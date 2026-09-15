@@ -12,10 +12,11 @@
 //! requests. Network-wide enrollment telemetry is deliberately out of
 //! scope.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, Connection};
 use serde::Serialize;
-use tauri::State;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -113,12 +114,15 @@ pub(crate) fn instructor_overview_impl(conn: &Connection) -> Result<Vec<CourseOv
 pub async fn instructor_overview(
     state: State<'_, AppState>,
 ) -> Result<Vec<CourseOverview>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    instructor_overview_impl(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "instructor.overview",
+            |db| instructor_overview_impl(db.conn()),
+        )
+        .await
 }
 
 pub(crate) fn instructor_course_learners_impl(
@@ -202,12 +206,15 @@ pub async fn instructor_course_learners(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Vec<CourseLearner>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    instructor_course_learners_impl(db.conn(), &course_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "instructor.course_learners",
+            move |db| instructor_course_learners_impl(db.conn(), &course_id),
+        )
+        .await
 }
 
 pub(crate) fn instructor_inbox_impl(conn: &Connection) -> Result<Vec<InboxItem>, String> {
@@ -287,12 +294,15 @@ pub(crate) fn instructor_inbox_impl(conn: &Connection) -> Result<Vec<InboxItem>,
 /// requests for owned classrooms, oldest first.
 #[tauri::command]
 pub async fn instructor_inbox(state: State<'_, AppState>) -> Result<Vec<InboxItem>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    instructor_inbox_impl(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "instructor.inbox",
+            |db| instructor_inbox_impl(db.conn()),
+        )
+        .await
 }
 
 #[cfg(test)]

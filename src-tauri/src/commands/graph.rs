@@ -13,11 +13,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::crypto::did::Did;
+use crate::db::executor::DatabaseWorkload;
 use crate::p2p::graph_fetch::{
     build_skill_graph, GraphFetchRequest, GraphFetchResponse, PublicSkillGraph,
 };
@@ -29,18 +30,26 @@ use crate::AppState;
 /// the vault is locked / no DID cached yet.
 #[tauri::command]
 pub async fn get_my_skill_graph(state: State<'_, AppState>) -> Result<PublicSkillGraph, String> {
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-    let local_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
-    if local_did.is_empty() {
-        return Ok(PublicSkillGraph {
-            subject_did: String::new(),
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        });
-    }
-    build_skill_graph(conn, &local_did, true)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "graph.get_mine",
+            |db| {
+                let conn = db.conn();
+                let local_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
+                if local_did.is_empty() {
+                    return Ok(PublicSkillGraph {
+                        subject_did: String::new(),
+                        nodes: Vec::new(),
+                        edges: Vec::new(),
+                    });
+                }
+                build_skill_graph(conn, &local_did, true)
+            },
+        )
+        .await
 }
 
 /// Fetch a DID's *public* skill graph.
@@ -54,18 +63,28 @@ pub async fn fetch_public_graph(
     state: State<'_, AppState>,
     did: String,
 ) -> Result<PublicSkillGraph, String> {
-    // Read the local DID, then drop the std lock before any await.
-    let local_did = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-        let local_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
-        if did == local_did {
-            // Loopback: serve our own public graph directly.
-            return build_skill_graph(conn, &local_did, false);
-        }
-        local_did
-    };
+    let requested_did = did.clone();
+    let (local_did, local_graph) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "graph.fetch_preflight",
+            move |db| {
+                let conn = db.conn();
+                let local_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
+                let graph = if requested_did == local_did {
+                    Some(build_skill_graph(conn, &local_did, false)?)
+                } else {
+                    None
+                };
+                Ok((local_did, graph))
+            },
+        )
+        .await?;
+    if let Some(graph) = local_graph {
+        return Ok(graph);
+    }
 
     let requestor = Did(if local_did.is_empty() {
         "did:key:unknown".to_string()
@@ -361,10 +380,22 @@ pub async fn compute_learning_path(
     state: State<'_, AppState>,
     goal_skill_ids: Vec<String>,
 ) -> Result<LearningPath, String> {
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "graph.compute_learning_path",
+            move |db| compute_learning_path_db(db, &goal_skill_ids),
+        )
+        .await
+}
 
+fn compute_learning_path_db(
+    db: &crate::db::Database,
+    goal_skill_ids: &[String],
+) -> Result<LearningPath, String> {
+    let conn = db.conn();
     let local_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
     let earned: HashSet<String> = if local_did.is_empty() {
         HashSet::new()
@@ -383,7 +414,7 @@ pub async fn compute_learning_path(
         set
     };
 
-    compute_path(conn, &goal_skill_ids, &earned)
+    compute_path(conn, goal_skill_ids, &earned)
 }
 
 #[cfg(test)]

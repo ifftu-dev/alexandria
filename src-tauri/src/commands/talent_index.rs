@@ -12,10 +12,11 @@
 //! Building this first means the wire schema is fixed from the auditable side
 //! rather than back-derived from whatever a server happens to accept.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::talent_index::{
     build_record, sign_record, CandidateSkill, ProfileFields, SignedTalentIndexRecord,
     TalentIndexConsent, TalentIndexRecord,
@@ -75,6 +76,11 @@ fn load_consent(conn: &Connection) -> TalentIndexConsent {
 /// straight from credentials would let one issuer's repeated attestations look
 /// like corroboration.
 fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<CandidateSkill>, String> {
+    super::aggregation::refresh_invalidated_states(
+        conn,
+        Some(subject_did),
+        &chrono::Utc::now().to_rfc3339(),
+    )?;
     let mut stmt = conn
         .prepare(
             // One row per skill. `derived_skill_states` is keyed by
@@ -100,7 +106,7 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
                     COALESCE(( \
                         SELECT MAX(CAST(json_extract(c.signed_vc_json, \
                                    '$.credentialSubject.level') AS INTEGER)) \
-                        FROM credentials c \
+                        FROM scoring_credentials c \
                         WHERE c.subject_did = d.subject_did \
                           AND c.skill_id = d.skill_id \
                           AND c.claim_kind = 'skill' AND c.revoked = 0 \
@@ -228,15 +234,20 @@ pub fn set_talent_index_consent_impl(
 pub async fn get_talent_index_preview(
     state: State<'_, AppState>,
 ) -> Result<TalentIndexPreview, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let subject_did = crate::commands::identity::local_did(db.conn())
-        .ok_or("this profile has no identity yet")?;
     let now = crate::commands::credentials::now_rfc3339();
-    get_talent_index_preview_impl(db.conn(), &subject_did, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "talent_index.preview",
+            move |db| {
+                let subject_did = crate::commands::identity::local_did(db.conn())
+                    .ok_or("this profile has no identity yet")?;
+                get_talent_index_preview_impl(db.conn(), &subject_did, &now)
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -244,19 +255,25 @@ pub async fn set_talent_index_consent(
     state: State<'_, AppState>,
     consent: TalentIndexConsent,
 ) -> Result<TalentIndexPreview, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let subject_did = crate::commands::identity::local_did(db.conn())
-        .ok_or("this profile has no identity yet")?;
-
-    set_talent_index_consent_impl(db.conn(), &consent)?;
-    // Return the recomputed preview so the UI shows the record that consent
-    // actually produced, rather than the one it predicted.
     let now = crate::commands::credentials::now_rfc3339();
-    get_talent_index_preview_impl(db.conn(), &subject_did, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "talent_index.set_consent",
+            move |db| {
+                let subject_did = crate::commands::identity::local_did(db.conn())
+                    .ok_or("this profile has no identity yet")?;
+                crate::db::with_transaction(db.conn(), || {
+                    set_talent_index_consent_impl(db.conn(), &consent)?;
+                    // Return the recomputed preview so the UI shows the record that consent
+                    // actually produced, rather than the one it predicted.
+                    get_talent_index_preview_impl(db.conn(), &subject_did, &now)
+                })
+            },
+        )
+        .await
 }
 
 /// Produce the signed record this device would publish.
@@ -296,33 +313,37 @@ pub async fn sign_consented_record(
 ) -> Result<Option<SignedTalentIndexRecord>, String> {
     let (signing_key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
     let now = crate::commands::credentials::now_rfc3339();
+    let only = only.map(<[String]>::to_vec);
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "talent_index.sign",
+            move |db| {
+                // Build from the same path the preview uses, so a learner cannot be shown
+                // one record and have another signed.
+                let preview = get_talent_index_preview_impl(db.conn(), did.as_str(), &now)?;
+                let Some(mut record) = preview.record else {
+                    // Consent covers nothing, so there is nothing to sign. Not an error —
+                    // it is the default state.
+                    return Ok(None);
+                };
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+                if let Some(only) = &only {
+                    record.skills.retain(|skill| only.contains(&skill.skill_id));
+                    // Nothing in common. Returning an empty record would prove the DID and
+                    // disclose nothing, which reads to the asker as an answer and is not
+                    // one — the caller turns this into a sentence about consent instead.
+                    if record.skills.is_empty() {
+                        return Ok(None);
+                    }
+                }
 
-    // Build from the same path the preview uses, so a learner cannot be shown
-    // one record and have another signed.
-    let preview = get_talent_index_preview_impl(db.conn(), did.as_str(), &now)?;
-    let Some(mut record) = preview.record else {
-        // Consent covers nothing, so there is nothing to sign. Not an error —
-        // it is the default state.
-        return Ok(None);
-    };
-
-    if let Some(only) = only {
-        record.skills.retain(|s| only.contains(&s.skill_id));
-        // Nothing in common. Returning an empty record would prove the DID and
-        // disclose nothing, which reads to the asker as an answer and is not
-        // one — the caller turns this into a sentence about consent instead.
-        if record.skills.is_empty() {
-            return Ok(None);
-        }
-    }
-
-    sign_record(&record, &signing_key, &now).map(Some)
+                sign_record(&record, &signing_key, &now).map(Some)
+            },
+        )
+        .await
 }
 
 #[cfg(test)]

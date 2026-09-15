@@ -12,12 +12,13 @@
 //! These are low-confidence starting points; dynamic assessments (Phase D)
 //! raise them by issuing higher-weight `AssessmentCredential`s.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::Connection;
 use serde::Deserialize;
-use tauri::State;
 
 use crate::commands::credentials::load_issuer_key;
 use crate::commands::goal_templates::SkillSuggestion;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, ProvenanceTier, SkillClaim};
 use crate::goals::jd_parser::{extract_skills, SkillEntry};
 use crate::AppState;
@@ -108,7 +109,10 @@ fn suggest_from_text(conn: &Connection, text: &str) -> Result<Vec<SkillSuggestio
 /// PDFs are parsed on-device; other bytes are treated as UTF-8 text. Operates
 /// only on bytes the caller already holds — it is not a file-read primitive.
 #[tauri::command]
-pub async fn bootstrap_extract_text(data: Vec<u8>) -> Result<String, String> {
+pub async fn bootstrap_extract_text(
+    _profile: crate::profile::scope::ProfileLease,
+    data: Vec<u8>,
+) -> Result<String, String> {
     if data.starts_with(b"%PDF") {
         // Text-based PDFs extract cleanly; scanned/image PDFs yield little —
         // the user can still paste in that case.
@@ -127,9 +131,15 @@ pub async fn bootstrap_extract(
     state: State<'_, AppState>,
     text: String,
 ) -> Result<Vec<SkillSuggestion>, String> {
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    suggest_from_text(db.conn(), &text)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "skill_bootstrap.extract",
+            move |db| suggest_from_text(db.conn(), &text),
+        )
+        .await
 }
 
 /// Issue self-asserted skill VCs for the confirmed skills, tagged with the
@@ -150,46 +160,53 @@ pub async fn bootstrap_confirm(
     let provenance = doc_type.provenance();
     let evidence_refs: Vec<String> = content_hash.into_iter().collect();
 
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "skill_bootstrap.confirm",
+            move |db| {
+                let conn = db.conn();
+                let mut claimed = 0u32;
+                for skill_id in skill_ids {
+                    let claim = SkillClaim {
+                        skill_id,
+                        level: BOOTSTRAP_LEVEL,
+                        score: BOOTSTRAP_SCORE,
+                        evidence_refs: evidence_refs.clone(),
+                        rubric_version: None,
+                        assessment_method: Some("document_bootstrap".into()),
+                        provenance: Some(provenance),
+                    };
+                    let req = crate::commands::credentials::IssueCredentialRequest {
+                        credential_type: CredentialType::SelfAssertion,
+                        subject: issuer_did.clone(), // self-issued
+                        claim: Claim::Skill(claim),
+                        evidence_refs: evidence_refs.clone(),
+                        expiration_date: None,
+                        supersedes: None,
+                        integrity_session_id: None,
+                        integrity_policy: None,
+                    };
+                    match crate::commands::credentials::issue_credential_impl(
+                        conn,
+                        &signing_key,
+                        &issuer_did,
+                        &req,
+                        &now,
+                    ) {
+                        Ok(_) => claimed += 1,
+                        Err(error) => log::warn!("bootstrap: skipping skill claim: {error}"),
+                    }
+                }
 
-    let mut claimed = 0u32;
-    for skill_id in skill_ids {
-        let claim = SkillClaim {
-            skill_id,
-            level: BOOTSTRAP_LEVEL,
-            score: BOOTSTRAP_SCORE,
-            evidence_refs: evidence_refs.clone(),
-            rubric_version: None,
-            assessment_method: Some("document_bootstrap".into()),
-            provenance: Some(provenance),
-        };
-        let req = crate::commands::credentials::IssueCredentialRequest {
-            credential_type: CredentialType::SelfAssertion,
-            subject: issuer_did.clone(), // self-issued
-            claim: Claim::Skill(claim),
-            evidence_refs: evidence_refs.clone(),
-            expiration_date: None,
-            supersedes: None,
-            integrity_session_id: None,
-            integrity_policy: None,
-        };
-        match crate::commands::credentials::issue_credential_impl(
-            conn,
-            &signing_key,
-            &issuer_did,
-            &req,
-            &now,
-        ) {
-            Ok(_) => claimed += 1,
-            Err(e) => log::warn!("bootstrap: skipping skill claim: {e}"),
-        }
-    }
-
-    // Refresh derived confidence so the new (low-tier) skills appear.
-    let _ = crate::commands::aggregation::recompute_all_impl(conn, &now);
-    Ok(claimed)
+                // Refresh derived confidence so the new (low-tier) skills appear.
+                let _ = crate::commands::aggregation::recompute_all_impl(conn, &now);
+                Ok(claimed)
+            },
+        )
+        .await
 }
 
 #[cfg(test)]

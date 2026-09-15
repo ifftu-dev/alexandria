@@ -1,8 +1,9 @@
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
 use crate::AppState;
 
@@ -12,12 +13,21 @@ pub async fn list_enrollments(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Enrollment>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.list",
+            move |db| list_enrollments_db(db, status),
+        )
+        .await
+}
 
+fn list_enrollments_db(
+    db: &crate::db::Database,
+    status: Option<String>,
+) -> Result<Vec<Enrollment>, String> {
     // Order by most recent learner activity so the dashboard "pick up where
     // you left off" card surfaces the course/tutorial the user last
     // viewed/progressed. Activity is the latest element_progress.updated_at
@@ -72,12 +82,18 @@ pub async fn list_enrollments(
 /// Enroll in a course.
 #[tauri::command]
 pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enrollment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.enroll",
+            move |db| enroll_db(db, course_id),
+        )
+        .await
+}
 
+fn enroll_db(db: &crate::db::Database, course_id: String) -> Result<Enrollment, String> {
     // Get the local user's stake address for deterministic ID
     let stake_address: String = db
         .conn()
@@ -151,18 +167,26 @@ pub async fn update_progress(
     enrollment_id: String,
     req: UpdateProgressRequest,
 ) -> Result<ElementProgress, String> {
-    // All DB work in a block so the guard is dropped before any .await.
-    let progress = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.update_progress",
+            move |db| update_progress_db(db, enrollment_id, req),
+        )
+        .await
+}
 
-        let id = entity_id(&[&enrollment_id, &req.element_id]);
+fn update_progress_db(
+    db: &crate::db::Database,
+    enrollment_id: String,
+    req: UpdateProgressRequest,
+) -> Result<ElementProgress, String> {
+    let id = entity_id(&[&enrollment_id, &req.element_id]);
 
-        // Upsert: insert or update
-        db.conn()
+    // Upsert: insert or update
+    db.conn()
             .execute(
                 "INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent)
                  VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 0))
@@ -183,8 +207,8 @@ pub async fn update_progress(
             )
             .map_err(|e| e.to_string())?;
 
-        // Read back the progress
-        let progress: ElementProgress = db
+    // Read back the progress
+    let progress: ElementProgress = db
             .conn()
             .query_row(
                 "SELECT id, enrollment_id, element_id, status, score, time_spent, completed_at, updated_at \
@@ -205,17 +229,14 @@ pub async fn update_progress(
             )
             .map_err(|e| e.to_string())?;
 
-        // Post-migration 040: completion no longer triggers evidence
-        // creation or aggregation. In the VC-first model, element
-        // completion is expected to produce a Cardano completion-witness
-        // tx; the Blockfrost observer (Session 2) auto-issues a signed
-        // VC referencing that tx and writes it to `credentials`. That
-        // wiring lands in a follow-up session; for now progress tracking
-        // alone is preserved so learners still see their course state
-        // move forward locally.
-        progress
-    }; // db guard dropped
-
+    // Post-migration 040: completion no longer triggers evidence
+    // creation or aggregation. In the VC-first model, element
+    // completion is expected to produce a Cardano completion-witness
+    // tx; the Blockfrost observer (Session 2) auto-issues a signed
+    // VC referencing that tx and writes it to `credentials`. That
+    // wiring lands in a follow-up session; for now progress tracking
+    // alone is preserved so learners still see their course state
+    // move forward locally.
     Ok(progress)
 }
 
@@ -426,12 +447,21 @@ pub async fn get_progress(
     state: State<'_, AppState>,
     enrollment_id: String,
 ) -> Result<Vec<ElementProgress>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.get_progress",
+            move |db| get_progress_db(db, &enrollment_id),
+        )
+        .await
+}
 
+fn get_progress_db(
+    db: &crate::db::Database,
+    enrollment_id: &str,
+) -> Result<Vec<ElementProgress>, String> {
     let mut stmt = db
         .conn()
         .prepare(
@@ -494,11 +524,34 @@ pub async fn record_element_submission(
     answers_json: String,
     score: f64,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.record_submission",
+            move |db| {
+                record_element_submission_db(
+                    db,
+                    enrollment_id,
+                    element_id,
+                    element_type,
+                    answers_json,
+                    score,
+                )
+            },
+        )
+        .await
+}
+
+fn record_element_submission_db(
+    db: &crate::db::Database,
+    enrollment_id: String,
+    element_id: String,
+    element_type: String,
+    answers_json: String,
+    score: f64,
+) -> Result<(), String> {
     let conn = db.conn();
 
     let score = score.clamp(0.0, 1.0);
@@ -570,12 +623,22 @@ pub async fn get_element_submission(
     enrollment_id: String,
     element_id: String,
 ) -> Result<Option<ElementSubmissionRecord>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.get_submission",
+            move |db| get_element_submission_db(db, &enrollment_id, &element_id),
+        )
+        .await
+}
 
+fn get_element_submission_db(
+    db: &crate::db::Database,
+    enrollment_id: &str,
+    element_id: &str,
+) -> Result<Option<ElementSubmissionRecord>, String> {
     let row = db
         .conn()
         .query_row(

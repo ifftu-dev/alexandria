@@ -10,6 +10,8 @@ pub mod course_document;
 pub mod enrollment;
 pub mod evidence;
 pub mod governance;
+pub mod governance_certificate;
+pub mod governance_locator;
 pub mod identity;
 pub mod integrity_attestation;
 pub mod opinions;

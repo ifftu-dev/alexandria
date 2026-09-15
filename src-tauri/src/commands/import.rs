@@ -15,11 +15,12 @@
 
 use std::str::FromStr;
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::content_store::{content, fetch};
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::verify_credential_db;
 use crate::domain::vc::{
     AcceptanceDecision, CredentialSubject, EntitlementClaim, RoleClaim, SkillClaim,
@@ -206,13 +207,16 @@ pub async fn import_credential(
     state: State<'_, AppState>,
     credential: VerifiableCredential,
 ) -> Result<ImportOutcome, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
-    import_credential_impl(db.conn(), &credential, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "import.credential",
+            move |db| import_credential_impl(db.conn(), &credential, &now),
+        )
+        .await
 }
 
 /// Where a credential can be fetched from: a provider endpoint and the BLAKE3
@@ -279,13 +283,16 @@ pub async fn import_credential_from_peer(
         .map_err(|e| format!("read fetched credential {}: {e}", ticket.hash))?;
     let vc = credential_from_bytes(&bytes)?;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
-    import_credential_impl(db.conn(), &vc, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "import.credential_from_peer",
+            move |db| import_credential_impl(db.conn(), &vc, &now),
+        )
+        .await
 }
 
 /// Result of importing a payload that may hold many credentials.
@@ -398,13 +405,16 @@ pub async fn import_credentials(
     state: State<'_, AppState>,
     payload: String,
 ) -> Result<ImportSummary, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
-    import_credentials_impl(db.conn(), &payload, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "import.credentials",
+            move |db| import_credentials_impl(db.conn(), &payload, &now),
+        )
+        .await
 }
 
 #[cfg(test)]

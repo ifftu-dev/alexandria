@@ -188,6 +188,9 @@ fn link_target(path: &Path) -> Option<PathBuf> {
 
 #[tauri::command]
 pub async fn cli_install_status() -> Result<CliInstallStatus, String> {
+    if !crate::commands::diagnostics::is_enabled() {
+        return Err("enter diagnostics before managing the CLI".into());
+    }
     let path = install_path();
     let bundled = bundled_cli();
     let links_to = link_target(&path);
@@ -215,6 +218,9 @@ pub async fn cli_install_status() -> Result<CliInstallStatus, String> {
 
 #[tauri::command]
 pub async fn cli_install(app: AppHandle) -> Result<CliInstallResult, String> {
+    if !crate::commands::diagnostics::is_enabled() {
+        return Err("enter diagnostics before managing the CLI".into());
+    }
     if !cfg!(unix) {
         return Err(
             "Installing the CLI is only supported on macOS and Linux. On Windows, \
@@ -426,6 +432,9 @@ pub fn refresh_link_if_installed() {
 
 #[tauri::command]
 pub async fn cli_uninstall() -> Result<String, String> {
+    if !crate::commands::diagnostics::is_enabled() {
+        return Err("enter diagnostics before managing the CLI".into());
+    }
     let dest = install_path();
     if dest.symlink_metadata().is_err() {
         return Ok(format!("Nothing installed at {}", dest.display()));

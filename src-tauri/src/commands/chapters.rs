@@ -3,10 +3,11 @@
 //! Chapters belong to courses and contain elements. Ordered by
 //! `position` (0-indexed).
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
-use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::course::{Chapter, CreateChapterRequest, UpdateChapterRequest};
 use crate::AppState;
 
@@ -16,12 +17,18 @@ pub async fn list_chapters(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Vec<Chapter>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "chapters.list",
+            move |db| list_chapters_db(db, &course_id),
+        )
+        .await
+}
 
+fn list_chapters_db(db: &crate::db::Database, course_id: &str) -> Result<Vec<Chapter>, String> {
     let mut stmt = db
         .conn()
         .prepare(
@@ -56,12 +63,22 @@ pub async fn create_chapter(
     course_id: String,
     req: CreateChapterRequest,
 ) -> Result<Chapter, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "chapters.create",
+            move |db| create_chapter_db(db, course_id, req),
+        )
+        .await
+}
 
+fn create_chapter_db(
+    db: &crate::db::Database,
+    course_id: String,
+    req: CreateChapterRequest,
+) -> Result<Chapter, String> {
     // Get the next position
     let next_pos: i64 = db
         .conn()
@@ -106,12 +123,22 @@ pub async fn update_chapter(
     chapter_id: String,
     req: UpdateChapterRequest,
 ) -> Result<Chapter, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "chapters.update",
+            move |db| update_chapter_db(db, &chapter_id, req),
+        )
+        .await
+}
 
+fn update_chapter_db(
+    db: &crate::db::Database,
+    chapter_id: &str,
+    req: UpdateChapterRequest,
+) -> Result<Chapter, String> {
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -132,7 +159,7 @@ pub async fn update_chapter(
         return Err("no fields to update".into());
     }
 
-    values.push(Box::new(chapter_id.clone()));
+    values.push(Box::new(chapter_id.to_owned()));
 
     let sql = format!(
         "UPDATE course_chapters SET {} WHERE id = ?",
@@ -210,12 +237,15 @@ pub async fn reorder_chapters(
     course_id: String,
     ordered_ids: Vec<String>,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    reorder_chapters_impl(db.conn(), &course_id, &ordered_ids)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "chapters.reorder",
+            move |db| reorder_chapters_impl(db.conn(), &course_id, &ordered_ids),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -405,12 +435,18 @@ mod tests {
 /// Delete a chapter and all its elements.
 #[tauri::command]
 pub async fn delete_chapter(state: State<'_, AppState>, chapter_id: String) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "chapters.delete",
+            move |db| delete_chapter_db(db, &chapter_id),
+        )
+        .await
+}
 
+fn delete_chapter_db(db: &crate::db::Database, chapter_id: &str) -> Result<(), String> {
     let rows = db
         .conn()
         .execute(
