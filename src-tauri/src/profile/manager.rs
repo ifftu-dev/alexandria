@@ -86,6 +86,32 @@ impl ProfilePaths {
         std::fs::create_dir_all(&self.video_cache_dir)?;
         Ok(())
     }
+
+    /// Remove transient plaintext media while retaining the cache directory.
+    ///
+    /// Directory symlinks are unlinked rather than followed. This matters
+    /// because the directory is reachable through Tauri's asset protocol and
+    /// must not expose a locked profile's materialized content.
+    pub fn clear_video_cache(&self) -> std::io::Result<()> {
+        let entries = match std::fs::read_dir(&self.video_cache_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return std::fs::create_dir_all(&self.video_cache_dir);
+            }
+            Err(error) => return Err(error),
+        };
+
+        for entry in entries {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() && !file_type.is_symlink() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -189,7 +215,7 @@ impl ProfileManager {
             guard.save(&self.app_data_dir)?;
         }
 
-        log::info!("created profile {id} at {}", paths.root.display());
+        log::info!("created profile {id}");
         Ok(paths)
     }
 
@@ -227,7 +253,7 @@ impl ProfileManager {
             guard.upsert(summary);
             guard.save(&self.app_data_dir)?;
         }
-        log::info!("adopted existing profile {id} at {}", paths.root.display());
+        log::info!("adopted existing profile {id}");
         Ok(paths)
     }
 

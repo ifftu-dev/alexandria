@@ -4,11 +4,13 @@
 //! Room creation/joining requires the iroh content node to be running
 //! (it provides the shared QUIC endpoint, gossip, and live instances).
 
+use crate::profile::scope::ProfileState as State;
 use live::media::audio::AudioBackend;
 use rusqlite::params;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::tutoring::manager::DeviceSelection;
 use crate::AppState;
 
@@ -149,23 +151,30 @@ pub async fn tutoring_create_room(
         .await?;
 
     log::info!("[cmd] tutoring_create_room: create_room returned, inserting into DB...");
-    // Persist to database
-    {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
+    // Persist to database after the media/network work has completed.
+    let persisted_session_id = session_id.clone();
+    let persisted_title = title.clone();
+    let persisted_ticket = ticket.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.create.persist-session",
+            move |db| {
+                db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
-                params![session_id, title, ticket],
+                        params![persisted_session_id, persisted_title, persisted_ticket],
             )
             .map_err(|e| {
                 log::error!("[cmd] tutoring_create_room: DB insert failed: {e}");
                 e.to_string()
             })?;
-    }
+                Ok(())
+            },
+        )
+        .await?;
 
     log::info!("[cmd] tutoring_create_room: done, returning to frontend");
     Ok(TutoringSessionInfo {
@@ -231,23 +240,30 @@ pub async fn tutoring_join_room(
         .await?;
 
     log::info!("[cmd] tutoring_join_room: join_room returned, inserting into DB...");
-    // Persist to database
-    {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
+    // Persist to database after the media/network work has completed.
+    let persisted_session_id = session_id.clone();
+    let persisted_title = title.clone();
+    let persisted_ticket = resolved_ticket.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.join.persist-session",
+            move |db| {
+                db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
-                params![session_id, title, resolved_ticket],
+                        params![persisted_session_id, persisted_title, persisted_ticket],
             )
             .map_err(|e| {
                 log::error!("[cmd] tutoring_join_room: DB insert failed: {e}");
                 e.to_string()
             })?;
-    }
+                Ok(())
+            },
+        )
+        .await?;
 
     log::info!("[cmd] tutoring_join_room: done, returning to frontend");
     Ok(TutoringSessionInfo {
@@ -270,17 +286,23 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
 
     // Update database
     if let Some(id) = session_id {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
+        state
+            .db_executor
             .execute(
-                "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
-                params![id],
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "tutoring.leave.persist-session",
+                move |db| {
+                    db.conn()
+                        .execute(
+                            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
+                            params![id],
+                        )
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                },
             )
-            .map_err(|e| e.to_string())?;
+            .await?;
     }
 
     Ok(())
@@ -349,37 +371,41 @@ pub async fn tutoring_peers(
 pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let mut stmt = db
-        .conn()
-        .prepare(
-            "SELECT id, title, ticket, status, created_at, ended_at
-             FROM tutoring_sessions
-             ORDER BY created_at DESC
-             LIMIT 50",
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.list-sessions",
+            |db| {
+                let mut stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT id, title, ticket, status, created_at, ended_at
+                         FROM tutoring_sessions
+                         ORDER BY created_at DESC
+                         LIMIT 50",
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                let sessions = stmt
+                    .query_map([], |row| {
+                        Ok(TutoringSessionInfo {
+                            id: row.get(0)?,
+                            title: row.get(1)?,
+                            ticket: row.get(2)?,
+                            status: row.get(3)?,
+                            created_at: row.get(4)?,
+                            ended_at: row.get(5)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                Ok(sessions)
+            },
         )
-        .map_err(|e| e.to_string())?;
-
-    let sessions = stmt
-        .query_map([], |row| {
-            Ok(TutoringSessionInfo {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                ticket: row.get(2)?,
-                status: row.get(3)?,
-                created_at: row.get(4)?,
-                ended_at: row.get(5)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(sessions)
+        .await
 }
 
 /// Check device availability (camera + audio) before joining a session.

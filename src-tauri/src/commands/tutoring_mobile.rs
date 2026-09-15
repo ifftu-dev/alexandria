@@ -7,11 +7,13 @@
 //!
 //! Screen share remains unavailable on mobile.
 
+use crate::profile::scope::ProfileState as State;
 use live::media::audio::AudioBackend;
 use rusqlite::params;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::tutoring::manager_mobile::DeviceSelection;
 use crate::AppState;
 
@@ -60,17 +62,6 @@ pub struct DeviceList {
     pub selected_audio_output: Option<String>,
 }
 
-/// Helper: lock the database, handling poisoned mutex and uninitialized DB gracefully.
-fn lock_db(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, Option<crate::db::Database>>, String> {
-    state.db.lock().map_err(|e| {
-        let msg = format!("database mutex poisoned: {e}");
-        crate::diag::log(&msg);
-        msg
-    })
-}
-
 /// Create a new tutoring room (host, audio-only).
 #[tauri::command]
 pub async fn tutoring_create_room(
@@ -113,17 +104,27 @@ pub async fn tutoring_create_room(
         )
         .await?;
 
-    // Persist to database
-    {
-        let db_guard = lock_db(&state)?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .execute(
-                "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
-                params![session_id, title, ticket],
-            )
-            .map_err(|e| e.to_string())?;
-    }
+    // Persist to database after the media/network work has completed.
+    let persisted_session_id = session_id.clone();
+    let persisted_title = title.clone();
+    let persisted_ticket = ticket.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.create.persist-session",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
+                        params![persisted_session_id, persisted_title, persisted_ticket],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
+        )
+        .await?;
 
     Ok(TutoringSessionInfo {
         id: session_id,
@@ -137,6 +138,10 @@ pub async fn tutoring_create_room(
 
 /// Join an existing tutoring room using a ticket (audio-only).
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tauri exposes these established room options as named IPC arguments"
+)]
 pub async fn tutoring_join_room(
     ticket: String,
     title: Option<String>,
@@ -180,17 +185,27 @@ pub async fn tutoring_join_room(
         )
         .await?;
 
-    // Persist to database
-    {
-        let db_guard = lock_db(&state)?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .execute(
-                "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
-                params![session_id, title, resolved_ticket],
-            )
-            .map_err(|e| e.to_string())?;
-    }
+    // Persist to database after the media/network work has completed.
+    let persisted_session_id = session_id.clone();
+    let persisted_title = title.clone();
+    let persisted_ticket = resolved_ticket.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.join.persist-session",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
+                        params![persisted_session_id, persisted_title, persisted_ticket],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
+        )
+        .await?;
 
     Ok(TutoringSessionInfo {
         id: session_id,
@@ -212,14 +227,23 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
 
     // Update database
     if let Some(id) = session_id {
-        let db_guard = lock_db(&state)?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
+        state
+            .db_executor
             .execute(
-                "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
-                params![id],
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "tutoring.leave.persist-session",
+                move |db| {
+                    db.conn()
+                        .execute(
+                            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
+                            params![id],
+                        )
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                },
             )
-            .map_err(|e| e.to_string())?;
+            .await?;
     }
 
     Ok(())
@@ -295,34 +319,41 @@ pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
     crate::diag::log("tutoring_list_sessions: called");
-    let db_guard = lock_db(&state)?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let mut stmt = db
-        .conn()
-        .prepare(
-            "SELECT id, title, ticket, status, created_at, ended_at
-             FROM tutoring_sessions
-             ORDER BY created_at DESC
-             LIMIT 50",
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.list-sessions",
+            |db| {
+                let mut stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT id, title, ticket, status, created_at, ended_at
+                         FROM tutoring_sessions
+                         ORDER BY created_at DESC
+                         LIMIT 50",
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                let sessions = stmt
+                    .query_map([], |row| {
+                        Ok(TutoringSessionInfo {
+                            id: row.get(0)?,
+                            title: row.get(1)?,
+                            ticket: row.get(2)?,
+                            status: row.get(3)?,
+                            created_at: row.get(4)?,
+                            ended_at: row.get(5)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                Ok(sessions)
+            },
         )
-        .map_err(|e| e.to_string())?;
-
-    let sessions = stmt
-        .query_map([], |row| {
-            Ok(TutoringSessionInfo {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                ticket: row.get(2)?,
-                status: row.get(3)?,
-                created_at: row.get(4)?,
-                ended_at: row.get(5)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(sessions)
+        .await
 }
 
 /// Check device availability — audio + camera on mobile.
@@ -350,7 +381,9 @@ pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
 /// List available audio devices and camera.
 ///
 #[tauri::command]
-pub async fn tutoring_list_devices(state: State<'_, AppState>) -> Result<DeviceList, String> {
+pub async fn tutoring_list_devices(
+    state: tauri::State<'_, AppState>,
+) -> Result<DeviceList, String> {
     let inventory = state.tutoring.audio_device_inventory().await;
 
     let audio_inputs = inventory

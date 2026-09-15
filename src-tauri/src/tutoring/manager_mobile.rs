@@ -43,7 +43,12 @@ use live::Live;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinHandle;
+
+use super::tasks::{SessionTasks, TaskHandle};
+
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;
 
 // ── GCD main-thread dispatch ───────────────────────────────────────
 
@@ -69,8 +74,6 @@ unsafe extern "C" {
 /// This blocks the calling thread until `f` completes on the main queue.
 /// Required for AVFoundation, AVAudioSession, and CoreAudio APIs on iOS.
 ///
-/// # Safety
-/// The closure must not panic. If it does, the process will abort.
 fn run_on_main_thread<F, R>(f: F) -> R
 where
     F: FnOnce() -> R + Send,
@@ -83,9 +86,11 @@ where
     }
 
     // Pack the closure and result slot into a context struct on the stack.
+    type PanicPayload = Box<dyn std::any::Any + Send + 'static>;
+
     struct Context<F, R> {
         f: Option<F>,
-        result: Option<R>,
+        result: Option<std::result::Result<R, PanicPayload>>,
     }
 
     let mut ctx = Context {
@@ -97,13 +102,24 @@ where
     where
         F: FnOnce() -> R,
     {
+        // SAFETY: `run_on_main_thread` passes a live, uniquely borrowed stack
+        // `Context<F, R>` to `dispatch_sync_f`, which invokes this callback
+        // synchronously before returning. The callback neither retains nor
+        // aliases the pointer beyond this call.
         let ctx = &mut *(raw as *mut Context<F, R>);
         if let Some(f) = ctx.f.take() {
-            ctx.result = Some(f());
+            // A Rust panic must never unwind through libdispatch's C frames.
+            // Capture it here, then resume it on the original Rust caller
+            // after `dispatch_sync_f` has returned.
+            ctx.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)));
         }
     }
 
     unsafe {
+        // SAFETY: `_dispatch_main_q` is libdispatch's process-lifetime main
+        // queue. `ctx` remains live and exclusively borrowed for the complete
+        // synchronous call, and `trampoline` catches all Rust unwinding before
+        // returning across the C ABI.
         let main_queue = &_dispatch_main_q as *const std::ffi::c_void;
         dispatch_sync_f(
             main_queue,
@@ -112,8 +128,13 @@ where
         );
     }
 
-    ctx.result
-        .expect("main-thread closure did not produce a result")
+    match ctx
+        .result
+        .expect("dispatch_sync_f returned without invoking its callback")
+    {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }
 
 // ── Shared ObjC FFI types ──────────────────────────────────────────
@@ -158,18 +179,18 @@ fn get_application_state() -> i64 {
         let send_state: MsgSendState =
             std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
 
-        let cls = objc_getClass(b"UIApplication\0".as_ptr() as *const i8);
+        let cls = objc_getClass(c"UIApplication".as_ptr());
         if cls.is_null() {
             return -1;
         }
 
-        let shared_sel = sel_registerName(b"sharedApplication\0".as_ptr() as *const i8);
+        let shared_sel = sel_registerName(c"sharedApplication".as_ptr());
         let app: Id = send(cls, shared_sel);
         if app.is_null() {
             return -1;
         }
 
-        let state_sel = sel_registerName(b"applicationState\0".as_ptr() as *const i8);
+        let state_sel = sel_registerName(c"applicationState".as_ptr());
         send_state(app, state_sel)
     })
 }
@@ -195,20 +216,20 @@ fn set_idle_timer_disabled(disabled: bool) {
         let send_bool: MsgSendBool =
             std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
 
-        let cls = objc_getClass(b"UIApplication\0".as_ptr() as *const i8);
+        let cls = objc_getClass(c"UIApplication".as_ptr());
         if cls.is_null() {
             log::error!("tutoring: UIApplication class not found");
             return;
         }
 
-        let shared_sel = sel_registerName(b"sharedApplication\0".as_ptr() as *const i8);
+        let shared_sel = sel_registerName(c"sharedApplication".as_ptr());
         let app: Id = send(cls, shared_sel);
         if app.is_null() {
             log::error!("tutoring: UIApplication.sharedApplication returned nil");
             return;
         }
 
-        let set_idle_sel = sel_registerName(b"setIdleTimerDisabled:\0".as_ptr() as *const i8);
+        let set_idle_sel = sel_registerName(c"setIdleTimerDisabled:".as_ptr());
         send_bool(app, set_idle_sel, if disabled { 1 } else { 0 });
 
         log::info!("tutoring: idleTimerDisabled = {disabled}");
@@ -444,11 +465,11 @@ struct ActiveSession {
     /// AppHandle for emitting Tauri events from toggle methods.
     app_handle: AppHandle,
     /// Handle for the self-preview task (aborted on toggle/leave).
-    self_preview_task: Option<JoinHandle<()>>,
+    self_preview_task: Option<TaskHandle>,
     /// User's selected audio devices — preserved for toggle_audio re-creation.
     _device_selection: DeviceSelection,
     /// Background tasks to abort on leave.
-    _tasks: Vec<JoinHandle<()>>,
+    _tasks: Vec<TaskHandle>,
     /// Ring buffer of recent log entries for diagnostics.
     recent_logs: Vec<String>,
     /// Home relay URL at time of session creation.
@@ -473,6 +494,7 @@ struct ActiveSession {
 /// whether to reactivate the session.
 static AUDIO_SESSION_WAS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static AUDIO_SESSION_OBSERVER: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static TUTORING_MANAGER_TASKS: OnceLock<Arc<SessionTasks>> = OnceLock::new();
 static TUTORING_MANAGER_INNER: OnceLock<Arc<Mutex<Option<ActiveSession>>>> = OnceLock::new();
 /// millis since UNIX_EPOCH of the most recent audio session recovery. Used to
 /// debounce bursts of route-change notifications caused by the reconfigure
@@ -510,29 +532,29 @@ impl InterruptionBridge {
                 objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
             );
 
-            let ns_string_cls = objc_getClass(b"NSString\0".as_ptr() as *const i8);
+            let ns_string_cls = objc_getClass(c"NSString".as_ptr());
             if ns_string_cls.is_null() {
                 log::error!("tutoring: NSString class not found while handling interruption");
                 return;
             }
 
-            let utf8_sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as *const i8);
-            let int_value_sel = sel_registerName(b"intValue\0".as_ptr() as *const i8);
+            let utf8_sel = sel_registerName(c"stringWithUTF8String:".as_ptr());
+            let int_value_sel = sel_registerName(c"intValue".as_ptr());
 
             // AVAudioSessionInterruptionTypeKey
             let type_key = send_cstr(
                 ns_string_cls,
                 utf8_sel,
-                b"AVAudioSessionInterruptionTypeKey\0".as_ptr() as *const i8,
+                c"AVAudioSessionInterruptionTypeKey".as_ptr(),
             );
-            let user_info_sel = sel_registerName(b"userInfo\0".as_ptr() as *const i8);
+            let user_info_sel = sel_registerName(c"userInfo".as_ptr());
             let user_info: ObjcId = if !notification.is_null() {
                 send_noargs(notification, user_info_sel)
             } else {
                 nsnil
             };
             let type_obj: ObjcId = if !user_info.is_null() {
-                let dict_sel = sel_registerName(b"objectForKey:\0".as_ptr() as *const i8);
+                let dict_sel = sel_registerName(c"objectForKey:".as_ptr());
                 send_obj(user_info, dict_sel, type_key)
             } else {
                 nsnil
@@ -545,15 +567,13 @@ impl InterruptionBridge {
 
             if interruption_type == 0 {
                 // Interruption began — record whether session was active so we restore it
-                let shared_sel = sel_registerName(b"sharedInstance\0".as_ptr() as *const i8);
+                let shared_sel = sel_registerName(c"sharedInstance".as_ptr());
                 let send_bool: unsafe extern "C" fn(ObjcId, ObjcSel) -> i8 = std::mem::transmute(
                     objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
                 );
-                let session: ObjcId = send_noargs(
-                    objc_getClass(b"AVAudioSession\0".as_ptr() as *const i8),
-                    shared_sel,
-                );
-                let is_active_sel = sel_registerName(b"isActive\0".as_ptr() as *const i8);
+                let session: ObjcId =
+                    send_noargs(objc_getClass(c"AVAudioSession".as_ptr()), shared_sel);
+                let is_active_sel = sel_registerName(c"isActive".as_ptr());
                 let was_active = send_bool(session, is_active_sel) != 0;
                 AUDIO_SESSION_WAS_ACTIVE.store(was_active, Ordering::SeqCst);
                 log::info!("tutoring: AVAudioSession interruption began, was_active={was_active}");
@@ -598,27 +618,27 @@ impl InterruptionBridge {
             if notification.is_null() {
                 return;
             }
-            let user_info_sel = sel_registerName(b"userInfo\0".as_ptr() as *const i8);
+            let user_info_sel = sel_registerName(c"userInfo".as_ptr());
             let user_info: ObjcId = send_noargs(notification, user_info_sel);
             if user_info.is_null() {
                 return;
             }
-            let ns_string_cls = objc_getClass(b"NSString\0".as_ptr() as *const i8);
+            let ns_string_cls = objc_getClass(c"NSString".as_ptr());
             if ns_string_cls.is_null() {
                 return;
             }
-            let utf8_sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as *const i8);
+            let utf8_sel = sel_registerName(c"stringWithUTF8String:".as_ptr());
             let reason_key = send_cstr(
                 ns_string_cls,
                 utf8_sel,
-                b"AVAudioSessionRouteChangeReasonKey\0".as_ptr() as *const i8,
+                c"AVAudioSessionRouteChangeReasonKey".as_ptr(),
             );
-            let dict_sel = sel_registerName(b"objectForKey:\0".as_ptr() as *const i8);
+            let dict_sel = sel_registerName(c"objectForKey:".as_ptr());
             let reason_obj: ObjcId = send_obj(user_info, dict_sel, reason_key);
             if reason_obj.is_null() {
                 return;
             }
-            let int_value_sel = sel_registerName(b"intValue\0".as_ptr() as *const i8);
+            let int_value_sel = sel_registerName(c"intValue".as_ptr());
             send_i32(reason_obj, int_value_sel)
         };
 
@@ -688,34 +708,30 @@ fn register_audio_session_observer() {
                 objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
             );
 
-            let cls_name = b"AudioSessionObserver\0".as_ptr() as *const i8;
+            let cls_name = c"AudioSessionObserver".as_ptr();
             let mut cls = objc_getClass(cls_name);
             if cls.is_null() {
-                cls = objc_allocateClassPair(
-                    objc_getClass(b"NSObject\0".as_ptr() as *const i8),
-                    cls_name,
-                    0,
-                );
+                cls = objc_allocateClassPair(objc_getClass(c"NSObject".as_ptr()), cls_name, 0);
                 if cls.is_null() {
                     log::error!("tutoring: failed to allocate AudioSessionObserver class");
                     return;
                 }
-                let v08: *const i8 = b"v@:@\0".as_ptr() as *const i8;
+                let v08 = c"v@:@".as_ptr();
                 class_addMethod(
                     cls,
-                    sel_registerName(b"handleInterruption:\0".as_ptr() as *const i8),
+                    sel_registerName(c"handleInterruption:".as_ptr()),
                     observer_trampoline as *mut std::ffi::c_void,
                     v08,
                 );
                 class_addMethod(
                     cls,
-                    sel_registerName(b"handleRouteChange:\0".as_ptr() as *const i8),
+                    sel_registerName(c"handleRouteChange:".as_ptr()),
                     route_change_trampoline as *mut std::ffi::c_void,
                     v08,
                 );
                 class_addMethod(
                     cls,
-                    sel_registerName(b"handleMediaServicesReset:\0".as_ptr() as *const i8),
+                    sel_registerName(c"handleMediaServicesReset:".as_ptr()),
                     media_services_reset_trampoline as *mut std::ffi::c_void,
                     v08,
                 );
@@ -728,8 +744,8 @@ fn register_audio_session_observer() {
                 if !existing.is_null() {
                     existing
                 } else {
-                    let alloc_sel = sel_registerName(b"alloc\0".as_ptr() as *const i8);
-                    let init_sel = sel_registerName(b"init\0".as_ptr() as *const i8);
+                    let alloc_sel = sel_registerName(c"alloc".as_ptr());
+                    let init_sel = sel_registerName(c"init".as_ptr());
                     let allocated = send_noargs(cls, alloc_sel);
                     if allocated.is_null() {
                         log::error!("tutoring: failed to allocate AudioSessionObserver instance");
@@ -745,44 +761,43 @@ fn register_audio_session_observer() {
                 }
             };
 
-            let nsstring_cls = objc_getClass(b"NSString\0".as_ptr() as *const i8);
+            let nsstring_cls = objc_getClass(c"NSString".as_ptr());
             if nsstring_cls.is_null() {
                 log::error!("tutoring: NSString class not found during observer registration");
                 return;
             }
-            let utf8_sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as *const i8);
-            let center_cls = objc_getClass(b"NSNotificationCenter\0".as_ptr() as *const i8);
+            let utf8_sel = sel_registerName(c"stringWithUTF8String:".as_ptr());
+            let center_cls = objc_getClass(c"NSNotificationCenter".as_ptr());
             if center_cls.is_null() {
                 log::error!(
                     "tutoring: NSNotificationCenter class not found during observer registration"
                 );
                 return;
             }
-            let center_sel = sel_registerName(b"defaultCenter\0".as_ptr() as *const i8);
+            let center_sel = sel_registerName(c"defaultCenter".as_ptr());
             let center: ObjcId = send_noargs(center_cls, center_sel);
-            let add_obs_sel =
-                sel_registerName(b"addObserver:selector:name:object:\0".as_ptr() as *const i8);
+            let add_obs_sel = sel_registerName(c"addObserver:selector:name:object:".as_ptr());
             let int_notif = send_cstr(
                 nsstring_cls,
                 utf8_sel,
-                b"AVAudioSessionInterruptionNotification\0".as_ptr() as *const i8,
+                c"AVAudioSessionInterruptionNotification".as_ptr(),
             );
-            let int_sel = sel_registerName(b"handleInterruption:\0".as_ptr() as *const i8);
+            let int_sel = sel_registerName(c"handleInterruption:".as_ptr());
             let nil: ObjcId = std::ptr::null_mut();
             send_add_observer(center, add_obs_sel, observer, int_sel, int_notif, nil);
             let route_notif = send_cstr(
                 nsstring_cls,
                 utf8_sel,
-                b"AVAudioSessionRouteChangeNotification\0".as_ptr() as *const i8,
+                c"AVAudioSessionRouteChangeNotification".as_ptr(),
             );
-            let route_sel = sel_registerName(b"handleRouteChange:\0".as_ptr() as *const i8);
+            let route_sel = sel_registerName(c"handleRouteChange:".as_ptr());
             send_add_observer(center, add_obs_sel, observer, route_sel, route_notif, nil);
             let reset_notif = send_cstr(
                 nsstring_cls,
                 utf8_sel,
-                b"AVAudioSessionMediaServicesWereResetNotification\0".as_ptr() as *const i8,
+                c"AVAudioSessionMediaServicesWereResetNotification".as_ptr(),
             );
-            let reset_sel = sel_registerName(b"handleMediaServicesReset:\0".as_ptr() as *const i8);
+            let reset_sel = sel_registerName(c"handleMediaServicesReset:".as_ptr());
             send_add_observer(center, add_obs_sel, observer, reset_sel, reset_notif, nil);
             log::info!("tutoring: AVAudioSession interruption observer registered");
         });
@@ -793,7 +808,14 @@ fn register_audio_session_observer() {
 ///
 /// Thread-safe via `Arc<Mutex<>>`. Stored in Tauri `AppState`.
 pub struct TutoringManager {
+    tasks: Arc<SessionTasks>,
     inner: Arc<Mutex<Option<ActiveSession>>>,
+}
+
+impl Default for TutoringManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TutoringManager {
@@ -802,7 +824,9 @@ impl TutoringManager {
         let _ = TUTORING_MANAGER_INNER.set(inner.clone());
         // Register AVAudioSession interruption observer once on first TutoringManager creation.
         register_audio_session_observer();
-        Self { inner }
+        let tasks = Arc::new(SessionTasks::default());
+        let _ = TUTORING_MANAGER_TASKS.set(tasks.clone());
+        Self { inner, tasks }
     }
 
     fn ios_port_device_id(uid: &str) -> String {
@@ -870,7 +894,7 @@ impl TutoringManager {
                 if obj.is_null() {
                     return None;
                 }
-                let utf8_sel = sel_registerName(b"UTF8String\0".as_ptr() as *const i8);
+                let utf8_sel = sel_registerName(c"UTF8String".as_ptr());
                 let cstr = send_utf8(obj, utf8_sel);
                 if cstr.is_null() {
                     None
@@ -887,11 +911,11 @@ impl TutoringManager {
                 if array.is_null() {
                     return Vec::new();
                 }
-                let count_sel = sel_registerName(b"count\0".as_ptr() as *const i8);
-                let object_sel = sel_registerName(b"objectAtIndex:\0".as_ptr() as *const i8);
-                let uid_sel = sel_registerName(b"UID\0".as_ptr() as *const i8);
-                let name_sel = sel_registerName(b"portName\0".as_ptr() as *const i8);
-                let type_sel = sel_registerName(b"portType\0".as_ptr() as *const i8);
+                let count_sel = sel_registerName(c"count".as_ptr());
+                let object_sel = sel_registerName(c"objectAtIndex:".as_ptr());
+                let uid_sel = sel_registerName(c"UID".as_ptr());
+                let name_sel = sel_registerName(c"portName".as_ptr());
+                let type_sel = sel_registerName(c"portType".as_ptr());
 
                 let count = send_count(array, count_sel);
                 let mut ports = Vec::with_capacity(count);
@@ -915,19 +939,19 @@ impl TutoringManager {
                 ports
             };
 
-            let cls = objc_getClass(b"AVAudioSession\0".as_ptr() as *const i8);
+            let cls = objc_getClass(c"AVAudioSession".as_ptr());
             if cls.is_null() {
                 return IosAudioRouteSnapshot::default();
             }
-            let shared_sel = sel_registerName(b"sharedInstance\0".as_ptr() as *const i8);
+            let shared_sel = sel_registerName(c"sharedInstance".as_ptr());
             let session = send_noargs(cls, shared_sel);
             if session.is_null() {
                 return IosAudioRouteSnapshot::default();
             }
 
-            let available_inputs_sel = sel_registerName(b"availableInputs\0".as_ptr() as *const i8);
-            let current_route_sel = sel_registerName(b"currentRoute\0".as_ptr() as *const i8);
-            let inputs_sel = sel_registerName(b"inputs\0".as_ptr() as *const i8);
+            let available_inputs_sel = sel_registerName(c"availableInputs".as_ptr());
+            let current_route_sel = sel_registerName(c"currentRoute".as_ptr());
+            let inputs_sel = sel_registerName(c"inputs".as_ptr());
 
             let available_inputs = ports_from_array(send_noargs(session, available_inputs_sel));
             let current_route = send_noargs(session, current_route_sel);
@@ -1081,14 +1105,14 @@ impl TutoringManager {
                 let send_act: MsgSendActivate =
                     std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
 
-                let cls = objc_getClass(b"AVAudioSession\0".as_ptr() as *const i8);
+                let cls = objc_getClass(c"AVAudioSession".as_ptr());
                 if cls.is_null() {
                     log::error!("tutoring: AVAudioSession class not found");
                     return;
                 }
 
                 // [AVAudioSession sharedInstance]
-                let shared_sel = sel_registerName(b"sharedInstance\0".as_ptr() as *const i8);
+                let shared_sel = sel_registerName(c"sharedInstance".as_ptr());
                 let session: Id = send(cls, shared_sel);
                 if session.is_null() {
                     log::error!("tutoring: AVAudioSession.sharedInstance returned nil");
@@ -1097,12 +1121,12 @@ impl TutoringManager {
 
                 // Create NSString @"AVAudioSessionCategoryPlayAndRecord"
                 // via [NSString stringWithUTF8String:"AVAudioSessionCategoryPlayAndRecord"]
-                let nsstring_cls = objc_getClass(b"NSString\0".as_ptr() as *const i8);
-                let utf8_sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as *const i8);
+                let nsstring_cls = objc_getClass(c"NSString".as_ptr());
+                let utf8_sel = sel_registerName(c"stringWithUTF8String:".as_ptr());
                 let category: Id = send_ptr(
                     nsstring_cls,
                     utf8_sel,
-                    b"AVAudioSessionCategoryPlayAndRecord\0".as_ptr() as *const i8,
+                    c"AVAudioSessionCategoryPlayAndRecord".as_ptr(),
                 );
                 if category.is_null() {
                     log::error!("tutoring: failed to create category NSString");
@@ -1114,8 +1138,7 @@ impl TutoringManager {
                 // Do not request AllowBluetoothA2DP here. For two-way tutoring/call audio we
                 // want the system's voice route selection, not high-quality output-only A2DP.
                 let options: u64 = 0x08 | 0x04;
-                let set_cat_sel =
-                    sel_registerName(b"setCategory:withOptions:error:\0".as_ptr() as *const i8);
+                let set_cat_sel = sel_registerName(c"setCategory:withOptions:error:".as_ptr());
                 let nil: Id = std::ptr::null_mut();
                 let set_cat_ok: i8 = send_cat(session, set_cat_sel, category, options, nil);
                 if set_cat_ok == 0 {
@@ -1133,12 +1156,12 @@ impl TutoringManager {
                 let mode: Id = send_ptr(
                     nsstring_cls,
                     utf8_sel,
-                    b"AVAudioSessionModeDefault\0".as_ptr() as *const i8,
+                    c"AVAudioSessionModeDefault".as_ptr(),
                 );
                 if mode.is_null() {
                     crate::diag::log("configure_ios_audio_session: failed to create mode NSString");
                 } else {
-                    let set_mode_sel = sel_registerName(b"setMode:error:\0".as_ptr() as *const i8);
+                    let set_mode_sel = sel_registerName(c"setMode:error:".as_ptr());
                     let set_mode_ok: i8 = send_mode(session, set_mode_sel, mode, nil);
                     if set_mode_ok == 0 {
                         crate::diag::log("configure_ios_audio_session: setMode(Default) failed");
@@ -1148,7 +1171,7 @@ impl TutoringManager {
                 }
 
                 // [session setActive:YES error:nil]
-                let set_active_sel = sel_registerName(b"setActive:error:\0".as_ptr() as *const i8);
+                let set_active_sel = sel_registerName(c"setActive:error:".as_ptr());
                 let set_active_ok: i8 = send_act(session, set_active_sel, 1i8, nil);
                 if set_active_ok == 0 {
                     crate::diag::log("configure_ios_audio_session: setActive failed");
@@ -1156,16 +1179,13 @@ impl TutoringManager {
                     crate::diag::log("configure_ios_audio_session: setActive OK");
                 }
 
-                let available_inputs_sel =
-                    sel_registerName(b"availableInputs\0".as_ptr() as *const i8);
-                let uid_sel = sel_registerName(b"UID\0".as_ptr() as *const i8);
-                let count_sel = sel_registerName(b"count\0".as_ptr() as *const i8);
-                let object_sel = sel_registerName(b"objectAtIndex:\0".as_ptr() as *const i8);
-                let set_pref_input_sel =
-                    sel_registerName(b"setPreferredInput:error:\0".as_ptr() as *const i8);
-                let override_sel =
-                    sel_registerName(b"overrideOutputAudioPort:error:\0".as_ptr() as *const i8);
-                let utf8_string_sel = sel_registerName(b"UTF8String\0".as_ptr() as *const i8);
+                let available_inputs_sel = sel_registerName(c"availableInputs".as_ptr());
+                let uid_sel = sel_registerName(c"UID".as_ptr());
+                let count_sel = sel_registerName(c"count".as_ptr());
+                let object_sel = sel_registerName(c"objectAtIndex:".as_ptr());
+                let set_pref_input_sel = sel_registerName(c"setPreferredInput:error:".as_ptr());
+                let override_sel = sel_registerName(c"overrideOutputAudioPort:error:".as_ptr());
+                let utf8_string_sel = sel_registerName(c"UTF8String".as_ptr());
 
                 type MsgSendCount = unsafe extern "C" fn(Id, Sel) -> usize;
                 type MsgSendIndex = unsafe extern "C" fn(Id, Sel, usize) -> Id;
@@ -1258,18 +1278,18 @@ impl TutoringManager {
                 type MsgSendF64 = unsafe extern "C" fn(Id, Sel) -> f64;
                 let send_f64: MsgSendF64 =
                     std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
-                let sr_sel = sel_registerName(b"sampleRate\0".as_ptr() as *const i8);
+                let sr_sel = sel_registerName(c"sampleRate".as_ptr());
                 let sample_rate = send_f64(session, sr_sel);
                 crate::diag::log(&format!("iOS audio sampleRate: {sample_rate:.0} Hz"));
 
                 // Log the currently active route so we can see exactly where
                 // audio is going after each reconfigure. Essential for debugging
                 // silent-output bugs where iOS silently picks a surprising port.
-                let current_route_sel = sel_registerName(b"currentRoute\0".as_ptr() as *const i8);
-                let outputs_sel = sel_registerName(b"outputs\0".as_ptr() as *const i8);
-                let inputs_sel = sel_registerName(b"inputs\0".as_ptr() as *const i8);
-                let port_type_sel = sel_registerName(b"portType\0".as_ptr() as *const i8);
-                let port_name_sel = sel_registerName(b"portName\0".as_ptr() as *const i8);
+                let current_route_sel = sel_registerName(c"currentRoute".as_ptr());
+                let outputs_sel = sel_registerName(c"outputs".as_ptr());
+                let inputs_sel = sel_registerName(c"inputs".as_ptr());
+                let port_type_sel = sel_registerName(c"portType".as_ptr());
+                let port_name_sel = sel_registerName(c"portName".as_ptr());
                 let route: Id = send(session, current_route_sel);
                 if !route.is_null() {
                     let log_ports = |label: &str, collection: Id| {
@@ -1326,8 +1346,12 @@ impl TutoringManager {
     ///
     /// Both AVAudioSession configuration and CoreAudio/cpal init are
     /// dispatched to the main thread — iOS requires it.
-    /// Uses spawn_blocking + timeout to prevent indefinite hangs.
-    async fn try_create_audio_backend(devices: &DeviceSelection) -> Option<AudioBackend> {
+    /// The timeout lets startup continue without audio. Cleanup still joins
+    /// a native initializer that has not returned; a timeout cannot stop it.
+    async fn try_create_audio_backend(
+        tasks: Arc<SessionTasks>,
+        devices: &DeviceSelection,
+    ) -> Option<AudioBackend> {
         crate::diag::log("try_create_audio_backend: starting...");
         let devices = devices.clone();
 
@@ -1335,7 +1359,7 @@ impl TutoringManager {
         // spawn_blocking so we can apply a timeout without blocking tokio.
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            tokio::task::spawn_blocking(move || {
+            tasks.run_blocking(move || {
                 // Configure iOS audio session first — required before any CoreAudio usage.
                 Self::configure_ios_audio_session_with_selection(Some(&devices));
                 crate::diag::log(
@@ -1399,7 +1423,10 @@ impl TutoringManager {
             return;
         };
 
-        tauri::async_runtime::spawn(async move {
+        let Some(tasks) = TUTORING_MANAGER_TASKS.get().cloned() else {
+            return;
+        };
+        tasks.spawn(async move {
             let (selection, outputs) = {
                 let guard = inner.lock().await;
                 match guard.as_ref() {
@@ -1541,6 +1568,7 @@ impl TutoringManager {
     }
 
     async fn repair_remote_audio_subscription(
+        tasks: Arc<SessionTasks>,
         inner: &Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: &Option<AudioBackend>,
         broadcast: &SubscribeBroadcast,
@@ -1588,7 +1616,7 @@ impl TutoringManager {
                 let bname_audio = name.to_string();
                 let sub_key_audio = audio_key.clone();
                 let remote_audio_key_for_cleanup = remote_audio_key.clone();
-                let audio_keepalive = tokio::spawn(async move {
+                let audio_keepalive = tasks.clone().spawn(async move {
                     audio_track.stopped().await;
                     log::warn!("tutoring: audio track stopped for {nid_audio}:{bname_audio}");
                     crate::diag::log(&format!(
@@ -1616,6 +1644,7 @@ impl TutoringManager {
     }
 
     async fn repair_remote_video_subscription(
+        tasks: Arc<SessionTasks>,
         inner: &Arc<Mutex<Option<ActiveSession>>>,
         broadcast: &SubscribeBroadcast,
         node_id: &str,
@@ -1667,6 +1696,7 @@ impl TutoringManager {
                 crate::diag::log(&format!("  [{short_id}] video repair: watch OK"));
                 Self::push_log(inner, format!("video_watch OK: {short_id}:{name}")).await;
                 Self::spawn_frame_bridge_inner(
+                    tasks.clone(),
                     video_track,
                     node_id.to_string(),
                     app_handle.clone(),
@@ -1686,14 +1716,15 @@ impl TutoringManager {
     }
 
     fn spawn_remote_broadcast_repair_task(
+        tasks: Arc<SessionTasks>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: Option<AudioBackend>,
         broadcast: SubscribeBroadcast,
         node_id: String,
         name: String,
         app_handle: AppHandle,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    ) -> TaskHandle {
+        tasks.clone().spawn(async move {
             let repair_key = format!("{node_id}:{name}:repair");
             let closed = broadcast.closed();
             tokio::pin!(closed);
@@ -1715,7 +1746,7 @@ impl TutoringManager {
                             break;
                         }
 
-                        Self::repair_remote_audio_subscription(
+                        Self::repair_remote_audio_subscription(tasks.clone(),
                             &inner,
                             &audio_ctx,
                             &broadcast,
@@ -1723,7 +1754,7 @@ impl TutoringManager {
                             &name,
                         )
                         .await;
-                        Self::repair_remote_video_subscription(
+                        Self::repair_remote_video_subscription(tasks.clone(),
                             &inner,
                             &broadcast,
                             &node_id,
@@ -1752,6 +1783,10 @@ impl TutoringManager {
     // ── Room lifecycle ─────────────────────────────────────────────
 
     /// Create a new tutoring room (host mode, audio + video).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "room construction keeps its owned session and media dependencies explicit"
+    )]
     pub async fn create_room(
         &self,
         session_id: String,
@@ -1763,160 +1798,193 @@ impl TutoringManager {
         app_handle: AppHandle,
         devices: DeviceSelection,
     ) -> Result<String, String> {
+        let tasks = self.tasks.clone();
         crate::diag::log("create_room: starting");
         set_idle_timer_disabled(true);
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
             return Err("already in a tutoring session".into());
         }
+        self.tasks.shutdown().await;
+        self.tasks.open()?;
+        let mut startup = self.tasks.startup_guard();
+        let result = async {
+            let our_node_id = endpoint.id().to_string();
+            let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
+            crate::diag::log(&format!(
+                "create_room: node_id={}, relay={}",
+                &our_node_id[..12.min(our_node_id.len())],
+                home_relay.as_deref().unwrap_or("none")
+            ));
 
-        let our_node_id = endpoint.id().to_string();
-        let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
-        crate::diag::log(&format!(
-            "create_room: node_id={}, relay={}",
-            &our_node_id[..12.min(our_node_id.len())],
-            home_relay.as_deref().unwrap_or("none")
-        ));
-
-        crate::diag::log("create_room: calling Room::new...");
-        let ticket = RoomTicket::generate();
-        let room = tokio::time::timeout(
-            Duration::from_secs(15),
-            Room::new(endpoint, gossip.clone(), live, ticket),
-        )
-        .await
-        .map_err(|_| {
-            crate::diag::log("create_room: Room::new TIMED OUT after 15s");
-            "Room::new timed out after 15s".to_string()
-        })?
-        .map_err(|e| {
-            crate::diag::log(&format!("create_room: Room::new FAILED: {e}"));
-            format!("failed to create room: {e}")
-        })?;
-        crate::diag::log("create_room: Room::new OK");
-
-        let ticket_str = room.ticket().to_string();
-
-        crate::diag::log("create_room: initializing audio backend...");
-        let audio_ctx = Self::try_create_audio_backend(&devices).await;
-        let has_audio = audio_ctx.is_some();
-        crate::diag::log(&format!(
-            "create_room: audio backend done, has_audio={has_audio}"
-        ));
-        if !has_audio {
-            log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
-        }
-
-        crate::diag::log("create_room: creating broadcast (camera + mic)...");
-        let (mut broadcast, mic_input, has_video) =
-            Self::create_broadcast(audio_ctx.as_ref(), has_audio).await?;
-        crate::diag::log(&format!(
-            "create_room: broadcast created, video={has_video}"
-        ));
-        let session_output = Self::create_session_output(&audio_ctx).await;
-        room.publish(BROADCAST_NAME, broadcast.producer())
+            crate::diag::log("create_room: calling Room::new...");
+            let ticket = RoomTicket::generate();
+            let room = tokio::time::timeout(
+                Duration::from_secs(15),
+                Room::new(endpoint, gossip.clone(), live, ticket),
+            )
             .await
-            .map_err(|e| format!("failed to publish broadcast: {e}"))?;
-        crate::diag::log("create_room: published broadcast OK");
+            .map_err(|_| {
+                crate::diag::log("create_room: Room::new TIMED OUT after 15s");
+                "Room::new timed out after 15s".to_string()
+            })?
+            .map_err(|e| {
+                crate::diag::log(&format!("create_room: Room::new FAILED: {e}"));
+                format!("failed to create room: {e}")
+            })?;
+            crate::diag::log("create_room: Room::new OK");
 
-        let (events, handle) = room.split();
+            let ticket_str = room.ticket().to_string();
 
-        // Set up chat on a derived gossip topic
-        let topic_seed = room_topic_bytes(&ticket_str);
-        let chat_sender =
-            Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
+            crate::diag::log("create_room: initializing audio backend...");
+            let audio_ctx = Self::try_create_audio_backend(tasks.clone(), &devices).await;
+            let has_audio = audio_ctx.is_some();
+            crate::diag::log(&format!(
+                "create_room: audio backend done, has_audio={has_audio}"
+            ));
+            if !has_audio {
+                log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
+            }
 
-        // Set up name announcements on a derived /names gossip topic
-        let names_setup = Self::setup_names(
-            &gossip,
-            &topic_seed,
-            &our_node_id,
-            &display_name,
-            self.inner.clone(),
-            app_handle.clone(),
-        )
+            crate::diag::log("create_room: creating broadcast (camera + mic)...");
+            let (mut broadcast, mic_input, has_video) =
+                Self::create_broadcast(tasks.clone(), audio_ctx.as_ref(), has_audio).await?;
+            crate::diag::log(&format!(
+                "create_room: broadcast created, video={has_video}"
+            ));
+            let session_output = Self::create_session_output(&audio_ctx).await;
+            room.publish(BROADCAST_NAME, broadcast.producer())
+                .await
+                .map_err(|e| format!("failed to publish broadcast: {e}"))?;
+            crate::diag::log("create_room: published broadcast OK");
+
+            let (events, handle) = room.split();
+
+            // Set up chat on a derived gossip topic
+            let topic_seed = room_topic_bytes(&ticket_str);
+            let chat_sender = Self::setup_chat(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                app_handle.clone(),
+            )
+            .await;
+
+            // Set up name announcements on a derived /names gossip topic
+            let names_setup = Self::setup_names(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                &display_name,
+                self.inner.clone(),
+                app_handle.clone(),
+            )
+            .await;
+            let (names_sender, names_task) = match names_setup {
+                Some((s, t)) => (Some(s), Some(t)),
+                None => (None, None),
+            };
+
+            // Spawn event loop to track peers and subscribe to audio+video
+            let inner_clone = self.inner.clone();
+            let audio_ctx_clone = audio_ctx.clone();
+            let app_handle_clone = app_handle.clone();
+            let event_tasks = tasks.clone();
+            let event_task = tasks.clone().spawn(async move {
+                Self::event_loop(
+                    event_tasks,
+                    events,
+                    inner_clone,
+                    audio_ctx_clone,
+                    app_handle_clone,
+                )
+                .await;
+            });
+
+            let mut session_tasks = vec![event_task];
+            if let Some(t) = names_task {
+                session_tasks.push(t);
+            }
+
+            // Start self-preview from local camera source
+            let self_preview_task =
+                Self::start_self_preview(tasks.clone(), &mut broadcast, app_handle.clone());
+
+            let mut init_logs = vec![
+                format!(
+                    "create_room: audio={has_audio}, video={has_video}, self_preview={}",
+                    self_preview_task.is_some()
+                ),
+                format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
+            ];
+            if !has_audio {
+                init_logs.push("WARN: audio backend init failed".to_string());
+            }
+
+            *inner = Some(ActiveSession {
+                session_id,
+                session_title: title,
+                handle,
+                broadcast,
+                audio_ctx,
+                mic_input,
+                output_stream: session_output,
+                remote_output_streams: HashMap::new(),
+                peers: HashMap::new(),
+                video_enabled: has_video,
+                audio_enabled: has_audio,
+                chat_sender,
+                names_sender,
+                our_node_id,
+                our_display_name: display_name,
+                started_at: Self::now_millis(),
+                last_chat_sent: Instant::now() - Duration::from_secs(10),
+                app_handle: app_handle.clone(),
+                self_preview_task,
+                _device_selection: devices,
+                _tasks: session_tasks,
+                recent_logs: init_logs,
+                home_relay,
+                _moq_sessions: Vec::new(),
+                _subscribe_broadcasts: Vec::new(),
+                _repair_broadcast_keys: HashSet::new(),
+                _subscribed_audio_keys: HashSet::new(),
+                _subscribed_video_keys: HashSet::new(),
+                remote_broadcasts: Vec::new(),
+            });
+
+            // Spawn audio level emitter after session is stored
+            let audio_level_task =
+                Self::start_audio_level_emitter(tasks.clone(), self.inner.clone(), app_handle);
+            let lifecycle_task = Self::start_lifecycle_watcher(tasks.clone(), self.inner.clone());
+            if let Some(session) = inner.as_mut() {
+                session._tasks.push(audio_level_task);
+                session._tasks.push(lifecycle_task);
+            }
+
+            log::info!(
+                "tutoring: room created — audio={has_audio}, video={has_video}, ticket={}...",
+                &ticket_str[..ticket_str.len().min(20)]
+            );
+
+            Ok(ticket_str)
+        }
         .await;
-        let (names_sender, names_task) = match names_setup {
-            Some((s, t)) => (Some(s), Some(t)),
-            None => (None, None),
-        };
-
-        // Spawn event loop to track peers and subscribe to audio+video
-        let inner_clone = self.inner.clone();
-        let audio_ctx_clone = audio_ctx.clone();
-        let app_handle_clone = app_handle.clone();
-        let event_task = tokio::spawn(async move {
-            Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
-        });
-
-        let mut tasks = vec![event_task];
-        if let Some(t) = names_task {
-            tasks.push(t);
+        if result.is_ok() {
+            startup.commit();
+        } else {
+            self.tasks.shutdown().await;
         }
-
-        // Start self-preview from local camera source
-        let self_preview_task = Self::start_self_preview(&mut broadcast, app_handle.clone());
-
-        let mut init_logs = vec![
-            format!(
-                "create_room: audio={has_audio}, video={has_video}, self_preview={}",
-                self_preview_task.is_some()
-            ),
-            format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
-        ];
-        if !has_audio {
-            init_logs.push("WARN: audio backend init failed".to_string());
-        }
-
-        *inner = Some(ActiveSession {
-            session_id,
-            session_title: title,
-            handle,
-            broadcast,
-            audio_ctx,
-            mic_input,
-            output_stream: session_output,
-            remote_output_streams: HashMap::new(),
-            peers: HashMap::new(),
-            video_enabled: has_video,
-            audio_enabled: has_audio,
-            chat_sender,
-            names_sender,
-            our_node_id,
-            our_display_name: display_name,
-            started_at: Self::now_millis(),
-            last_chat_sent: Instant::now() - Duration::from_secs(10),
-            app_handle: app_handle.clone(),
-            self_preview_task,
-            _device_selection: devices,
-            _tasks: tasks,
-            recent_logs: init_logs,
-            home_relay,
-            _moq_sessions: Vec::new(),
-            _subscribe_broadcasts: Vec::new(),
-            _repair_broadcast_keys: HashSet::new(),
-            _subscribed_audio_keys: HashSet::new(),
-            _subscribed_video_keys: HashSet::new(),
-            remote_broadcasts: Vec::new(),
-        });
-
-        // Spawn audio level emitter after session is stored
-        let audio_level_task = Self::start_audio_level_emitter(self.inner.clone(), app_handle);
-        let lifecycle_task = Self::start_lifecycle_watcher(self.inner.clone());
-        if let Some(session) = inner.as_mut() {
-            session._tasks.push(audio_level_task);
-            session._tasks.push(lifecycle_task);
-        }
-
-        log::info!(
-            "tutoring: room created — audio={has_audio}, video={has_video}, ticket={}...",
-            &ticket_str[..ticket_str.len().min(20)]
-        );
-
-        Ok(ticket_str)
+        result
     }
 
     /// Join an existing tutoring room using a ticket string (audio + video).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "room construction keeps its owned session and media dependencies explicit"
+    )]
     pub async fn join_room(
         &self,
         session_id: String,
@@ -1929,169 +1997,208 @@ impl TutoringManager {
         app_handle: AppHandle,
         devices: DeviceSelection,
     ) -> Result<String, String> {
+        let tasks = self.tasks.clone();
         crate::diag::log("join_room: starting");
         set_idle_timer_disabled(true);
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
             return Err("already in a tutoring session".into());
         }
+        self.tasks.shutdown().await;
+        self.tasks.open()?;
+        let mut startup = self.tasks.startup_guard();
+        let result = async {
+            let our_node_id = endpoint.id().to_string();
+            let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
+            crate::diag::log(&format!(
+                "join_room: node_id={}, relay={}",
+                &our_node_id[..12.min(our_node_id.len())],
+                home_relay.as_deref().unwrap_or("none")
+            ));
 
-        let our_node_id = endpoint.id().to_string();
-        let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
-        crate::diag::log(&format!(
-            "join_room: node_id={}, relay={}",
-            &our_node_id[..12.min(our_node_id.len())],
-            home_relay.as_deref().unwrap_or("none")
-        ));
+            let ticket: RoomTicket = ticket_str
+                .parse()
+                .map_err(|e| format!("invalid room ticket: {e}"))?;
 
-        let ticket: RoomTicket = ticket_str
-            .parse()
-            .map_err(|e| format!("invalid room ticket: {e}"))?;
-
-        crate::diag::log("join_room: calling Room::new...");
-        let room = tokio::time::timeout(
-            Duration::from_secs(15),
-            Room::new(endpoint, gossip.clone(), live, ticket),
-        )
-        .await
-        .map_err(|_| {
-            crate::diag::log("join_room: Room::new TIMED OUT after 15s");
-            "Room::new timed out after 15s".to_string()
-        })?
-        .map_err(|e| {
-            crate::diag::log(&format!("join_room: Room::new FAILED: {e}"));
-            format!("failed to join room: {e}")
-        })?;
-        crate::diag::log("join_room: Room::new OK");
-
-        let ticket_str = room.ticket().to_string();
-
-        crate::diag::log("join_room: creating audio backend...");
-        let audio_ctx = Self::try_create_audio_backend(&devices).await;
-        let has_audio = audio_ctx.is_some();
-        crate::diag::log(&format!("join_room: audio={has_audio}"));
-        if !has_audio {
-            log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
-        }
-
-        // Start publishing local audio + video
-        crate::diag::log("join_room: creating broadcast (camera + mic)...");
-        let (mut broadcast, mic_input, has_video) =
-            Self::create_broadcast(audio_ctx.as_ref(), has_audio).await?;
-        crate::diag::log(&format!("join_room: broadcast created, video={has_video}"));
-        let session_output = Self::create_session_output(&audio_ctx).await;
-
-        crate::diag::log("join_room: publishing broadcast...");
-        room.publish(BROADCAST_NAME, broadcast.producer())
+            crate::diag::log("join_room: calling Room::new...");
+            let room = tokio::time::timeout(
+                Duration::from_secs(15),
+                Room::new(endpoint, gossip.clone(), live, ticket),
+            )
             .await
+            .map_err(|_| {
+                crate::diag::log("join_room: Room::new TIMED OUT after 15s");
+                "Room::new timed out after 15s".to_string()
+            })?
             .map_err(|e| {
-                crate::diag::log(&format!("join_room: publish FAILED: {e}"));
-                format!("failed to publish broadcast: {e}")
+                crate::diag::log(&format!("join_room: Room::new FAILED: {e}"));
+                format!("failed to join room: {e}")
             })?;
-        crate::diag::log("join_room: publish OK");
+            crate::diag::log("join_room: Room::new OK");
 
-        let (events, handle) = room.split();
+            let ticket_str = room.ticket().to_string();
 
-        // Set up chat on a derived gossip topic
-        let topic_seed = room_topic_bytes(&ticket_str);
-        let chat_sender =
-            Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
+            crate::diag::log("join_room: creating audio backend...");
+            let audio_ctx = Self::try_create_audio_backend(tasks.clone(), &devices).await;
+            let has_audio = audio_ctx.is_some();
+            crate::diag::log(&format!("join_room: audio={has_audio}"));
+            if !has_audio {
+                log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
+            }
 
-        // Set up name announcements on a derived /names gossip topic
-        let names_setup = Self::setup_names(
-            &gossip,
-            &topic_seed,
-            &our_node_id,
-            &display_name,
-            self.inner.clone(),
-            app_handle.clone(),
-        )
+            // Start publishing local audio + video
+            crate::diag::log("join_room: creating broadcast (camera + mic)...");
+            let (mut broadcast, mic_input, has_video) =
+                Self::create_broadcast(tasks.clone(), audio_ctx.as_ref(), has_audio).await?;
+            crate::diag::log(&format!("join_room: broadcast created, video={has_video}"));
+            let session_output = Self::create_session_output(&audio_ctx).await;
+
+            crate::diag::log("join_room: publishing broadcast...");
+            room.publish(BROADCAST_NAME, broadcast.producer())
+                .await
+                .map_err(|e| {
+                    crate::diag::log(&format!("join_room: publish FAILED: {e}"));
+                    format!("failed to publish broadcast: {e}")
+                })?;
+            crate::diag::log("join_room: publish OK");
+
+            let (events, handle) = room.split();
+
+            // Set up chat on a derived gossip topic
+            let topic_seed = room_topic_bytes(&ticket_str);
+            let chat_sender = Self::setup_chat(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                app_handle.clone(),
+            )
+            .await;
+
+            // Set up name announcements on a derived /names gossip topic
+            let names_setup = Self::setup_names(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                &display_name,
+                self.inner.clone(),
+                app_handle.clone(),
+            )
+            .await;
+            let (names_sender, names_task) = match names_setup {
+                Some((s, t)) => (Some(s), Some(t)),
+                None => (None, None),
+            };
+
+            let inner_clone = self.inner.clone();
+            let audio_ctx_clone = audio_ctx.clone();
+            let app_handle_clone = app_handle.clone();
+            let event_tasks = tasks.clone();
+            let event_task = tasks.clone().spawn(async move {
+                Self::event_loop(
+                    event_tasks,
+                    events,
+                    inner_clone,
+                    audio_ctx_clone,
+                    app_handle_clone,
+                )
+                .await;
+            });
+
+            let mut session_tasks = vec![event_task];
+            if let Some(t) = names_task {
+                session_tasks.push(t);
+            }
+
+            let self_preview_task =
+                Self::start_self_preview(tasks.clone(), &mut broadcast, app_handle.clone());
+
+            let init_logs = vec![
+                format!(
+                    "join_room: audio={has_audio}, video={has_video}, self_preview={}",
+                    self_preview_task.is_some()
+                ),
+                format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
+            ];
+
+            *inner = Some(ActiveSession {
+                session_id,
+                session_title: title,
+                handle,
+                broadcast,
+                audio_ctx,
+                mic_input,
+                output_stream: session_output,
+                remote_output_streams: HashMap::new(),
+                peers: HashMap::new(),
+                video_enabled: has_video,
+                audio_enabled: has_audio,
+                chat_sender,
+                names_sender,
+                our_node_id,
+                our_display_name: display_name,
+                started_at: Self::now_millis(),
+                last_chat_sent: Instant::now() - Duration::from_secs(10),
+                app_handle: app_handle.clone(),
+                self_preview_task,
+                _device_selection: devices,
+                _tasks: session_tasks,
+                recent_logs: init_logs,
+                home_relay,
+                _moq_sessions: Vec::new(),
+                _subscribe_broadcasts: Vec::new(),
+                _repair_broadcast_keys: HashSet::new(),
+                _subscribed_audio_keys: HashSet::new(),
+                _subscribed_video_keys: HashSet::new(),
+                remote_broadcasts: Vec::new(),
+            });
+
+            // Spawn audio level emitter after session is stored
+            let audio_level_task =
+                Self::start_audio_level_emitter(tasks.clone(), self.inner.clone(), app_handle);
+            let lifecycle_task = Self::start_lifecycle_watcher(tasks.clone(), self.inner.clone());
+            if let Some(session) = inner.as_mut() {
+                session._tasks.push(audio_level_task);
+                session._tasks.push(lifecycle_task);
+            }
+
+            Ok(ticket_str)
+        }
         .await;
-        let (names_sender, names_task) = match names_setup {
-            Some((s, t)) => (Some(s), Some(t)),
-            None => (None, None),
-        };
-
-        let inner_clone = self.inner.clone();
-        let audio_ctx_clone = audio_ctx.clone();
-        let app_handle_clone = app_handle.clone();
-        let event_task = tokio::spawn(async move {
-            Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
-        });
-
-        let mut tasks = vec![event_task];
-        if let Some(t) = names_task {
-            tasks.push(t);
+        if result.is_ok() {
+            startup.commit();
+        } else {
+            self.tasks.shutdown().await;
         }
-
-        let self_preview_task = Self::start_self_preview(&mut broadcast, app_handle.clone());
-
-        let init_logs = vec![
-            format!(
-                "join_room: audio={has_audio}, video={has_video}, self_preview={}",
-                self_preview_task.is_some()
-            ),
-            format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
-        ];
-
-        *inner = Some(ActiveSession {
-            session_id,
-            session_title: title,
-            handle,
-            broadcast,
-            audio_ctx,
-            mic_input,
-            output_stream: session_output,
-            remote_output_streams: HashMap::new(),
-            peers: HashMap::new(),
-            video_enabled: has_video,
-            audio_enabled: has_audio,
-            chat_sender,
-            names_sender,
-            our_node_id,
-            our_display_name: display_name,
-            started_at: Self::now_millis(),
-            last_chat_sent: Instant::now() - Duration::from_secs(10),
-            app_handle: app_handle.clone(),
-            self_preview_task,
-            _device_selection: devices,
-            _tasks: tasks,
-            recent_logs: init_logs,
-            home_relay,
-            _moq_sessions: Vec::new(),
-            _subscribe_broadcasts: Vec::new(),
-            _repair_broadcast_keys: HashSet::new(),
-            _subscribed_audio_keys: HashSet::new(),
-            _subscribed_video_keys: HashSet::new(),
-            remote_broadcasts: Vec::new(),
-        });
-
-        // Spawn audio level emitter after session is stored
-        let audio_level_task = Self::start_audio_level_emitter(self.inner.clone(), app_handle);
-        let lifecycle_task = Self::start_lifecycle_watcher(self.inner.clone());
-        if let Some(session) = inner.as_mut() {
-            session._tasks.push(audio_level_task);
-            session._tasks.push(lifecycle_task);
-        }
-
-        Ok(ticket_str)
+        result
     }
 
     /// Leave the current room.
     pub async fn leave_room(&self) -> Result<(), String> {
+        self.stop_room(true).await
+    }
+
+    pub async fn shutdown(&self) -> Result<(), String> {
+        self.stop_room(false).await
+    }
+
+    async fn stop_room(&self, require_active: bool) -> Result<(), String> {
         let mut inner = self.inner.lock().await;
-        let session = inner.take().ok_or("not in a tutoring session")?;
-
-        if let Some(t) = &session.self_preview_task {
-            t.abort();
+        if require_active && inner.is_none() {
+            return Err("not in a tutoring session".into());
         }
-        for task in &session._tasks {
-            task.abort();
+        if let Some(session) = inner.as_ref() {
+            if let Some(preview) = &session.self_preview_task {
+                preview.abort();
+            }
+            for task in &session._tasks {
+                task.abort();
+            }
         }
-        drop(session);
-
+        self.tasks.shutdown().await;
+        *inner = None;
         set_idle_timer_disabled(false);
-        log::info!("left tutoring session");
         Ok(())
     }
 
@@ -2100,7 +2207,10 @@ impl TutoringManager {
     /// Toggle local microphone on/off.
     pub async fn toggle_audio(&self, enable: bool) -> Result<bool, String> {
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         if enable == session.audio_enabled {
             return Ok(session.audio_enabled);
@@ -2141,7 +2251,10 @@ impl TutoringManager {
     pub async fn update_audio_devices(&self, devices: DeviceSelection) -> Result<(), String> {
         {
             let mut inner = self.inner.lock().await;
-            let session = inner.as_mut().ok_or("not in a tutoring session")?;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
             session._device_selection = devices.clone();
         }
 
@@ -2174,8 +2287,12 @@ impl TutoringManager {
 
     /// Toggle local camera on/off.
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
+        let tasks = self.tasks.clone();
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         if enable == session.video_enabled {
             return Ok(session.video_enabled);
@@ -2188,7 +2305,7 @@ impl TutoringManager {
         if enable {
             // Try to create camera and video renditions.
             // Dispatch to main thread — AVCaptureSession requires it on iOS.
-            let camera_result = run_on_main_thread(|| IosCameraSource::front());
+            let camera_result = run_on_main_thread(IosCameraSource::front);
             match camera_result {
                 Ok(camera) => {
                     let renditions =
@@ -2199,6 +2316,7 @@ impl TutoringManager {
                         .map_err(|e| format!("failed to enable video: {e}"))?;
                     session.video_enabled = true;
                     session.self_preview_task = Self::start_self_preview(
+                        tasks.clone(),
                         &mut session.broadcast,
                         session.app_handle.clone(),
                     );
@@ -2239,7 +2357,10 @@ impl TutoringManager {
         }
 
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         // Rate limit
         let now = Instant::now();
@@ -2274,7 +2395,7 @@ impl TutoringManager {
     /// Get the current session status.
     pub async fn status(&self) -> Option<SessionStatus> {
         let inner = self.inner.lock().await;
-        let session = inner.as_ref()?;
+        let session = inner.as_ref().filter(|_| self.tasks.is_open())?;
 
         Some(SessionStatus {
             session_id: session.session_id.clone(),
@@ -2300,13 +2421,13 @@ impl TutoringManager {
     /// Check if currently in a session.
     pub async fn is_active(&self) -> bool {
         let inner = self.inner.lock().await;
-        inner.is_some()
+        inner.is_some() && self.tasks.is_open()
     }
 
     /// Get diagnostic info about the current session for debugging A/V pipeline.
     pub async fn diagnostics(&self) -> Option<SessionDiagnostics> {
         let inner = self.inner.lock().await;
-        let session = inner.as_ref()?;
+        let session = inner.as_ref().filter(|_| self.tasks.is_open())?;
 
         // Merge session ring buffer + diag file log into recent_logs
         let mut all_logs = session.recent_logs.clone();
@@ -2358,6 +2479,7 @@ impl TutoringManager {
     /// Uses `PureOpusEncoder` for audio and `VtEncoder` (VideoToolbox) for video.
     /// Returns `(broadcast, mic_input, has_video)`.
     async fn create_broadcast(
+        tasks: Arc<SessionTasks>,
         audio_ctx: Option<&AudioBackend>,
         audio: bool,
     ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
@@ -2388,7 +2510,7 @@ impl TutoringManager {
         crate::diag::log("create_broadcast: initializing camera via spawn_blocking...");
         let camera_result = tokio::time::timeout(
             Duration::from_secs(10),
-            tokio::task::spawn_blocking(|| {
+            tasks.run_blocking(|| {
                 run_on_main_thread(|| {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         IosCameraSource::front()
@@ -2432,10 +2554,11 @@ impl TutoringManager {
     /// Spawn a background task that periodically reads mic + output peak levels
     /// and emits `tutoring:audio-level` Tauri events for the frontend VU meters.
     fn start_audio_level_emitter(
+        tasks: Arc<SessionTasks>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         app_handle: AppHandle,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    ) -> TaskHandle {
+        tasks.clone().spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(200));
             loop {
                 interval.tick().await;
@@ -2471,11 +2594,14 @@ impl TutoringManager {
 
     /// Polls `UIApplication.applicationState` and toggles video/audio on
     /// foreground↔background transitions so the camera resumes after unlock.
-    fn start_lifecycle_watcher(manager_inner: Arc<Mutex<Option<ActiveSession>>>) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            // UIApplicationState: 0 = Active, 2 = Background
+    fn start_lifecycle_watcher(
+        tasks: Arc<SessionTasks>,
+        manager_inner: Arc<Mutex<Option<ActiveSession>>>,
+    ) -> TaskHandle {
+        tasks.clone().spawn(async move {
+            // UIApplicationState: 0 = Active; every other available state is
+            // treated as inactive for capture teardown.
             const STATE_ACTIVE: i64 = 0;
-            const STATE_BACKGROUND: i64 = 2;
 
             let mut was_active = get_application_state() == STATE_ACTIVE;
             let mut interval = tokio::time::interval(Duration::from_millis(1500));
@@ -2520,7 +2646,7 @@ impl TutoringManager {
                         let mut guard = manager_inner.lock().await;
                         if let Some(session) = guard.as_mut() {
                             if !session.video_enabled {
-                                let camera_result = run_on_main_thread(|| IosCameraSource::front());
+                                let camera_result = run_on_main_thread(IosCameraSource::front);
                                 match camera_result {
                                     Ok(camera) => {
                                         let renditions = VideoRenditions::new::<VtEncoder>(
@@ -2529,7 +2655,7 @@ impl TutoringManager {
                                         );
                                         if session.broadcast.set_video(Some(renditions)).is_ok() {
                                             session.video_enabled = true;
-                                            let preview = Self::start_self_preview(
+                                            let preview = Self::start_self_preview(tasks.clone(),
                                                 &mut session.broadcast,
                                                 session.app_handle.clone(),
                                             );
@@ -2563,6 +2689,7 @@ impl TutoringManager {
 
     /// Set up a chat channel on a gossip topic derived from the room.
     async fn setup_chat(
+        tasks: Arc<SessionTasks>,
         gossip: &Gossip,
         topic_seed: &[u8],
         our_node_id: &str,
@@ -2581,7 +2708,7 @@ impl TutoringManager {
                 let (sender, mut receiver) = topic.split();
                 let our_id = our_node_id.to_string();
 
-                tokio::spawn(async move {
+                tasks.clone().spawn(async move {
                     use futures::StreamExt;
                     while let Some(Ok(event)) = receiver.next().await {
                         if let iroh_gossip::api::Event::Received(msg) = event {
@@ -2620,13 +2747,14 @@ impl TutoringManager {
 
     /// Set up display name exchange on a `/names` gossip topic.
     async fn setup_names(
+        tasks: Arc<SessionTasks>,
         gossip: &Gossip,
         topic_seed: &[u8],
         our_node_id: &str,
         our_display_name: &str,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         app_handle: AppHandle,
-    ) -> Option<(iroh_gossip::api::GossipSender, JoinHandle<()>)> {
+    ) -> Option<(iroh_gossip::api::GossipSender, TaskHandle)> {
         use iroh_gossip::proto::TopicId;
 
         let mut hasher = blake3::Hasher::new();
@@ -2642,7 +2770,7 @@ impl TutoringManager {
                 let our_id = our_node_id.to_string();
                 let our_name = our_display_name.to_string();
 
-                let task = tokio::spawn(async move {
+                let task = tasks.clone().spawn(async move {
                     // Broadcast our name immediately
                     let announce = NameAnnouncement {
                         node_id: our_id.clone(),
@@ -2752,6 +2880,7 @@ impl TutoringManager {
     /// connections, broadcast subscriptions) and subscribes to
     /// audio+video streams from remote peers.
     async fn event_loop(
+        tasks: Arc<SessionTasks>,
         mut events: mpsc::Receiver<RoomEvent>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: Option<AudioBackend>,
@@ -2889,7 +3018,12 @@ impl TutoringManager {
                         );
                     }
                     Self::repair_remote_audio_subscription(
-                        &inner, &audio_ctx, &broadcast, &node_id, &name,
+                        tasks.clone(),
+                        &inner,
+                        &audio_ctx,
+                        &broadcast,
+                        &node_id,
+                        &name,
                     )
                     .await;
 
@@ -2918,6 +3052,7 @@ impl TutoringManager {
                     }
 
                     Self::repair_remote_video_subscription(
+                        tasks.clone(),
                         &inner,
                         &broadcast,
                         &node_id,
@@ -2939,6 +3074,7 @@ impl TutoringManager {
 
                     if spawn_repair_task {
                         let repair_task = Self::spawn_remote_broadcast_repair_task(
+                            tasks.clone(),
                             inner.clone(),
                             audio_ctx.clone(),
                             broadcast_for_repair,
@@ -2963,25 +3099,46 @@ impl TutoringManager {
     }
 
     fn start_self_preview(
+        tasks: Arc<SessionTasks>,
         broadcast: &mut PublishBroadcast,
         app_handle: AppHandle,
-    ) -> Option<JoinHandle<()>> {
+    ) -> Option<TaskHandle> {
         let config = live::media::av::DecodeConfig::default();
         let watch = broadcast.watch_local(config)?;
         log::info!("tutoring: starting self-preview (mobile)");
         crate::diag::log("self_preview: STARTED");
-        Some(Self::spawn_frame_bridge(watch, "self".into(), app_handle))
+        Some(Self::spawn_frame_bridge(
+            tasks.clone(),
+            watch,
+            "self".into(),
+            app_handle,
+        ))
     }
 
     fn spawn_frame_bridge(
+        tasks: Arc<SessionTasks>,
         watch: WatchTrack,
         node_id: String,
         app_handle: AppHandle,
-    ) -> JoinHandle<()> {
-        Self::spawn_frame_bridge_inner(watch, node_id, app_handle, None, None, None, None)
+    ) -> TaskHandle {
+        Self::spawn_frame_bridge_inner(
+            tasks.clone(),
+            watch,
+            node_id,
+            app_handle,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the frame task owns explicit teardown metadata for remote and local tracks"
+    )]
     fn spawn_frame_bridge_inner(
+        tasks: Arc<SessionTasks>,
         watch: WatchTrack,
         node_id: String,
         app_handle: AppHandle,
@@ -2989,7 +3146,7 @@ impl TutoringManager {
         subscription_key: Option<String>,
         _remote_endpoint: Option<EndpointId>,
         _broadcast_name: Option<String>,
-    ) -> JoinHandle<()> {
+    ) -> TaskHandle {
         let (mut frames, handle) = watch.split();
         let is_self_preview = node_id == "self";
         let viewport = if is_self_preview {
@@ -3005,7 +3162,7 @@ impl TutoringManager {
         };
         handle.set_viewport(viewport.0, viewport.1);
 
-        tokio::spawn(async move {
+        tasks.clone().spawn(async move {
             let _handle = handle;
             log::info!("tutoring: frame bridge started for {node_id}");
             crate::diag::log(&format!(

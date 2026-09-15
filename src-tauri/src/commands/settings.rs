@@ -5,8 +5,10 @@
 //! write so multiple windows stay in sync.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
+use crate::db::executor::DatabaseWorkload;
+use crate::profile::scope::ProfileState as State;
 use crate::settings::{registry::SettingEntry, store::SettingsError, SettingsStore};
 use crate::AppState;
 
@@ -28,9 +30,15 @@ fn map_settings_error(e: SettingsError) -> String {
 /// value, and metadata. Refused while no profile is unlocked.
 #[tauri::command]
 pub async fn list_settings(state: State<'_, AppState>) -> Result<Vec<SettingEntry>, String> {
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("no active profile")?;
-    SettingsStore::list_all(db.conn()).map_err(map_settings_error)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "settings.list",
+            |db| SettingsStore::list_all(db.conn()).map_err(map_settings_error),
+        )
+        .await
 }
 
 /// Persist a single setting. The key MUST be one declared in
@@ -43,12 +51,17 @@ pub async fn set_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("no active profile")?;
-        SettingsStore::set_raw(db.conn(), &key, &value).map_err(map_settings_error)?;
-    }
-    emit_changed(&app, Some(&key));
+    let changed_key = key.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "settings.set",
+            move |db| SettingsStore::set_raw(db.conn(), &key, &value).map_err(map_settings_error),
+        )
+        .await?;
+    emit_changed(&app, Some(&changed_key));
     Ok(())
 }
 
@@ -59,11 +72,16 @@ pub async fn reset_setting(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<(), String> {
-    {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("no active profile")?;
-        SettingsStore::reset(db.conn(), &key).map_err(map_settings_error)?;
-    }
-    emit_changed(&app, Some(&key));
+    let changed_key = key.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "settings.reset",
+            move |db| SettingsStore::reset(db.conn(), &key).map_err(map_settings_error),
+        )
+        .await?;
+    emit_changed(&app, Some(&changed_key));
     Ok(())
 }

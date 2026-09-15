@@ -27,6 +27,14 @@
 pub mod index;
 pub mod manager;
 pub mod migration;
+pub(crate) mod operations;
+pub mod scope;
+
+#[cfg(test)]
+mod lifecycle_tests;
+
+#[cfg(test)]
+mod worker_tests;
 
 pub use index::{Avatar, ProfileIndex, ProfileSummary};
 pub use manager::{ProfileError, ProfileId, ProfileManager, ProfilePaths};

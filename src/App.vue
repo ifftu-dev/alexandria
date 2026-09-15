@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from '@/composables/useLocalApi'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
@@ -17,6 +17,7 @@ import EvidenceConsentModal from '@/components/integrity/EvidenceConsentModal.vu
 import FlaggedRunNotice from '@/components/integrity/FlaggedRunNotice.vue'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
 import InstallCliDialog from '@/components/developer/InstallCliDialog.vue'
+import DiagnosticsControls from '@/components/developer/DiagnosticsControls.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
@@ -24,10 +25,19 @@ import { useDeepLinks } from '@/deeplink/useDeepLinks'
 
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
+import { useDiagnostics } from '@/composables/useDiagnostics'
+
+const { invoke } = useLocalApi()
 
 /** Matches `APPEAL_WINDOW_DAYS` in `sentinel::evidence`. */
 const EVIDENCE_RETENTION_DAYS = 14
-const { pendingEvidenceConsent, clearPendingEvidenceConsent } = useSentinel()
+const {
+  pendingEvidenceConsent,
+  clearPendingEvidenceConsent,
+  stopForProfileLock,
+  hydrateBehavioralProfile,
+} = useSentinel()
+const diagnostics = useDiagnostics()
 
 // Apply stored theme immediately (before first render)
 initTheme()
@@ -50,10 +60,26 @@ function onWheel(e: WheelEvent) {
 
 const route = useRoute()
 const router = useRouter()
-const { initialize, isUnlocked } = useProfiles()
+const { initialize, isUnlocked, isLockBlocked, lockState, lockProfile } = useProfiles()
 const { refreshAccountStatus } = useAccountStatus()
 
 const ready = ref(false)
+const isPublicRoute = computed(() => route.name === 'profiles' || route.name === 'onboarding')
+const showLockScreen = computed(() => isLockBlocked.value || (ready.value && !isUnlocked.value && !isPublicRoute.value))
+
+watchEffect(() => {
+  if (ready.value && !isUnlocked.value && !isLockBlocked.value && !isPublicRoute.value) {
+    void router.replace('/profiles')
+  }
+})
+
+async function retryLock() {
+  try {
+    await lockProfile()
+  } catch {
+    // The lock screen keeps the failure visible and permits another retry.
+  }
+}
 
 const layout = computed(() => {
   const meta = route.meta?.layout as string | undefined
@@ -66,8 +92,9 @@ const layout = computed(() => {
  * Called once a profile is unlocked. Safe to call repeatedly —
  * each `initXFromSettings` is idempotent.
  */
-onProfileReady(() => {
-  hydrateProfileScopedState()
+onProfileReady(async () => {
+  await hydrateProfileScopedState()
+  await diagnostics.initialize().catch(e => console.warn('[App] diagnostics hydration failed:', e))
   // Unlock just blurred/destroyed the password field; clear any leaked
   // Secure Event Input now (no focus event fires since the window is
   // already key).
@@ -83,11 +110,17 @@ onProfileReady(() => {
   // path: the withdrawal is signed with the learner's own key.
   void invoke('holder_retry_withdrawals').catch(() => {})
 })
-onProfileLocked(() => {
+onProfileLocked(async () => {
   // Drop the in-memory settings cache so the picker (and the next
   // profile that unlocks) does not flash the previously-active
   // profile's preferences.
-  clearSettingsCache()
+  try {
+    await stopForProfileLock()
+  } finally {
+    diagnostics.resetForProfileLock()
+    clearPendingEvidenceConsent()
+    clearSettingsCache()
+  }
 })
 
 async function hydrateProfileScopedState() {
@@ -99,6 +132,7 @@ async function hydrateProfileScopedState() {
       initShortcutsFromSettings(),
       initOmniRecentsFromSettings(),
       initSentinelFlagsFromSettings(),
+      hydrateBehavioralProfile(),
     ])
   } catch (e) {
     console.warn('[App] settings hydration failed:', e)
@@ -146,6 +180,7 @@ onMounted(async () => {
       router.replace('/profiles')
     } else if (state === 'ready') {
       await hydrateProfileScopedState()
+      await diagnostics.initialize().catch(e => console.warn('[App] diagnostics hydration failed:', e))
       // A gated minor profile (awaiting guardian activation) must land on
       // the gate, not the app. The router guard covers later navigations;
       // this covers the initial one, which resolves before initialize().
@@ -183,7 +218,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top">
+  <div v-if="showLockScreen" class="flex items-center justify-center h-full bg-background safe-area-top" role="status" aria-live="polite">
+    <div class="text-center max-w-sm p-6">
+      <template v-if="lockState === 'failed'">
+        <p class="text-sm text-muted-foreground">{{ $t('common.app.lockFailed') }}</p>
+        <button type="button" class="mt-4 rounded-lg bg-primary px-4 py-2 text-primary-foreground" @click="retryLock">
+          {{ $t('common.actions.retry') }}
+        </button>
+      </template>
+      <template v-else>
+        <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p class="text-sm text-muted-foreground">{{ $t('common.app.locking') }}</p>
+      </template>
+    </div>
+  </div>
+  <div v-else-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top">
     <div class="text-center">
       <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
       <p class="text-sm text-muted-foreground">{{ $t('common.app.initializing') }}</p>
@@ -196,20 +245,20 @@ onUnmounted(() => {
   <!-- Signed-update prompt; self-hides until a check finds an update. -->
   <UpdateBanner />
 
-  <!-- Live Sentinel observability PiP — stays hidden until toggled from the
-       Develop menu (Sentinel Live View, ⌘⇧S), so it's safe to always mount. -->
-  <SentinelDebugPip />
+  <!-- Live Sentinel observability PiP. It is not mounted outside explicit
+       diagnostics mode, so its listeners and camera cannot survive exit. -->
+  <SentinelDebugPip v-if="isUnlocked && diagnostics.enabled.value" />
 
   <!-- Shows what Sentinel can see while a session is running, so avoidable
        flags can be avoided. Self-hides when no session is active. -->
-  <SentinelLiveIndicator />
+  <SentinelLiveIndicator v-if="isUnlocked" />
 
   <!-- Offers the evidence decision when a session ends flagged. Mounted at the
        root because the assessment view that was running is usually gone by the
        time the session ends, and a learner must not miss this — it is the only
        moment the decision is theirs to make. -->
   <EvidenceConsentModal
-    v-if="pendingEvidenceConsent"
+    v-if="isUnlocked && pendingEvidenceConsent"
     :open="true"
     :session-id="pendingEvidenceConsent.sessionId"
     :reasons="pendingEvidenceConsent.reasons"
@@ -224,6 +273,8 @@ onUnmounted(() => {
        settings page is not being told. Self-hides when there is nothing new. -->
   <FlaggedRunNotice v-if="isUnlocked" />
 
-  <!-- CLI installer — hidden until the Develop menu emits develop://install-cli. -->
-  <InstallCliDialog />
+  <!-- CLI installer — available only from explicit diagnostics mode. -->
+  <InstallCliDialog v-if="!showLockScreen && diagnostics.enabled.value" />
+
+  <DiagnosticsControls v-if="isUnlocked" />
 </template>
