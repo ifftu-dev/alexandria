@@ -2,7 +2,7 @@
 
 Prepared: 2026-09-15. Audience: an implementing coding agent working in short, independently verifiable sessions.
 
-**Status: ready for implementation handoff, with deployment inputs intentionally pending.** Policy-approved issuers and demo organisation hosted custody are approved. The OIDC provider is intentionally unselected; the infrastructure budget remains pending. This document incorporates the existing worktree review. Writing it has not changed application code, provisioned infrastructure, or activated a protocol.
+**Status: implementation in progress; deployment inputs intentionally pending.** Policy-approved issuers and demo organisation hosted custody are approved. The OIDC provider is intentionally unselected; the infrastructure budget remains pending. Foundation packages F01, F03, and F04 and trust-retirement package T01 are verified. F02 is source-complete with its final closure evidence still to record. The app-side N01 contract and immutable profile binding are committed; coordinated wire-protocol changes across the app, relay, and monitoring services remain.
 
 Navigation:
 
@@ -13,6 +13,28 @@ Navigation:
 - [Hosted world](#9-m3--the-smallest-real-hosted-world) and [committee implementation](#10-m4--committee-consensus-and-independently-verifiable-outcomes)
 - [Full world and platform verification](#11-m5--complete-the-world-and-verify-all-platforms)
 - [Verification commands](#13-commands-and-verification-gates) and [small-model handoff templates](#15-handoff-protocol-for-small-model-execution)
+
+## Current execution checkpoint
+
+Use the hidden machine-readable ledger at
+`alexandria/.git/remediation-snapshots/execution-state.json` as the detailed
+package record. At this documentation checkpoint:
+
+| Package | State | Evidence |
+| --- | --- | --- |
+| F01 | Verified | Recovery refs preserve the original app and cloud work without altering the live trees |
+| F02 | Source complete | Durable exact-byte chain journal and bounded provider requests; final package closure record remains |
+| F03 | Verified | Bounded profile-fenced inbound execution and store-close recovery |
+| F04 | Verified | Proxy bypass closure and actual-workspace CI classification |
+| G01 | Source complete | CometBFT/ABCI spike and no-std verifier compile checks; target-runtime known-answer execution and G02 timing design remain |
+| T01 | Verified | `530831d`: challenge/escrow and arbitrary plugin-attestation authority retired; credential status lifecycle issuer-bound |
+| N01 | In progress | `79d6688`: strict preprod profile and centralized trust/service contract; `26cb204`: immutable profile network identity; wire/service migration pending |
+| Documentation | Current through T01/N01 app slices | `f569efc`: active architecture, protocol, schema, plugin, profile, registry, VC, and operator docs reconciled |
+
+The next ready package is T02. N01 wire migration can proceed independently,
+using separate sequential commits across the recorded service worktrees; deploy no
+part of that protocol change until all three repositories have compatible
+builds and a rollback plan.
 
 ## 1. Read this first
 
@@ -37,7 +59,7 @@ This is an execution plan, not a claim that the proposed consensus integration o
 9. Product text uses the existing localization system and design system. Do not show implementation jargon or cryptographic success labels that overstate the user's assurance.
 10. Public/shared Rust verification belongs in `alexandria-verify`; it must remain free of application storage, network clients, Tauri, and platform-media dependencies.
 11. Local hermetic tests may use controlled peers, a fake chain transport, and a test OIDC issuer. Hosted demos must use the real services and real OIDC. Test fixtures must not become production bypasses.
-12. Assess documentation after each code package. The request authorizes creation of this plan. It does not automatically authorize unrelated README, protocol, security-audit, or AGENTS changes; prepare their exact changes and obtain the approval required by AGENTS when needed. Do not ask again for a documentation scope the user subsequently authorizes.
+12. Assess documentation after each code package. The user subsequently authorized updates to README, architecture, protocol, database, VC, skills/reputation, stake-registry, plugin, profile, and AGENTS/CLAUDE guidance so those sources stay aligned with this plan and implementation. That authorization persists for this execution thread; record material updates with their package. Do not infer approval for unrelated product copy or historical audit rewrites.
 13. Run the relevant focused checks during development and the milestone gate before claiming completion. Record commands, exit codes, skips, platform/features, and source revisions. An ignored test is not a pass.
 14. Do not claim a phone was verified because a host build or cross-target lint passed. Do not claim a hosted flow passed because the client talked to a mock.
 15. The plan describes separable work streams, not authorization to spawn agents. Follow the session's delegation rules. A single smaller model should execute sequentially.
@@ -52,11 +74,11 @@ These are independent Git repositories. There is no root monorepo commit that at
 
 | Alias used below | Starting directory | Role |
 | --- | --- | --- |
-| `APP` | `worktrees/assessment-remediation/` | Main app, CLI, verifier, in-tree media crates; primary implementation worktree |
+| `APP` | `worktrees/assessment-remediation/` (`rebuild/foundation`) | Main app, CLI, verifier, in-tree media crates; primary implementation worktree |
 | `CLOUD` | `worktrees/alexandria-cloud-ux/` | Cloud worktree containing unfinished backend and console changes; preserve and assess before building on it |
 | `CLOUD_MAIN` | `alexandria-cloud/` | Cloud main checkout; do not silently replace CLOUD's work with this baseline |
-| `RELAY` | `alexandria-relay/` | Relay, username receipt registry, deployment configuration |
-| `MONITOR` | `alexandria-monitoring/` | Observer and monitoring web application |
+| `RELAY` | `worktrees/assessment-remediation-relay/` (`rebuild/network-profile`) | Clean isolated relay worktree for N01/N02; username receipt registry and deployment configuration |
+| `MONITOR` | `worktrees/assessment-remediation-monitoring/` (`rebuild/network-profile`) | Clean isolated observer/monitoring worktree for N01/N02 |
 
 For example, `APP/src-tauri/src/cardano/submission.rs` means that path inside the app worktree. Existing `crates/live`, `crates/iroh-moq`, and `crates/moq-media` are in APP. Do not modify the separate old `iroh-live-patched` repository on the assumption it is still the active app dependency.
 
@@ -66,7 +88,7 @@ Use isolated service worktrees/branches when beginning service edits. Record the
 
 ## 2. Starting evidence: preserve, then refresh
 
-### 2.1 Reviewed source state
+### 2.1 Initial reviewed source state
 
 | Surface | Reviewed revision/state |
 | --- | --- |
@@ -78,6 +100,12 @@ Use isolated service worktrees/branches when beginning service edits. Record the
 | Cloud main / cloud-UX base | `ee2c4f89cc79d63c24b64de551cc7458394337c0`; cloud-UX has substantial uncommitted work |
 
 The app's committed diff contained 284 changed files. Counts describe review scope, not quality or a target for additional churn.
+
+The initial dirty app work was preserved and then integrated into scoped commits.
+The current app branch at this checkpoint is `rebuild/foundation` at
+`f569efc`. Relay and monitoring remain at their clean base revisions in the
+isolated N01 worktrees listed above. The cloud UX work remains preserved on its
+dirty worktree plus recovery commit; do not replace it with cloud main.
 
 Paused artifacts were found at:
 
@@ -375,9 +403,18 @@ For a single implementing model, begin with F01, then G01. If G01 is blocked on 
 
 ## 7. M1 — authentic claims and deletion
 
-### T01 — Remove immediate challenge/plugin authority exposures
+### T01 — Remove immediate challenge/plugin authority exposures — verified
 
 **Dependencies:** F01; overlapping dirty challenge/escrow work must first be preserved. **Read:** `commands/challenge.rs`, `evidence/challenge.rs`, `plugins/attestation.rs`, `commands/plugins.rs`, registered handlers, inbound plugin handling.
+
+**Implemented:** commit `530831d`. Challenge commands, domain/evidence code,
+escrow builders/recovery/validator/scripts, UI surfaces, and arbitrary plugin
+attestation IPC/persistence authority are removed. The permanent retired-command
+denylist covers the old IPC names. Plugin issuance requires exact bundled
+manifest and grader bytes. Credential revoke/suspend/reinstate requires the
+active credential and status-list issuer. Full workspace, frontend, and iOS
+checks passed; the supplemental Android re-run was blocked only by a missing NDK
+compiler, with that target previously green at F03.
 
 1. Delete challenge vote/resolve/expiry/escrow commands, routes, UI entry points, and production workers. Remove their registrations and frontend calls together. Delete builders/recovery modules only once no surviving path references them. D03 drops the obsolete tables.
 2. Remove arbitrary `plugin_ingest_attestation` IPC and event-supplied-key authority. Until G06 is complete, only exact bundled plugin/grader identities confer built-in credential eligibility. Other plugins may remain installable under the product's existing sandbox rules but do not acquire a trusted endorsement label.
@@ -477,9 +514,24 @@ Set explicit byte/depth/list/numeric limits for every new untrusted object and t
 
 ## 8. M2 — network, cloud, headless execution, and restore
 
-### N01 — Versioned network profiles and protocol isolation
+### N01 — Versioned network profiles and protocol isolation — in progress
 
 **Dependencies:** F01; contract can be defined before D03. **Read:** `p2p/{discovery,relay_registry,network,types,registry_chain}.rs`, profile creation/metadata, Cardano configuration, service callers, relay/observer startup.
+
+**Implemented app slices:** commit `79d6688` adds and validates the strict
+version-1 preprod profile, verifies the embedded bootstrap digest, moves relay
+discovery/registry origins, receipt issuers, founder keys, and optional
+governance anchoring behind it, requires HTTPS for authoritative relay registry
+queries, and namespaces DHT provider-record keys. Commit `26cb204` upgrades the
+profile index to format v2 and makes `network_id` immutable across open, create,
+restore, and migration. The current profile deliberately leaves cloud,
+committee, governance, and subject-policy identities unavailable.
+
+**Remaining N01 work:** steps 4–6 below. GossipSub, request-response, Identify,
+and Kademlia protocol IDs are still unscoped. The relay and monitoring
+repositories have clean `rebuild/network-profile` worktrees ready for the
+coordinated change. Do not claim full protocol isolation until the three
+implementations and cross-network tests pass together.
 
 1. Implement and validate the profile schema in section 4.3, initially from `APP/resources/networks/preprod.json`. Treat unresolved real values as deployment inputs: refuse activation if a required value is missing rather than shipping placeholder trust keys.
 2. Delete hard-coded `RELAYS`, `GENESIS_ISSUERS` and governance-address ownership from runtime code. Centralize the approved preprod configuration without putting secrets in the resource file.

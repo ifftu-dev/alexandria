@@ -1,8 +1,17 @@
 # Assessment remediation plan
 
-Status: implementation in progress for the correctness foundation. User decisions recorded for D1–D18, including D4's approval/turnout, runoff, missing-evidence, quorum-time, and clock-operation policies, D12's DAO-approved qualification policy, D13's uncertain chain-submission recovery policy, D14's immediate offline self-claims with separate genuine instructor endorsement, D15's all-evidence reputation snapshots, D16's quorum-committed ordered governance log, D17's CometBFT integration boundary, and D18's genesis-derived DAO identity and explicit client trust-anchor pinning, amended to derive the ID from the canonical genesis core. Detailed protocol integration and performance budgets remain pending; the new governance protocol is not implemented or activated. Release builds now fail closed on all remaining legacy local governance authority, including elections, proposals, committee installation, operator governance transactions, content ratification, and inbound governance and content gossip. Founding-genesis identity is bound to its core, with hardened locators. See the implementation progress record below.
+Status: preserved decision and correctness record; active execution has moved to
+[`rebuild-execution-plan.md`](rebuild-execution-plan.md) and the hidden
+`alexandria/.git/remediation-snapshots/execution-state.json` ledger. The current
+branch is `rebuild/foundation`. Foundation packages F01/F03/F04 and T01 are
+verified; F02 is source-complete; G01 is source-complete with runtime/design
+gates remaining; N01 has a committed app-side profile contract and immutable
+profile binding but not the coordinated wire/service migration. Detailed
+protocol integration, physical-device evidence, OIDC selection, and deployment
+budget remain pending. The new governance protocol is not activated.
 
-Base: `e4e9248` on `main`. Worktree: `worktrees/assessment-remediation`. Branch: `plan/assessment-remediation`.
+Original base: `e4e9248` on `main`. Worktree:
+`worktrees/assessment-remediation`. Current branch: `rebuild/foundation`.
 
 Commit requirements: match the structure and naming style of relevant prior commits, including scoped subjects and explanatory bodies where appropriate. Keep commit messages and PR descriptions free of AI-tool names and attribution. Work in this worktree is committed as scoped commits on the branch; no published history has been rewritten, and the scope of any published-history/tag or existing PR-description cleanup remains pending clarification.
 
