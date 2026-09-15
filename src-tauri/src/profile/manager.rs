@@ -130,10 +130,34 @@ pub enum ProfileError {
         expected: String,
         actual: String,
     },
+    #[error("embedded network profile is invalid: {0}")]
+    NetworkProfile(String),
     #[error("profile index error: {0}")]
     Index(#[from] IndexError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Load the public profile index and refuse any profile bound to a network
+/// other than the one embedded in this build. The app and CLI share this gate
+/// so neither can select a profile the other would refuse to open.
+pub fn load_network_index(app_data_dir: &Path) -> Result<ProfileIndex, ProfileError> {
+    let index = ProfileIndex::load(app_data_dir)?;
+    let expected_network = &embedded_preprod()
+        .map_err(|error| ProfileError::NetworkProfile(error.to_string()))?
+        .network_id;
+    if let Some(profile) = index
+        .profiles
+        .iter()
+        .find(|profile| &profile.network_id != expected_network)
+    {
+        return Err(ProfileError::NetworkMismatch {
+            profile_id: profile.id.to_string(),
+            expected: expected_network.clone(),
+            actual: profile.network_id.clone(),
+        });
+    }
+    Ok(index)
 }
 
 /// Coordinates the profile index + per-profile directories. Safe to
@@ -148,21 +172,7 @@ impl ProfileManager {
     /// the sidecar index.
     pub fn open(app_data_dir: &Path) -> Result<Self, ProfileError> {
         std::fs::create_dir_all(app_data_dir.join(PROFILES_DIRNAME))?;
-        let index = ProfileIndex::load(app_data_dir)?;
-        let expected_network = &embedded_preprod()
-            .expect("embedded network profile is validated during app setup")
-            .network_id;
-        if let Some(profile) = index
-            .profiles
-            .iter()
-            .find(|profile| &profile.network_id != expected_network)
-        {
-            return Err(ProfileError::NetworkMismatch {
-                profile_id: profile.id.to_string(),
-                expected: expected_network.clone(),
-                actual: profile.network_id.clone(),
-            });
-        }
+        let index = load_network_index(app_data_dir)?;
         Ok(Self {
             app_data_dir: app_data_dir.to_path_buf(),
             index: Mutex::new(index),
