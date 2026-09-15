@@ -80,8 +80,8 @@ All state lives on the user's device in three locations:
 
 | Store | Purpose |
 |-------|---------|
-| Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~96 live tables (106 CREATE TABLE across 77 migrations; 10 dropped in migration 040). One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| Profile index | Format-version-2 public sidecar `profiles_index.json` — immutable network IDs, display names, and avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
+| SQLite | Per-profile relational data (courses, skills, governance, verifiable credentials) across 90 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -110,7 +110,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via ~320 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across many domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, guardian, instructor, completion, auto_issuance, pairing, assessment, goal_templates, skill_bootstrap, content_governance, role_assessment, sentinel_gaze, sentinel_holdout, sentinel_dao, sentinel_ml, updater, users, username_registry), with `commands/` containing 52 Rust source files (excluding `mod.rs`; `ratelimit.rs` and the three tutoring platform variants — `tutoring`, `tutoring_mobile`, `tutoring_stubs` — included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
+The frontend communicates with the Rust backend through Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across domain-facing modules including profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, P2P, aggregation, presentation, health, guardian, instructor, completion, pairing, assessment, goal templates, skill bootstrap, content governance, role assessment, Sentinel, updater, users, and username registry. The retired challenge and plugin-attestation ingest/status commands are absent from the handler list and are enforced by a source-level denylist test. The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
 
 ---
 
@@ -342,9 +342,14 @@ The aggregator evaluates Bloom's taxonomy proficiency thresholds from lowest to 
 
 Multi-party attestation requirements MAY be defined for high-stakes assessments. The attestation system supports configurable requirements with multiple required attestors.
 
-### 5.6 Challenge Mechanism
+### 5.6 Credential Status Authority
 
-Any peer MAY challenge a **credential** by staking 5 ADA (5,000,000 lovelace), locked at the `challenge_escrow.ak` validator. The challenge enters a voting period. A 2/3 supermajority is required to uphold. If upheld, the targeted credential is **revoked** via its RevocationList2020 status list (not deleted). The DAO authority then settles the escrow per the recorded vote: Refund returns the stake to the challenger (upheld), Forfeit sends it to the DAO treasury (rejected). Because challenges are adjudicated off-chain, the escrow trusts the DAO-authority key to settle according to the recorded outcome; the on-chain redeemer still pins each outcome to its correct recipient. The challenge-escrow reference script is deployed on preprod (2026-05-22), so settlement is live-capable; stake locking already works on preprod today.
+The stake-based challenge experiment is retired. No peer or DAO committee can
+change a credential's status through a challenge. Revocation, suspension, and
+reinstatement require the active profile to derive the same issuer DID named by
+the credential and its status-list row. Revocation is permanent; suspension is
+reversible by that issuer. The old challenge tables remain as pre-launch legacy
+storage until cleanup migration D03 and MUST NOT be interpreted as authority.
 
 ---
 
@@ -360,6 +365,16 @@ own relays, discovery and node identity — see
 [`architecture.md`](./architecture.md#two-transports-and-which-does-what). Claims
 about relay independence in this section apply to the libp2p side; iroh currently
 falls back to relays operated by a third party.
+
+The application also embeds a strict versioned network profile at
+`src-tauri/resources/networks/preprod.json`. It is validated before profile
+state opens and centralizes the network ID, Cardano magic, relay identities and
+HTTPS registry origins, receipt issuers, stake-registry founder keys, bootstrap
+resource digest, and optional service identities. Each local profile is
+immutably bound to that network ID. The configured protocol namespace is
+`/alexandria/preprod`; today it namespaces DHT provider-record keys, while the
+wire protocol IDs in §6.4–§6.5 remain unscoped pending a synchronized app,
+relay, and monitoring migration.
 
 | Layer | Name | Description |
 |:-----:|------|-------------|
@@ -421,7 +436,7 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes (§14.18) |
 | `/alexandria/pinboard/1.0` | PinBoard pinning-commitment observations (§14.12, §14.20.4) |
 | `/alexandria/plugins/1.0` | Community plugin announcements (manifest CID + metadata) |
-| `/alexandria/plugin-attestations/1.0` | Plugin DAO threshold-signed grader attestations |
+| `/alexandria/plugin-attestations/1.0` | Reserved compatibility topic. It is subscribed and scored but has no inbound persistence handler and grants no credential authority. |
 | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates (exam/curriculum/job-role) |
 | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
@@ -545,7 +560,7 @@ Every incoming gossip message MUST pass through a 6-step validation pipeline. A 
 | Step | Check | Rejection Error |
 |------|-------|-----------------|
 | 1. Signature | Ed25519 verify over canonical bytes | `InvalidSignature` |
-| 2. Identity | For privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks), `(stake_address, public_key)` MUST appear in `stake_pubkey_registry` within the current validity window. Non-privileged topics skip. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md). | `IdentityMismatch` |
+| 2. Identity | For privileged topics (taxonomy, governance, Sentinel priors, goal templates, question banks, and the reserved plugin-attestation compatibility topic), `(stake_address, public_key)` MUST appear in `stake_pubkey_registry` within the current validity window. Non-privileged topics skip. This check does not grant domain authority to the reserved topic. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md). | `IdentityMismatch` |
 | 3. Freshness | Timestamp within ±5 minutes of local clock | `ExpiredMessage` |
 | 4. Dedup | Blake2b-256 hash not in LRU cache (100,000 entries) | `DuplicateMessage` |
 | 5. Schema | Payload deserialises to expected topic-specific type | `InvalidSchema` |
@@ -578,7 +593,7 @@ The first failing step rejects the message. Validation outcomes MUST feed gossip
 
 #### 6.8.3 Per-Topic Parameters
 
-Fourteen of the fifteen signed topics carry per-topic scoring parameters; peer-exchange traffic intentionally bypasses scoring because its payload is unsigned. The privileged-tier topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks) share the strongest `invalid_message_deliveries_weight = -50.0` because forging an entry on any of them produces a global, persistent harm.
+Fourteen of the fifteen signed topics carry per-topic scoring parameters; peer-exchange traffic intentionally bypasses scoring because its payload is unsigned. The privileged-tier topics (taxonomy, governance, Sentinel priors, the reserved plugin-attestation channel, goal templates, question banks) share the strongest `invalid_message_deliveries_weight = -50.0`. Plugin-attestation messages receive transport validation and scoring for compatibility, but the domain layer ignores them and they cannot authorize grading or issuance.
 
 | Topic | Weight | First Delivery | Invalid Penalty | Invalid Decay |
 |-------|--------|----------------|-----------------|---------------|
@@ -594,7 +609,7 @@ Fourteen of the fifteen signed topics carry per-topic scoring parameters; peer-e
 | Profiles | 0.3 | 1.0 | -5.0 | 0.5 |
 | Peer Exchange | *(no scoring profile — unsigned envelopes)* | | | |
 
-Taxonomy and the other privileged-tier topics share the strongest invalid-message penalty because unauthorized publications on those topics are the most dangerous attack vectors (corrupt the global skill graph, install rogue committees, poison Sentinel models, or whitelist a malicious plugin). Authoritative values live in `src-tauri/src/p2p/scoring.rs`.
+Taxonomy and the active privileged-tier topics share the strongest invalid-message penalty because unauthorized publications on them can corrupt global state. The reserved plugin-attestation topic retains the same score profile until its coordinated protocol retirement. Authoritative values live in `src-tauri/src/p2p/scoring.rs`.
 
 ### 6.9 NAT Traversal
 
@@ -780,7 +795,7 @@ Only these facts are written to Cardano, all **operator-signed** (the platform's
 - **Committee install** — spends the DAO state UTxO and recreates it with the new committee, referencing the finalized election (`dao_registry`).
 - **Proposal resolve** — a metadata anchor (label 1697) carrying the outcome, tally, and a Merkle root over the signed votes, so the off-chain tally is independently auditable.
 
-The Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion, challenge_escrow) are deployed as CIP-33 reference scripts on **preprod testnet** and verified, but the per-transition spend validators (election/proposal state machine, per-user reputation soulbound tokens) are **not on the lean live path** — they are the upgrade path to full on-chain enforcement.
+Eight retained Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion) are deployed as CIP-33 reference scripts on **preprod testnet** and verified, but the per-transition spend validators (election/proposal state machine, per-user reputation soulbound tokens) are **not on the lean live path**. The challenge escrow source and app builder were removed.
 
 **Upgrade path**: move the election/proposal state machine and per-user reputation tokens fully on-chain (the verified spend validators), trading higher cost + UTxO contention for trustless enforcement.
 
@@ -908,13 +923,13 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Actors attempt to inflate reputation via low-signal instruction, collusion, or selective assessment.
 
-**Mitigations**: Reputation derived only from verified SkillProofs. Reputation skill- and proficiency-scoped. Distribution-based with confidence weighting. Evidence strength requirements enforced.
+**Mitigations**: Reputation inputs are signature-verified credentials filtered for revocation and known reproducible legacy issuers. Reputation remains skill- and proficiency-scoped, with distribution statistics, provenance/type weights, and independence penalties.
 
 ### 13.2 Assessment Inflation
 
 **Threat**: Instructors or assessors inflate scores to boost downstream reputation.
 
-**Mitigations**: Assessment definitions independent of instructor. Difficulty and assessment type weighting. Sentinel integrity scoring lowers trust_factor on flagged assessments. Variance and confidence penalties for inconsistent outcomes. Stake-based credential challenges (5 ADA, 2/3 supermajority vote).
+**Mitigations**: Assessment definitions are independent of the instructor. Difficulty and assessment type weighting, Sentinel integrity state, variance, confidence penalties, exact bundled-grader byte binding, and issuer policy determine whether an outcome contributes trust or a privilege. The explicit subject/DAO accepted-issuer privilege gate is specified below but remains an implementation prerequisite (T03).
 
 ### 13.3 Sybil Attacks
 
@@ -1274,6 +1289,11 @@ Default protocol behavior: expired formal credentials SHOULD be treated as inact
 
 Each revocable credential MUST provide a resolvable status reference. A credential is revoked if `Revoked(c) = 1`. Revoked credentials MUST NOT contribute positive weight to the active trust score.
 
+Only the credential issuer may publish or apply a status change for that
+credential. The implementation checks that the caller-derived DID matches both
+the credential issuer and status-list issuer before changing the bitmap or
+denormalized row.
+
 #### 14.11.3 Suspension
 
 Temporary invalidation MAY be supported through status lists. For suspension interval `[t_s, t_r]`, a credential is suspended at verification time `t_v` if `t_s ≤ t_v ≤ t_r`. Suspended credentials MUST be excluded from positive active computations during suspension.
@@ -1454,6 +1474,16 @@ w_issuer,i ∈ [0,1]
 This is a protocol- or verifier-configurable prior based on issuer credibility, governance legitimacy, auditability, historical accuracy, or role. Examples: a recognized institution carries a higher prior; a new peer attestor carries a lower one.
 
 The protocol MUST keep issuer weighting transparent and explainable.
+
+Authenticity and privilege are separate decisions. A valid credential from an
+issuer outside the applicable subject/DAO qualification policy remains visible
+and may receive a low verifier-defined trust weight, but MUST NOT satisfy a
+proficiency-derived privilege such as field-opinion posting. A privilege check
+MUST require an accepted issuer (or another route explicitly named by that
+policy), the required skill and proficiency, and active status. This closes the
+self-issued-course/two-identity route to privileges. The founding-genesis
+schema can carry accepted issuer identifiers; runtime enforcement of this rule
+is the pending T03 remediation package.
 
 #### 14.14.5 Type Weight
 
@@ -1930,12 +1960,12 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
-| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 48 pages, 77 components, 30 composables |
-| Database | SQLite (rusqlite, bundled) | ~96 tables, 77 migrations |
+| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | Pages, reusable components, and singleton composables |
+| Database | SQLite (rusqlite, bundled) | Local encrypted store, 90 migrations |
 | Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
-| Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
+| Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance experiments, completion-witness minting, and legacy CIP-68 reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
 | Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only |
 | CLI | Rust, clap 4 | Developer tooling (`alexandria`) |
@@ -1946,7 +1976,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~96 across 77 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 90.
 
 | Domain | Tables |
 |--------|--------|
@@ -1961,8 +1991,8 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
-| Challenges | `evidence_challenges`, `challenge_votes` |
-| Attestation | `attestation_requirements`, `evidence_attestations` |
+| Retired challenges | `credential_challenges`, `credential_challenge_votes` remain as legacy storage; the earlier evidence tables were dropped in migration 040 |
+| Completion attestation | `completion_attestation_requirements`, `completion_attestations` |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
 | Governance (on-chain) | `onchain_governance_queue` |
@@ -1972,9 +2002,14 @@ Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`,
 
 ### 15.3 Test Suite
 
-900+ library unit tests (`cargo test -p alexandria-node --lib`; run for current count) and ~40 end-to-end VC tests (`cargo test --test e2e_vc`), plus the `guardian_e2e` and `settings_sync_e2e` integration suites, all passing with 0 ignored at the latest pre-launch revision. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `content_store` modules. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
+The workspace has unit and integration coverage across `crypto`, `db`, `p2p`,
+`evidence`, `cardano`, `domain`, `aggregation`, `commands`, and
+`content_store`, including `e2e_vc`, `guardian_e2e`, and
+`settings_sync_e2e`. At the T01 verification point, the full workspace run
+reported 1,733 passed and 15 ignored tests. Run the suite for the current count;
+the §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 
-> **P2P stress suite:** the original ~1500-line stress suite (evidence gossip, skill-proof aggregation, multi-party attestation, challenge committee under load) was retired in the VC-first cutover — those subsystems are gone or being rebuilt against `credentials`. `p2p/stress.rs` is currently a stub tracking the VC-first replacements (VC gossip publish-rate/dedup/spam resistance, credential sync merge races, challenge-committee voting under contention). It is **not** live coverage today.
+> **P2P stress suite:** the original ~1500-line stress suite (evidence gossip, skill-proof aggregation, multi-party attestation, and the challenge committee) was retired in the VC-first cutover. `p2p/stress.rs` is currently a stub tracking VC gossip and credential-sync replacements. It is **not** live coverage today.
 
 ---
 

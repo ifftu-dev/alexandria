@@ -1,12 +1,10 @@
 # Stake-Pubkey Registry — Pre-Launch Runbook
 
-Operational steps for the two remaining items on PR B before public
-launch:
-
-1. Replace the placeholder `SNAPSHOT_VERIFIERS` with real founder keys
-   and produce the first signed `bootstrap_registry.json`.
-2. Smoke-test `build_registration_tx` + `BlockfrostFetcher` end-to-end
-   against Cardano preprod.
+Operational steps for rotating the founder trust roots and signed bootstrap
+snapshot, plus repeating the preprod registration smoke test. The original
+three-key ceremony, signed snapshot, and first real preprod registration are
+complete. Founder public keys now live in the versioned preprod network profile,
+not a registry-module constant.
 
 Design context: [`stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 
@@ -47,29 +45,22 @@ The command:
 - Re-running with the same `--out` fails by design (`create_new`) so
   you cannot accidentally overwrite.
 
-### 1.3 Update `SNAPSHOT_VERIFIERS`
+### 1.3 Update the network profile founder keys
 
-Open `src-tauri/src/p2p/registry.rs`, locate `SNAPSHOT_VERIFIERS`, and
-replace the placeholder hex literals with the three pubkey-hex
-strings from step 1.2. Commit the change to a feature branch.
-
-```rust
-pub const SNAPSHOT_VERIFIERS: &[(&str, &str)] = &[
-    ("founder_a", "<hex from founder_a.sk>"),
-    ("founder_b", "<hex from founder_b.sk>"),
-    ("founder_c", "<hex from founder_c.sk>"),
-];
-```
-
-Names are advisory — verification just counts how many distinct keys
-in this list produced valid signatures.
+Open `src-tauri/resources/networks/preprod.json` and replace the
+`stake_registry_founder_keys` entries with the three public-key hex strings
+from step 1.2. Keep unique stable signer IDs. Snapshot verification counts
+distinct configured public keys; signer labels do not substitute for a valid
+signature.
 
 ### 1.4 Author the first real snapshot
 
 Edit `src-tauri/resources/bootstrap_registry.json` to list the initial
 committee. Each entry binds a Cardano stake address to the Ed25519
 public key it will use to sign privileged-topic gossip envelopes
-(taxonomy / governance / Sentinel priors / plugin DAO attestations):
+(taxonomy / governance / Sentinel priors / goal templates / question banks).
+The reserved plugin-attestation topic also passes this envelope gate for wire
+compatibility, but its messages grant no application authority:
 
 ```json
 {
@@ -128,20 +119,27 @@ Expected output:
 OK: <N> entries, <M> signatures verified against SNAPSHOT_VERIFIERS
 ```
 
+The command's `SNAPSHOT_VERIFIERS` label is retained for compatibility; the
+keys are loaded from `stake_registry_founder_keys` in the embedded network
+profile.
+
 If verification fails on `SnapshotQuorum`, one signature is missing
-or invalid. If it fails on `VerifierKey`, `SNAPSHOT_VERIFIERS` in
-`registry.rs` was not updated correctly.
+or invalid. If it fails on `VerifierKey`, the corresponding network-profile
+founder key is malformed or does not match the signing key.
 
 ### 1.7 Land the change
 
-Merge the branch. The release build will embed the signed
-`bootstrap_registry.json` via `include_bytes!` and every fresh node
-will seed its `stake_pubkey_registry` from it on first boot.
+Compute SHA-256 over the final signed `bootstrap_registry.json` bytes and set
+that exact lowercase digest at
+`signed_bootstrap_registry_identity.sha256` in the same network profile. Merge
+both files together. The release build embeds both resources, verifies their
+identity before opening profiles, and seeds each fresh profile database from
+the signature-verified snapshot.
 
-To rotate a founder key later: regenerate (step 1.2), update
-`SNAPSHOT_VERIFIERS` in code, ship a new release, then re-sign + re-
-ship a snapshot. Old releases continue working under the old keyset
-until upgraded.
+To rotate a founder key later: regenerate it, update the network profile,
+re-sign the snapshot to quorum under the new configured set, update the
+snapshot digest, and ship those changes in one release. Old releases continue
+using their embedded profile and snapshot until upgraded.
 
 ---
 
@@ -243,11 +241,11 @@ mainnet.
 
 ---
 
-## 3. After both steps complete
+## 3. Current status and remaining boundary
 
-- PR B-4 closed: real founder keys live in `SNAPSHOT_VERIFIERS`, signed
-  bootstrap snapshot ships with the build.
-- Preprod smoke green: the full pipeline works against live Cardano.
-- Mainnet selection (the `Network::Preprod` hardcode in
-  `lib.rs::start_node_with_db`'s registry refresh spawn) is now the
-  only remaining pre-launch blocker.
+- Real founder keys live in `preprod.json`; the signed bootstrap snapshot and
+  its SHA-256 resource identity ship with the build.
+- The preprod registration round trip has been confirmed against live Cardano.
+- The app is intentionally preprod-only. A mainnet release requires a separate
+  reviewed network profile, immutable profile separation, and coordinated
+  protocol/service deployment; changing the Cardano enum alone is insufficient.

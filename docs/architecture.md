@@ -9,13 +9,14 @@
 > Credentials, including offline learner self-claims and optional
 > confirmed Cardano completion witnesses. See
 > [`vc-migration.md`](./vc-migration.md) for what replaces what.
-> The reputation/challenge/attestation subsystems have since been
-> rebuilt on the VC-first model and are live: `commands::{reputation,
-> attestation,challenge}` are registered in `lib.rs` (see §8/§9/§11).
-> Only the legacy evidence-based versions were retired.
+> Reputation and completion attestation were rebuilt on the VC-first
+> model. The later credential-challenge experiment and its Cardano
+> escrow path have now also been retired: no challenge commands are
+> registered and no challenge transaction builder is compiled. Their
+> schema remains only as pre-launch legacy storage pending migration D03.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-09-15 (completion issuer policy, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, legacy governance release gating, and genesis core identity; other sections retain their earlier implementation scope)
+**Last updated**: 2026-09-15 (legacy authority retirement, versioned preprod network profile, immutable profile network identity, completion issuer policy, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
 
 ---
 
@@ -68,11 +69,11 @@ central API, no hosted database, and no Docker infrastructure.
 |                                                       |
 |  +----------------+         +----------------------+  |
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
-|  |   (WebView)    | ~320    |                      |  |
+|  |   (WebView)    |  IPC    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  48 pages      |         |  |   SQLite DB    |  |  |
-|  |  77 components |         |  |   ~96 tables   |  |  |
-|  |  30 composables|         |  |   86 migrations|  |  |
+|  |  Vue pages     |         |  |   SQLite DB    |  |  |
+|  |  + components |         |  |  local schema  |  |  |
+|  |  + composables|         |  |   90 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -248,7 +249,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Schema**: 86 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
+**Schema**: 90 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
 
 | Domain | Tables |
 |--------|--------|
@@ -265,7 +266,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
-| Challenges | `credential_challenges`, `credential_challenge_votes` |
+| Retired challenge experiment | `credential_challenges`, `credential_challenge_votes` (legacy tables; no active command or authority path) |
 | Attestation | `completion_attestation_requirements`, `completion_attestations` |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
@@ -279,6 +280,29 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 - **No server tables**: No `refresh_tokens`, `oauth_accounts`, or session management
 - **Content stored externally**: Course HTML and profiles live in iroh blobs, referenced by BLAKE3 hash
 - **Settings live in `app_settings`**: One unified per-profile key-value table with a `scope` discriminator (`'sync'` propagates to the user's other devices; `'device'` stays here). The Rust-side typed registry (`settings::registry::keys`) is the source of truth for valid keys + defaults — the table only stores user-overridden values. See [Settings](settings.md).
+
+### Network identity and configuration
+
+The app embeds `src-tauri/resources/networks/preprod.json` and validates it
+before opening the profile manager. The strict version-1 profile owns the
+network ID, Cardano network and magic, relay PeerIds and DNS names, public
+fallback IPs, HTTPS registry origins, receipt issuers, stake-registry founder
+keys, the signed bootstrap-registry SHA-256 identity, optional service
+identities, and the intended protocol namespace. Unknown fields, duplicate JSON
+keys, placeholders, malformed trust roots, inconsistent optional-service
+settings, and a bootstrap-registry digest mismatch prevent application setup.
+
+`profiles_index.json` is format version 2 and records an immutable `network_id`
+for every profile. The manager rejects a version-1 index, a future index format,
+or any profile whose network differs from the embedded profile. New-profile and
+mnemonic-restore IPC requests must name the expected network.
+
+The profile currently supplies relay discovery, relay receipt trust, bootstrap
+founder keys, HTTPS relay-registry origins, the optional governance anchor, and
+the namespace used in DHT provider-record keys. Its
+`protocol_namespace = "/alexandria/preprod"` is the target for all wire protocol
+IDs, but GossipSub and request-response paths remain the unscoped paths below
+until the app, relay, and monitoring services migrate in lockstep.
 
 See [Database Schema](database-schema.md) for the full DDL.
 
@@ -439,7 +463,7 @@ path within the same process hangs indefinitely.
 | VC Presentation | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes |
 | PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
 | Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
-| Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Plugin DAO grader attestations |
+| Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Reserved compatibility topic; subscribed and scored, but grants no authority and has no inbound persistence handler |
 | Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 | Goal Templates | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates |
 | Question Banks | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
@@ -466,7 +490,7 @@ exchanges.
 ### Validation Pipeline (6 steps)
 
 1. **Signature** — Ed25519 verify (covers all envelope fields: topic, timestamp, stake_address, payload)
-2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
+2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, goal templates, question banks, and the reserved plugin-attestation compatibility topic) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. Registry validation of the reserved topic does not grant domain authority. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
 5. **Schema** — valid JSON
@@ -526,7 +550,6 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 | Fee estimation | Linear fee model from protocol params |
 | VC integrity anchoring | Metadata-only tx (label 1697) timestamping the canonical VC hash |
 | Completion-witness minting | Merkle-root completion witness; validator deployed |
-| Challenge-stake escrow | 5 ADA locked at `challenge_escrow.ak`; lock works on preprod, settle uses the deployed escrow reference script |
 | Reputation snapshots | Signed as-of `DerivedCredential`; optional metadata-only anchor of its canonical VC hash |
 | Governance metadata | DAO/election/proposal tx builders and queue records; validator-backed enforcement is still pending |
 | Coin selection | Greedy UTxO selection with min-ADA enforcement |
@@ -536,8 +559,7 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content. (The legacy SkillProof NFT and course-registration mints were retired in migration 040.)
 2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
 3. **Reputation Snapshot** — Local signed `DerivedCredential` over all currently eligible evidence; optional metadata-only VC-hash anchor uses the credential queue
-4. **Challenge-Stake Escrow** — Locks 5 ADA at the `challenge_escrow.ak` validator; on resolution the DAO authority settles (Refund → challenger / Forfeit → treasury), using the deployed escrow reference script
-5. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
+4. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
 
 ---
 
@@ -592,21 +614,14 @@ The optional witness transaction is durably checkpointed before submission. A ti
 | `evidence/taxonomy` | Bloom's level thresholds and skill graph traversal |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
 
-Completion-attestation requirements and credential challenges are now
-handled by the VC-first command modules (`commands::attestation`,
-`commands::challenge`), not a `skill_proof` aggregator. The
-`evidence/aggregator` and `evidence/attestation` modules were removed
-(`evidence/challenge` was rebuilt against the VC status-list flow and
-remains).
-
-### Challenge Mechanism
-
-- Any peer can challenge a **credential** by staking 5 ADA (5,000,000 lovelace), locked at `challenge_escrow.ak`
-- Challenge enters voting period
-- 2/3 supermajority required to uphold
-- Upheld: targeted credential **revoked** via its RevocationList2020 status list; DAO authority refunds the stake to the challenger
-- Rejected: DAO authority forfeits the stake to the DAO treasury
-- Settlement uses the deployed escrow reference script (`challenge_escrow_deployed()` returns true)
+Completion-attestation requirements are handled by
+`commands::attestation`, outside the retired `skill_proof` aggregator. The
+credential-challenge command module, evidence challenge module, challenge domain
+types, escrow transaction builders, recovery worker, validator source, and
+frontend surfaces have been removed. Credential revocation, suspension, and
+reinstatement are issuer actions: the active profile must derive the same issuer
+DID named by both the credential and its status list. A subject, committee, or
+arbitrary peer cannot mutate another issuer's credential status.
 
 ---
 
@@ -715,7 +730,12 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via ~320 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **52 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`, `adaptive`, `graph`):
+The frontend communicates with the Rust backend through the handlers registered
+in `tauri::generate_handler!`. The `commands/` directory also contains internal
+helpers and platform-conditional tutoring variants, so source-file or attribute
+counts do not equal the command surface. The table below is a non-exhaustive
+sample of command modules; inspect `lib.rs` for the authoritative registration
+list.
 
 | Module | Commands | Examples |
 |--------|----------|---------|
@@ -730,7 +750,6 @@ The frontend communicates with the Rust backend via ~320 registered Tauri IPC ha
 | sync | 8 | `sync_status`, `sync_now`, `sync_set_auto`, `sync_list_devices` |
 | courses | 8 | `create_course`, `get_course`, `list_courses` |
 | attestation | 5 | `set_completion_attestation_requirement`, `submit_completion_attestation`, `get_completion_attestation_status` |
-| challenge | 8 | `submit_credential_challenge`, `vote_on_credential_challenge`, `resolve_credential_challenge`, `lock_challenge_stake`, `settle_challenge_stake` |
 | opinions | 6 | `publish_opinion`, `list_opinions`, `withdraw_own_opinion` |
 | integrity | 6 | `integrity_start_session`, `integrity_submit_snapshot`, `integrity_get_session` |
 | sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_load_dao_classifier`, `sentinel_paste_classifier_info`, `sentinel_revert_classifier_to_bundled`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
@@ -748,7 +767,7 @@ The frontend communicates with the Rust backend via ~320 registered Tauri IPC ha
 | evidence | 1 | `list_reputation` (legacy read surface; `skill_proofs`/`evidence` listings retired in migration 040 — use `list_credentials`) |
 | aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
 | presentation | 2 | `create_presentation`, `verify_presentation` |
-| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, the `irl_*` review inbox, attestation status |
+| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, and the `irl_*` review inbox. Legacy attestation ingest/status IPC is retired. |
 | health | 4 | `check_health`, `read_diag_log`, `frontend_log`, `release_secure_input` |
 
 Note: `tutoring` has platform-specific variants. Desktop and Android share the full manager (`tutoring/manager.rs`); iOS has its own AVFoundation/VideoToolbox manager (`tutoring/manager_mobile.rs`); only targets that are neither desktop, iOS, nor Android fall back to `commands/tutoring_stubs.rs`. Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
@@ -763,9 +782,9 @@ Note: `tutoring` has platform-specific variants. Desktop and Android share the f
 |--------|-----------|
 | Key theft | Per-profile encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). Compromising one profile's vault does not expose any other profile on the same device. |
 | Message forgery | Ed25519 signatures on all gossip messages |
-| Sybil attacks | IP colocation scoring, stake-based challenges |
+| Sybil attacks | IP colocation scoring, signed messages, subject-scoped aggregation, and independence penalties |
 | Taxonomy corruption | Committee authority verification, strongest peer scoring penalty |
-| Evidence inflation | Multi-party attestation, stake-based challenges, behavioral integrity |
+| Evidence inflation | Multi-party completion attestation, issuer/provenance weighting, anti-gaming aggregation, and behavioral integrity |
 | Replay attacks | ±5 minute freshness window, Blake2b-256 dedup cache |
 | Content tampering | BLAKE3 content addressing (iroh), Ed25519 signed documents |
 

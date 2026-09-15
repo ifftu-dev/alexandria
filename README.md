@@ -28,7 +28,7 @@
 **In plain terms — what you get as a learner:**
 
 - **Learn for free** — courses, tutorials, and interactive lessons that work offline.
-- **Earn credentials you truly own** — verified proof of your skills that no platform can revoke, shareable even offline.
+- **Earn portable credentials** — signed proof of your skills that you can store, export, and verify offline. An issuer can revoke or suspend only credentials that it issued.
 - **Keep your data on your device** — no accounts, no data collection, and nothing to sign up for; the app connects you directly to other learners.
 - **One device, many learners** — fully separate, private profiles for households, classrooms, and shared devices.
 - **In your language** — the interface ships in 9 languages, including right-to-left (Urdu).
@@ -42,8 +42,8 @@ The capabilities below describe how each of these works — the underlying techn
 - **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Completion credentials are **self-issued locally at claim time** — a Cardano completion validator witnesses the element-completion tx as an optional on-chain anchor (treasury-funded when configured), not a hard requirement. Courses with no gradeable elements issue a content-only credential at a baseline proficiency. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
 - **Usernames & Public Profiles** — decentralized @handles backed by a DHT registry (relay-receipted, optionally Cardano-anchored under metadata label 1698), public/private profiles and skill graphs fetched over P2P, and learner goals with computed paths. See [docs/username-registry.md](docs/username-registry.md).
-- **Cardano's role** — (1) VC integrity anchoring (BLAKE3-of-VC metadata txs), (2) DAO governance (elections, proposals, reputation snapshots, CIP-68 soulbound reputation tokens), (3) the `completion.ak` validator that witnesses learner completion events to authorize VC issuance, and (4) the `challenge_escrow.ak` validator that holds a challenger's stake pending the DAO's revoke/refund decision. All validators are deployed as reference scripts on **preprod testnet** (block 4736927). Legacy skill-proof / course-registration NFT minting has been retired.
-- **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally. The Aiken/Plutus governance validators are deployed as reference scripts on **preprod testnet** (block 4736927), and the flows that spend against them — elections, proposals, the anchored tally, and challenge-escrow settlement — have been exercised end to end against preprod. Nothing has run on mainnet, and no governance decision with real consequences has been made through any of it.
+- **Cardano's role** — VC integrity anchoring, DAO governance, completion-witness minting, and historical reputation-token experiments. The active app no longer exposes the challenge escrow flow. Reference scripts exist on **preprod testnet** only; no shipped build submits by default.
+- **Governance** — DAOs mirror the knowledge taxonomy. The current release build can verify and explicitly pin a seven-founder genesis, but rejects inbound governance mutations until committee outcome certificates are implemented. Older Aiken/Plutus governance reference scripts remain deployed on **preprod testnet**; deployment alone does not make their flows part of the release authority path.
 - **Assessment Integrity** — Sentinel anti-cheat fuses six on-device signals: a keystroke autoencoder and mouse-trajectory CNN (Rust + `candle`, trained per-user on-device), a paste/typing-bot classifier and YuNet face detector (Rust, frozen ONNX via `tract`), gaze/second-device detection (head-pose proxies + per-user calibration MLP), and frontmost-application detection. Only the LBP face embedder remains in TypeScript. `tract` is pure Rust, so every model compiles for all targets including iOS and Android. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics. There is exactly one path off the device and the learner is the only one who can use it: a flagged session's evidence may be kept on-device for 14 days at their explicit choice, and released by them to contest the flag. Nothing can request it, the reviewer it reaches is one named person, and deleting it locally withdraws the copy they were sent. See [`docs/sentinel.md`](docs/sentinel.md#review-and-adjudication).
 - **Peer-to-Peer** — Two stacks. The mesh runs on libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR; content blobs and live tutoring media run on iroh. There is no application server and no account server, but connectivity does rely on relays: the libp2p relays are self-hosted, listed in an on-chain registry, and anyone can run one, while iroh currently falls back to relays and DNS discovery operated by [N0, INC](https://n0.computer) when a direct connection can't be made. Traffic is end-to-end encrypted either way, so a relay can see connection metadata but never content. See [`docs/architecture.md`](docs/architecture.md#relay-and-discovery-dependency).
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
@@ -69,7 +69,9 @@ names where the detail lives.
 | **Federated learning (Option A)** | Per-user gradient sharing, DP-SGD, secure aggregation and stake-gated submissions are design-phase. Option B — DAO-published adversarial priors — is what shipped. |
 | **Real-world integrity measurement** | Sentinel's false-positive rate is measured against a **synthetic** holdout only. No real-world validity study has been done, by us or independently. |
 | **Push notifications** | Research complete, not scheduled. See [`docs/push-notifications-rfc.md`](docs/push-notifications-rfc.md). |
-| **Relay-independent bootstrap** | Fresh peer discovery still depends on hardcoded relay nodes. DNS seeds and user-pinned bootstrap lists are post-launch. Existing credentials and content survive relays disappearing; discovering new peers does not. |
+| **Relay-independent bootstrap** | Fresh peer discovery uses the relays in the bundled, validated `preprod` network profile. The profile centralizes relay identities, HTTPS registry origins, fallback IPs, and trust roots, but remains part of the application release. DNS seeds and user-pinned bootstrap lists are post-launch. Existing credentials and content survive relays disappearing; discovering new peers does not. |
+| **Privilege qualification policy** | Credentials from any authentic issuer remain visible, but field-opinion posting and other proficiency-derived privileges are not yet restricted by the explicit subject/DAO accepted-issuer policy. This is the next trust-policy package in the remediation plan. |
+| **Full network namespace isolation** | The profile declares `/alexandria/preprod` and DHT provider-record keys include it. Gossip and request-response protocol paths still use the unscoped `/alexandria/...` paths until the app, relay, and monitoring services switch together. |
 | **Independent security audit** | Not commissioned. An internal review was carried out in February 2026 and its remediation is unfinished — see [`docs/security-audit.md`](docs/security-audit.md). |
 | **The non-profit instrument** | The dilution-proof veto over free learner access described in [`docs/vision.md`](docs/vision.md) **has not been drafted or executed**. Free access rests today on the AGPL licence and on intent. |
 | **Anything organizational** | Single sign-on, ATS delivery, bulk verification, cohort analytics and the employer console are built and under test in a separate, proprietary control-plane repository. Nobody outside this project runs any of it, and none of it is purchasable. Student-record (SIS) and SCIM provisioning have not been started. See [`docs/enterprise-boundary.md`](docs/enterprise-boundary.md). |
@@ -139,12 +141,13 @@ alexandria/
 │       ├── aggregation/ # Deterministic aggregation engine with anti-gaming penalties, weights, independence
 │       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies, metadata anchoring
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
-│       ├── commands/ # IPC command handlers across ~50 modules (frontend ↔ backend), including profile/* lifecycle
+│       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including profile lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (~96 live tables, 77 migrations, seed data) — one DB per profile
+│       ├── db/       # SQLite schema (90 migrations + seed data) — one encrypted DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
-│       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine (attestation/challenge live in commands/; legacy evidence pipeline retired at mig 040)
+│       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine; legacy evidence/challenge pipeline retired
+│       ├── network_profile.rs # Strict, versioned network identity and trust-root configuration
 │       ├── content_store/ # iroh node, BLAKE3 content-addressed blobs, URL resolution
 │       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch, graph-fetch, profile-fetch, username-reg
 │       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar + auto-migrator
@@ -568,7 +571,7 @@ The test suite includes:
 - **End-to-end integration suites** — `e2e_vc` (VC issue/verify, anchoring, offline peer fetch, DID status), `guardian_e2e`, and `settings_sync_e2e`
 - **Frontend Vitest suite** — first wave of composable/parser tests (e.g. `useOmniSearch`, deeplink parsing, i18n), expanding
 
-> The original ~1500-line P2P stress suite was retired in the VC-first cutover (its evidence/skill-proof/attestation subsystems are gone or being rebuilt); `p2p/stress.rs` is now a stub tracking the VC-first replacements and is not live coverage.
+> The original ~1500-line P2P stress suite was retired in the VC-first cutover. `p2p/stress.rs` is now a stub tracking VC gossip and credential-sync replacements and is not live coverage.
 
 ## Data Storage
 
@@ -576,9 +579,9 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
+| `profiles_index.json` | Version-2 public sidecar — immutable `network_id`, display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** Version-1 and cross-network indexes fail closed. |
 | `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~96 live tables), key derived from that profile's password |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database, key derived from that profile's password |
 | `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
@@ -596,6 +599,7 @@ Use `alexandria path` to print the active profile's directory on any platform, a
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
 | [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
 | [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 15 gossip topics, validation, peer scoring |
+| [Network Profiles](docs/network-profiles.md) | Versioned network identity, trust roots, immutable local binding, and N01 rollout boundary |
 | [Stake-Pubkey Registry](docs/stake-pubkey-registry.md) | Persistent stake-address ↔ gossip pubkey registry that backs privileged-topic authority (replaces in-memory TOFU) |
 | [Stake-Pubkey Runbook](docs/stake-pubkey-registry-runbook.md) | Operational steps: founder keypair ceremony + multisig signing of `bootstrap_registry.json` + preprod smoke test |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |

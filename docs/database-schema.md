@@ -15,8 +15,15 @@
 > `witness_validator_name`, `auto_issued`. See
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
+> **Authority retirement (2026-09-15):** The later
+> `credential_challenges`, `credential_challenge_votes`, and
+> `plugin_attestations` tables still exist in the pre-launch schema, but no
+> release command, P2P handler, or credential-issuance path reads them as
+> authority. They are retained only so existing development databases continue
+> to open until cleanup migration D03 removes obsolete storage.
+
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 77
+**Migrations**: 90
 
 ---
 
@@ -78,14 +85,14 @@
 | 40 | `vc_first_cutover` | Hard cut to VC-first. Drops the SkillProof/evidence pipeline (`skill_proofs`, `skill_proof_evidence`, `evidence_records`, `skill_assessments`, `reputation_evidence`, `reputation_impact_deltas`, `evidence_challenges`, `challenge_votes`, `attestation_requirements`, `evidence_attestations`). Adds witness columns to `credentials`. |
 | 41 | `completion_observer` | `completion_observations` — observer memo for Cardano completion-mint events that auto-issue VCs |
 | 42 | `completion_attestation` | `completion_attestation_requirements` + `completion_attestations` — VC-first replacement for evidence cosigning |
-| 43 | `credential_challenges` | `credential_challenges` + `credential_challenge_votes` — VC-first replacement for evidence challenges |
+| 43 | `credential_challenges` | Historical VC-first challenge experiment; its tables remain temporarily but its command and authority paths are retired |
 | 44 | `integrity_paste_anomaly` | Add `ai_paste_anomaly` column to `integrity_snapshots` |
 | 45 | `sentinel_priors_model_weights` | Add DAO-ratified model-weights columns (`weights_cid`, `eval_cid`, `eval_tpr`, `eval_fpr`, `version`) to `sentinel_priors` |
 | 46 | `sentinel_kill_switch_and_blocklist` | `sentinel_kill_switch` + `sentinel_weights_blocklist` — operator safety valves for the paste classifier |
 | 47 | `sentinel_user_models` | `sentinel_user_models` — per-user keystroke/mouse weights moved from browser localStorage into the encrypted DB |
 | 48 | `app_settings_scope` | Add `scope` column (`sync` / `device`) to `app_settings`. Reclassifies `storage_quota_bytes` as `device`-scoped. Powers the unified per-profile settings store; see [`settings.md`](settings.md). |
 | 49 | `device_pairing` | Add `stake_address` / `shared_key` / `paired` to `devices`; new `pending_pairings` table for explicit device pairing |
-| 50 | `challenge_stake_lifecycle` | Add `stake_status` + `settle_tx_hash` to `credential_challenges` for stake-escrow settlement |
+| 50 | `challenge_stake_lifecycle` | Historical escrow fields on the retired challenge tables |
 | 51 | `element_submission_grader_version` | Add `grader_version` column to `element_submissions` |
 | 52 | `stake_pubkey_registry` | `stake_pubkey_registry` — persistent stake-address → libp2p Ed25519 pubkey bindings (chain + multisig-signed snapshot rows). Replaces the in-memory TOFU binding; see [`stake-pubkey-registry.md`](stake-pubkey-registry.md). |
 | 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
@@ -117,6 +124,15 @@
 | 79 | `sentinel_evidence_release` | Adds `integrity_evidence_release` — where a learner sent evidence to contest a flag, and whether a withdrawal is still owed. Deliberately no FK to `integrity_sessions`: a withdrawal must outlive the local deletion of everything that explains why it was wanted |
 | 80 | `sentinel_flag_notice` | Adds `integrity_flag_notice` — which remote flags this device has already told the learner about, so an accusation is raised once rather than on every unlock. `told_at`, not `accepted_at` |
 | 81 | `account_roles_set` | Add `account_roles` (JSON array, always containing `learner`, plus any of `instructor`/`parent`) to `local_identity`, backfilled from `account_role`. The app reads this; `account_role` keeps being written as the first extra role for older builds. |
+| 82 | `escrow_datum_recipients` | Historical recipient fields on the retired credential-challenge escrow tables |
+| 83 | `durable_chain_submissions` | Local recovery journal that checkpoints exact signed transaction bytes before provider I/O |
+| 84 | `chain_submission_recovery_members` | Receipt outcome fields plus exclusive member bindings for recoverable submission batches |
+| 85 | `public_derived_issuer_exclusion` | Exact signed-payload recognition of reproducible legacy course-authority issuers, repair queues, and filtered scoring views |
+| 86 | `durable_completion_requests` | Atomic local completion receipts and durable optional completion-witness intents |
+| 87 | `frozen_reputation_snapshots` | Frozen snapshot inputs and a journal trigger that prevents rebuilding uncertain signed transactions |
+| 88 | `credential_backed_reputation_snapshots` | New reputation snapshots become signed `DerivedCredential` VCs with optional credential-hash anchoring; legacy CIP-68 rows remain distinguishable |
+| 89 | `assessment_diagnostics_exit` | Explicit diagnostic/interrupted assessment endings and locally saved fixed-form draft answers |
+| 90 | `governance_genesis_trust_anchors` | Exact canonical seven-founder genesis envelopes stored only after explicit local pinning |
 
 ---
 
@@ -221,10 +237,13 @@ discovery (Phase 3).
 - **`plugin_catalog`** — Discovery cache of plugin announcements seen on
   the `/alexandria/plugins/1.0` gossip topic (plus built-ins seeded at
   startup). A row means "heard of", not "installed".
-- **`plugin_attestations`** + **`plugin_advisories`** — Plugin DAO
-  multi-sig attestations binding a `(plugin_cid, grader_cid)` pair as
-  credential-eligible, and advisory-only notes (deprecated / known-flawed)
-  that surface in the UI without affecting recognition.
+- **`plugin_attestations`** — Legacy storage from the retired Plugin DAO
+  authority experiment. Rows do not make a plugin or grader
+  credential-eligible, and there is no active ingest/status IPC or inbound
+  persistence handler. A regression test writes a forged row to prove issuance
+  ignores it.
+- **`plugin_advisories`** — Advisory-only notes (deprecated / known-flawed)
+  that may surface without granting recognition.
 - **`plugin_irl_submissions`** — Local instructor-review inbox for the
   `irl-review` builtin (migration 053). A learner's submission queues a
   `pending` row (`submission_json` = files + comment, `skills_json` =
@@ -323,12 +342,13 @@ discovery (Phase 3).
 - **`onchain_governance_queue`** — Persistent queue for async governance
   submissions, with `attempts`, `last_error`, and status transitions.
 
-### Challenges, Attestations, and Opinions (7 tables)
+### Completion Attestations, Opinions, and Retired Challenges (7 tables)
 
 > The evidence-based challenge/attestation tables (`evidence_challenges`,
 > `challenge_votes`, `attestation_requirements`, `evidence_attestations`)
-> were dropped in migration 040 and rebuilt against the `credentials`
-> VC store in migrations 042–043.
+> were dropped in migration 040. Completion attestation was rebuilt against
+> credentials in migration 042. The migration-043 credential-challenge rebuild
+> was subsequently retired; those two tables below are historical storage only.
 
 - **`completion_attestation_requirements`** — Per-course gate (keyed by
   `course_id`) for how many attestor signatures a learner's
@@ -337,13 +357,13 @@ discovery (Phase 3).
 - **`completion_attestations`** — Individual attestor signatures over a
   `witness_tx_hash` (`attestor_did`, `attestor_pubkey`, `signature`,
   optional `note`; unique per `(witness_tx_hash, attestor_did)`).
-- **`credential_challenges`** — Stake-based challenges against a
+- **`credential_challenges`** *(retired)* — Historical stake-based challenges against a
   `credential_id`, with `challenger`, `reason`, `stake_lovelace`,
   `stake_tx_hash`, `status` (pending/reviewing/upheld/rejected/expired),
   `dao_id`, `resolution_tx`, `signature`, and the stake-escrow lifecycle
   fields `stake_status` (none/locked/returned/forfeited) and
   `settle_tx_hash` (migration 050).
-- **`credential_challenge_votes`** — Committee votes on a `challenge_id`
+- **`credential_challenge_votes`** *(retired)* — Historical committee votes on a `challenge_id`
   (`voter`, `upheld`, optional `reason`; unique per `(challenge_id, voter)`).
 - **`opinions`** — Field Commentary video takes scoped to a `subject_field_id`,
   with staked `credential_proof_ids`, signature, publication timestamps,

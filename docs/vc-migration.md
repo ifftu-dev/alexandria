@@ -1,7 +1,8 @@
 # VC-First Cutover (Migration 040)
 
 **Date:** 2026-04-24
-**Branch:** `refactor/vc-first-migration`
+**Original branch:** `refactor/vc-first-migration`
+**Last reconciled:** 2026-09-15 on `rebuild/foundation`
 
 This document is the authoritative account of the cutover from the
 legacy SkillProof pipeline to a W3C Verifiable Credentials (VC) model.
@@ -9,6 +10,12 @@ It supersedes the pre-cutover descriptions in `architecture.md`,
 `protocol-specification.md`, `skills-and-reputation.md`,
 `database-schema.md`, and `vision.md` wherever those docs reference
 SkillProof / EvidenceRecord / SkillAssessment artifacts.
+
+Later work briefly rebuilt a credential challenge committee and Cardano escrow.
+Assessment-remediation package T01 retired that experiment again. The current
+authority model is issuer-bound status lists: only the issuer can revoke,
+suspend, or reinstate its credential. This document records both the original
+cutover and that current state.
 
 ## What changed
 
@@ -28,6 +35,12 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   against credentials (not evidence rows).
 - Reputation join tables (`reputation_evidence`,
   `reputation_impact_deltas`) — will be rebuilt against credentials.
+- The later `commands::challenge` module, credential-challenge domain types,
+  challenge UI, escrow transaction builders and recovery worker, and the Aiken
+  challenge validator. The migration-043/050/082 tables remain only as legacy
+  pre-launch storage pending cleanup migration D03.
+- Plugin-attestation ingest/status IPC and inbound persistence. The reserved
+  gossip topic remains subscribed for compatibility but grants no authority.
 
 **New:**
 
@@ -51,7 +64,10 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   request-response protocol.
 - All governance/Aiken validators (`dao_registry`, `dao_minting`,
   `election`, `proposal`, `reputation_minting`, `soulbound`,
-  `vote_minting`) — unchanged.
+  `vote_minting`) — historical deployments remain, while release authority is
+  gated on explicitly pinned governance genesis and future committee outcome
+  certificates.
+- `completion_attestation_requirements` and `completion_attestations`.
 
 ## New conceptual model
 
@@ -88,11 +104,10 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
    `cardano/script_refs.rs`).
 3. **Completion-witness minting** — `completion.ak` validator
    (deployed) + observer + auto-issuance (live).
-4. **Challenge-stake escrow** — `challenge_escrow.ak` validator; lock
-   and settle both work on preprod (escrow reference script deployed).
-5. **CIP-68 soulbound reputation snapshots** — `soulbound_tx_builder.rs`
-   / `submit_snapshot_tx`; mint works on preprod (reputation-minting
-   reference script deployed).
+4. **Reputation snapshots** — new snapshots are signed
+   `DerivedCredential` VCs whose canonical hashes use the normal optional
+   credential-anchor queue. Historical CIP-68 rows remain identifiable and can
+   only reconcile an already-journaled signed transaction.
 
 ## What compiles today
 
@@ -142,16 +157,11 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   variance / learner_count) **are now computed and persisted**;
   `commands::reputation::get_reputation` derives a sample-size
   confidence (`learner_count / (learner_count + 5)`) on read.
-- **Challenge system** (task #16): rebuilt at
-  `commands::challenge` + `credential_challenges` +
-  `credential_challenge_votes` tables (migration 043). Targets a
-  specific credential; 2/3 supermajority upholds → revocation via
-  status-list bit flip. Stake escrow is now real: 5 ADA locks at the
-  `challenge_escrow.ak` validator (migration 050 added `stake_status`
-  + `settle_tx_hash`); the lock tx works on preprod, and on resolution
-  the DAO authority settles (Refund → challenger / Forfeit →
-  treasury). `CHALLENGE_ESCROW_REF_UTXO` is deployed on preprod
-  (2026-05-22, block 4736927), so settlement is live-capable.
+- **Challenge system** (historical task #16): migrations 043, 050, and
+  082 added a VC-first challenge and escrow experiment. T01 removed every
+  executable and user-facing path because an off-chain committee could mutate
+  issuer status without a complete authority policy. The remaining tables do
+  not authorize any action.
 
 ## Observer daemon wiring
 
@@ -182,28 +192,26 @@ Migration-time SQL seeds (`db::seed`) gain:
 **Done.** The credential pages are rewired against the VC IPC surface
 (`list_credentials`, `preview_completion_root`,
 `submit_completion_witness`, `claim_course_completion`,
-`list_reputation_rows`, `get_reputation`, `list_credential_challenges`,
+`list_reputation_rows`, `get_reputation`,
 `get_completion_attestation_status`, etc.), and the frontend exposes a
 "Claim Credential" affordance that drives the completion-witness flow.
 
 ## Deploy prerequisites
 
-The subsystem rebuilds are **done**: auto-issuance
-(`commands::auto_issuance`), the credential-sourced reputation engine
-(`evidence/reputation.rs`), credential challenges (`commands::challenge`,
-status-list revocation), completion attestation (`commands::attestation`),
-and the frontend rewire all ship.
+The auto-issuance path, credential-sourced reputation engine
+(`evidence/reputation.rs`), completion attestation
+(`commands::attestation`), issuer-bound status-list lifecycle, and frontend VC
+surface ship. Credential challenges do not.
 
-All nine Aiken/Plutus v3 reference scripts are now deployed on
+Eight retained Aiken/Plutus v3 reference scripts are deployed on
 **preprod testnet** (2026-05-22, block 4736927) via
 `cardano/governance/deploy_blockfrost.py` (a node-free deployer:
 `cardano-cli build-raw` + Blockfrost submit), and `cardano/script_refs.rs`
 carries their UTxOs. `ref_utxos_deployed()`, `completion_ref_deployed()`,
-and `challenge_escrow_deployed()` all return `true`, so the soulbound
-snapshot mint, challenge-stake settlement, completion-witness, and
-governance tx builders all reference live scripts. The end-to-end
-governance enforcement *flows* (election/proposal lifecycle) are still
-maturing on top of the now-deployed validators.
+and the completion/governance reference checks identify deployed historical
+scripts. The active app no longer compiles the soulbound mint or challenge
+escrow builders. The end-to-end governance enforcement flows remain gated in
+release builds while committee outcome certificates are unfinished.
 
 To run the flows against preprod:
 

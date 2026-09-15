@@ -6,7 +6,7 @@ builder, validator integration, embedded multisig-signed bootstrap
 snapshot, and refresh-task spawn all live in the codebase. First
 real preprod registration confirmed on 2026-05-25. Operator runbook:
 [`stake-pubkey-registry-runbook.md`](./stake-pubkey-registry-runbook.md).
-**Date:** 2026-05-25
+**Last updated:** 2026-09-15
 **Spec link:** §7.3 (authority on privileged gossip topics)
 **Replaces:** the in-memory TOFU binding that previously lived in
 `src-tauri/src/p2p/validation.rs`.
@@ -70,6 +70,13 @@ Conflict resolution: on-chain always wins. If the cache and chain
 disagree for an entry within its validity window, the chain entry
 overwrites the cached one and the discrepancy is logged.
 
+The release-specific trust roots and resource identity live in the versioned
+network profile at `src-tauri/resources/networks/preprod.json`. The profile
+contains the three founder verification keys and the exact SHA-256 digest of
+the bundled snapshot. The application validates the profile and digest before
+opening profiles, so an altered or mismatched bootstrap resource prevents
+application setup.
+
 ### 4.2 SQLite schema (migration 052)
 
 ```sql
@@ -101,12 +108,11 @@ remain verifiable, while new traffic uses the new key.
    for ops use but is not on the default boot path), verify the
    2-of-3 multisig over its canonical JSON bytes, insert all entries
    with `source='snapshot'` and `last_verified = 0`.
-2. If verification fails, the current implementation logs a `WARN`
-   and continues — privileged-topic gossip is then gated entirely by
-   on-chain refresh entries until the snapshot is fixed. (Earlier
-   drafts of this doc called for refusing privileged-topic
-   subscription on snapshot-verify failure; that stricter posture
-   is on the roadmap but is not what ships today.)
+2. Before profile activation, verify that the embedded snapshot bytes match
+   the digest pinned by the network profile. A mismatch fails application
+   setup. When a profile database is initialized, parse the snapshot and
+   verify its 2-of-3 founder signatures; an invalid snapshot returns an error
+   rather than seeding authority.
 3. The background refresh task starts at the same time and begins
    reconciling against Blockfrost (§4.4).
 
@@ -187,8 +193,9 @@ for authority. Today that's exactly the set returned by
 - `/alexandria/governance/1.0` — committee changes / proposal events.
 - `/alexandria/sentinel-priors/1.0` — Sentinel DAO threshold-signed
   adversarial-prior announcements.
-- `/alexandria/plugin-attestations/1.0` — Plugin DAO threshold-signed
-  `(plugin_cid, grader_cid)` approvals.
+- `/alexandria/plugin-attestations/1.0` — Reserved compatibility topic. The
+  envelope still receives registry validation and peer scoring, but there is
+  no inbound persistence handler and it cannot approve a plugin or grader.
 - `/alexandria/goal-templates/1.0` — DAO-ratified goal-template
   publications.
 - `/alexandria/question-banks/1.0` — DAO-ratified question-bank
@@ -230,10 +237,10 @@ in `p2p/registry.rs` AND list it here so the two stay in sync.
 }
 ```
 
-Multisig verification: collect the three founder public keys from a
-constant in code (`p2p::registry::SNAPSHOT_VERIFIERS`), accept the
-snapshot iff ≥ 2 of the signatures over `canonical_json(entries +
-issued_at + version)` verify.
+Multisig verification: collect the three founder public keys from the active
+embedded network profile, and accept the snapshot iff at least two distinct
+configured keys verify signatures over `canonical_json(entries + issued_at +
+version)`.
 
 ### 4.8 Settings
 
@@ -248,16 +255,13 @@ issued_at + version)` verify.
   roadmap)* — would reject any binding that hasn't been confirmed
   against the chain since app start. Tracked as a follow-up.
 
-## 5. Migration story (pre-launch)
+## 5. Migration status (pre-launch)
 
-No live users. No data migration needed. Steps:
-
-1. Land migration 052 + registry module.
-2. Ship `bootstrap_registry.json` w/ initial committee in
-   `src-tauri/resources/`.
-3. Flip the validation call site to the new lookup.
-4. Delete `identity_bindings: Mutex<HashMap<…>>` from
-   `GossipValidator` and the TOFU code in `validation.rs:108-144`.
+Migration 052, the registry module, bundled signed snapshot, validation lookup,
+and background refresh are implemented. The old in-memory TOFU binding has
+been removed. N01 subsequently moved founder keys and the bootstrap resource
+digest into the strict network profile. Profiles are immutably bound to that
+profile's `network_id`.
 
 ## 6. Testing plan
 
@@ -292,28 +296,13 @@ No live users. No data migration needed. Steps:
 | `bootstrap_registry.json` tampering in release pipeline | Multisig requires 2 of 3 founder keys; one compromise insufficient. Release SBOM should hash the file. |
 | Backward compatibility for in-flight messages mid-rotation | Validity windows are inclusive on `valid_from`, exclusive on `valid_until`. Message freshness window (±5 min) is already smaller than expected rotation overlap, so verification at message timestamp avoids races. |
 
-## 8. Open questions
+## 8. Remaining work
 
-- Do we add the on-chain `StakePubkeyRegistration` script in this PR, or
-  ship the snapshot-only path first and add the script in a follow-up?
-  Recommendation: snapshot-only for PR B, on-chain script in PR B'
-  before public-beta — chain refresh code can be stubbed but disabled.
-- Snapshot file location: `src-tauri/resources/` (bundled, requires
-  rebuild) vs `<app_data>/bootstrap_registry.json` (replaceable). Pick
-  bundled for tamper resistance; add a TOFU-free update path later.
-- Founder verifier pubkeys: hardcoded constants vs config. Hardcoded
-  for v1 — config opens a key-substitution attack vector.
-
-## 9. Implementation order (PR B impl)
-
-1. Schema migration 052.
-2. `p2p::registry` module: types, snapshot loader, multisig verifier.
-3. `p2p::registry::lookup(conn, stake_addr, pubkey, ts)` helper +
-   tests.
-4. Wire `check_identity_binding` to call the helper. Delete the
-   `identity_bindings` field and its initialization.
-5. Background refresh task (stubbed Blockfrost client first, real
-   client second).
-6. Ship a stub `bootstrap_registry.json` with the project's initial
-   committee.
-7. Tests as per §6.
+- Move every GossipSub, request-response, Kademlia, relay, and monitoring
+  protocol identifier under the profile's `/alexandria/preprod` namespace in
+  one synchronized deployment. At present only DHT provider-record keys consume
+  the configured namespace.
+- Add a reviewed, signed profile-update mechanism before any trust root can be
+  rotated without shipping a new application release.
+- Decide whether `registry.require_chain_verification` is needed for the hosted
+  demo and document its availability tradeoff before implementing it.

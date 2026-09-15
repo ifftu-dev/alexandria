@@ -112,15 +112,16 @@ src-tauri/
     │   ├── manifest.rs     # Manifest parse + validate
     │   ├── verifier.rs     # Signature + CID verification
     │   ├── catalog.rs      # Gossip discovery cache
-    │   ├── attestation.rs  # DAO multi-sig attestations
     │   ├── builtins.rs     # Embedded builtin bundles (MCQ, editors, IRL review)
     │   ├── asset_protocol.rs # plugin:// asset handler + per-plugin CSP
     │   └── irl_review.rs   # Local instructor-review inbox
     ├── content_store/      # iroh node + resolver + public URL fallback
     │
+    ├── network_profile.rs  # Strict embedded network identity, services, relays, and trust roots
+    │
     ├── profile/            # Multi-user profile manager
     │   ├── mod.rs          # Module exports
-    │   ├── index.rs        # profiles_index.json sidecar (public — names/avatars only)
+    │   ├── index.rs        # format-v2 profiles_index.json (public network IDs/names/avatars)
     │   ├── manager.rs      # ProfileManager: list/create/rename/delete/touch + ProfilePaths
     │   └── migration.rs    # First-launch auto-migrator from legacy single-vault layout
     │

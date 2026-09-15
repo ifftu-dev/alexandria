@@ -1,6 +1,6 @@
 # Multi-User Profiles
 
-**Status:** Implemented on `feat/multi-user-profiles` (backend + frontend landed) · **Date:** 2026-05-19
+**Status:** Implemented; profile index upgraded to network-bound format v2 · **Last updated:** 2026-09-15
 
 ## Motivation
 
@@ -58,10 +58,11 @@ Multi-user accounts let one device host several learners, each with their own cr
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "profiles": [
     {
       "id": "0f5a…",
+      "network_id": "preprod",
       "display_name": "Pratyush",
       "avatar": { "kind": "emoji", "value": "🦊" },
       "color": "#7c3aed",
@@ -73,8 +74,11 @@ Multi-user accounts let one device host several learners, each with their own cr
 ```
 
 - **Public** because the picker must render before any vault is unlocked.
-- Holds only what's needed for the tile: display name, avatar (emoji or local image hash), accent color, timestamps.
+- Holds the immutable network ID plus what's needed for the tile: display name, avatar (emoji or local image hash), accent color, timestamps.
 - Never contains stake addresses, DIDs, keys, or anything cryptographically linked to the user's chain identity. Treat it as user-public listing data.
+- Version 1, unknown future versions, and profiles for a different network fail
+  before row deserialization or profile activation. There is no network mutation
+  API; moving identities between networks requires an explicit future migration.
 
 ### Usernames are mandatory
 
@@ -147,7 +151,9 @@ On first launch after upgrade, if `<app_data>/alexandria.db` exists at the legac
 1. Generate `new_uuid`.
 2. Create `<app_data>/profiles/<new_uuid>/`.
 3. **Move** (not copy): `alexandria.db`, `alexandria.db-wal`, `alexandria.db-shm`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/` into the new directory.
-4. Write `profiles_index.json` with one entry. Display name defaults to `"My Profile"` (renameable later); avatar is a random emoji.
+4. Write a format-version-2 `profiles_index.json` entry bound to the active
+   embedded network profile. Display name defaults to `"My Profile"`
+   (renameable later); avatar is a random emoji.
 5. If any step fails: rollback by moving any partially-moved files back, leave legacy layout intact, surface a `migration_failed` event the picker can show as a banner.
 
 The migration runs **before** `AppState` is constructed, so the rest of the app boots in the new layout from the very first frame. The user does **not** see a migration spinner — the move is filesystem-rename-fast.
@@ -188,7 +194,7 @@ const profiles = ref<ProfileSummary[]>([])
 const activeProfileId = ref<string | null>(null)
 
 async function listProfiles(): Promise<void>
-async function createProfile(displayName: string, password: string): Promise<ProfileSummary>
+async function createProfile(username: string, displayName: string, password: string, avatar?: Avatar, account?: AccountOptions): Promise<CreateProfileResponse>
 async function unlockProfile(id: string, password: string): Promise<void>
 async function lockProfile(): Promise<void>                  // returns to /profiles
 async function switchProfile(id: string): Promise<void>      // lock + redirect picker preselects id
@@ -196,6 +202,10 @@ async function deleteProfile(id: string, password: string): Promise<void>
 async function renameProfile(id: string, name: string): Promise<void>
 async function setAvatar(id: string, avatar: Avatar): Promise<void>
 ```
+
+The composable supplies `networkId: 'preprod'` to creation and mnemonic-restore
+IPC. The backend independently checks it against the embedded network profile;
+the frontend constant is not a trust decision.
 
 `useAuth` is kept as a thin compatibility shim — it delegates to `useProfiles` and exposes the same `isAuthenticated`/`displayName`/`stakeAddress` reactive properties that 10 components already consume. No mass rewrite.
 
@@ -220,7 +230,7 @@ Keyboard shortcut: `Cmd/Ctrl + Shift + U` invokes Switch user from anywhere.
 
 ## Privacy & security
 
-- **At rest:** each profile's data is encrypted with that profile's password-derived key. A compromised host filesystem reveals only `profiles_index.json` (avatars, display names) plus ciphertext.
+- **At rest:** each profile's data is encrypted with that profile's password-derived key. A compromised host filesystem reveals only `profiles_index.json` (network IDs, avatars, display names) plus ciphertext.
 - **In memory:** only the active profile's keystore and database connection are held. Lock zeroes them.
 - **Auto-lock:** existing inactivity timeout applies, scoped to the active profile.
 - **Peer ID rotation:** distinct profiles cannot be linked through libp2p observation. Two profiles on one device look like two separate devices to the network.
