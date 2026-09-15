@@ -320,10 +320,10 @@ fn write_salt_with_hmac(
     Ok(())
 }
 
-/// Read salt file and verify its integrity HMAC.
+/// Read the salt file and verify its integrity HMAC.
 ///
-/// Supports both the new format (salt + HMAC = 64 bytes) and the legacy
-/// format (salt only = 32 bytes) for backward compatibility.
+/// The file is salt + HMAC, 64 bytes. The pre-HMAC 32-byte format is not
+/// supported: it is refused rather than accepted without verification.
 fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, KeystoreError> {
     let salt_path = vault_dir.join(SALT_FILENAME);
     let data = std::fs::read(&salt_path).map_err(|_| {
@@ -334,18 +334,17 @@ fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, Key
         let (salt, stored_tag) = data.split_at(SALT_LEN);
         let expected_tag = compute_salt_hmac(password, salt);
         if stored_tag != expected_tag {
-            return Err(KeystoreError::Crypto(
-                "salt file corrupted or tampered — integrity check failed".into(),
-            ));
+            // The HMAC is keyed by the entered password, so a mismatch is
+            // indistinguishable from an incorrect password at unlock time.
+            // Report it as a wrong password rather than claim tampering.
+            return Err(KeystoreError::IncorrectPassword);
         }
         Ok(salt.to_vec())
-    } else if data.len() == SALT_LEN {
-        log::warn!("Salt file uses legacy format (no integrity HMAC) — will upgrade on next save");
-        Ok(data)
     } else {
         Err(KeystoreError::Crypto(format!(
-            "salt file has unexpected size: {} bytes",
-            data.len()
+            "unsupported salt file: {} bytes, expected {} (salt + integrity HMAC)",
+            data.len(),
+            SALT_LEN + HMAC_LEN
         )))
     }
 }
@@ -439,6 +438,27 @@ mod tests {
         assert!(result.is_err());
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unsupported_legacy_salt_file_is_refused() {
+        let dir = tempfile::TempDir::new().expect("temporary vault");
+        let _keystore = Keystore::create(dir.path(), "testpassword").expect("create failed");
+        let salt_path = dir.path().join(SALT_FILENAME);
+        let current = fs::read(&salt_path).expect("read salt");
+        fs::write(&salt_path, &current[..SALT_LEN]).expect("write pre-HMAC salt");
+
+        let error = Keystore::open(dir.path(), "testpassword").expect_err("must refuse");
+
+        assert!(
+            format!("{error}").contains("unsupported salt file"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read(&salt_path).expect("salt still readable").len(),
+            SALT_LEN,
+            "the refused file must be left as it was"
+        );
     }
 
     #[test]
