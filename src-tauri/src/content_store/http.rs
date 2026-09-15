@@ -78,7 +78,7 @@ pub struct HttpClient {
 impl HttpClient {
     /// Create a new HTTP client with the given per-request timeout.
     pub fn new(timeout: Duration) -> Result<Self, HttpError> {
-        Self::build(timeout, Arc::new(PublicDnsResolver), false)
+        Self::build(timeout, Arc::new(PublicDnsResolver))
     }
 
     /// Test seam: replace connect-time DNS and ignore proxy settings, so a
@@ -88,25 +88,21 @@ impl HttpClient {
         timeout: Duration,
         resolver: Arc<R>,
     ) -> Result<Self, HttpError> {
-        Self::build(timeout, resolver, true)
+        Self::build(timeout, resolver)
     }
 
     fn build<R: reqwest::dns::Resolve + 'static>(
         timeout: Duration,
         resolver: Arc<R>,
-        no_proxy: bool,
     ) -> Result<Self, HttpError> {
         let builder = |redirect: reqwest::redirect::Policy| {
-            let builder = reqwest::Client::builder()
+            reqwest::Client::builder()
                 .timeout(timeout)
                 .dns_resolver(resolver.clone())
-                .redirect(redirect);
-            let builder = if no_proxy {
-                builder.no_proxy()
-            } else {
-                builder
-            };
-            builder.build().map_err(|e| HttpError::Http(e.to_string()))
+                .redirect(redirect)
+                .no_proxy()
+                .build()
+                .map_err(|e| HttpError::Http(e.to_string()))
         };
 
         // Redirects are checked, not followed blindly. `resolver`'s SSRF
@@ -212,6 +208,9 @@ async fn fetch_bounded(
 
 #[cfg(test)]
 mod tests {
+    use std::net::TcpListener;
+    use std::process::Command;
+
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -235,6 +234,52 @@ mod tests {
     #[test]
     fn client_creates_with_defaults() {
         assert!(HttpClient::with_defaults().is_ok());
+    }
+
+    #[test]
+    fn production_client_ignores_proxy_environment() {
+        const CHILD: &str = "ALEXANDRIA_HTTP_PROXY_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("child runtime");
+            runtime.block_on(async {
+                let client = HttpClient::new(Duration::from_millis(250)).expect("client");
+                let _ = client
+                    .fetch_by_url("http://93.184.216.34:9/proxy-isolation")
+                    .await;
+            });
+            return;
+        }
+
+        let proxy = TcpListener::bind("127.0.0.1:0").expect("proxy sentinel");
+        proxy.set_nonblocking(true).expect("nonblocking sentinel");
+        let proxy_url = format!("http://{}", proxy.local_addr().expect("sentinel address"));
+        let test_name = "content_store::http::tests::production_client_ignores_proxy_environment";
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .args(["--exact", test_name, "--nocapture"])
+            .env(CHILD, "1")
+            .env("HTTP_PROXY", &proxy_url)
+            .env("HTTPS_PROXY", &proxy_url)
+            .env("ALL_PROXY", &proxy_url)
+            .env("http_proxy", &proxy_url)
+            .env("https_proxy", &proxy_url)
+            .env("all_proxy", &proxy_url)
+            .env("NO_PROXY", "")
+            .env("no_proxy", "")
+            .output()
+            .expect("run isolated proxy child");
+        assert!(
+            output.status.success(),
+            "proxy child failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            matches!(proxy.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+            "the production client connected to the proxy sentinel"
+        );
     }
 
     #[test]

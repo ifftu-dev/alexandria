@@ -59,8 +59,9 @@ if command -v cargo-audit >/dev/null 2>&1; then
   step "cargo audit" cargo audit --file Cargo.lock
 else
   echo
-  echo "⚠ cargo-audit not installed — skipping Security Audit mirror."
+  echo "✘ cargo audit (cargo-audit is not installed)"
   echo "  Install with: cargo install cargo-audit"
+  failures+=("cargo audit (tool missing)")
 fi
 
 echo

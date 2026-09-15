@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/**'
       - 'cli/**'
+      - 'committee/**'
+      - 'core/**'
       - 'crates/**'
       - 'patches/**'
       - 'scripts/**'
@@ -20,12 +22,15 @@ on:
       - 'index.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
+      - 'world/**'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'cli/**'
+      - 'committee/**'
+      - 'core/**'
       - 'crates/**'
       - 'patches/**'
       - 'scripts/**'
@@ -39,6 +44,7 @@ on:
       - 'index.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
+      - 'world/**'
       - '.github/workflows/ci.yml'
 
 concurrency:
@@ -83,39 +89,7 @@ jobs:
 
           mapfile -t changed_files < <(git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}")
 
-          matches_any() {
-            local path
-            for path in "${changed_files[@]}"; do
-              case "${path}" in
-                .github/workflows/*|cli/*|patches/*|scripts/*|src-tauri/*|Cargo.toml|Cargo.lock)
-                  if [ "$1" = "backend" ] || [ "$1" = "security" ]; then
-                    return 0
-                  fi
-                  ;;
-                src/*|package.json|package-lock.json|index.html|vite.config.ts|tsconfig*.json)
-                  if [ "$1" = "frontend" ]; then
-                    return 0
-                  fi
-                  ;;
-              esac
-            done
-            return 1
-          }
-
-          for surface in backend frontend security; do
-            if matches_any "${surface}"; then
-              echo "${surface}=true" >> "${GITHUB_OUTPUT}"
-            else
-              echo "${surface}=false" >> "${GITHUB_OUTPUT}"
-            fi
-          done
-
-          if printf '%s\n' "${changed_files[@]}" | grep -Eq \
-            '^(\.github/workflows/((release|validate)-|desktop-shared\.yml|mobile-shared\.yml)|\.github/workflows/ci\.yml|scripts/|src-tauri/tauri.*\.json|src-tauri/Cargo\.toml|src-tauri/src/commands/mod\.rs|src-tauri/src/commands/tutoring_stubs\.rs|src-tauri/src/tutoring/manager_android\.rs|package\.json|package-lock\.json)$'; then
-            echo "release=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "release=false" >> "${GITHUB_OUTPUT}"
-          fi
+          node scripts/classify-ci-changes.mjs "${changed_files[@]}" >> "${GITHUB_OUTPUT}"
 
   check:
     name: Lint & Test
@@ -242,6 +216,11 @@ jobs:
         run: |
           node scripts/check-tauri-commands.mjs
           node --test scripts/check-tauri-commands.test.mjs
+
+      - name: CI change-classifier regressions
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: node --test scripts/classify-ci-changes.test.mjs
       - name: CSP style hashes match the libraries that inject styles
         # style-src carries sha256 hashes for the <style> blocks two libraries
         # inject at runtime. A version bump changes the CSS, the hash stops
