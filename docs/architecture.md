@@ -9,14 +9,14 @@
 > Credentials, including offline learner self-claims and optional
 > confirmed Cardano completion witnesses. See
 > [`vc-migration.md`](./vc-migration.md) for what replaces what.
-> Reputation and completion attestation were rebuilt on the VC-first
-> model. The later credential-challenge experiment and its Cardano
+> Reputation and exact course-version completion endorsement were rebuilt on
+> the VC-first model. The later credential-challenge experiment and its Cardano
 > escrow path have now also been retired: no challenge commands are
 > registered and no challenge transaction builder is compiled. Their
 > schema remains only as pre-launch legacy storage pending migration D03.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-09-15 (legacy authority retirement, versioned preprod network profile, immutable profile network identity, completion issuer policy, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
+**Last updated**: 2026-09-15 (legacy authority retirement, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and endorsement persistence, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
 
 ---
 
@@ -73,7 +73,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |                | cmds    |  +----------------+  |  |
 |  |  Vue pages     |         |  |   SQLite DB    |  |  |
 |  |  + components |         |  |  local schema  |  |  |
-|  |  + composables|         |  |   90 migrations|  |  |
+|  |  + composables|         |  |   91 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -249,7 +249,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Schema**: 90 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
+**Schema**: 91 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
 
 | Domain | Tables |
 |--------|--------|
@@ -260,14 +260,13 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Credentials | `credentials`, `credential_status_lists`, `key_registry` |
 | Reputation | `reputation_assertions`, `derived_skill_states`, `derived_skill_state_history`, `reputation_snapshots`; scoring uses filtered views |
 | Issuer recognition (local-only) | `public_derived_issuers`, `derived_skill_refresh_queue` (migration 085) |
-| Completion persistence (local-only) | `completion_claims`, `completion_witness_requests` (migration 086) |
+| Completion persistence (local-only) | `completion_claims`, `completion_witness_requests`, `course_completion_endorsements`; enrollments and claims freeze exact course-document identity/policy (migrations 086, 091) |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
 | Retired challenge experiment | `credential_challenges`, `credential_challenge_votes` (legacy tables; no active command or authority path) |
-| Attestation | `completion_attestation_requirements`, `completion_attestations` |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
 | Governance (on-chain) | `onchain_governance_queue` |
@@ -604,7 +603,7 @@ The completion command performs no Cardano I/O. Migration 086 atomically persist
 
 `cardano::completion_queue` uses the existing background worker's profile lease and unlocked wallet, verifies the saved wallet binding, and attempts at most one unsigned request per pass. Retry scheduling is durable (30-second increments, capped at five minutes, subject to the worker's cadence). Journal handoff removes signed requests from the dispatch index atomically. Receipt reconciliation and witnessed-VC issuance remain separate; backend locking cancels the audited worker pass before releasing its lease, rather than switching a profile underneath it. The UI queries indexed local witness status separately from local credential progress and clears private state on locking. See [Lifecycle ownership and cleanup limits](#lifecycle-ownership-and-cleanup-limits) for implemented cancellation and remaining deadline/native-device checks; this is not a measured device-latency guarantee.
 
-The optional witness transaction is durably checkpointed before submission. A timeout or lost response retains the same signed transaction for reconciliation; neither acknowledgement nor an uncertain outcome becomes a witnessed credential. A genuine instructor endorsement must be separately signed by the actual instructor. The completion command no longer creates a synthetic course-authority attestation, and the new endorsement-request/response UX remains pending.
+The optional witness transaction is durably checkpointed before submission. A timeout or lost response retains the same signed transaction for reconciliation; neither acknowledgement nor an uncertain outcome becomes a witnessed credential. A genuine instructor endorsement is separately signed by an attestor authorized in the exact author-signed course document. The backend exports, signs, verifies, imports, and counts exact-binding endorsements; the user-facing review and transport flow remains pending.
 
 ### Components
 
@@ -614,7 +613,7 @@ The optional witness transaction is durably checkpointed before submission. A ti
 | `evidence/taxonomy` | Bloom's level thresholds and skill graph traversal |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
 
-Completion-attestation requirements are handled by
+Exact course-version endorsement policy and artifacts are handled by
 `commands::attestation`, outside the retired `skill_proof` aggregator. The
 credential-challenge command module, evidence challenge module, challenge domain
 types, escrow transaction builders, recovery worker, validator source, and
@@ -748,8 +747,8 @@ list.
 | settings | 3 | `list_settings`, `set_setting`, `reset_setting` — drives the unified per-profile settings store. See [`settings.md`](settings.md). |
 | credentials | 10 | `issue_credential`, `list_credentials`, `get_credential`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle` |
 | sync | 8 | `sync_status`, `sync_now`, `sync_set_auto`, `sync_list_devices` |
-| courses | 8 | `create_course`, `get_course`, `list_courses` |
-| attestation | 5 | `set_completion_attestation_requirement`, `submit_completion_attestation`, `get_completion_attestation_status` |
+| courses | 9 | `create_course`, `get_course`, `list_courses`, `set_course_completion_policy`, `publish_course` |
+| attestation | 4 | `get_course_completion_endorsement_request`, `sign_course_completion_endorsement`, `import_course_completion_endorsement`, `get_course_completion_endorsement_status` |
 | opinions | 6 | `publish_opinion`, `list_opinions`, `withdraw_own_opinion` |
 | integrity | 6 | `integrity_start_session`, `integrity_submit_snapshot`, `integrity_get_session` |
 | sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_load_dao_classifier`, `sentinel_paste_classifier_info`, `sentinel_revert_classifier_to_bundled`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
@@ -784,7 +783,7 @@ Note: `tutoring` has platform-specific variants. Desktop and Android share the f
 | Message forgery | Ed25519 signatures on all gossip messages |
 | Sybil attacks | IP colocation scoring, signed messages, subject-scoped aggregation, and independence penalties |
 | Taxonomy corruption | Committee authority verification, strongest peer scoring penalty |
-| Evidence inflation | Multi-party completion attestation, issuer/provenance weighting, anti-gaming aggregation, and behavioral integrity |
+| Evidence inflation | Exact author-signed completion policy, allowlisted distinct-attestor thresholds, issuer/provenance weighting, anti-gaming aggregation, and behavioral integrity |
 | Replay attacks | ±5 minute freshness window, Blake2b-256 dedup cache |
 | Content tampering | BLAKE3 content addressing (iroh), Ed25519 signed documents |
 

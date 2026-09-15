@@ -28,13 +28,17 @@ package record. At this documentation checkpoint:
 | F04 | Verified | Proxy bypass closure and actual-workspace CI classification |
 | G01 | Source complete | CometBFT/ABCI spike and no-std verifier compile checks; target-runtime known-answer execution and G02 timing design remain |
 | T01 | Verified | `530831d`: challenge/escrow and arbitrary plugin-attestation authority retired; credential status lifecycle issuer-bound |
-| T02 | In progress | `f183607`: shared bounded endorsement verifier, author-signed course-document v2 policy, and stable catalog course identity; enrollment binding, legacy gate removal, acquisition, and trust-state integration remain |
+| T02 | In progress | `f183607`: shared bounded endorsement verifier and author-signed course-document v2 policy; `758b09a`: exact enrollment/claim binding, verified endorsement import/status, migration-042 authority removal, and caller-supplied completion IPC retirement; user-facing acquisition and trust-state integration remain |
 | N01 | In progress | `79d6688`: strict preprod profile and centralized trust/service contract; `26cb204`: immutable profile network identity; wire/service migration pending |
-| Documentation | Current through T01/N01 app slices | `f569efc`: active architecture, protocol, schema, plugin, profile, registry, VC, and operator docs reconciled |
+| Documentation | Current through T02 exact-binding slice | Active architecture, protocol, schema, VC migration, and skills docs describe migration 091 and the remaining UI/trust-state work |
 
-The next T02 slice binds enrollment and completion to the exact verified course
-document, removes the mutable migration-042 authority path, and persists only
-endorsements accepted by the shared verifier. N01 wire migration can proceed independently,
+The next T02 slice makes missing issuer-key/status evidence a typed pending
+verification outcome instead of collapsing it into absence, adds the author
+policy and explicit endorsement review UI, and connects accepted endorsement
+thresholds to privilege-bearing trust state. Authenticated addressed request
+delivery remains part of the hosted/headless integration; the current backend
+supports explicit request export, local signing, verified import, and status.
+N01 wire migration can proceed independently,
 using separate sequential commits across the recorded service worktrees; deploy no
 part of that protocol change until all three repositories have compatible
 builds and a rollback plan.
@@ -505,13 +509,13 @@ Set explicit byte/depth/list/numeric limits for every new untrusted object and t
 **Dependencies:** D01/D02 and stable T02/T03 structures. **Read:** `db/{schema,schema_tests,mod}.rs`, CLI migration runner and DB commands; surviving SQL across APP.
 
 1. Inventory surviving tables, views, triggers, indexes, foreign keys and uniqueness/check constraints. Categorize authority/derived/private/local-only data using section 4.5. Identify every remaining reader of old scoring views before dropping them.
-2. Build `MIGRATION_001_BASELINE` from the desired final schema, not a textual concatenation of 90 migrations. Remove obsolete governance/challenge columns and tables; retain current genesis trust anchors, credential/status state, lifecycle/settings, valid learning data, and current submission journal structures.
+2. Build `MIGRATION_001_BASELINE` from the desired final schema, not a textual concatenation of the current 91 migrations. Remove obsolete governance/challenge columns and tables; retain current genesis trust anchors, credential/status state, lifecycle/settings, valid learning data, and current submission journal structures.
 3. Give the new schema family an explicit identity in metadata. An old database with migration number `1` must not be mistaken for this new baseline. Validate schema family/history before issuing normal queries.
 4. Keep the atomic migration runner for future schema evolution. Disposable old data permits a clean starting schema; it is not permission to abandon atomic schema management permanently.
 5. Refuse incompatible old/unknown/future schema families with an actionable profile-reset message. Do not auto-delete files or silently migrate unsupported data.
 6. Make CLI and app use the same baseline, initialization and validation code. Rewrite schema tests around invariants, rollback, encryption/reopen, foreign keys, uniqueness and idempotent initialization.
 
-**Required tests:** new app/CLI DB schemas agree; initialize twice safely; old version-1 and version-90 DBs both refuse; unknown future family refuses; failed baseline transaction leaves no partial schema/version marker; encrypted file reopen works; forbidden fake/legacy tables absent; surviving SQL and FKs valid.
+**Required tests:** new app/CLI DB schemas agree; initialize twice safely; old version-1 and version-91 DBs both refuse; unknown future family refuses; failed baseline transaction leaves no partial schema/version marker; encrypted file reopen works; forbidden fake/legacy tables absent; surviving SQL and FKs valid.
 
 **Gate:** full `G-APP-RUST` and `G-APP-WEB`. M1 is not complete with intentionally failing intermediate SQL readers.
 

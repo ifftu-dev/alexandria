@@ -86,7 +86,7 @@ Course elements (`course_elements`) are tagged with skills via `element_skill_ta
 
 The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. There are three issuance paths:
 
-1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), and computes a Merkle root. It issues one learner-signed **`SelfAssertion` per course skill**, without an instructor signature or a required chain witness. An optional Cardano completion-witness mint is treasury-funded when configured (the learner still signs), otherwise learner-funded. A witnessed completion credential requires a confirmed successful ledger receipt and its matching stored observation; a submission acknowledgement is insufficient. Courses with no gradeable elements use `CONTENT_COMPLETION_SCORE = 0.3`, a deterministic completion root, and no on-chain witness. `get_course_completion_status` reports still-unmet gradeable elements.
+1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's persisted graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), and computes a Merkle root. New enrollments freeze the verified signed course-document CID, version, and author-selected completion policy; the completion claim and any instructor endorsement bind those exact values. It issues one learner-signed **`SelfAssertion` per course skill** immediately. If the exact course policy requires instructor endorsements, the result includes a canonical signing request and the separately imported endorsements count only after shared verification against the policy allowlist and threshold. A satisfied endorsement is not yet promoted into privilege-bearing trust state. An optional Cardano completion-witness mint is treasury-funded when configured (the learner still signs), otherwise learner-funded. A witnessed completion credential requires a confirmed successful ledger receipt and its matching stored observation; a submission acknowledgement is insufficient. Courses with no gradeable elements use `CONTENT_COMPLETION_SCORE = 0.3`, a deterministic completion root bound to the exact course document, and no on-chain witness. `get_course_completion_status` reports still-unmet gradeable elements.
 2. **Document bootstrap** — skills confirmed from an uploaded resume / transcript are self-issued as `SelfAssertion` credentials carrying a provenance tier (see §6.1).
 3. **Assessment** — passing a dynamic, Sentinel-gated question-bank attempt issues an `AssessmentCredential` bound to the integrity session (see §6.2).
 
@@ -183,7 +183,7 @@ See [Sentinel](sentinel.md#diagnostics-transition).
 
 ### 6.3 Completion endorsement and historical issuer exclusion
 
-Offline completion produces a learner's own claim, not an instructor's endorsement. The application must not derive an instructor signing key from a public author address. A genuine instructor endorsement is a separate, independently signed artifact; the new endorsement-request/response experience is still pending. A valid signature proves control of a key, not expertise or qualification under a DAO policy.
+Offline completion produces a learner's own claim, not an instructor's endorsement. The application does not derive an instructor signing key from a public author address. A genuine instructor endorsement is a separate artifact signed by a key allowlisted in the exact author-signed course policy. Backend request export, local signing, verified import, and status are implemented; the human review and authenticated delivery experience is pending. A valid signature proves control of a key, not expertise or qualification under a DAO policy.
 
 Migration 085 recognizes the former public-derived issuers by reproducing their DID from a known public author address. `public_derived_issuers` retains the exact DID/preimage pair even after normal course edits or deletion. A credential is excluded from aggregation and reputation sampling only when its stored signed payload names one of those matched issuers. The `instructor_attestation` assessment label, an unsigned issuer column, or absent metadata is **not** enough to classify an issuer. Unmatched historical attestations remain unchanged.
 
@@ -242,7 +242,7 @@ Schemas are designed as authoritative inputs for LLM reasoning:
 
 - All credentials are Ed25519 signed by the issuer DID's key
 - The stake-based credential-challenge and escrow experiment is retired. Old tables may remain until cleanup migration D03 but grant no authority.
-- Multi-party completion-attestation requirements for high-stakes courses (`commands::attestation`)
+- Exact course-version endorsement policies with allowlisted attestor keys and distinct-signer thresholds (`commands::attestation`)
 - Behavioral integrity scores from the Sentinel anti-cheat system feed the trust signal on flagged assessments
 - Identity binding via the persistent `stake_pubkey_registry` in the P2P validation pipeline (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md))
 

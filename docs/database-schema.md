@@ -23,7 +23,7 @@
 > to open until cleanup migration D03 removes obsolete storage.
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 90
+**Migrations**: 91
 
 ---
 
@@ -84,7 +84,7 @@
 | … | (migrations 31-39: content provenance, plugin system, plugin catalog/attestations, sentinel flags/priors/holdout) | |
 | 40 | `vc_first_cutover` | Hard cut to VC-first. Drops the SkillProof/evidence pipeline (`skill_proofs`, `skill_proof_evidence`, `evidence_records`, `skill_assessments`, `reputation_evidence`, `reputation_impact_deltas`, `evidence_challenges`, `challenge_votes`, `attestation_requirements`, `evidence_attestations`). Adds witness columns to `credentials`. |
 | 41 | `completion_observer` | `completion_observations` — observer memo for Cardano completion-mint events that auto-issue VCs |
-| 42 | `completion_attestation` | `completion_attestation_requirements` + `completion_attestations` — VC-first replacement for evidence cosigning |
+| 42 | `completion_attestation` | Historical mutable completion gate; both tables are dropped by migration 091 |
 | 43 | `credential_challenges` | Historical VC-first challenge experiment; its tables remain temporarily but its command and authority paths are retired |
 | 44 | `integrity_paste_anomaly` | Add `ai_paste_anomaly` column to `integrity_snapshots` |
 | 45 | `sentinel_priors_model_weights` | Add DAO-ratified model-weights columns (`weights_cid`, `eval_cid`, `eval_tpr`, `eval_fpr`, `version`) to `sentinel_priors` |
@@ -133,6 +133,7 @@
 | 88 | `credential_backed_reputation_snapshots` | New reputation snapshots become signed `DerivedCredential` VCs with optional credential-hash anchoring; legacy CIP-68 rows remain distinguishable |
 | 89 | `assessment_diagnostics_exit` | Explicit diagnostic/interrupted assessment endings and locally saved fixed-form draft answers |
 | 90 | `governance_genesis_trust_anchors` | Exact canonical seven-founder genesis envelopes stored only after explicit local pinning |
+| 91 | `exact_course_enrollment_binding` | Freeze verified course-document identity/policy on enrollments and completion claims; add exact verified endorsements; drop migration-042 mutable attestation authority |
 
 ---
 
@@ -197,14 +198,21 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 - **`courses`** — Course/tutorial metadata. Important fields include
   `title`, `description`, `author_address`, `author_name`, `content_cid`,
   `thumbnail_cid`, `thumbnail_svg`, `tags`, `skill_ids`, `kind`,
-  `version`, `status`, `published_at`, and `on_chain_tx`.
+  `version`, `status`, `published_at`, and `on_chain_tx`. Migration 091 adds
+  the verified `course_document_version` and canonical
+  `completion_policy_json` projection plus the author's local
+  `draft_completion_policy_json`; publication signs the draft into v2 before
+  updating the verified projection.
 - **`course_chapters`** — Ordered chapter rows per course.
 - **`course_elements`** — Element rows with `title`, `element_type`,
   `content_cid`, optional `content_inline`, `position`, and `duration_seconds`.
 - **`element_skill_tags`** — Element-to-skill mapping with `weight`.
 - **`video_chapters`** — Timestamp markers for video elements.
 - **`enrollments`** — Enrollment rows with `course_id`, `enrolled_at`,
-  `completed_at`, `status`, and `updated_at`.
+  `completed_at`, `status`, and `updated_at`. New rows also freeze the verified
+  `course_document_cid`, `course_document_version`, and canonical
+  `completion_policy_json`. Historical rows remain null and cannot produce a
+  new exact-binding completion.
 - **`element_progress`** — Per-element progress with `status`, `score`,
   `time_spent`, `completed_at`, and `updated_at`.
 - **`course_notes`** — Notes scoped to an enrollment/chapter/element,
@@ -342,25 +350,21 @@ discovery (Phase 3).
 - **`onchain_governance_queue`** — Persistent queue for async governance
   submissions, with `attempts`, `last_error`, and status transitions.
 
-### Transitional Completion Attestations, Opinions, and Retired Challenges (7 tables)
+### Exact Completion Endorsements, Opinions, and Retired Challenges (6 tables)
 
 > The evidence-based challenge/attestation tables (`evidence_challenges`,
 > `challenge_votes`, `attestation_requirements`, `evidence_attestations`)
-> were dropped in migration 040. Completion attestation was rebuilt against
-> credentials in migration 042. The migration-043 credential-challenge rebuild
-> was subsequently retired; those two tables below are historical storage only.
-> The migration-042 completion tables are also transitional: they predate the
-> author-signed course-document v2 completion policy and exact-binding
-> endorsement format. T02 will remove them after the replacement persistence
-> and acquisition path is connected.
+> were dropped in migration 040. Migration 042 later introduced a mutable
+> per-course requirement and signatures over only a witness transaction hash.
+> Migration 091 drops both tables because they cannot prove the learner, exact
+> course version, evidence, or network. The migration-043 credential-challenge
+> rebuild was also retired; its two tables below are historical storage only.
 
-- **`completion_attestation_requirements`** *(transitional; unsafe as final authority)* — Per-course gate (keyed by
-  `course_id`) for how many attestor signatures a learner's
-  completion-witness tx needs before the observer auto-issues a VC, with
-  `required_attestors`, `dao_id`, and optional `set_by_proposal`.
-- **`completion_attestations`** *(transitional; unsafe as final authority)* — Individual attestor signatures over a
-  `witness_tx_hash` (`attestor_did`, `attestor_pubkey`, `signature`,
-  optional `note`; unique per `(witness_tx_hash, attestor_did)`).
+- **`course_completion_endorsements`** — Canonical shared-verifier-approved
+  endorsement artifacts, unique by `(claim_id, attestor_did)`. Each artifact
+  binds the network, learner DID, stable course ID, exact signed document CID
+  and format version, completion root, evidence identities, optional witness,
+  and an attestor authorized by that document's frozen policy.
 - **`credential_challenges`** *(retired)* — Historical stake-based challenges against a
   `credential_id`, with `challenger`, `reason`, `stake_lovelace`,
   `stake_tx_hash`, `status` (pending/reviewing/upheld/rejected/expired),
@@ -435,6 +439,13 @@ These tables back the VC-first protocol described in
   and the `credential_id` populated once the VC is auto-issued, so the
   observer neither re-issues nor misses mints that occurred while
   offline.
+- **`completion_claims`** — Idempotent local completion receipts. Migration
+  091 adds the exact document CID/version, canonical endorsement binding, and
+  source `enrollment_id`; legacy rows remain null rather than inheriting a
+  current course version.
+- **`completion_witness_requests`** — Durable local intents for optional
+  Cardano completion witnesses, keyed to a completion claim and handed off to
+  the exact-byte submission journal.
 - **Migration 29 additions on `credentials`** — `suspended`,
   `suspended_at`, `suspended_until`, `suspended_reason`, plus an index
   on `supersedes`.
@@ -495,7 +506,8 @@ erDiagram
     credentials ||--o{ credential_challenges : challenged
     credential_challenges ||--o{ credential_challenge_votes : votes
     completion_observations ||--o| credentials : "auto-issues"
-    completion_attestation_requirements ||--o{ completion_attestations : "gated by"
+    enrollments ||--o{ completion_claims : "exact source"
+    completion_claims ||--o{ course_completion_endorsements : "endorsed by"
     reputation_assertions ||--o{ reputation_snapshots : anchors
 
     integrity_sessions ||--o{ integrity_snapshots : snapshots

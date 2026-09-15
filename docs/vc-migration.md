@@ -41,6 +41,12 @@ cutover and that current state.
   pre-launch storage pending cleanup migration D03.
 - Plugin-attestation ingest/status IPC and inbound persistence. The reserved
   gossip topic remains subscribed for compatibility but grants no authority.
+- Migration 042's mutable `completion_attestation_requirements` and
+  transaction-hash-only `completion_attestations` tables, together with their
+  set/remove/submit/status IPC. Migration 091 drops the tables.
+- The registered `submit_completion_witness` IPC that accepted a completion
+  element list from its caller. `claim_course_completion` is the authoritative
+  path and reconstructs its inputs from persisted passing submissions.
 
 **New:**
 
@@ -50,6 +56,11 @@ cutover and that current state.
 - `VerifiableCredential` struct gains an optional `witness` field
   carrying those three pieces of on-chain authorization state. The
   JWS covers the witness block when present.
+- Course-document v2 signs the author DID and optional bounded completion
+  policy. New enrollments freeze the verified document CID/version/policy;
+  completion claims and endorsements bind that exact snapshot.
+- `course_completion_endorsements` stores only artifacts accepted by the
+  shared I/O-free verifier. Each authorized attestor is counted once.
 
 **Staying:**
 
@@ -67,14 +78,14 @@ cutover and that current state.
   `vote_minting`) — historical deployments remain, while release authority is
   gated on explicitly pinned governance genesis and future committee outcome
   certificates.
-- `completion_attestation_requirements` and `completion_attestations`.
 
 ## New conceptual model
 
 1. A learner's identity is a `did:key` Ed25519 derived from their
    BIP-39 mnemonic (unchanged).
 2. Course elements are gradeable; `claim_course_completion` assembles
-   completion leaves from the learner's graded `element_submissions`
+   completion leaves from the learner's persisted graded
+   `element_submissions` for the exact verified enrollment
    (**implemented**).
 3. Element leaves aggregate to a course-completion Merkle root that is
    verified against the registered course template (gradeable elements
@@ -127,7 +138,7 @@ cutover and that current state.
   asset_name_hex)`.
 - `src-tauri/src/commands/auto_issuance.rs` — self-signs a
   `SelfAssertion` VC for each pending observation with the `Witness`
-  block populated. Attestation gate below.
+  block populated. Instructor endorsement is tracked independently.
 - `src-tauri/src/domain/completion.rs` — `element_leaf` /
   `merkle_root` that match the Aiken algorithm byte-for-byte.
 - `src-tauri/src/cardano/completion_tx_builder.rs` — Conway tx
@@ -136,18 +147,21 @@ cutover and that current state.
   populated (deployed to preprod 2026-05-22, block 4736927).
 - Migration 041 adds `completion_observations`.
 - `src-tauri/src/commands/completion.rs` — frontend IPC:
-  `preview_completion_root`, `submit_completion_witness`.
+  `preview_completion_root`, `get_course_completion_status`, and
+  `claim_course_completion`. The write path accepts no caller-built element
+  list.
 
 ## Session 3 additions — rebuilt subsystems
 
 - **Governance + opinion gating** (task #9): queries read the
   proficiency level out of `signed_vc_json` via `json_extract`;
   opinions require `apply+` credentials under the target subject.
-- **Attestation** (task #17): rebuilt at
-  `commands::attestation` + `completion_attestation_requirements` +
-  `completion_attestations` tables (migration 042). Assessors sign
-  the witness tx hash; the auto-issuance pipeline refuses to emit
-  until the DAO-configured threshold of valid signatures is present.
+- **Attestation** (historical task #17): migration 042 keyed mutable
+  requirements by course ID and signed only the witness transaction hash.
+  Assessment-remediation T02 replaced this with an author-signed policy on the
+  exact course document, a canonical learner/course/version/evidence/network
+  binding, shared verifier, and `course_completion_endorsements` persistence
+  in migration 091. Learner self-claims do not wait for an instructor.
 - **Reputation engine** (task #15): rebuilt at
   `evidence::reputation`. `on_credential_accepted` is the single
   entry point, called after every issuance path. Learner rows
@@ -171,37 +185,36 @@ cutover and that current state.
    Blockfrost for new mints under
    `ALEXANDRIA_COMPLETION_POLICY_ID` and writes
    `completion_observations` rows.
-2. `commands::auto_issuance::tick(&conn, &learner_key)` — emits
-   VCs for observations whose attestation requirement is satisfied.
+2. `commands::auto_issuance::tick(&conn, &learner_key)` — emits the learner's
+   self-signed witnessed VC for matching local observations. Instructor
+   endorsement is a separate exact-binding artifact.
 
 Both are silent no-ops if the env var is unset or no profile is
 currently unlocked, matching the posture of the other cardano queues.
 
-## Seed updates
+## Seed status
 
-Migration-time SQL seeds (`db::seed`) gain:
-- One demo `completion_attestation_requirements` row on
-  `course_civics_101` (required_attestors = 2).
-- One pending `completion_observations` row so the frontend can
-  exercise the "awaiting attestation" state.
-- One demo `completion_attestations` row that partially satisfies
-  the requirement.
+The former fake requirement and attestation rows were removed. Product seed
+data does not fabricate an instructor signature. The planned demo-world
+builder must create course policies and endorsements with the actual persona
+keys through the real publication and import paths.
 
 ## Frontend wiring
 
-**Done.** The credential pages are rewired against the VC IPC surface
-(`list_credentials`, `preview_completion_root`,
-`submit_completion_witness`, `claim_course_completion`,
-`list_reputation_rows`, `get_reputation`,
-`get_completion_attestation_status`, etc.), and the frontend exposes a
-"Claim Credential" affordance that drives the completion-witness flow.
+The credential pages use the VC IPC surface, and the learner UI calls
+`claim_course_completion`. Backend commands now support exact endorsement
+request export, local authorized signing, verified import, and threshold
+status. The author policy editor and explicit human review/import UI are still
+pending.
 
 ## Deploy prerequisites
 
 The auto-issuance path, credential-sourced reputation engine
-(`evidence/reputation.rs`), completion attestation
-(`commands::attestation`), issuer-bound status-list lifecycle, and frontend VC
-surface ship. Credential challenges do not.
+(`evidence/reputation.rs`), exact endorsement backend
+(`commands::attestation`), issuer-bound status-list lifecycle, and learner VC
+surface ship. Credential challenges do not. Hosted or peer delivery of an
+endorsement request must authenticate the addressed instructor before it is a
+complete acquisition flow.
 
 Eight retained Aiken/Plutus v3 reference scripts are deployed on
 **preprod testnet** (2026-05-22, block 4736927) via

@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Format-version-2 public sidecar `profiles_index.json` — immutable network IDs, display names, and avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, governance, verifiable credentials) across 90 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, governance, verifiable credentials) across 91 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -349,16 +349,25 @@ document CID and format version, completion root, evidence identities and an
 optional chain-witness transaction hash. The shared I/O-free verifier rejects
 unlisted or duplicate attestors and any changed binding field.
 
-New course publications emit v2 canonical JSON. Version 1 documents remain
-readable and retain their original signing bytes; they cannot carry a
-completion policy. No policy means the completion is a learner self-claim.
+New course publications emit v2 documents whose signed payload uses canonical
+JSON and whose author DID must match the embedded signing key. Version 1
+documents remain readable and retain their original signing bytes; they cannot
+carry a completion policy. No policy means the completion is a learner
+self-claim.
 
-The application has not yet connected this format to enrollment snapshots or
-an instructor request/import flow. Migration-042's mutable per-course
-requirement rows and raw transaction-hash signatures are still present during
-that transition and must not be treated as the final endorsement authority.
-T02 removes that IPC and storage path once exact enrollment binding and genuine
-endorsement acquisition are wired.
+Migration 091 freezes the verified course-document CID, format version, and
+canonical completion policy on each new enrollment. Completion claims bind that
+snapshot, the learner, the root, evidence, network, and exact enrollment. The
+registered claim path reconstructs gradeable evidence from persisted passing
+submissions; the former caller-supplied witness command is retired.
+
+The application can export the canonical endorsement request, sign it with an
+authorized local instructor key, import an endorsement only after shared
+verification, and report a distinct-attestor threshold. Migration 091 drops
+migration 042's mutable per-course requirement and raw transaction-hash
+signature tables without rebinding historical rows. The author policy editor,
+human review flow, authenticated addressed delivery, and use of a satisfied
+threshold in privilege-bearing trust decisions remain implementation work.
 
 ### 5.6 Credential Status Authority
 
@@ -1979,7 +1988,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4 | Pages, reusable components, and singleton composables |
-| Database | SQLite (rusqlite, bundled) | Local encrypted store, 90 migrations |
+| Database | SQLite (rusqlite, bundled) | Local encrypted store, 91 migrations |
 | Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
@@ -1994,7 +2003,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 90.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 91.
 
 | Domain | Tables |
 |--------|--------|
@@ -2010,7 +2019,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
 | Retired challenges | `credential_challenges`, `credential_challenge_votes` remain as legacy storage; the earlier evidence tables were dropped in migration 040 |
-| Completion attestation | `completion_attestation_requirements`, `completion_attestations` |
+| Completion endorsement | `completion_claims`, `course_completion_endorsements`; exact policy/CID snapshots are stored on `enrollments` |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
 | Governance (on-chain) | `onchain_governance_queue` |
