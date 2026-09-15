@@ -246,6 +246,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/community/import',
+      name: 'community-import',
+      component: () => import('@/pages/governance/ImportGenesis.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/community/:id',
       name: 'community-detail',
       component: () => import('@/pages/governance/DaoDetail.vue'),

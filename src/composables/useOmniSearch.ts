@@ -1,5 +1,6 @@
 import { ref, computed, readonly } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { onProfileLocked } from '@/composables/useProfiles'
 import type { Course, CatalogEntry, SkillInfo, DaoInfo, Classroom } from '@/types'
 
 /**
@@ -46,6 +47,7 @@ const recents = ref<OmniSearchResult[]>(loadRecents())
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let activeQueryToken = 0
+let profileGeneration = 0
 
 // ── Public composable ──────────────────────────────────────────────
 
@@ -77,6 +79,7 @@ export function useOmniSearch() {
   }
 
   function close() {
+    activeQueryToken += 1
     isOpen.value = false
     query.value = ''
     results.value = []
@@ -93,6 +96,7 @@ export function useOmniSearch() {
     if (debounceTimer) clearTimeout(debounceTimer)
     const trimmed = q.trim()
     if (!trimmed) {
+      activeQueryToken += 1
       results.value = []
       loading.value = false
       return
@@ -130,6 +134,7 @@ export function useOmniSearch() {
 
   async function runQuery(q: string) {
     const token = ++activeQueryToken
+    const generation = profileGeneration
     loading.value = true
     try {
       const [skills, courses, catalog, daos, classrooms] = await Promise.all([
@@ -140,7 +145,7 @@ export function useOmniSearch() {
         invoke<Classroom[]>('classroom_list').catch(() => []),
       ])
 
-      if (token !== activeQueryToken) return // a newer query superseded this
+      if (token !== activeQueryToken || generation !== profileGeneration) return
 
       const lower = q.toLowerCase()
       const merged: OmniSearchResult[] = [
@@ -160,7 +165,7 @@ export function useOmniSearch() {
       results.value = merged
       selectedIndex.value = 0
     } finally {
-      if (token === activeQueryToken) loading.value = false
+      if (token === activeQueryToken && generation === profileGeneration) loading.value = false
     }
   }
 
@@ -275,7 +280,8 @@ function loadRecents(): OmniSearchResult[] {
   }
 }
 
-function saveRecents(items: OmniSearchResult[]) {
+function saveRecents(items: OmniSearchResult[], generation: number) {
+  if (generation !== profileGeneration) return
   if (typeof window === 'undefined') return
   try {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(items))
@@ -286,6 +292,7 @@ function saveRecents(items: OmniSearchResult[]) {
   // follow the user across their other devices.
   void (async () => {
     const { setSetting } = await import('./useSettings').then((m) => m.useSettings())
+    if (generation !== profileGeneration) return
     setSetting('ui.omni_recents', JSON.stringify(items)).catch(() => {
       /* no profile yet — settings store rejects writes pre-unlock */
     })
@@ -294,9 +301,11 @@ function saveRecents(items: OmniSearchResult[]) {
 
 /** Reconcile in-memory recents with the per-profile settings store. */
 export async function initOmniRecentsFromSettings(): Promise<void> {
+  const generation = profileGeneration
   const mod = await import('./useSettings')
   const { entries, initialize } = mod.useSettings()
   await initialize()
+  if (generation !== profileGeneration) return
 
   // Clear localStorage + in-memory cache up-front so a previous
   // profile's recents do not bleed into a fresh one before sync
@@ -324,11 +333,30 @@ export async function initOmniRecentsFromSettings(): Promise<void> {
 }
 
 function addRecent(item: OmniSearchResult) {
+  const generation = profileGeneration
   const existing = recents.value.filter(r => r.id !== item.id)
   const next = [item, ...existing].slice(0, MAX_RECENTS)
   recents.value = next
-  saveRecents(next)
+  saveRecents(next, generation)
 }
+
+onProfileLocked(() => {
+  profileGeneration += 1
+  activeQueryToken += 1
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = null
+  isOpen.value = false
+  query.value = ''
+  results.value = []
+  loading.value = false
+  selectedIndex.value = 0
+  recents.value = []
+  try {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(RECENT_KEY)
+  } catch {
+    // Local storage may be disabled.
+  }
+})
 
 // ── Utils ──────────────────────────────────────────────────────────
 

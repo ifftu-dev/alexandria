@@ -84,6 +84,12 @@
     "unknownAuthor": "Unknown"
   },
   "completion": {
+    "witnessPending": "Optional witness pending. Your local claims are saved; processing resumes while this profile is unlocked.",
+    "witnessSubmitted": "Witness submitted; confirmation pending. Your local claims are ready.",
+    "witnessUnknown": "Witness outcome unknown. Checking the original transaction; no replacement will be created.",
+    "witnessConfirmed": "Optional witness confirmed on Cardano.",
+    "witnessFailed": "The witness transaction failed on-chain. Local claims are preserved; no replacement will be created.",
+    "witnessUnavailable": "This completion cannot receive a new witness. Local claims are preserved; any existing witness remains separate.",
     "achievementUnlocked": "Achievement unlocked",
     "tutorialComplete": "Tutorial complete",
     "courseComplete": "Course complete",

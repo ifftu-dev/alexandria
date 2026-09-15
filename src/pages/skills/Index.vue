@@ -17,6 +17,12 @@ import {
 import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
 import { useGoals } from '@/composables/useGoals'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
+import {
+  createForceGraph,
+  type ForceGraphInstance,
+  type SkillGraphLink,
+  type SkillGraphNode,
+} from '@/utils/forceGraph'
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -152,12 +158,12 @@ const lockedSkillsCount = computed(() =>
 
 // ============ Force-graph (same renderer as sidebar/modal) ============
 const graphContainerRef = ref<HTMLElement | null>(null)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const forceGraphInstance = ref<any>(null)
+let forceGraphInstance: ForceGraphInstance | null = null
 let graphResizeObserver: ResizeObserver | null = null
+let graphGeneration = 0
 const { buildAdjacency, createHoverHandler, renderNode, renderLink, nodePointerAreaPaint } = useSkillGraphHover()
 
-const forceGraphNodes = computed(() => {
+const forceGraphNodes = computed<SkillGraphNode[]>(() => {
   const earned = earnedSkillIdSet.value
   // Full taxonomy (respecting the active field/subject/search filter),
   // matching the sidebar graph. Status colours every node.
@@ -173,23 +179,23 @@ const forceGraphNodes = computed(() => {
 })
 
 function destroyForceGraph() {
+  graphGeneration++
   graphResizeObserver?.disconnect()
   graphResizeObserver = null
-  if (forceGraphInstance.value) {
-    forceGraphInstance.value._destructor?.()
-    forceGraphInstance.value = null
+  if (forceGraphInstance) {
+    forceGraphInstance._destructor()
+    forceGraphInstance = null
   }
 }
 
 async function initForceGraph() {
-  if (!graphContainerRef.value || !forceGraphNodes.value.length) return
+  const container = graphContainerRef.value
+  if (!container || !forceGraphNodes.value.length) return
   destroyForceGraph()
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ForceGraph = (await import('force-graph')).default as any
+  const generation = graphGeneration
 
   const visibleIds = new Set(forceGraphNodes.value.map(n => n.id))
-  const links: Array<{ source: string; target: string }> = []
+  const links: SkillGraphLink[] = []
   for (const node of forceGraphNodes.value) {
     for (const prereqId of node.prerequisites) {
       if (visibleIds.has(prereqId)) {
@@ -197,12 +203,20 @@ async function initForceGraph() {
       }
     }
   }
-  buildAdjacency(links)
+  buildAdjacency(links.map(link => ({
+    source: String(link.source),
+    target: String(link.target),
+  })))
 
-  const width = graphContainerRef.value.clientWidth
-  const height = graphContainerRef.value.clientHeight
+  const width = container.clientWidth
+  const height = container.clientHeight
 
-  const graph = ForceGraph()(graphContainerRef.value)
+  const graph = await createForceGraph(container)
+  if (generation !== graphGeneration || container !== graphContainerRef.value) {
+    graph._destructor()
+    return
+  }
+  graph
     .width(width)
     .height(height)
     .graphData({ nodes: forceGraphNodes.value, links })
@@ -230,7 +244,7 @@ async function initForceGraph() {
   graph.d3Force('charge')?.strength(-80)
   graph.d3Force('link')?.distance(50)
 
-  forceGraphInstance.value = graph
+  forceGraphInstance = graph
 
   graphResizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
@@ -238,7 +252,7 @@ async function initForceGraph() {
       graph.height(entry.contentRect.height)
     }
   })
-  graphResizeObserver.observe(graphContainerRef.value)
+  graphResizeObserver.observe(container)
 }
 
 // Init/destroy the force graph when switching to/from the graph tab

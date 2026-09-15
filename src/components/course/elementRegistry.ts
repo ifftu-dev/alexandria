@@ -1,6 +1,6 @@
 // Element dispatch registry for the Player.
 //
-// Phase 0 of the plugin system (see /Users/hack/.claude/plans/prancy-bubbling-grove.md):
+// Phase 0 of the plugin system (see docs/plugins.md):
 // replaces the v-if chain in Player.vue with a typed registry. Phase 1+ will
 // register plugin-loaded components through `registerElementBinding` so the
 // dispatch path is identical for built-ins and community plugins.

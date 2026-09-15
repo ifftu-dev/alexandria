@@ -1,4 +1,9 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'
+import { getProfileSessionToken } from './profileSession'
+import profileCommandPolicy from './profile-command-policy.json'
+import type { TauriCommand } from '@/generated/tauri-commands'
+
+const unscopedCommands = new Set(Object.keys(profileCommandPolicy.unscoped_commands))
 
 /**
  * Composable that bridges the Vue frontend to the Rust backend via Tauri IPC.
@@ -20,8 +25,15 @@ export function useLocalApi() {
    * @returns       - The command's return value, deserialized from JSON
    * @throws        - String error message from the Rust side
    */
-  async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-    return tauriInvoke<T>(command, args)
+  async function invoke<T>(command: TauriCommand, args?: Record<string, unknown>): Promise<T> {
+    const session = getProfileSessionToken()
+    const result = await tauriInvoke<T>(command, args, {
+      headers: session ? { 'x-alexandria-profile-session': session } : {},
+    })
+    if (!unscopedCommands.has(command) && session !== getProfileSessionToken()) {
+      throw new Error('Profile session changed before the command completed')
+    }
+    return result
   }
 
   return { invoke }

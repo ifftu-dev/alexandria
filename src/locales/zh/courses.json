@@ -84,6 +84,12 @@
     "unknownAuthor": "未知"
   },
   "completion": {
+    "witnessPending": "可选见证待处理。本地声明已保存；此个人资料解锁时将继续处理。",
+    "witnessSubmitted": "见证已提交，等待确认。本地声明已就绪。",
+    "witnessUnknown": "见证结果未知。正在核查原始交易，不会创建替代交易。",
+    "witnessConfirmed": "可选见证已在 Cardano 上确认。",
+    "witnessFailed": "见证交易在链上失败。本地声明已保留，不会创建替代交易。",
+    "witnessUnavailable": "此次完成无法获得新见证。本地声明已保留；任何已有见证将保持独立。",
     "achievementUnlocked": "成就解锁",
     "tutorialComplete": "教程完成",
     "courseComplete": "课程完成",

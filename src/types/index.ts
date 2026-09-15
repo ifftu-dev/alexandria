@@ -375,7 +375,7 @@ export interface VerificationResult {
 
 // ---- Snapshots ----
 
-export type SnapshotStatus = 'pending' | 'building' | 'submitted' | 'confirmed' | 'failed'
+export type SnapshotStatus = 'pending' | 'building' | 'outcome_unknown' | 'submitted' | 'confirmed' | 'failed' | 'failed_on_chain'
 
 export interface SnapshotRecord {
   id: string
@@ -391,6 +391,10 @@ export interface SnapshotRecord {
   error_message: string | null
   snapshot_at: string
   confirmed_at: string | null
+  snapshot_format: 'legacy_cip68' | 'credential_hash_vc'
+  snapshot_scope: 'legacy_declared_window' | 'as_of_all_eligible_evidence'
+  computation_spec: string | null
+  credential_id: string | null
 }
 
 export interface CreateSnapshotParams {
@@ -423,6 +427,57 @@ export interface DaoMember {
   stake_address: string
   role: string
   joined_at: string
+}
+
+export interface GovernanceGenesisLocator {
+  version: number
+  dao_id: string
+  content_hash: string
+  locations: string[]
+}
+
+export interface GenesisMemberPreview {
+  member_id: string
+  identity_public_key_hex: string
+  consensus_public_key_hex: string
+  governance_public_key_hex: string
+}
+
+export interface GenesisPreview {
+  dao_id: string
+  genesis_hash: string
+  name: string
+  scope_type: string
+  scope_id: string
+  protocol_version: number
+  rules_version: string
+  rules_hash: string
+  proposal_approval_numerator: number
+  proposal_approval_denominator: number
+  minimum_turnout_count: number
+  committee_size: number
+  receipt_threshold: number
+  outcome_threshold: number
+  qualification_policy_version: string
+  accepted_issuers: string[]
+  accepted_assessment_evidence: string[]
+  cometbft_chain_id: string
+  initial_epoch: number
+  initial_height: number
+  activation_time_unix: number
+  members: GenesisMemberPreview[]
+}
+
+export interface RetrievedGenesisPreview {
+  locator: GovernanceGenesisLocator
+  resolved_from: string
+  genesis_json: string
+  preview: GenesisPreview
+}
+
+export interface PinGenesisResponse {
+  preview: GenesisPreview
+  newly_pinned: boolean
 }
 
 /** Returned by `sentinel_dao_get_info`. */
@@ -901,7 +956,7 @@ export type FlagType =
 
 export interface IntegritySession {
   id: string
-  enrollment_id: string
+  enrollment_id: string | null
   status: string
   integrity_score: number | null
   critical_count: number
@@ -1090,7 +1145,6 @@ export interface SignalData {
   face_consistency?: number
   tab_switches: number
   unfocused_ms: number
-  devtools_detected: boolean
   paste_events: number
   pasted_chars: number
   environment_changed: boolean
@@ -1118,8 +1172,6 @@ export interface BehavioralProfile {
   }
   lastUpdated: number
   aiModels?: {
-    keystrokeAutoencoder?: Record<string, unknown>
-    mouseCNN?: Record<string, unknown>
     faceEnrollment?: {
       vector: number[]
       frameCount: number
@@ -1706,7 +1758,7 @@ export interface DerivedSkillState {
 
 // ============================================================
 // Community plugin system — Phase 1
-// See /Users/hack/.claude/plans/prancy-bubbling-grove.md
+// See docs/plugins.md
 // ============================================================
 
 /** Capabilities a plugin can declare. Only these are recognized at the
@@ -2029,6 +2081,7 @@ export interface StartedAttempt {
   skill_id: string
   pass_threshold: number
   questions: ServedQuestion[]
+  draft_answers: SubmittedAnswer[]
 }
 
 /** One submitted answer: the served option positions the learner selected. */
@@ -2078,3 +2131,18 @@ export type GoalInput =
   | { kind: 'job_role'; key: string }
   | { kind: 'jd_text'; text: string }
   | { kind: 'jd_link'; url: string }
+export type CompletionWitnessStatus = 'not_requested' | 'pending' | 'submitted' | 'outcome_unknown' | 'confirmed' | 'failed_on_chain' | 'unavailable'
+
+export interface CompletionWitnessState {
+  status: CompletionWitnessStatus
+  tx_hash: string | null
+}
+
+export interface CompletionWitnessResult {
+  claim_id: string
+  witness_status: CompletionWitnessStatus
+  tx_hash: string
+  completion_root: string
+  leaves: string[]
+  credential_ids: string[]
+}

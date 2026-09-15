@@ -30,9 +30,8 @@ async function loadContent() {
   loading.value = true
   error.value = null
   try {
-    const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: props.contentCid })
-    const decoder = new TextDecoder()
-    content.value = sanitizeHtml(decoder.decode(new Uint8Array(bytes)))
+    const text = await invoke<string>('content_resolve_text', { identifier: props.contentCid })
+    content.value = sanitizeHtml(text)
   } catch (e: unknown) {
     error.value = t('courses.text.loadError', { error: String(e) })
     content.value = ''

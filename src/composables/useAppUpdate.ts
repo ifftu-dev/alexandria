@@ -1,9 +1,11 @@
 import { readonly, ref } from 'vue'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import { getVersion } from '@tauri-apps/api/app'
 import { isMobilePlatform, currentPlatform } from '@/composables/usePlatform'
+
+const { invoke } = useLocalApi()
 
 /**
  * In-app auto-update flow (desktop only).

@@ -17,6 +17,7 @@ import { useProfiles } from '@/composables/useProfiles'
 import { usePlatform } from '@/composables/usePlatform'
 import { useOmniSearch } from '@/composables/useOmniSearch'
 import { useKeyboardShortcuts, formatCombo } from '@/composables/useKeyboardShortcuts'
+import { useDiagnostics } from '@/composables/useDiagnostics'
 
 defineProps<{ sidebarCollapsed: boolean }>()
 const emit = defineEmits<{ toggleSidebar: [] }>()
@@ -32,6 +33,7 @@ const { isMobilePlatform, isMac } = usePlatform()
 const omniSearch = useOmniSearch()
 const { shortcuts, registerAction } = useKeyboardShortcuts()
 const shortcutsHelpOpen = ref(false)
+const diagnostics = useDiagnostics()
 
 function openOmniSearch() {
   omniSearch.open()
@@ -137,6 +139,11 @@ function navigateFromMenu(path: string) {
   router.push(path)
 }
 
+function requestDiagnostics(): void {
+  userMenuOpen.value = false
+  void diagnostics.requestEntry().catch(e => console.warn('diagnostics entry failed:', e))
+}
+
 const switching = ref(false)
 
 async function handleSwitchProfile() {
@@ -146,11 +153,11 @@ async function handleSwitchProfile() {
   if (switching.value) return
   switching.value = true
   userMenuOpen.value = false
-  // Redirect to the picker immediately; lockProfile flips the local locked
-  // state up front and runs the slow backend teardown in the background.
-  router.replace('/profiles')
+  // The root lock screen hides private content immediately and keeps the
+  // picker unavailable until cleanup succeeds, including after a failure.
   try {
     await lockProfile()
+    await router.replace('/profiles')
   } catch (e) {
     console.warn('lock failed:', e)
   } finally {
@@ -416,6 +423,12 @@ const avatarEmoji = computed(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 {{ $t('nav.userMenu.settings') }}
+              </button>
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="requestDiagnostics">
+                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.75h4.5m-6 0h7.5l-.75 4.5 3.75 7.5A3 3 0 0116.07 20.25H7.93a3 3 0 01-2.68-4.5L9 8.25l-.75-4.5z" />
+                </svg>
+                {{ diagnostics.enabled.value ? $t('common.diagnostics.active') : $t('common.diagnostics.enter') }}
               </button>
             </div>
 

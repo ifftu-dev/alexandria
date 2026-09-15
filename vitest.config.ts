@@ -26,6 +26,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     include: [
+      'build/**/*.test.ts',
       'src/**/*.{test,spec}.ts',
       // Builtin plugin tests live next to their JS sources so they ship
       // with the bundle and can import its modules directly.

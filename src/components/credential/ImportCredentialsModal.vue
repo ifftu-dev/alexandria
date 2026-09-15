@@ -14,10 +14,12 @@
  */
 
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import { useI18n } from 'vue-i18n'
 
 import { AppButton, AppModal, AppTextarea } from '@/components/ui'
+
+const { invoke } = useLocalApi()
 
 interface ImportFailure {
   credentialId: string

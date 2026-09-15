@@ -84,6 +84,12 @@
     "unknownAuthor": "Desconocido"
   },
   "completion": {
+    "witnessPending": "Testimonio opcional pendiente. Tus declaraciones locales están guardadas; el proceso se reanuda mientras este perfil esté desbloqueado.",
+    "witnessSubmitted": "Testimonio enviado; confirmación pendiente. Tus declaraciones locales están listas.",
+    "witnessUnknown": "Resultado del testimonio desconocido. Se comprueba la transacción original; no se creará otra.",
+    "witnessConfirmed": "Testimonio opcional confirmado en Cardano.",
+    "witnessFailed": "La transacción del testimonio falló en la cadena. Las declaraciones locales se conservan; no se creará otra transacción.",
+    "witnessUnavailable": "Esta finalización no puede recibir un nuevo testimonio. Las declaraciones locales se conservan; cualquier testimonio existente permanece separado.",
     "achievementUnlocked": "Logro desbloqueado",
     "tutorialComplete": "Tutorial completado",
     "courseComplete": "Curso completado",

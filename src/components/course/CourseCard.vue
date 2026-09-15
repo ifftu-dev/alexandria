@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import type { Course } from '@/types'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { ProvenanceBadge } from '@/components/ui'
+
+const { invoke } = useLocalApi()
 
 const router = useRouter()
 

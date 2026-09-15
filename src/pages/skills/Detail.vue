@@ -108,8 +108,12 @@ onMounted(async () => {
       const claim = extractSkillClaim(vc.credentialSubject)
       return claim !== null && claim.skillId === skillId
     })
-  } catch (e: any) {
-    error.value = typeof e === 'string' ? e : e?.message ?? t('skills.detail.loadError')
+  } catch (e: unknown) {
+    error.value = typeof e === 'string'
+      ? e
+      : e instanceof Error
+        ? e.message
+        : t('skills.detail.loadError')
     console.error('Failed to load skill:', e)
   } finally {
     loading.value = false

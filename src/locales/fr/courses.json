@@ -84,6 +84,12 @@
     "unknownAuthor": "Inconnu"
   },
   "completion": {
+    "witnessPending": "Témoignage facultatif en attente. Vos déclarations locales sont enregistrées ; le traitement reprend lorsque ce profil est déverrouillé.",
+    "witnessSubmitted": "Témoignage soumis ; confirmation en attente. Vos déclarations locales sont prêtes.",
+    "witnessUnknown": "Résultat du témoignage inconnu. Vérification de la transaction originale ; aucune transaction de remplacement ne sera créée.",
+    "witnessConfirmed": "Témoignage facultatif confirmé sur Cardano.",
+    "witnessFailed": "La transaction du témoignage a échoué sur la chaîne. Les déclarations locales sont conservées ; aucune transaction de remplacement ne sera créée.",
+    "witnessUnavailable": "Cette réussite ne peut pas recevoir de nouveau témoignage. Les déclarations locales sont conservées ; tout témoignage existant reste distinct.",
     "achievementUnlocked": "Réussite débloquée",
     "tutorialComplete": "Tutoriel terminé",
     "courseComplete": "Cours terminé",
