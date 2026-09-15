@@ -18,6 +18,7 @@ pub mod course;
 pub mod did;
 pub mod governance;
 pub mod hash;
+pub mod qualification;
 pub mod talent;
 pub mod trust;
 pub mod vc;

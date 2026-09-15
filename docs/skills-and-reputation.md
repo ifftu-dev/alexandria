@@ -149,6 +149,33 @@ ambiguous stored completion evidence is an error rather than a lower trust
 state. These states describe provenance only. None of them grants a privilege;
 T03 adds the policy-qualified state that privilege checks will require.
 
+#### Action-to-policy matrix (T03)
+
+Each action names the evidence it requires and what happens when no policy
+applies. "Pinned policy" means a subject qualification policy whose exact
+canonical bytes match a digest in the network profile's
+`subject_qualification_policy_digests`; discovery, a course author's signature,
+a login, or a local row never makes a policy applicable.
+
+| Action | Code paths | Required evidence | Authority | No applicable policy |
+|---|---|---|---|---|
+| Private learning progress | enrollments, element progress, notes | none beyond the local profile | none | always allowed |
+| Visible credential provenance | `get_credential_trust` | trust classification of the signed credential | none; display only | provenance still shown at its own level |
+| Field-opinion posting | `publish_opinion`, inbound `handle_opinion_message`, `promote_pending_opinions`, `list_eligible_subject_fields_for_posting` | signed skill credential whose subject is the signing actor, level at or above the policy minimum, skill in the built-in taxonomy under the field, and either an accepted issuer's signature or an exact course endorsement with enough accepted-issuer attestors | pinned policy for `opinion_posting` in that subject field | refused with an explanation; inbound messages referencing unknown or pending credentials stay queued, known unqualified ones are rejected |
+| Talent-index claims | `talent_index` | verified credentials only; no privilege is granted | none | claims show provenance, not approval |
+| Governance eligibility | legacy `check_proficiency` (test/debug `legacy-local-governance` builds only) | qualification policy bound to the pinned genesis/opening (G02/G06), evaluated at certified submission | committee genesis, not the network profile | not active; the legacy gate is deleted in D01 |
+| Role evidence | cloud role specification (C04) | signed organisation specification plus learner-signed result | organisation signature | out of scope for T03 |
+| Aggregation and reputation scoring | `evidence/reputation.rs`, `commands/aggregation.rs` | re-verified proofs; self-issued claims gain no independence weight | calculation version | later T03 slice |
+
+A policy lists accepted `did:key` issuers, permitted routes
+(`accepted_issuer`, `accepted_course_endorsement`), the governed subject fields,
+a minimum level, and the minimum number of accepted attestors for the
+course-endorsement route. At most one pinned policy may govern an action in a
+field. A self-claim never qualifies on its own, including one issued by an
+accepted issuer about themselves. Policy replacement is an explicit network
+profile change, not a background refresh, and no IPC command edits accepted
+issuers.
+
 Plugin grading has a narrower temporary rule. New credential issuance accepts
 only the exact manifest and grader bytes embedded for a bundled plugin. A
 matching CID string or a row in the legacy `plugin_attestations` table is
