@@ -480,7 +480,7 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates (exam/curriculum/job-role) |
 | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
-Until domain handlers consume verified committee outcome certificates (§10.2.1), the current implementation still subscribes to and validates the taxonomy, governance, goal-template, and question-bank topics, but its release-build handlers reject every inbound message on them before any database read or write, so no rows, sync-log entry, or UI event result. The earlier single-signer apply paths compile only in debug builds that enable an explicit legacy feature (`legacy-taxonomy-ratification`, `legacy-local-governance`, or `legacy-content-ratification`).
+Until domain handlers consume verified committee outcome certificates (§10.2.1), the current implementation still subscribes to and validates the taxonomy, governance, Sentinel prior, goal-template, and question-bank topics, but its handlers reject every inbound message on them before any database read or write, so no rows, sync-log entry, or UI event result. The earlier single-signer apply paths are deleted.
 
 All 15 topics MUST be subscribed on node startup. In addition, six
 request-response protocols (libp2p `request-response` + CBOR codec)
@@ -706,7 +706,7 @@ Skills carry references to external taxonomies (ESCO, O*NET) to support interope
 
 ### 8.3 Taxonomy Governance
 
-Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and old proofs remain valid across taxonomy versions. Backward-compatible parsing is required. Release builds currently disable legacy taxonomy ratification and reject inbound taxonomy gossip pending verified committee outcome certificates (§6.5).
+Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and old proofs remain valid across taxonomy versions. Backward-compatible parsing is required. The implementation has no local ratification path: the caller-declared ratification commands are deleted, the bundled public taxonomy is authoritative, and inbound taxonomy gossip is rejected before any database access (§6.5).
 
 ### 8.4 Content Ratification (Goal Templates & Question Banks)
 
@@ -717,7 +717,7 @@ Two further content types are DAO-ratified through the same committee-gated, ver
 
 Both follow propose → signed-vote → resolve → publish (content CID) → peers fetch + apply, mirroring taxonomy ratification. Genesis-ratified templates and banks are seeded so day-one offline use works before any gossip arrives.
 
-**Implementation status**: the legacy flow above accepts caller-supplied ratifiers and applies received version documents without a committee authority check, so it is not the approved five-of-seven committee model. Release builds disable it: `propose_goal_template_change`, `publish_goal_template_ratification`, `propose_question_bank_change`, `publish_question_bank_ratification`, and `apply_content_version` return a disabled error, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). The implementations compile only in debug builds with the `legacy-content-ratification` feature. Seeded templates and banks are unaffected.
+**Implementation status**: the earlier flow accepted caller-supplied ratifiers and applied received version documents without a committee authority check, so it was not the approved five-of-seven committee model. It is deleted: there are no content proposal, ratification or apply commands, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). Seeded templates and banks are unaffected.
 
 ---
 

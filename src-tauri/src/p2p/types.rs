@@ -38,6 +38,8 @@ pub const PEER_EXCHANGE_JSON_LIMITS: JsonLimits = JsonLimits {
 ///
 /// Each topic uses a versioned path to allow protocol upgrades.
 pub const TOPIC_CATALOG: &str = "/alexandria/catalog/1.0";
+/// Retired taxonomy update topic; every inbound message is rejected before
+/// any database access.
 pub const TOPIC_TAXONOMY: &str = "/alexandria/taxonomy/1.0";
 pub const TOPIC_GOVERNANCE: &str = "/alexandria/governance/1.0";
 pub const TOPIC_PROFILES: &str = "/alexandria/profiles/1.0";
@@ -85,14 +87,13 @@ pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0
 /// before any database access.
 pub const TOPIC_SENTINEL_PRIORS: &str = "/alexandria/sentinel-priors/1.0";
 
-/// Ratified goal-template versions — a DAO publishes a signed version
-/// document (goal → target-skill maps) here after a `goal_template_change`
-/// proposal is approved. Receivers apply it into `goal_templates`. Privileged.
+/// Retired goal-template version topic. It stays subscribed until the
+/// coordinated wire-protocol removal; every inbound message is rejected
+/// before any database access. Privileged.
 pub const TOPIC_GOAL_TEMPLATES: &str = "/alexandria/goal-templates/1.0";
-/// Ratified assessment question-bank versions — published after a
-/// `question_bank_change` proposal is approved. Receivers apply it into
-/// `question_banks` / `bank_questions`. The answer key travels inside the
-/// signed doc but is never re-exposed to the client. Privileged.
+/// Retired question-bank version topic. It stays subscribed until the
+/// coordinated wire-protocol removal; every inbound message is rejected
+/// before any database access. Privileged.
 pub const TOPIC_QUESTION_BANKS: &str = "/alexandria/question-banks/1.0";
 
 /// All gossip topics the node subscribes to.

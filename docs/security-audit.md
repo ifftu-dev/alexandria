@@ -131,7 +131,7 @@ The stress test at `stress.rs` explicitly acknowledges this: `"Freshness check d
 > except a debug build that enables `legacy-local-governance`; a release
 > build excludes the replacement path even with that feature. Inbound
 > taxonomy gossip, the other link in the escalation chain below, is likewise
-> rejected except in a debug build with `legacy-taxonomy-ratification`. A lasting fix requires verified committee outcome
+> rejected, and its apply path is deleted. A lasting fix requires verified committee outcome
 > certificates.
 
 When a `CommitteeUpdated` gossip announcement arrives, `handle_committee_updated` DELETE-and-replaces the entire committee membership for the DAO with zero authentication:

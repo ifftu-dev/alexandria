@@ -48,5 +48,16 @@
   "sentinel_set_kill_switch": "retired community classifier override",
   "sentinel_get_kill_switch": "retired community classifier override",
   "sentinel_blocklist_version": "retired community classifier override",
-  "sentinel_unblocklist_version": "retired community classifier override"
+  "sentinel_unblocklist_version": "retired community classifier override",
+  "propose_taxonomy_change": "retired ungated local taxonomy proposal write",
+  "preview_taxonomy_change": "retired taxonomy ratification surface",
+  "publish_taxonomy_ratification": "retired caller-declared taxonomy ratification",
+  "get_taxonomy_version": "retired taxonomy ratification surface",
+  "list_taxonomy_versions": "retired taxonomy ratification surface",
+  "validate_taxonomy_changes": "retired taxonomy ratification surface",
+  "propose_goal_template_change": "retired local content proposal authority",
+  "publish_goal_template_ratification": "retired caller-declared content ratification",
+  "propose_question_bank_change": "retired local content proposal authority",
+  "publish_question_bank_ratification": "retired caller-declared content ratification",
+  "apply_content_version": "retired caller-supplied content version apply"
 }

@@ -1,53 +1,29 @@
-//! Inbound handler for community-content version documents received on
-//! `/alexandria/goal-templates/1.0` and `/alexandria/question-banks/1.0`.
-//! Both carry a signed [`VersionDoc`] whose `kind` self-identifies the content
-//! type, so one handler serves both topics.
+//! Community-content gossip — `/alexandria/goal-templates/1.0` and
+//! `/alexandria/question-banks/1.0`.
 //!
-//! **Authority**: the network layer only proves that a registered identity
-//! signed the envelope. The document's `ratified_by` list and signature are
-//! declared by that sender, so they are not evidence of DAO ratification.
-//! Production rejects these documents until the handler consumes a verified
-//! committee outcome certificate. The old apply path is available only in an
-//! explicitly enabled development build.
+//! Caller-declared goal-template and question-bank ratification is deleted;
+//! the genesis templates and banks come from the seed. Both topics stay
+//! subscribed until the coordinated wire-protocol removal, and every inbound
+//! version document is rejected before any database access.
 
 use crate::db::Database;
-#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
-use crate::domain::content_ratification::{apply_version_doc, VersionDoc};
 use crate::p2p::types::SignedGossipMessage;
 
-/// Handle a received goal-template / question-bank version document.
+pub const LEGACY_CONTENT_GOSSIP_DISABLED: &str =
+    "content version gossip is retired; caller-declared goal-template and question-bank ratification is deleted";
+
+/// Reject a received goal-template / question-bank version document.
 pub fn handle_content_version_message(
-    db: &Database,
-    message: &SignedGossipMessage,
-) -> Result<usize, String> {
-    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
-    {
-        let _ = (db, message);
-        Err(crate::domain::content_ratification::LEGACY_CONTENT_RATIFICATION_DISABLED.into())
-    }
-
-    #[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
-    {
-        handle_legacy_content_version_message(db, message)
-    }
-}
-
-#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
-fn handle_legacy_content_version_message(
-    db: &Database,
-    message: &SignedGossipMessage,
-) -> Result<usize, String> {
-    let doc: VersionDoc = serde_json::from_slice(&message.payload)
-        .map_err(|e| format!("invalid content version doc: {e}"))?;
-    apply_version_doc(db.conn(), &doc)
+    _db: &Database,
+    _message: &SignedGossipMessage,
+) -> Result<(), String> {
+    Err(LEGACY_CONTENT_GOSSIP_DISABLED.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
-    use crate::p2p::types::TOPIC_GOAL_TEMPLATES;
-    use crate::p2p::types::TOPIC_QUESTION_BANKS;
+    use crate::p2p::types::{TOPIC_GOAL_TEMPLATES, TOPIC_QUESTION_BANKS};
 
     fn seeded_db() -> Database {
         let db = Database::open_in_memory().expect("in-memory db");
@@ -56,7 +32,7 @@ mod tests {
         db
     }
 
-    fn message(topic: &str, doc: &VersionDoc) -> SignedGossipMessage {
+    fn message(topic: &str, doc: &serde_json::Value) -> SignedGossipMessage {
         SignedGossipMessage {
             topic: topic.into(),
             payload: serde_json::to_vec(doc).unwrap(),
@@ -70,43 +46,41 @@ mod tests {
     }
 
     /// Rewrites the genesis JavaScript bank's answers and pass threshold.
-    fn hostile_question_bank_doc() -> VersionDoc {
-        VersionDoc {
-            kind: "question_bank_change".into(),
-            version: 99,
-            previous_cid: None,
-            ratified_by: vec!["stake_test1registered".into()],
-            ratified_at: "2026-01-01T00:00:00Z".into(),
-            signature: "self-declared".into(),
-            taxonomy_version: None,
-            content: serde_json::json!({
+    fn hostile_question_bank_doc() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "question_bank_change",
+            "version": 99,
+            "previous_cid": null,
+            "ratified_by": ["stake_test1registered"],
+            "ratified_at": "2026-01-01T00:00:00Z",
+            "signature": "self-declared",
+            "taxonomy_version": null,
+            "content": {
                 "banks": [{"id": "qb_js", "skill_id": "skill_javascript",
                            "label": "JS", "pass_threshold": 0.0, "draw_count": 1}],
                 "questions": [{"id": "bq_js1", "bank_id": "qb_js", "prompt": "?",
                                "options": ["a", "b"], "correct_indices": [0]}]
-            }),
-        }
+            },
+        })
     }
 
-    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
-    fn hostile_goal_template_doc() -> VersionDoc {
-        VersionDoc {
-            kind: "goal_template_change".into(),
-            version: 99,
-            previous_cid: None,
-            ratified_by: vec!["stake_test1registered".into()],
-            ratified_at: "2026-01-01T00:00:00Z".into(),
-            signature: "self-declared".into(),
-            taxonomy_version: None,
-            content: serde_json::json!({
+    fn hostile_goal_template_doc() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "goal_template_change",
+            "version": 99,
+            "previous_cid": null,
+            "ratified_by": ["stake_test1registered"],
+            "ratified_at": "2026-01-01T00:00:00Z",
+            "signature": "self-declared",
+            "taxonomy_version": null,
+            "content": {
                 "templates": [{"id": "gt_role_fe", "kind": "job_role",
                                "key": "frontend_engineer", "label": "Rewritten",
                                "skill_ids": []}]
-            }),
-        }
+            },
+        })
     }
 
-    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
     fn content_state(db: &Database) -> Vec<String> {
         [
             "SELECT group_concat(id || ':' || pass_threshold || ':' || draw_count || ':' || ratified, '|') FROM question_banks",
@@ -114,6 +88,7 @@ mod tests {
             "SELECT group_concat(id || ':' || label || ':' || skill_ids, '|') FROM goal_templates",
             "SELECT COUNT(*) FROM question_bank_versions",
             "SELECT COUNT(*) FROM goal_template_versions",
+            "SELECT COUNT(*) FROM sync_log",
         ]
         .iter()
         .map(|query| {
@@ -127,9 +102,8 @@ mod tests {
         .collect()
     }
 
-    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
     #[test]
-    fn production_handler_rejects_content_version_gossip_without_mutation() {
+    fn content_version_gossip_is_rejected_without_mutation() {
         let db = seeded_db();
         let before = content_state(&db);
 
@@ -138,27 +112,9 @@ mod tests {
             (TOPIC_GOAL_TEMPLATES, hostile_goal_template_doc()),
         ] {
             let error = handle_content_version_message(&db, &message(topic, &doc)).unwrap_err();
-            assert!(error.contains("verified committee certificates"), "{error}");
+            assert_eq!(error, LEGACY_CONTENT_GOSSIP_DISABLED);
         }
 
         assert_eq!(content_state(&db), before);
-    }
-
-    #[test]
-    fn legacy_handler_still_applies_version_documents() {
-        let db = seeded_db();
-        let doc = hostile_question_bank_doc();
-
-        handle_legacy_content_version_message(&db, &message(TOPIC_QUESTION_BANKS, &doc)).unwrap();
-
-        let threshold: f64 = db
-            .conn()
-            .query_row(
-                "SELECT pass_threshold FROM question_banks WHERE id = 'qb_js'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(threshold, 0.0);
     }
 }

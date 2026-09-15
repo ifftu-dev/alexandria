@@ -188,18 +188,19 @@ The registry guards messages whose stake address is checked downstream
 for authority. Today that's exactly the set returned by
 `p2p::registry::is_privileged_topic`:
 
-- `/alexandria/taxonomy/1.0` — DAO-ratified skill graph updates,
-  authority checked by `p2p::taxonomy::is_committee_member`.
-- `/alexandria/governance/1.0` — committee changes / proposal events.
-- `/alexandria/sentinel-priors/1.0` — Sentinel DAO threshold-signed
-  adversarial-prior announcements.
+- `/alexandria/taxonomy/1.0` — retired taxonomy updates; the handler
+  rejects every message.
+- `/alexandria/governance/1.0` — retired governance events; the handler
+  rejects every message.
+- `/alexandria/sentinel-priors/1.0` — retired Sentinel prior
+  announcements; the handler rejects every message.
 - `/alexandria/plugin-attestations/1.0` — Reserved compatibility topic. The
   envelope still receives registry validation and peer scoring, but there is
   no inbound persistence handler and it cannot approve a plugin or grader.
-- `/alexandria/goal-templates/1.0` — DAO-ratified goal-template
-  publications.
-- `/alexandria/question-banks/1.0` — DAO-ratified question-bank
-  publications.
+- `/alexandria/goal-templates/1.0` — retired goal-template
+  publications; the handler rejects every message.
+- `/alexandria/question-banks/1.0` — retired question-bank
+  publications; the handler rejects every message.
 
 The registry check still runs on every privileged topic. Separately, release
 builds currently reject every inbound message on the taxonomy, governance,

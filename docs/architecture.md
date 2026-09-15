@@ -467,7 +467,7 @@ path within the same process hangs indefinitely.
 | Topic | Path | Content |
 |-------|------|---------|
 | Catalog | `/alexandria/catalog/1.0` | Course announcements |
-| Taxonomy | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
+| Taxonomy | `/alexandria/taxonomy/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
 | Governance | `/alexandria/governance/1.0` | Proposals, elections, committee updates |
 | Profiles | `/alexandria/profiles/1.0` | User profile announcements |
 | Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, peers |
@@ -479,10 +479,10 @@ path within the same process hangs indefinitely.
 | Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
 | Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Reserved compatibility topic; subscribed and scored, but grants no authority and has no inbound persistence handler |
 | Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
-| Goal Templates | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates |
-| Question Banks | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
+| Goal Templates | `/alexandria/goal-templates/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
+| Question Banks | `/alexandria/question-banks/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
 
-The taxonomy, governance, Sentinel prior, goal-template, and question-bank topics are still subscribed and validated, but release builds reject every inbound message on them before any database read or write (no rows, sync-log entry, or UI event) until handlers consume verified committee outcome certificates. The governance and Sentinel prior handlers only reject. The legacy taxonomy and content apply paths compile only in debug builds with `legacy-taxonomy-ratification` or `legacy-content-ratification`.
+The taxonomy, governance, Sentinel prior, goal-template, and question-bank topics are still subscribed and validated, but release builds reject every inbound message on them before any database read or write (no rows, sync-log entry, or UI event) until handlers consume verified committee outcome certificates. Their apply paths are deleted; the handlers only reject.
 
 Six request-response protocols (libp2p `request-response` + CBOR
 codec) run alongside the gossip mesh and are not part of the
@@ -508,7 +508,7 @@ exchanges.
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
 5. **Schema** — strict JSON within the gossip payload limits (no duplicate keys, unsafe numbers, hostile nesting, oversized collections or trailing bytes); the envelope itself is decoded under its own limits before step 1
-6. **Authority** — in release builds the taxonomy, governance, Sentinel-prior, and content-governance (goal-template, question-bank) handlers reject every message pending verified committee outcome certificates; their legacy committee-membership checks against local governance tables compile only in debug builds with the matching `legacy-*` feature
+6. **Authority** — the taxonomy, governance, Sentinel-prior, goal-template and question-bank handlers reject every message; their legacy apply paths and committee-membership checks against local governance tables are deleted
 
 Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature, envelope-parse, or identity-binding failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
 
@@ -626,7 +626,6 @@ The optional witness transaction is durably checkpointed before submission. A ti
 | Module | Responsibility |
 |--------|---------------|
 | `evidence/reputation` | Distribution-based reputation from verified credentials; rows are revalidated by input fingerprint before they are read |
-| `evidence/taxonomy` | Bloom's level thresholds and skill graph traversal |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
 
 Exact course-version endorsement policy and artifacts are handled by
@@ -648,7 +647,7 @@ arbitrary peer cannot mutate another issuer's credential status.
 - Each DAO identity is the domain-separated BLAKE2b-256 digest of its founding-genesis core; it identifies a DAO only once all seven founders' acceptances verify
 - A founding genesis names seven independently controlled committee members; every member accepts the same core with its identity, consensus, and governance keys, and each member ID must be the `did:key` of that member's identity key
 - Operational submission receipts and final outcomes require five of the seven committee members
-- Committees gate taxonomy updates and DAO-ratified content (goal templates, question banks); until verified committee certificates are wired in, release builds disable the legacy local paths for both (see [Features](#features))
+- Taxonomy, goal-template and question-bank updates have no local ratification path; the bundled taxonomy and seeded content are authoritative until a certificate-backed update path exists (see [Features](#features))
 
 ### Trust bootstrap and import
 
@@ -671,7 +670,7 @@ Neither locator review nor retrieval auto-pins content. Retrieval races at most 
 | Founding-genesis verification and explicit local pinning | Implemented; governance activation is not yet wired to it |
 | Locator/deep-link review, verified retrieval, and QR display | Implemented; locator publishing/export and retrieval scheduling remain open |
 | Local elections, nominations, committee install, proposals, operator DAO creation, and the operator governance transaction queue | Deleted, including their pages, commands, gossip apply paths and Cardano builders; inbound governance gossip is rejected before any database access until the topic is removed |
-| Legacy goal-template and question-bank ratification | Development-only behind `legacy-content-ratification`; the five content commands return a disabled error in release and inbound version documents are rejected |
+| Legacy taxonomy, goal-template and question-bank ratification | Deleted, including the ungated taxonomy proposal write, the eleven commands and the gossip apply paths; inbound update and version documents are rejected before any database access until the topics are removed |
 | Per-vote / per-transition on-chain Plutus spends | Not used; the validators remain deployed upgrade artifacts |
 
 The earlier lean local/operator model is deleted: its local SQLite state
@@ -744,7 +743,7 @@ list.
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
 | tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
 | interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
-| taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
+| taxonomy | 9 | `list_skills`, `list_subjects`, `list_skill_graph_edges`, `tag_element_skill` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
 | settings | 3 | `list_settings`, `set_setting`, `reset_setting` — drives the unified per-profile settings store. See [`settings.md`](settings.md). |

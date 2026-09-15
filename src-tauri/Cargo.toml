@@ -13,14 +13,7 @@ default-run = "alexandria-node"
 [features]
 default = []
 dev-seed = []
-# Compile the obsolete caller-supplied taxonomy ratification path only for
-# explicit local compatibility testing. Code also checks `debug_assertions`.
-legacy-taxonomy-ratification = []
 legacy-integrity-attestation = []
-# Compile the obsolete caller-supplied goal-template/question-bank
-# ratification (IPC and inbound content-version gossip) only for explicit
-# local compatibility testing. Code also checks `debug_assertions`.
-legacy-content-ratification = []
 
 
 # Enable desktop tutoring video without acoustic echo cancellation.

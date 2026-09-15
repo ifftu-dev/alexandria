@@ -70,7 +70,6 @@ src-tauri/
     │   ├── assessment.rs   # Dynamic Sentinel-gated assessments: start attempt, host-side grade
     │   ├── goal_templates.rs # Resolve learner goals → skill graph; list/get DAO goal templates
     │   ├── skill_bootstrap.rs # Bootstrap skill graph from uploaded resume/transcript
-    │   ├── content_governance.rs # DAO propose/publish for goal templates + question banks
     │   ├── role_assessment.rs # Enterprise sponsor role/JD assessments
     │   ├── content.rs      # iroh blob operations
     │   ├── pinning.rs      # PinBoard commitments
@@ -92,7 +91,7 @@ src-tauri/
     ├── db/                 # SQLite, migrations, seed data
     ├── domain/             # Core types and VC domain models
     ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted)
-    ├── evidence/           # Reputation, challenge, taxonomy, thresholds logic
+    ├── evidence/           # Reputation, challenge, thresholds logic
     ├── goals/              # Goal → skill-graph resolver + on-device JD/resume parser
     │   ├── mod.rs
     │   └── jd_parser.rs    # Pure n-gram matcher over skill names + synonyms
@@ -142,7 +141,7 @@ src-tauri/
     │   ├── scoring.rs      # Per-topic GossipSub peer scoring (14 scored topics)
     │   ├── discovery.rs    # Relay bootstrap + namespace discovery
     │   ├── catalog.rs      # Catalog topic handler
-    │   ├── taxonomy.rs     # Taxonomy topic handler
+    │   ├── taxonomy.rs     # Retired taxonomy topic (rejects every message)
     │   ├── governance.rs   # Governance topic handler
     │   ├── opinions.rs     # Opinions topic handler
     │   ├── sync.rs         # Cross-device sync

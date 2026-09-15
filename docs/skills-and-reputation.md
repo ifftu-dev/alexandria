@@ -215,7 +215,7 @@ insufficient. General community-grader authorization remains pending G06.
 
 ### 6.2 Dynamic assessments
 
-Community-contributed, DAO-ratified **question banks** (migration 070; see [`protocol-specification.md`](./protocol-specification.md) §8.4) verify claimed skills:
+Seeded **question banks** (migration 070; see [`protocol-specification.md`](./protocol-specification.md) §8.4) verify claimed skills:
 
 - `assessment_start_attempt` draws a randomized, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`bank_questions.correct_indices`) is **never** included in the returned questions.
 - Sentinel auto-activates for every attempt (the learner is told), binding the attempt to an integrity session.
@@ -451,7 +451,7 @@ goal_skill_ids, kind?, source_key?, source_url?, resolution_provenance?,
 taxonomy_version?, created_at }`); a user may hold many.
 
 Beyond hand-picking skills, a goal can be **resolved** (`resolve_goal`,
-`commands::goal_templates`) from a DAO-ratified **goal template** — a
+`commands::goal_templates`) from a seeded **goal template** — a
 nationalized exam, a K-12 board-grade curriculum, or a job role
 (migration 069, seeded genesis set) — or from a job description: a public
 JD link is fetched and stripped to text, or pasted text is parsed
@@ -508,7 +508,7 @@ Mitigated via bounded attribution, evidence requirements, and IP colocation scor
 Governed by DAOs that mirror the knowledge taxonomy. One DAO per subject field or subject.
 
 ### B.2 Spec Evolution
-All taxonomy changes are versioned (`taxonomy_versions`), committee-gated, and ratified via 2/3 supermajority.
+Taxonomy changes are to be committee-gated and versioned. The implementation has no local ratification path; the bundled public taxonomy is authoritative until a certificate-backed update path exists.
 
 ### B.3 Compatibility
 Old proofs remain valid across taxonomy versions. Backward-compatible parsing required.

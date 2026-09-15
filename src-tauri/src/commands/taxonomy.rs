@@ -1,24 +1,18 @@
-//! IPC commands for taxonomy browsing and DAO ratification.
+//! IPC commands for the skill taxonomy.
 //!
-//! Read commands for the skill taxonomy:
+//!   - Bootstrap the bundled public taxonomy
 //!   - Browse subject fields, subjects, skills
 //!   - Query prerequisites and relations
+//!   - Tag course elements with skills
 //!
-//! Write commands for the taxonomy ratification workflow:
-//!   - Propose a taxonomy change via governance
-//!   - Preview what a change would affect
-//!   - Publish a ratified taxonomy version
-//!   - Query taxonomy versions
+//! Caller-declared taxonomy ratification is deleted; the taxonomy changes
+//! only with the bundled public taxonomy.
 
 use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::db::executor::DatabaseWorkload;
-use crate::domain::taxonomy::{
-    ProposeTaxonomyParams, TaxonomyPreview, TaxonomyPublishResult, TaxonomyVersion,
-};
-use crate::evidence::taxonomy;
 use crate::AppState;
 
 const BOOTSTRAP_PUBLIC_TAXONOMY_JSON: &str =
@@ -760,187 +754,6 @@ pub struct ElementSkillTag {
     pub weight: f64,
 }
 
-/// Propose a taxonomy change via a governance proposal.
-///
-/// Creates a draft proposal with category 'taxonomy_change' under
-/// the specified DAO. The changes are stored as JSON and will be
-/// applied when the proposal is approved and published.
-#[tauri::command]
-pub async fn propose_taxonomy_change(
-    state: State<'_, AppState>,
-    params: ProposeTaxonomyParams,
-) -> Result<String, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "taxonomy.change.propose",
-            move |db| {
-                let conn = db.conn();
-
-                // Get proposer address from local identity
-                let proposer: String = conn
-                    .query_row(
-                        "SELECT stake_address FROM local_identity WHERE id = 1",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(|e| format!("no local identity: {e}"))?;
-
-                // Validate changes first
-                let warnings = taxonomy::validate_changes(conn, &params.changes)?;
-                if !warnings.is_empty() {
-                    log::warn!("taxonomy proposal warnings: {:?}", warnings);
-                }
-
-                taxonomy::propose_taxonomy_change(
-                    conn,
-                    &params.dao_id,
-                    &params.title,
-                    params.description.as_deref(),
-                    &params.changes,
-                    &proposer,
-                )
-            },
-        )
-        .await
-}
-
-/// Preview what a taxonomy change would affect.
-///
-/// Returns counts of affected items and lists of new vs modified skill IDs.
-#[tauri::command]
-pub async fn preview_taxonomy_change(
-    state: State<'_, AppState>,
-    params: ProposeTaxonomyParams,
-) -> Result<TaxonomyPreview, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "taxonomy.change.preview",
-            move |db| taxonomy::preview_taxonomy_change(db.conn(), &params.changes),
-        )
-        .await
-}
-
-/// Legacy caller-supplied taxonomy ratification compatibility command.
-///
-/// The authority-bearing implementation is compiled only for debug builds
-/// that explicitly enable `legacy-taxonomy-ratification`. Every other build
-/// retains the IPC name for compatibility but fails closed until taxonomy
-/// publication consumes a verified committee outcome certificate.
-#[tauri::command]
-pub async fn publish_taxonomy_ratification(
-    state: State<'_, AppState>,
-    proposal_id: String,
-    ratified_by: Vec<String>,
-    signature: String,
-) -> Result<TaxonomyPublishResult, String> {
-    #[cfg(not(all(debug_assertions, feature = "legacy-taxonomy-ratification")))]
-    {
-        let _ = (state, proposal_id, ratified_by, signature);
-        Err("legacy taxonomy ratification is disabled; use a verified committee outcome certificate"
-            .into())
-    }
-
-    #[cfg(all(debug_assertions, feature = "legacy-taxonomy-ratification"))]
-    {
-        publish_taxonomy_ratification_legacy(state, proposal_id, ratified_by, signature).await
-    }
-}
-
-#[cfg(all(debug_assertions, feature = "legacy-taxonomy-ratification"))]
-async fn publish_taxonomy_ratification_legacy(
-    state: State<'_, AppState>,
-    proposal_id: String,
-    ratified_by: Vec<String>,
-    signature: String,
-) -> Result<TaxonomyPublishResult, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "taxonomy.ratification.publish-legacy",
-            move |db| {
-                publish_taxonomy_ratification_transactional(
-                    db.conn(),
-                    &proposal_id,
-                    &ratified_by,
-                    &signature,
-                )
-            },
-        )
-        .await
-}
-
-#[cfg(any(test, all(debug_assertions, feature = "legacy-taxonomy-ratification")))]
-fn publish_taxonomy_ratification_transactional(
-    conn: &rusqlite::Connection,
-    proposal_id: &str,
-    ratified_by: &[String],
-    signature: &str,
-) -> Result<TaxonomyPublishResult, String> {
-    crate::db::with_transaction(conn, || {
-        taxonomy::publish_taxonomy_ratification(conn, proposal_id, ratified_by, signature)
-    })
-}
-
-/// Get the current (latest) taxonomy version.
-#[tauri::command]
-pub async fn get_taxonomy_version(
-    state: State<'_, AppState>,
-) -> Result<Option<TaxonomyVersion>, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "taxonomy.version.get",
-            move |db| taxonomy::get_current_version(db.conn()),
-        )
-        .await
-}
-
-/// List all taxonomy versions (most recent first).
-#[tauri::command]
-pub async fn list_taxonomy_versions(
-    state: State<'_, AppState>,
-    limit: Option<i64>,
-) -> Result<Vec<TaxonomyVersion>, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "taxonomy.version.list",
-            move |db| taxonomy::list_versions(db.conn(), limit.unwrap_or(50)),
-        )
-        .await
-}
-
-/// Validate a set of taxonomy changes.
-///
-/// Returns a list of warnings (empty = all valid).
-#[tauri::command]
-pub async fn validate_taxonomy_changes(
-    state: State<'_, AppState>,
-    params: ProposeTaxonomyParams,
-) -> Result<Vec<String>, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "taxonomy.change.validate",
-            move |db| taxonomy::validate_changes(db.conn(), &params.changes),
-        )
-        .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,89 +792,5 @@ mod tests {
             .execute_batch("DROP TRIGGER fail_taxonomy_skill_insert")
             .expect("remove fault");
         assert!(bootstrap_public_taxonomy_impl(db.conn()).expect("retry bootstrap") > 0);
-    }
-
-    #[test]
-    fn ratification_rolls_back_applied_changes_before_retry() {
-        let db = Database::open_in_memory().expect("open database");
-        db.run_migrations().expect("run migrations");
-        db.conn()
-            .execute(
-                "INSERT INTO governance_daos \
-                 (id, name, scope_type, scope_id, status, committee_size, election_interval_days) \
-                 VALUES ('dao', 'DAO', 'subject_field', 'existing_scope', 'active', 7, 365)",
-                [],
-            )
-            .expect("insert DAO");
-        let changes = crate::domain::taxonomy::TaxonomyChanges {
-            subject_fields: vec![crate::domain::taxonomy::TaxonomySubjectField {
-                id: "new_field".into(),
-                name: "New Field".into(),
-                description: None,
-            }],
-            subjects: vec![],
-            skills: vec![],
-            prerequisites: vec![],
-            removed_prerequisites: vec![],
-        };
-        let proposal_id = taxonomy::propose_taxonomy_change(
-            db.conn(),
-            "dao",
-            "Add field",
-            None,
-            &changes,
-            "stake_owner",
-        )
-        .expect("create proposal");
-        db.conn()
-            .execute(
-                "UPDATE governance_proposals SET status = 'approved' WHERE id = ?1",
-                [&proposal_id],
-            )
-            .expect("approve proposal");
-        db.conn()
-            .execute_batch(
-                "CREATE TRIGGER fail_taxonomy_version_insert BEFORE INSERT ON taxonomy_versions \
-                 BEGIN SELECT RAISE(ABORT, 'injected version failure'); END;",
-            )
-            .expect("install fault");
-
-        let error = publish_taxonomy_ratification_transactional(
-            db.conn(),
-            &proposal_id,
-            &["member".into()],
-            "signature",
-        )
-        .unwrap_err();
-
-        assert!(error.contains("injected version failure"));
-        let fields: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM subject_fields WHERE id = 'new_field'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count fields");
-        let versions: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM taxonomy_versions", [], |row| {
-                row.get(0)
-            })
-            .expect("count versions");
-        assert_eq!(fields, 0);
-        assert_eq!(versions, 0);
-
-        db.conn()
-            .execute_batch("DROP TRIGGER fail_taxonomy_version_insert")
-            .expect("remove fault");
-        let result = publish_taxonomy_ratification_transactional(
-            db.conn(),
-            &proposal_id,
-            &["member".into()],
-            "signature",
-        )
-        .expect("retry ratification");
-        assert_eq!(result.changes_applied, 1);
     }
 }

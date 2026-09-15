@@ -193,8 +193,9 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
   migration 069).
 - **`skill_prerequisites`** — Directed prerequisite edges.
 - **`skill_relations`** — Non-prerequisite skill relationships.
-- **`taxonomy_versions`** — Signed taxonomy version history with `cid`,
-  `previous_cid`, `ratified_by`, `ratified_at`, `signature`, and `applied_at`.
+- **`taxonomy_versions`** — Retired taxonomy version history (`cid`,
+  `previous_cid`, `ratified_by`, `ratified_at`, `signature`, `applied_at`);
+  nothing writes it since caller-declared ratification was deleted.
 
 ### Courses and Learning (10 tables)
 
@@ -486,24 +487,24 @@ These tables back the VC-first protocol described in
 
 ### Goals (2 tables, migration 069)
 
-- **`goal_templates`** — DAO-ratified maps from a goal to an ideal skill
+- **`goal_templates`** — Seeded maps from a goal to an ideal skill
   graph: `id`, `kind` (`CHECK(exam|curriculum|job_role)`), `key`, `label`,
   optional `board` / `grade`, `skill_ids` (JSON), `taxonomy_version`,
   `dao_id`, `ratified`, `content_cid`. Genesis-seeded so day-one offline
   resolution works.
-- **`goal_template_versions`** — Signed version history mirroring
+- **`goal_template_versions`** — Retired version history mirroring
   `taxonomy_versions` (`version`, `content_cid`, `ratified_by`,
-  `signature`, `taxonomy_version`, `published_at`).
+  `signature`, `taxonomy_version`, `published_at`); nothing writes it.
 
 ### Assessments (7 tables, migrations 070 + 072)
 
-- **`question_banks`** — DAO-ratified banks: `id`, `skill_id`, `label`,
+- **`question_banks`** — Seeded banks: `id`, `skill_id`, `label`,
   `difficulty_profile`, `taxonomy_version`, `dao_id`, `ratified`,
   `content_cid`.
 - **`bank_questions`** — `id`, `bank_id`, `prompt`, `options` (JSON),
   `correct_indices` (JSON) — the answer key, held locally and **never**
   sent to the client or gossiped — `difficulty`, `points`, `rubric_version`.
-- **`question_bank_versions`** — Signed version history (as above).
+- **`question_bank_versions`** — Retired version history (as above); nothing writes it.
 - **`assessment_attempts`** — Per-attempt record: `id`, `subject_did`,
   `bank_id`, `seed`, `question_ids` (JSON), `option_orders` (JSON),
   `integrity_session_id`, `score`, `passed`, `started_at`, `graded_at`.

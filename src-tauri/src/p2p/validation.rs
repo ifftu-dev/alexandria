@@ -286,26 +286,22 @@ impl MessageValidator {
 
     /// Step 5: Authority check for privileged topics.
     ///
-    /// Per spec §7.3: "For taxonomy updates, verify the signer is a
-    /// DAO committee member."
-    ///
     /// The validation pipeline runs without DB access (it lives in the
-    /// swarm event loop). Full authority verification — checking that
-    /// the signer is a DAO committee member via `governance_dao_members`
-    /// — is performed by the taxonomy domain handler (`p2p::taxonomy::
-    /// handle_taxonomy_message`) which has DB access. This step does a
-    /// lightweight topic-level check only.
+    /// swarm event loop), so this step does a lightweight topic-level
+    /// check only. The retired taxonomy handler (`p2p::taxonomy::
+    /// handle_taxonomy_message`) rejects every message before any database
+    /// access.
     fn check_authority(&self, message: &SignedGossipMessage) -> ValidationResult {
         if message.topic == TOPIC_TAXONOMY {
             // Lightweight check: taxonomy messages must have a non-empty
-            // stake address (the domain handler verifies committee membership).
+            // stake address (the retired domain handler rejects them).
             if message.stake_address.is_empty() {
                 return Err(ValidationError::Unauthorized(
                     "taxonomy update missing stake_address".into(),
                 ));
             }
             log::debug!(
-                "Taxonomy message from {} — committee check deferred to domain handler",
+                "Taxonomy message from {} — the retired domain handler rejects it",
                 message.stake_address
             );
         }

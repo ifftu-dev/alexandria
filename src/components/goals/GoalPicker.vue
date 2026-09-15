@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Set a learning goal. Exam / curriculum / job-role pick from curated,
-// DAO-ratified templates that resolve directly to target skills; a job
+// Set a learning goal. Exam / curriculum / job-role pick from seeded
+// templates that resolve directly to target skills; a job
 // description (link or pasted text) is parsed on-device into skill
 // *suggestions* the learner confirms before they become a goal.
 import { computed, onMounted, ref, watch } from 'vue'

@@ -5,5 +5,4 @@
 //     (data: `course_completion_endorsements`).
 //   - `reputation` was rebuilt against `credentials`.
 pub mod reputation;
-pub mod taxonomy;
 pub mod thresholds;
