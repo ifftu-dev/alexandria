@@ -28,10 +28,13 @@ package record. At this documentation checkpoint:
 | F04 | Verified | Proxy bypass closure and actual-workspace CI classification |
 | G01 | Source complete | CometBFT/ABCI spike and no-std verifier compile checks; target-runtime known-answer execution and G02 timing design remain |
 | T01 | Verified | `530831d`: challenge/escrow and arbitrary plugin-attestation authority retired; credential status lifecycle issuer-bound |
+| T02 | In progress | `f183607`: shared bounded endorsement verifier, author-signed course-document v2 policy, and stable catalog course identity; enrollment binding, legacy gate removal, acquisition, and trust-state integration remain |
 | N01 | In progress | `79d6688`: strict preprod profile and centralized trust/service contract; `26cb204`: immutable profile network identity; wire/service migration pending |
 | Documentation | Current through T01/N01 app slices | `f569efc`: active architecture, protocol, schema, plugin, profile, registry, VC, and operator docs reconciled |
 
-The next ready package is T02. N01 wire migration can proceed independently,
+The next T02 slice binds enrollment and completion to the exact verified course
+document, removes the mutable migration-042 authority path, and persists only
+endorsements accepted by the shared verifier. N01 wire migration can proceed independently,
 using separate sequential commits across the recorded service worktrees; deploy no
 part of that protocol change until all three repositories have compatible
 builds and a rollback plan.

@@ -342,19 +342,23 @@ discovery (Phase 3).
 - **`onchain_governance_queue`** — Persistent queue for async governance
   submissions, with `attempts`, `last_error`, and status transitions.
 
-### Completion Attestations, Opinions, and Retired Challenges (7 tables)
+### Transitional Completion Attestations, Opinions, and Retired Challenges (7 tables)
 
 > The evidence-based challenge/attestation tables (`evidence_challenges`,
 > `challenge_votes`, `attestation_requirements`, `evidence_attestations`)
 > were dropped in migration 040. Completion attestation was rebuilt against
 > credentials in migration 042. The migration-043 credential-challenge rebuild
 > was subsequently retired; those two tables below are historical storage only.
+> The migration-042 completion tables are also transitional: they predate the
+> author-signed course-document v2 completion policy and exact-binding
+> endorsement format. T02 will remove them after the replacement persistence
+> and acquisition path is connected.
 
-- **`completion_attestation_requirements`** — Per-course gate (keyed by
+- **`completion_attestation_requirements`** *(transitional; unsafe as final authority)* — Per-course gate (keyed by
   `course_id`) for how many attestor signatures a learner's
   completion-witness tx needs before the observer auto-issues a VC, with
   `required_attestors`, `dao_id`, and optional `set_by_proposal`.
-- **`completion_attestations`** — Individual attestor signatures over a
+- **`completion_attestations`** *(transitional; unsafe as final authority)* — Individual attestor signatures over a
   `witness_tx_hash` (`attestor_did`, `attestor_pubkey`, `signature`,
   optional `note`; unique per `(witness_tx_hash, attestor_did)`).
 - **`credential_challenges`** *(retired)* — Historical stake-based challenges against a

@@ -340,7 +340,25 @@ The aggregator evaluates Bloom's taxonomy proficiency thresholds from lowest to 
 
 ### 5.5 Attestation
 
-Multi-party attestation requirements MAY be defined for high-stakes assessments. The attestation system supports configurable requirements with multiple required attestors.
+Course-document format v2 can carry an author-signed `completion_policy`. The
+policy fixes its format version, the exact authorized attestor DIDs and
+Ed25519 keys, a distinct-attestor threshold, and bounded evidence
+requirements. A completion endorsement signs canonical, domain-separated
+bytes that bind the network, learner DID, stable course ID, exact course
+document CID and format version, completion root, evidence identities and an
+optional chain-witness transaction hash. The shared I/O-free verifier rejects
+unlisted or duplicate attestors and any changed binding field.
+
+New course publications emit v2 canonical JSON. Version 1 documents remain
+readable and retain their original signing bytes; they cannot carry a
+completion policy. No policy means the completion is a learner self-claim.
+
+The application has not yet connected this format to enrollment snapshots or
+an instructor request/import flow. Migration-042's mutable per-course
+requirement rows and raw transaction-hash signatures are still present during
+that transition and must not be treated as the final endorsement authority.
+T02 removes that IPC and storage path once exact enrollment binding and genuine
+endorsement acquisition are wired.
 
 ### 5.6 Credential Status Authority
 
