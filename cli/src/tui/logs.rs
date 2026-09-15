@@ -136,14 +136,28 @@ pub(super) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
 mod tests {
     use super::*;
 
+    /// Records from these tests carry a target nothing else in the process
+    /// uses. The buffer is global, so another test's logging (a migration
+    /// run, say) can land between a push and an assertion; assertions look
+    /// only at this target's entries.
+    const TARGET: &str = "cli_logs_tests::capture::probe";
+    const SHORT_TARGET: &str = "capture::probe";
+
     fn push(level: Level, message: &str) {
         Capture.log(
             &Record::builder()
                 .level(level)
-                .target("app_lib::commands::credentials")
+                .target(TARGET)
                 .args(format_args!("{}", message))
                 .build(),
         );
+    }
+
+    fn own_entries(minimum: LevelFilter) -> Vec<Entry> {
+        entries(minimum)
+            .into_iter()
+            .filter(|entry| entry.target == SHORT_TARGET)
+            .collect()
     }
 
     #[test]
@@ -166,7 +180,7 @@ mod tests {
         }
         assert_eq!(len(), CAPACITY, "the buffer must stay bounded");
 
-        let all = entries(LevelFilter::Trace);
+        let all = own_entries(LevelFilter::Trace);
         // The newest survived and the oldest went, which is the right way
         // round for debugging.
         assert!(all
@@ -187,12 +201,12 @@ mod tests {
         push(Level::Info, "some info");
         push(Level::Debug, "a detail");
 
-        let warn_and_worse = entries(LevelFilter::Warn);
+        let warn_and_worse = own_entries(LevelFilter::Warn);
         assert_eq!(warn_and_worse.len(), 2);
         assert!(warn_and_worse.iter().all(|e| e.level <= Level::Warn));
 
-        assert_eq!(entries(LevelFilter::Error).len(), 1);
-        assert_eq!(entries(LevelFilter::Debug).len(), 4);
+        assert_eq!(own_entries(LevelFilter::Error).len(), 1);
+        assert_eq!(own_entries(LevelFilter::Debug).len(), 4);
         // Off means nothing, not everything — a filter that inverted here
         // would flood the view at the moment someone tried to quieten it.
         assert_eq!(entries(LevelFilter::Off).len(), 0);
@@ -205,7 +219,7 @@ mod tests {
         clear();
         push(Level::Info, "first");
         push(Level::Info, "second");
-        let all = entries(LevelFilter::Trace);
+        let all = own_entries(LevelFilter::Trace);
         assert_eq!(all[0].message, "first");
         assert_eq!(all[1].message, "second");
         clear();
@@ -216,9 +230,9 @@ mod tests {
         let _guard = test_lock();
         clear();
         push(Level::Warn, "vault locked");
-        let entry = &entries(LevelFilter::Trace)[0];
+        let entry = &own_entries(LevelFilter::Trace)[0];
         assert_eq!(entry.level, Level::Warn);
-        assert_eq!(entry.target, "commands::credentials");
+        assert_eq!(entry.target, SHORT_TARGET);
         assert_eq!(entry.message, "vault locked");
         // HH:MM:SS.mmm
         assert_eq!(entry.time.len(), 12, "got {}", entry.time);
