@@ -74,6 +74,7 @@ export type Avatar =
 
 export interface ProfileSummary {
   id: string
+  network_id: string
   display_name: string
   avatar: Avatar
   color: string

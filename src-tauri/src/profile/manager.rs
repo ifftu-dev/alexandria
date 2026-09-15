@@ -12,6 +12,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::network_profile::embedded_preprod;
+
 use super::index::{Avatar, IndexError, ProfileIndex, ProfileSummary};
 
 /// Root directory for all per-profile data (relative to app_data_dir).
@@ -122,6 +124,12 @@ pub enum ProfileError {
     InvalidId(String),
     #[error("display name must be 1-64 characters")]
     InvalidDisplayName,
+    #[error("profile {profile_id} belongs to network {actual}; this build requires {expected}")]
+    NetworkMismatch {
+        profile_id: String,
+        expected: String,
+        actual: String,
+    },
     #[error("profile index error: {0}")]
     Index(#[from] IndexError),
     #[error("IO error: {0}")]
@@ -141,6 +149,20 @@ impl ProfileManager {
     pub fn open(app_data_dir: &Path) -> Result<Self, ProfileError> {
         std::fs::create_dir_all(app_data_dir.join(PROFILES_DIRNAME))?;
         let index = ProfileIndex::load(app_data_dir)?;
+        let expected_network = &embedded_preprod()
+            .expect("embedded network profile is validated during app setup")
+            .network_id;
+        if let Some(profile) = index
+            .profiles
+            .iter()
+            .find(|profile| &profile.network_id != expected_network)
+        {
+            return Err(ProfileError::NetworkMismatch {
+                profile_id: profile.id.to_string(),
+                expected: expected_network.clone(),
+                actual: profile.network_id.clone(),
+            });
+        }
         Ok(Self {
             app_data_dir: app_data_dir.to_path_buf(),
             index: Mutex::new(index),
@@ -191,9 +213,31 @@ impl ProfileManager {
     /// vault or database — the caller (typically `unlock_profile` on a
     /// fresh profile) must do that and then call `touch_unlocked`.
     pub fn create(&self, display_name: &str, avatar: Avatar) -> Result<ProfilePaths, ProfileError> {
+        let network_id = &embedded_preprod()
+            .expect("embedded network profile is valid")
+            .network_id;
+        self.create_on_network(display_name, avatar, network_id)
+    }
+
+    pub fn create_on_network(
+        &self,
+        display_name: &str,
+        avatar: Avatar,
+        network_id: &str,
+    ) -> Result<ProfilePaths, ProfileError> {
         let display_name = display_name.trim();
         if display_name.is_empty() || display_name.chars().count() > 64 {
             return Err(ProfileError::InvalidDisplayName);
+        }
+        let expected_network = &embedded_preprod()
+            .expect("embedded network profile is valid")
+            .network_id;
+        if network_id != expected_network {
+            return Err(ProfileError::NetworkMismatch {
+                profile_id: "new profile".to_string(),
+                expected: expected_network.clone(),
+                actual: network_id.to_string(),
+            });
         }
 
         let id = ProfileId::new();
@@ -202,6 +246,7 @@ impl ProfileManager {
 
         let summary = ProfileSummary {
             id: id.clone(),
+            network_id: network_id.to_string(),
             display_name: display_name.to_string(),
             avatar,
             color: pick_color(&id),
@@ -228,6 +273,9 @@ impl ProfileManager {
         display_name: &str,
         avatar: Avatar,
     ) -> Result<ProfilePaths, ProfileError> {
+        let network_id = &embedded_preprod()
+            .expect("embedded network profile is valid")
+            .network_id;
         let display_name = display_name.trim();
         if display_name.is_empty() || display_name.chars().count() > 64 {
             return Err(ProfileError::InvalidDisplayName);
@@ -241,6 +289,7 @@ impl ProfileManager {
 
         let summary = ProfileSummary {
             id: id.clone(),
+            network_id: network_id.clone(),
             display_name: display_name.to_string(),
             avatar,
             color: pick_color(&id),
@@ -360,11 +409,48 @@ mod tests {
         assert!(paths.plugins_dir.exists());
         assert!(paths.video_cache_dir.exists());
         assert_eq!(m.count(), 1);
+        assert_eq!(m.get(&paths.id).unwrap().network_id, "preprod");
 
         // Reopen — index must survive.
         let m2 = ProfileManager::open(tmp.path()).unwrap();
         assert_eq!(m2.count(), 1);
         assert_eq!(m2.list()[0].display_name, "Pratyush");
+    }
+
+    #[test]
+    fn create_rejects_another_network() {
+        let (_tmp, m) = manager();
+        let error = m
+            .create_on_network("Alice", Avatar::default(), "other-network")
+            .unwrap_err();
+        assert!(matches!(error, ProfileError::NetworkMismatch { .. }));
+        assert_eq!(m.count(), 0);
+    }
+
+    #[test]
+    fn open_rejects_a_profile_from_another_network() {
+        let (tmp, m) = manager();
+        let paths = m.create("Alice", Avatar::default()).unwrap();
+        drop(m);
+
+        let index_path = tmp.path().join(super::super::index::INDEX_FILENAME);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
+        value["profiles"][0]["network_id"] = serde_json::json!("other-network");
+        std::fs::write(&index_path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let error = match ProfileManager::open(tmp.path()) {
+            Ok(_) => panic!("cross-network profile should be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            ProfileError::NetworkMismatch {
+                actual,
+                expected,
+                profile_id
+            } if actual == "other-network" && expected == "preprod" && profile_id == paths.id.to_string()
+        ));
     }
 
     #[test]

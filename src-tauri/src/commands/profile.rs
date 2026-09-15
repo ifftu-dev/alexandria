@@ -162,6 +162,7 @@ pub async fn create_profile(
     app: AppHandle,
     username: String,
     display_name: String,
+    network_id: String,
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
     roles: Option<Vec<String>>,
@@ -195,7 +196,7 @@ pub async fn create_profile(
             let avatar = avatar.unwrap_or_default();
             let paths = state
                 .profile_manager
-                .create(&display_name, avatar)
+                .create_on_network(&display_name, avatar, &network_id)
                 .map_err(|e| e.to_string())?;
 
             // All cryptographic work happens on a blocking thread.
@@ -293,6 +294,7 @@ pub async fn restore_profile_with_mnemonic(
     app: AppHandle,
     username: String,
     display_name: String,
+    network_id: String,
     mnemonic: String,
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
@@ -324,7 +326,7 @@ pub async fn restore_profile_with_mnemonic(
             let avatar = avatar.unwrap_or_default();
             let paths = state
                 .profile_manager
-                .create(&display_name, avatar)
+                .create_on_network(&display_name, avatar, &network_id)
                 .map_err(|e| e.to_string())?;
 
             emit_progress(&app, "validate", "Validating recovery phrase...");

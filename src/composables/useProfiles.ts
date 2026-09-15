@@ -153,6 +153,7 @@ async function createProfile(
     const result = await invoke<CreateProfileResponse>('create_profile', {
       username,
       displayName: display_name,
+      networkId: 'preprod',
       password,
       avatar,
       roles: account?.roles,
@@ -182,6 +183,7 @@ async function restoreProfileWithMnemonic(
     const result = await invoke<UnlockProfileResponse>('restore_profile_with_mnemonic', {
       username,
       displayName: display_name,
+      networkId: 'preprod',
       mnemonic,
       password,
       avatar,
