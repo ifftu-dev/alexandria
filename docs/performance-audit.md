@@ -333,11 +333,11 @@ Stronghold vault operations use `spawn_blocking`, avoiding blocking the async ru
 
 ---
 
-### I-3: `seed_content` properly scopes DB lock
+### I-3: `seed_content` properly scoped its DB lock
 
-**File**: `src-tauri/src/db/seed_content.rs`
+**File**: deleted with the startup seed.
 
-The content seeding function acquires the DB lock, reads what is needed, drops the lock, then does iroh blob operations without holding the DB mutex. This is the correct pattern that other commands should follow.
+The content seeding function acquired the DB lock, read what it needed, dropped the lock, then did iroh blob operations without holding the DB mutex. That remains the pattern other commands should follow.
 
 ---
 

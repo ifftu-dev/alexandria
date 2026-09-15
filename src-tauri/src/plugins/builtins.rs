@@ -392,9 +392,7 @@ pub fn find_bundle_by_id(id: &str) -> Option<&'static BuiltinBundle<'static>> {
 ///
 /// Course-scoped builtins (the code editors + the `editors` collection) are
 /// **not** installed here — they install on first enrollment in a course that
-/// requires them (see `commands::plugins::install_course_plugins`). The
-/// exception is the `dev-seed` feature, under which every builtin is installed
-/// so the seeded demo course works out of the box.
+/// requires them (see `commands::plugins::install_course_plugins`).
 ///
 /// Errors on individual builtins are logged but do not fail the call —
 /// a corrupt embedded bundle should not block app startup.
@@ -487,8 +485,8 @@ mod tests {
 
         let stats = install_all(&db, dir.path());
         assert_eq!(stats.failed, 0, "no builtin should fail to install");
-        // Without the `dev-seed` feature, startup installs only global-scoped
-        // builtins; the course-scoped editor plugins + `editors` collection are
+        // Startup installs only global-scoped builtins; the course-scoped
+        // editor plugins + `editors` collection are
         // deferred to first enrollment. mcq/music×2/irl are the globals.
         let global_count = BUILTIN_PLUGINS
             .iter()

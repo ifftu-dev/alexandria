@@ -13,8 +13,6 @@ export const TAURI_COMMANDS = [
   "bootstrap_confirm",
   "bootstrap_extract",
   "bootstrap_extract_text",
-  "bootstrap_public_catalog",
-  "bootstrap_public_taxonomy",
   "check_health",
   "check_my_username_conflict",
   "check_username_availability",

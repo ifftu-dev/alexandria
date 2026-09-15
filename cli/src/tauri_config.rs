@@ -2,7 +2,7 @@
 //!
 //! These are applied via `--config <path>` when invoking `cargo tauri …`
 //! to ensure platform-specific features (`tutoring-video-ios`,
-//! `tutoring-video-android`, `dev-seed`, etc.) get merged into the build.
+//! `tutoring-video-android`, etc.) get merged into the build.
 //!
 //! Paths are relative to the project root (where `alexandria` is invoked).
 

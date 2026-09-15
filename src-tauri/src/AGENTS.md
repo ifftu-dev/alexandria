@@ -20,7 +20,7 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
 | P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), profile-fetch, username-reg (registry receipts), sync, stress. `sync.rs` also fans settings rows out/in. |
-| Database | `db/` | SQLite + 94 versioned migrations (one DB per profile). Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
+| Database | `db/` | SQLite + 94 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks; no startup seed creates personas, credentials or courses. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
 | Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
 | Cardano | `cardano/` | Pallas wallet/tx building; reference scripts deployed on preprod (UTxOs in `cardano/script_refs.rs`) |
 | Content storage | `content_store/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock; `ContentNode::shutdown` calls both `Router::shutdown` and `Store::shutdown` so the redb lock releases between profile switches. |

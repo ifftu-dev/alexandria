@@ -20,7 +20,7 @@ alexandria/
 ├── crates/                 # Workspace member crates (live, iroh-moq, moq-media)
 ├── patches/                # Local crate patches (netdev, if-watch, audiopus_sys, webrtc-audio-processing-sys, ffmpeg-sys-next, ffmpeg-next)
 ├── docs/                   # Documentation
-├── bootstrap/              # Seed data (public_courses.json)
+├── bootstrap/              # Bundled built-in data (public_taxonomy.json)
 └── scripts/                # Build/dev scripts (incl. check-tauri-commands.mjs: CI guard that every registered command has a frontend caller or is allowlisted)
 ```
 
@@ -88,7 +88,7 @@ src-tauri/
     │   └── graph.rs      # Skill-graph fetch + learning-path helpers
     │
     ├── crypto/             # BIP-39 wallet, keystore, Ed25519, did:key
-    ├── db/                 # SQLite, migrations, seed data
+    ├── db/                 # SQLite, migrations, bundled built-in data
     ├── domain/             # Core types and VC domain models
     ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted)
     ├── evidence/           # Reputation, challenge, thresholds logic

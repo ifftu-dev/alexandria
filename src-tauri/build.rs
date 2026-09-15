@@ -1,12 +1,6 @@
 fn main() {
     tauri_build::build();
 
-    // Emit a custom cfg so that files shared with the CLI crate
-    // (via #[path] includes) can gate test modules that depend on
-    // app_lib types (Database, etc.) which don't exist in the CLI.
-    println!("cargo::rustc-check-cfg=cfg(has_app_lib)");
-    println!("cargo:rustc-cfg=has_app_lib");
-
     // Re-run when any embedded plugin asset or bootstrap script changes
     // — these are pulled in via include_bytes!/include_str! and Cargo
     // doesn't track them by default.

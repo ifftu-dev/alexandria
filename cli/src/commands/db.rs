@@ -8,22 +8,11 @@ use crate::context::ProjectContext;
 use crate::output;
 
 // ── Shared SQL from src-tauri ───────────────────────────────────────
-// Include the schema and seed modules directly from the Tauri crate so
-// there is a single source of truth for migrations and seed data.
+// Include the schema module directly from the Tauri crate so there is a
+// single source of truth for migrations.
 
 #[path = "../../../src-tauri/src/db/schema.rs"]
 mod schema;
-
-#[path = "../../../src-tauri/src/db/seed.rs"]
-mod seed;
-
-// Provide the SEED_CONTENT constant that seed.rs references via
-// `super::seed_content::SEED_CONTENT`. In the main Tauri crate this
-// lives in `db::seed_content`; for the CLI we include only the
-// dependency-free data constant (the iroh seeding function is not
-// needed here).
-#[path = "../../../src-tauri/src/db/seed_content_data.rs"]
-mod seed_content;
 
 // ── CLI subcommands ─────────────────────────────────────────────────
 
@@ -34,13 +23,6 @@ pub enum DbCommand {
 
     /// Run pending database schema migrations
     Migrate,
-
-    /// Seed demo data (taxonomy, courses, governance)
-    Seed {
-        /// Force re-seed even if data already exists (clears seed tables first)
-        #[arg(long)]
-        force: bool,
-    },
 
     /// Reset all app data (database + vault + iroh). Requires --force.
     Reset {
@@ -58,7 +40,6 @@ pub fn execute(
     match cmd {
         DbCommand::Status => show_status(ctx, password_file),
         DbCommand::Migrate => run_migrate(ctx, password_file),
-        DbCommand::Seed { force } => run_seed(ctx, *force, password_file),
         DbCommand::Reset { force } => reset_data(ctx, *force),
     }
 }
@@ -93,14 +74,6 @@ pub(crate) fn latest_version() -> i64 {
 
 pub(crate) fn apply_migrations(conn: &Connection) -> Result<usize> {
     app_lib::db::run_migrations_on_connection(conn).context("Database migration failed")
-}
-
-/// Insert the demo taxonomy/courses/governance rows if the database is empty.
-///
-/// Returns whether anything was inserted. Shared with the TUI so both drive
-/// the same `seed::seed_if_empty` rather than diverging.
-pub(crate) fn seed_if_empty(conn: &Connection) -> Result<bool> {
-    seed::seed_if_empty(conn).map_err(|e| anyhow::anyhow!("Seed failed: {e}"))
 }
 
 // ── Open DB helper ──────────────────────────────────────────────────
@@ -188,149 +161,6 @@ fn run_migrate(ctx: &ProjectContext, password_file: Option<&std::path::Path>) ->
         before,
         current_version(&conn)
     ));
-
-    Ok(())
-}
-
-// ── Subcommand: seed ────────────────────────────────────────────────
-
-fn run_seed(
-    ctx: &ProjectContext,
-    force: bool,
-    password_file: Option<&std::path::Path>,
-) -> Result<()> {
-    output::header("Database seed");
-    output::kv("Database", &ctx.db_path().display().to_string());
-
-    let conn = open_db(ctx, password_file)?;
-
-    // Ensure migrations are current first
-    let applied = apply_migrations(&conn)?;
-    if applied > 0 {
-        output::info(&format!("Applied {} pending migration(s) first", applied));
-    }
-
-    if force {
-        output::blank();
-        output::warning("Force mode: clearing existing seed data...");
-
-        // Delete in dependency order (leaf tables first).
-        // Use PRAGMA foreign_keys = OFF to avoid ordering headaches on
-        // interconnected tables (evidence → proofs → skills, etc.).
-        conn.execute_batch(
-            "PRAGMA foreign_keys = OFF;
-
-             -- Classrooms & messaging
-             DELETE FROM classroom_messages;
-             DELETE FROM classroom_calls;
-             DELETE FROM classroom_channels;
-             DELETE FROM classroom_join_requests;
-             DELETE FROM classroom_members;
-             DELETE FROM classroom_group_keys;
-             DELETE FROM classrooms;
-
-             -- Tutoring & integrity
-             DELETE FROM tutoring_sessions;
-             DELETE FROM integrity_snapshots;
-             DELETE FROM integrity_sessions;
-
-             -- Governance lifecycle
-             DELETE FROM governance_proposal_votes;
-             DELETE FROM governance_election_votes;
-             DELETE FROM governance_election_nominees;
-             DELETE FROM governance_elections;
-             DELETE FROM governance_proposals;
-             DELETE FROM governance_dao_members;
-             DELETE FROM governance_daos;
-
-             -- Reputation
-             DELETE FROM reputation_impact_deltas;
-             DELETE FROM reputation_evidence;
-             DELETE FROM reputation_snapshots;
-             DELETE FROM reputation_assertions;
-
-             -- Verifiable Credentials & DID registry (added in seed expansion)
-             DELETE FROM credential_allowlist;
-             DELETE FROM credentials_pending_verification;
-             DELETE FROM credential_anchors;
-             DELETE FROM credentials;
-             DELETE FROM credential_status_lists;
-             DELETE FROM key_registry;
-             DELETE FROM derived_skill_states;
-             DELETE FROM presentations_seen;
-             DELETE FROM pinboard_observations;
-
-             -- Multi-device sync state
-             DELETE FROM sync_queue;
-             DELETE FROM sync_state;
-             DELETE FROM sync_log;
-             DELETE FROM devices;
-
-             -- (Legacy attestation / challenge / evidence-record /
-             --  skill-proof tables were dropped by migration 040.)
-
-             -- Opinions (Field Commentary)
-             DELETE FROM opinions;
-
-             -- Progress & notes
-             DELETE FROM element_progress;
-             DELETE FROM course_notes;
-             DELETE FROM enrollments;
-
-             -- Tutorials video chapters (must come before course_elements)
-             DELETE FROM video_chapters;
-
-             -- Courses & taxonomy
-             DELETE FROM element_skill_tags;
-             DELETE FROM course_elements;
-             DELETE FROM course_chapters;
-             DELETE FROM courses;
-             DELETE FROM skill_prerequisites;
-             DELETE FROM skill_relations;
-             DELETE FROM skills;
-             DELETE FROM subjects;
-             DELETE FROM subject_fields;
-
-             -- App settings (seed-managed keys only)
-             DELETE FROM app_settings WHERE key IN (
-                 'theme','language','notifications_enabled','auto_sync',
-                 'sentinel_camera_enabled','sentinel_keyboard_enabled'
-             );
-
-             PRAGMA foreign_keys = ON;",
-        )
-        .context("Failed to clear seed data")?;
-        output::success("Existing data cleared.");
-
-        // Wipe the iroh content store too — seeded blobs (videos, PDFs,
-        // downloadables) are content-addressed by their hash, and those
-        // hashes were just nulled out of the DB. Leaving the blobs behind
-        // just wastes disk and creates orphans; the next seed will re-fetch.
-        let iroh_dir = ctx.iroh_dir();
-        if iroh_dir.exists() {
-            fs::remove_dir_all(&iroh_dir)
-                .with_context(|| format!("Failed to remove iroh dir {}", iroh_dir.display()))?;
-            output::info(&format!(
-                "Cleared iroh content store ({})",
-                iroh_dir.display()
-            ));
-        }
-    }
-
-    output::blank();
-
-    match seed::seed_if_empty(&conn) {
-        Ok(true) => {
-            output::success("Seed data inserted (taxonomy, courses, governance).");
-        }
-        Ok(false) => {
-            output::info("Database already has data — seed skipped.");
-            output::faint("Use --force to wipe and re-seed.");
-        }
-        Err(e) => {
-            bail!("Seed failed: {}", e);
-        }
-    }
 
     Ok(())
 }
@@ -507,70 +337,6 @@ fn dir_size(path: &std::path::Path) -> u64 {
 #[cfg(test)]
 mod migration_tests {
     use super::*;
-
-    #[test]
-    fn cli_seed_failure_rolls_back_and_retries() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", true).unwrap();
-        apply_migrations(&conn).unwrap();
-        conn.execute_batch(
-            "CREATE TEMP TRIGGER fail_cli_seed BEFORE INSERT ON bank_questions
-             BEGIN SELECT RAISE(ABORT, 'injected CLI seed failure'); END;",
-        )
-        .unwrap();
-        let error = seed_if_empty(&conn).unwrap_err();
-        assert!(
-            error.to_string().contains("injected CLI seed failure"),
-            "{error}"
-        );
-        assert!(conn.is_autocommit());
-        for table in ["subject_fields", "courses", "credentials", "goal_templates"] {
-            assert_eq!(
-                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                0
-            );
-        }
-        assert_eq!(current_version(&conn), latest_version());
-        assert!(conn
-            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
-            .unwrap());
-        conn.execute_batch("DROP TRIGGER fail_cli_seed").unwrap();
-        assert!(seed_if_empty(&conn).unwrap());
-        assert!(!seed_if_empty(&conn).unwrap());
-    }
-
-    #[test]
-    fn cli_seed_backfill_failure_preserves_existing_rows() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", true).unwrap();
-        apply_migrations(&conn).unwrap();
-        seed_if_empty(&conn).unwrap();
-        conn.execute_batch(
-            "DELETE FROM opinions;
-             UPDATE courses SET title = 'Preserved title', thumbnail_svg = NULL;
-             CREATE TEMP TRIGGER fail_cli_backfill BEFORE INSERT ON bank_questions
-             BEGIN SELECT RAISE(ABORT, 'injected CLI backfill failure'); END;",
-        )
-        .unwrap();
-        assert!(seed_if_empty(&conn).is_err());
-        assert!(conn.is_autocommit());
-        for query in [
-            "SELECT COUNT(*) FROM opinions",
-            "SELECT COUNT(*) FROM courses WHERE title != 'Preserved title' OR thumbnail_svg IS NOT NULL",
-        ] {
-            assert_eq!(conn.query_row(query, [], |r| r.get::<_, i64>(0)).unwrap(), 0);
-        }
-        conn.execute_batch("DROP TRIGGER fail_cli_backfill")
-            .unwrap();
-        assert!(!seed_if_empty(&conn).unwrap());
-        assert!(
-            conn.query_row("SELECT COUNT(*) FROM opinions", [], |r| r.get::<_, i64>(0))
-                .unwrap()
-                > 0
-        );
-    }
 
     #[test]
     fn cli_migrations_replay_the_app_schema_and_retire_issuer_recognition() {

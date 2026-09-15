@@ -491,8 +491,8 @@ These tables back the VC-first protocol described in
 - **`goal_templates`** — Seeded maps from a goal to an ideal skill
   graph: `id`, `kind` (`CHECK(exam|curriculum|job_role)`), `key`, `label`,
   optional `board` / `grade`, `skill_ids` (JSON), `taxonomy_version`,
-  `dao_id`, `ratified`, `content_cid`. Genesis-seeded so day-one offline
-  resolution works.
+  `dao_id`, `ratified`, `content_cid`. Installed as labelled built-in content
+  (`taxonomy_version = 'bundled'`) so day-one offline resolution works.
 - **`goal_template_versions`** — Retired version history mirroring
   `taxonomy_versions` (`version`, `content_cid`, `ratified_by`,
   `signature`, `taxonomy_version`, `published_at`); nothing writes it.

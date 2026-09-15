@@ -647,7 +647,7 @@ arbitrary peer cannot mutate another issuer's credential status.
 - Each DAO identity is the domain-separated BLAKE2b-256 digest of its founding-genesis core; it identifies a DAO only once all seven founders' acceptances verify
 - A founding genesis names seven independently controlled committee members; every member accepts the same core with its identity, consensus, and governance keys, and each member ID must be the `did:key` of that member's identity key
 - Operational submission receipts and final outcomes require five of the seven committee members
-- Taxonomy, goal-template and question-bank updates have no local ratification path; the bundled taxonomy and seeded content are authoritative until a certificate-backed update path exists (see [Features](#features))
+- Taxonomy, goal-template and question-bank updates have no local ratification path; the bundled taxonomy, goal templates and question banks are authoritative until a certificate-backed update path exists (see [Features](#features))
 
 ### Trust bootstrap and import
 
@@ -676,8 +676,8 @@ Neither locator review nor retrieval auto-pins content. Retrieval races at most 
 The earlier lean local/operator model is deleted: its local SQLite state
 machine, signed-vote gossip and four operator-signed Cardano facts were not the
 approved five-of-seven committee model. `/community` now opens founding-genesis
-review and pinning. Release seeding still inserts DAO scope rows without
-committees, elections, proposals, or votes until fake startup seeds are removed.
+review and pinning. Startup seeding is deleted: a new profile receives the
+bundled taxonomy, goal templates and question banks and nothing else.
 
 ---
 
@@ -762,7 +762,7 @@ list.
 | enrollment | 4 | `enroll`, `update_progress`, `get_progress`, `list_enrollments` |
 | elements | 4 | `list_elements`, `create_element`, `update_element`, `delete_element` |
 | chapters | 4 | `list_chapters`, `create_chapter`, `update_chapter`, `delete_chapter` |
-| catalog | 4 | `search_catalog`, `get_catalog_entry`, `bootstrap_public_catalog` |
+| catalog | 3 | `search_catalog`, `get_catalog_entry` |
 | p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
 | evidence | 1 | `list_reputation` (legacy read surface; `skill_proofs`/`evidence` listings retired in migration 040 — use `list_credentials`) |
 | aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |

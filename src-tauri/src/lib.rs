@@ -273,27 +273,6 @@ impl AppState {
             }
         }
 
-        // 7. Seed iroh content blobs (demo video/pdf media) in the background on
-        // every platform. Downloads the public seed-asset URLs once into iroh and
-        // fills in each element's content_cid so the demo videos actually play.
-        // Best-effort + non-blocking — a network-less first launch just leaves the
-        // media unresolved until a later boot with connectivity.
-        {
-            let db_handle = Arc::clone(&self.db);
-            let node_handle = self.content_node.clone();
-            self.profile_operations
-                .spawn_job(async move {
-                    match crate::db::seed_content::seed_content_if_needed(&db_handle, &node_handle)
-                        .await
-                    {
-                        Ok(0) => {}
-                        Ok(n) => log::info!("seeded iroh content for {n} elements"),
-                        Err(e) => log::warn!("iroh content seed failed (non-fatal): {e}"),
-                    }
-                })
-                .await;
-        }
-
         self.start_registry_refresh().await;
 
         // 8. Publish active profile metadata.
@@ -469,15 +448,11 @@ impl AppState {
             log::info!("stake-pubkey registry: seeded {seeded} rows from bootstrap");
         }
 
-        // Seed the skill taxonomy, goal templates, and browsable demo courses
-        // on every platform (mobile/release included) — these are product data
-        // the goals + skill-graph features need, not dev-only fixtures. The
-        // heavy iroh content-blob seeding stays behind `dev-seed` above. Fresh
-        // profiles are NOT auto-enrolled (see BACKFILL_SQL) and course plugins
-        // install through the enrollment pre-flight (see builtins::install_all).
-        if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
-            log::warn!("seed failed (non-fatal): {e}");
-        }
+        // Install the labelled built-in taxonomy, goal templates and question
+        // banks. No personas, credentials, courses or governance rows are
+        // created, and nothing is downloaded.
+        crate::db::bundled::install_bundled_data(database.conn())
+            .map_err(|e| format!("bundled data install failed: {e}"))?;
 
         {
             let mut guard = self.db.lock().map_err(|e| e.to_string())?;
@@ -494,13 +469,6 @@ impl AppState {
                     stats.installed,
                     stats.failed
                 );
-
-                // Demo course exercising both first-party plugins.
-                // Idempotent and silent if the builtins haven't landed yet
-                // (e.g. a corrupt embedded bundle); see seed_plugin_demo.
-                if let Err(e) = crate::db::seed_plugin_demo::seed_plugin_demo_course(db.conn()) {
-                    log::warn!("plugin demo course seed failed: {e}");
-                }
 
                 // Clean up any sessions stuck as 'active' from a previous crash.
                 match db.conn().execute(
@@ -1390,7 +1358,6 @@ pub fn run() {
             // Catalog
             commands::catalog::search_catalog,
             commands::catalog::get_catalog_entry,
-            commands::catalog::bootstrap_public_catalog,
             commands::catalog::hydrate_catalog_courses,
             // Governance genesis review and trust-anchor pinning
             commands::governance_genesis::governance_preview_genesis,
@@ -1432,7 +1399,6 @@ pub fn run() {
             commands::snapshot::list_snapshots,
             commands::snapshot::get_snapshot,
             // Taxonomy
-            commands::taxonomy::bootstrap_public_taxonomy,
             commands::taxonomy::list_subject_fields,
             commands::taxonomy::list_subjects,
             commands::taxonomy::list_skills,

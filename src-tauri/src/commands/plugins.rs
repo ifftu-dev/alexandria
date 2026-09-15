@@ -1307,8 +1307,8 @@ mod grade_credential_tests {
 
     /// Seed a minimal skill taxonomy plus one plugin element tagged with two
     /// skills at different weights, so the credential path has real
-    /// `element_skill_tags`. Built from raw inserts (not the `dev-seed` seeder)
-    /// so the test runs under the default feature set CI checks.
+    /// `element_skill_tags`. Built from raw inserts rather than production
+    /// fixtures.
     fn seed_tagged_element(db: &Database) {
         let c = db.conn();
         c.execute(

@@ -715,9 +715,9 @@ Two further content types are DAO-ratified through the same committee-gated, ver
 - **Goal templates** — exam / curriculum / job-role → ideal-skill-graph maps (`goal_templates`, versioned in `goal_template_versions`), propagated on `/alexandria/goal-templates/1.0` under the `goal_template_change` governance category.
 - **Question banks** — assessment question banks (`question_banks`, versioned in `question_bank_versions`), propagated on `/alexandria/question-banks/1.0` under the `question_bank_change` category. Answer keys (`bank_questions.correct_indices`) are held locally and **never** published in the ratified document or over any command.
 
-Both follow propose → signed-vote → resolve → publish (content CID) → peers fetch + apply, mirroring taxonomy ratification. Genesis-ratified templates and banks are seeded so day-one offline use works before any gossip arrives.
+Both follow propose → signed-vote → resolve → publish (content CID) → peers fetch + apply, mirroring taxonomy ratification. Bundled templates and banks ship with the app, labelled `taxonomy_version = 'bundled'`, so day-one offline use works.
 
-**Implementation status**: the earlier flow accepted caller-supplied ratifiers and applied received version documents without a committee authority check, so it was not the approved five-of-seven committee model. It is deleted: there are no content proposal, ratification or apply commands, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). Seeded templates and banks are unaffected.
+**Implementation status**: the earlier flow accepted caller-supplied ratifiers and applied received version documents without a committee authority check, so it was not the approved five-of-seven committee model. It is deleted: there are no content proposal, ratification or apply commands, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). Bundled templates and banks are unaffected.
 
 ---
 

@@ -2,9 +2,9 @@
 //! `/alexandria/question-banks/1.0`.
 //!
 //! Caller-declared goal-template and question-bank ratification is deleted;
-//! the genesis templates and banks come from the seed. Both topics stay
-//! subscribed until the coordinated wire-protocol removal, and every inbound
-//! version document is rejected before any database access.
+//! the templates and banks are bundled built-in content (`db::bundled`). Both
+//! topics stay subscribed until the coordinated wire-protocol removal, and
+//! every inbound version document is rejected before any database access.
 
 use crate::db::Database;
 use crate::p2p::types::SignedGossipMessage;
@@ -28,7 +28,7 @@ mod tests {
     fn seeded_db() -> Database {
         let db = Database::open_in_memory().expect("in-memory db");
         db.run_migrations().expect("migrations");
-        crate::db::seed::seed_if_empty(db.conn()).expect("seed");
+        crate::db::bundled::install_bundled_data(db.conn()).expect("bundled data");
         db
     }
 

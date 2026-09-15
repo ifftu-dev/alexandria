@@ -237,7 +237,6 @@ describe('profile-scoped media and classroom caches', () => {
     search.setQuery('private')
     sync.startContentSync()
     sync.completeContentSync({
-      bootstrapped: 1,
       hydrated: 2,
       beforeCourses: 3,
       afterCourses: 4,

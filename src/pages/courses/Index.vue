@@ -34,10 +34,6 @@ const counts = computed(() => ({
 
 onMounted(async () => {
   try {
-    await invoke<number>('bootstrap_public_catalog').catch((e) => {
-      console.warn('Public catalog bootstrap skipped:', e)
-      return 0
-    })
     await invoke<number>('hydrate_catalog_courses', { limit: 200 }).catch((e) => {
       console.warn('Catalog hydration skipped:', e)
       return 0

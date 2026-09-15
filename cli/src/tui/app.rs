@@ -127,7 +127,6 @@ pub enum Pending {
     VerifyBundle,
     VerifyPresentation,
     SetFilter,
-    DbSeed,
 }
 
 /// A modal over the browse screen.
@@ -649,7 +648,6 @@ impl App {
                     "browse the rows in this table, then ⏎ again for one row",
                 ),
                 ("m", "run pending migrations"),
-                ("s", "seed demo data if the database is empty"),
             ],
             Tab::Verify => vec![("⏎", "run the selected verification")],
             Tab::Doctor => vec![("g", "re-run the checks")],
@@ -1050,18 +1048,8 @@ impl App {
     }
 
     fn on_key_database(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('m') => self.run_migrate(),
-            KeyCode::Char('s') => {
-                self.modal = Modal::Confirm {
-                    title: "Seed demo data?".into(),
-                    body: "Inserts the demo taxonomy, courses, and governance rows \
-                           if the database is empty. Existing data is left alone."
-                        .into(),
-                    action: Pending::DbSeed,
-                };
-            }
-            _ => {}
+        if let KeyCode::Char('m') = key.code {
+            self.run_migrate()
         }
     }
 
@@ -1291,7 +1279,6 @@ impl App {
                 self.verify_bundle(&values[0], at.as_deref())
             }
             Pending::VerifyPresentation => self.verify_presentation(&values[0], &values[1]),
-            Pending::DbSeed => self.db_seed(),
             Pending::SetFilter => {
                 // Filtering touches no state the lists are derived from, so it
                 // skips the refresh every other action triggers.
@@ -1657,16 +1644,6 @@ impl App {
             }
             Err(e) => self.toast_err(format!("{e:#}")),
         }
-    }
-
-    fn db_seed(&mut self) -> Result<String> {
-        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        let inserted = crate::commands::db::seed_if_empty(conn)?;
-        Ok(if inserted {
-            "Seed data inserted".to_string()
-        } else {
-            "Database already has data — seed skipped".to_string()
-        })
     }
 
     /// Run the same checks `alexandria doctor` runs. Synchronous: the checks
@@ -2398,13 +2375,13 @@ mod tests {
     }
 
     #[test]
-    fn database_tab_offers_migrate_and_seed() {
+    fn database_tab_offers_migrate_only() {
         let mut app = browsing_app(0, 0);
         app.tab = Tab::Database;
-        // Seed asks first — it writes rows.
         app.on_key(key(KeyCode::Char('s')));
-        assert!(matches!(app.modal, Modal::Confirm { .. }));
+        assert!(matches!(app.modal, Modal::None));
         assert!(app.help_lines().iter().any(|(k, _)| *k == "m"));
+        assert!(!app.help_lines().iter().any(|(k, _)| *k == "s"));
     }
 
     // ---- Table row browser ---------------------------------------------

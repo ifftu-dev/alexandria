@@ -1,75 +1,18 @@
 //! IPC commands for the skill taxonomy.
 //!
-//!   - Bootstrap the bundled public taxonomy
 //!   - Browse subject fields, subjects, skills
 //!   - Query prerequisites and relations
 //!   - Tag course elements with skills
 //!
-//! Caller-declared taxonomy ratification is deleted; the taxonomy changes
-//! only with the bundled public taxonomy.
+//! Caller-declared taxonomy ratification is deleted; the taxonomy is the
+//! bundled public taxonomy installed by `db::bundled`.
 
 use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
-
-const BOOTSTRAP_PUBLIC_TAXONOMY_JSON: &str =
-    include_str!("../../../bootstrap/public_taxonomy.json");
-
-#[derive(Debug, Deserialize)]
-struct BootstrapTaxonomyPayload {
-    subject_fields: Vec<BootstrapSubjectField>,
-    subjects: Vec<BootstrapSubject>,
-    skills: Vec<BootstrapSkill>,
-    skill_prerequisites: Vec<BootstrapSkillPrerequisite>,
-    skill_relations: Vec<BootstrapSkillRelation>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BootstrapSubjectField {
-    id: String,
-    name: String,
-    description: Option<String>,
-    icon_emoji: Option<String>,
-    created_at: Option<String>,
-    updated_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BootstrapSubject {
-    id: String,
-    name: String,
-    description: Option<String>,
-    subject_field_id: String,
-    created_at: Option<String>,
-    updated_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BootstrapSkill {
-    id: String,
-    name: String,
-    description: Option<String>,
-    subject_id: String,
-    bloom_level: String,
-    created_at: Option<String>,
-    updated_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BootstrapSkillPrerequisite {
-    skill_id: String,
-    prerequisite_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct BootstrapSkillRelation {
-    skill_id: String,
-    related_skill_id: String,
-    relation_type: String,
-}
 
 // ============================================================================
 // Read-only taxonomy types (returned to frontend)
@@ -139,109 +82,6 @@ pub struct SkillRelation {
 // ============================================================================
 // Taxonomy read commands
 // ============================================================================
-
-/// Bootstrap bundled taxonomy tables for fresh installs.
-///
-/// This only writes when the local taxonomy is empty.
-#[tauri::command]
-pub async fn bootstrap_public_taxonomy(state: State<'_, AppState>) -> Result<i64, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Background,
-            state.profile_lease(),
-            "taxonomy.bootstrap",
-            move |db| bootstrap_public_taxonomy_impl(db.conn()),
-        )
-        .await
-}
-
-fn bootstrap_public_taxonomy_impl(conn: &rusqlite::Connection) -> Result<i64, String> {
-    crate::db::with_transaction(conn, || {
-        let existing_skills: i64 = conn
-            .query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
-
-        if existing_skills > 0 {
-            return Ok(0);
-        }
-
-        let payload: BootstrapTaxonomyPayload =
-            serde_json::from_str(BOOTSTRAP_PUBLIC_TAXONOMY_JSON).map_err(|e| e.to_string())?;
-
-        for f in &payload.subject_fields {
-            conn.execute(
-                "INSERT OR REPLACE INTO subject_fields
-             (id, name, description, icon_emoji, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), COALESCE(?6, datetime('now')))",
-                params![
-                    f.id,
-                    f.name,
-                    f.description,
-                    f.icon_emoji,
-                    f.created_at,
-                    f.updated_at
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-
-        for s in &payload.subjects {
-            conn.execute(
-                "INSERT OR REPLACE INTO subjects
-             (id, name, description, subject_field_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), COALESCE(?6, datetime('now')))",
-                params![
-                    s.id,
-                    s.name,
-                    s.description,
-                    s.subject_field_id,
-                    s.created_at,
-                    s.updated_at
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-
-        for sk in &payload.skills {
-            conn.execute(
-            "INSERT OR REPLACE INTO skills
-             (id, name, description, subject_id, bloom_level, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, datetime('now')), COALESCE(?7, datetime('now')))",
-            params![
-                sk.id,
-                sk.name,
-                sk.description,
-                sk.subject_id,
-                sk.bloom_level,
-                sk.created_at,
-                sk.updated_at
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        }
-
-        for edge in &payload.skill_prerequisites {
-            conn.execute(
-                "INSERT OR IGNORE INTO skill_prerequisites (skill_id, prerequisite_id)
-             VALUES (?1, ?2)",
-                params![edge.skill_id, edge.prerequisite_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-
-        for rel in &payload.skill_relations {
-            conn.execute(
-                "INSERT OR IGNORE INTO skill_relations (skill_id, related_skill_id, relation_type)
-             VALUES (?1, ?2, ?3)",
-                params![rel.skill_id, rel.related_skill_id, rel.relation_type],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-
-        Ok(payload.skills.len() as i64)
-    })
-}
 
 /// List all subject fields with aggregate counts.
 #[tauri::command]
@@ -752,45 +592,4 @@ pub struct ElementSkillTag {
     pub skill_name: String,
     pub bloom_level: String,
     pub weight: f64,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::Database;
-
-    #[test]
-    fn bootstrap_rolls_back_all_tables_before_retry() {
-        let db = Database::open_in_memory().expect("open database");
-        db.run_migrations().expect("run migrations");
-        db.conn()
-            .execute_batch(
-                "DELETE FROM skill_relations; \
-                 DELETE FROM skill_prerequisites; \
-                 DELETE FROM skills; \
-                 DELETE FROM subjects; \
-                 DELETE FROM subject_fields; \
-                 CREATE TRIGGER fail_taxonomy_skill_insert BEFORE INSERT ON skills \
-                 BEGIN SELECT RAISE(ABORT, 'injected skill failure'); END;",
-            )
-            .expect("prepare empty taxonomy");
-
-        let error = bootstrap_public_taxonomy_impl(db.conn()).unwrap_err();
-
-        assert!(error.contains("injected skill failure"));
-        for table in ["subject_fields", "subjects", "skills"] {
-            let count: i64 = db
-                .conn()
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get(0)
-                })
-                .expect("count rows");
-            assert_eq!(count, 0, "partial bootstrap in {table}");
-        }
-
-        db.conn()
-            .execute_batch("DROP TRIGGER fail_taxonomy_skill_insert")
-            .expect("remove fault");
-        assert!(bootstrap_public_taxonomy_impl(db.conn()).expect("retry bootstrap") > 0);
-    }
 }

@@ -36,11 +36,11 @@
 
 The capabilities below describe how each of these works — the underlying technical implementation.
 
-- **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging. Separately, **dynamic assessments** verify claimed skills through seeded question banks: each attempt draws a randomized, difficulty-stratified subset, is graded host-side (the answer key never reaches the client), and auto-activates Sentinel — a pass issues an `AssessmentCredential`.
+- **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging. Separately, **dynamic assessments** verify claimed skills through bundled question banks: each attempt draws a randomized, difficulty-stratified subset, is graded host-side (the answer key never reaches the client), and auto-activates Sentinel — a pass issues an `AssessmentCredential`.
 - **Interview Assistant** — Instructors can prepare standalone or sponsored-role interviews, record per-participant consent choices, conduct the call over the live tutoring transport, capture an attributed transcript, track rubric coverage, receive local follow-up suggestions, keep private notes, and edit/export a timestamped summary. Interview records stay in the active profile's encrypted database, expire on a configurable schedule, and export with pseudonyms and without private notes by default. Raw audio/video is not recorded, and speech-to-text is available only when the WebView guarantees on-device processing. See [`docs/interview-assistant.md`](docs/interview-assistant.md).
-- **Goals & Learning Paths** — learners set a goal (a nationalized exam, a K-12 board-grade curriculum, a job role, or a pasted/linked job description); it resolves to an ideal skill graph via seeded goal templates or on-device job-description parsing, and computed prerequisite paths chart the route.
+- **Goals & Learning Paths** — learners set a goal (a nationalized exam, a K-12 board-grade curriculum, a job role, or a pasted/linked job description); it resolves to an ideal skill graph via bundled goal templates or on-device job-description parsing, and computed prerequisite paths chart the route.
 - **Skill-Graph Bootstrap** — a new learner uploads a resume, transcript, or credential; on-device parsing suggests skills to confirm, each becoming a self-asserted credential whose **provenance tier** (self-declared → document-backed → accredited-document → issuer-signed) weights how much aggregation confidence it carries.
-- **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
+- **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching) while network discovery catches up.
 - **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Completion credentials are **self-issued locally at claim time** — a Cardano completion validator witnesses the element-completion tx as an optional on-chain anchor (treasury-funded when configured), not a hard requirement. A course author may separately require endorsements from exact keys in the signed course version; the app supports explicit request export, fact review, local signing, verified import, and threshold status. Courses with no gradeable elements issue a content-only credential at a baseline proficiency. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
 - **Usernames & Public Profiles** — decentralized @handles backed by a DHT registry (relay-receipted, optionally Cardano-anchored under metadata label 1698), public/private profiles and skill graphs fetched over P2P, and learner goals with computed paths. See [docs/username-registry.md](docs/username-registry.md).
@@ -147,7 +147,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including interviews and profile lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite schema (94 migrations + seed data) — one encrypted DB per profile
+│       ├── db/       # SQLite schema (94 migrations + bundled built-in data) — one encrypted DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine; legacy evidence/challenge pipeline retired
@@ -258,7 +258,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, seeds taxonomy and courses (plus DAO scope rows with no committees, elections, proposals, or votes, which the rebuild removes), and starts the iroh content store.
+The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. No personas, credentials, courses or governance rows are created.
 
 ### Building for iOS
 
@@ -454,8 +454,6 @@ prompts for the active profile's password.
 ```bash
 alexandria db status        # Table row counts, migration version, data sizes
 alexandria db migrate       # Run pending schema migrations
-alexandria db seed          # Seed demo data (taxonomy, courses, neutral DAO rows)
-alexandria db seed --force  # Clear and re-seed
 alexandria db reset --force # Delete ALL app data on this device
 ```
 

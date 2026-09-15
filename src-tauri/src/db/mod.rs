@@ -1,3 +1,4 @@
+pub mod bundled;
 pub(crate) mod executor;
 pub(crate) mod governance_genesis;
 pub(crate) mod opinion_eligibility;
@@ -7,9 +8,6 @@ mod schema_tests;
 #[cfg(test)]
 mod scoring_adversarial_tests;
 pub(crate) mod scoring_inputs;
-pub mod seed;
-pub mod seed_content;
-pub mod seed_plugin_demo;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 use std::path::Path;

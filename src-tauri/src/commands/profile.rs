@@ -251,13 +251,6 @@ pub async fn create_profile(
                 if let Some(b) = &birthdate {
                     issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
                 }
-
-                #[cfg(feature = "dev-seed")]
-                {
-                    let did = crate::crypto::did::derive_did_key(&w.signing_key);
-                    let _ =
-                        crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
-                }
             }
 
             state
@@ -378,13 +371,6 @@ pub async fn restore_profile_with_mnemonic(
                 if let Some(b) = &birthdate {
                     issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
                 }
-
-                #[cfg(feature = "dev-seed")]
-                {
-                    let did = crate::crypto::did::derive_did_key(&w.signing_key);
-                    let _ =
-                        crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
-                }
             }
 
             state
@@ -469,13 +455,6 @@ pub async fn unlock_profile(
                             params![w.stake_address.clone(), w.payment_address.clone()],
                         )
                         .map_err(|e| e.to_string())?;
-                }
-
-                #[cfg(feature = "dev-seed")]
-                {
-                    let did = crate::crypto::did::derive_did_key(&w.signing_key);
-                    let _ =
-                        crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
                 }
             }
 

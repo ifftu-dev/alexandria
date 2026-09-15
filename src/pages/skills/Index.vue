@@ -50,8 +50,6 @@ const tabs = computed(() => [
 
 onMounted(async () => {
   try {
-    await invoke<number>('bootstrap_public_taxonomy', {}).catch(() => 0)
-
     const [f, s, sk, edges, did, creds] = await Promise.all([
       invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
       invoke<SubjectInfo[]>('list_subjects', {}),

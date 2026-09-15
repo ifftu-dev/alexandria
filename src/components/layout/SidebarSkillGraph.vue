@@ -105,8 +105,6 @@ async function loadData() {
   if (loaded.value) return
 
   try {
-    await invoke<number>('bootstrap_public_taxonomy').catch(() => 0)
-
     // Local DID may be null when the vault is locked — in that case
     // we still render the skill graph, just without earned-state
     // colouring (every skill becomes available/locked by prereqs).

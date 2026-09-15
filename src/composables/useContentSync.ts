@@ -4,7 +4,6 @@ import { onProfileLocked } from './useProfiles'
 type ContentSyncPhase = 'idle' | 'running' | 'success' | 'error'
 
 interface ContentSyncStats {
-  bootstrapped: number
   hydrated: number
   beforeCourses: number
   afterCourses: number
@@ -36,7 +35,6 @@ function startContentSync() {
 }
 
 function completeContentSync(payload: {
-  bootstrapped: number
   hydrated: number
   beforeCourses: number
   afterCourses: number
@@ -46,7 +44,6 @@ function completeContentSync(payload: {
   clearHideTimer()
   const newCourses = Math.max(0, payload.afterCourses - payload.beforeCourses)
   stats.value = {
-    bootstrapped: payload.bootstrapped,
     hydrated: payload.hydrated,
     beforeCourses: payload.beforeCourses,
     afterCourses: payload.afterCourses,
@@ -77,7 +74,7 @@ const statusMessage = computed(() => {
     return 'Content sync: checking for new courses...'
   }
   if (phase.value === 'success' && stats.value) {
-    return `Content sync complete: +${stats.value.newCourses} courses | hydrated ${stats.value.hydrated} | bootstrap ${stats.value.bootstrapped} | ${stats.value.durationMs}ms`
+    return `Content sync complete: +${stats.value.newCourses} courses | hydrated ${stats.value.hydrated} | ${stats.value.durationMs}ms`
   }
   if (phase.value === 'error' && error.value) {
     return `Content sync failed: ${error.value}`

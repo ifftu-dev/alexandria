@@ -322,7 +322,7 @@ Option A without any one of those is a mission regression disguised as a feature
 
 | Capability | Status | Reference |
 |------------|--------|-----------|
-| Sentinel DAO scaffolding (migration 037) | 🗑 deleted | Command and dashboard card removed; seeded rows await the seed and schema reset |
+| Sentinel DAO scaffolding (migration 037) | 🗑 deleted | Command and dashboard card removed; the row migration 037 still inserts awaits the D03 schema reset |
 | `sentinel_priors` table (migration 038) | 🗑 deleted | Commands removed; the table is unused until the baseline schema squash |
 | Holdout refs (migration 039) | ✅ shipped | `commands/sentinel_holdout.rs` |
 | Per-snapshot AI score plumbing | ✅ shipped | `useSentinel.ts`, migration 044 |

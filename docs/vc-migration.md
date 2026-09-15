@@ -200,8 +200,9 @@ currently unlocked, matching the posture of the other cardano queues.
 
 ## Seed status
 
-The former fake requirement and attestation rows were removed. Product seed
-data does not fabricate an instructor signature. The planned demo-world
+The former fake requirement and attestation rows were removed, and the startup
+seed itself is deleted: a new profile carries no fabricated rows and no
+instructor signature. The planned demo-world
 builder must create course policies and endorsements with the actual persona
 keys through the real publication and import paths.
 

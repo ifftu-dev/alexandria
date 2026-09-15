@@ -62,5 +62,6 @@
   "apply_content_version": "retired caller-supplied content version apply",
   "integrity_record_attestation": "retired local committee co-sign authority",
   "integrity_set_anchor": "retired unverified anchor assurance setter",
-  "integrity_get_assurance": "retired committee assurance projection"
+  "integrity_get_assurance": "retired committee assurance projection",
+  "bootstrap_public_catalog": "retired import of fabricated-author demo courses"
 }
