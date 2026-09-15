@@ -13,7 +13,7 @@
 //! rather than back-derived from whatever a server happens to accept.
 
 use crate::profile::scope::ProfileState as State;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::db::executor::DatabaseWorkload;
@@ -76,67 +76,77 @@ fn load_consent(conn: &Connection) -> TalentIndexConsent {
 /// straight from credentials would let one issuer's repeated attestations look
 /// like corroboration.
 fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<CandidateSkill>, String> {
-    super::aggregation::refresh_invalidated_states(
-        conn,
-        Some(subject_did),
-        &chrono::Utc::now().to_rfc3339(),
-    )?;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    // A cached state is listed only while its verified inputs are unchanged.
+    // Revalidation drops other calculation versions, recomputes changed
+    // states and removes states whose last verified input disappeared, so a
+    // learner is never offered a stale or unbacked strength.
+    super::aggregation::refresh_invalidated_states(conn, Some(subject_did), &now)?;
+    super::aggregation::revalidate_cached_states(conn, Some(subject_did), &now)?;
+    let version = crate::aggregation::AggregationConfig::default().version;
     let mut stmt = conn
         .prepare(
-            // One row per skill. `derived_skill_states` is keyed by
-            // (subject, skill, calculation_version), so a subject rescored
-            // under a new version has several rows per skill and a naive
-            // select would list the same skill twice. GROUP BY with MAX picks
-            // the newest — SQLite guarantees the bare columns come from the
-            // row that produced the max.
-            // The two axes come from different places, because they measure
-            // different things. Strength (level, Q, C, T, U) is the
-            // aggregation pipeline's output. The Bloom level is the highest
-            // cognitive level any live credential attests — read from
-            // `credentialSubject.level`, the same field content ratification
-            // gates on, so "operates at analyze" means one thing everywhere.
-            //
-            // COALESCE to 2 (`apply`) matches BloomLevel::default(): a subject
-            // with a derived state but no readable rank is described the way
-            // the rest of the system describes an unknown level, rather than
-            // as `remember`, which would understate them.
             "SELECT d.skill_id, COALESCE(s.name, d.skill_id), d.level, \
-                    d.unique_issuer_clusters, d.raw_score, d.confidence, \
-                    d.trust_score, \
-                    COALESCE(( \
-                        SELECT MAX(CAST(json_extract(c.signed_vc_json, \
-                                   '$.credentialSubject.level') AS INTEGER)) \
-                        FROM scoring_credentials c \
-                        WHERE c.subject_did = d.subject_did \
-                          AND c.skill_id = d.skill_id \
-                          AND c.claim_kind = 'skill' AND c.revoked = 0 \
-                    ), 2), \
-                    MAX(d.computed_at) \
+                    d.unique_issuer_clusters, d.raw_score, d.confidence, d.trust_score \
              FROM derived_skill_states d \
              LEFT JOIN skills s ON s.id = d.skill_id \
-             WHERE d.subject_did = ?1 \
-             GROUP BY d.skill_id \
+             WHERE d.subject_did = ?1 AND d.calculation_version = ?2 \
              ORDER BY d.trust_score DESC, d.skill_id ASC",
         )
         .map_err(|e| e.to_string())?;
-
     let rows = stmt
-        .query_map([subject_did], |r| {
-            Ok(CandidateSkill {
-                skill_id: r.get(0)?,
-                name: r.get(1)?,
-                level: r.get::<_, i64>(2)? as u8,
-                issuer_clusters: r.get::<_, i64>(3)? as u32,
-                score: r.get::<_, f64>(4)?,
-                confidence: r.get::<_, f64>(5)?,
-                trust_score: r.get::<_, f64>(6)?,
-                bloom_level: r.get::<_, i64>(7)?.clamp(0, 5) as u8,
-            })
+        .query_map(params![subject_did, version], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, f64>(4)?,
+                r.get::<_, f64>(5)?,
+                r.get::<_, f64>(6)?,
+            ))
         })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    drop(stmt);
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    let network_id = &crate::network_profile::embedded_preprod()
+        .map_err(|error| error.to_string())?
+        .network_id;
+    rows.into_iter()
+        .map(
+            |(skill_id, name, level, clusters, score, confidence, trust_score)| {
+                // Strength (level, Q, C, T, U) is the aggregation output. The
+                // Bloom level is the highest cognitive level any verified input
+                // attests, read from the signed `credentialSubject.level` that
+                // content ratification also gates on. 2 (`apply`) matches
+                // BloomLevel::default() if no verified level is readable.
+                let bloom_level = crate::db::scoring_inputs::verified_skill_inputs(
+                    conn,
+                    subject_did,
+                    &skill_id,
+                    &now,
+                    network_id,
+                )?
+                .iter()
+                .map(|input| input.claim.level)
+                .max()
+                .unwrap_or(2)
+                .min(5);
+                Ok(CandidateSkill {
+                    skill_id,
+                    name,
+                    level: level.clamp(0, 5) as u8,
+                    issuer_clusters: clusters.max(0) as u32,
+                    score,
+                    confidence,
+                    trust_score,
+                    bloom_level,
+                })
+            },
+        )
+        .collect()
 }
 
 /// The learner's own profile fields, whether or not consent covers them.
@@ -349,10 +359,19 @@ pub async fn sign_consented_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::aggregation::recompute_all_impl;
+    use crate::crypto::did::{derive_did_key, Did};
+    use crate::db::opinion_eligibility::test_support::store_skill_credential;
     use crate::db::Database;
+    use ed25519_dalek::SigningKey;
 
-    const DID: &str = "did:key:z6MkLearner";
     const NOW: &str = "2026-01-01T00:00:00Z";
+
+    fn learner_did() -> String {
+        derive_did_key(&SigningKey::from_bytes(&[31; 32]))
+            .as_str()
+            .to_string()
+    }
 
     fn open_db() -> Database {
         let db = Database::open_in_memory().unwrap();
@@ -360,32 +379,34 @@ mod tests {
         db
     }
 
-    fn seed_skill(db: &Database, skill_id: &str, name: &str, level: i64, clusters: i64) {
-        seed_state(
-            db,
-            skill_id,
-            name,
-            level,
-            clusters,
-            "v1",
-            "2026-01-01T00:00:00Z",
-        );
+    /// Insert a taxonomy skill and derive a state for it from `issuers`
+    /// genuinely signed credentials at `level`, each from a distinct issuer.
+    fn seed_skill(db: &Database, skill_id: &str, name: &str, level: u8, issuers: u8) {
+        seed_taxonomy(db, skill_id, name);
+        seed_credentials(db, skill_id, level, issuers);
     }
 
-    /// Insert a taxonomy skill and one derived state for it.
+    fn seed_credentials(db: &Database, skill_id: &str, level: u8, issuers: u8) {
+        for index in 0..issuers {
+            let issuer = SigningKey::from_bytes(&[40 + index; 32]);
+            store_skill_credential(
+                db,
+                &format!("{skill_id}-{index}"),
+                &issuer,
+                &Did(learner_did()),
+                skill_id,
+                level,
+            );
+        }
+        recompute_all_impl(db.conn(), NOW).unwrap();
+    }
+
+    /// Insert a taxonomy skill.
     ///
     /// `skills.subject_id` is a NOT NULL foreign key, so a subject row has to
     /// exist first — the talent index reads through that join for display
     /// names.
-    fn seed_state(
-        db: &Database,
-        skill_id: &str,
-        name: &str,
-        level: i64,
-        clusters: i64,
-        version: &str,
-        computed_at: &str,
-    ) {
+    fn seed_taxonomy(db: &Database, skill_id: &str, name: &str) {
         // `skills.subject_id -> subjects.subject_field_id` is a NOT NULL FK
         // chain, so the whole spine has to exist. Unwrapped rather than
         // ignored: a silently failed seed makes the join miss and the display
@@ -410,16 +431,6 @@ mod tests {
                 rusqlite::params![skill_id, name],
             )
             .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO derived_skill_states \
-                 (subject_did, skill_id, raw_score, confidence, trust_score, level, \
-                  evidence_mass, unique_issuer_clusters, active_evidence_count, \
-                  calculation_version, state_json, computed_at) \
-                 VALUES (?1, ?2, 0.8, 0.7, 0.56, ?3, 2.0, ?4, 2, ?5, '{}', ?6)",
-                rusqlite::params![DID, skill_id, level, clusters, version, computed_at],
-            )
-            .unwrap();
     }
 
     /// A fresh profile publishes nothing. Every existing user is in this state
@@ -429,7 +440,7 @@ mod tests {
         let db = open_db();
         seed_skill(&db, "skill_rust", "Rust", 3, 2);
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
         assert_eq!(preview.candidates.len(), 1, "the skill is still offered");
         assert!(!preview.candidates[0].consented);
         assert!(
@@ -454,7 +465,7 @@ mod tests {
         )
         .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
         let record = preview.record.expect("consented, so a record exists");
         assert_eq!(record.skills.len(), 1);
         assert_eq!(record.skills[0].name, "Rust");
@@ -505,7 +516,7 @@ mod tests {
         )
         .unwrap();
 
-        let full = get_talent_index_preview_impl(db.conn(), DID, NOW)
+        let full = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW)
             .unwrap()
             .record
             .expect("consent covers two skills");
@@ -553,7 +564,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(load_consent(db.conn()), TalentIndexConsent::default());
-        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
         assert!(preview.record.is_none());
     }
 
@@ -572,16 +583,20 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(get_talent_index_preview_impl(db.conn(), DID, NOW)
-            .unwrap()
-            .record
-            .is_some());
+        assert!(
+            get_talent_index_preview_impl(db.conn(), &learner_did(), NOW)
+                .unwrap()
+                .record
+                .is_some()
+        );
 
         set_talent_index_consent_impl(db.conn(), &TalentIndexConsent::default()).unwrap();
-        assert!(get_talent_index_preview_impl(db.conn(), DID, NOW)
-            .unwrap()
-            .record
-            .is_none());
+        assert!(
+            get_talent_index_preview_impl(db.conn(), &learner_did(), NOW)
+                .unwrap()
+                .record
+                .is_none()
+        );
     }
 
     /// The graph-visibility preference must not leak into this decision.
@@ -603,42 +618,46 @@ mod tests {
         )
         .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
         assert!(
             preview.record.is_none(),
             "a publicly visible skill is still not consented for the talent index"
         );
     }
 
-    /// A subject rescored under a newer calculation version has several rows
-    /// per skill. The listing must show the skill once, at its newest level —
-    /// a duplicated entry would be visible to an employer and simply wrong.
+    /// A state left over from an older calculation version is never listed:
+    /// the skill appears once, from the current verified computation, and the
+    /// stale row is removed. A duplicated or outdated entry would be visible to
+    /// an employer and simply wrong.
     #[test]
-    fn a_rescored_skill_is_listed_once_at_its_newest_level() {
+    fn a_stale_calculation_version_is_never_listed() {
         let db = open_db();
-        seed_state(
-            &db,
-            "skill_rust",
-            "Rust",
-            2,
-            1,
-            "v1",
-            "2026-01-01T00:00:00Z",
-        );
-        seed_state(
-            &db,
-            "skill_rust",
-            "Rust",
-            4,
-            3,
-            "v2",
-            "2026-06-01T00:00:00Z",
-        );
+        seed_skill(&db, "skill_rust", "Rust", 3, 2);
+        db.conn()
+            .execute(
+                "INSERT INTO derived_skill_states \
+                 (subject_did, skill_id, raw_score, confidence, trust_score, level, \
+                  evidence_mass, unique_issuer_clusters, active_evidence_count, \
+                  calculation_version, state_json, computed_at) \
+                 VALUES (?1, 'skill_rust', 1.0, 1.0, 1.0, 5, 9.0, 9, 9, 'retired', '{}', \
+                         '2027-01-01T00:00:00Z')",
+                rusqlite::params![learner_did()],
+            )
+            .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
         assert_eq!(preview.candidates.len(), 1, "one row per skill");
-        assert_eq!(preview.candidates[0].level, 4, "the newest score wins");
-        assert_eq!(preview.candidates[0].issuer_clusters, 3);
+        assert_eq!(preview.candidates[0].issuer_clusters, 2);
+        assert_eq!(preview.candidates[0].bloom_level, 3);
+        let stale: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM derived_skill_states WHERE calculation_version = 'retired'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale, 0);
     }
 
     /// A skill with no taxonomy row still lists, under its id. Losing a skill
@@ -647,21 +666,41 @@ mod tests {
     #[test]
     fn a_skill_missing_from_the_taxonomy_falls_back_to_its_id() {
         let db = open_db();
+        seed_credentials(&db, "skill_orphan", 3, 1);
+
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
+        assert_eq!(preview.candidates.len(), 1);
+        assert_eq!(preview.candidates[0].name, "skill_orphan");
+    }
+
+    /// A listing is only as good as its verified inputs. Altering a signed
+    /// credential after the state was cached, or revoking it, removes the
+    /// skill instead of offering the old strength or an inflated Bloom level.
+    #[test]
+    fn altered_or_revoked_inputs_remove_a_listed_skill() {
+        let db = open_db();
+        seed_skill(&db, "skill_rust", "Rust", 3, 1);
+        seed_skill(&db, "skill_async", "Async", 2, 1);
+        let before = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
+        assert_eq!(before.candidates.len(), 2);
+
         db.conn()
             .execute(
-                "INSERT INTO derived_skill_states \
-                 (subject_did, skill_id, raw_score, confidence, trust_score, level, \
-                  evidence_mass, unique_issuer_clusters, active_evidence_count, \
-                  calculation_version, state_json, computed_at) \
-                 VALUES (?1, 'skill_orphan', 0.8, 0.7, 0.56, 3, 2.0, 1, 2, 'v1', '{}', \
-                         '2026-01-01T00:00:00Z')",
-                rusqlite::params![DID],
+                "UPDATE credentials SET signed_vc_json = \
+                 json_set(signed_vc_json, '$.credentialSubject.level', 5) \
+                 WHERE skill_id = 'skill_rust'",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE credentials SET revoked = 1 WHERE skill_id = 'skill_async'",
+                [],
             )
             .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
-        assert_eq!(preview.candidates.len(), 1);
-        assert_eq!(preview.candidates[0].name, "skill_orphan");
+        let after = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
+        assert!(after.candidates.is_empty(), "got {:?}", after.candidates);
     }
 
     /// Another learner's skills are never candidates.

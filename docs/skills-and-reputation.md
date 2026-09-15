@@ -149,7 +149,14 @@ unverifiable row never credits its issuer, and issuer inequality alone is not
 the test. A row whose verified sample becomes empty is marked excluded rather
 than rewritten with a zero score. Reputation snapshots cite exactly that
 verified set, so a snapshot cannot freeze unverified or self-issued instructor
-evidence. The talent-index Bloom level reader is a later T03 slice.
+evidence.
+
+The talent-index candidate list revalidates cached derived states before
+listing them, so it offers only current-version states whose verified inputs
+are unchanged, and takes each skill's Bloom level from the highest signed level
+among those verified inputs. An altered or revoked input removes the listing
+instead of offering an old strength or an inflated level. Publication still
+requires explicit talent-index consent.
 
 The shared credential verifier now classifies incomplete issuer-key or
 status-list evidence as `pending`, separately from `reject`. Only `accept` is an

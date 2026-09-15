@@ -83,7 +83,7 @@ fn refresh_pair(
 
 /// Drop states from other calculation versions and recompute cached states
 /// whose inputs changed, so cached and direct readers agree.
-fn revalidate_cached_states(
+pub(crate) fn revalidate_cached_states(
     conn: &Connection,
     subject: Option<&str>,
     now: &str,
