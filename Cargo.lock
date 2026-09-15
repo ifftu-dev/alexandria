@@ -269,6 +269,7 @@ dependencies = [
  "iroh",
  "iroh-blobs",
  "iroh-gossip",
+ "irpc",
  "jni 0.21.1",
  "libc",
  "libp2p",

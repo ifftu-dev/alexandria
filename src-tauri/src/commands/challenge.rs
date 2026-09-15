@@ -3,7 +3,7 @@
 use crate::profile::scope::ProfileState as State;
 
 use crate::cardano::escrow_recovery::{self, EscrowAction, EscrowContext};
-use crate::cardano::submission::{self, Operation};
+use crate::cardano::submission::{self, Journal, Operation};
 use crate::cardano::{blockfrost::BlockfrostClient, challenge_escrow_tx_builder};
 use crate::crypto::hash::blake2b_256;
 use crate::db::{executor::DatabaseWorkload, Database};
@@ -283,8 +283,15 @@ pub async fn lock_challenge_stake(
         },
     };
     let context_json = serde_json::to_string(&context).map_err(|e| e.to_string())?;
+    // The challenger initiates the lock: journal phases use its learner lane
+    // and this command's profile lease.
+    let journal = Journal::new(
+        state.db_executor.clone(),
+        state.profile_lease(),
+        DatabaseWorkload::Learner,
+    );
     let submitted =
-        submission::submit_once(&state.db, &bf, operation, &result.tx_cbor, &context_json).await?;
+        submission::submit_once(&journal, &bf, operation, &result.tx_cbor, &context_json).await?;
     let challenge_id_for_projection = challenge_id.clone();
     let submitted_for_projection = submitted.clone();
     challenge_db(
@@ -408,8 +415,15 @@ pub async fn settle_challenge_stake(
         },
     };
     let context_json = serde_json::to_string(&context).map_err(|e| e.to_string())?;
+    // Settlement is a DAO-authority action: journal phases share the
+    // instructor lane of its projection and this command's profile lease.
+    let journal = Journal::new(
+        state.db_executor.clone(),
+        state.profile_lease(),
+        DatabaseWorkload::Instructor,
+    );
     let submitted =
-        submission::submit_once(&state.db, &bf, operation, &result.tx_cbor, &context_json).await?;
+        submission::submit_once(&journal, &bf, operation, &result.tx_cbor, &context_json).await?;
     let challenge_id_for_projection = challenge_id.clone();
     let submitted_for_projection = submitted.clone();
     challenge_db(

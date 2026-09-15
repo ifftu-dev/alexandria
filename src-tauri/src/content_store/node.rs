@@ -60,6 +60,9 @@ struct RunningNode {
     live: Live,
     closing: bool,
     store_shutdown: ShutdownStatus,
+    /// Test seam: make every retried store close fail.
+    #[cfg(test)]
+    fail_close_retry: bool,
 }
 
 type ShutdownStatus = Arc<std::sync::Mutex<Option<Result<(), String>>>>;
@@ -77,18 +80,35 @@ impl ProtocolHandler for TrackedBlobsProtocol {
 
     async fn shutdown(&self) {
         // The stock handler logs and discards this result. Keep evidence of
-        // the one store shutdown requested by the router instead of issuing
-        // a second shutdown RPC against an already-stopped actor.
-        let result = self
-            .blobs
-            .store()
-            .shutdown()
-            .await
-            .map_err(|e| e.to_string());
+        // the store shutdown requested by the router so the node can tell a
+        // confirmed close from one that has to be retried.
+        let result = store_close_result(self.blobs.store().shutdown().await);
         *self
             .shutdown_status
             .lock()
             .expect("shutdown status poisoned") = Some(result);
+    }
+}
+
+/// Interpret the blob store's reply to a shutdown request.
+///
+/// The store's metadata actor drops its redb database before acknowledging a
+/// shutdown, and drops it on every other exit path too. A request that can no
+/// longer reach the store's actors therefore proves the database is closed,
+/// just as an acknowledgement does. Any other failure leaves the close
+/// unconfirmed.
+fn store_close_result(result: irpc::Result<()>) -> Result<(), String> {
+    match result {
+        Ok(())
+        | Err(irpc::Error::Send {
+            source: irpc::channel::SendError::ReceiverClosed { .. },
+            ..
+        })
+        | Err(irpc::Error::OneshotRecv {
+            source: irpc::channel::oneshot::RecvError::SenderClosed { .. },
+            ..
+        }) => Ok(()),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -123,14 +143,28 @@ impl ContentNode {
     ///
     /// MUST be called while the node is not running (i.e. after
     /// `shutdown()`). Used to reroute the singleton ContentNode at a
-    /// freshly-unlocked profile's blob directory.
+    /// freshly-unlocked profile's blob directory. A close that failed at lock
+    /// time is retried first, and the directory changes only once it succeeds.
     pub async fn set_data_dir(&self, new_dir: PathBuf) -> Result<(), NodeError> {
-        let inner = self.inner.lock().await;
-        if inner.is_some() {
-            return Err(NodeError::AlreadyRunning);
-        }
+        let mut inner = self.inner.lock().await;
+        Self::finish_pending_close(&mut inner).await?;
         *self.data_dir.lock().await = new_dir;
         Ok(())
+    }
+
+    /// Refuse to replace a live node, but retry a close that failed or went
+    /// unconfirmed earlier. Only a confirmed close frees the slot.
+    async fn finish_pending_close(inner: &mut Option<RunningNode>) -> Result<(), NodeError> {
+        match inner.as_mut() {
+            None => Ok(()),
+            Some(node) if !node.closing => Err(NodeError::AlreadyRunning),
+            Some(node) => {
+                Self::close(node).await?;
+                *inner = None;
+                log::info!("iroh node shut down after retrying cleanup");
+                Ok(())
+            }
+        }
     }
 
     /// Clear the in-memory content key (called when the active profile
@@ -161,9 +195,7 @@ impl ContentNode {
     /// auto-migrated on first start with an encryption key.
     pub async fn start(&self, node_enc_key: Option<&[u8; 32]>) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
-        if inner.is_some() {
-            return Err(NodeError::AlreadyRunning);
-        }
+        Self::finish_pending_close(&mut inner).await?;
 
         let data_dir = self.data_dir.lock().await.clone();
         std::fs::create_dir_all(&data_dir)
@@ -258,6 +290,8 @@ impl ContentNode {
             live,
             closing: false,
             store_shutdown,
+            #[cfg(test)]
+            fail_close_retry: false,
         });
         Ok(())
     }
@@ -269,34 +303,65 @@ impl ContentNode {
     /// `start()` on the same data directory within this process
     /// (e.g. after a profile switch) succeeds.
     ///
-    /// The router's blobs handler requests store shutdown exactly once and
-    /// records its result. Failed or unconfirmed cleanup retains the handles,
-    /// refuses content operations, and prevents restart or directory changes.
+    /// The router's blobs handler requests store shutdown and records its
+    /// result. Failed or unconfirmed cleanup retains the handles, refuses
+    /// content operations, and prevents restart or directory changes. The
+    /// next call here, `set_data_dir`, or `start` retries the close, and only
+    /// a confirmed close lets it continue.
     pub async fn shutdown(&self) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
         let node = inner.as_mut().ok_or(NodeError::NotRunning)?;
-        node.closing = true;
 
         crate::diag::log("node.shutdown: router.shutdown()...");
         log::info!("shutting down iroh node...");
-        node.router
-            .shutdown()
-            .await
-            .map_err(|e| NodeError::Shutdown(e.to_string()))?;
-
-        let store_result = node
-            .store_shutdown
-            .lock()
-            .expect("shutdown status poisoned")
-            .clone();
-        store_result
-            .ok_or_else(|| NodeError::Shutdown("store shutdown was not confirmed".to_string()))?
-            .map_err(NodeError::Shutdown)?;
+        Self::close(node).await?;
         *inner = None;
 
         crate::diag::log("node.shutdown: complete");
         log::info!("iroh node shut down");
         Ok(())
+    }
+
+    async fn close(node: &mut RunningNode) -> Result<(), NodeError> {
+        let retry = node.closing;
+        node.closing = true;
+
+        // Idempotent: a router that has already shut down returns Ok without
+        // running its protocol handlers a second time.
+        node.router
+            .shutdown()
+            .await
+            .map_err(|e| NodeError::Shutdown(e.to_string()))?;
+
+        let recorded = node
+            .store_shutdown
+            .lock()
+            .expect("shutdown status poisoned")
+            .clone();
+        let result = match recorded {
+            Some(Ok(())) => Ok(()),
+            // The router's handler asks the store to stop only once, so a
+            // retry sends the request itself rather than repeating the
+            // recorded failure.
+            _ if retry => {
+                #[cfg(test)]
+                let result = if node.fail_close_retry {
+                    Err("store close retry fixture".to_string())
+                } else {
+                    store_close_result(node.store.shutdown().await)
+                };
+                #[cfg(not(test))]
+                let result = store_close_result(node.store.shutdown().await);
+                *node
+                    .store_shutdown
+                    .lock()
+                    .expect("shutdown status poisoned") = Some(result.clone());
+                result
+            }
+            Some(Err(error)) => Err(error),
+            None => Err("store shutdown was not confirmed".to_string()),
+        };
+        result.map_err(NodeError::Shutdown)
     }
 
     /// Check if the node is currently running.
@@ -584,41 +649,84 @@ mod tests {
         assert!(!directory.path().join("blobs.db").exists());
     }
 
-    #[tokio::test]
-    async fn failed_shutdown_evidence_retains_resources_and_refuses_reuse() {
-        let directory = TempDir::new().expect("temporary content directory");
-        let next_directory = TempDir::new().expect("next content directory");
-        let node = ContentNode::new(directory.path());
+    /// Start a node, stop its router (which really closes the store), then
+    /// record a failed close so the node looks stranded by a transient error.
+    async fn node_with_failed_close(
+        directory: &Path,
+        fail_retry: bool,
+    ) -> (ContentNode, ShutdownStatus) {
+        let node = ContentNode::new(directory);
         node.start(None).await.expect("start node");
         let status = {
-            let inner = node.inner.lock().await;
-            let running = inner.as_ref().expect("running node");
+            let mut inner = node.inner.lock().await;
+            let running = inner.as_mut().expect("running node");
             running
                 .router
                 .shutdown()
                 .await
                 .expect("shutdown fixture router");
+            running.fail_close_retry = fail_retry;
             running.store_shutdown.clone()
         };
         assert!(matches!(*status.lock().expect("status"), Some(Ok(()))));
-        // Inject a failed callback result into the production verification path.
         *status.lock().expect("status") = Some(Err("store failure fixture".to_string()));
         assert!(matches!(node.shutdown().await, Err(NodeError::Shutdown(_))));
         assert!(!node.is_running().await);
         assert!(node.endpoint().await.is_none());
         assert!(node.store().await.is_err());
         assert!(node.inner.lock().await.is_some());
-        assert!(node.start(None).await.is_err());
-        assert!(node
-            .set_data_dir(next_directory.path().to_path_buf())
-            .await
-            .is_err());
-        // Restore the actual successful result to finish fixture cleanup.
-        *status.lock().expect("status") = Some(Ok(()));
-        node.shutdown().await.expect("finish cleanup");
+        (node, status)
+    }
+
+    #[tokio::test]
+    async fn a_close_that_keeps_failing_refuses_reuse() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let next_directory = TempDir::new().expect("next content directory");
+        let (node, _status) = node_with_failed_close(directory.path(), true).await;
+
+        assert!(matches!(node.shutdown().await, Err(NodeError::Shutdown(_))));
+        assert!(matches!(
+            node.start(None).await,
+            Err(NodeError::Shutdown(_))
+        ));
+        assert!(matches!(
+            node.set_data_dir(next_directory.path().to_path_buf()).await,
+            Err(NodeError::Shutdown(_))
+        ));
+        assert!(!node.is_running().await);
+        assert!(node.inner.lock().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn unlock_retries_a_failed_close_and_continues_once_confirmed() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let next_directory = TempDir::new().expect("next content directory");
+        let (node, status) = node_with_failed_close(directory.path(), false).await;
+
         node.set_data_dir(next_directory.path().to_path_buf())
             .await
-            .expect("repoint after cleanup");
+            .expect("the retried close is confirmed");
+        assert!(node.inner.lock().await.is_none());
+        assert!(matches!(*status.lock().expect("status"), Some(Ok(()))));
+
+        node.start(None).await.expect("start in the next directory");
+        node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn lock_retry_confirms_the_close_and_releases_the_store() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let (node, _status) = node_with_failed_close(directory.path(), false).await;
+
+        node.shutdown()
+            .await
+            .expect("the retried close is confirmed");
+        assert!(matches!(node.shutdown().await, Err(NodeError::NotRunning)));
+        // Reopening the same directory proves the store released its files.
+        node.start(None)
+            .await
+            .expect("restart in the same directory");
+        node.shutdown().await.expect("shutdown");
     }
 
     #[test]

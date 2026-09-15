@@ -10,7 +10,8 @@
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::submission::{self, Operation, Submission, SubmissionStatus};
+use super::blockfrost::BlockfrostClient;
+use super::submission::{self, Journal, Operation, Submission, SubmissionStatus, SubmitError};
 use crate::db::Database;
 
 /// A queued on-chain governance transaction.
@@ -297,9 +298,9 @@ fn get_item(db: &Database, queue_id: &str) -> Result<Option<QueueItem>, String> 
 /// 4. Mark as submitted/failed accordingly
 ///
 /// Returns the number of items processed.
-pub async fn process_queue(
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
-    blockfrost: &Option<super::blockfrost::BlockfrostClient>,
+pub(crate) async fn process_queue(
+    journal: &Journal,
+    blockfrost: &Option<BlockfrostClient>,
     wallet: &Option<crate::crypto::wallet::Wallet>,
 ) -> Result<usize, String> {
     // Skip if no Blockfrost client or wallet available
@@ -309,8 +310,8 @@ pub async fn process_queue(
     };
     // Recover before checking builder credentials or pending work. In
     // particular, an empty pending queue must not suppress confirmation.
-    let recovered = reconcile_journaled_items(db, bf).await?;
-    let confirmed = confirm_submitted_items(db, bf).await?;
+    let recovered = reconcile_journaled_items(journal, bf).await?;
+    let confirmed = confirm_submitted_items(journal, bf).await?;
     if !super::gov_tx_builder::validators_deployed() {
         return Ok(recovered + confirmed);
     }
@@ -332,11 +333,7 @@ pub async fn process_queue(
     };
 
     // Get pending items
-    let items = {
-        let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-        let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-        get_pending(db_ref)?
-    };
+    let items = journal.run("governance_queue.pending", get_pending).await?;
 
     if items.is_empty() {
         return Ok(recovered + confirmed);
@@ -344,12 +341,15 @@ pub async fn process_queue(
 
     let mut processed = recovered + confirmed;
 
-    for item in &items {
+    for item in items {
         // Skip items that have been attempted too many times
         if item.attempts >= 5 {
-            let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-            let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-            mark_failed(db_ref, &item.id, "max attempts (5) reached")?;
+            let id = item.id.clone();
+            journal
+                .run("governance_queue.max-attempts", move |db| {
+                    mark_failed(db, &id, "max attempts (5) reached")
+                })
+                .await?;
             processed += 1;
             continue;
         }
@@ -362,23 +362,32 @@ pub async fn process_queue(
         );
 
         // Attempt to build and submit the transaction
-        match build_and_submit(&item.action_type, item, bf, db, &operator).await {
+        match build_and_submit(&item.action_type, &item, bf, journal, &operator).await {
             Ok(submitted) => {
-                let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-                project_submission(db_ref, item, &submitted)?;
                 log::info!(
                     "On-chain tx: {} -> {:?} ({})",
                     item.action_type,
                     submitted.status,
                     submitted.tx_hash
                 );
+                journal
+                    .run("governance_queue.project", move |db| {
+                        project_submission(db, &item, &submitted)
+                    })
+                    .await?;
             }
-            Err(e) => {
-                let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-                mark_failed(db_ref, &item.id, &e)?;
+            Err(SubmitError::Retryable(error)) => {
+                // Nothing was journaled or sent; the item stays pending
+                // without consuming an attempt.
+                log::debug!("On-chain tx deferred for {}: {error}", item.action_type);
+                return Ok(processed);
+            }
+            Err(SubmitError::Failed(e)) => {
                 log::warn!("On-chain tx failed for {}: {}", item.action_type, e);
+                let id = item.id.clone();
+                journal
+                    .run("governance_queue.fail", move |db| mark_failed(db, &id, &e))
+                    .await?;
             }
         }
 
@@ -389,47 +398,56 @@ pub async fn process_queue(
 }
 
 async fn reconcile_journaled_items(
-    db: &std::sync::Arc<std::sync::Mutex<Option<Database>>>,
-    blockfrost: &super::blockfrost::BlockfrostClient,
+    journal: &Journal,
+    blockfrost: &BlockfrostClient,
 ) -> Result<usize, String> {
-    let items = {
-        let guard = db.lock().map_err(|_| "db lock poisoned")?;
-        let database = guard.as_ref().ok_or("database closed")?;
-        let mut statement = database
-            .conn()
-            .prepare(
-                "SELECT q.id FROM onchain_governance_queue q JOIN chain_submissions s
+    let items = journal
+        .run("governance_queue.journaled", |database| {
+            let mut statement = database
+                .conn()
+                .prepare(
+                    "SELECT q.id FROM onchain_governance_queue q JOIN chain_submissions s
              ON s.network = 'cardano-preprod' AND s.operation_kind = 'governance_queue'
                 AND s.operation_id = q.id
              WHERE q.status != 'confirmed' ORDER BY q.updated_at, q.id LIMIT 20",
-            )
-            .map_err(|e| e.to_string())?;
-        let ids = statement
-            .query_map([], |r| r.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        ids.iter()
-            .map(|id| get_item(database, id)?.ok_or_else(|| "queue item missing".into()))
-            .collect::<Result<Vec<_>, String>>()?
-    };
-    for item in &items {
+                )
+                .map_err(|e| e.to_string())?;
+            let ids = statement
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            let items = ids
+                .iter()
+                .map(|id| get_item(database, id)?.ok_or_else(|| "queue item missing".into()))
+                .collect::<Result<Vec<_>, String>>();
+            items
+        })
+        .await?;
+    let count = items.len();
+    for item in items {
         let operation = Operation {
             kind: "governance_queue",
             id: &item.id,
         };
         // Provider failure still projects the persisted uncertain state;
         // it cannot turn this operation back into buildable work.
-        if let Err(error) = submission::reconcile(db, blockfrost, operation).await {
+        if let Err(error) = submission::reconcile(journal, blockfrost, operation).await {
             log::debug!("governance submission reconciliation: {error}");
         }
-        let guard = db.lock().map_err(|_| "db lock poisoned")?;
-        let database = guard.as_ref().ok_or("database closed")?;
-        let original =
-            submission::lookup(database.conn(), operation)?.ok_or("submission missing")?;
-        project_submission(database, item, &original)?;
+        journal
+            .run("governance_queue.project-journaled", move |database| {
+                let operation = Operation {
+                    kind: "governance_queue",
+                    id: &item.id,
+                };
+                let original =
+                    submission::lookup(database.conn(), operation)?.ok_or("submission missing")?;
+                project_submission(database, &item, &original)
+            })
+            .await?;
     }
-    Ok(items.len())
+    Ok(count)
 }
 
 /// Poll submitted queue items for on-chain confirmation.
@@ -437,23 +455,24 @@ async fn reconcile_journaled_items(
 /// Queries items with status='submitted' and checks each via Blockfrost.
 /// Items confirmed on-chain transition to 'confirmed'.
 async fn confirm_submitted_items(
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
-    blockfrost: &super::blockfrost::BlockfrostClient,
+    journal: &Journal,
+    blockfrost: &BlockfrostClient,
 ) -> Result<usize, String> {
-    let items = {
-        let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-        let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-        get_submitted(db_ref)?
-    };
+    let items = journal
+        .run("governance_queue.submitted", get_submitted)
+        .await?;
 
     let mut confirmed = 0;
     for item in &items {
         if let Some(ref tx_hash) = item.tx_hash {
             match blockfrost.is_tx_confirmed(tx_hash).await {
                 Ok(true) => {
-                    let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                    let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-                    mark_confirmed(db_ref, &item.id)?;
+                    let id = item.id.clone();
+                    journal
+                        .run("governance_queue.confirm-legacy", move |db| {
+                            mark_confirmed(db, &id)
+                        })
+                        .await?;
                     log::info!("On-chain tx confirmed: {} ({})", item.action_type, tx_hash);
                     confirmed += 1;
                 }
@@ -518,15 +537,21 @@ fn get_submitted(db: &crate::db::Database) -> Result<Vec<QueueItem>, String> {
 async fn build_and_submit(
     action_type: &str,
     item: &QueueItem,
-    blockfrost: &super::blockfrost::BlockfrostClient,
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    blockfrost: &BlockfrostClient,
+    journal: &Journal,
     operator: &super::operator::OperatorKey,
-) -> Result<Submission, String> {
+) -> Result<Submission, SubmitError> {
     use super::gov_onchain;
 
+    let failed = |error: String| SubmitError::Failed(error);
+    let target_id = item.target_id.clone();
     let signed: Vec<u8> = match action_type {
         "finalize_election" => {
-            let f = read_finalize_data(db, &item.target_id)?;
+            let f = journal
+                .before_send("governance_queue.finalize-data", move |db| {
+                    read_finalize_data(db, &target_id)
+                })
+                .await?;
             gov_onchain::publish_finalized_election(
                 blockfrost,
                 operator,
@@ -537,12 +562,17 @@ async fn build_and_submit(
                 f.nomination_end_ms,
                 f.voting_end_ms,
             )
-            .await?
+            .await
+            .map_err(|e| failed(e.to_string()))?
         }
         "install_committee" => {
             // The operator only pays for and signs the transaction; it is
             // never substituted for an unresolvable elected committee.
-            let d = read_install_data(db, &item.target_id)?;
+            let d = journal
+                .before_send("governance_queue.install-data", move |db| {
+                    read_install_data(db, &target_id)
+                })
+                .await?;
             let params = gov_onchain::InstallParams {
                 dao_state_utxo: (&d.dao_state_tx, d.dao_state_idx),
                 dao_state_lovelace: d.dao_state_lovelace,
@@ -557,10 +587,16 @@ async fn build_and_submit(
                 committee_vkhs: d.committee_vkhs.clone(),
                 term_start_ms: chrono::Utc::now().timestamp_millis(),
             };
-            gov_onchain::install_committee(blockfrost, operator, &params).await?
+            gov_onchain::install_committee(blockfrost, operator, &params)
+                .await
+                .map_err(|e| failed(e.to_string()))?
         }
         "resolve_proposal" => {
-            let o = read_proposal_outcome(db, &item.target_id)?;
+            let o = journal
+                .before_send("governance_queue.proposal-outcome", move |db| {
+                    read_proposal_outcome(db, &target_id)
+                })
+                .await?;
             let metadata = gov_onchain::proposal_outcome_metadata(
                 &item.target_id,
                 &o.status,
@@ -568,15 +604,17 @@ async fn build_and_submit(
                 o.votes_against,
                 o.vote_merkle_root_hex,
             );
-            gov_onchain::build_governance_anchor(blockfrost, operator, metadata).await?
+            gov_onchain::build_governance_anchor(blockfrost, operator, metadata)
+                .await
+                .map_err(|e| failed(e.to_string()))?
         }
         "open_election" | "cast_election_vote" | "cast_proposal_vote" | "submit_proposal"
         | "approve_proposal" => {
-            return Err(format!(
+            return Err(failed(format!(
                 "action '{action_type}' is off-chain under the lean governance model"
-            ));
+            )));
         }
-        other => return Err(format!("unknown governance action type: {other}")),
+        other => return Err(failed(format!("unknown governance action type: {other}"))),
     };
 
     let context = serde_json::json!({"version": 1, "action_type": action_type,
@@ -584,7 +622,7 @@ async fn build_and_submit(
         "payload_json": item.payload_json})
     .to_string();
     submission::submit_once(
-        db,
+        journal,
         blockfrost,
         Operation {
             kind: "governance_queue",
@@ -596,7 +634,7 @@ async fn build_and_submit(
     .await
 }
 
-/// Row data for `finalize_election`, read under a brief DB lock.
+/// Row data for `finalize_election`, read in one short database job.
 struct FinalizeData {
     dao_policy: [u8; 28],
     dao_token_name: Vec<u8>,
@@ -643,12 +681,7 @@ fn iso_to_ms(s: Option<String>) -> i64 {
 }
 
 #[allow(clippy::type_complexity)]
-fn read_finalize_data(
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
-    election_id: &str,
-) -> Result<FinalizeData, String> {
-    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-    let dbref = guard.as_ref().ok_or("database not initialized")?;
+fn read_finalize_data(dbref: &Database, election_id: &str) -> Result<FinalizeData, String> {
     let (seats, nom, vot, pol, name_hex, rep): (
         i64,
         Option<String>,
@@ -690,12 +723,7 @@ fn read_finalize_data(
 }
 
 #[allow(clippy::type_complexity)]
-fn read_install_data(
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
-    election_id: &str,
-) -> Result<InstallData, String> {
-    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-    let dbref = guard.as_ref().ok_or("database not initialized")?;
+fn read_install_data(dbref: &Database, election_id: &str) -> Result<InstallData, String> {
     let conn = dbref.conn();
     let now_secs = chrono::Utc::now().timestamp();
 
@@ -818,12 +846,7 @@ struct ProposalOutcome {
     vote_merkle_root_hex: Option<String>,
 }
 
-fn read_proposal_outcome(
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
-    proposal_id: &str,
-) -> Result<ProposalOutcome, String> {
-    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-    let dbref = guard.as_ref().ok_or("database not initialized")?;
+fn read_proposal_outcome(dbref: &Database, proposal_id: &str) -> Result<ProposalOutcome, String> {
     let conn = dbref.conn();
 
     let (status, votes_for, votes_against): (String, i64, i64) = conn
@@ -875,7 +898,10 @@ fn read_proposal_outcome(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use super::*;
+    use crate::cardano::test_chain::{FakeChain, TestProfile, SHORT_LIMITS};
 
     fn test_db() -> Database {
         let db = Database::open_in_memory().unwrap();
@@ -928,23 +954,13 @@ mod tests {
                 hash = "00".repeat(28),
             ))
             .unwrap();
-        let db = std::sync::Arc::new(std::sync::Mutex::new(Some(db)));
-        let install = |db: &std::sync::Arc<std::sync::Mutex<Option<Database>>>| {
-            read_install_data(db, "election").map(|data| data.committee_vkhs)
-        };
+        let install =
+            |db: &Database| read_install_data(db, "election").map(|data| data.committee_vkhs);
 
         let error = install(&db).expect_err("no winners must not install");
         assert!(error.contains("no winners"), "{error}");
 
-        let execute = |sql: &str| {
-            db.lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .conn()
-                .execute_batch(sql)
-                .unwrap()
-        };
+        let execute = |sql: &str| db.conn().execute_batch(sql).unwrap();
         execute(
             "INSERT INTO governance_election_nominees
                  (id, election_id, stake_address, accepted, is_winner)
@@ -971,6 +987,53 @@ mod tests {
         assert_eq!(duplicate.id, item.id);
         assert_eq!(duplicate.status, "outcome_unknown");
         assert_eq!(get_all(&db).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn journaled_item_reconciles_by_hash_without_operator_build_or_post() {
+        let db = test_db();
+        let item = queued(&db);
+        let hash = "a".repeat(64);
+        db.conn()
+            .execute(
+                "INSERT INTO chain_submissions
+             (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json)
+             VALUES ('cardano-preprod', 'governance_queue', ?1, ?2, X'00', '{}')",
+                params![item.id, hash],
+            )
+            .unwrap();
+        let profile = TestProfile::new(db);
+        let (chain, included) = FakeChain::stalled_submit(42).await;
+        let client = Some(chain.client(SHORT_LIMITS));
+        let journal = profile.background();
+        let status =
+            |profile: &TestProfile| profile.with_conn(|conn| get_item_status(conn, &item.id));
+
+        process_queue(&journal, &client, &None).await.unwrap();
+        assert_eq!(status(&profile), "outcome_unknown");
+        included.store(true, Ordering::Release);
+        process_queue(&journal, &client, &None).await.unwrap();
+        assert_eq!(status(&profile), "confirmed");
+        let pointer: String = profile.with_conn(|conn| {
+            conn.query_row(
+                "SELECT dao_state_utxo FROM governance_daos WHERE id = 'dao'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        });
+        assert_eq!(pointer, format!("{hash}#0"));
+        let query = format!("GET /txs/{hash}");
+        assert_eq!(chain.requests(), vec![query.clone(), query]);
+    }
+
+    fn get_item_status(conn: &rusqlite::Connection, id: &str) -> String {
+        conn.query_row(
+            "SELECT status FROM onchain_governance_queue WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
     }
 
     #[test]

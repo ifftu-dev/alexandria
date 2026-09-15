@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
@@ -7,8 +5,7 @@ use super::blockfrost::BlockfrostClient;
 use super::completion::{self, CompletionObservation};
 use super::completion_tx_builder;
 use super::script_refs;
-use super::submission::{self, Operation, Submission, SubmissionStatus};
-use crate::db::Database;
+use super::submission::{self, Journal, Operation, Submission, SubmissionStatus};
 use crate::domain::completion::merkle_root;
 
 pub const KIND: &str = "completion_witness";
@@ -168,18 +165,32 @@ pub fn ensure_unobserved(conn: &Connection, context: &CompletionContext) -> Resu
     Ok(())
 }
 
-pub async fn tick(db: &Arc<Mutex<Option<Database>>>, bf: &BlockfrostClient) -> Result<(), String> {
-    let ids =
-        submission::with_database(db, |conn| submission::unapplied_operations(conn, KIND, 10))?;
+pub(crate) async fn tick(journal: &Journal, bf: &BlockfrostClient) -> Result<(), String> {
+    let ids = journal
+        .run("completion_recovery.scan", |db| {
+            submission::unapplied_operations(db.conn(), KIND, 10)
+        })
+        .await?;
     for id in ids {
         let operation = Operation {
             kind: KIND,
             id: &id,
         };
-        match submission::reconcile(db, bf, operation).await {
+        match submission::reconcile(journal, bf, operation).await {
             Ok(Some(submitted)) => {
-                if let Err(error) =
-                    submission::with_database(db, |conn| project(conn, operation, &submitted))
+                let id = id.clone();
+                if let Err(error) = journal
+                    .run("completion_recovery.project", move |db| {
+                        project(
+                            db.conn(),
+                            Operation {
+                                kind: KIND,
+                                id: &id,
+                            },
+                            &submitted,
+                        )
+                    })
+                    .await
                 {
                     log::warn!("completion recovery remains pending: {error}");
                 }

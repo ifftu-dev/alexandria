@@ -1,13 +1,10 @@
 //! Recovery of challenge stake operations without rebuilding transactions.
 
-use std::sync::{Arc, Mutex};
-
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use super::blockfrost::BlockfrostClient;
-use super::submission::{self, Operation, Submission, SubmissionStatus};
-use crate::db::Database;
+use super::submission::{self, Journal, Operation, Submission, SubmissionStatus};
 use crate::evidence::challenge;
 
 pub const LOCK_KIND: &str = "challenge_lock";
@@ -158,17 +155,24 @@ pub fn project(
 
 /// Run after unlock as part of the profile-leased chain worker. Querying an
 /// existing transaction requires a provider, not a wallet or authority key.
-pub async fn tick(db: &Arc<Mutex<Option<Database>>>, bf: &BlockfrostClient) -> Result<(), String> {
+pub(crate) async fn tick(journal: &Journal, bf: &BlockfrostClient) -> Result<(), String> {
     // Always recover locks first, so confirmed settlements can find them.
     for kind in [LOCK_KIND, SETTLE_KIND] {
-        let ids =
-            submission::with_database(db, |conn| submission::unapplied_operations(conn, kind, 10))?;
+        let ids = journal
+            .run("escrow_recovery.scan", move |db| {
+                submission::unapplied_operations(db.conn(), kind, 10)
+            })
+            .await?;
         for id in ids {
             let operation = Operation { kind, id: &id };
-            match submission::reconcile(db, bf, operation).await {
+            match submission::reconcile(journal, bf, operation).await {
                 Ok(Some(submitted)) => {
-                    if let Err(error) =
-                        submission::with_database(db, |conn| project(conn, operation, &submitted))
+                    let id = id.clone();
+                    if let Err(error) = journal
+                        .run("escrow_recovery.project", move |db| {
+                            project(db.conn(), Operation { kind, id: &id }, &submitted)
+                        })
+                        .await
                     {
                         log::error!("escrow recovery projection pending: {error}");
                     }

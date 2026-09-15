@@ -1,13 +1,10 @@
-use std::sync::{Arc, Mutex};
-
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::blockfrost::BlockfrostClient;
 use super::completion_recovery::{self, CompletionContext, KIND};
-use super::submission::{self, Operation, SubmissionStatus};
+use super::submission::{self, Journal, Operation, SubmissionStatus, SubmitError};
 use crate::crypto::wallet::Wallet;
-use crate::db::Database;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -176,12 +173,15 @@ fn validate_owner(context: &CompletionContext, id: &str, wallet: &Wallet) -> Res
 // The caller must retain its profile lease throughout this pass. At most one
 // unsigned intent is built per pass. Signed operations are exclusively handled
 // by receipt recovery: neither absence nor an error authorizes a replacement.
-pub async fn tick(
-    db: &Arc<Mutex<Option<Database>>>,
+pub(crate) async fn tick(
+    journal: &Journal,
     bf: &BlockfrostClient,
     wallet: &Wallet,
 ) -> Result<(), String> {
-    let Some((id, json)) = submission::with_database(db, next_request)? else {
+    let Some((id, json)) = journal
+        .run("completion_queue.next", |db| next_request(db.conn()))
+        .await?
+    else {
         return Ok(());
     };
     let context = serde_json::from_str::<CompletionContext>(&json)
@@ -193,36 +193,46 @@ pub async fn tick(
     let context = match context {
         Ok(context) => context,
         Err(error) => {
-            submission::with_database(db, |conn| {
-                conn.execute("UPDATE completion_witness_requests SET blocked = 1, last_error = ?2 WHERE operation_id = ?1", params![id, error])
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            })?;
+            let id = id.clone();
+            journal
+                .run("completion_queue.block", move |db| {
+                    db.conn().execute("UPDATE completion_witness_requests SET blocked = 1, last_error = ?2 WHERE operation_id = ?1", params![id, error])
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await?;
             return Ok(());
         }
     };
     // Reserve the next attempt before any await, also spacing restart retries.
-    let observed = submission::with_database(db, |conn| {
+    let observed = {
+        let id = id.clone();
+        let policy_id = context.policy_id.clone();
         let asset = hex::encode(super::completion_tx_builder::completion_asset_name(
             &context.payment_key_hash,
             context.course_id.as_bytes(),
         ));
-        let observed = super::completion::observation_exists(conn, &context.policy_id, &asset)
-            .map_err(|e| e.to_string())?;
-        if observed {
-            conn.execute("UPDATE completion_witness_requests SET blocked = 1,
-                last_error = 'An existing observation prevents a new witness' WHERE operation_id = ?1", [&id])
+        journal
+            .run("completion_queue.reserve", move |db| {
+                let conn = db.conn();
+                let observed = super::completion::observation_exists(conn, &policy_id, &asset)
+                    .map_err(|e| e.to_string())?;
+                if observed {
+                    conn.execute("UPDATE completion_witness_requests SET blocked = 1,
+                        last_error = 'An existing observation prevents a new witness' WHERE operation_id = ?1", [&id])
+                        .map_err(|e| e.to_string())?;
+                    return Ok(true);
+                }
+                conn.execute(
+                    "UPDATE completion_witness_requests SET attempts = attempts + 1,
+                     next_attempt_at = unixepoch() + MIN(300, 30 * (attempts + 1)) WHERE operation_id = ?1",
+                    [&id],
+                )
                 .map_err(|e| e.to_string())?;
-            return Ok(true);
-        }
-        conn.execute(
-            "UPDATE completion_witness_requests SET attempts = attempts + 1,
-             next_attempt_at = unixepoch() + MIN(300, 30 * (attempts + 1)) WHERE operation_id = ?1",
-            [&id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(false)
-    })?;
+                Ok(false)
+            })
+            .await?
+    };
     if observed {
         return Ok(());
     }
@@ -232,7 +242,19 @@ pub async fn tick(
     };
     // Re-check before building; the durable submission layer arbitrates a
     // racing journal insert before POST as well.
-    if submission::with_database(db, |conn| submission::lookup(conn, operation))?.is_some() {
+    let lookup_id = id.clone();
+    let journaled = journal
+        .run("completion_queue.lookup", move |db| {
+            submission::lookup(
+                db.conn(),
+                Operation {
+                    kind: KIND,
+                    id: &lookup_id,
+                },
+            )
+        })
+        .await?;
+    if journaled.is_some() {
         return Ok(());
     }
     let result = async {
@@ -250,19 +272,27 @@ pub async fn tick(
             treasury.as_ref(),
         )
         .await
-        .map_err(|e| e.to_string())?;
-        submission::submit_once(db, bf, operation, &built.tx_cbor, &json).await
+        .map_err(|e| SubmitError::Failed(e.to_string()))?;
+        submission::submit_once(journal, bf, operation, &built.tx_cbor, &json).await
     }
     .await;
-    if let Err(error) = result {
-        submission::with_database(db, |conn| {
-            conn.execute(
-                "UPDATE completion_witness_requests SET last_error = ?2 WHERE operation_id = ?1",
-                params![id, error],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
-        })?;
+    match result {
+        Ok(_) => {}
+        // Nothing was journaled or sent; the reserved backoff spaces the retry.
+        Err(SubmitError::Retryable(error)) => log::debug!("completion witness deferred: {error}"),
+        Err(SubmitError::Failed(error)) => {
+            journal
+                .run("completion_queue.error", move |db| {
+                    db.conn()
+                        .execute(
+                            "UPDATE completion_witness_requests SET last_error = ?2 WHERE operation_id = ?1",
+                            params![id, error],
+                        )
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await?;
+        }
     }
     Ok(())
 }

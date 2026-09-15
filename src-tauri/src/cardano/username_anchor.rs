@@ -16,17 +16,14 @@
 //! appears under the label; verified anchors mark `anchor_verified` in
 //! `username_claims` and lift the claim to tier 2.
 
-use std::sync::{Arc, Mutex};
-
 use pallas_codec::utils::KeyValuePairs;
 use pallas_primitives::{Metadatum, MetadatumLabel};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::cardano::blockfrost::BlockfrostClient;
-use crate::cardano::submission::{self, Member, Operation, Submission, SubmissionStatus};
+use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
 use crate::cardano::{anchor_tx, tx_builder};
-use crate::db::Database;
 use crate::domain::username_claim::{CardanoAnchor, UsernameClaim};
 
 /// Auxiliary-data label for username claim batches.
@@ -190,43 +187,41 @@ pub async fn verify_anchor(
 /// Batch-anchor every unanchored claim in the local cache. Returns the
 /// number of claims anchored. The enriched claims republish to the DHT
 /// through the caller (claims are keyed per-username there).
-pub async fn tick(
-    db: &Arc<Mutex<Option<Database>>>,
+pub(crate) async fn tick(
+    journal: &Journal,
     blockfrost: &Option<BlockfrostClient>,
     wallet: &Option<crate::crypto::wallet::Wallet>,
 ) -> Result<Vec<UsernameClaim>, String> {
     let Some(bf) = blockfrost else {
         return Ok(Vec::new());
     };
-    let mut anchored = recover_batches(db, bf).await?;
+    let mut anchored = recover_batches(journal, bf).await?;
 
     // Verification pass: claims anchored by OTHER nodes arrive via the
     // DHT with anchor_verified = 0. Confirm their digests on-chain so
     // resolution can trust them (capped per tick).
-    let unverified: Vec<(String, UsernameClaim)> = {
-        let guard = db.lock().map_err(|_| "db lock poisoned")?;
-        let Some(database) = guard.as_ref() else {
-            return Ok(Vec::new());
-        };
-        let mut stmt = database
-            .conn()
-            .prepare(
-                "SELECT claim_json FROM username_claims
+    let unverified: Vec<(String, UsernameClaim)> = journal
+        .run("username_anchor.unverified", |database| {
+            let mut stmt = database
+                .conn()
+                .prepare(
+                    "SELECT claim_json FROM username_claims
                  WHERE tier = 2 AND anchor_verified = 0 LIMIT 20",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows: Vec<(String, UsernameClaim)> = stmt
-            .query_map([], |r| r.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .filter_map(|json| {
-                serde_json::from_str::<UsernameClaim>(&json)
-                    .ok()
-                    .map(|claim| (json, claim))
-            })
-            .collect();
-        rows
-    };
+                )
+                .map_err(|e| e.to_string())?;
+            let rows: Vec<(String, UsernameClaim)> = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .filter_map(|json| {
+                    serde_json::from_str::<UsernameClaim>(&json)
+                        .ok()
+                        .map(|claim| (json, claim))
+                })
+                .collect();
+            Ok(rows)
+        })
+        .await?;
     for (original_json, claim) in unverified {
         let ok = match verify_anchor(bf, &claim).await {
             Ok(Some(ok)) => ok,
@@ -236,8 +231,7 @@ pub async fn tick(
                 continue;
             }
         };
-        let guard = db.lock().map_err(|_| "db lock poisoned")?;
-        if let Some(database) = guard.as_ref() {
+        journal.run("username_anchor.verification", move |database| {
             // Only mutate the exact snapshot whose evidence was checked.
             // A newer receipt, release, or owner claim must not be overwritten.
             if ok {
@@ -258,7 +252,8 @@ pub async fn tick(
                     );
                 }
             }
-        }
+            Ok(())
+        }).await?;
     }
 
     let Some(w) = wallet else {
@@ -266,11 +261,7 @@ pub async fn tick(
     };
 
     // Collect unanchored claims (tier < 2).
-    let pending: Vec<UsernameClaim> = {
-        let guard = db.lock().map_err(|_| "db lock poisoned")?;
-        let Some(database) = guard.as_ref() else {
-            return Ok(anchored);
-        };
+    let pending: Vec<UsernameClaim> = journal.run("username_anchor.pending", |database| {
         let mut stmt = database
             .conn()
             .prepare(
@@ -287,8 +278,8 @@ pub async fn tick(
             .filter_map(|json| serde_json::from_str::<UsernameClaim>(&json).ok())
             .filter(|c| c.verify().is_ok() && c.release.is_none())
             .collect();
-        rows
-    };
+        Ok(rows)
+    }).await?;
     if pending.is_empty() {
         return Ok(anchored);
     }
@@ -324,7 +315,7 @@ pub async fn tick(
         id: &batch_id,
     };
     let submitted = submission::submit_once_with_members(
-        db,
+        journal,
         bf,
         operation,
         &tx.signed_cbor,
@@ -334,29 +325,50 @@ pub async fn tick(
     .await?;
     // An acknowledgement is not a verified anchor. Recovery attaches it
     // only after a ledger receipt identifies successful execution and slot.
-    anchored.extend(submission::with_database(db, |conn| {
-        project_batch(conn, operation, &submitted)
-    })?);
+    anchored.extend(
+        journal
+            .run("username_anchor.project", move |database| {
+                let operation = Operation {
+                    kind: OPERATION_KIND,
+                    id: &batch_id,
+                };
+                project_batch(database.conn(), operation, &submitted)
+            })
+            .await?,
+    );
     Ok(anchored)
 }
 
 async fn recover_batches(
-    db: &Arc<Mutex<Option<Database>>>,
+    journal: &Journal,
     bf: &BlockfrostClient,
 ) -> Result<Vec<UsernameClaim>, String> {
-    let ids = submission::with_database(db, |conn| {
-        submission::unapplied_operations(conn, OPERATION_KIND, 10)
-    })?;
+    let ids = journal
+        .run("username_anchor.scan", |database| {
+            submission::unapplied_operations(database.conn(), OPERATION_KIND, 10)
+        })
+        .await?;
     let mut anchored = Vec::new();
     for id in ids {
         let operation = Operation {
             kind: OPERATION_KIND,
             id: &id,
         };
-        match submission::reconcile(db, bf, operation).await {
-            Ok(Some(recovered)) => anchored.extend(submission::with_database(db, |conn| {
-                project_batch(conn, operation, &recovered)
-            })?),
+        match submission::reconcile(journal, bf, operation).await {
+            Ok(Some(recovered)) => {
+                let id = id.clone();
+                anchored.extend(
+                    journal
+                        .run("username_anchor.recover", move |database| {
+                            let operation = Operation {
+                                kind: OPERATION_KIND,
+                                id: &id,
+                            };
+                            project_batch(database.conn(), operation, &recovered)
+                        })
+                        .await?,
+                )
+            }
             Ok(None) => return Err("username batch checkpoint missing".into()),
             Err(error) => log::debug!("username batch reconciliation pending: {error}"),
         }
@@ -436,9 +448,63 @@ fn project_batch(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use super::*;
+    use crate::cardano::test_chain::{self, FakeChain, TestProfile, SHORT_LIMITS};
     use crate::crypto::did::derive_did_key;
+    use crate::db::Database;
     use ed25519_dalek::SigningKey;
+
+    #[tokio::test]
+    async fn timed_out_batch_is_reconciled_without_rebuild_or_resubmission() {
+        let profile = TestProfile::migrated();
+        let original = claim(1, "ada_99");
+        profile.with_conn(|conn| cache(conn, &original));
+        let (chain, included) = FakeChain::stalled_submit(42).await;
+        let client = Some(chain.client(SHORT_LIMITS));
+        let wallet = Some(test_chain::wallet());
+        let journal = profile.background();
+
+        // The POST reaches the provider, then the client deadline expires.
+        assert!(tick(&journal, &client, &wallet).await.unwrap().is_empty());
+        let batch = profile
+            .with_conn(|conn| submission::unapplied_operations(conn, OPERATION_KIND, 10).unwrap());
+        assert_eq!(batch.len(), 1);
+        let saved = profile.with_conn(|conn| {
+            submission::lookup(
+                conn,
+                Operation {
+                    kind: OPERATION_KIND,
+                    id: &batch[0],
+                },
+            )
+            .unwrap()
+            .unwrap()
+        });
+        assert_eq!(saved.status, SubmissionStatus::OutcomeUnknown);
+
+        // "Not found" neither anchors nor frees the reserved claim for a new batch.
+        assert!(tick(&journal, &client, &wallet).await.unwrap().is_empty());
+        assert_eq!(
+            profile.with_conn(|conn| cached(conn, &original.username)),
+            original
+        );
+
+        included.store(true, Ordering::Release);
+        let anchored = tick(&journal, &client, &wallet).await.unwrap();
+        assert_eq!(anchored.len(), 1);
+        let anchor = anchored[0].anchor.as_ref().unwrap();
+        assert_eq!(
+            (anchor.tx_hash.as_str(), anchor.slot),
+            (saved.tx_hash.as_str(), 42)
+        );
+        let address = &wallet.as_ref().unwrap().payment_address;
+        assert_eq!(chain.count("POST /tx/submit"), 1);
+        assert_eq!(chain.count(&format!("GET /addresses/{address}/utxos")), 1);
+        assert_eq!(chain.count(&format!("GET /txs/{}", saved.tx_hash)), 2);
+        assert_eq!(chain.requests().len(), 6);
+    }
 
     fn claim(seed: u8, name: &str) -> UsernameClaim {
         let key = SigningKey::from_bytes(&[seed; 32]);

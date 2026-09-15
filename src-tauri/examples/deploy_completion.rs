@@ -228,10 +228,12 @@ async fn main() -> Result<()> {
     );
 
     eprintln!("\n[deploy_completion] submitting via Blockfrost…");
-    let submit_hash = blockfrost
-        .submit_tx(&signed_cbor)
-        .await
-        .map_err(|e| anyhow!("submit_tx: {e}"))?;
+    let submit_hash = blockfrost.submit_tx(&signed_cbor).await.map_err(|e| {
+        anyhow!(
+            "submit_tx: {e}\n  outcome unknown: {local_tx_hash} may still reach the chain; \
+                 check it before re-running, which builds a different transaction"
+        )
+    })?;
 
     println!("\n✓ submitted");
     println!("  tx_hash: {submit_hash}");

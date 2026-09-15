@@ -99,9 +99,14 @@ impl MessageValidator {
         }
     }
 
-    /// Create a validator wired to the active profile's database so the
-    /// identity binding step can consult `stake_pubkey_registry`.
-    pub fn with_db(db: Arc<Mutex<Option<Database>>>) -> Self {
+    /// Create a validator that consults `stake_pubkey_registry`
+    /// synchronously through a shared database handle. Test-only: the swarm
+    /// event loop must not lock the profile database, so production runs the
+    /// identity step as a profile-fenced executor job between
+    /// [`check_before_identity`](Self::check_before_identity) and
+    /// [`check_after_identity`](Self::check_after_identity).
+    #[cfg(test)]
+    pub(crate) fn with_db(db: Arc<Mutex<Option<Database>>>) -> Self {
         Self {
             seen: Mutex::new(LruCache::new(NonZeroUsize::new(DEDUP_CACHE_MAX).unwrap())),
             db: Some(db),
@@ -114,13 +119,24 @@ impl MessageValidator {
     /// `ValidationError` encountered. Checks run in order:
     /// signature → identity → freshness → dedup → schema → authority.
     pub fn validate(&self, message: &SignedGossipMessage) -> ValidationResult {
-        self.check_signature(message)?;
+        self.check_before_identity(message)?;
         self.check_identity_binding(message)?;
+        self.check_after_identity(message)
+    }
+
+    /// The pipeline steps that precede the registry identity binding.
+    pub(crate) fn check_before_identity(&self, message: &SignedGossipMessage) -> ValidationResult {
+        self.check_signature(message)
+    }
+
+    /// The pipeline steps that follow the registry identity binding. A caller
+    /// running the binding asynchronously invokes this only after it passed,
+    /// so a rejected message is never recorded in the dedup cache.
+    pub(crate) fn check_after_identity(&self, message: &SignedGossipMessage) -> ValidationResult {
         self.check_freshness(message)?;
         self.check_dedup(message)?;
         self.check_schema(message)?;
-        self.check_authority(message)?;
-        Ok(())
+        self.check_authority(message)
     }
 
     /// Step 1: Verify the Ed25519 signature over the payload.

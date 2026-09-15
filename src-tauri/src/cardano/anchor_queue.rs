@@ -6,12 +6,15 @@
 //! `anchor_tx::build_anchor_metadata_tx`, submits via Blockfrost, and
 //! records the resulting tx hash on success.
 
-use std::sync::{Arc, Mutex};
-
 use crate::cardano::anchor_tx;
-use crate::cardano::submission::{self, Operation, Submission, SubmissionStatus};
+use crate::cardano::blockfrost::BlockfrostClient;
+use crate::cardano::submission::{
+    self, Journal, Operation, Submission, SubmissionStatus, SubmitError,
+};
 use crate::crypto::did::Did;
-use crate::db::Database;
+use crate::crypto::wallet::Wallet;
+
+const OPERATION_KIND: &str = "credential_anchor";
 
 /// Maximum number of rows processed per `tick` call. Caps work
 /// per scheduler invocation so an idle node returning to a large
@@ -48,10 +51,10 @@ pub struct CredentialAnchor {
 ///
 /// Returns the number of rows whose state changed (submitted, failed,
 /// or marked permanently failed at MAX_ATTEMPTS).
-pub async fn tick(
-    db: &Arc<Mutex<Option<Database>>>,
-    blockfrost: &Option<crate::cardano::blockfrost::BlockfrostClient>,
-    wallet: &Option<crate::crypto::wallet::Wallet>,
+pub(crate) async fn tick(
+    journal: &Journal,
+    blockfrost: &Option<BlockfrostClient>,
+    wallet: &Option<Wallet>,
 ) -> Result<u32, String> {
     // Idle-node contract: no chain credentials ⇒ no work, no error.
     let bf = match blockfrost {
@@ -69,17 +72,11 @@ pub async fn tick(
         }
     };
 
-    // Pull the pending batch. We hold the DB lock only for the SELECT
-    // so the long-running Blockfrost calls below don't block other
-    // commands.
-    let batch = {
-        let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-        let db_ref = match guard.as_ref() {
-            Some(d) => d,
-            None => return Ok(0),
-        };
-        load_pending(db_ref.conn())?
-    };
+    // Every local phase is a short executor job; the Blockfrost calls
+    // below run between jobs and never hold the database.
+    let batch = journal
+        .run("anchor_queue.load", |db| load_pending(db.conn()))
+        .await?;
     if batch.is_empty() {
         return Ok(0);
     }
@@ -87,19 +84,28 @@ pub async fn tick(
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut processed = 0u32;
 
-    for row in &batch {
+    for row in batch {
+        let credential_id = row.credential_id.clone();
         let operation = Operation {
-            kind: "credential_anchor",
-            id: &row.credential_id,
+            kind: OPERATION_KIND,
+            id: &credential_id,
         };
-        let existing = {
-            let guard = db.lock().map_err(|_| "db lock poisoned")?;
-            submission::lookup(guard.as_ref().ok_or("database closed")?.conn(), operation)?
-        };
+        let lookup_id = credential_id.clone();
+        let existing = journal
+            .run("anchor_queue.lookup", move |db| {
+                submission::lookup(
+                    db.conn(),
+                    Operation {
+                        kind: OPERATION_KIND,
+                        id: &lookup_id,
+                    },
+                )
+            })
+            .await?;
         if let Some(existing) = existing {
             // A crash may have left the queue row pending even though the
             // exact transaction was durably journaled. Never rebuild it.
-            let recovered = match submission::reconcile(db, bf, operation).await {
+            let recovered = match submission::reconcile(journal, bf, operation).await {
                 Ok(Some(recovered)) => recovered,
                 Ok(None) => return Err("credential submission checkpoint missing".into()),
                 Err(error) => {
@@ -107,13 +113,7 @@ pub async fn tick(
                     existing
                 }
             };
-            let guard = db.lock().map_err(|_| "db lock poisoned")?;
-            project_submission(
-                guard.as_ref().ok_or("database closed")?.conn(),
-                &row.credential_id,
-                &recovered,
-                &now,
-            )?;
+            project_anchor(journal, &credential_id, recovered, &now).await?;
             processed += 1;
             continue;
         }
@@ -125,36 +125,46 @@ pub async fn tick(
         // Hit max attempts before this run? Mark permanently failed
         // and move on. Mirror the onchain_queue convention.
         if row.attempts >= MAX_ATTEMPTS {
-            let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-            let db_ref = guard.as_ref().ok_or("database closed")?;
-            mark_failed_permanent(db_ref.conn(), &row.credential_id, &now)?;
+            let (id, failed_at) = (credential_id.clone(), now.clone());
+            journal
+                .run("anchor_queue.fail-permanent", move |db| {
+                    mark_failed_permanent(db.conn(), &id, &failed_at)
+                })
+                .await?;
             processed += 1;
             continue;
         }
 
         log::info!(
             "anchor_queue: processing {} (attempt {})",
-            row.credential_id,
+            credential_id,
             row.attempts + 1
         );
 
-        match build_and_submit(&row.credential_id, bf, w, db).await {
+        match build_and_submit(&credential_id, bf, w, journal).await {
             Ok(submitted) => {
-                let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                let db_ref = guard.as_ref().ok_or("database closed")?;
-                project_submission(db_ref.conn(), &row.credential_id, &submitted, &now)?;
                 log::info!(
                     "anchor_queue: {} → {:?} ({})",
-                    row.credential_id,
+                    credential_id,
                     submitted.status,
                     submitted.tx_hash
                 );
+                project_anchor(journal, &credential_id, submitted, &now).await?;
             }
-            Err(e) => {
-                let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                let db_ref = guard.as_ref().ok_or("database closed")?;
-                mark_failed_retryable(db_ref.conn(), &row.credential_id, &e, &now)?;
-                log::warn!("anchor_queue: {} failed: {}", row.credential_id, e);
+            Err(SubmitError::Retryable(error)) => {
+                // Nothing was journaled or sent, so no attempt is consumed.
+                // The profile database is unavailable; end this pass.
+                log::debug!("anchor_queue: {credential_id} deferred: {error}");
+                return Ok(processed);
+            }
+            Err(SubmitError::Failed(error)) => {
+                log::warn!("anchor_queue: {} failed: {}", credential_id, error);
+                let (id, failed_at) = (credential_id.clone(), now.clone());
+                journal
+                    .run("anchor_queue.fail-retryable", move |db| {
+                        mark_failed_retryable(db.conn(), &id, &error, &failed_at)
+                    })
+                    .await?;
             }
         }
         processed += 1;
@@ -163,33 +173,47 @@ pub async fn tick(
     Ok(processed)
 }
 
+async fn project_anchor(
+    journal: &Journal,
+    credential_id: &str,
+    submission: Submission,
+    now: &str,
+) -> Result<(), String> {
+    let (id, now) = (credential_id.to_owned(), now.to_owned());
+    journal
+        .run("anchor_queue.project", move |db| {
+            project_submission(db.conn(), &id, &submission, &now)
+        })
+        .await
+}
+
 /// Fetch the credential's hash + issuer + issuance_date, build the
 /// anchor tx, and submit. Pulled out so `tick` stays readable.
 async fn build_and_submit(
     credential_id: &str,
-    blockfrost: &crate::cardano::blockfrost::BlockfrostClient,
-    wallet: &crate::crypto::wallet::Wallet,
-    db: &Arc<Mutex<Option<Database>>>,
-) -> Result<Submission, String> {
-    let (integrity_hash, issuer_did, issuance_date) = {
-        let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-        let db_ref = guard.as_ref().ok_or("database closed")?;
-        db_ref
-            .conn()
-            .query_row(
-                "SELECT integrity_hash, issuer_did, issuance_date FROM credentials \
-                 WHERE id = ?1",
-                rusqlite::params![credential_id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .map_err(|e| format!("load credential: {e}"))?
-    };
+    blockfrost: &BlockfrostClient,
+    wallet: &Wallet,
+    journal: &Journal,
+) -> Result<Submission, SubmitError> {
+    let id = credential_id.to_owned();
+    let (integrity_hash, issuer_did, issuance_date) = journal
+        .before_send("anchor_queue.credential", move |db| {
+            db.conn()
+                .query_row(
+                    "SELECT integrity_hash, issuer_did, issuance_date FROM credentials \
+                     WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .map_err(|e| format!("load credential: {e}"))
+        })
+        .await?;
 
     let issuer = Did(issuer_did);
     let anchor = anchor_tx::build_anchor_metadata_tx(
@@ -199,15 +223,16 @@ async fn build_and_submit(
         wallet,
         blockfrost,
     )
-    .await?;
+    .await
+    .map_err(SubmitError::Failed)?;
     let context = serde_json::json!({"version": 1, "credential_id": credential_id,
         "integrity_hash": integrity_hash})
     .to_string();
     submission::submit_once(
-        db,
+        journal,
         blockfrost,
         Operation {
-            kind: "credential_anchor",
+            kind: OPERATION_KIND,
             id: credential_id,
         },
         &anchor.signed_cbor,
@@ -372,7 +397,11 @@ pub fn enqueue_or_retry(db: &rusqlite::Connection, credential_id: &str) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use super::*;
+    use crate::cardano::test_chain::{self, FakeChain, TestProfile, SHORT_LIMITS};
+    use crate::db::Database;
 
     #[test]
     fn anchor_status_serializes_as_snake_case() {
@@ -502,11 +531,102 @@ mod tests {
     async fn tick_without_blockfrost_returns_zero_silently() {
         // Idle-node contract: no Blockfrost project id + no wallet
         // ⇒ tick is a silent no-op. Logs at debug only to avoid spam.
-        let db = std::sync::Arc::new(std::sync::Mutex::new(Some(
-            Database::open_in_memory().unwrap(),
-        )));
-        let processed = tick(&db, &None, &None).await.expect("tick ok");
+        let profile = TestProfile::new(Database::open_in_memory().unwrap());
+        let processed = tick(&profile.background(), &None, &None)
+            .await
+            .expect("tick ok");
         assert_eq!(processed, 0);
+    }
+
+    fn anchor_row(profile: &TestProfile, id: &str) -> (String, i64, Option<String>) {
+        profile.with_conn(|conn| {
+            conn.query_row(
+                "SELECT anchor_status, attempts, anchor_tx_hash FROM credential_anchors
+                 WHERE credential_id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+        })
+    }
+
+    #[tokio::test]
+    async fn confirmed_anchor_is_never_reprocessed_with_live_credentials() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| {
+            seed_credential(conn, "cred-confirmed");
+            conn.execute(
+                "INSERT INTO credential_anchors (credential_id, anchor_status, anchor_tx_hash, attempts)
+                 VALUES ('cred-confirmed', 'confirmed', 'tx_abc', 1)",
+                [],
+            )
+            .unwrap();
+        });
+        let (chain, _) = FakeChain::stalled_submit(42).await;
+        let processed = tick(
+            &profile.background(),
+            &Some(chain.client(SHORT_LIMITS)),
+            &Some(test_chain::wallet()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(processed, 0);
+        assert!(chain.requests().is_empty(), "no build, submit or query");
+        assert_eq!(
+            anchor_row(&profile, "cred-confirmed"),
+            ("confirmed".into(), 1, Some("tx_abc".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_out_anchor_is_reconciled_without_rebuild_or_resubmission() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| {
+            seed_credential(conn, "cred");
+            enqueue(conn, "cred").unwrap();
+        });
+        let (chain, included) = FakeChain::stalled_submit(42).await;
+        let client = Some(chain.client(SHORT_LIMITS));
+        let wallet = Some(test_chain::wallet());
+        let journal = profile.background();
+
+        // The POST reaches the provider, then the client deadline expires.
+        assert_eq!(tick(&journal, &client, &wallet).await.unwrap(), 1);
+        let (status, attempts, hash) = anchor_row(&profile, "cred");
+        assert_eq!((status.as_str(), attempts), ("outcome_unknown", 1));
+        let hash = hash.unwrap();
+        let journaled = profile.with_conn(|conn| {
+            submission::lookup(
+                conn,
+                Operation {
+                    kind: OPERATION_KIND,
+                    id: "cred",
+                },
+            )
+            .unwrap()
+            .unwrap()
+        });
+        assert_eq!(journaled.tx_hash, hash);
+        assert!(journaled.last_error.is_some());
+
+        // "Not found" is not a rejection and never authorizes a rebuild.
+        tick(&journal, &client, &wallet).await.unwrap();
+        assert_eq!(
+            anchor_row(&profile, "cred"),
+            ("outcome_unknown".into(), 1, Some(hash.clone()))
+        );
+
+        included.store(true, Ordering::Release);
+        tick(&journal, &client, &wallet).await.unwrap();
+        assert_eq!(
+            anchor_row(&profile, "cred"),
+            ("confirmed".into(), 1, Some(hash.clone()))
+        );
+        let address = &wallet.as_ref().unwrap().payment_address;
+        assert_eq!(chain.count("POST /tx/submit"), 1);
+        assert_eq!(chain.count(&format!("GET /addresses/{address}/utxos")), 1);
+        assert_eq!(chain.count(&format!("GET /txs/{hash}")), 2);
+        assert_eq!(chain.requests().len(), 6);
     }
 
     #[test]

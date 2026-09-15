@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use rusqlite::OptionalExtension;
-use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use crate::db::Database;
@@ -11,6 +10,11 @@ use super::types::{
     ClassroomMessageEvent, ClassroomMessageInfo, ClassroomMessagePayload, ClassroomMetaEvent,
     ClassroomMetaTauriEvent,
 };
+
+/// Tauri event carrying a committed incoming classroom text message.
+pub const MESSAGE_EVENT: &str = "classroom:message";
+/// Tauri event carrying a committed incoming classroom meta change.
+pub const META_EVENT: &str = "classroom:meta";
 
 /// Manages the set of classroom topics the local node is subscribed to.
 ///
@@ -176,19 +180,26 @@ fn apply_classroom_message(
     Ok((inserted == 1).then_some(sent_at))
 }
 
-/// Handle an incoming gossip message on a classroom text channel topic.
-///
-/// Called from the P2P event consumer loop (DB lock is held by the caller).
-/// Validates membership, persists the message, and emits a Tauri event.
-pub fn handle_classroom_message(db: &Database, signed_msg: &SignedGossipMessage, app: &AppHandle) {
-    let payload: ClassroomMessagePayload = match serde_json::from_slice(&signed_msg.payload) {
-        Ok(p) => p,
-        Err(e) => {
-            log::debug!("[classroom] Invalid message payload: {e}");
-            return;
-        }
-    };
+/// Decode an incoming classroom text-channel payload. Runs before the
+/// database job so the database thread only performs checks and writes.
+pub fn decode_incoming_message(
+    signed_msg: &SignedGossipMessage,
+) -> Option<ClassroomMessagePayload> {
+    serde_json::from_slice(&signed_msg.payload)
+        .map_err(|e| log::debug!("[classroom] Invalid message payload: {e}"))
+        .ok()
+}
 
+/// Apply an incoming gossip message on a classroom text channel topic.
+///
+/// Runs inside the inbound P2P database job. Validates membership and
+/// persists the message; the returned event is emitted by the caller only
+/// after the job has returned, so the UI never sees an uncommitted message.
+pub fn apply_incoming_message(
+    db: &Database,
+    signed_msg: &SignedGossipMessage,
+    payload: ClassroomMessagePayload,
+) -> Option<ClassroomMessageEvent> {
     let local_address: Option<String> = db
         .conn()
         .query_row(
@@ -204,29 +215,26 @@ pub fn handle_classroom_message(db: &Database, signed_msg: &SignedGossipMessage,
         local_address.as_deref(),
     ) {
         Ok(Some(sent_at)) => sent_at,
-        Ok(None) => return,
+        Ok(None) => return None,
         Err(error) => {
             log::error!("[classroom] Failed to apply message: {error}");
-            return;
+            return None;
         }
     };
 
-    let _ = app.emit(
-        "classroom:message",
-        ClassroomMessageEvent {
-            classroom_id: payload.classroom_id.clone(),
-            channel_id: payload.channel_id.clone(),
-            message: ClassroomMessageInfo {
-                id: payload.id,
-                channel_id: payload.channel_id,
-                classroom_id: payload.classroom_id,
-                sender_address: signed_msg.stake_address.clone(),
-                sender_name: payload.sender_name,
-                content: payload.content,
-                sent_at,
-            },
+    Some(ClassroomMessageEvent {
+        classroom_id: payload.classroom_id.clone(),
+        channel_id: payload.channel_id.clone(),
+        message: ClassroomMessageInfo {
+            id: payload.id,
+            channel_id: payload.channel_id,
+            classroom_id: payload.classroom_id,
+            sender_address: signed_msg.stake_address.clone(),
+            sender_name: payload.sender_name,
+            content: payload.content,
+            sent_at,
         },
-    );
+    })
 }
 
 fn apply_classroom_meta(
@@ -467,19 +475,23 @@ fn apply_classroom_meta(
     }
 }
 
-/// Handle an incoming gossip message on a classroom meta topic.
-///
-/// Called from the P2P event consumer loop (DB lock is held by the caller).
-/// Applies the membership/call state change and emits a Tauri event.
-pub fn handle_classroom_meta(db: &Database, signed_msg: &SignedGossipMessage, app: &AppHandle) {
-    let event: ClassroomMetaEvent = match serde_json::from_slice(&signed_msg.payload) {
-        Ok(e) => e,
-        Err(e) => {
-            log::debug!("[classroom] Invalid meta payload: {e}");
-            return;
-        }
-    };
+/// Decode an incoming classroom meta payload before the database job.
+pub fn decode_incoming_meta(signed_msg: &SignedGossipMessage) -> Option<ClassroomMetaEvent> {
+    serde_json::from_slice(&signed_msg.payload)
+        .map_err(|e| log::debug!("[classroom] Invalid meta payload: {e}"))
+        .ok()
+}
 
+/// Apply an incoming gossip message on a classroom meta topic.
+///
+/// Runs inside the inbound P2P database job. Applies the membership/call
+/// state change; the returned event is emitted by the caller only after the
+/// job has returned.
+pub fn apply_incoming_meta(
+    db: &Database,
+    signed_msg: &SignedGossipMessage,
+    event: ClassroomMetaEvent,
+) -> Option<ClassroomMetaTauriEvent> {
     let local_address: Option<String> = db
         .conn()
         .query_row(
@@ -495,10 +507,10 @@ pub fn handle_classroom_meta(db: &Database, signed_msg: &SignedGossipMessage, ap
         local_address.as_deref(),
     ) {
         Ok(true) => {}
-        Ok(false) => return,
+        Ok(false) => return None,
         Err(error) => {
             log::error!("[classroom] Failed to apply meta event: {error}");
-            return;
+            return None;
         }
     }
 
@@ -506,14 +518,11 @@ pub fn handle_classroom_meta(db: &Database, signed_msg: &SignedGossipMessage, ap
     let event_type = event.event_type().to_string();
     let data = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
 
-    let _ = app.emit(
-        "classroom:meta",
-        ClassroomMetaTauriEvent {
-            classroom_id,
-            event_type,
-            data,
-        },
-    );
+    Some(ClassroomMetaTauriEvent {
+        classroom_id,
+        event_type,
+        data,
+    })
 }
 
 #[cfg(test)]

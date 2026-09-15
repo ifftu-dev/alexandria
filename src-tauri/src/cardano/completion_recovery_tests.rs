@@ -1,4 +1,8 @@
+use std::sync::atomic::Ordering;
+
 use super::*;
+use crate::cardano::test_chain::{FakeChain, TestProfile, SHORT_LIMITS};
+use crate::db::Database;
 
 fn context() -> CompletionContext {
     CompletionContext {
@@ -158,6 +162,26 @@ fn interrupted_projection_rolls_back_observation_and_retries_original_evidence()
     assert!(submission::unapplied_operations(db.conn(), KIND, 10)
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn uncertain_witness_recovers_by_querying_its_original_transaction_only() {
+    let db = test_db();
+    let context = context();
+    let saved = checkpoint(&db, &context, SubmissionStatus::OutcomeUnknown);
+    let profile = TestProfile::new(db);
+    let (chain, included) = FakeChain::stalled_submit(42).await;
+    let client = chain.client(SHORT_LIMITS);
+    let journal = profile.background();
+    tick(&journal, &client).await.unwrap();
+    assert!(profile.with_conn(|conn| completion::pending_observations(conn).unwrap().is_empty()));
+    included.store(true, Ordering::Release);
+    tick(&journal, &client).await.unwrap();
+    let pending = profile.with_conn(|conn| completion::pending_observations(conn).unwrap());
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].tx_hash, saved.tx_hash);
+    let query = format!("GET /txs/{}", saved.tx_hash);
+    assert_eq!(chain.requests(), vec![query.clone(), query]);
 }
 
 #[test]

@@ -23,6 +23,8 @@ pub mod snapshot_recovery;
 pub mod soulbound_tx_builder;
 pub mod stake_pubkey;
 pub mod submission;
+#[cfg(test)]
+pub(crate) mod test_chain;
 pub mod treasury;
 pub mod tx_builder;
 pub mod types;

@@ -1,4 +1,8 @@
+use std::sync::atomic::Ordering;
+
 use super::*;
+use crate::cardano::test_chain::{FakeChain, TestProfile, SHORT_LIMITS};
+use crate::db::Database;
 
 fn test_db() -> Database {
     let db = Database::open_in_memory().unwrap();
@@ -86,6 +90,26 @@ fn frozen_snapshot_and_uncertain_checkpoint_survive_reopen() {
         freeze(db.conn(), &context).is_err(),
         "frozen inputs must not be replaced"
     );
+}
+
+#[tokio::test]
+async fn uncertain_snapshot_recovers_by_querying_its_original_transaction_only() {
+    let db = test_db();
+    let context = context();
+    freeze(db.conn(), &context).unwrap();
+    let saved = checkpoint(db.conn(), &context, SubmissionStatus::OutcomeUnknown);
+    let profile = TestProfile::new(db);
+    let (chain, included) = FakeChain::stalled_submit(42).await;
+    let client = chain.client(SHORT_LIMITS);
+    let journal = profile.background();
+    let status = || profile.with_conn(|conn| record(conn, "snap").unwrap().tx_status);
+    tick(&journal, &client).await.unwrap();
+    assert_eq!(status(), "outcome_unknown", "not found is not rejection");
+    included.store(true, Ordering::Release);
+    tick(&journal, &client).await.unwrap();
+    assert_eq!(status(), "confirmed");
+    let query = format!("GET /txs/{}", saved.tx_hash);
+    assert_eq!(chain.requests(), vec![query.clone(), query]);
 }
 
 #[test]

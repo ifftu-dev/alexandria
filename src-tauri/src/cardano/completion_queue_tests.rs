@@ -1,4 +1,6 @@
 use super::*;
+use crate::cardano::test_chain::TestProfile;
+use crate::db::Database;
 
 fn wallet() -> Wallet {
     crate::crypto::wallet::wallet_from_mnemonic(
@@ -105,9 +107,9 @@ async fn every_signed_status_is_excluded_from_building_or_resubmission() {
         enqueue(db.conn(), "claim", &context).unwrap();
         assert!(next_request(db.conn()).unwrap().is_none());
         assert_eq!(state(db.conn(), "claim").unwrap().status, expected);
-        let db = Arc::new(Mutex::new(Some(db)));
-        tick(&db, &bf, &wallet()).await.unwrap();
-        submission::with_database(&db, |conn| {
+        let profile = TestProfile::new(db);
+        tick(&profile.background(), &bf, &wallet()).await.unwrap();
+        submission::with_database(&profile.db, |conn| {
             let attempts: i64 = conn
                 .query_row(
                     "SELECT attempts FROM completion_witness_requests",
@@ -132,10 +134,10 @@ async fn wrong_wallet_request_is_blocked_before_io() {
     let mut context = context();
     context.subject_pubkey = [3; 32];
     enqueue(db.conn(), "claim", &context).unwrap();
-    let db = Arc::new(Mutex::new(Some(db)));
+    let profile = TestProfile::new(db);
     let bf = BlockfrostClient::with_base_url("test".into(), "http://127.0.0.1:1".into()).unwrap();
-    tick(&db, &bf, &wallet()).await.unwrap();
-    submission::with_database(&db, |conn| {
+    tick(&profile.background(), &bf, &wallet()).await.unwrap();
+    submission::with_database(&profile.db, |conn| {
         assert_eq!(
             state(conn, "claim").unwrap().status,
             WitnessStatus::Unavailable
@@ -226,12 +228,12 @@ async fn cancelled_unsigned_build_preserves_intent_and_restart_backoff() {
     let context = context();
     claim(db.conn(), "claim");
     enqueue(db.conn(), "claim", &context).unwrap();
-    let shared = Arc::new(Mutex::new(Some(db)));
-    let job_db = shared.clone();
+    let shared = TestProfile::new(db);
+    let journal = shared.background();
     let job = tokio::spawn(async move {
         let bf =
             BlockfrostClient::with_base_url("test".into(), format!("http://{address}")).unwrap();
-        tick(&job_db, &bf, &wallet()).await
+        tick(&journal, &bf, &wallet()).await
     });
     let started = tokio::time::timeout(std::time::Duration::from_secs(5), started_rx).await;
     job.abort();

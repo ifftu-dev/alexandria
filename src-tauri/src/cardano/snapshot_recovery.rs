@@ -1,13 +1,10 @@
-use std::sync::{Arc, Mutex};
-
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use super::blockfrost::BlockfrostClient;
-use super::submission::{self, Operation, Submission, SubmissionStatus};
+use super::submission::{self, Journal, Operation, Submission, SubmissionStatus};
 use super::{script_refs, snapshot};
 use crate::crypto::wallet::Wallet;
-use crate::db::Database;
 use crate::domain::reputation::{OnChainSkillScore, ReputationRole, SnapshotRecord};
 
 pub const KIND: &str = "reputation_snapshot";
@@ -230,18 +227,32 @@ pub fn project(
     tx.commit().map_err(|e| e.to_string())
 }
 
-pub async fn tick(db: &Arc<Mutex<Option<Database>>>, bf: &BlockfrostClient) -> Result<(), String> {
-    let ids =
-        submission::with_database(db, |conn| submission::unapplied_operations(conn, KIND, 10))?;
+pub(crate) async fn tick(journal: &Journal, bf: &BlockfrostClient) -> Result<(), String> {
+    let ids = journal
+        .run("snapshot_recovery.scan", |db| {
+            submission::unapplied_operations(db.conn(), KIND, 10)
+        })
+        .await?;
     for id in ids {
         let operation = Operation {
             kind: KIND,
             id: &id,
         };
-        match submission::reconcile(db, bf, operation).await {
+        match submission::reconcile(journal, bf, operation).await {
             Ok(Some(saved)) => {
-                if let Err(error) =
-                    submission::with_database(db, |conn| project(conn, operation, &saved))
+                let id = id.clone();
+                if let Err(error) = journal
+                    .run("snapshot_recovery.project", move |db| {
+                        project(
+                            db.conn(),
+                            Operation {
+                                kind: KIND,
+                                id: &id,
+                            },
+                            &saved,
+                        )
+                    })
+                    .await
                 {
                     log::warn!("snapshot projection remains pending: {error}");
                 }

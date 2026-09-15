@@ -309,37 +309,25 @@ impl AppState {
     }
 
     async fn start_registry_refresh(&self) {
-        let db_for_registry = self.db.clone();
-        let db_for_resolve = self.db.clone();
-        let fetcher_factory = move || -> Option<Arc<dyn p2p::registry_chain::ChainFetcher>> {
-            let project_id = {
-                let guard = db_for_resolve.lock().ok()?;
-                let db = guard.as_ref()?;
-                cardano::blockfrost::resolve_project_id(Some(db.conn()))
-            }?;
+        // This job starts during profile startup, before admission opens, so
+        // its database work is fenced to the first session it is admitted
+        // under; profile cleanup joins it before any later session exists.
+        let registry_db = p2p::inbound::InboundDatabase::pin_on_first_use(
+            self.db_executor.clone(),
+            self.profile_operations.clone(),
+        );
+        let fetcher_factory = |settings: &p2p::registry_chain::RefreshSettings| -> Option<Arc<dyn p2p::registry_chain::ChainFetcher>> {
+            let project_id = settings.project_id.clone()?;
             let bf = cardano::blockfrost::BlockfrostClient::new(project_id).ok()?;
             Some(Arc::new(p2p::registry_chain::BlockfrostFetcher::new(
                 Arc::new(bf),
                 cardano::stake_pubkey::Network::Preprod,
             )))
         };
-        let db_for_interval = self.db.clone();
-        let interval_factory = move || -> u64 {
-            let guard = db_for_interval.lock().ok();
-            let db = guard.as_deref().and_then(|opt| opt.as_ref());
-            match db {
-                Some(db) => settings::store::SettingsStore::get(
-                    db.conn(),
-                    settings::registry::keys::REGISTRY_REFRESH_SECS,
-                ),
-                None => p2p::registry_chain::DEFAULT_REFRESH_SECS,
-            }
-        };
         self.profile_operations
             .spawn_job(p2p::registry_chain::refresh_loop(
-                db_for_registry,
+                registry_db,
                 fetcher_factory,
-                interval_factory,
             ))
             .await;
     }
@@ -864,6 +852,7 @@ pub fn run() {
                             continue;
                         };
                         let guardian_lease = lease.clone();
+                        let chain_lease = lease.clone();
                         // This pass contains cancellation-safe provider/P2P
                         // awaits and synchronous local transactions, not detached
                         // blocking jobs. Stop on lock before releasing its lease;
@@ -899,16 +888,24 @@ pub fn run() {
                                     })
                                 };
 
+                                // Chain submission/recovery database phases run as
+                                // background-lane executor jobs. The journal owns a
+                                // lease clone that is released with this pass.
+                                let chain_journal = cardano::submission::Journal::new(
+                                    db_executor_for_queue.clone(),
+                                    chain_lease,
+                                    db::executor::DatabaseWorkload::Background,
+                                );
                                 if let Some(client) = bf.as_ref() {
                                     if let Err(error) =
-                                        cardano::snapshot_recovery::tick(&db_for_queue, client)
+                                        cardano::snapshot_recovery::tick(&chain_journal, client)
                                             .await
                                     {
                                         log::debug!("snapshot recovery: {error}");
                                     }
                                     if let Some(wallet) = wallet.as_ref() {
                                         if let Err(error) = cardano::completion_queue::tick(
-                                            &db_for_queue,
+                                            &chain_journal,
                                             client,
                                             wallet,
                                         )
@@ -918,13 +915,13 @@ pub fn run() {
                                         }
                                     }
                                     if let Err(error) =
-                                        cardano::completion_recovery::tick(&db_for_queue, client)
+                                        cardano::completion_recovery::tick(&chain_journal, client)
                                             .await
                                     {
                                         log::debug!("completion recovery: {error}");
                                     }
                                     if let Err(error) =
-                                        cardano::escrow_recovery::tick(&db_for_queue, client).await
+                                        cardano::escrow_recovery::tick(&chain_journal, client).await
                                     {
                                         log::debug!("escrow recovery: {error}");
                                     }
@@ -932,7 +929,7 @@ pub fn run() {
 
                                 // Governance tx queue (elections, proposals, soulbound)
                                 match cardano::onchain_queue::process_queue(
-                                    &db_for_queue,
+                                    &chain_journal,
                                     &bf,
                                     &wallet,
                                 )
@@ -948,7 +945,8 @@ pub fn run() {
                                 }
 
                                 // Credential anchor queue (VC integrity hashes → Cardano metadata-only txs)
-                                match cardano::anchor_queue::tick(&db_for_queue, &bf, &wallet).await
+                                match cardano::anchor_queue::tick(&chain_journal, &bf, &wallet)
+                                    .await
                                 {
                                     Ok(n) if n > 0 => {
                                         log::info!("anchor queue: processed {n} items");
@@ -962,7 +960,7 @@ pub fn run() {
                                 // Username claim batch anchoring (registry phase 3):
                                 // one metadata tx (label 1698) anchors up to 80
                                 // unanchored claims. Silent no-op without chain creds.
-                                match cardano::username_anchor::tick(&db_for_queue, &bf, &wallet)
+                                match cardano::username_anchor::tick(&chain_journal, &bf, &wallet)
                                     .await
                                 {
                                     Ok(anchored) if !anchored.is_empty() => {
@@ -1085,6 +1083,9 @@ pub fn run() {
                                 drop(bf);
                             })
                             .await;
+                        // Release every lease clone before sleeping, so a lock
+                        // can drain this pass without waiting for the next tick.
+                        drop(guardian_lease);
                         if completed.is_none() {
                             log::debug!("profile background pass stopped for locking");
                         }

@@ -17,30 +17,31 @@
 //!   [`ChainFetcher`]. Walks the `stake_pubkey_registration` script
 //!   address, decodes each inline datum, witness-verifies the
 //!   creating tx, and emits one [`ChainEntry`] per surviving UTxO.
-//! - [`spawn_refresh_task`] — Tokio task that polls the fetcher at a
-//!   configurable interval and feeds [`apply_chain_entries`]. Both
-//!   the fetcher and the interval are resolved through factory
-//!   closures, invoked **per tick**, so the task survives operators
-//!   unlocking a profile or tuning settings after boot.
+//! - [`refresh_loop`] — profile background job that polls the fetcher at
+//!   a configurable interval and feeds [`apply_chain_entries`]. The
+//!   Blockfrost project id and interval are read from the profile, and
+//!   the fetcher is built from them, **per tick**, so the task survives
+//!   operators unlocking a profile or tuning settings after boot. Its
+//!   database reads and writes run as profile-fenced executor jobs; no
+//!   database access spans the chain round-trip.
 //!
 //! Before-profile-unlock the task uses [`BOOTSTRAP_REFRESH_SECS`] as
 //! the inter-tick sleep instead of the configured interval, so a
 //! newly-set `cardano.blockfrost_project_id` is picked up within
 //! tens of seconds rather than waiting out the default hour.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rusqlite::Connection;
 
+use super::inbound::InboundDatabase;
 use super::registry::{evict_contradicted_snapshot, upsert_chain_entry};
-use crate::db::Database;
 
 /// Default cadence for the background refresh task. Used when no
 /// per-profile `registry.refresh_secs` setting is present. Production
-/// reads the setting fresh on every tick via [`spawn_refresh_task`]'s
-/// `interval_factory` closure so a value change takes effect on the
-/// next refresh without a restart.
+/// reads the setting fresh on every tick in [`refresh_tick`] so a value
+/// change takes effect on the next refresh without a restart.
 pub const DEFAULT_REFRESH_SECS: u64 = 3600;
 
 /// Lower bound on the per-tick sleep. Stops a misconfigured setting
@@ -285,128 +286,144 @@ impl ChainFetcher for BlockfrostFetcher {
     }
 }
 
-/// Spawn the background refresh task.
-///
-/// `fetcher_factory` is invoked **once per tick** so the task picks
-/// up configuration changes (Blockfrost project id arriving, network
-/// switching, etc.) without an app restart. A `None` return value
-/// means "not configured this tick" — the loop logs at debug and
-/// continues. Once the operator sets the
-/// `cardano.blockfrost_project_id` setting (or exports
-/// `BLOCKFROST_PROJECT_ID`) the very next tick will build a fresh
-/// fetcher and start pulling chain state.
-///
-/// `interval_factory` is likewise invoked per tick so the
-/// `registry.refresh_secs` setting can be tuned at runtime. The
-/// returned value is clamped up to [`MIN_REFRESH_SECS`].
-///
-/// Failures inside the loop are logged and swallowed — registry
-/// state is unchanged on error, and the next tick retries.
-///
-/// Returns a `JoinHandle` so callers can abort during shutdown.
-pub fn spawn_refresh_task<F, I>(
-    db: Arc<Mutex<Option<Database>>>,
-    fetcher_factory: F,
-    interval_factory: I,
-) -> tokio::task::JoinHandle<()>
-where
-    F: Fn() -> Option<Arc<dyn ChainFetcher>> + Send + Sync + 'static,
-    I: Fn() -> u64 + Send + Sync + 'static,
-{
-    tokio::spawn(refresh_loop(db, fetcher_factory, interval_factory))
+/// Profile settings one refresh tick needs, read in a single executor job.
+pub(crate) struct RefreshSettings {
+    /// Blockfrost project id from the profile setting or the environment.
+    pub(crate) project_id: Option<String>,
+    /// Configured `registry.refresh_secs`.
+    pub(crate) interval_secs: u64,
 }
 
-pub(crate) async fn refresh_loop<F, I>(
-    db: Arc<Mutex<Option<Database>>>,
-    fetcher_factory: F,
-    interval_factory: I,
-) where
-    F: Fn() -> Option<Arc<dyn ChainFetcher>> + Send + Sync + 'static,
-    I: Fn() -> u64 + Send + Sync + 'static,
-{
-    // First iteration runs immediately so a freshly-started node
-    // catches up before privileged-topic traffic flows. Sleep is
-    // at the end of the loop so the interval applies *between*
-    // ticks, not before the first one. The labelled-block
-    // pattern keeps every skip path inside the same sleep, so a
-    // misconfigured factory can't hot-spin.
-    //
-    // `bootstrap_mode` is set inside the labelled block whenever
-    // the tick produced zero Blockfrost traffic (no fetcher, or
-    // no profile DB yet). In that case the inter-tick sleep
-    // shortens to `BOOTSTRAP_REFRESH_SECS` so a late profile
-    // unlock or a newly-set Blockfrost project id is picked up
-    // within tens of seconds — without this, the default 1-hour
-    // interval gates the first useful tick after unlock.
-    loop {
-        let mut bootstrap_mode = false;
-        'tick: {
-            let Some(fetcher) = fetcher_factory() else {
-                log::debug!(
-                    "registry refresh: skipping tick — no Blockfrost project id configured \
-                         (set in Settings → Cardano or via BLOCKFROST_PROJECT_ID); \
-                         polling again in {BOOTSTRAP_REFRESH_SECS}s"
-                );
-                bootstrap_mode = true;
-                break 'tick;
-            };
-            let entries = match fetcher.fetch().await {
-                Ok(e) => e,
-                Err(e) => {
-                    log::warn!("registry refresh: fetch failed: {e}");
-                    break 'tick;
-                }
-            };
-            if entries.is_empty() {
-                break 'tick;
-            }
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let apply_result = {
-                let guard = match db.lock() {
-                    Ok(g) => g,
-                    Err(e) => {
-                        log::warn!("registry refresh: db lock poisoned: {e}");
-                        break 'tick;
-                    }
-                };
-                let Some(db_ref) = guard.as_ref() else {
-                    // No active profile yet — drop this tick
-                    // AND mark the tick as bootstrap so the next
-                    // wait is short. We did spend a Blockfrost
-                    // call here (above), so a fast retry costs
-                    // one call per BOOTSTRAP_REFRESH_SECS until
-                    // unlock; acceptable trade for prompt
-                    // pickup. The refresh task outlives any
-                    // single profile.
-                    bootstrap_mode = true;
-                    break 'tick;
-                };
-                apply_chain_entries(db_ref.conn(), &entries, now)
-            };
-            match apply_result {
-                Ok(stats) => log::info!(
-                    "registry refresh: upserted {} chain rows, evicted {} snapshot rows",
-                    stats.upserted,
-                    stats.evicted
-                ),
-                Err(e) => log::warn!("registry refresh: apply failed: {e}"),
-            }
+/// What a refresh tick observed; decides the following sleep.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TickOutcome {
+    /// No Blockfrost traffic was useful: no fetcher could be built, or the
+    /// profile database was unavailable (locked, replaced, or busy).
+    Bootstrap,
+    /// The tick reached the chain; wait the configured interval.
+    Completed { interval_secs: u64 },
+}
+
+/// Inter-tick sleep. Bootstrap ticks retry after [`BOOTSTRAP_REFRESH_SECS`]
+/// so a late profile unlock or a newly-set Blockfrost project id is picked
+/// up within tens of seconds; otherwise the configured interval applies,
+/// clamped up to [`MIN_REFRESH_SECS`].
+pub(crate) fn next_delay(outcome: &TickOutcome) -> Duration {
+    match outcome {
+        TickOutcome::Bootstrap => Duration::from_secs(BOOTSTRAP_REFRESH_SECS),
+        TickOutcome::Completed { interval_secs } => {
+            Duration::from_secs((*interval_secs).max(MIN_REFRESH_SECS))
         }
-        let secs = if bootstrap_mode {
-            BOOTSTRAP_REFRESH_SECS
-        } else {
-            interval_factory().max(MIN_REFRESH_SECS)
-        };
-        tokio::time::sleep(Duration::from_secs(secs)).await;
     }
+}
+
+/// Run the background refresh loop as a profile job.
+///
+/// `fetcher_factory` is invoked **once per tick** with that tick's
+/// settings, so the task picks up configuration changes (Blockfrost
+/// project id arriving, network switching, etc.) without an app restart.
+/// A `None` return value means "not configured this tick" — the loop logs
+/// at debug and continues. Once the operator sets the
+/// `cardano.blockfrost_project_id` setting (or exports
+/// `BLOCKFROST_PROJECT_ID`) the very next tick will build a fresh fetcher
+/// and start pulling chain state.
+///
+/// The first tick runs immediately so a freshly-started node catches up
+/// before privileged-topic traffic flows; the sleep applies *between*
+/// ticks. Failures are logged and swallowed — registry state is unchanged
+/// on error, and the next tick retries.
+pub(crate) async fn refresh_loop<F>(db: InboundDatabase, fetcher_factory: F)
+where
+    F: Fn(&RefreshSettings) -> Option<Arc<dyn ChainFetcher>> + Send + Sync + 'static,
+{
+    loop {
+        let outcome = refresh_tick(&db, &fetcher_factory).await;
+        tokio::time::sleep(next_delay(&outcome)).await;
+    }
+}
+
+/// One refresh pass: read settings, fetch from the chain, apply. Each
+/// database phase is its own Background-lane job; none spans the fetch.
+pub(crate) async fn refresh_tick<F>(db: &InboundDatabase, fetcher_factory: &F) -> TickOutcome
+where
+    F: Fn(&RefreshSettings) -> Option<Arc<dyn ChainFetcher>>,
+{
+    let settings = match db
+        .run("registry.refresh-settings", |database| {
+            Ok(RefreshSettings {
+                project_id: crate::cardano::blockfrost::resolve_project_id(Some(database.conn())),
+                interval_secs: crate::settings::SettingsStore::get(
+                    database.conn(),
+                    crate::settings::registry::keys::REGISTRY_REFRESH_SECS,
+                ),
+            })
+        })
+        .await
+    {
+        Ok(settings) => settings,
+        Err(error) => {
+            log::debug!(
+                "registry refresh: profile database unavailable ({error}); \
+                 polling again in {BOOTSTRAP_REFRESH_SECS}s"
+            );
+            return TickOutcome::Bootstrap;
+        }
+    };
+    let completed = TickOutcome::Completed {
+        interval_secs: settings.interval_secs,
+    };
+    let Some(fetcher) = fetcher_factory(&settings) else {
+        log::debug!(
+            "registry refresh: skipping tick — no Blockfrost project id configured \
+                 (set in Settings → Cardano or via BLOCKFROST_PROJECT_ID); \
+                 polling again in {BOOTSTRAP_REFRESH_SECS}s"
+        );
+        return TickOutcome::Bootstrap;
+    };
+    let entries = match fetcher.fetch().await {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("registry refresh: fetch failed: {e}");
+            return completed;
+        }
+    };
+    if entries.is_empty() {
+        return completed;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    match db
+        .run("registry.apply-chain-entries", move |database| {
+            Ok(apply_chain_entries(database.conn(), &entries, now).map_err(|e| e.to_string()))
+        })
+        .await
+    {
+        Ok(Ok(stats)) => log::info!(
+            "registry refresh: upserted {} chain rows, evicted {} snapshot rows",
+            stats.upserted,
+            stats.evicted
+        ),
+        Ok(Err(e)) => log::warn!("registry refresh: apply failed: {e}"),
+        // The profile was locked or replaced, or the lane was busy, after the
+        // fetch. Nothing was written; retry soon. A fast retry costs one
+        // Blockfrost call per BOOTSTRAP_REFRESH_SECS until the database is
+        // available again — an acceptable trade for prompt pickup.
+        Err(error) => {
+            log::warn!("registry refresh: chain entries not applied: {error}");
+            return TickOutcome::Bootstrap;
+        }
+    }
+    completed
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+    use crate::db::Database;
     use crate::p2p::registry::{lookup, upsert_snapshot_entry, SnapshotEntry};
 
     fn test_db() -> Database {
@@ -444,6 +461,20 @@ mod tests {
         }
     }
 
+    async fn registry_database(handle: &Arc<Mutex<Option<Database>>>) -> InboundDatabase {
+        InboundDatabase::detached(Arc::clone(handle))
+            .await
+            .expect("registry database")
+    }
+
+    fn registered(handle: &Arc<Mutex<Option<Database>>>, stake: &str, key: &str) -> bool {
+        let guard = handle.lock().expect("database slot");
+        guard
+            .as_ref()
+            .and_then(|db| lookup(db.conn(), stake, key, 0).ok())
+            .unwrap_or(false)
+    }
+
     #[tokio::test]
     async fn profile_cleanup_cancels_inflight_registry_fetch_before_database_reuse() {
         let handle = Arc::new(Mutex::new(Some(test_db())));
@@ -453,12 +484,11 @@ mod tests {
             release: tokio::sync::Notify::new(),
         });
         let factory = fetcher.clone();
+        let db = registry_database(&handle).await;
         operations
-            .spawn_job(refresh_loop(
-                handle.clone(),
-                move || Some(factory.clone()),
-                || 60,
-            ))
+            .spawn_job(refresh_loop(db, move |_| {
+                Some(factory.clone() as Arc<dyn ChainFetcher>)
+            }))
             .await;
         tokio::time::timeout(Duration::from_secs(5), fetcher.started.notified())
             .await
@@ -566,88 +596,68 @@ mod tests {
         }
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn refresh_task_uses_bootstrap_cadence_when_unconfigured() {
+    #[tokio::test]
+    async fn unconfigured_or_unavailable_ticks_use_bootstrap_cadence() {
         // Regression for the P2 round-2 finding: without
         // `BOOTSTRAP_REFRESH_SECS`, a profile unlocked after the
         // first tick had to wait the full `DEFAULT_REFRESH_SECS`
         // (~1h) before the next tick picked up its Blockfrost
-        // project id. We assert here that the inter-tick wait when
-        // the factory returns `None` is `BOOTSTRAP_REFRESH_SECS`
-        // (30s) by advancing virtual time *just past* that mark and
-        // observing that the apply lands before the normal-mode
-        // `MIN_REFRESH_SECS` (60s) would have allowed.
+        // project id.
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let db = test_db();
-        let handle = Arc::new(Mutex::new(Some(db)));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let calls_for_factory = calls.clone();
-        let canned: Arc<dyn ChainFetcher> = Arc::new(StaticFetcher(vec![entry(
-            "stake1u_boot",
-            "ee",
-            0,
-            None,
-            "tx-boot",
-        )]));
-        let factory = move || -> Option<Arc<dyn ChainFetcher>> {
-            let n = calls_for_factory.fetch_add(1, Ordering::SeqCst);
-            if n == 0 {
-                None
-            } else {
-                Some(canned.clone())
-            }
-        };
-        // Normal-mode interval would be 3600s (default); if the
-        // bootstrap path is broken we'd wait that long. The test
-        // would either hang or fail.
-        let h = spawn_refresh_task(handle.clone(), factory, || {
-            crate::p2p::registry_chain::DEFAULT_REFRESH_SECS
-        });
-        // First tick (factory → None) runs immediately.
-        tokio::task::yield_now().await;
-        // Advance past BOOTSTRAP_REFRESH_SECS but well under
-        // MIN_REFRESH_SECS — proves the path uses the bootstrap
-        // const, not the default-interval clamp.
-        tokio::time::advance(Duration::from_secs(BOOTSTRAP_REFRESH_SECS + 5)).await;
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-        }
-        let found = {
-            let guard = handle.lock().unwrap();
-            guard
-                .as_ref()
-                .and_then(|db| lookup(db.conn(), "stake1u_boot", "ee", 0).ok())
-                .unwrap_or(false)
-        };
-        h.abort();
-        assert!(
-            found,
-            "bootstrap-mode tick must fire within BOOTSTRAP_REFRESH_SECS, \
-             not the configured (default 1h) refresh interval"
+        let handle = Arc::new(Mutex::new(Some(test_db())));
+        let db = registry_database(&handle).await;
+        let unconfigured = |_: &RefreshSettings| -> Option<Arc<dyn ChainFetcher>> { None };
+        assert_eq!(
+            refresh_tick(&db, &unconfigured).await,
+            TickOutcome::Bootstrap
         );
-        // The const guard at module top enforces this at compile time;
-        // the runtime check here documents the relationship for
-        // readers of the test alone.
+
+        // A locked profile is refused before the fetcher is consulted, so a
+        // late unlock is also picked up on the bootstrap cadence.
+        let locked = InboundDatabase::pin_on_first_use(
+            crate::db::executor::DatabaseExecutor::new(Arc::clone(&handle)),
+            crate::profile::operations::ProfileOperations::default(),
+        );
+        let calls = AtomicUsize::new(0);
+        let counting = |_: &RefreshSettings| -> Option<Arc<dyn ChainFetcher>> {
+            calls.fetch_add(1, Ordering::SeqCst);
+            None
+        };
+        assert_eq!(
+            refresh_tick(&locked, &counting).await,
+            TickOutcome::Bootstrap
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        assert_eq!(
+            next_delay(&TickOutcome::Bootstrap),
+            Duration::from_secs(BOOTSTRAP_REFRESH_SECS)
+        );
+        assert_eq!(
+            next_delay(&TickOutcome::Completed { interval_secs: 1 }),
+            Duration::from_secs(MIN_REFRESH_SECS)
+        );
+        assert_eq!(
+            next_delay(&TickOutcome::Completed {
+                interval_secs: DEFAULT_REFRESH_SECS
+            }),
+            Duration::from_secs(DEFAULT_REFRESH_SECS)
+        );
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn refresh_task_picks_up_fetcher_after_late_arrival() {
+    #[tokio::test]
+    async fn refresh_picks_up_fetcher_after_late_arrival() {
         // Regression for the P2 bug where the refresh launcher
         // resolved Blockfrost once at boot and returned forever if
         // the project id wasn't set yet. The fetcher_factory is
         // queried on every tick — a `None` early and a `Some` later
         // means the entry should still land without restart.
-        //
-        // Tokio time is paused (`start_paused = true`) so we can
-        // time-travel past the MIN_REFRESH_SECS sleep deterministically
-        // without making the suite slow.
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let db = test_db();
-        let handle = Arc::new(Mutex::new(Some(db)));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let calls_for_factory = calls.clone();
+        let handle = Arc::new(Mutex::new(Some(test_db())));
+        let db = registry_database(&handle).await;
+        let calls = AtomicUsize::new(0);
         let canned: Arc<dyn ChainFetcher> = Arc::new(StaticFetcher(vec![entry(
             "stake1u_late",
             "fe",
@@ -657,49 +667,30 @@ mod tests {
         )]));
         // First call returns None (operator hasn't configured
         // Blockfrost yet); subsequent calls return the real fetcher.
-        let factory = move || -> Option<Arc<dyn ChainFetcher>> {
-            let n = calls_for_factory.fetch_add(1, Ordering::SeqCst);
-            if n == 0 {
+        let factory = |_: &RefreshSettings| -> Option<Arc<dyn ChainFetcher>> {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
                 None
             } else {
                 Some(canned.clone())
             }
         };
-        let h = spawn_refresh_task(handle.clone(), factory, || 60);
 
-        // Yield so the spawned task runs its first tick (factory→None).
-        tokio::task::yield_now().await;
-        // Advance past the inter-tick sleep so the second tick fires.
-        tokio::time::advance(std::time::Duration::from_secs(61)).await;
-        // Yield repeatedly to give the task a chance to fetch, apply,
-        // and release the DB mutex.
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-        }
-
-        let found = {
-            let guard = handle.lock().unwrap();
-            guard
-                .as_ref()
-                .and_then(|db| lookup(db.conn(), "stake1u_late", "fe", 0).ok())
-                .unwrap_or(false)
-        };
-        h.abort();
+        assert_eq!(refresh_tick(&db, &factory).await, TickOutcome::Bootstrap);
+        assert!(!registered(&handle, "stake1u_late", "fe"));
+        assert!(matches!(
+            refresh_tick(&db, &factory).await,
+            TickOutcome::Completed { .. }
+        ));
         assert!(
-            found,
-            "refresh task must apply entries after a late config arrival"
+            registered(&handle, "stake1u_late", "fe"),
+            "refresh must apply entries after a late config arrival"
         );
-        assert!(
-            calls.load(Ordering::SeqCst) >= 2,
-            "fetcher_factory should have been invoked at least twice (none-then-some), got {}",
-            calls.load(Ordering::SeqCst)
-        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
-    async fn refresh_task_applies_fetcher_output() {
-        let db = test_db();
-        let handle = Arc::new(Mutex::new(Some(db)));
+    async fn refresh_loop_applies_fetcher_output() {
+        let handle = Arc::new(Mutex::new(Some(test_db())));
         let fetcher: Arc<dyn ChainFetcher> = Arc::new(StaticFetcher(vec![entry(
             "stake1u_x",
             "ff",
@@ -707,25 +698,14 @@ mod tests {
             None,
             "tx-x",
         )]));
-        // Use a 60s interval — clamped to MIN_REFRESH_SECS; the
-        // tokio runtime advances immediately on the sleep so the
-        // first apply lands inside the spin budget below.
-        let factory_fetcher = fetcher.clone();
-        let h = spawn_refresh_task(handle.clone(), move || Some(factory_fetcher.clone()), || 60);
-        // Spin until the row lands or we time out (~1s budget). The
-        // guard is scoped inside braces so clippy doesn't think it
-        // crosses the `await` below — we already explicitly drop it
-        // before sleeping, but the scope is clearer + lint-clean.
+        let db = registry_database(&handle).await;
+        let h = tokio::spawn(refresh_loop(db, move |_| Some(fetcher.clone())));
+        // Spin until the row lands or we time out (~1s budget).
         let mut found = false;
         for _ in 0..50 {
-            {
-                let guard = handle.lock().unwrap();
-                if let Some(db) = guard.as_ref() {
-                    if lookup(db.conn(), "stake1u_x", "ff", 0).unwrap_or(false) {
-                        found = true;
-                        break;
-                    }
-                }
+            if registered(&handle, "stake1u_x", "ff") {
+                found = true;
+                break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }

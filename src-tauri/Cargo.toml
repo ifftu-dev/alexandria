@@ -155,6 +155,9 @@ aes-gcm = "0.10"
 # that does not cross-compile to iOS/Android.
 iroh = { version = "1.0.2", default-features = false, features = ["metrics", "fast-apple-datapath", "portmapper", "tls-ring"] }
 iroh-blobs = { version = "0.103", features = ["fs-store"] }
+# iroh-blobs returns irpc errors; the content node matches them to tell a
+# store that has already closed from a close that failed.
+irpc = { version = "0.17", default-features = false }
 
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.

@@ -212,7 +212,13 @@ async fn main() -> Result<()> {
     let submit_hash = blockfrost
         .submit_tx(&tx_result.tx_cbor)
         .await
-        .map_err(|e| anyhow!("submit_tx: {e}"))?;
+        .map_err(|e| {
+            anyhow!(
+                "submit_tx: {e}\n  outcome unknown: {} may still reach the chain; \
+                 check it before re-running, which builds a different transaction",
+                tx_result.tx_hash
+            )
+        })?;
     if submit_hash != tx_result.tx_hash {
         eprintln!(
             "[smoke] WARN: submitted hash {} != locally computed {}",

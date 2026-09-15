@@ -4,9 +4,10 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::cardano::blockfrost::BlockfrostClient;
-use crate::cardano::submission::{self, Operation, SubmissionStatus};
+use crate::cardano::submission::{self, Journal, Operation, SubmissionStatus};
 use crate::cardano::tx_builder;
 use crate::crypto::keystore::Keystore;
+use crate::db::executor::DatabaseWorkload;
 use crate::db::Database;
 use crate::{ActiveProfile, AppState};
 
@@ -185,11 +186,15 @@ async fn locking_stalled_post_cleans_profile_and_recovers_original_after_switch(
                 .is_err()
         );
     });
-    let task_db = state.db.clone();
+    let task_journal = Journal::new(
+        state.db_executor.clone(),
+        lease.clone(),
+        DatabaseWorkload::Background,
+    );
     let task_client = client.clone();
     let task_bytes = bytes.clone();
     let job = tokio::spawn(lease.run_until_closed(async move {
-        submission::submit_once(&task_db, &task_client, OPERATION, &task_bytes, CONTEXT).await
+        submission::submit_once(&task_journal, &task_client, OPERATION, &task_bytes, CONTEXT).await
     }));
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), posted_rx)
@@ -240,9 +245,14 @@ async fn locking_stalled_post_cleans_profile_and_recovers_original_after_switch(
         .profile_operations
         .admit(&state.profile_operations.session().unwrap())
         .unwrap();
+    let journal = Journal::new(
+        state.db_executor.clone(),
+        lease.clone(),
+        DatabaseWorkload::Background,
+    );
     let recovered = tokio::time::timeout(
         Duration::from_secs(5),
-        lease.run_until_closed(submission::reconcile(&state.db, &client, OPERATION)),
+        lease.run_until_closed(submission::reconcile(&journal, &client, OPERATION)),
     )
     .await
     .unwrap()
@@ -252,7 +262,7 @@ async fn locking_stalled_post_cleans_profile_and_recovers_original_after_switch(
     assert_eq!(recovered.status, SubmissionStatus::Confirmed);
     assert_eq!(recovered.confirmed_slot, Some(42));
     let retry = submission::submit_once(
-        &state.db,
+        &journal,
         &client,
         OPERATION,
         &signed_transaction(300_000),
@@ -261,6 +271,8 @@ async fn locking_stalled_post_cleans_profile_and_recovers_original_after_switch(
     .await
     .unwrap();
     assert_eq!(retry, recovered);
+    // The journal's lease clone must not keep the final lock from draining.
+    drop(journal);
     tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .unwrap()
