@@ -573,7 +573,8 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content. (The legacy SkillProof NFT and course-registration mints were retired in migration 040.)
 2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
 3. **Reputation Snapshot** — Local signed `DerivedCredential` over all currently eligible evidence; optional metadata-only VC-hash anchor uses the credential queue
-4. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
+
+The operator governance transaction queue (DAO creation, election finalization, committee install, proposal-outcome anchors) is deleted.
 
 ---
 
@@ -669,31 +670,15 @@ Neither locator review nor retrieval auto-pins content. Retrieval races at most 
 |---------|--------|
 | Founding-genesis verification and explicit local pinning | Implemented; governance activation is not yet wired to it |
 | Locator/deep-link review, verified retrieval, and QR display | Implemented; locator publishing/export and retrieval scheduling remain open |
-| Legacy operator DAO creation | Development-only behind `legacy-governance-bootstrap`; not a production authority path |
-| Legacy local elections, proposals, committee install, and operator governance transactions | Development-only behind `legacy-local-governance`; the twelve state-changing commands return a disabled error in release, inbound governance gossip is rejected, and the operator queue builds no governance transactions |
+| Local elections, nominations, committee install, proposals, operator DAO creation, and the operator governance transaction queue | Deleted, including their pages, commands, gossip apply paths and Cardano builders; inbound governance gossip is rejected before any database access until the topic is removed |
 | Legacy goal-template and question-bank ratification | Development-only behind `legacy-content-ratification`; the five content commands return a disabled error in release and inbound version documents are rejected |
-| Committee management | Legacy implementation, development-only (above); a committee install fails in every build unless every elected winner resolves to a registered key |
-| Proposal lifecycle (draft → published → approved/rejected) | Legacy implementation, development-only (off-chain; outcome anchored) |
-| Election lifecycle (nomination → voting → finalized) | Legacy implementation, development-only (off-chain; finalized election published on-chain) |
-| 2/3 supermajority voting | Legacy implementation, development-only (off-chain tally over signed gossiped votes) |
-| Signed-vote + full-lifecycle P2P gossip | Legacy implementation, development-only; release rejects inbound events |
-| On-chain (operator-signed): DAO create, election finalize, committee install, proposal-outcome anchor | Legacy implementation, development-only; release reconciles and confirms journaled submissions only |
-| Per-vote / per-transition on-chain Plutus spends | Not used (lean model — validators deployed as the upgrade path) |
+| Per-vote / per-transition on-chain Plutus spends | Not used; the validators remain deployed upgrade artifacts |
 
-Governance runs a **lean** on-chain model: the live state machine is local
-SQLite, votes and the election lifecycle propagate as signed P2P gossip, and
-only the four operator-signed facts above are written to Cardano (the proposal
-anchor carries the tally plus a Merkle root over the signed votes, so the
-off-chain tally is auditable). The full per-transition Plutus spend validators
-are deployed + verified on preprod but are not on the live path.
-
-That lean model is not the approved five-of-seven committee model, so release
-builds disable its authority as listed above. Listing and reading DAOs,
-elections, proposals, and on-chain queue status still work. Release seeding
-keeps the neutral DAO rows other features depend on but creates no
-committees, elections, proposals, or votes. The operator key only pays for and
-signs transactions; it is never installed as a committee in place of
-unresolvable winners.
+The earlier lean local/operator model is deleted: its local SQLite state
+machine, signed-vote gossip and four operator-signed Cardano facts were not the
+approved five-of-seven committee model. `/community` now opens founding-genesis
+review and pinning. Release seeding still inserts DAO scope rows without
+committees, elections, proposals, or votes until fake startup seeds are removed.
 
 ---
 
@@ -757,7 +742,6 @@ list.
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` (in release builds `create_dao` and the twelve state-changing election/proposal commands return a disabled error; list/get and queue-status commands work) |
 | tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
 | interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
 | taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |

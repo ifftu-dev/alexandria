@@ -1,7 +1,6 @@
 //! Credential-hash integrity anchor queue.
 //!
-//! Mirrors `cardano::onchain_queue` but for credential hashes. Each row
-//! in `credential_anchors` points to a `credentials` row; the processor
+//! Each row in `credential_anchors` points to a `credentials` row; the processor
 //! builds a metadata-only Cardano tx (no mint) via
 //! `anchor_tx::build_anchor_metadata_tx`, submits via Blockfrost, and
 //! records the resulting tx hash on success.
@@ -21,8 +20,8 @@ const OPERATION_KIND: &str = "credential_anchor";
 /// backlog doesn't block other tasks.
 const TICK_BATCH: i64 = 10;
 
-/// Maximum number of submission attempts before giving up. Mirrors
-/// `onchain_queue::process_queue` (line ~270).
+/// Maximum number of submission attempts before a row is marked permanently
+/// failed.
 const MAX_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -123,7 +122,7 @@ pub(crate) async fn tick(
             continue;
         }
         // Hit max attempts before this run? Mark permanently failed
-        // and move on. Mirror the onchain_queue convention.
+        // and move on.
         if row.attempts >= MAX_ATTEMPTS {
             let (id, failed_at) = (credential_id.clone(), now.clone());
             journal

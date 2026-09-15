@@ -1,14 +1,14 @@
 import { ref, computed, readonly } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked } from '@/composables/useProfiles'
-import type { Course, CatalogEntry, SkillInfo, DaoInfo, Classroom } from '@/types'
+import type { Course, CatalogEntry, SkillInfo, Classroom } from '@/types'
 
 /**
  * A single result surfaced by the omni search palette.
  */
 export interface OmniSearchResult {
   id: string
-  type: 'skill' | 'course' | 'catalog' | 'dao' | 'classroom'
+  type: 'skill' | 'course' | 'catalog' | 'classroom'
   title: string
   subtitle?: string
   icon?: string
@@ -19,7 +19,6 @@ const GROUP_ORDER: OmniSearchResult['type'][] = [
   'skill',
   'course',
   'catalog',
-  'dao',
   'classroom',
 ]
 
@@ -27,7 +26,6 @@ const GROUP_LABELS: Record<OmniSearchResult['type'], string> = {
   skill: 'Skills',
   course: 'Courses',
   catalog: 'Public catalog',
-  dao: 'Governance',
   classroom: 'Classrooms',
 }
 
@@ -137,11 +135,10 @@ export function useOmniSearch() {
     const generation = profileGeneration
     loading.value = true
     try {
-      const [skills, courses, catalog, daos, classrooms] = await Promise.all([
+      const [skills, courses, catalog, classrooms] = await Promise.all([
         invoke<SkillInfo[]>('list_skills', { search: q }).catch(() => []),
         invoke<Course[]>('list_courses').catch(() => []),
         invoke<CatalogEntry[]>('search_catalog', { query: q, limit: PER_DOMAIN_LIMIT }).catch(() => []),
-        invoke<DaoInfo[]>('list_daos', { search: q }).catch(() => []),
         invoke<Classroom[]>('classroom_list').catch(() => []),
       ])
 
@@ -155,7 +152,6 @@ export function useOmniSearch() {
           .slice(0, PER_DOMAIN_LIMIT)
           .map(courseToResult),
         ...catalog.slice(0, PER_DOMAIN_LIMIT).map(catalogToResult),
-        ...daos.slice(0, PER_DOMAIN_LIMIT).map(daoToResult),
         ...classrooms
           .filter(c => matchesClassroom(c, lower))
           .slice(0, PER_DOMAIN_LIMIT)
@@ -222,18 +218,6 @@ function catalogToResult(c: CatalogEntry): OmniSearchResult {
   }
 }
 
-function daoToResult(d: DaoInfo): OmniSearchResult {
-  const scopeLabel = d.scope_type === 'subject_field' ? 'Field' : 'Subject'
-  return {
-    id: `dao:${d.id}`,
-    type: 'dao',
-    title: d.name,
-    subtitle: scopeLabel,
-    icon: d.icon_emoji || undefined,
-    route: `/community/${d.id}`,
-  }
-}
-
 function classroomToResult(c: Classroom): OmniSearchResult {
   return {
     id: `classroom:${c.id}`,
@@ -267,6 +251,12 @@ function matchesClassroom(c: Classroom, lower: string): boolean {
 // omni-search opens with results before the per-profile settings
 // store hydrates. `initOmniRecentsFromSettings` (called from
 // App.vue after profile unlock) reconciles with the canonical value.
+// Recents that point at a result type this build no longer produces are
+// dropped rather than rendered as dead links.
+
+function isKnownResult(item: OmniSearchResult): boolean {
+  return GROUP_ORDER.includes(item.type)
+}
 
 function loadRecents(): OmniSearchResult[] {
   if (typeof window === 'undefined') return []
@@ -274,7 +264,7 @@ function loadRecents(): OmniSearchResult[] {
     const raw = window.localStorage.getItem(RECENT_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw) as OmniSearchResult[]
-    return Array.isArray(parsed) ? parsed.slice(0, MAX_RECENTS) : []
+    return Array.isArray(parsed) ? parsed.filter(isKnownResult).slice(0, MAX_RECENTS) : []
   } catch {
     return []
   }
@@ -325,7 +315,7 @@ export async function initOmniRecentsFromSettings(): Promise<void> {
   try {
     const parsed = JSON.parse(found.current_value) as OmniSearchResult[]
     if (Array.isArray(parsed)) {
-      recents.value = parsed.slice(0, MAX_RECENTS)
+      recents.value = parsed.filter(isKnownResult).slice(0, MAX_RECENTS)
     }
   } catch {
     /* keep cleared value */

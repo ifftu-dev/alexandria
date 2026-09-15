@@ -823,13 +823,13 @@ DAO membership is any actor who holds the relevant skill levels within the scope
 
 To participate in governance (open an election, nominate, accept a nomination, start/finalize voting, submit/approve/vote on proposals), an actor's stake address MUST be bound to its signing public key in the persistent `stake_pubkey_registry`. Peers verify this binding before accepting a gossiped governance action, and the local node refuses to produce one without it. The binding is established by a signed on-chain `stake_pubkey_registration` or a multisig-signed bootstrap snapshot.
 
-The lifecycle above describes the target governance rules. In the current release, the local election and proposal actions it names are disabled and inbound governance messages are rejected until verified committee certificates exist; see §10.6.
+The lifecycle above describes the target governance rules. The application's local election and proposal actions are deleted, and inbound governance messages are rejected until verified committee certificates exist; see §10.6.
 
-### 10.6 On-Chain Footprint (lean model)
+### 10.6 On-Chain Footprint (retired lean model)
 
-Governance runs a **lean** model. The live state machine is local SQLite; the full lifecycle — elections, nominations, and votes — propagates as **signed P2P gossip** on `/alexandria/governance/1.0`, and each node tallies the verified votes itself. **Votes are not on-chain transactions.**
+The retired **lean** model kept the live state machine in local SQLite; the full lifecycle — elections, nominations, and votes — propagated as **signed P2P gossip** on `/alexandria/governance/1.0`, and each node tallied the verified votes itself. **Votes were not on-chain transactions.**
 
-Only these facts are written to Cardano, all **operator-signed** (the platform's `authorized_admin` key; see `cardano/operator.rs`):
+It wrote only these facts to Cardano, all **operator-signed** (the platform's `authorized_admin` key):
 
 - **DAO create** — mints the DAO state token to the `dao_registry` script (`dao_minting`).
 - **Election finalize** — publishes a finalized-election UTxO at the `election` script (plain output creation).
@@ -840,7 +840,7 @@ Eight retained Aiken/Plutus v3 validators (dao_registry, dao_minting, election, 
 
 **Upgrade path**: move the election/proposal state machine and per-user reputation tokens fully on-chain (the verified spend validators), trading higher cost + UTxO contention for trustless enforcement.
 
-**Current release status**: this lean local/operator model is not the approved five-of-seven committee model, and release builds disable its authority. Operator DAO creation compiles only in debug builds with `legacy-governance-bootstrap`. The twelve state-changing election, nomination, committee, and proposal commands (`open_election`, `nominate`, `accept_nomination`, `start_election_voting`, `cast_election_vote`, `finalize_election`, `install_committee`, `submit_proposal`, `approve_proposal`, `cancel_proposal`, `cast_proposal_vote`, `resolve_proposal`) return a disabled error, and their implementations compile only in debug builds with `legacy-local-governance`. Inbound `/alexandria/governance/1.0` events are rejected (§6.5). The on-chain queue still reconciles and confirms already journaled submissions but builds no governance transactions, and release seeding keeps neutral DAO rows without committees, elections, proposals, or votes. In every build, a committee install fails unless every elected winner resolves to a registered key: the operator key pays for and signs transactions but is never substituted for the committee. Read-only DAO, election, proposal, and queue-status queries remain available.
+**Current implementation status**: this lean local/operator model was not the approved five-of-seven committee model and is deleted from the application. Its DAO creation, election, nomination, committee, proposal and queue-status commands, the operator governance transaction queue, and its Cardano transaction builders no longer exist, and the app no longer lists DAOs, elections or proposals. Inbound `/alexandria/governance/1.0` events are rejected before any database access (§6.5). The description above is retained as the record of what the retained validators were built for; they are deployment artifacts, not a release authority path.
 
 ### 10.7 Spec Stewardship
 

@@ -4,7 +4,7 @@ On-chain governance for the Alexandria learning platform, implementing Section 1
 
 > **Status: retained deployment artifacts on preprod.** Eight validators are deployed as CIP-33 reference scripts (parameterized validators applied; hashes + ref UTxOs in `src-tauri/src/cardano/script_refs.rs`). Deployment and isolated transition tests do not make every flow part of the current release authority path.
 >
-> **Release governance is gated.** The app can verify and explicitly pin a seven-founder genesis, but release builds reject governance mutations and inbound governance state until committee outcome certificates are implemented. The older local/queue builders and deployed validators remain reviewable upgrade artifacts. See `src-tauri/src/cardano/gov_onchain.rs`, `onchain_queue.rs`, and `docs/protocol-specification.md` §10.
+> **Release governance is not active.** The app can verify and explicitly pin a seven-founder genesis, and it rejects inbound governance state until committee outcome certificates are implemented. The app's local election/proposal commands and operator governance queue are deleted; the deployed validators remain reviewable upgrade artifacts. See `docs/protocol-specification.md` §10.
 
 ## Validators
 
@@ -96,9 +96,8 @@ The Rust backend integrates with these validators through:
 
 | Module | Purpose |
 |--------|---------|
-| `cardano/gov_tx_builder.rs` | 6 governance tx builders (CreateDao, OpenElection, CastVote, ResolveProposal, FinalizeElection, InstallCommittee) |
-| `cardano/onchain_queue.rs` | Persistent queue that dispatches governance actions to tx builders |
-| `cardano/plutus_data.rs` | All datum/redeemer CBOR encoding for Plutus Data |
+| `cardano/gov_tx_builder.rs` | Shared Plutus helpers (script addresses, field injection, script-hash parsing); the governance tx builders are deleted |
+| `cardano/plutus_data.rs` | Soulbound, reputation-mint and completion datum/redeemer CBOR encoding; the governance encoders are deleted |
 | `cardano/script_refs.rs` | Script hashes and reference UTxO locations |
 | `commands/snapshot.rs` | Creates signed `DerivedCredential` snapshots and optionally queues their canonical credential hash for anchoring |
 

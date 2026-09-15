@@ -932,23 +932,6 @@ pub fn run() {
                                     }
                                 }
 
-                                // Governance tx queue (elections, proposals, soulbound)
-                                match cardano::onchain_queue::process_queue(
-                                    &chain_journal,
-                                    &bf,
-                                    &wallet,
-                                )
-                                .await
-                                {
-                                    Ok(n) if n > 0 => {
-                                        log::info!("governance queue: processed {n} items");
-                                    }
-                                    Err(e) => {
-                                        log::debug!("governance queue: {e}");
-                                    }
-                                    _ => {}
-                                }
-
                                 // Credential anchor queue (VC integrity hashes → Cardano metadata-only txs)
                                 match cardano::anchor_queue::tick(&chain_journal, &bf, &wallet)
                                     .await
@@ -1410,27 +1393,7 @@ pub fn run() {
             commands::catalog::get_catalog_entry,
             commands::catalog::bootstrap_public_catalog,
             commands::catalog::hydrate_catalog_courses,
-            // Governance
-            commands::governance::list_daos,
-            commands::governance::get_dao,
-            commands::governance::create_dao,
-            commands::governance::open_election,
-            commands::governance::list_elections,
-            commands::governance::get_election,
-            commands::governance::nominate,
-            commands::governance::accept_nomination,
-            commands::governance::start_election_voting,
-            commands::governance::cast_election_vote,
-            commands::governance::finalize_election,
-            commands::governance::install_committee,
-            commands::governance::submit_proposal,
-            commands::governance::list_proposals,
-            commands::governance::approve_proposal,
-            commands::governance::cancel_proposal,
-            commands::governance::cast_proposal_vote,
-            commands::governance::resolve_proposal,
-            commands::governance::get_onchain_queue_status,
-            commands::governance::retry_onchain_submission,
+            // Governance genesis review and trust-anchor pinning
             commands::governance_genesis::governance_preview_genesis,
             commands::governance_genesis::governance_preview_genesis_locator,
             commands::governance_genesis::governance_retrieve_genesis,

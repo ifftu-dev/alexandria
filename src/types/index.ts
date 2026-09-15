@@ -425,9 +425,6 @@ export interface CreateSnapshotParams {
 
 // ---- Governance ----
 
-export type ElectionPhase = 'nomination' | 'voting' | 'finalized' | 'cancelled'
-export type ProposalStatus = 'draft' | 'published' | 'approved' | 'rejected' | 'cancelled'
-
 export interface DaoInfo {
   id: string
   name: string
@@ -544,92 +541,6 @@ export interface SentinelHoldoutKeyPolicy {
 export interface SentinelHoldoutPlaintextShare {
   share_index: number
   y_hex: string
-}
-
-export interface Election {
-  id: string
-  dao_id: string
-  title: string
-  description: string | null
-  phase: string
-  seats: number
-  nominee_min_proficiency: string
-  voter_min_proficiency: string
-  nomination_start: string
-  nomination_end: string | null
-  voting_end: string | null
-  on_chain_tx: string | null
-  created_at: string
-  finalized_at: string | null
-}
-
-export interface ElectionNominee {
-  id: string
-  election_id: string
-  stake_address: string
-  accepted: boolean
-  votes_received: number
-  is_winner: boolean
-  nominated_at: string
-}
-
-export interface ElectionVote {
-  id: string
-  election_id: string
-  voter: string
-  nominee_id: string
-  on_chain_tx: string | null
-  voted_at: string
-}
-
-export interface OpenElectionParams {
-  dao_id: string
-  title: string
-  description?: string | null
-  seats?: number | null
-  nominee_min_proficiency?: string | null
-  voter_min_proficiency?: string | null
-  nomination_end?: string | null
-  voting_end?: string | null
-}
-
-export interface Proposal {
-  id: string
-  dao_id: string
-  title: string
-  description: string | null
-  category: string
-  status: string
-  proposer: string
-  votes_for: number
-  votes_against: number
-  voting_deadline: string | null
-  min_vote_proficiency: string
-  on_chain_tx: string | null
-  created_at: string
-  resolved_at: string | null
-}
-
-export interface ProposalVote {
-  id: string
-  proposal_id: string
-  voter: string
-  in_favor: boolean
-  on_chain_tx: string | null
-  voted_at: string
-}
-
-export interface SubmitProposalParams {
-  dao_id: string
-  title: string
-  description?: string | null
-  category: string
-  min_vote_proficiency?: string | null
-}
-
-export interface GovernanceTxResult {
-  tx_hash: string
-  action: string
 }
 
 // ---- Opinions (Field Commentary) ----

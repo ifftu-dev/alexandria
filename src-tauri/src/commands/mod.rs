@@ -16,7 +16,6 @@ pub mod elements;
 pub mod enrollment;
 pub mod evidence;
 pub mod goal_templates;
-pub mod governance;
 pub mod governance_genesis;
 pub mod graph;
 pub mod guardian;

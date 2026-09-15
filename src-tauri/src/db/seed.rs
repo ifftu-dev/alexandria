@@ -293,9 +293,7 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     // some tables already have rows but others don't.
     // NB: enrollments are intentionally never seeded (no auto-enrol), so they
     // can't be a backfill trigger — key off other demo tables instead.
-    // Governance members are a trigger only where their demo rows are seeded.
-    if (legacy_governance_demo_enabled() && needs_backfill("governance_dao_members"))
-        || needs_backfill("classrooms")
+    if needs_backfill("classrooms")
         || needs_backfill("video_chapters")
         || needs_backfill("opinions")
         || needs_backfill("credentials")
@@ -333,27 +331,10 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
-/// Apply the idempotent demo backfill. Legacy governance authority rows are
-/// included only where [`legacy_governance_demo_enabled`] allows them.
+/// Apply the idempotent demo backfill.
 fn execute_backfill_sql(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(BACKFILL_SQL)?;
-    if legacy_governance_demo_enabled() {
-        conn.execute_batch(LEGACY_GOVERNANCE_DEMO_SQL)?;
-    }
     conn.execute_batch(BACKFILL_TAIL_SQL)
-}
-
-/// The app crate seeds legacy governance authority rows only in debug builds
-/// with `legacy-local-governance`. The CLI shares this file via `#[path]`
-/// and never seeds them.
-#[cfg(has_app_lib)]
-fn legacy_governance_demo_enabled() -> bool {
-    crate::domain::governance::legacy_local_governance_enabled()
-}
-
-#[cfg(not(has_app_lib))]
-fn legacy_governance_demo_enabled() -> bool {
-    false
 }
 
 /// Rewrite the seeded demo learner's VC blobs to the W3C VC v2 shape
@@ -1432,121 +1413,6 @@ ON CONFLICT DO NOTHING;
 
 "##;
 
-/// Demo committee/chair members, finalized elections with winners, and
-/// resolved proposals. These rows carry legacy local governance authority, so
-/// they are seeded only by debug builds with `legacy-local-governance`.
-const LEGACY_GOVERNANCE_DEMO_SQL: &str = r##"
--- ============================================================
--- P4: GOVERNANCE (members, elections, proposals, votes)
--- ============================================================
--- DAO members (committee members for each DAO)
-INSERT INTO governance_dao_members (dao_id, stake_address, role) VALUES
-    -- CS DAO: 7 members
-    ('dao_cs', 'addr_seed_author_1',   'chair'),
-    ('dao_cs', 'addr_seed_author_2',   'committee'),
-    ('dao_cs', 'addr_seed_member_1',   'committee'),
-    ('dao_cs', 'addr_seed_member_2',   'committee'),
-    ('dao_cs', 'addr_seed_member_3',   'member'),
-    ('dao_cs', 'addr_seed_member_4',   'member'),
-    ('dao_cs', 'addr_seed_member_5',   'member'),
-    -- Math DAO: 5 members
-    ('dao_math', 'addr_seed_author_2', 'chair'),
-    ('dao_math', 'addr_seed_member_1', 'committee'),
-    ('dao_math', 'addr_seed_member_6', 'committee'),
-    ('dao_math', 'addr_seed_member_7', 'member'),
-    ('dao_math', 'addr_seed_member_8', 'member'),
-    -- Web DAO: 5 members
-    ('dao_web', 'addr_seed_author_1',  'chair'),
-    ('dao_web', 'addr_seed_member_2',  'committee'),
-    ('dao_web', 'addr_seed_member_9',  'committee'),
-    ('dao_web', 'addr_seed_member_10', 'member'),
-    ('dao_web', 'addr_seed_member_11', 'member'),
-    -- Design DAO: 5 members
-    ('dao_design', 'addr_seed_author_3', 'chair'),
-    ('dao_design', 'addr_seed_member_3',  'committee'),
-    ('dao_design', 'addr_seed_member_12', 'committee'),
-    ('dao_design', 'addr_seed_member_13', 'member'),
-    ('dao_design', 'addr_seed_member_14', 'member'),
-    -- Cyber DAO: 5 members
-    ('dao_cyber', 'addr_seed_author_2', 'chair'),
-    ('dao_cyber', 'addr_seed_member_4', 'committee'),
-    ('dao_cyber', 'addr_seed_member_15', 'member'),
-    ('dao_cyber', 'addr_seed_member_16', 'member'),
-    ('dao_cyber', 'addr_seed_member_17', 'member'),
-    -- Data DAO: 5 members
-    ('dao_data', 'addr_seed_author_2', 'chair'),
-    ('dao_data', 'addr_seed_member_5', 'committee'),
-    ('dao_data', 'addr_seed_member_6', 'committee'),
-    ('dao_data', 'addr_seed_member_18', 'member'),
-    ('dao_data', 'addr_seed_member_19', 'member')
-ON CONFLICT DO NOTHING;
-
--- Elections: 1 finalized, 1 in voting phase, 1 in nomination phase
-INSERT INTO governance_elections (id, dao_id, title, description, phase, seats, nominee_min_proficiency, voter_min_proficiency, nomination_start, nomination_end, voting_end, finalized_at) VALUES
-    ('election_001', 'dao_cs', 'Q1 2026 CS Committee Election', 'Annual election for the Computer Science DAO committee seats', 'finalized', 5, 'apply', 'remember', '2025-12-01T00:00:00', '2025-12-15T00:00:00', '2025-12-31T00:00:00', '2026-01-02T00:00:00'),
-    ('election_002', 'dao_web', 'Q2 2026 Web Dev Committee Election', 'Election for Web Development DAO committee seats', 'voting', 5, 'apply', 'remember', '2026-03-01T00:00:00', '2026-03-15T00:00:00', '2026-04-15T00:00:00', NULL),
-    ('election_003', 'dao_design', 'Q2 2026 Design Committee Election', 'Election for Design DAO committee seats', 'nomination', 5, 'apply', 'remember', '2026-04-01T00:00:00', '2026-04-30T00:00:00', NULL, NULL)
-ON CONFLICT DO NOTHING;
-
--- Election nominees
-INSERT INTO governance_election_nominees (id, election_id, stake_address, accepted, votes_received, is_winner) VALUES
-    -- Finalized CS election: 4 nominees, 3 won
-    ('nom_001', 'election_001', 'addr_seed_author_1',  1, 12, 1),
-    ('nom_002', 'election_001', 'addr_seed_author_2',  1, 9,  1),
-    ('nom_003', 'election_001', 'addr_seed_member_1',  1, 8,  1),
-    ('nom_004', 'election_001', 'addr_seed_member_2',  1, 4,  0),
-    -- Active Web election: 3 nominees, voting in progress
-    ('nom_005', 'election_002', 'addr_seed_author_1',  1, 6, 0),
-    ('nom_006', 'election_002', 'addr_seed_member_2',  1, 4, 0),
-    ('nom_007', 'election_002', 'addr_seed_member_9',  1, 3, 0),
-    -- Design nomination: 2 nominees so far
-    ('nom_008', 'election_003', 'addr_seed_author_3',  1, 0, 0),
-    ('nom_009', 'election_003', 'addr_seed_member_12', 0, 0, 0)
-ON CONFLICT DO NOTHING;
-
--- Election votes (for finalized + active elections)
-INSERT INTO governance_election_votes (id, election_id, voter, nominee_id) VALUES
-    ('evote_001', 'election_001', 'addr_seed_member_3', 'nom_001'),
-    ('evote_002', 'election_001', 'addr_seed_member_4', 'nom_001'),
-    ('evote_003', 'election_001', 'addr_seed_member_5', 'nom_002'),
-    ('evote_004', 'election_001', 'addr_seed_member_6', 'nom_003'),
-    ('evote_005', 'election_002', 'addr_seed_member_10', 'nom_005'),
-    ('evote_006', 'election_002', 'addr_seed_member_11', 'nom_005'),
-    ('evote_007', 'election_002', 'addr_seed_member_3',  'nom_006')
-ON CONFLICT DO NOTHING;
-
--- Proposals: varied states across DAOs
-INSERT INTO governance_proposals (id, dao_id, title, description, category, status, proposer, votes_for, votes_against, voting_deadline, min_vote_proficiency) VALUES
-    ('prop_001', 'dao_cs', 'Add Quantum Computing subject', 'Proposal to add Quantum Computing as a new subject under Computer Science, with skills for quantum gates, Shor/Grover algorithms, and quantum error correction.', 'taxonomy_change', 'approved', 'addr_seed_author_1', 5, 1, '2026-02-28T00:00:00', 'apply'),
-    ('prop_002', 'dao_cs', 'Require 3 evidence records for analyze-level proofs', 'Increase minimum evidence threshold for analyze-level skill proofs from 2 to 3 to improve credential rigor.', 'policy', 'active', 'addr_seed_member_1', 3, 2, '2026-04-30T00:00:00', 'remember'),
-    ('prop_003', 'dao_web', 'Add WebAssembly skill under Frontend', 'Proposal to add WASM as a new skill under Frontend Development: compiling Rust/C++ to WebAssembly, JS interop, and performance optimization.', 'taxonomy_change', 'active', 'addr_seed_author_1', 2, 0, '2026-04-20T00:00:00', 'apply'),
-    ('prop_004', 'dao_design', 'Content moderation policy for design courses', 'Establish guidelines for reviewing design course content: original work requirements, attribution standards, and accessibility compliance.', 'content_moderation', 'draft', 'addr_seed_author_3', 0, 0, NULL, 'remember'),
-    ('prop_005', 'dao_math', 'Add Applied Mathematics subject', 'Create a new Applied Mathematics subject covering numerical methods, optimization, and mathematical modelling.', 'taxonomy_change', 'rejected', 'addr_seed_member_7', 1, 4, '2026-03-15T00:00:00', 'apply')
-ON CONFLICT DO NOTHING;
-
--- Proposal votes
-INSERT INTO governance_proposal_votes (id, proposal_id, voter, in_favor) VALUES
-    ('pvote_001', 'prop_001', 'addr_seed_author_2',  1),
-    ('pvote_002', 'prop_001', 'addr_seed_member_1',  1),
-    ('pvote_003', 'prop_001', 'addr_seed_member_2',  1),
-    ('pvote_004', 'prop_001', 'addr_seed_member_3',  1),
-    ('pvote_005', 'prop_001', 'addr_seed_member_4',  1),
-    ('pvote_006', 'prop_001', 'addr_seed_member_5',  0),
-    ('pvote_007', 'prop_002', 'addr_seed_author_1',  1),
-    ('pvote_008', 'prop_002', 'addr_seed_author_2',  1),
-    ('pvote_009', 'prop_002', 'addr_seed_member_1',  1),
-    ('pvote_010', 'prop_002', 'addr_seed_member_3',  0),
-    ('pvote_011', 'prop_002', 'addr_seed_member_4',  0),
-    ('pvote_012', 'prop_003', 'addr_seed_member_2',  1),
-    ('pvote_013', 'prop_003', 'addr_seed_member_9',  1),
-    ('pvote_014', 'prop_005', 'addr_seed_author_2',  0),
-    ('pvote_015', 'prop_005', 'addr_seed_member_1',  0),
-    ('pvote_016', 'prop_005', 'addr_seed_member_6',  0),
-    ('pvote_017', 'prop_005', 'addr_seed_member_8',  0),
-    ('pvote_018', 'prop_005', 'addr_seed_member_7',  1)
-ON CONFLICT DO NOTHING;
-"##;
-
 const BACKFILL_TAIL_SQL: &str = r##"
 -- ============================================================
 -- P5: CLASSROOMS
@@ -2556,7 +2422,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
     #[test]
     fn production_seed_and_backfill_grant_no_governance_authority() {
         let db = Database::open_in_memory().expect("open");
@@ -2586,7 +2451,7 @@ mod tests {
                 "{query}"
             );
         }
-        // Neutral DAO scope rows stay for completion requirements and UI.
+        // The fabricated DAO scope rows remain seeded until D02 removes them.
         let daos: i64 = conn
             .query_row("SELECT COUNT(*) FROM governance_daos", [], |r| r.get(0))
             .unwrap();

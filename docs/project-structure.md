@@ -174,11 +174,9 @@ src-tauri/
         ├── blockfrost.rs   # REST client (preprod)
         ├── tx_builder.rs   # Shared tx-builder primitives (fee/metadata/hash; NFT minters moved out at mig 040)
         ├── username_anchor.rs # Batched label-1698 username-claim anchoring
-        ├── gov_tx_builder.rs # Governance tx builders
+        ├── gov_tx_builder.rs # Shared Plutus script helpers
         ├── soulbound_tx_builder.rs # Soulbound/reputation tx builder path
         ├── snapshot.rs     # Asset names, datum encoding, metadata
-        ├── governance.rs   # Metadata labels and payloads
-        ├── onchain_queue.rs  # Persistent governance tx queue
         ├── anchor_queue.rs   # VC integrity-anchor queue
         ├── anchor_tx.rs      # Metadata-only anchor transactions
         └── script_refs.rs    # Reference-script hashes/UTXOs (deployed to preprod, block 4736927)
@@ -275,8 +273,7 @@ src/
 │   │   ├── Sentinel.vue
 │   │   └── Sync.vue
 │   ├── governance/
-│   │   ├── DaoDetail.vue
-│   │   └── Index.vue
+│   │   └── ImportGenesis.vue
 │   ├── instructor/
 │   │   ├── Composer.vue
 │   │   ├── CourseLearners.vue

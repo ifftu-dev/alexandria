@@ -149,10 +149,7 @@ onMounted(() => {
 <template>
   <div class="mx-auto max-w-4xl space-y-6">
     <div>
-      <router-link to="/community" class="text-sm text-primary hover:underline">
-        {{ $t('actions.back') }}
-      </router-link>
-      <h1 class="mt-3 text-2xl font-bold text-foreground">
+      <h1 class="text-2xl font-bold text-foreground">
         {{ $t('governanceGenesisImport.title') }}
       </h1>
       <p class="mt-2 text-sm text-muted-foreground">

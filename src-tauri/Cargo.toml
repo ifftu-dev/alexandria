@@ -13,9 +13,6 @@ default-run = "alexandria-node"
 [features]
 default = []
 dev-seed = []
-# Compile the obsolete one-operator DAO bootstrap only for explicit local
-# compatibility testing. `debug_assertions` is checked in code as a second gate.
-legacy-governance-bootstrap = []
 # Compile the obsolete caller-supplied taxonomy ratification path only for
 # explicit local compatibility testing. Code also checks `debug_assertions`.
 legacy-taxonomy-ratification = []
@@ -23,11 +20,6 @@ legacy-taxonomy-ratification = []
 # authority only for explicit local compatibility testing.
 legacy-sentinel-prior-ratification = []
 legacy-integrity-attestation = []
-# Compile the obsolete local/operator election, proposal and committee
-# authority (IPC, inbound governance gossip and operator-queue governance
-# transactions) only for explicit local compatibility testing. Code also
-# checks `debug_assertions`.
-legacy-local-governance = []
 # Compile the obsolete caller-supplied goal-template/question-bank
 # ratification (IPC and inbound content-version gossip) only for explicit
 # local compatibility testing. Code also checks `debug_assertions`.

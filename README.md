@@ -258,7 +258,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, seeds taxonomy/courses and neutral DAO rows (no committees, elections, proposals, or votes), and starts the iroh content store.
+The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, seeds taxonomy and courses (plus DAO scope rows with no committees, elections, proposals, or votes, which the rebuild removes), and starts the iroh content store.
 
 ### Building for iOS
 

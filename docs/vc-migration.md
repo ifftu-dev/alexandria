@@ -115,10 +115,10 @@ cutover and that current state.
 
 1. **VC integrity anchoring** — BLAKE3-of-VC metadata txs (label 1697)
    via `cardano/anchor_queue.rs` (wired).
-2. **DAO governance** — election/proposal/vote txs via
-   `cardano/gov_tx_builder.rs` and `cardano/onchain_queue.rs`
-   (wired; reference scripts deployed on preprod — see
-   `cardano/script_refs.rs`).
+2. **DAO governance** — the operator election/proposal/vote transaction
+   queue is deleted. Governance will anchor verified committee outcomes once
+   the committee protocol lands; the deployed reference scripts remain listed
+   in `cardano/script_refs.rs`.
 3. **Completion-witness minting** — `completion.ak` validator
    (deployed) + observer + auto-issuance (live).
 4. **Reputation snapshots** — new snapshots are signed

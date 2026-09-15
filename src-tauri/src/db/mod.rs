@@ -1,5 +1,4 @@
 pub(crate) mod executor;
-pub(crate) mod governance;
 pub(crate) mod governance_genesis;
 pub(crate) mod opinion_eligibility;
 pub mod schema;

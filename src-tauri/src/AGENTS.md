@@ -97,7 +97,6 @@ Line counts drift with every PR; regenerate with `wc -l` before relying on them.
 |------|-------|------|
 | `p2p/network.rs` | 3382 | Swarm behavior and protocol orchestration |
 | `tutoring/manager_mobile.rs` | 3286 | Mobile tutoring logic |
-| `commands/governance.rs` | 2901 | Governance command surface |
 | `db/schema.rs` | 3781 | 94 migrations |
 | `tutoring/manager.rs` | 2136 | Desktop/Android tutoring |
 | `evidence/reputation.rs` | 830 | Credential-backed reputation system |

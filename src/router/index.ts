@@ -258,28 +258,16 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
-    // Community (formerly "Governance")
-    {
-      path: '/community',
-      name: 'community',
-      component: () => import('@/pages/governance/Index.vue'),
-      meta: { layout: 'app' },
-    },
+    // Community: governance genesis review and trust-anchor pinning. The
+    // obsolete DAO list, elections and proposals are deleted.
+    { path: '/community', redirect: '/community/import' },
     {
       path: '/community/import',
       name: 'community-import',
       component: () => import('@/pages/governance/ImportGenesis.vue'),
       meta: { layout: 'app' },
     },
-    {
-      path: '/community/:id',
-      name: 'community-detail',
-      component: () => import('@/pages/governance/DaoDetail.vue'),
-      meta: { layout: 'app' },
-    },
-    // Legacy /governance* paths — redirect so old deeplinks/bookmarks resolve.
-    { path: '/governance', redirect: '/community' },
-    { path: '/governance/:id', redirect: (to) => `/community/${to.params.id}` },
+    { path: '/governance', redirect: '/community/import' },
 
     // Dashboard surfaces — flattened to plain top-level paths.
     {
