@@ -123,6 +123,15 @@ pub struct BlockfrostClient {
     project_id: String,
 }
 
+/// Minimal ledger receipt from GET /txs/{hash}; inclusion is not synonymous
+/// with successful Plutus execution. See Blockfrost's `tx_content` schema.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TransactionReceipt {
+    pub hash: String,
+    pub slot: u64,
+    pub valid_contract: bool,
+}
+
 /// Preprod base URL.
 const PREPROD_BASE_URL: &str = "https://cardano-preprod.blockfrost.io/api/v0";
 
@@ -538,6 +547,16 @@ impl BlockfrostClient {
     /// Queries `GET /txs/{hash}`. Returns `true` if Blockfrost returns 200
     /// (transaction exists on-chain), `false` for 404 (not yet confirmed).
     pub async fn is_tx_confirmed(&self, tx_hash: &str) -> Result<bool, BlockfrostError> {
+        Ok(self
+            .get_transaction_receipt(tx_hash)
+            .await?
+            .is_some_and(|r| r.valid_contract))
+    }
+
+    pub async fn get_transaction_receipt(
+        &self,
+        tx_hash: &str,
+    ) -> Result<Option<TransactionReceipt>, BlockfrostError> {
         let url = format!("{}/txs/{}", self.base_url, tx_hash);
         let resp = self
             .client
@@ -547,8 +566,19 @@ impl BlockfrostClient {
             .await?;
 
         match resp.status().as_u16() {
-            200 => Ok(true),
-            404 => Ok(false),
+            200 => {
+                let receipt: TransactionReceipt = resp
+                    .json()
+                    .await
+                    .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+                if receipt.hash != tx_hash {
+                    return Err(BlockfrostError::Deserialize(
+                        "transaction receipt hash mismatch".into(),
+                    ));
+                }
+                Ok(Some(receipt))
+            }
+            404 => Ok(None),
             status => {
                 let body = resp.text().await.unwrap_or_default();
                 Err(BlockfrostError::Api { status, body })

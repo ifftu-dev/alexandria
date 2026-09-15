@@ -4,11 +4,13 @@
 //! on-chain Plutus transaction for async submission. A background task
 //! processes the queue, building and submitting transactions via Blockfrost.
 //!
-//! Queue states: pending → submitted → confirmed | failed
+//! Queue states: pending → outcome_unknown → submitted → confirmed.
+//! Build failures may be retried; journaled transactions are never rebuilt.
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use super::submission::{self, Operation, Submission, SubmissionStatus};
 use crate::db::Database;
 
 /// A queued on-chain governance transaction.
@@ -35,17 +37,34 @@ pub fn enqueue(
     target_table: &str,
     target_id: &str,
 ) -> Result<String, String> {
-    let id =
-        crate::crypto::hash::entity_id(&[action_type, target_id, &chrono::Utc::now().to_rfc3339()]);
-
-    db.conn()
-        .execute(
-            "INSERT INTO onchain_governance_queue \
+    // Repeating the command must not allocate a fresh queue identity that
+    // bypasses an uncertain transaction's durable binding.
+    let tx =
+        rusqlite::Transaction::new_unchecked(db.conn(), rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| e.to_string())?;
+    let existing: Option<String> = tx
+        .query_row(
+            "SELECT id FROM onchain_governance_queue
+         WHERE action_type = ?1 AND target_table = ?2 AND target_id = ?3
+         ORDER BY created_at, id LIMIT 1",
+            params![action_type, target_table, target_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(id) = existing {
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(id);
+    }
+    let id = crate::crypto::hash::entity_id(&[action_type, target_table, target_id]);
+    tx.execute(
+        "INSERT INTO onchain_governance_queue \
              (id, action_type, payload_json, target_table, target_id) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, action_type, payload_json, target_table, target_id],
-        )
-        .map_err(|e| format!("failed to enqueue on-chain tx: {e}"))?;
+        params![id, action_type, payload_json, target_table, target_id],
+    )
+    .map_err(|e| format!("failed to enqueue on-chain tx: {e}"))?;
+    tx.commit().map_err(|e| e.to_string())?;
 
     log::info!(
         "Enqueued on-chain governance tx: {} for {}.{}",
@@ -65,7 +84,9 @@ pub fn get_pending(db: &Database) -> Result<Vec<QueueItem>, String> {
             "SELECT id, action_type, payload_json, target_table, target_id, \
              status, tx_hash, attempts, last_error, created_at, updated_at \
              FROM onchain_governance_queue \
-             WHERE status = 'pending' \
+             WHERE status = 'pending' AND NOT EXISTS \
+               (SELECT 1 FROM chain_submissions s WHERE s.network = 'cardano-preprod' \
+                AND s.operation_kind = 'governance_queue' AND s.operation_id = onchain_governance_queue.id) \
              ORDER BY created_at ASC LIMIT 20",
         )
         .map_err(|e| e.to_string())?;
@@ -128,30 +149,70 @@ pub fn get_all(db: &Database) -> Result<Vec<QueueItem>, String> {
     Ok(items)
 }
 
-/// Mark a queue item as submitted (tx built and sent to Blockfrost).
-pub fn mark_submitted(db: &Database, queue_id: &str, tx_hash: &str) -> Result<(), String> {
-    db.conn()
+/// Project the durable journal atomically into the queue and chain pointers.
+/// Confirmed pointers describe observed chain state, not an uncertain POST.
+fn project_submission(
+    db: &Database,
+    item: &QueueItem,
+    submission: &Submission,
+) -> Result<(), String> {
+    if matches!(
+        submission.status,
+        SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain
+    ) && submission.confirmed_slot.is_none()
+    {
+        return Err("governance submission requires a ledger receipt before projection".into());
+    }
+    let status = match submission.status {
+        SubmissionStatus::OutcomeUnknown => "outcome_unknown",
+        SubmissionStatus::Submitted => "submitted",
+        SubmissionStatus::Confirmed => "confirmed",
+        SubmissionStatus::FailedOnChain => "failed",
+    };
+    let tx = db
+        .conn()
+        .unchecked_transaction()
+        .map_err(|e| e.to_string())?;
+    let changed = tx
         .execute(
-            "UPDATE onchain_governance_queue \
-             SET status = 'submitted', tx_hash = ?1, \
-                 attempts = attempts + 1, updated_at = datetime('now') \
-             WHERE id = ?2",
-            params![tx_hash, queue_id],
+            "UPDATE onchain_governance_queue SET status = ?2, tx_hash = ?3,
+             attempts = CASE WHEN status = 'pending' THEN attempts + 1 ELSE attempts END,
+             last_error = ?4, updated_at = datetime('now')
+         WHERE id = ?1 AND status != 'confirmed'",
+            params![item.id, status, submission.tx_hash, submission.last_error],
         )
         .map_err(|e| e.to_string())?;
-
-    // Also update the target entity's on_chain_tx column
-    // (the target_table is already validated via the schema allowlist)
-    let item = get_item(db, queue_id)?;
-    if let Some(item) = item {
-        let sql = format!(
-            "UPDATE {} SET on_chain_tx = ?1 WHERE id = ?2",
-            item.target_table
-        );
-        let _ = db.conn().execute(&sql, params![tx_hash, item.target_id]);
+    if changed == 1 && submission.status == SubmissionStatus::Confirmed {
+        let sql = match item.target_table.as_str() {
+            "governance_elections" => {
+                "UPDATE governance_elections SET on_chain_tx = ?1 WHERE id = ?2"
+            }
+            "governance_proposals" => {
+                "UPDATE governance_proposals SET on_chain_tx = ?1 WHERE id = ?2"
+            }
+            _ => return Err("unsupported on-chain queue target".into()),
+        };
+        if tx
+            .execute(sql, params![submission.tx_hash, item.target_id])
+            .map_err(|e| e.to_string())?
+            != 1
+        {
+            return Err("on-chain queue target missing".into());
+        }
+        if item.action_type == "install_committee"
+            && tx
+                .execute(
+                    "UPDATE governance_daos SET dao_state_utxo = ?1
+                 WHERE id = (SELECT dao_id FROM governance_elections WHERE id = ?2)",
+                    params![format!("{}#0", submission.tx_hash), item.target_id],
+                )
+                .map_err(|e| e.to_string())?
+                != 1
+        {
+            return Err("on-chain DAO target missing".into());
+        }
     }
-
-    Ok(())
+    tx.commit().map_err(|e| e.to_string())
 }
 
 /// Mark a queue item as confirmed (tx confirmed on chain).
@@ -174,7 +235,9 @@ pub fn mark_failed(db: &Database, queue_id: &str, error: &str) -> Result<(), Str
             "UPDATE onchain_governance_queue \
              SET status = 'failed', last_error = ?1, \
                  attempts = attempts + 1, updated_at = datetime('now') \
-             WHERE id = ?2",
+             WHERE id = ?2 AND NOT EXISTS \
+               (SELECT 1 FROM chain_submissions s WHERE s.network = 'cardano-preprod' \
+                AND s.operation_kind = 'governance_queue' AND s.operation_id = ?2)",
             params![error, queue_id],
         )
         .map_err(|e| e.to_string())?;
@@ -188,7 +251,9 @@ pub fn retry_item(db: &Database, queue_id: &str) -> Result<(), String> {
             "UPDATE onchain_governance_queue \
              SET status = 'pending', last_error = NULL, \
                  updated_at = datetime('now') \
-             WHERE id = ?1 AND status = 'failed'",
+             WHERE id = ?1 AND status = 'failed' AND NOT EXISTS \
+               (SELECT 1 FROM chain_submissions s WHERE s.network = 'cardano-preprod' \
+                AND s.operation_kind = 'governance_queue' AND s.operation_id = ?1)",
             params![queue_id],
         )
         .map_err(|e| e.to_string())?;
@@ -237,24 +302,26 @@ pub async fn process_queue(
     blockfrost: &Option<super::blockfrost::BlockfrostClient>,
     wallet: &Option<crate::crypto::wallet::Wallet>,
 ) -> Result<usize, String> {
-    // Skip if validators not deployed yet
-    if !super::gov_tx_builder::validators_deployed() {
-        return Ok(0);
-    }
-
     // Skip if no Blockfrost client or wallet available
     let bf = match blockfrost {
         Some(ref client) => client,
         None => return Ok(0),
     };
-    // Governance admin/committee txs are operator-signed (3-A). Only an
-    // operator-configured node builds + submits them; everyone else skips
-    // the queue entirely. The user `wallet` is no longer used here (votes
+    // Recover before checking builder credentials or pending work. In
+    // particular, an empty pending queue must not suppress confirmation.
+    let recovered = reconcile_journaled_items(db, bf).await?;
+    let confirmed = confirm_submitted_items(db, bf).await?;
+    if !super::gov_tx_builder::validators_deployed() {
+        return Ok(recovered + confirmed);
+    }
+    // Legacy governance admin/committee txs are operator-signed (3-A).
+    // Only an operator-configured node builds new ones; reconciliation
+    // above needs no signing key. The user `wallet` is unused here (votes
     // and nominations are off-chain gossip, not queued).
     let _ = wallet;
     let operator = match super::operator::load_operator_key() {
         Some(op) => op,
-        None => return Ok(0),
+        None => return Ok(recovered + confirmed),
     };
 
     // Get pending items
@@ -265,10 +332,10 @@ pub async fn process_queue(
     };
 
     if items.is_empty() {
-        return Ok(0);
+        return Ok(recovered + confirmed);
     }
 
-    let mut processed = 0;
+    let mut processed = recovered + confirmed;
 
     for item in &items {
         // Skip items that have been attempted too many times
@@ -289,11 +356,16 @@ pub async fn process_queue(
 
         // Attempt to build and submit the transaction
         match build_and_submit(&item.action_type, item, bf, db, &operator).await {
-            Ok(tx_hash) => {
+            Ok(submitted) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
                 let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
-                mark_submitted(db_ref, &item.id, &tx_hash)?;
-                log::info!("On-chain tx submitted: {} -> {}", item.action_type, tx_hash);
+                project_submission(db_ref, item, &submitted)?;
+                log::info!(
+                    "On-chain tx: {} -> {:?} ({})",
+                    item.action_type,
+                    submitted.status,
+                    submitted.tx_hash
+                );
             }
             Err(e) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
@@ -306,13 +378,51 @@ pub async fn process_queue(
         processed += 1;
     }
 
-    // After processing pending items, check submitted ones for confirmation
-    let confirmed = confirm_submitted_items(db, bf).await?;
-    if confirmed > 0 {
-        log::info!("governance queue: confirmed {confirmed} transaction(s)");
-    }
+    Ok(processed)
+}
 
-    Ok(processed + confirmed)
+async fn reconcile_journaled_items(
+    db: &std::sync::Arc<std::sync::Mutex<Option<Database>>>,
+    blockfrost: &super::blockfrost::BlockfrostClient,
+) -> Result<usize, String> {
+    let items = {
+        let guard = db.lock().map_err(|_| "db lock poisoned")?;
+        let database = guard.as_ref().ok_or("database closed")?;
+        let mut statement = database
+            .conn()
+            .prepare(
+                "SELECT q.id FROM onchain_governance_queue q JOIN chain_submissions s
+             ON s.network = 'cardano-preprod' AND s.operation_kind = 'governance_queue'
+                AND s.operation_id = q.id
+             WHERE q.status != 'confirmed' ORDER BY q.updated_at, q.id LIMIT 20",
+            )
+            .map_err(|e| e.to_string())?;
+        let ids = statement
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        ids.iter()
+            .map(|id| get_item(database, id)?.ok_or_else(|| "queue item missing".into()))
+            .collect::<Result<Vec<_>, String>>()?
+    };
+    for item in &items {
+        let operation = Operation {
+            kind: "governance_queue",
+            id: &item.id,
+        };
+        // Provider failure still projects the persisted uncertain state;
+        // it cannot turn this operation back into buildable work.
+        if let Err(error) = submission::reconcile(db, blockfrost, operation).await {
+            log::debug!("governance submission reconciliation: {error}");
+        }
+        let guard = db.lock().map_err(|_| "db lock poisoned")?;
+        let database = guard.as_ref().ok_or("database closed")?;
+        let original =
+            submission::lookup(database.conn(), operation)?.ok_or("submission missing")?;
+        project_submission(database, item, &original)?;
+    }
+    Ok(items.len())
 }
 
 /// Poll submitted queue items for on-chain confirmation.
@@ -361,7 +471,9 @@ fn get_submitted(db: &crate::db::Database) -> Result<Vec<QueueItem>, String> {
             "SELECT id, action_type, payload_json, target_table, target_id, \
              status, tx_hash, attempts, last_error, created_at, updated_at \
              FROM onchain_governance_queue \
-             WHERE status = 'submitted' AND tx_hash IS NOT NULL \
+             WHERE status = 'submitted' AND tx_hash IS NOT NULL AND NOT EXISTS \
+               (SELECT 1 FROM chain_submissions s WHERE s.network = 'cardano-preprod' \
+                AND s.operation_kind = 'governance_queue' AND s.operation_id = onchain_governance_queue.id) \
              ORDER BY updated_at ASC LIMIT 20",
         )
         .map_err(|e| e.to_string())?;
@@ -402,7 +514,7 @@ async fn build_and_submit(
     blockfrost: &super::blockfrost::BlockfrostClient,
     db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
     operator: &super::operator::OperatorKey,
-) -> Result<String, String> {
+) -> Result<Submission, String> {
     use super::gov_onchain;
 
     let signed: Vec<u8> = match action_type {
@@ -463,17 +575,21 @@ async fn build_and_submit(
         other => return Err(format!("unknown governance action type: {other}")),
     };
 
-    let tx_hash = blockfrost
-        .submit_tx(&signed)
-        .await
-        .map_err(|e| format!("tx submission failed: {e}"))?;
-
-    // Committee install moves the DAO state token to a new UTxO; advance
-    // the pointer so the next spend finds it.
-    if action_type == "install_committee" {
-        update_dao_state_pointer(db, &item.target_id, &tx_hash)?;
-    }
-    Ok(tx_hash)
+    let context = serde_json::json!({"version": 1, "action_type": action_type,
+        "target_table": item.target_table, "target_id": item.target_id,
+        "payload_json": item.payload_json})
+    .to_string();
+    submission::submit_once(
+        db,
+        blockfrost,
+        Operation {
+            kind: "governance_queue",
+            id: &item.id,
+        },
+        &signed,
+        &context,
+    )
+    .await
 }
 
 /// Row data for `finalize_election`, read under a brief DB lock.
@@ -739,21 +855,140 @@ fn read_proposal_outcome(
     })
 }
 
-fn update_dao_state_pointer(
-    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
-    election_id: &str,
-    install_tx: &str,
-) -> Result<(), String> {
-    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-    let dbref = guard.as_ref().ok_or("database not initialized")?;
-    let new_ptr = format!("{install_tx}#0");
-    dbref
-        .conn()
-        .execute(
-            "UPDATE governance_daos SET dao_state_utxo = ?1 \
-             WHERE id = (SELECT dao_id FROM governance_elections WHERE id = ?2)",
-            params![new_ptr, election_id],
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db.conn().execute_batch(
+            "INSERT INTO governance_daos (id, name, scope_type, scope_id, dao_state_utxo)
+             VALUES ('dao', 'Test', 'subject', 'subject', 'old#0');
+             INSERT INTO governance_elections (id, dao_id, title) VALUES ('election', 'dao', 'Test');"
+        ).unwrap();
+        db
+    }
+
+    fn queued(db: &Database) -> QueueItem {
+        let id = enqueue(
+            db,
+            "install_committee",
+            "{}",
+            "governance_elections",
+            "election",
         )
-        .map_err(|e| format!("failed to advance DAO state pointer: {e}"))?;
-    Ok(())
+        .unwrap();
+        get_item(db, &id).unwrap().unwrap()
+    }
+
+    fn submission(status: SubmissionStatus) -> Submission {
+        Submission {
+            tx_hash: "a".repeat(64),
+            status,
+            context_json: "{}".into(),
+            last_error: None,
+            confirmed_slot: (status == SubmissionStatus::Confirmed).then_some(42),
+        }
+    }
+
+    #[test]
+    fn enqueue_reuses_the_original_operation_even_after_outcome_unknown() {
+        let db = test_db();
+        let item = queued(&db);
+        project_submission(&db, &item, &submission(SubmissionStatus::OutcomeUnknown)).unwrap();
+        let duplicate = queued(&db);
+        assert_eq!(duplicate.id, item.id);
+        assert_eq!(duplicate.status, "outcome_unknown");
+        assert_eq!(get_all(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn journaled_pending_or_failed_item_cannot_be_rebuilt() {
+        let db = test_db();
+        let item = queued(&db);
+        assert_eq!(get_pending(&db).unwrap().len(), 1);
+        db.conn()
+            .execute(
+                "INSERT INTO chain_submissions
+             (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json)
+             VALUES ('cardano-preprod', 'governance_queue', ?1, ?2, X'00', '{}')",
+                params![item.id, "a".repeat(64)],
+            )
+            .unwrap();
+        assert!(get_pending(&db).unwrap().is_empty());
+        mark_failed(&db, &item.id, "lost response").unwrap();
+        assert_eq!(get_item(&db, &item.id).unwrap().unwrap().status, "pending");
+        db.conn()
+            .execute(
+                "UPDATE onchain_governance_queue SET status = 'failed' WHERE id = ?1",
+                [&item.id],
+            )
+            .unwrap();
+        retry_item(&db, &item.id).unwrap();
+        assert_eq!(get_item(&db, &item.id).unwrap().unwrap().status, "failed");
+        assert!(get_pending(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn confirmation_and_chain_pointers_roll_back_together_then_recover_idempotently() {
+        let db = test_db();
+        let item = queued(&db);
+        let unknown = submission(SubmissionStatus::OutcomeUnknown);
+        project_submission(&db, &item, &unknown).unwrap();
+        let pointer = || {
+            db.conn()
+                .query_row(
+                    "SELECT dao_state_utxo FROM governance_daos WHERE id = 'dao'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(pointer(), "old#0");
+        project_submission(&db, &item, &submission(SubmissionStatus::Submitted)).unwrap();
+        assert_eq!(pointer(), "old#0", "acknowledged is not confirmed");
+        let mut legacy_confirmation = submission(SubmissionStatus::Confirmed);
+        legacy_confirmation.confirmed_slot = None;
+        assert!(project_submission(&db, &item, &legacy_confirmation).is_err());
+        assert_eq!(
+            get_item(&db, &item.id).unwrap().unwrap().status,
+            "submitted"
+        );
+        assert_eq!(pointer(), "old#0");
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_pointer BEFORE UPDATE OF dao_state_utxo ON governance_daos
+             BEGIN SELECT RAISE(ABORT, 'injected pointer failure'); END;",
+            )
+            .unwrap();
+        let confirmed = submission(SubmissionStatus::Confirmed);
+        assert!(project_submission(&db, &item, &confirmed)
+            .unwrap_err()
+            .contains("injected pointer failure"));
+        assert_eq!(
+            get_item(&db, &item.id).unwrap().unwrap().status,
+            "submitted"
+        );
+        let election_tx: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT on_chain_tx FROM governance_elections WHERE id = 'election'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(election_tx, None);
+        assert_eq!(pointer(), "old#0");
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_pointer")
+            .unwrap();
+        project_submission(&db, &item, &confirmed).unwrap();
+        project_submission(&db, &item, &unknown).unwrap();
+        assert_eq!(
+            get_item(&db, &item.id).unwrap().unwrap().status,
+            "confirmed"
+        );
+        assert_eq!(pointer(), format!("{}#0", confirmed.tx_hash));
+    }
 }

@@ -11,13 +11,14 @@
 //! point-lookup; recompute is cheap (~ms per skill) so callers can
 //! invalidate by deleting the row and re-querying.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::State;
 
 use crate::aggregation::{
     aggregate_skill_state, AggregationConfig, AggregationInput, DerivedSkillState,
 };
 use crate::crypto::did::Did;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{CredentialType, ProvenanceTier, SkillClaim, VerifiableCredential};
 use crate::AppState;
 
@@ -30,6 +31,18 @@ pub fn get_derived_skill_state_impl(
     skill_id: &str,
     now: &str,
 ) -> Result<Option<DerivedSkillState>, String> {
+    crate::db::with_transaction(conn, || {
+        get_derived_skill_state_in_transaction(conn, subject_did, skill_id, now)
+    })
+}
+
+fn get_derived_skill_state_in_transaction(
+    conn: &Connection,
+    subject_did: &Did,
+    skill_id: &str,
+    now: &str,
+) -> Result<Option<DerivedSkillState>, String> {
+    refresh_invalidated_states(conn, Some(subject_did.as_str()), now)?;
     let cfg = AggregationConfig::default();
 
     // Cached lookup first — (subject, skill, version) PK gives O(1).
@@ -54,6 +67,7 @@ pub fn list_derived_states_impl(
     conn: &Connection,
     subject_did: Option<&str>,
 ) -> Result<Vec<DerivedSkillState>, String> {
+    refresh_invalidated_states(conn, subject_did, &now_rfc3339())?;
     let mut sql = String::from("SELECT state_json FROM derived_skill_states");
     let mut args: Vec<String> = Vec::new();
     if let Some(s) = subject_did {
@@ -80,17 +94,22 @@ pub fn list_derived_states_impl(
 /// table and refresh the `derived_skill_states` cache. Returns the
 /// number of (subject, skill) pairs processed.
 pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
+    crate::db::with_transaction(conn, || recompute_all_in_transaction(conn, now))
+}
+
+fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, String> {
+    refresh_invalidated_states(conn, None, now)?;
     let mut stmt = conn
         .prepare(
-            "SELECT DISTINCT subject_did, skill_id FROM credentials \
+            "SELECT DISTINCT subject_did, skill_id FROM scoring_credentials \
              WHERE skill_id IS NOT NULL AND revoked = 0",
         )
         .map_err(|e| e.to_string())?;
     let pairs: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(|e| e.to_string())?
-        .filter_map(|x| x.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
 
     let cfg = AggregationConfig::default();
     let mut count = 0u32;
@@ -109,6 +128,55 @@ pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
 
 // ---- helpers -------------------------------------------------------------
 
+/// Repair only pairs invalidated by an exact legacy issuer match. The original
+/// credentials and invalidated historical snapshots are retained. A failure
+/// keeps the work queued, and no stale current cache was left by recognition.
+pub(crate) fn refresh_invalidated_states(
+    conn: &Connection,
+    subject: Option<&str>,
+    now: &str,
+) -> Result<(), String> {
+    let tx = if conn.is_autocommit() {
+        Some(conn.unchecked_transaction().map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let mut stmt = conn
+        .prepare(
+            "SELECT subject_did, skill_id FROM derived_skill_refresh_queue \
+         WHERE ?1 IS NULL OR subject_did = ?1 ORDER BY subject_did, skill_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let pairs = stmt
+        .query_map([subject], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    let cfg = AggregationConfig::default();
+    for (subject, skill) in pairs {
+        let did = Did(subject);
+        let evidence = load_evidence_for(conn, &did, &skill, &cfg)?;
+        if !evidence.is_empty() {
+            upsert_cached(
+                conn,
+                &aggregate_skill_state(&did, &skill, &evidence, now, &cfg),
+            )?;
+        }
+        conn.execute(
+            "DELETE FROM derived_skill_refresh_queue WHERE subject_did = ?1 AND skill_id = ?2",
+            params![did.as_str(), skill],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(tx) = tx {
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Load every accepted credential matching (subject, skill) and turn
 /// each into an `AggregationInput`. Revoked / non-skill rows are
 /// excluded by the SQL. The quality factors (rubric / proctoring /
@@ -123,7 +191,7 @@ fn load_evidence_for(
 ) -> Result<Vec<AggregationInput>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, signed_vc_json FROM credentials \
+            "SELECT id, signed_vc_json FROM scoring_credentials \
              WHERE subject_did = ?1 AND skill_id = ?2 AND revoked = 0 \
              ORDER BY issuance_date",
         )
@@ -266,7 +334,8 @@ fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), 
             trust_score = excluded.trust_score, \
             level = excluded.level, \
             evidence_mass = excluded.evidence_mass, \
-            computed_at = excluded.computed_at",
+            computed_at = excluded.computed_at, \
+            input_policy_valid = 1",
         params![
             state.subject.as_str(),
             state.skill_id,
@@ -287,7 +356,7 @@ fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), 
 fn dominant_provenance_for(conn: &Connection, subject_did: &str, skill_id: &str) -> Option<String> {
     let mut stmt = conn
         .prepare(
-            "SELECT provenance FROM credentials \
+            "SELECT provenance FROM scoring_credentials \
              WHERE subject_did = ?1 AND skill_id = ?2 AND revoked = 0 \
                AND provenance IS NOT NULL",
         )
@@ -314,12 +383,15 @@ pub async fn get_derived_skill_state(
     skill_id: String,
 ) -> Result<Option<DerivedSkillState>, String> {
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    get_derived_skill_state_impl(db.conn(), &Did(subject_did), &skill_id, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "aggregation.get_derived_skill_state",
+            move |db| get_derived_skill_state_impl(db.conn(), &Did(subject_did), &skill_id, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -327,23 +399,29 @@ pub async fn list_derived_states(
     state: State<'_, AppState>,
     subject_did: Option<String>,
 ) -> Result<Vec<DerivedSkillState>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_derived_states_impl(db.conn(), subject_did.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "aggregation.list_derived_states",
+            move |db| list_derived_states_impl(db.conn(), subject_did.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
 pub async fn recompute_all(state: State<'_, AppState>) -> Result<u32, String> {
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    recompute_all_impl(db.conn(), &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            state.profile_lease(),
+            "aggregation.recompute_all",
+            move |db| recompute_all_impl(db.conn(), &now),
+        )
+        .await
 }
 
 /// One dated point on a skill's confidence/trust history.
@@ -365,17 +443,31 @@ pub async fn get_skill_state_history(
     subject_did: String,
     skill_id: String,
 ) -> Result<Vec<SkillHistoryPoint>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let mut stmt = db
-        .conn()
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "aggregation.get_skill_state_history",
+            move |db| get_skill_state_history_impl(db.conn(), &subject_did, &skill_id, &now),
+        )
+        .await
+}
+
+fn get_skill_state_history_impl(
+    conn: &Connection,
+    subject_did: &str,
+    skill_id: &str,
+    now: &str,
+) -> Result<Vec<SkillHistoryPoint>, String> {
+    refresh_invalidated_states(conn, Some(subject_did), now)?;
+    let mut stmt = conn
         .prepare(
             "SELECT snapshot_date, raw_score, confidence, trust_score, level, evidence_mass \
                FROM derived_skill_state_history \
-              WHERE subject_did = ?1 AND skill_id = ?2 ORDER BY snapshot_date ASC",
+              WHERE subject_did = ?1 AND skill_id = ?2 AND input_policy_valid = 1 \
+              ORDER BY snapshot_date ASC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt

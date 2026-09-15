@@ -17,15 +17,15 @@
 
 use pallas_addresses::Address as PallasAddress;
 use pallas_crypto::hash::Hash;
-use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
-use pallas_wallet::PrivateKey;
 
 use super::blockfrost::BlockfrostClient;
 use super::gov_tx_builder::{inject_plutus_fields, script_address, GovTxResult};
 use super::plutus_data;
 use super::script_refs;
-use super::tx_builder::{compute_tx_hash, parse_tx_hash, sign_raw_tx, TxBuildError, TTL_OFFSET};
+use super::tx_builder::{
+    compute_tx_hash, extended_private_key, parse_tx_hash, sign_raw_tx, TxBuildError, TTL_OFFSET,
+};
 
 /// Minimum ADA at the escrow UTxO (covers the inline datum storage).
 const MIN_ESCROW_UTXO_LOVELACE: u64 = 2_000_000;
@@ -107,9 +107,7 @@ pub async fn build_lock_tx(
     // plain pay-to-script, not a script spend).
     let (tx_bytes, _) = inject_plutus_fields(&built_tx.tx_bytes.0, &[], &[], &[], Some(&datum))?;
 
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
-    });
+    let private_key = extended_private_key(payment_key_extended)?;
     let signed = sign_raw_tx(&tx_bytes, &private_key)?;
     let tx_hash = compute_tx_hash(&signed)?;
     Ok(GovTxResult {

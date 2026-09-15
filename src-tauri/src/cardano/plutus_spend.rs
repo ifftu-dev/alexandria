@@ -19,14 +19,14 @@
 
 use pallas_addresses::Address as PallasAddress;
 use pallas_crypto::hash::Hash;
-use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_txbuilder::{BuildConway, ExUnits, Input, Output, ScriptKind, StagingTransaction};
-use pallas_wallet::PrivateKey;
 
 use super::blockfrost::BlockfrostClient;
 use super::cost_models::PLUTUS_V3_COST_MODEL;
 use super::gov_tx_builder::GovTxResult;
-use super::tx_builder::{parse_tx_hash, sign_raw_tx, TxBuildError, TTL_OFFSET};
+use super::tx_builder::{
+    extended_private_key, parse_tx_hash, sign_raw_tx, TxBuildError, TTL_OFFSET,
+};
 
 const PRICE_MEM_NUM: u64 = 577;
 const PRICE_MEM_DEN: u64 = 10_000;
@@ -94,9 +94,7 @@ pub async fn build_spend_tx(
     spec: SpendScript<'_>,
 ) -> Result<GovTxResult, TxBuildError> {
     let unsigned = build_spend_unsigned(blockfrost, &spec).await?;
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*spec.payment_key_extended)
-    });
+    let private_key = extended_private_key(spec.payment_key_extended)?;
     let signed = sign_raw_tx(&unsigned, &private_key)?;
     let tx_hash = super::tx_builder::compute_tx_hash(&signed)?;
     Ok(GovTxResult {

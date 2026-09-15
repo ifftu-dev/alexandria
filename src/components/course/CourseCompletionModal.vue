@@ -15,7 +15,7 @@ const { t } = useI18n()
 const router = useRouter()
 const {
   isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId,
-  unmetElements, elapsedMs, etaMs, progressPct, close,
+  unmetElements, elapsedMs, etaMs, progressPct, witnessStatus, close,
 } = useCourseCompletion()
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -38,9 +38,6 @@ function fmtSecs(ms: number): string {
 const etaLabel = computed(() => {
   if (mintStage.value === 'issued') return t('courses.completion.etaDone', { seconds: fmtSecs(elapsedMs.value) })
   if (mintStage.value === 'unavailable') return ''
-  if (mintStage.value === 'anchoring') {
-    return etaMs.value > 0 ? t('courses.completion.etaSecuring', { seconds: fmtSecs(etaMs.value) }) : t('courses.completion.etaSecuringConfirming')
-  }
   return etaMs.value > 0 ? t('courses.completion.etaLeft', { seconds: fmtSecs(etaMs.value) }) : t('courses.completion.etaFinishing')
 })
 
@@ -129,11 +126,6 @@ const mint = computed(() => {
         label: t('courses.completion.creatingLabel'),
         note: t('courses.completion.creatingNote', { done: mintedCount.value, total }),
       }
-    case 'anchoring':
-      return {
-        label: t('courses.completion.securingLabel'),
-        note: t('courses.completion.securingNote'),
-      }
     default:
       return {
         label: t('courses.completion.notEarnedLabel'),
@@ -145,6 +137,18 @@ const mint = computed(() => {
 })
 
 const hasCredential = computed(() => mintStage.value !== 'unavailable' && items.value.length > 0)
+
+const witnessNote = computed(() => {
+  switch (witnessStatus.value) {
+    case 'pending': return t('courses.completion.witnessPending')
+    case 'submitted': return t('courses.completion.witnessSubmitted')
+    case 'outcome_unknown': return t('courses.completion.witnessUnknown')
+    case 'confirmed': return t('courses.completion.witnessConfirmed')
+    case 'failed_on_chain': return t('courses.completion.witnessFailed')
+    case 'unavailable': return t('courses.completion.witnessUnavailable')
+    default: return ''
+  }
+})
 
 function viewCredential() {
   const id = primaryCredentialId.value
@@ -223,7 +227,6 @@ function continueToDashboard() {
               <div class="mint-bar">
                 <div
                   class="mint-bar-fill"
-                  :class="{ anchoring: mintStage === 'anchoring' }"
                   :style="{ width: `${progressPct}%` }"
                 />
               </div>
@@ -282,8 +285,9 @@ function continueToDashboard() {
               <p class="unmet-cta">{{ $t('courses.completion.cta', { pct: pct(unmet[0]?.required_score ?? 0.6) }) }}</p>
             </div>
 
+            <p v-if="witnessNote" class="mt-3 text-sm" role="status">{{ witnessNote }}</p>
             <a
-              v-if="shortTx"
+              v-if="shortTx && witnessStatus === 'confirmed'"
               class="mint-tx"
               :href="`https://preprod.cardanoscan.io/transaction/${txHash}`"
               target="_blank"

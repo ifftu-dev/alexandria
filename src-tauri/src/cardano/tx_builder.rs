@@ -13,6 +13,7 @@
 
 use pallas_codec::utils::KeyValuePairs;
 use pallas_crypto::hash::Hash;
+use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_primitives::conway::{AuxiliaryData, Tx};
 use pallas_primitives::{Fragment, Metadatum, MetadatumLabel};
 use pallas_traverse::ComputeHash;
@@ -53,6 +54,20 @@ pub const TTL_OFFSET: u64 = 3600;
 /// Estimated fee floor for initial transaction sizing (300k lovelace, ~0.3 ADA).
 /// The calculated linear fee is used when it exceeds this floor.
 pub(crate) const ESTIMATED_FEE: u64 = 300_000;
+
+/// Validate and reconstruct a Pallas extended private key from wallet bytes.
+///
+/// The checked constructor verifies the BIP32-Ed25519 scalar bit invariants;
+/// corrupted key material fails closed before any transaction is signed.
+pub(crate) fn extended_private_key(
+    bytes: &[u8; SecretKeyExtended::SIZE],
+) -> Result<PrivateKey, TxBuildError> {
+    SecretKeyExtended::from_bytes(*bytes)
+        .map(PrivateKey::Extended)
+        .map_err(|_| {
+            TxBuildError::Builder("extended payment key failed structural validation".into())
+        })
+}
 
 /// Inject a metadata map into a pre-built transaction's auxiliary data.
 ///
@@ -172,6 +187,16 @@ mod tests {
     fn parse_tx_hash_invalid_hex() {
         let result = parse_tx_hash(&"zz".repeat(32));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn extended_private_key_checks_required_scalar_bits() {
+        let invalid = [0u8; SecretKeyExtended::SIZE];
+        assert!(extended_private_key(&invalid).is_err());
+
+        let mut valid = invalid;
+        valid[31] = 0b0100_0000;
+        assert!(extended_private_key(&valid).is_ok());
     }
 
     #[test]

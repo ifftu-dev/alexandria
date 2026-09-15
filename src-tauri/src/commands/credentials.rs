@@ -6,12 +6,13 @@
 //! `&Did`. This split keeps the business logic unit-testable without
 //! constructing a full `State<AppState>`.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::State;
 
 use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
     Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof, VerifiableCredential,
@@ -138,6 +139,10 @@ fn build_integrity_assertion(
         commitment_root,
         anchor_ref,
     ) = row;
+    let assurance_level = crate::commands::integrity::effective_assurance_level(
+        &assurance_level,
+        anchor_ref.is_some(),
+    );
     Ok(IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
@@ -585,12 +590,15 @@ pub async fn issue_credential(
 ) -> Result<VerifiableCredential, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    issue_credential_impl(db.conn(), &signing_key, &issuer_did, &req, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.issue",
+            move |db| issue_credential_impl(db.conn(), &signing_key, &issuer_did, &req, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -599,12 +607,15 @@ pub async fn list_credentials(
     subject: Option<String>,
     skill_id: Option<String>,
 ) -> Result<Vec<VerifiableCredential>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_credentials_impl(db.conn(), subject.as_deref(), skill_id.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.list",
+            move |db| list_credentials_impl(db.conn(), subject.as_deref(), skill_id.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -612,12 +623,15 @@ pub async fn get_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<Option<VerifiableCredential>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    get_credential_impl(db.conn(), &credential_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.get",
+            move |db| get_credential_impl(db.conn(), &credential_id),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -627,12 +641,15 @@ pub async fn revoke_credential(
     reason: String,
 ) -> Result<(), String> {
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    revoke_credential_impl(db.conn(), &credential_id, &reason, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.revoke",
+            move |db| revoke_credential_impl(db.conn(), &credential_id, &reason, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -643,18 +660,23 @@ pub async fn suspend_credential(
     reason: Option<String>,
 ) -> Result<(), String> {
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    suspend_credential_impl(
-        db.conn(),
-        &credential_id,
-        until.as_deref(),
-        reason.as_deref(),
-        &now,
-    )
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.suspend",
+            move |db| {
+                suspend_credential_impl(
+                    db.conn(),
+                    &credential_id,
+                    until.as_deref(),
+                    reason.as_deref(),
+                    &now,
+                )
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -662,12 +684,15 @@ pub async fn reinstate_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    reinstate_credential_impl(db.conn(), &credential_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.reinstate",
+            move |db| reinstate_credential_impl(db.conn(), &credential_id),
+        )
+        .await
 }
 
 /// Add a (credential_id, requestor_did) entry to the per-credential
@@ -679,12 +704,15 @@ pub async fn allow_credential_fetch(
     credential_id: String,
     requestor_did: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    crate::p2p::vc_fetch::allow_fetch(db.conn(), &credential_id, &requestor_did)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.allow_fetch",
+            move |db| crate::p2p::vc_fetch::allow_fetch(db.conn(), &credential_id, &requestor_did),
+        )
+        .await
 }
 
 /// Remove a (credential_id, requestor_did) entry from the
@@ -695,12 +723,17 @@ pub async fn disallow_credential_fetch(
     credential_id: String,
     requestor_did: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    crate::p2p::vc_fetch::disallow_fetch(db.conn(), &credential_id, &requestor_did)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.disallow_fetch",
+            move |db| {
+                crate::p2p::vc_fetch::disallow_fetch(db.conn(), &credential_id, &requestor_did)
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -709,17 +742,22 @@ pub async fn verify_credential_cmd(
     credential: VerifiableCredential,
 ) -> Result<VerificationResult, String> {
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    Ok(crate::domain::vc::verify_credential_db(
-        db.conn(),
-        &credential,
-        &now,
-        &crate::domain::vc::VerificationPolicy::default(),
-    ))
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.verify",
+            move |db| {
+                Ok(crate::domain::vc::verify_credential_db(
+                    db.conn(),
+                    &credential,
+                    &now,
+                    &crate::domain::vc::VerificationPolicy::default(),
+                ))
+            },
+        )
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -1092,12 +1130,15 @@ impl crate::domain::vc::VerificationStore for BundleStore {
 
 #[tauri::command]
 pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    export_bundle_impl(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.export-bundle",
+            move |db| export_bundle_impl(db.conn()),
+        )
+        .await
 }
 
 // ---------------------------------------------------------------------------

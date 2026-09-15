@@ -9,6 +9,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::cardano::anchor_tx;
+use crate::cardano::submission::{self, Operation, Submission, SubmissionStatus};
 use crate::crypto::did::Did;
 use crate::db::Database;
 
@@ -25,6 +26,7 @@ const MAX_ATTEMPTS: u32 = 5;
 #[serde(rename_all = "snake_case")]
 pub enum AnchorStatus {
     Pending,
+    OutcomeUnknown,
     Submitted,
     Confirmed,
     Failed,
@@ -86,6 +88,40 @@ pub async fn tick(
     let mut processed = 0u32;
 
     for row in &batch {
+        let operation = Operation {
+            kind: "credential_anchor",
+            id: &row.credential_id,
+        };
+        let existing = {
+            let guard = db.lock().map_err(|_| "db lock poisoned")?;
+            submission::lookup(guard.as_ref().ok_or("database closed")?.conn(), operation)?
+        };
+        if let Some(existing) = existing {
+            // A crash may have left the queue row pending even though the
+            // exact transaction was durably journaled. Never rebuild it.
+            let recovered = match submission::reconcile(db, bf, operation).await {
+                Ok(Some(recovered)) => recovered,
+                Ok(None) => return Err("credential submission checkpoint missing".into()),
+                Err(error) => {
+                    log::debug!("credential anchor reconciliation: {error}");
+                    existing
+                }
+            };
+            let guard = db.lock().map_err(|_| "db lock poisoned")?;
+            project_submission(
+                guard.as_ref().ok_or("database closed")?.conn(),
+                &row.credential_id,
+                &recovered,
+                &now,
+            )?;
+            processed += 1;
+            continue;
+        }
+        if row.anchor_status != AnchorStatus::Pending {
+            // Legacy submitted rows have no recoverable signed bytes. Keep
+            // them out of the builder; absence of a journal is not a retry.
+            continue;
+        }
         // Hit max attempts before this run? Mark permanently failed
         // and move on. Mirror the onchain_queue convention.
         if row.attempts >= MAX_ATTEMPTS {
@@ -103,11 +139,16 @@ pub async fn tick(
         );
 
         match build_and_submit(&row.credential_id, bf, w, db).await {
-            Ok(tx_hash) => {
+            Ok(submitted) => {
                 let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
                 let db_ref = guard.as_ref().ok_or("database closed")?;
-                mark_submitted(db_ref.conn(), &row.credential_id, &tx_hash, &now)?;
-                log::info!("anchor_queue: {} → {}", row.credential_id, tx_hash);
+                project_submission(db_ref.conn(), &row.credential_id, &submitted, &now)?;
+                log::info!(
+                    "anchor_queue: {} → {:?} ({})",
+                    row.credential_id,
+                    submitted.status,
+                    submitted.tx_hash
+                );
             }
             Err(e) => {
                 let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
@@ -129,7 +170,7 @@ async fn build_and_submit(
     blockfrost: &crate::cardano::blockfrost::BlockfrostClient,
     wallet: &crate::crypto::wallet::Wallet,
     db: &Arc<Mutex<Option<Database>>>,
-) -> Result<String, String> {
+) -> Result<Submission, String> {
     let (integrity_hash, issuer_did, issuance_date) = {
         let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
         let db_ref = guard.as_ref().ok_or("database closed")?;
@@ -159,11 +200,20 @@ async fn build_and_submit(
         blockfrost,
     )
     .await?;
-    blockfrost
-        .submit_tx(&anchor.signed_cbor)
-        .await
-        .map_err(|e| format!("submit_tx: {e}"))?;
-    Ok(anchor.tx_hash)
+    let context = serde_json::json!({"version": 1, "credential_id": credential_id,
+        "integrity_hash": integrity_hash})
+    .to_string();
+    submission::submit_once(
+        db,
+        blockfrost,
+        Operation {
+            kind: "credential_anchor",
+            id: credential_id,
+        },
+        &anchor.signed_cbor,
+        &context,
+    )
+    .await
 }
 
 /// Pending rows ready to be processed *now* — `next_attempt_at` is
@@ -175,9 +225,13 @@ fn load_pending(conn: &rusqlite::Connection) -> Result<Vec<CredentialAnchor>, St
             "SELECT credential_id, anchor_tx_hash, anchor_status, attempts, \
                     last_error, next_attempt_at \
              FROM credential_anchors \
-             WHERE anchor_status = 'pending' \
-               AND (next_attempt_at IS NULL OR next_attempt_at <= ?1) \
-             ORDER BY enqueued_at \
+             WHERE (anchor_status = 'pending' OR \
+               (anchor_status IN ('outcome_unknown', 'submitted') AND EXISTS \
+                (SELECT 1 FROM chain_submissions s WHERE s.operation_kind = 'credential_anchor' \
+                 AND s.operation_id = credential_id AND s.network = 'cardano-preprod'))) \
+             AND \
+               (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?1)) \
+             ORDER BY COALESCE(julianday(next_attempt_at), julianday(enqueued_at)), credential_id \
              LIMIT ?2",
         )
         .map_err(|e| e.to_string())?;
@@ -187,9 +241,9 @@ fn load_pending(conn: &rusqlite::Connection) -> Result<Vec<CredentialAnchor>, St
             Ok(CredentialAnchor {
                 credential_id: r.get(0)?,
                 anchor_tx_hash: r.get(1)?,
-                anchor_status: serde_json::from_str(&format!("\"{status}\""))
-                    .unwrap_or(AnchorStatus::Pending),
-                attempts: r.get::<_, i64>(3)? as u32,
+                anchor_status: serde_json::from_value(serde_json::Value::String(status))
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                attempts: r.get(3)?,
                 last_error: r.get(4)?,
                 next_attempt_at: r.get(5)?,
             })
@@ -202,21 +256,35 @@ fn load_pending(conn: &rusqlite::Connection) -> Result<Vec<CredentialAnchor>, St
     Ok(out)
 }
 
-fn mark_submitted(
+fn project_submission(
     conn: &rusqlite::Connection,
     credential_id: &str,
-    tx_hash: &str,
+    submission: &Submission,
     now: &str,
 ) -> Result<(), String> {
+    if matches!(
+        submission.status,
+        SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain
+    ) && submission.confirmed_slot.is_none()
+    {
+        return Err("credential submission requires a ledger receipt before projection".into());
+    }
+    let status = match submission.status {
+        SubmissionStatus::OutcomeUnknown => "outcome_unknown",
+        SubmissionStatus::Submitted => "submitted",
+        SubmissionStatus::Confirmed => "confirmed",
+        SubmissionStatus::FailedOnChain => "failed",
+    };
     conn.execute(
         "UPDATE credential_anchors \
-         SET anchor_status = 'submitted', anchor_tx_hash = ?2, \
-             attempts = attempts + 1, last_error = NULL, \
-             next_attempt_at = NULL, confirmed_at = ?3 \
-         WHERE credential_id = ?1",
-        rusqlite::params![credential_id, tx_hash, now],
+         SET anchor_status = ?4, anchor_tx_hash = ?2, \
+             attempts = CASE WHEN anchor_status = 'pending' THEN attempts + 1 ELSE attempts END, \
+             last_error = ?5, next_attempt_at = ?3, \
+             confirmed_at = CASE WHEN ?4 = 'confirmed' THEN COALESCE(confirmed_at, ?3) ELSE NULL END \
+         WHERE credential_id = ?1 AND anchor_status != 'confirmed'",
+        rusqlite::params![credential_id, submission.tx_hash, now, status, submission.last_error],
     )
-    .map_err(|e| format!("mark_submitted: {e}"))?;
+    .map_err(|e| format!("project credential submission: {e}"))?;
     Ok(())
 }
 
@@ -277,6 +345,28 @@ pub fn enqueue(db: &rusqlite::Connection, credential_id: &str) -> Result<(), Str
         rusqlite::params![credential_id],
     )
     .map_err(|e| format!("enqueue credential anchor: {e}"))?;
+    Ok(())
+}
+
+/// Make an unsigned credential anchor eligible for another background attempt.
+/// A row with durable signed bytes is never reset: it must reconcile that exact
+/// transaction through the journal instead of creating a replacement.
+pub fn enqueue_or_retry(db: &rusqlite::Connection, credential_id: &str) -> Result<(), String> {
+    enqueue(db, credential_id)?;
+    db.execute(
+        "UPDATE credential_anchors
+         SET anchor_status = 'pending', attempts = 0, last_error = NULL,
+             next_attempt_at = NULL
+         WHERE credential_id = ?1 AND anchor_status = 'failed'
+           AND NOT EXISTS (
+             SELECT 1 FROM chain_submissions
+             WHERE network = 'cardano-preprod'
+               AND operation_kind = 'credential_anchor'
+               AND operation_id = ?1
+           )",
+        rusqlite::params![credential_id],
+    )
+    .map_err(|e| format!("retry credential anchor: {e}"))?;
     Ok(())
 }
 
@@ -358,6 +448,56 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    #[test]
+    fn retry_resets_only_failures_without_signed_bytes() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "unsigned");
+        seed_credential(db.conn(), "signed");
+        for id in ["unsigned", "signed"] {
+            enqueue(db.conn(), id).unwrap();
+            db.conn()
+                .execute(
+                    "UPDATE credential_anchors SET anchor_status = 'failed', attempts = 5,
+                        last_error = 'failed' WHERE credential_id = ?1",
+                    [id],
+                )
+                .unwrap();
+        }
+        db.conn()
+            .execute(
+                "INSERT INTO chain_submissions
+                 (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json)
+                 VALUES ('cardano-preprod', 'credential_anchor', 'signed', ?1, X'00', '{}')",
+                ["a".repeat(64)],
+            )
+            .unwrap();
+
+        enqueue_or_retry(db.conn(), "unsigned").unwrap();
+        enqueue_or_retry(db.conn(), "signed").unwrap();
+
+        let unsigned: (String, i64, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT anchor_status, attempts, last_error FROM credential_anchors
+                 WHERE credential_id = 'unsigned'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unsigned, ("pending".into(), 0, None));
+        let signed: (String, i64, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT anchor_status, attempts, last_error FROM credential_anchors
+                 WHERE credential_id = 'signed'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(signed, ("failed".into(), 5, Some("failed".into())));
+    }
+
     #[tokio::test]
     async fn tick_without_blockfrost_returns_zero_silently() {
         // Idle-node contract: no Blockfrost project id + no wallet
@@ -367,5 +507,58 @@ mod tests {
         )));
         let processed = tick(&db, &None, &None).await.expect("tick ok");
         assert_eq!(processed, 0);
+    }
+
+    #[test]
+    fn uncertain_projection_is_retry_visible_without_being_a_new_submission() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "cred");
+        enqueue(db.conn(), "cred").unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO chain_submissions
+             (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json)
+             VALUES ('cardano-preprod', 'credential_anchor', 'cred', ?1, X'00', '{}')",
+                ["a".repeat(64)],
+            )
+            .unwrap();
+        let mut submission = Submission {
+            tx_hash: "a".repeat(64),
+            status: SubmissionStatus::OutcomeUnknown,
+            context_json: "{}".into(),
+            last_error: Some("response lost".into()),
+            confirmed_slot: None,
+        };
+        let now = "2026-01-01T00:00:00Z";
+        project_submission(db.conn(), "cred", &submission, now).unwrap();
+        project_submission(db.conn(), "cred", &submission, now).unwrap();
+        let rows = load_pending(db.conn()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].anchor_status, AnchorStatus::OutcomeUnknown);
+        assert_eq!(
+            rows[0].attempts, 1,
+            "polling must not consume submission attempts"
+        );
+        let confirmed_at: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT confirmed_at FROM credential_anchors WHERE credential_id = 'cred'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(confirmed_at, None);
+        submission.status = SubmissionStatus::Confirmed;
+        assert!(project_submission(db.conn(), "cred", &submission, now).is_err());
+        assert_eq!(load_pending(db.conn()).unwrap().len(), 1);
+        submission.confirmed_slot = Some(42);
+        project_submission(db.conn(), "cred", &submission, now).unwrap();
+        submission.status = SubmissionStatus::OutcomeUnknown;
+        project_submission(db.conn(), "cred", &submission, now).unwrap();
+        assert!(
+            load_pending(db.conn()).unwrap().is_empty(),
+            "late unknown must not downgrade confirmation"
+        );
     }
 }

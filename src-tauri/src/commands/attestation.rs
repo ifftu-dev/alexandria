@@ -9,12 +9,13 @@
 //! observation; unmet requirements keep the observation pending so
 //! the UI can nudge assessors.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::State;
 
 use crate::crypto::did::{derive_did_key, parse_did_key};
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::attestation::{
     CompletionAttestation, CompletionAttestationRequirement, CompletionAttestationStatus,
     SetCompletionRequirementParams, SubmitCompletionAttestationParams,
@@ -292,12 +293,15 @@ pub async fn set_completion_attestation_requirement(
     state: State<'_, AppState>,
     params: SetCompletionRequirementParams,
 ) -> Result<CompletionAttestationRequirement, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    set_requirement_impl(db.conn(), &params)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "attestation.requirement.set",
+            move |db| set_requirement_impl(db.conn(), &params),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -305,24 +309,30 @@ pub async fn remove_completion_attestation_requirement(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<usize, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    remove_requirement_impl(db.conn(), &course_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "attestation.requirement.remove",
+            move |db| remove_requirement_impl(db.conn(), &course_id),
+        )
+        .await
 }
 
 #[tauri::command]
 pub async fn list_completion_attestation_requirements(
     state: State<'_, AppState>,
 ) -> Result<Vec<CompletionAttestationRequirement>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_requirements(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "attestation.requirement.list",
+            move |db| list_requirements(db.conn()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -336,12 +346,15 @@ pub async fn submit_completion_attestation(
     drop(ks_guard);
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    submit_attestation_impl(db.conn(), &w.signing_key, &params)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "attestation.submit",
+            move |db| submit_attestation_impl(db.conn(), &w.signing_key, &params),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -350,12 +363,15 @@ pub async fn get_completion_attestation_status(
     witness_tx_hash: String,
     course_id: Option<String>,
 ) -> Result<CompletionAttestationStatus, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    attestation_status(db.conn(), &witness_tx_hash, course_id.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "attestation.status",
+            move |db| attestation_status(db.conn(), &witness_tx_hash, course_id.as_deref()),
+        )
+        .await
 }
 
 #[cfg(test)]

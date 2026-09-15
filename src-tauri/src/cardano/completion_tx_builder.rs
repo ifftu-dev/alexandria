@@ -16,16 +16,16 @@ use blake2::digest::consts::U28;
 use blake2::{Blake2b, Digest};
 use pallas_addresses::Address as PallasAddress;
 use pallas_crypto::hash::Hash;
-use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_txbuilder::{BuildConway, ExUnits, Input, Output, ScriptKind, StagingTransaction};
-use pallas_wallet::PrivateKey;
 
 use super::blockfrost::BlockfrostClient;
 use super::cost_models::PLUTUS_V3_COST_MODEL;
 use super::gov_tx_builder::{self, GovTxResult};
 use super::plutus_data;
 use super::script_refs;
-use super::tx_builder::{parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, TTL_OFFSET};
+use super::tx_builder::{
+    extended_private_key, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, TTL_OFFSET,
+};
 
 /// Execution-unit prices (preprod/mainnet, current protocol version):
 /// price_mem = 0.0577, price_step = 0.0000721. Expressed as rationals to
@@ -294,9 +294,7 @@ pub async fn build_completion_mint_tx(
     //    learner always witnesses (validator identity); the treasury
     //    additionally witnesses when it funded the inputs.
     let final_tx = build(fee, real_ex)?;
-    let learner_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
-    });
+    let learner_key = extended_private_key(payment_key_extended)?;
     let signed_tx_bytes = match treasury {
         Some(t) => super::tx_builder::sign_raw_tx_many(&final_tx, &[&learner_key, &t.key])?,
         None => sign_raw_tx(&final_tx, &learner_key)?,

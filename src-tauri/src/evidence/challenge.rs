@@ -40,7 +40,9 @@ pub fn submit_challenge(
     if params.reason.trim().len() < 10 {
         return Err("reason must be at least 10 characters".into());
     }
-    if (params.stake_lovelace as u64) < MIN_STAKE_LOVELACE {
+    let stake_lovelace = u64::try_from(params.stake_lovelace)
+        .map_err(|_| "stake must be a non-negative lovelace amount".to_string())?;
+    if stake_lovelace < MIN_STAKE_LOVELACE {
         return Err(format!(
             "stake must be at least {MIN_STAKE_LOVELACE} lovelace, got {}",
             params.stake_lovelace
@@ -550,6 +552,24 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("stake"));
+    }
+
+    #[test]
+    fn rejects_negative_stake_without_unsigned_wraparound() {
+        let db = test_db();
+        let err = submit_challenge(
+            db.conn(),
+            &SubmitCredentialChallengeParams {
+                credential_id: "cred_a".into(),
+                reason: "long enough reason here".into(),
+                stake_lovelace: -1,
+                dao_id: "d".into(),
+            },
+            "stake_challenger",
+            "sig",
+        )
+        .unwrap_err();
+        assert!(err.contains("non-negative"));
     }
 
     #[test]

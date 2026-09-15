@@ -94,20 +94,7 @@ pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceR
         }
 
         match issue_for_observation(conn, learner_key, &local_did, &obs) {
-            Ok(credential_id) => {
-                if let Err(e) = completion::mark_issued(
-                    conn,
-                    &obs.policy_id,
-                    &obs.asset_name_hex,
-                    &credential_id,
-                ) {
-                    report
-                        .errors
-                        .push(format!("mark_issued({credential_id}): {e}"));
-                } else {
-                    report.issued += 1;
-                }
-            }
+            Ok(_) => report.issued += 1,
             Err(e) => {
                 report.errors.push(format!("issue({}): {e}", obs.tx_hash));
             }
@@ -125,13 +112,37 @@ pub fn issue_for_observation(
     learner_did: &Did,
     obs: &CompletionObservation,
 ) -> Result<String, String> {
-    // Idempotency: if this observation already has a credential id
-    // recorded, return it — no-op. Prevents duplicate inserts if the
-    // caller retries after a partial failure.
-    if let Some(existing) = obs.credential_id.clone() {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let stored = completion::find_by_asset(&tx, &obs.policy_id, &obs.asset_name_hex)
+        .map_err(|e| e.to_string())?
+        .ok_or("completion observation missing")?;
+    if stored.tx_hash != obs.tx_hash
+        || stored.subject_pubkey != obs.subject_pubkey
+        || stored.course_id != obs.course_id
+        || stored.completion_root != obs.completion_root
+        || stored.completion_time != obs.completion_time
+        || stored.subject_pubkey != hex::encode(learner_key.verifying_key().as_bytes())
+        || *learner_did != did_from_verifying_key(&learner_key.verifying_key())
+    {
+        return Err("completion issuance does not match the stored observation and learner".into());
+    }
+    if let Some(existing) = stored.credential_id {
         return Ok(existing);
     }
+    let credential_id = issue_new_observation(&tx, learner_key, learner_did, obs)?;
+    completion::mark_issued(&tx, &obs.policy_id, &obs.asset_name_hex, &credential_id)
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(credential_id)
+}
 
+fn issue_new_observation(
+    conn: &Connection,
+    learner_key: &SigningKey,
+    learner_did: &Did,
+    obs: &CompletionObservation,
+) -> Result<String, String> {
     let list_id = ensure_status_list(conn, learner_did)?;
     let index = allocate_status_index(conn, &list_id)?;
 
@@ -510,13 +521,75 @@ mod tests {
             issued_at: Some("2026-04-24 12:01:00".into()),
         };
 
+        seed_observation(&db, &obs);
         let cid = issue_for_observation(db.conn(), &key, &did, &obs).unwrap();
-        assert_eq!(cid, "urn:uuid:already-issued");
+        assert_ne!(cid, "urn:uuid:already-issued");
+        assert_eq!(
+            issue_for_observation(db.conn(), &key, &did, &obs).unwrap(),
+            cid
+        );
 
         let row_count: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(row_count, 0, "must not insert when already resolved");
+        assert_eq!(
+            row_count, 1,
+            "must use the stored issuance even with a stale caller snapshot"
+        );
+    }
+
+    #[test]
+    fn issuance_and_status_slot_roll_back_when_observation_update_fails() {
+        let db = test_db();
+        let key = SigningKey::from_bytes(&[3; 32]);
+        let did = did_from_verifying_key(&key.verifying_key());
+        let obs = CompletionObservation {
+            policy_id: "01".repeat(28),
+            asset_name_hex: "02".repeat(32),
+            tx_hash: "03".repeat(32),
+            subject_pubkey: hex::encode(key.verifying_key().as_bytes()),
+            course_id: "04".repeat(16),
+            completion_root: "05".repeat(32),
+            completion_time: "2026-04-24T12:00:00Z".into(),
+            credential_id: None,
+            observed_at: "2026-04-24 12:00:00".into(),
+            issued_at: None,
+        };
+        seed_observation(&db, &obs);
+        db.conn().execute_batch("CREATE TRIGGER fail_issuance BEFORE UPDATE OF credential_id
+            ON completion_observations BEGIN SELECT RAISE(ABORT, 'injected issuance failure'); END;").unwrap();
+        assert!(issue_for_observation(db.conn(), &key, &did, &obs)
+            .unwrap_err()
+            .contains("injected issuance failure"));
+        let counts: (i64, i64) = db.conn().query_row(
+            "SELECT (SELECT COUNT(*) FROM credentials), (SELECT COUNT(*) FROM credential_status_lists)",
+            [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(counts, (0, 0));
+        assert_eq!(
+            completion::pending_observations(db.conn()).unwrap().len(),
+            1
+        );
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_issuance")
+            .unwrap();
+        let id = issue_for_observation(db.conn(), &key, &did, &obs).unwrap();
+        assert_eq!(
+            issue_for_observation(db.conn(), &key, &did, &obs).unwrap(),
+            id
+        );
+        let mut changed = obs.clone();
+        changed.completion_root = "06".repeat(32);
+        assert!(issue_for_observation(db.conn(), &key, &did, &changed).is_err());
+        assert!(completion::pending_observations(db.conn())
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            db.conn()
+                .query_row("SELECT COUNT(*) FROM credentials", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 }

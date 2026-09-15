@@ -15,10 +15,11 @@
 //! computed and persisted by `evidence::reputation`. Impact-delta
 //! provenance rows and on-chain verification remain deferred.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::evidence::reputation;
 use crate::AppState;
 
@@ -99,12 +100,23 @@ pub async fn list_reputation_rows(
     state: State<'_, AppState>,
     query: ReputationQuery,
 ) -> Result<Vec<ReputationRow>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "reputation.list",
+            move |db| list_reputation_rows_db(db, query),
+        )
+        .await
+}
+
+fn list_reputation_rows_db(
+    db: &crate::db::Database,
+    query: ReputationQuery,
+) -> Result<Vec<ReputationRow>, String> {
     let conn = db.conn();
+    reputation::refresh_invalidated(conn)?;
 
     let mut conditions: Vec<String> = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -138,7 +150,7 @@ pub async fn list_reputation_rows(
     let sql = format!(
         "SELECT id, actor_address, role, skill_id, proficiency_level, \
                 score, evidence_count, computation_spec, updated_at \
-         FROM reputation_assertions {where_clause} \
+         FROM current_reputation_assertions {where_clause} \
          ORDER BY updated_at DESC LIMIT ?{i}"
     );
     let limit = query.limit.unwrap_or(100);
@@ -172,16 +184,26 @@ pub async fn recompute_reputation_for_subject(
     state: State<'_, AppState>,
     subject_did: String,
 ) -> Result<i64, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    reputation::recompute_for_subject(db.conn(), &subject_did)?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            state.profile_lease(),
+            "reputation.recompute",
+            move |db| recompute_reputation_for_subject_db(db, &subject_did),
+        )
+        .await
+}
+
+fn recompute_reputation_for_subject_db(
+    db: &crate::db::Database,
+    subject_did: &str,
+) -> Result<i64, String> {
+    reputation::recompute_for_subject(db.conn(), subject_did)?;
     let count: i64 = db
         .conn()
         .query_row(
-            "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = ?1",
+            "SELECT COUNT(*) FROM current_reputation_assertions WHERE actor_address = ?1",
             params![subject_did],
             |row| row.get(0),
         )
@@ -194,12 +216,23 @@ pub async fn get_reputation(
     state: State<'_, AppState>,
     query: ReputationQuery,
 ) -> Result<Vec<FullReputationAssertion>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "reputation.get",
+            move |db| get_reputation_db(db, query),
+        )
+        .await
+}
+
+fn get_reputation_db(
+    db: &crate::db::Database,
+    query: ReputationQuery,
+) -> Result<Vec<FullReputationAssertion>, String> {
     let conn = db.conn();
+    reputation::refresh_invalidated(conn)?;
 
     let mut conditions: Vec<String> = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -234,7 +267,7 @@ pub async fn get_reputation(
                 score, evidence_count, median_impact, impact_p25, impact_p75, \
                 learner_count, impact_variance, window_start, window_end, \
                 computation_spec, updated_at \
-         FROM reputation_assertions {where_clause} \
+         FROM current_reputation_assertions {where_clause} \
          ORDER BY updated_at DESC LIMIT ?{i}"
     );
     let limit = query.limit.unwrap_or(100);

@@ -15,6 +15,7 @@
 //! not an application.
 
 pub mod did;
+pub mod governance;
 pub mod hash;
 pub mod talent;
 pub mod vc;

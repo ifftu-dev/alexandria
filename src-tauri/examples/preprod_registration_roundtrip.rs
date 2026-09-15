@@ -76,12 +76,14 @@ fn load_keys() -> Result<KeyMaterial> {
     if let Ok(mnemonic) = env::var("ALEXANDRIA_TEST_MNEMONIC") {
         let wallet =
             wallet_from_mnemonic(&mnemonic).map_err(|e| anyhow!("wallet_from_mnemonic: {e}"))?;
-        let payment_key = PrivateKey::Extended(unsafe {
-            SecretKeyExtended::from_bytes_unchecked(wallet.payment_key_extended)
-        });
-        let stake_key = PrivateKey::Extended(unsafe {
-            SecretKeyExtended::from_bytes_unchecked(wallet.stake_key_extended)
-        });
+        let payment_key = PrivateKey::Extended(
+            SecretKeyExtended::from_bytes(wallet.payment_key_extended)
+                .map_err(|_| anyhow!("derived payment key failed structural validation"))?,
+        );
+        let stake_key = PrivateKey::Extended(
+            SecretKeyExtended::from_bytes(wallet.stake_key_extended)
+                .map_err(|_| anyhow!("derived stake key failed structural validation"))?,
+        );
         return Ok(KeyMaterial {
             payment_address: wallet.payment_address.clone(),
             stake_address: wallet.stake_address.clone(),

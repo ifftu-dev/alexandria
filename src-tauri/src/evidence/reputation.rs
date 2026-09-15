@@ -52,9 +52,28 @@ pub fn level_to_str(level: i64) -> &'static str {
 /// Called whenever a credential is accepted into the local store.
 /// Pure function — no network, no vault, no async.
 pub fn on_credential_accepted(conn: &Connection, credential_id: &str) -> Result<(), String> {
+    crate::db::with_transaction(conn, || {
+        on_credential_accepted_in_transaction(conn, credential_id)
+    })
+}
+
+fn on_credential_accepted_in_transaction(
+    conn: &Connection,
+    credential_id: &str,
+) -> Result<(), String> {
     let Some(cred) = load_credential_row(conn, credential_id)? else {
         return Err(format!("credential not found: {credential_id}"));
     };
+    let scores: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM scoring_credentials WHERE id = ?1)",
+            [credential_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !scores {
+        return Ok(());
+    }
     // We only reward skill-kind credentials; role and custom claims
     // don't carry proficiency signal.
     if cred.claim_kind != "skill" {
@@ -92,7 +111,7 @@ pub fn recompute_for_subject(conn: &Connection, subject_did: &str) -> Result<(),
     // every credential they've issued to someone else.
     let mut stmt = conn
         .prepare(
-            "SELECT id FROM credentials \
+            "SELECT id FROM scoring_credentials \
              WHERE (subject_did = ?1 OR issuer_did = ?1) \
                AND revoked = 0 \
              ORDER BY issuance_date ASC",
@@ -111,6 +130,78 @@ pub fn recompute_for_subject(conn: &Connection, subject_did: &str) -> Result<(),
 }
 
 // ---------- internal ----------
+
+/// Refresh invalidated rows in place: dependent history is not cascaded away.
+/// Empty evidence becomes excluded rather than a misleading zero-score award.
+pub fn refresh_invalidated(conn: &Connection) -> Result<(), String> {
+    let tx = if conn.is_autocommit() {
+        Some(conn.unchecked_transaction().map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, actor_address, role, skill_id, proficiency_level \
+         FROM reputation_assertions WHERE input_policy_state = 'needs_refresh'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    for (id, actor, role, skill, level) in rows {
+        // Keep the original row even when its shape has no recomputable claim.
+        conn.execute(
+            "UPDATE reputation_assertions SET input_policy_state = 'excluded' WHERE id = ?1",
+            [&id],
+        )
+        .map_err(|e| e.to_string())?;
+        let Some(skill) = skill else { continue };
+        let Some(level) = (0..=5).find(|n| Some(level_to_str(*n)) == level.as_deref()) else {
+            continue;
+        };
+        let (scores, count) = match role.as_str() {
+            "learner" => fetch_samples(conn, "subject_did", "issuer_did", &actor, &skill, level)?,
+            "instructor" => {
+                fetch_samples(conn, "issuer_did", "subject_did", &actor, &skill, level)?
+            }
+            _ => continue,
+        };
+        if scores.is_empty() {
+            continue;
+        }
+        let score = if role == "learner" {
+            scores.iter().copied().fold(0.0_f64, f64::max)
+        } else {
+            scores.iter().sum::<f64>() / scores.len() as f64
+        };
+        upsert_row(
+            conn,
+            &id,
+            &actor,
+            &role,
+            &skill,
+            level_to_str(level),
+            score,
+            &scores,
+            count,
+        )?;
+    }
+    if let Some(tx) = tx {
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 struct CredentialRow {
     issuer_did: String,
@@ -223,17 +314,23 @@ fn fetch_samples(
     skill_id: &str,
     level: i64,
 ) -> Result<(Vec<f64>, i64), String> {
+    let third_party_only = if actor_col == "issuer_did" {
+        "AND issuer_did != subject_did"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT \
             CAST(json_extract(signed_vc_json, '$.credentialSubject.score') AS REAL), \
             {counterparty_col} \
-         FROM credentials \
+         FROM scoring_credentials \
          WHERE {actor_col} = ?1 \
            AND skill_id = ?2 \
            AND claim_kind = 'skill' \
            AND revoked = 0 \
            AND CAST(json_extract(signed_vc_json, \
-                '$.credentialSubject.level') AS INTEGER) = ?3"
+                '$.credentialSubject.level') AS INTEGER) = ?3 \
+           {third_party_only}"
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -287,6 +384,8 @@ fn upsert_row(
              impact_p75 = excluded.impact_p75, \
              learner_count = excluded.learner_count, \
              impact_variance = excluded.impact_variance, \
+             computation_spec = excluded.computation_spec, \
+             input_policy_state = 'valid', \
              updated_at = datetime('now')",
         params![
             id,
@@ -526,6 +625,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(instructor_count, 0);
+    }
+
+    #[test]
+    fn self_assertion_never_enters_an_existing_instructor_distribution() {
+        let db = test_db();
+        let instructor = "did:key:zInstructor";
+        insert_skill_credential(
+            &db,
+            "third-party",
+            instructor,
+            "did:key:zA",
+            "skill_a",
+            2,
+            0.8,
+        );
+        on_credential_accepted(db.conn(), "third-party").unwrap();
+        insert_skill_credential(&db, "self", instructor, instructor, "skill_a", 2, 0.1);
+        on_credential_accepted(db.conn(), "self").unwrap();
+        recompute_for_subject(db.conn(), instructor).unwrap();
+
+        let (score, count): (f64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT score, evidence_count FROM reputation_assertions
+                 WHERE actor_address = ?1 AND role = 'instructor'",
+                [instructor],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!((score - 0.8).abs() < 1e-9);
+        assert_eq!(count, 1);
     }
 
     #[test]

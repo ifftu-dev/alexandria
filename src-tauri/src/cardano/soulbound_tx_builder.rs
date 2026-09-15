@@ -9,9 +9,7 @@
 
 use pallas_addresses::Address as PallasAddress;
 use pallas_crypto::hash::Hash;
-use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_txbuilder::{BuildConway, ExUnits, Input, Output, ScriptKind, StagingTransaction};
-use pallas_wallet::PrivateKey;
 
 use crate::domain::reputation::OnChainSkillScore;
 
@@ -21,7 +19,8 @@ use super::gov_tx_builder::{self, GovTxResult};
 use super::script_refs;
 use super::snapshot;
 use super::tx_builder::{
-    inject_metadata, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, TTL_OFFSET,
+    extended_private_key, inject_metadata, parse_tx_hash, sign_raw_tx, TxBuildError,
+    MIN_NFT_LOVELACE, TTL_OFFSET,
 };
 
 /// Minimum ADA for the reference NFT UTxO at the soulbound script address.
@@ -254,9 +253,7 @@ pub async fn build_soulbound_mint_tx(
         window_end_ms,
     )
     .await?;
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
-    });
+    let private_key = extended_private_key(payment_key_extended)?;
     let signed_tx_bytes = sign_raw_tx(&unsigned, &private_key)?;
     let tx_hash = super::tx_builder::compute_tx_hash(&signed_tx_bytes)?;
     Ok(GovTxResult {

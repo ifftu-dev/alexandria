@@ -355,9 +355,11 @@ pub mod cip68 {
 pub enum SnapshotStatus {
     Pending,
     Building,
+    OutcomeUnknown,
     Submitted,
     Confirmed,
     Failed,
+    FailedOnChain,
 }
 
 impl SnapshotStatus {
@@ -365,9 +367,11 @@ impl SnapshotStatus {
         match self {
             SnapshotStatus::Pending => "pending",
             SnapshotStatus::Building => "building",
+            SnapshotStatus::OutcomeUnknown => "outcome_unknown",
             SnapshotStatus::Submitted => "submitted",
             SnapshotStatus::Confirmed => "confirmed",
             SnapshotStatus::Failed => "failed",
+            SnapshotStatus::FailedOnChain => "failed_on_chain",
         }
     }
 
@@ -376,9 +380,11 @@ impl SnapshotStatus {
         match s {
             "pending" => Some(SnapshotStatus::Pending),
             "building" => Some(SnapshotStatus::Building),
+            "outcome_unknown" => Some(SnapshotStatus::OutcomeUnknown),
             "submitted" => Some(SnapshotStatus::Submitted),
             "confirmed" => Some(SnapshotStatus::Confirmed),
             "failed" => Some(SnapshotStatus::Failed),
+            "failed_on_chain" => Some(SnapshotStatus::FailedOnChain),
             _ => None,
         }
     }
@@ -400,6 +406,14 @@ pub struct SnapshotRecord {
     pub error_message: Option<String>,
     pub snapshot_at: String,
     pub confirmed_at: Option<String>,
+    /// `legacy_cip68` or the replacement `credential_hash_vc` format.
+    pub snapshot_format: String,
+    /// The time/scope interpretation committed by the snapshot.
+    pub snapshot_scope: String,
+    /// Reputation calculation declared by the signed snapshot.
+    pub computation_spec: Option<String>,
+    /// Signed VC whose integrity hash is anchored for replacement snapshots.
+    pub credential_id: Option<String>,
 }
 
 /// On-chain skill score (part of ReputationDatum).

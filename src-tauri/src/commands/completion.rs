@@ -6,23 +6,26 @@
 //!   will require. The frontend uses this to confirm what it's about
 //!   to submit before pulling the wallet.
 //! * [`submit_completion_witness`] — derives the Merkle root, unlocks
-//!   the vault, and submits the mint tx via the completion tx
-//!   builder. Gated on `ALEXANDRIA_COMPLETION_POLICY_ID` + Blockfrost
-//!   availability.
+//!   the vault, commits learner self-claims and queues an optional mint when
+//!   Blockfrost is configured. Network work belongs to the profile worker.
 //!
 //! These are the bridge between the plugin-reported completion state
 //! and the on-chain witness the observer later ingests.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::cardano::completion::{self as completion_obs, CompletionObservation};
-use crate::cardano::{blockfrost::BlockfrostClient, completion_tx_builder, script_refs};
+use crate::cardano::{
+    completion_queue::{self, WitnessState, WitnessStatus},
+    completion_recovery, completion_tx_builder, script_refs,
+};
 use crate::commands::credentials::{now_rfc3339, IssueCredentialRequest};
-use crate::crypto::did::{did_from_verifying_key, Did};
+use crate::crypto::did::did_from_verifying_key;
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::completion::{element_leaf, merkle_root, ElementCompletion};
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::AppState;
@@ -48,6 +51,12 @@ fn compute_preview(inputs: &[ElementCompletionInput]) -> Result<CompletionRootPr
     if inputs.is_empty() {
         return Err("course completion requires at least one element".into());
     }
+    if inputs
+        .iter()
+        .any(|input| !input.score.is_finite() || !(0.0..=1.0).contains(&input.score))
+    {
+        return Err("completion scores must be finite values between zero and one".into());
+    }
     let leaves: Vec<[u8; 32]> = inputs
         .iter()
         .map(|e| {
@@ -69,6 +78,7 @@ fn compute_preview(inputs: &[ElementCompletionInput]) -> Result<CompletionRootPr
 
 #[tauri::command]
 pub async fn preview_completion_root(
+    _profile: crate::profile::scope::ProfileLease,
     elements: Vec<ElementCompletionInput>,
 ) -> Result<CompletionRootPreview, String> {
     compute_preview(&elements)
@@ -76,12 +86,13 @@ pub async fn preview_completion_root(
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CompletionWitnessResult {
+    pub claim_id: String,
+    pub witness_status: WitnessStatus,
     pub tx_hash: String,
     pub completion_root: String,
     pub leaves: Vec<String>,
-    /// Ids of every credential issued for this completion (witnessed VC when
-    /// anchored, plus per-skill self-claim + instructor attestation). Drives
-    /// the frontend's per-credential mint progress.
+    /// Original local learner self-claim IDs. A subsequently confirmed
+    /// witnessed VC is issued separately without rewriting these claims.
     pub credential_ids: Vec<String>,
 }
 
@@ -234,23 +245,32 @@ pub async fn get_course_completion_status(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<CourseCompletionStatus, String> {
-    let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let (inputs, missing, required_count) = assemble_from_template(db.conn(), &course_id)?;
-    let ready = required_count > 0 && missing.is_empty();
-    let preview = if ready {
-        Some(compute_preview(&inputs)?)
-    } else {
-        None
-    };
-    let unmet_elements = build_unmet_elements(db.conn(), &course_id, &missing);
-    Ok(CourseCompletionStatus {
-        ready,
-        missing_elements: missing,
-        required_count,
-        preview,
-        unmet_elements,
-    })
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.course-status",
+            move |db| {
+                let (inputs, missing, required_count) =
+                    assemble_from_template(db.conn(), &course_id)?;
+                let ready = required_count > 0 && missing.is_empty();
+                let preview = if ready {
+                    Some(compute_preview(&inputs)?)
+                } else {
+                    None
+                };
+                let unmet_elements = build_unmet_elements(db.conn(), &course_id, &missing);
+                Ok(CourseCompletionStatus {
+                    ready,
+                    missing_elements: missing,
+                    required_count,
+                    preview,
+                    unmet_elements,
+                })
+            },
+        )
+        .await
 }
 
 /// Build the per-element score context for each unmet gradeable element:
@@ -301,8 +321,8 @@ fn build_unmet_elements(
 }
 
 /// Auto-earn entry point: assemble the witness from the learner's
-/// graded submissions (verified against the course template) and submit
-/// it on-chain. The frontend calls this directly — no hand-built
+/// graded submissions (verified against the course template), persist local
+/// claims and optionally queue a witness. The frontend supplies no hand-built
 /// element list. Fails if the course isn't fully completed.
 #[tauri::command]
 pub async fn claim_course_completion(
@@ -312,41 +332,34 @@ pub async fn claim_course_completion(
 ) -> Result<CompletionWitnessResult, String> {
     // `None` → content-only course (no gradeable elements): issue locally at a
     // baseline proficiency. `Some(inputs)` → graded course ready to anchor.
-    let inputs: Option<Vec<ElementCompletionInput>> = {
-        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let (inputs, missing, required_count) = assemble_from_template(db.conn(), &course_id)?;
-        if required_count == 0 {
-            None
-        } else if !missing.is_empty() {
-            return Err(format!(
-                "course not complete: {} element(s) lack a passing submission",
-                missing.len()
-            ));
-        } else {
-            Some(inputs)
-        }
-    };
+    let course_id_for_read = course_id.clone();
+    let inputs: Option<Vec<ElementCompletionInput>> = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.claim.prepare",
+            move |db| {
+                let (inputs, missing, required_count) =
+                    assemble_from_template(db.conn(), &course_id_for_read)?;
+                if required_count == 0 {
+                    Ok(None)
+                } else if !missing.is_empty() {
+                    Err(format!(
+                        "course not complete: {} element(s) lack a passing submission",
+                        missing.len()
+                    ))
+                } else {
+                    Ok(Some(inputs))
+                }
+            },
+        )
+        .await?;
 
-    let result = match inputs {
+    match inputs {
         Some(inputs) => submit_witness(&state, &course_id, &inputs, timestamp_ms).await,
         None => issue_content_completion(&state, &course_id, timestamp_ms).await,
-    };
-
-    // On a successful claim, mark the enrollment completed. This is what
-    // makes recorded assessment responses read-only on revisit (the player
-    // gates editing on enrollment status) and stamps `completed_at`.
-    if result.is_ok() {
-        if let Ok(db_guard) = state.db.lock() {
-            if let Some(db) = db_guard.as_ref() {
-                if let Err(e) = mark_enrollment_completed(db.conn(), &course_id) {
-                    log::warn!("failed to mark enrollment completed: {e}");
-                }
-            }
-        }
     }
-
-    result
 }
 
 /// Mark the (single, local) enrollment for a course as completed. Idempotent;
@@ -370,8 +383,8 @@ fn mark_enrollment_completed(conn: &Connection, course_id: &str) -> Result<(), S
 const CONTENT_COMPLETION_SCORE: f64 = 0.3;
 
 /// Issue local completion credentials for a content-only course. No on-chain
-/// witness (there are no graded leaves to anchor); the skill claims +
-/// instructor attestation are evidenced by a deterministic completion root
+/// witness (there are no graded leaves to anchor); learner self-claims
+/// are evidenced by a deterministic completion root
 /// derived from the course id.
 async fn issue_content_completion(
     state: &State<'_, AppState>,
@@ -389,29 +402,28 @@ async fn issue_content_completion(
     // Synthetic, deterministic completion root — no graded leaves exist.
     let root = hex::encode(blake3::hash(course_id.as_bytes()).as_bytes());
 
-    let learner_key = SigningKey::from_bytes(&wallet.signing_key.to_bytes());
-    let credential_ids = {
-        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        self_issue_completion(
-            db.conn(),
-            &learner_key,
-            course_id,
-            &subject_pubkey,
-            &wallet.payment_key_hash,
-            &root,
-            CONTENT_COMPLETION_SCORE,
-            None,
-            timestamp_ms,
-        )?
-    };
-
-    Ok(CompletionWitnessResult {
-        tx_hash: String::new(),
-        completion_root: root,
-        leaves: vec![],
-        credential_ids,
-    })
+    let course_id = course_id.to_owned();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.content.persist",
+            move |db| {
+                persist_completion(
+                    db.conn(),
+                    &wallet,
+                    &course_id,
+                    &subject_pubkey,
+                    &root,
+                    CONTENT_COMPLETION_SCORE,
+                    timestamp_ms,
+                    vec![],
+                    None,
+                )
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -425,7 +437,7 @@ pub async fn submit_completion_witness(
 }
 
 /// Shared witness builder: compute the root from `elements`, unlock the
-/// vault, build + submit the completion mint tx.
+/// vault, persist local claims and enqueue the optional completion mint tx.
 async fn submit_witness(
     state: &State<'_, AppState>,
     course_id: &str,
@@ -462,103 +474,123 @@ async fn submit_witness(
     // Subject pubkey = learner Ed25519 verification key (32 bytes).
     let subject_pubkey: [u8; 32] = *wallet.signing_key.verifying_key().as_bytes();
 
-    // Best-effort on-chain witness mint. Blockfrost (per-device
-    // `cardano.blockfrost_project_id` setting, or the BLOCKFROST_PROJECT_ID env
-    // var) anchors the completion on Cardano. If it's not configured, or the
-    // submission fails, we still issue the credential LOCALLY below — the
-    // on-chain anchor is an upgrade, not a hard requirement, so completing a
-    // course always yields a credential.
-    let project_id = {
-        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-        let conn = db_guard.as_ref().map(|db| db.conn());
-        crate::cardano::blockfrost::resolve_project_id(conn)
+    let requested_context = completion_recovery::CompletionContext {
+        version: 1,
+        policy_id: script_refs::COMPLETION_MINTING_SCRIPT_HASH.to_string(),
+        course_id: course_id.to_owned(),
+        subject_pubkey,
+        payment_key_hash: wallet.payment_key_hash,
+        leaves: leaves.clone(),
+        root: root_bytes,
+        mean_score: elements.iter().map(|e| e.score).sum::<f64>() / elements.len() as f64,
+        timestamp_ms,
     };
-    let submitted_hash: Option<String> = match project_id {
-        None => {
-            log::info!("Blockfrost not configured — issuing local completion credential");
-            None
-        }
-        Some(pid) => {
-            // Policy: on-chain txs are funded by the Alexandria treasury when
-            // configured — the learner still signs (validator identity) but
-            // pays nothing. Without treasury config the learner wallet funds
-            // its own tx.
-            let treasury = crate::cardano::treasury::TreasuryPayer::from_env();
-            match &treasury {
-                Some(t) => log::info!("completion mint funded by treasury {}", t.address),
-                None => log::info!("completion mint funded by learner wallet"),
-            }
-            let minted: Result<String, String> = async {
-                let bf = BlockfrostClient::new(pid).map_err(|e| e.to_string())?;
-                let built = completion_tx_builder::build_completion_mint_tx(
-                    &bf,
-                    &wallet.payment_address,
-                    &wallet.payment_key_hash,
-                    &wallet.payment_key_extended,
+    requested_context.validate()?;
+    let course_id = course_id.to_owned();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.witness.persist",
+            move |db| {
+                let configured =
+                    crate::cardano::blockfrost::resolve_project_id(Some(db.conn())).is_some();
+                persist_completion(
+                    db.conn(),
+                    &wallet,
+                    &course_id,
                     &subject_pubkey,
-                    course_id.as_bytes(),
-                    &leaves,
-                    &root_bytes,
+                    &preview.root,
+                    requested_context.mean_score,
                     timestamp_ms,
-                    treasury.as_ref(),
+                    leaves_hex,
+                    configured.then_some(&requested_context),
                 )
-                .await
-                .map_err(|e| e.to_string())?;
-                bf.submit_tx(&built.tx_cbor)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
-            .await;
-            match minted {
-                Ok(h) => Some(h),
-                Err(e) => {
-                    log::warn!("completion witness mint failed — issuing local credential: {e}");
-                    None
-                }
-            }
-        }
-    };
+            },
+        )
+        .await
+}
 
-    // Always self-issue locally — the skill credentials (and, when anchored,
-    // the witnessed completion VC) appear in `list_credentials` immediately so
-    // the frontend mint completes without waiting on the async observer. With
-    // an on-chain tx the completion VC carries the witness; without, it's a
-    // local credential. Best-effort: never fail the claim on a self-issue hiccup.
-    let mut credential_ids: Vec<String> = Vec::new();
-    {
-        let mean_score = if elements.is_empty() {
-            0.0
+// Receipt, credentials, enrollment state and optional intent commit together.
+// No provider calls are permitted on this local completion path.
+#[allow(clippy::too_many_arguments)]
+fn persist_completion(
+    conn: &Connection,
+    wallet: &wallet::Wallet,
+    course_id: &str,
+    subject_pubkey: &[u8; 32],
+    root: &str,
+    mean_score: f64,
+    timestamp_ms: i64,
+    leaves: Vec<String>,
+    witness: Option<&completion_recovery::CompletionContext>,
+) -> Result<CompletionWitnessResult, String> {
+    let subject = did_from_verifying_key(&wallet.signing_key.verifying_key());
+    let identity =
+        serde_json::to_vec(&(subject.as_str(), course_id, root)).map_err(|e| e.to_string())?;
+    let claim_id = blake3::hash(&identity).to_hex().to_string();
+    crate::db::with_transaction(conn, || {
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT credential_ids_json FROM completion_claims WHERE id = ?1",
+                [&claim_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let credential_ids = if let Some(json) = existing {
+            serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())?
         } else {
-            elements.iter().map(|e| e.score).sum::<f64>() / elements.len() as f64
-        };
-        // `Wallet` zeroizes on drop, so clone the key bytes out.
-        let learner_key = SigningKey::from_bytes(&wallet.signing_key.to_bytes());
-        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-        if let Some(db) = db_guard.as_ref() {
-            match self_issue_completion(
-                db.conn(),
-                &learner_key,
+            let ids = self_issue_completion(
+                conn,
+                &wallet.signing_key,
                 course_id,
-                &subject_pubkey,
+                subject_pubkey,
                 &wallet.payment_key_hash,
-                &preview.root,
+                root,
                 mean_score,
-                submitted_hash.as_deref(),
+                None,
                 timestamp_ms,
-            ) {
-                Ok(ids) => credential_ids = ids,
-                Err(e) => log::warn!("completion self-issue failed: {e}"),
-            }
+            )?;
+            conn.execute(
+                "INSERT INTO completion_claims (id, subject_did, course_id, completion_root, credential_ids_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![claim_id, subject.as_str(), course_id, root,
+                    serde_json::to_string(&ids).map_err(|e| e.to_string())?],
+            ).map_err(|e| e.to_string())?;
+            ids
+        };
+        if let Some(context) = witness {
+            completion_queue::enqueue(conn, &claim_id, context)?;
         }
-    }
-
-    Ok(CompletionWitnessResult {
-        // Empty when issued locally without an on-chain anchor.
-        tx_hash: submitted_hash.unwrap_or_default(),
-        completion_root: preview.root,
-        leaves: leaves_hex,
-        credential_ids,
+        mark_enrollment_completed(conn, course_id)?;
+        let status = completion_queue::state(conn, &claim_id)?;
+        Ok(CompletionWitnessResult {
+            claim_id: claim_id.clone(),
+            witness_status: status.status,
+            tx_hash: status.tx_hash.unwrap_or_default(),
+            completion_root: root.to_owned(),
+            leaves,
+            credential_ids,
+        })
     })
+}
+
+#[tauri::command]
+pub async fn get_completion_witness_status(
+    state: State<'_, AppState>,
+    claim_id: String,
+) -> Result<WitnessState, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.witness.status",
+            move |db| completion_queue::state(db.conn(), &claim_id),
+        )
+        .await
 }
 
 /// POSIX-millis → the ISO-8601 string shape the observer records for
@@ -584,34 +616,8 @@ fn course_skill_ids(conn: &Connection, course_id: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Deterministic "course authority" signing key for a course's author.
-///
-/// A learner completing a course doesn't hold the instructor's key, so the
-/// instructor attestation is signed with a stable per-author keypair derived
-/// from the course `author_address`. Domain-separated (so it can't collide
-/// with any other derived key) and deterministic (same author → same DID,
-/// so repeated completions don't spawn fresh issuer clusters). The DID is
-/// distinct from the learner's, which is what lets the aggregator treat the
-/// attestation as independent evidence.
-///
-/// Returns `None` when the course has no usable author address.
-fn course_authority_key(conn: &Connection, course_id: &str) -> Option<(SigningKey, Did)> {
-    let author: Option<String> = conn
-        .query_row(
-            "SELECT author_address FROM courses WHERE id = ?1",
-            rusqlite::params![course_id],
-            |r| r.get::<_, String>(0),
-        )
-        .ok();
-    let author = author.filter(|a| !a.is_empty())?;
-
-    let key = crate::crypto::did::course_authority_key(&author);
-    let did = crate::crypto::did::derive_did_key(&key);
-    Some((key, did))
-}
-
-/// Self-issue the local credentials for a freshly-submitted completion
-/// mint. Pure (no network / no keystore) so it's unit-testable:
+/// Self-issue local completion credentials. An optional witness hash must
+/// come from a successfully projected ledger receipt, not a submission ack.
 ///
 /// 1. Record the matching `completion_observations` row (dedups the
 ///    async observer).
@@ -635,9 +641,8 @@ fn self_issue_completion(
 ) -> Result<Vec<String>, String> {
     let learner_did = did_from_verifying_key(&learner_key.verifying_key());
     // Ids of every credential issued here, in mint order: the witnessed
-    // completion VC (when anchored), then per skill the learner's self-claim
-    // and the instructor attestation. Returned so the frontend can show
-    // per-credential mint progress.
+    // completion VC (when anchored), then per skill the learner's self-claim.
+    // Instructor endorsement must be signed separately by the instructor.
     let mut issued_ids: Vec<String> = Vec::new();
 
     // (1)+(2) When anchored on-chain, record the observation (dedups the async
@@ -669,19 +674,11 @@ fn self_issue_completion(
 
         let credential_id =
             super::auto_issuance::issue_for_observation(conn, learner_key, &learner_did, &obs)?;
-        completion_obs::mark_issued(conn, &policy_id, &asset_name_hex, &credential_id)
-            .map_err(|e| e.to_string())?;
         issued_ids.push(credential_id);
     }
 
-    // (3) Per course skill, issue two credentials so the derived skill state
-    // is fed by two independent issuers (raising aggregation confidence):
-    //   a. the learner's own SelfAssertion skill claim, and
-    //   b. an instructor AttestationCredential signed by the course-authority
-    //      key (derived from the course author — see `course_authority_key`).
-    // Both are evidenced by the witness tx when anchored, else by the local
-    // completion root. Level is the completion's mean score mapped onto the
-    // 0..=5 proficiency ladder.
+    // (3) Self-claims do not imply an independent instructor endorsement.
+    // Evidence is the confirmed witness or the local completion root.
     let evidence = match tx_hash {
         Some(tx) => format!("witness:{tx}"),
         None => format!("completion-root:{completion_root_hex}"),
@@ -689,7 +686,6 @@ fn self_issue_completion(
     let score = mean_score.clamp(0.0, 1.0);
     let level = (score * 5.0).round() as u8;
     let now = now_rfc3339();
-    let authority = course_authority_key(conn, course_id);
     for skill_id in course_skill_ids(conn, course_id) {
         let self_claim = IssueCredentialRequest {
             credential_type: CredentialType::SelfAssertion,
@@ -709,57 +705,19 @@ fn self_issue_completion(
             integrity_session_id: None,
             integrity_policy: None,
         };
-        match super::credentials::issue_credential_impl(
+        let vc = super::credentials::issue_credential_impl(
             conn,
             learner_key,
             &learner_did,
             &self_claim,
             &now,
-        ) {
-            Ok(vc) => issued_ids.extend(vc.id),
-            Err(e) => log::warn!("completion self-issue: skill claim failed: {e}"),
-        }
-
-        // Instructor attestation — issued by the course authority over the
-        // same skill claim. Distinct issuer DID from the learner, so the
-        // aggregator treats it as independent evidence.
-        if let Some((auth_key, auth_did)) = authority.as_ref() {
-            let attestation = IssueCredentialRequest {
-                credential_type: CredentialType::AttestationCredential,
-                subject: learner_did.clone(),
-                claim: Claim::Skill(SkillClaim {
-                    skill_id,
-                    level,
-                    score,
-                    evidence_refs: vec![evidence.clone()],
-                    rubric_version: None,
-                    assessment_method: Some("instructor_attestation".into()),
-                    provenance: None,
-                }),
-                evidence_refs: vec![evidence.clone()],
-                expiration_date: None,
-                supersedes: None,
-                integrity_session_id: None,
-                integrity_policy: None,
-            };
-            match super::credentials::issue_credential_impl(
-                conn,
-                auth_key,
-                auth_did,
-                &attestation,
-                &now,
-            ) {
-                Ok(vc) => issued_ids.extend(vc.id),
-                Err(e) => log::warn!("completion self-issue: instructor attestation failed: {e}"),
-            }
-        }
+        )?;
+        issued_ids.push(vc.id.ok_or("issued completion credential has no id")?);
     }
 
     // (4) Refresh derived proficiency so the skill graph reflects the
     // new evidence right away.
-    if let Err(e) = super::aggregation::recompute_all_impl(conn, &now) {
-        log::warn!("completion self-issue: recompute failed: {e}");
-    }
+    super::aggregation::recompute_all_impl(conn, &now)?;
 
     Ok(issued_ids)
 }
@@ -767,6 +725,95 @@ fn self_issue_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_receipt_is_atomic_idempotent_and_independent_of_provider() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_course_with_elements(&db);
+        db.conn()
+            .execute(
+                "UPDATE courses SET skill_ids = '[\"one\",\"two\"]' WHERE id = 'c1'",
+                [],
+            )
+            .unwrap();
+        let wallet = wallet::wallet_from_mnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").unwrap();
+        let context = completion_recovery::CompletionContext {
+            version: 1,
+            policy_id: script_refs::COMPLETION_MINTING_SCRIPT_HASH.into(),
+            course_id: "c1".into(),
+            subject_pubkey: *wallet.signing_key.verifying_key().as_bytes(),
+            payment_key_hash: wallet.payment_key_hash,
+            leaves: vec![[9; 32]],
+            root: [9; 32],
+            mean_score: 0.8,
+            timestamp_ms: 1_714_000_000_000,
+        };
+        let root = hex::encode(context.root);
+        let persist = || {
+            persist_completion(
+                db.conn(),
+                &wallet,
+                "c1",
+                &context.subject_pubkey,
+                &root,
+                context.mean_score,
+                context.timestamp_ms,
+                vec![root.clone()],
+                Some(&context),
+            )
+        };
+        db.conn().execute_batch("CREATE TRIGGER fail_completion_request BEFORE INSERT ON completion_witness_requests
+            BEGIN SELECT RAISE(ABORT, 'injected request failure'); END;").unwrap();
+        assert!(persist().unwrap_err().contains("injected request failure"));
+        for table in [
+            "credentials",
+            "completion_claims",
+            "completion_witness_requests",
+            "credential_status_lists",
+            "derived_skill_states",
+        ] {
+            let count: i64 = db
+                .conn()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "partial completion in {table}");
+        }
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM enrollments WHERE id = 'enr1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "active");
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_completion_request")
+            .unwrap();
+        let first = persist().unwrap();
+        let retry = persist().unwrap();
+        assert_eq!(first.credential_ids.len(), 2);
+        assert_eq!(retry.credential_ids, first.credential_ids);
+        assert_eq!(retry.claim_id, first.claim_id);
+        assert_eq!(retry.witness_status, WitnessStatus::Pending);
+        assert!(retry.tx_hash.is_empty());
+        let credentials =
+            super::super::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        assert_eq!(credentials.len(), 2);
+        assert!(credentials.iter().all(|vc| vc.witness.is_none()));
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM enrollments WHERE id = 'enr1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "completed");
+    }
 
     #[test]
     fn preview_fails_on_empty_input() {
@@ -916,8 +963,7 @@ mod tests {
             .find(|c| c.witness.as_ref().map(|w| w.tx_hash.as_str()) == Some(tx_hash.as_str()));
         assert!(witness_hit.is_some(), "no VC carries the witness tx hash");
 
-        // Two skill claims per course skill: the learner's SelfAssertion and
-        // the course-authority's instructor AttestationCredential.
+        // A course author address does not authorize instructor signatures.
         let skill_count: i64 = db
             .conn()
             .query_row(
@@ -927,8 +973,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            skill_count, 4,
-            "expected self + instructor skill VC per course skill"
+            skill_count, 2,
+            "expected only a learner self-claim per course skill"
         );
 
         let attestation_count: i64 = db
@@ -941,25 +987,19 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            attestation_count, 2,
-            "one instructor attestation per course skill"
+            attestation_count, 0,
+            "completion must not manufacture instructor endorsements"
         );
 
-        // The instructor attestation is issued by the deterministic course
-        // authority (derived from the author address), not the learner.
-        let learner_did = did_from_verifying_key(&key.verifying_key());
-        let (_, authority_did) = course_authority_key(db.conn(), "c1").unwrap();
-        assert_ne!(authority_did.as_str(), learner_did.as_str());
-        let attestation_issuer: String = db
+        let foreign_issuers: i64 = db
             .conn()
             .query_row(
-                "SELECT issuer_did FROM credentials \
-                 WHERE credential_type = 'AttestationCredential' LIMIT 1",
+                "SELECT COUNT(*) FROM credentials WHERE issuer_did != subject_did",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(attestation_issuer, authority_did.as_str());
+        assert_eq!(foreign_issuers, 0);
 
         // The observation is recorded and marked issued so the async
         // observer won't re-issue the same mint.
@@ -998,5 +1038,50 @@ mod tests {
         let b = compute_preview(&inputs).unwrap();
         assert_eq!(a.root, b.root);
         assert_eq!(a.leaves, b.leaves);
+    }
+
+    #[test]
+    fn offline_completion_issues_only_learner_self_claims() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address, skill_ids)
+            VALUES ('offline', 'Offline course', 'public-author', '[\"skill\"]')",
+                [],
+            )
+            .unwrap();
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let ids = self_issue_completion(
+            db.conn(),
+            &key,
+            "offline",
+            key.verifying_key().as_bytes(),
+            &[1; 28],
+            &"33".repeat(32),
+            0.8,
+            None,
+            1_714_000_000_000,
+        )
+        .unwrap();
+        assert_eq!(ids.len(), 1);
+        let credentials =
+            crate::commands::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        assert_eq!(credentials.len(), 1);
+        assert_eq!(
+            credentials[0].issuer,
+            did_from_verifying_key(&key.verifying_key())
+        );
+        assert!(credentials[0].type_.contains(&"SelfAssertion".to_owned()));
+        assert!(!credentials[0]
+            .type_
+            .contains(&"AttestationCredential".to_owned()));
+        assert!(credentials[0].witness.is_none());
+        assert!(completion_obs::pending_observations(db.conn())
+            .unwrap()
+            .is_empty());
+        let state = super::super::aggregation::list_derived_states_impl(db.conn(), None).unwrap();
+        assert_eq!(state.len(), 1);
+        assert_eq!(state[0].unique_issuer_clusters, 1);
     }
 }
