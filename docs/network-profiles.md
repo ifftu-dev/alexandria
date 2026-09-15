@@ -48,8 +48,10 @@ The OIDC provider is intentionally undecided.
 
 The parser rejects:
 
-- a profile over 64 KiB;
-- duplicate JSON keys or unknown fields;
+- a profile over 64 KiB, nested deeper than 8 levels, or with an array over
+  256 elements, an object over 64 entries, or a string over 4096 bytes;
+- duplicate JSON keys, numbers outside JavaScript's exact integer range,
+  trailing bytes, or unknown fields;
 - unsupported schema versions or revision zero;
 - malformed identifiers, PeerIds, Ed25519 keys, and SHA-256 digests;
 - duplicate relay, receipt-issuer, or founder identities;

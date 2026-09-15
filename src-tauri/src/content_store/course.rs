@@ -7,6 +7,7 @@
 //! 4. Resolve (fetch + verify) course documents by BLAKE3 hash
 
 use alexandria_verify::did::did_from_verifying_key;
+use alexandria_verify::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
 
@@ -37,6 +38,29 @@ pub enum CourseDocError {
     UnsupportedVersion(u32),
     #[error("invalid completion policy: {0}")]
     InvalidCompletionPolicy(String),
+    #[error("course document JSON rejected: {0}")]
+    UntrustedJson(UntrustedJsonError),
+}
+
+/// Structural limits for an untrusted signed course document, checked before
+/// typed decoding and signature verification. Publication applies the same
+/// limits, so an author cannot publish a document peers would refuse. Element
+/// content is referenced by hash, so strings carry titles and descriptions.
+pub const COURSE_DOCUMENT_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: 1024 * 1024,
+    max_depth: 16,
+    max_array_len: 4096,
+    max_object_entries: 64,
+    max_string_bytes: 64 * 1024,
+};
+
+/// Decode an untrusted signed course document under
+/// [`COURSE_DOCUMENT_JSON_LIMITS`]. The result is not yet verified.
+pub fn decode_course_document(bytes: &[u8]) -> Result<SignedCourseDocument, CourseDocError> {
+    decode_untrusted(bytes, &COURSE_DOCUMENT_JSON_LIMITS).map_err(|error| match error {
+        UntrustedJsonError::Invalid(message) => CourseDocError::Deserialization(message),
+        rejected => CourseDocError::UntrustedJson(rejected),
+    })
 }
 
 /// Sign a course document payload with the given Ed25519 signing key.
@@ -160,6 +184,7 @@ pub async fn publish_course_document(
 ) -> Result<PublishCourseResult, CourseDocError> {
     let doc_json =
         serde_json::to_vec(signed).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    decode_course_document(&doc_json)?;
 
     let result = content::add_bytes(node, &doc_json)
         .await
@@ -193,8 +218,7 @@ pub async fn resolve_course_document(
             other => CourseDocError::Store(other.to_string()),
         })?;
 
-    let signed: SignedCourseDocument = serde_json::from_slice(&bytes)
-        .map_err(|e| CourseDocError::Deserialization(e.to_string()))?;
+    let signed = decode_course_document(&bytes)?;
 
     verify_course_document(&signed)?;
 
@@ -422,6 +446,53 @@ mod tests {
         assert_eq!(deserialized.title, signed.title);
         assert_eq!(deserialized.signature, signed.signature);
         verify_course_document(&deserialized).unwrap();
+    }
+
+    #[test]
+    fn course_documents_are_bounded_before_verification() {
+        let signed = sign_course_document(&make_payload(), &make_signing_key()).unwrap();
+        let bytes = serde_json::to_vec(&signed).unwrap();
+        let max = COURSE_DOCUMENT_JSON_LIMITS.max_bytes;
+
+        let mut exact = bytes.clone();
+        exact.resize(max, b' ');
+        verify_course_document(&decode_course_document(&exact).unwrap()).unwrap();
+        exact.push(b' ');
+        assert!(matches!(
+            decode_course_document(&exact),
+            Err(CourseDocError::UntrustedJson(UntrustedJsonError::TooLarge { max: limit }))
+                if limit == max
+        ));
+
+        let rest = std::str::from_utf8(&bytes)
+            .unwrap()
+            .strip_prefix('{')
+            .unwrap();
+        let duplicated = format!("{{\"title\":\"Forged\",{rest}");
+        assert!(matches!(
+            decode_course_document(duplicated.as_bytes()),
+            Err(CourseDocError::UntrustedJson(UntrustedJsonError::DuplicateKey(field)))
+                if field == "title"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_document_over_the_limits_is_not_published() {
+        let tmp = TempDir::new().unwrap();
+        let node = ContentNode::new(tmp.path());
+        node.start(None).await.unwrap();
+
+        let mut payload = make_payload();
+        payload.description = Some("a".repeat(COURSE_DOCUMENT_JSON_LIMITS.max_string_bytes + 1));
+        let signed = sign_course_document(&payload, &make_signing_key()).unwrap();
+        assert!(matches!(
+            publish_course_document(&node, &signed).await,
+            Err(CourseDocError::UntrustedJson(
+                UntrustedJsonError::StringTooLong { .. }
+            ))
+        ));
+
+        node.shutdown().await.unwrap();
     }
 
     #[tokio::test]

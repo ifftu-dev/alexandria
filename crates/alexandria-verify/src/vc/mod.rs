@@ -14,6 +14,23 @@ pub mod verify;
 use serde::{Deserialize, Serialize};
 
 use crate::did::{Did, VerificationMethodRef};
+use crate::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
+
+/// Structural limits for one untrusted credential document, applied before
+/// typed decoding or any signature work. Strings may carry evidence text, not
+/// bulk data; a bundle or list never admits a credential these limits refuse.
+pub const CREDENTIAL_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: 256 * 1024,
+    max_depth: 32,
+    max_array_len: 4096,
+    max_object_entries: 256,
+    max_string_bytes: 64 * 1024,
+};
+
+/// Decode one untrusted credential under [`CREDENTIAL_JSON_LIMITS`].
+pub fn decode_credential(bytes: &[u8]) -> Result<VerifiableCredential, UntrustedJsonError> {
+    decode_untrusted(bytes, &CREDENTIAL_JSON_LIMITS)
+}
 
 /// High-level credential classes (spec §6). The `type` field on the
 /// JSON-LD credential is always `["VerifiableCredential", <class>]`.

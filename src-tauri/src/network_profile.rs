@@ -2,17 +2,28 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
 
+use alexandria_verify::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
 use alexandria_verify::qualification::QualificationPolicySet;
 use ed25519_dalek::VerifyingKey;
 use libp2p::PeerId;
-use serde::de::{MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
 pub const NETWORK_PROFILE_SCHEMA_VERSION: u32 = 1;
 pub const MAX_NETWORK_PROFILE_BYTES: usize = 64 * 1024;
+
+/// Structural limits for a network profile document, checked before typed
+/// decoding. A profile nests relays and their fallback addresses at most four
+/// levels deep and carries short identifiers, keys, digests and origins.
+pub const NETWORK_PROFILE_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_NETWORK_PROFILE_BYTES,
+    max_depth: 8,
+    max_array_len: 256,
+    max_object_entries: 64,
+    max_string_bytes: 4096,
+};
 
 const EMBEDDED_PREPROD_JSON: &[u8] = include_bytes!("../resources/networks/preprod.json");
 const EMBEDDED_BOOTSTRAP_REGISTRY_JSON: &[u8] =
@@ -74,7 +85,9 @@ pub enum NetworkProfileError {
     #[error("network profile exceeds {MAX_NETWORK_PROFILE_BYTES} bytes")]
     TooLarge,
     #[error("invalid network profile JSON: {0}")]
-    InvalidJson(#[from] serde_json::Error),
+    InvalidJson(UntrustedJsonError),
+    #[error("network profile could not be encoded: {0}")]
+    Encoding(#[from] serde_json::Error),
     #[error("unsupported network profile schema version: {0}")]
     UnsupportedSchema(u32),
     #[error("invalid network profile: {0}")]
@@ -110,11 +123,11 @@ pub fn embedded_preprod() -> Result<&'static NetworkProfile, &'static NetworkPro
 
 impl NetworkProfile {
     pub fn parse(bytes: &[u8]) -> Result<Self, NetworkProfileError> {
-        if bytes.len() > MAX_NETWORK_PROFILE_BYTES {
-            return Err(NetworkProfileError::TooLarge);
-        }
-        reject_duplicate_json_keys(bytes)?;
-        let profile: Self = serde_json::from_slice(bytes)?;
+        let profile: Self =
+            decode_untrusted(bytes, &NETWORK_PROFILE_JSON_LIMITS).map_err(|error| match error {
+                UntrustedJsonError::TooLarge { .. } => NetworkProfileError::TooLarge,
+                other => NetworkProfileError::InvalidJson(other),
+            })?;
         profile.validate()?;
         Ok(profile)
     }
@@ -407,89 +420,6 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
         || (segments[0] == 0x0100 && segments[1..].iter().all(|segment| *segment == 0)))
 }
 
-struct DuplicateKeyGuard;
-
-impl<'de> Deserialize<'de> for DuplicateKeyGuard {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(DuplicateKeyVisitor)
-    }
-}
-
-struct DuplicateKeyVisitor;
-
-impl<'de> Visitor<'de> for DuplicateKeyVisitor {
-    type Value = DuplicateKeyGuard;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a JSON value without duplicate object keys")
-    }
-
-    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        while sequence.next_element::<DuplicateKeyGuard>()?.is_some() {}
-        Ok(DuplicateKeyGuard)
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut keys = HashSet::new();
-        while let Some(key) = map.next_key::<String>()? {
-            if !keys.insert(key.clone()) {
-                return Err(serde::de::Error::custom(format!(
-                    "duplicate JSON object key: {key}"
-                )));
-            }
-            map.next_value::<DuplicateKeyGuard>()?;
-        }
-        Ok(DuplicateKeyGuard)
-    }
-}
-
-fn reject_duplicate_json_keys(bytes: &[u8]) -> Result<(), serde_json::Error> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    DuplicateKeyGuard::deserialize(&mut deserializer)?;
-    deserializer.end()
-}
-
 fn reject_placeholders(profile: &NetworkProfile) -> Result<(), NetworkProfileError> {
     let value = serde_json::to_value(profile)?;
     fn visit(value: &serde_json::Value) -> Option<&str> {
@@ -578,7 +508,45 @@ mod tests {
         duplicated.extend_from_slice(b",\n  \"network_id\": \"other\"\n}");
         assert!(matches!(
             NetworkProfile::parse(&duplicated),
-            Err(NetworkProfileError::InvalidJson(_))
+            Err(NetworkProfileError::InvalidJson(UntrustedJsonError::DuplicateKey(key)))
+                if key == "network_id"
+        ));
+    }
+
+    #[test]
+    fn structural_limits_are_checked_before_typed_decoding() {
+        let max = MAX_NETWORK_PROFILE_BYTES;
+        let mut exact = EMBEDDED_PREPROD_JSON.to_vec();
+        exact.resize(max, b' ');
+        assert!(NetworkProfile::parse(&exact).is_ok());
+        exact.push(b' ');
+        assert!(matches!(
+            NetworkProfile::parse(&exact),
+            Err(NetworkProfileError::TooLarge)
+        ));
+
+        let with_member = |member: &str| {
+            let rest = std::str::from_utf8(EMBEDDED_PREPROD_JSON)
+                .unwrap()
+                .trim_start()
+                .strip_prefix('{')
+                .unwrap();
+            format!("{{{member},{rest}").into_bytes()
+        };
+        let depth = NETWORK_PROFILE_JSON_LIMITS.max_depth;
+        assert!(matches!(
+            NetworkProfile::parse(&with_member(&format!(
+                "\"extra\":{}{}",
+                "[".repeat(depth),
+                "]".repeat(depth)
+            ))),
+            Err(NetworkProfileError::InvalidJson(UntrustedJsonError::TooDeep { max })) if max == depth
+        ));
+        assert!(matches!(
+            NetworkProfile::parse(&with_member("\"extra\":9007199254740992")),
+            Err(NetworkProfileError::InvalidJson(
+                UntrustedJsonError::UnsafeNumber(_)
+            ))
         ));
     }
 

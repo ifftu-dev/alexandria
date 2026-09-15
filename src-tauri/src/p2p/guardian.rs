@@ -498,8 +498,9 @@ fn complete_guardian_link(
 
     // Verify the guardianship credential: signature must check out,
     // issuer must be the claimed guardian, subject must be us.
-    let vc: VerifiableCredential = serde_json::from_str(guardian_vc_json)
-        .map_err(|error| format!("bad guardian VC: {error}"))?;
+    let vc: VerifiableCredential =
+        alexandria_verify::vc::decode_credential(guardian_vc_json.as_bytes())
+            .map_err(|error| format!("bad guardian VC: {error}"))?;
     if vc.issuer.as_str() != guardian_did {
         return Err("guardian VC issuer mismatch".into());
     }
@@ -766,6 +767,40 @@ mod tests {
             take_pending_invite(db.conn(), "hash-invalid").unwrap(),
             Some([7u8; 32]),
             "failed verification must roll back single-use invite consumption"
+        );
+    }
+
+    #[test]
+    fn hostile_link_credential_json_is_refused_without_consuming_invite() {
+        let db = test_db();
+        seed_identity(db.conn(), Some("2012-01-01"), "pending_guardian");
+        record_pending_invite(db.conn(), "hash-hostile", &[7u8; 32], 300).unwrap();
+        let depth = alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_depth + 1;
+
+        for hostile in [
+            format!("{}{}", "[".repeat(depth), "]".repeat(depth)),
+            "{\"issuer\":\"did:key:zParent\",\"issuer\":\"did:key:zOther\"}".to_string(),
+        ] {
+            let response = handle_guardian_request(
+                db.conn(),
+                "12D3KooWParent",
+                &GuardianRequest::Link {
+                    code_hash: "hash-hostile".into(),
+                    link_id: "l-hostile".into(),
+                    guardian_did: "did:key:zParent".into(),
+                    guardian_stake_address: "stake_parent".into(),
+                    guardian_display_name: None,
+                    guardian_vc_json: hostile,
+                },
+            );
+            assert!(
+                matches!(&response, GuardianResponse::Error(message) if message.starts_with("bad guardian VC")),
+                "unexpected response: {response:?}"
+            );
+        }
+        assert_eq!(
+            take_pending_invite(db.conn(), "hash-hostile").unwrap(),
+            Some([7u8; 32])
         );
     }
 

@@ -287,8 +287,9 @@ before opening the profile manager. The strict version-1 profile owns the
 network ID, Cardano network and magic, relay PeerIds and DNS names, public
 fallback IPs, HTTPS registry origins, receipt issuers, stake-registry founder
 keys, the signed bootstrap-registry SHA-256 identity, optional service
-identities, and the intended protocol namespace. Unknown fields, duplicate JSON
-keys, placeholders, malformed trust roots, inconsistent optional-service
+identities, and the intended protocol namespace. The profile is parsed with the
+verifier's bounded strict JSON parser. Structural limits, unknown fields,
+duplicate JSON keys, unsafe numbers, placeholders, malformed trust roots, inconsistent optional-service
 settings, and a bootstrap-registry digest mismatch prevent application setup.
 
 `profiles_index.json` is format version 2 and records an immutable `network_id`
@@ -877,6 +878,22 @@ through an in-memory `VerificationStore` adapter and runs the shared §13.2
 verification pipeline without opening a database. A bare status-bearing
 credential can prove its signature but remains pending without the referenced
 list; the bundle supplies that missing evidence. PR 12 plus remediation T02.
+
+Imported and verified payloads are parsed before typed decoding. The parser
+enforces explicit structural limits and refuses duplicate keys, unsafe
+numbers and trailing bytes. Limits by boundary:
+
+| Boundary | Bytes | Nesting | Array elements | Object entries | String bytes |
+| --- | --- | --- | --- | --- | --- |
+| Credential payload (bundle, list or single credential) | 16 MiB | 32 | 4096 | 256 | 1,398,104 (base64 of the 1 MiB status bitmap) |
+| Each credential in a payload | 256 KiB | 32 | 4096 | 256 | 64 KiB |
+| Signed course document | 1 MiB | 16 | 4096 | 64 | 64 KiB |
+
+The per-credential limit applies wherever a credential arrives: file import,
+offline verification, a guardian link, and peer import. Peer import also stops
+the transfer at 256 KiB and does not retain the fetched blob. Publishing a
+course document applies the same limits peers enforce on resolution, so an
+author cannot publish a document other nodes would refuse.
 
 ### P2P propagation
 

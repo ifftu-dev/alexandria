@@ -844,6 +844,69 @@ pub struct StatusListRow {
 
 const BUNDLE_FORMAT_VERSION: &str = "alexandria-credential-bundle/1.0";
 
+/// Structural limits for an untrusted credential payload: a bundle, a list of
+/// credentials, or one credential. A bundle's status lists carry base64
+/// bitmaps up to the status-list bitmap cap, so its strings may be longer than
+/// a credential's; every credential entry is still held to
+/// [`alexandria_verify::vc::CREDENTIAL_JSON_LIMITS`].
+pub const CREDENTIAL_PAYLOAD_JSON_LIMITS: alexandria_verify::json::JsonLimits =
+    alexandria_verify::json::JsonLimits {
+        max_bytes: 16 * 1024 * 1024,
+        max_depth: 32,
+        max_array_len: 4096,
+        max_object_entries: 256,
+        max_string_bytes: 4 * crate::p2p::vc_status::MAX_BITS_BYTES.div_ceil(3),
+    };
+
+/// Parse an untrusted credential payload under
+/// [`CREDENTIAL_PAYLOAD_JSON_LIMITS`] before any typed decoding.
+pub(crate) fn parse_credential_payload(payload: &str) -> Result<serde_json::Value, String> {
+    alexandria_verify::json::parse_untrusted(payload.as_bytes(), &CREDENTIAL_PAYLOAD_JSON_LIMITS)
+        .map_err(|error| format!("not a valid credential payload: {error}"))
+}
+
+/// Decode one credential entry of a parsed payload under the single-credential
+/// limits, so a bundle or list cannot carry a credential a direct import would
+/// refuse.
+pub(crate) fn credential_entry(
+    entry: &serde_json::Value,
+) -> Result<VerifiableCredential, alexandria_verify::json::UntrustedJsonError> {
+    let bytes = serde_json::to_vec(entry)
+        .map_err(|error| alexandria_verify::json::UntrustedJsonError::Invalid(error.to_string()))?;
+    alexandria_verify::vc::decode_credential(&bytes)
+}
+
+fn bounded_credentials(entries: &[serde_json::Value]) -> Result<Vec<VerifiableCredential>, String> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            credential_entry(entry).map_err(|error| format!("credential {index}: {error}"))
+        })
+        .collect()
+}
+
+/// Decode a parsed payload as a §20.4 bundle. `None` means the payload is not
+/// a bundle; an unsupported format version or an over-limit credential entry
+/// is an error.
+fn bundle_from_payload(value: &serde_json::Value) -> Result<Option<CredentialBundle>, String> {
+    let Ok(mut bundle) = serde_json::from_value::<CredentialBundle>(value.clone()) else {
+        return Ok(None);
+    };
+    if bundle.format_version != BUNDLE_FORMAT_VERSION {
+        return Err(format!(
+            "unsupported bundle format_version: {}",
+            bundle.format_version
+        ));
+    }
+    let entries = value
+        .get("credentials")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("bundle credentials are not a list")?;
+    bundle.credentials = bounded_credentials(entries)?;
+    Ok(Some(bundle))
+}
+
 /// Build a JCS-canonical export bundle of every credential, key
 /// registry row, and status list known to this node.
 pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
@@ -1045,15 +1108,13 @@ pub fn verify_offline_impl(json: &str, now: &str) -> Result<OfflineVerification,
         }
     };
 
+    // Structural limits, duplicate keys and unsafe numbers are checked once,
+    // before any shape is tried.
+    let value = parse_credential_payload(json)?;
+
     // A bundle is the most specific shape, so it is tried first: it has a
     // `format_version` that neither of the others carries.
-    if let Ok(bundle) = serde_json::from_str::<CredentialBundle>(json) {
-        if bundle.format_version != BUNDLE_FORMAT_VERSION {
-            return Err(format!(
-                "unsupported bundle format_version: {}",
-                bundle.format_version
-            ));
-        }
+    if let Some(bundle) = bundle_from_payload(&value)? {
         let store = BundleStore::new(&bundle)?;
         let results = bundle
             .credentials
@@ -1063,12 +1124,17 @@ pub fn verify_offline_impl(json: &str, now: &str) -> Result<OfflineVerification,
         return Ok(tally(results, OfflineSource::Bundle, false));
     }
 
-    if let Ok(vc) = serde_json::from_str::<VerifiableCredential>(json) {
+    if serde_json::from_value::<VerifiableCredential>(value.clone()).is_ok() {
+        let vc = credential_entry(&value).map_err(|error| format!("credential: {error}"))?;
         let results = vec![verify::verify_credential(&NullStore, &vc, now, &policy)];
         return Ok(tally(results, OfflineSource::Credential, true));
     }
 
-    if let Ok(list) = serde_json::from_str::<Vec<VerifiableCredential>>(json) {
+    if let Some(entries) = value
+        .as_array()
+        .filter(|_| serde_json::from_value::<Vec<VerifiableCredential>>(value.clone()).is_ok())
+    {
+        let list = bounded_credentials(entries)?;
         let results = list
             .iter()
             .map(|vc| verify::verify_credential(&NullStore, vc, now, &policy))
@@ -1088,14 +1154,9 @@ pub fn verify_bundle_offline_impl(
 ) -> Result<(u32, u32), String> {
     use crate::domain::vc::{verify, AcceptanceDecision, VerificationPolicy};
 
-    let bundle: CredentialBundle =
-        serde_json::from_str(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
-    if bundle.format_version != BUNDLE_FORMAT_VERSION {
-        return Err(format!(
-            "unsupported bundle format_version: {}",
-            bundle.format_version
-        ));
-    }
+    let value = parse_credential_payload(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
+    let bundle = bundle_from_payload(&value)?
+        .ok_or_else(|| "parse bundle: not a §20.4 credential bundle".to_string())?;
 
     let store = BundleStore::new(&bundle)?;
 
@@ -1301,6 +1362,41 @@ mod tests {
         // A bare credential carries no status list, so this must not read as
         // a clean bill of health.
         assert!(report.revocation_unknown);
+    }
+
+    #[test]
+    fn credential_payloads_are_bounded_before_verification() {
+        let (db, issuer_key, issuer, subject) = setup();
+        issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+        let bundle = export_bundle_impl(db.conn()).unwrap();
+
+        let max = CREDENTIAL_PAYLOAD_JSON_LIMITS.max_bytes;
+        let mut exact = bundle.clone();
+        exact.push_str(&" ".repeat(max - bundle.len()));
+        assert_eq!(verify_bundle_offline_impl(&exact, NOW).unwrap(), (1, 1));
+        exact.push(' ');
+        let error = verify_bundle_offline_impl(&exact, NOW).unwrap_err();
+        assert!(error.contains("exceeds"), "{error}");
+
+        let duplicated = format!("{{\"format_version\":\"forged\",{}", &bundle[1..]);
+        let error = verify_offline_impl(&duplicated, NOW).unwrap_err();
+        assert!(error.contains("duplicate"), "{error}");
+
+        // The bundle fits, but one credential in it exceeds what a direct
+        // import of that credential would accept.
+        let mut value: serde_json::Value = serde_json::from_str(&bundle).unwrap();
+        value["credentials"][0]["credentialSubject"]["note"] = serde_json::Value::String(
+            "a".repeat(alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_string_bytes + 1),
+        );
+        let error = verify_offline_impl(&value.to_string(), NOW).unwrap_err();
+        assert!(error.contains("credential 0"), "{error}");
     }
 
     #[test]

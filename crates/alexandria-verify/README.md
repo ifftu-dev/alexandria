@@ -41,6 +41,30 @@ credential bundle, Postgres — and the same verification logic runs against it.
 `tests/no_io_deps.rs` fails the build if a dependency that reaches the outside
 world is ever added.
 
+## Untrusted input
+
+`json::parse_untrusted` and `json::decode_untrusted` parse bytes from a peer, a
+file, or a service under explicit `JsonLimits` before any typed decoding or
+signature work. They refuse, as distinct errors:
+- documents over the byte limit, checked before parsing;
+- nesting deeper than the depth limit;
+- arrays, objects, or strings over their limits;
+- duplicate object keys at any depth;
+- numbers outside JavaScript's exact integer range (±2^53−1) or non-finite;
+- trailing bytes.
+
+`vc::decode_credential` applies `vc::CREDENTIAL_JSON_LIMITS`:
+- 256 KiB;
+- depth 32;
+- 4096 array elements;
+- 256 object entries;
+- 64 KiB strings.
+
+A payload that holds several credentials may have its own outer limits, but
+each credential in it must still pass these.
+`tests/credential_limits.rs` checks every limit at its exact boundary and one
+past it.
+
 ## Trust classification
 
 A valid signature says who signed a credential, not that the signer is approved
