@@ -91,8 +91,8 @@ beforeEach(() => {
   const trained = { trained: true, epochs: 3, samples: 20, loss: 0.1 }
   mocks.getAIModelStatus.mockReturnValue({ keystrokeAE: trained, mouseCNN: trained, faceEmbedder: null })
   mocks.trainAIModels.mockResolvedValue({
-    keystrokeAE: { trained: false, loss: -1, samples: 0, priorDigraphs: 0 },
-    mouseCNN: { trained: false, loss: -1, samples: 0, priorTrajectories: 0 },
+    keystrokeAE: { trained: false, loss: -1, samples: 0 },
+    mouseCNN: { trained: false, loss: -1, samples: 0 },
     faceEmbedder: { enrolled: false, progress: 0 },
   })
   mocks.extractGazeFeatures.mockResolvedValue({ yaw: 0, pitch: 0, roll: 0, irisDx: 0, irisDy: 0 })

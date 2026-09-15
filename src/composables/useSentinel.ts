@@ -14,9 +14,6 @@ import type {
   SignalData,
   BehavioralProfile,
   StartSessionResponse,
-  SentinelPrior,
-  SentinelPriorBlob,
-  ActivePasteClassifier,
   KeystrokeEvent,
   MousePoint,
   DigraphFeatures,
@@ -269,65 +266,19 @@ let faceEmbedder: FaceEmbedder | null = null
 const keystrokeAeStatus = ref<UserModelStatus | null>(null)
 const mouseCnnStatus = ref<UserModelStatus | null>(null)
 
-// Cap incoming ONNX weight blobs — defense against a malicious DAO
-// envelope pointing at a huge CID. 50 MiB matches MAX_WEIGHTS_BYTES on
-// the Rust side (commands/sentinel_priors.rs).
-const MAX_DAO_WEIGHTS_BYTES = 50 * 1024 * 1024
-
-// Share one DAO lookup across sessions in the active profile. Successful
-// profile cleanup invalidates this lookup so the next profile checks its own data.
-let daoUpgradePromise: Promise<void> | null = null
 const loadedClassifierInfo = ref<LoadedClassifierInfo>({ source: 'bundled', version: 'bundled-v1' })
 
 export function getLoadedClassifierInfo(): LoadedClassifierInfo {
   return loadedClassifierInfo.value
 }
 
-async function upgradePasteClassifierOnce(): Promise<void> {
-  if (daoUpgradePromise) return daoUpgradePromise
+async function refreshPasteClassifierInfo(): Promise<void> {
   const requireCurrent = profileStateGuard()
-  daoUpgradePromise = (async () => {
-    try {
-      // Pull the current backend-reported source so dashboard cards
-      // can show "bundled" until / unless the DAO swap succeeds.
-      try {
-        const info = await tauriInvoke<LoadedClassifierInfo>(
-          'sentinel_paste_classifier_info',
-        )
-        requireCurrent()
-        loadedClassifierInfo.value = info
-      } catch { /* backend not ready yet */ }
-      requireCurrent()
-
-      const active = await tauriInvoke<ActivePasteClassifier | null>(
-        'sentinel_get_active_paste_classifier',
-      )
-      requireCurrent()
-      if (!active) return
-      const bytes = await tauriInvoke<number[]>('content_resolve_bytes', {
-        identifier: active.weights_cid,
-      })
-      requireCurrent()
-      if (bytes.length > MAX_DAO_WEIGHTS_BYTES) {
-        console.warn(
-          `[sentinel] DAO weights blob ${bytes.length} bytes exceeds ${MAX_DAO_WEIGHTS_BYTES}; staying on bundled`,
-        )
-        return
-      }
-      const info = await tauriInvoke<LoadedClassifierInfo>(
-        'sentinel_load_dao_classifier',
-        { req: { bytes, version: active.version } },
-      )
-      requireCurrent()
-      loadedClassifierInfo.value = info
-      console.info(
-        `[sentinel] paste classifier upgraded to DAO model ${active.version} (TPR=${active.eval_tpr} FPR=${active.eval_fpr})`,
-      )
-    } catch (err) {
-      console.warn('[sentinel] DAO classifier upgrade skipped:', err)
-    }
-  })()
-  return daoUpgradePromise
+  try {
+    const info = await tauriInvoke<LoadedClassifierInfo>('sentinel_paste_classifier_info')
+    requireCurrent()
+    loadedClassifierInfo.value = info
+  } catch { /* backend not ready yet, or the profile changed */ }
 }
 
 // ============================================================================
@@ -1049,10 +1000,8 @@ function createSentinelService() {
       sentinelDebug.sessionGazeChecks = 0
       snapshotWindowStartMs = Date.now()
 
-      // Best-effort upgrade to the latest DAO-ratified paste classifier.
-      // Failures fall through to the bundled artifact — never block
-      // session start on a model swap.
-      void tryUpgradePasteClassifier()
+      // Report the bundled paste classifier version to dashboard cards.
+      void refreshPasteClassifierInfo()
 
       // Refresh per-user model status so the snapshot path knows whether
       // to call the AE / CNN scoring IPCs.
@@ -1106,8 +1055,6 @@ function createSentinelService() {
       throw e
     }
   }
-
-  const tryUpgradePasteClassifier = () => upgradePasteClassifierOnce()
 
   const setElement = (elementId: string, elementType: string) => {
     currentElementId = elementId
@@ -1438,9 +1385,6 @@ function createSentinelService() {
       } catch { /* localStorage disabled */ }
       pendingEvidenceConsent.value = null
       Object.assign(sentinelDebug, emptySentinelDebug())
-      // Keep last-known public classifier metadata, without pretending to
-      // unload Rust's model. The next profile retries its own DAO lookup.
-      daoUpgradePromise = null
     })
   }
 
@@ -1660,20 +1604,17 @@ function createSentinelService() {
   }
 
   /**
-   * Score a candidate prior blob against the current local classifier.
+   * Score a labeled-samples blob against the current local classifier.
    *
-   * Used by the propose-prior UX to self-check before submitting: if
-   * the classifier already flags the blob as strongly anomalous, the
-   * prior is genuinely adversarial and worth proposing. If it scores
-   * like a legit human, ratifying it would teach the model to flag
-   * honest users — the proposer (and later DAO voters) should reject.
+   * Used by the holdout evaluator: adversarial-labeled samples should
+   * score as strongly anomalous, and human-labeled samples should not.
    *
    * Returns null if the local classifier isn't trained yet (no signal
    * to compare against). Returns `meanScore` on [0,1]:
    *   - keystroke: average reconstruction-error anomaly score (higher
-   *     = more anomalous; > 0.65 is the ratify signal)
+   *     = more anomalous; > 0.65 is the adversarial signal)
    *   - mouse: 1 - average human probability (higher = more bot-like;
-   *     > 0.50 is the ratify signal since the CNN is symmetric)
+   *     > 0.50 is the adversarial signal since the CNN is symmetric)
    *
    * `adversarialFraction` is the share of samples that individually
    * cross the per-model anomaly threshold — useful for picking up
@@ -1773,69 +1714,17 @@ function createSentinelService() {
     return out
   }
 
-  const fetchPriorTrajectories = async (signal?: AbortSignal): Promise<MousePoint[][]> => {
-    const requireCurrent = profileStateGuard(signal)
-    try {
-      requireCurrent()
-      const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'mouse' })
-      requireCurrent()
-      const blobs = await Promise.all(priors.map(p =>
-        invoke<SentinelPriorBlob>('sentinel_priors_load', { priorId: p.id }).catch(() => null),
-      ))
-      requireCurrent()
-      const out: MousePoint[][] = []
-      for (const blob of blobs) {
-        if (!blob || blob.model_kind !== 'mouse') continue
-        for (const entry of blob.samples as Array<{ trajectory?: MousePoint[] }>) {
-          if (Array.isArray(entry?.trajectory) && entry.trajectory.length >= 51) {
-            out.push(entry.trajectory)
-          }
-        }
-      }
-      return out
-    } catch {
-      return []
-    }
-  }
-
-  const fetchKeystrokeNegatives = async (signal?: AbortSignal): Promise<DigraphFeatures[]> => {
-    const requireCurrent = profileStateGuard(signal)
-    try {
-      requireCurrent()
-      const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'keystroke' })
-      requireCurrent()
-      const blobs = await Promise.all(priors.map(p =>
-        invoke<SentinelPriorBlob>('sentinel_priors_load', { priorId: p.id }).catch(() => null),
-      ))
-      requireCurrent()
-      const out: DigraphFeatures[] = []
-      for (const blob of blobs) {
-        if (!blob || blob.model_kind !== 'keystroke') continue
-        for (const s of blob.samples) {
-          const d = s as Partial<DigraphFeatures>
-          if (typeof d.dwellMs1 === 'number' && typeof d.dwellMs2 === 'number'
-              && typeof d.flightMs === 'number' && typeof d.speedRatio === 'number') {
-            out.push(d as DigraphFeatures)
-          }
-        }
-      }
-      return out
-    } catch {
-      return []
-    }
-  }
-
   const trainAIModels = async (signal?: AbortSignal): Promise<{
-    keystrokeAE: { trained: boolean; loss: number; samples: number; priorDigraphs: number }
-    mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
+    keystrokeAE: { trained: boolean; loss: number; samples: number }
+    mouseCNN: { trained: boolean; loss: number; samples: number }
     faceEmbedder: { enrolled: boolean; progress: number }
   }> => {
     const requireCurrent = profileStateGuard(signal)
     const userId = stakeAddress.value
     if (!userId) {
       return {
-        keystrokeAE: { trained: false, loss: -1, samples: 0, priorDigraphs: 0 },
-        mouseCNN: { trained: false, loss: -1, samples: 0, priorTrajectories: 0 },
+        keystrokeAE: { trained: false, loss: -1, samples: 0 },
+        mouseCNN: { trained: false, loss: -1, samples: 0 },
         faceEmbedder: {
           enrolled: faceEmbedder?.isEnrolled ?? false,
           progress: faceEmbedder?.enrollmentProgress ?? 0,
@@ -1848,20 +1737,13 @@ function createSentinelService() {
     let aeLoss = -1
     let aeSamples = 0
     let aeTrained = false
-    let priorDigraphs = 0
     if (keystrokeBuffer.length >= 20) {
-      // Hydrate ratified keystroke priors (labeled attack digraphs) to
-      // drive the AE's contrastive "push-away" pass.
-      const ratifiedNegatives = await fetchKeystrokeNegatives(signal)
-      requireCurrent()
-      priorDigraphs = ratifiedNegatives.length
       try {
         const r = await tauriInvoke<TrainKeystrokeAeResponse>('sentinel_train_keystroke_ae', {
           req: {
             user_address: userId,
             device_fp_prefix: deviceFp,
             events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
-            negative_digraphs: ratifiedNegatives,
           },
         })
         requireCurrent()
@@ -1884,12 +1766,8 @@ function createSentinelService() {
     let cnnLoss = -1
     let cnnSamples = 0
     let cnnTrained = false
-    let priorTrajectories = 0
     const moves = mouseBuffer.filter(m => m.type === 'move')
     if (moves.length >= 51) {
-      const ratifiedBots = await fetchPriorTrajectories(signal)
-      requireCurrent()
-      priorTrajectories = ratifiedBots.length
       try {
         const r = await tauriInvoke<TrainMouseCnnResponse>('sentinel_train_mouse_cnn', {
           req: {
@@ -1916,8 +1794,8 @@ function createSentinelService() {
 
     requireCurrent()
     return {
-      keystrokeAE: { trained: aeTrained, loss: aeLoss, samples: aeSamples, priorDigraphs },
-      mouseCNN: { trained: cnnTrained, loss: cnnLoss, samples: cnnSamples, priorTrajectories },
+      keystrokeAE: { trained: aeTrained, loss: aeLoss, samples: aeSamples },
+      mouseCNN: { trained: cnnTrained, loss: cnnLoss, samples: cnnSamples },
       faceEmbedder: { enrolled: faceEmbedder?.isEnrolled ?? false, progress: faceEmbedder?.enrollmentProgress ?? 0 },
     }
   }

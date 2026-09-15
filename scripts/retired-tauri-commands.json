@@ -35,5 +35,18 @@
   "cast_proposal_vote": "retired local proposal authority",
   "resolve_proposal": "retired local proposal authority",
   "get_onchain_queue_status": "retired operator governance queue",
-  "retry_onchain_submission": "retired operator governance queue"
+  "retry_onchain_submission": "retired operator governance queue",
+  "sentinel_dao_get_info": "retired Sentinel DAO committee projection",
+  "sentinel_propose_prior": "retired Sentinel prior proposal authority",
+  "sentinel_ratify_prior": "retired approved-status Sentinel prior ratification",
+  "sentinel_priors_list": "retired Sentinel prior library",
+  "sentinel_priors_sync": "retired Sentinel prior library",
+  "sentinel_priors_load": "retired Sentinel prior library",
+  "sentinel_get_active_paste_classifier": "retired community classifier selection",
+  "sentinel_load_dao_classifier": "retired runtime classifier replacement",
+  "sentinel_revert_classifier_to_bundled": "retired runtime classifier replacement",
+  "sentinel_set_kill_switch": "retired community classifier override",
+  "sentinel_get_kill_switch": "retired community classifier override",
+  "sentinel_blocklist_version": "retired community classifier override",
+  "sentinel_unblocklist_version": "retired community classifier override"
 }

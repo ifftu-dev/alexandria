@@ -326,12 +326,7 @@ const router = createRouter({
       component: () => import('@/pages/dashboard/Sentinel.vue'),
       meta: { layout: 'app' },
     },
-    {
-      path: '/dashboard/sentinel/propose-prior',
-      name: 'dashboard-sentinel-propose-prior',
-      component: () => import('@/pages/dashboard/sentinel/ProposePrior.vue'),
-      meta: { layout: 'app' },
-    },
+    { path: '/dashboard/sentinel/propose-prior', redirect: '/dashboard/sentinel' },
     {
       path: '/dashboard/sentinel/holdout-evaluate',
       name: 'dashboard-sentinel-holdout-evaluate',

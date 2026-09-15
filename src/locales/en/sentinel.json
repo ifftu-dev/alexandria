@@ -3,12 +3,10 @@
   "subtitle": "Keeps your assessments honest",
   "actions": {
     "resetProfile": "Reset setup",
-    "proposeCheat": "Propose cheat pattern",
     "recalibrate": "Redo setup",
     "train": "Set up Sentinel",
     "open": "Open",
-    "runTest": "Run test",
-    "openCommunity": "Open Community"
+    "runTest": "Run test"
   },
   "tabs": {
     "overview": "Overview",
@@ -32,14 +30,6 @@
     "clean": "Clean",
     "flagged": "Flagged",
     "suspended": "Suspended"
-  },
-  "community": {
-    "title": "Sentinel Community",
-    "active": "Active",
-    "pending": "Getting started",
-    "description": "Reviews the shared cheat-pattern library that every copy of Sentinel learns from.",
-    "noCouncil": "No council chosen yet. Propose the first Sentinel council in the main Alexandria Community to unlock approvals and accuracy tests.",
-    "members": "Council members"
   },
   "holdout": {
     "title": "Accuracy test set",
@@ -208,9 +198,7 @@
   "pasteClassifier": {
     "title": "Sentinel paste detector",
     "description": "Adds the paste-detector signal while smart scoring is on. Turn it off if it flags too many honest answers; the other smart signals keep working.",
-    "loadedModel": "Loaded detector",
-    "activeModel": "Community detector",
-    "bundledFallback": "built-in default"
+    "loadedModel": "Loaded detector"
   },
   "reset": {
     "title": "Erase your setup",
@@ -265,48 +253,6 @@
     "verdictAttack": "Cheat test set: Sentinel's average alarm level was {score}% (higher is better). {adv}% of {count} {kind} samples were caught as cheating — that's your catch rate for the '{label}' family.",
     "note": "The unlocked test set stays on this device. Don't share the labeled samples — leaking them hands cheaters the answer key.",
     "holdoutOption": "{kind} · threshold {threshold} · {date}"
-  },
-  "propose": {
-    "back": "Back to Sentinel",
-    "title": "Propose a cheat pattern",
-    "subtitle": "Submit a labeled cheat pattern for the Sentinel community to review. Approved patterns teach every copy of Sentinel to recognize that kind of cheating. Face patterns aren't accepted.",
-    "submittedTitle": "Proposal sent",
-    "submittedBody": "Proposal ID: {id}. Sentinel community members will vote on it — check the Community dashboard for progress.",
-    "another": "Propose another",
-    "step1": "1. Which model",
-    "step1Body": "Which model should learn to catch this pattern? Face data is never shared.",
-    "step2": "2. Label",
-    "step2Body": "What kind of cheating is this? Pick a known label or type your own.",
-    "labelPlaceholder": "Or type a custom label (overrides the choice above)",
-    "step3": "3. Sample file",
-    "step3Body": "A JSON file with format 1, a model matching your choice above, a label, and at least 20 samples. See {doc} for the format.",
-    "selected": "Selected: {name}",
-    "parsedOk": "Looks good — {count} samples, label {label}.",
-    "kindMismatch": "Heads up: the file's model is \"{fileKind}\" but you picked \"{selectedKind}\". Change one before submitting.",
-    "selfCheckTitle": "Sentinel self-check",
-    "step4": "4. Source session (optional)",
-    "step4Body": "If you took these samples from one of your own assessment sessions, pick it here. Flagged or suspended sessions can't be used — cheat data must not shape the detector. Sentinel checks again either way.",
-    "sessionNone": "None",
-    "step5": "5. Proposal summary",
-    "titlePlaceholder": "Short title shown to voters",
-    "descriptionPlaceholder": "Why should this be approved? How did you collect the data?",
-    "submit": "Submit proposal",
-    "verdict": {
-      "untrained": "Sentinel isn't set up here yet, so it can't self-check. Set up Sentinel first to see whether this really looks like cheating.",
-      "strong": "Sentinel flags this strongly (average {pct}%, {adv}% of samples over the line). A solid cheat pattern.",
-      "weak": "Sentinel reads this as close to normal (average {pct}%). Approving it could teach the model to flag honest people — reconsider before submitting.",
-      "borderline": "Borderline: average {pct}%, {adv}% flagged. The pattern may be weak or mixed — take another look at the samples."
-    },
-    "errors": {
-      "samplesArray": "\"samples\" must be a list.",
-      "tooFew": "Need at least 20 samples (got {count}).",
-      "faceForbidden": "Face patterns aren't accepted.",
-      "unsupportedKind": "Unsupported model: {kind}.",
-      "unsupportedSchema": "Unsupported format: {schema}.",
-      "emptyLabel": "The label can't be empty.",
-      "readFailed": "Couldn't read the file: {error}"
-    },
-    "statusOption": "{date} — status: {status}"
   },
   "wizard": {
     "welcomeTitle": "Set up Sentinel",

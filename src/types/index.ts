@@ -425,28 +425,6 @@ export interface CreateSnapshotParams {
 
 // ---- Governance ----
 
-export interface DaoInfo {
-  id: string
-  name: string
-  description: string | null
-  icon_emoji: string | null
-  scope_type: string
-  scope_id: string
-  status: string
-  committee_size: number
-  election_interval_days: number
-  on_chain_tx: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface DaoMember {
-  dao_id: string
-  stake_address: string
-  role: string
-  joined_at: string
-}
-
 export interface GovernanceGenesisLocator {
   version: number
   dao_id: string
@@ -507,13 +485,6 @@ export interface PinGenesisResponse {
   newly_pinned: boolean
   /** A differently signed envelope over the same core was already pinned and kept. */
   stored_envelope_differs: boolean
-}
-
-/** Returned by `sentinel_dao_get_info`. */
-export interface SentinelDaoInfo {
-  dao: DaoInfo
-  committee: DaoMember[]
-  recognized_categories: string[]
 }
 
 /** Returned by `sentinel_holdout_list`. */
@@ -830,38 +801,6 @@ export interface IntegritySession {
   ended_at: string | null
 }
 
-/** Ratified adversarial-prior metadata as persisted in `sentinel_priors`. */
-export interface SentinelPrior {
-  id: string
-  proposal_id: string
-  cid: string
-  model_kind: string
-  label: string
-  schema_version: number
-  sample_count: number
-  notes: string | null
-  ratified_at: string
-  signature: string
-  weights_cid?: string | null
-  eval_cid?: string | null
-  eval_tpr?: number | null
-  eval_fpr?: number | null
-  version?: string | null
-}
-
-/** Active DAO-ratified paste classifier returned by
- *  `sentinel_get_active_paste_classifier`. Null means no entry passes
- *  the runtime gate and the client should keep its bundled fallback. */
-export interface ActivePasteClassifier {
-  prior_id: string
-  weights_cid: string
-  version: string
-  eval_tpr: number
-  eval_fpr: number
-  signature: string
-  ratified_at: string
-}
-
 // ---------------------------------------------------------------------------
 // Sentinel backend ML (Rust: tract + candle). Mirrors the structs in
 // `src-tauri/src/sentinel/types.rs` + `src-tauri/src/commands/sentinel_ml.rs`.
@@ -893,7 +832,7 @@ export interface ScorePasteResponse {
 }
 
 export interface LoadedClassifierInfo {
-  source: 'bundled' | 'dao'
+  source: 'bundled'
   version: string
 }
 
@@ -974,7 +913,7 @@ export interface TrainGazeCalibResponse {
   trained_epochs: number
 }
 
-/** Parsed labeled-samples blob loaded via `sentinel_priors_load`. */
+/** Parsed labeled-samples blob returned by `sentinel_holdout_evaluate`. */
 export interface SentinelPriorBlob {
   schema_version: number
   model_kind: string

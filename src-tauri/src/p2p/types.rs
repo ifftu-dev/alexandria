@@ -80,12 +80,9 @@ pub const TOPIC_PLUGINS: &str = "/alexandria/plugins/1.0";
 /// this topic currently confer no plugin or credential authority.
 pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0";
 
-/// Ratified Sentinel adversarial priors — the Sentinel DAO broadcasts
-/// metadata for each prior the committee has approved so every client
-/// can mirror the library locally. The blob itself is content-addressed
-/// and fetched separately on demand; this topic carries only the
-/// envelope metadata plus the approved proposal reference.
-/// See docs/sentinel-adversarial-priors.md.
+/// Retired Sentinel prior library topic. It stays subscribed until the
+/// coordinated wire-protocol removal; every inbound message is rejected
+/// before any database access.
 pub const TOPIC_SENTINEL_PRIORS: &str = "/alexandria/sentinel-priors/1.0";
 
 /// Ratified goal-template versions — a DAO publishes a signed version

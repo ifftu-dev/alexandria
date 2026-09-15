@@ -909,7 +909,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored and broadcast.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative; AI is advisory until validated with labeled data.
-4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The active paste classifier runs via `tract` (pure Rust ONNX); its bundled fallback weights are embedded with `include_bytes!` and can be replaced at runtime by DAO-ratified weights (`set_dao_session`).
+4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The paste classifier runs via `tract` (pure Rust ONNX); its weights are embedded with `include_bytes!`, and no command replaces them at runtime.
 5. **Incremental trust** — Behavioral profiles build over time. Consistency scoring activates after 10+ samples.
 
 ### 12.3 Signal Taxonomy

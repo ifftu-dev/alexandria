@@ -309,17 +309,11 @@ discovery (Phase 3).
 - **`integrity_attestations`** (migration 061) — committee co-signatures per
   session for the assurance ladder: `session_id`, `attestor_address`,
   `public_key`, `signature`.
-- **`sentinel_priors`** — DAO-ratified training samples and model
-  weights for the paste classifier. Weights rows carry `weights_cid`,
-  `eval_cid`, `eval_tpr`, `eval_fpr`, and `version`; a client only
-  auto-loads a weights row whose gate passes (`eval_tpr >= 0.92 AND
-  eval_fpr <= 0.03`).
-- **`sentinel_kill_switch`** — Single row per `model_kind`; when
-  `active = 1` the client treats that classifier as disabled even if a
-  ratified row exists.
-- **`sentinel_weights_blocklist`** — `(model_kind, version)` pairs the
-  active-classifier selector must skip, for rolling back a faulty
-  ratified model without amending governance history.
+- **`sentinel_priors`**, **`sentinel_kill_switch`**, and
+  **`sentinel_weights_blocklist`** — Retired community prior-library
+  tables. The prior ratification, runtime weights replacement, kill
+  switch and version blocklist are deleted; nothing reads or writes these
+  tables, and they drop with the baseline schema squash.
 - **`sentinel_user_models`** — Per-user keystroke autoencoder
   (`keystroke_ae`), mouse CNN (`mouse_cnn`), and gaze-calibration MLP
   (`gaze_calib`, a per-user 5→16→2 net) weights, keyed by

@@ -15,15 +15,13 @@ ignore = [
     # `half` that satisfies both, so `cargo update -p tract-onnx` fails to
     # resolve.
     #
-    # Production mitigates the vulnerable untrusted-artifact path by refusing
-    # `sentinel_load_dao_classifier` entirely until verified committee outcome
-    # certificates are implemented. The legacy loader exists only in debug
-    # builds with the explicit `legacy-sentinel-prior-ratification` feature;
-    # even there it verifies the artifact's BLAKE3 digest against its ratified
-    # record before parsing. The two release paths that still reach tract parse
-    # fixed model bytes embedded at build time, not network-supplied models.
-    # Any future committee-backed activation must preserve exact-byte digest
-    # verification before the parser or remove this acceptance.
+    # The vulnerable path is untrusted model bytes reaching the parser, and no
+    # such path exists: the community classifier-weights loader is deleted and
+    # no command accepts model bytes. The two paths that reach tract, the paste
+    # classifier and the face detector, parse fixed model bytes embedded at
+    # build time. Any future path that loads a model from outside the binary
+    # must verify its exact bytes against a pinned digest before the parser, or
+    # remove this acceptance.
     #
     # Revisit when tract relaxes its `half` pin, or when the media stack moves
     # to a wgpu/naga release that accepts `half 2.4`.

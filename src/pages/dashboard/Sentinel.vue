@@ -9,9 +9,7 @@ import { getLoadedClassifierInfo } from '@/composables/useSentinel'
 import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizard.vue'
 import type {
   IntegritySession,
-  SentinelDaoInfo,
   SentinelHoldoutRef,
-  ActivePasteClassifier,
   BehavioralProfile,
 } from '@/types'
 
@@ -30,13 +28,11 @@ const {
 } = useSentinel()
 
 const loadedClassifier = ref(getLoadedClassifierInfo())
-const activeDaoClassifier = ref<ActivePasteClassifier | null>(null)
 
 const showWizard = ref(false)
 const sessions = ref<IntegritySession[]>([])
 const loading = ref(true)
 const profile = ref<BehavioralProfile | null>(null)
-const sentinelDao = ref<SentinelDaoInfo | null>(null)
 const holdouts = ref<SentinelHoldoutRef[]>([])
 const aiStatus = ref<{
   keystrokeAE: { trained: boolean; epochs: number; samples: number; loss: number } | null
@@ -143,26 +139,12 @@ async function loadData() {
     sessions.value = await invoke<IntegritySession[]>('integrity_list_sessions')
     profile.value = getProfile()
     aiStatus.value = getAIModelStatus()
-    // Sentinel DAO + holdout data — both may be absent on fresh
-    // installs; failures are logged but don't block the page.
-    try {
-      sentinelDao.value = await invoke<SentinelDaoInfo>('sentinel_dao_get_info')
-    } catch (e) {
-      console.warn('Sentinel DAO info unavailable:', e)
-      sentinelDao.value = null
-    }
+    // Holdout data may be absent on fresh installs; a failure does not
+    // block the page.
     try {
       holdouts.value = await invoke<SentinelHoldoutRef[]>('sentinel_holdout_list')
     } catch {
       holdouts.value = []
-    }
-    try {
-      activeDaoClassifier.value = await invoke<ActivePasteClassifier | null>(
-        'sentinel_get_active_paste_classifier',
-      )
-    } catch (e) {
-      console.warn('Active paste classifier unavailable:', e)
-      activeDaoClassifier.value = null
     }
     loadedClassifier.value = getLoadedClassifierInfo()
   } catch (e) {
@@ -248,13 +230,6 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           @click="handleResetProfile"
         >
           {{ $t('sentinel.actions.resetProfile') }}
-        </AppButton>
-        <AppButton
-          variant="secondary"
-          size="sm"
-          @click="router.push('/dashboard/sentinel/propose-prior')"
-        >
-          {{ $t('sentinel.actions.proposeCheat') }}
         </AppButton>
         <AppButton
           variant="primary"
@@ -413,66 +388,26 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           </template>
         </div>
 
-        <!-- Sentinel DAO status + holdout summary (follow-ups #1 and #3) -->
-        <div v-if="sentinelDao" class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <!-- DAO committee card -->
-          <div class="card p-5">
-            <div class="mb-2 flex items-center justify-between">
-              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.community.title') }}</h2>
-              <AppBadge :variant="sentinelDao.committee.length > 0 ? 'success' : 'warning'">
-                {{ sentinelDao.committee.length > 0 ? $t('sentinel.community.active') : $t('sentinel.community.pending') }}
-              </AppBadge>
-            </div>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('sentinel.community.description') }}
-            </p>
-            <div v-if="sentinelDao.committee.length === 0" class="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-              {{ $t('sentinel.community.noCouncil') }}
-              <div class="mt-2">
-                <AppButton size="sm" variant="secondary" @click="router.push('/community')">
-                  {{ $t('sentinel.actions.openCommunity') }}
-                </AppButton>
-              </div>
-            </div>
-            <details v-else class="mt-3">
-              <summary class="cursor-pointer text-xs text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
-              <p class="mt-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.community.members') }}</p>
-              <div class="mt-1 space-y-1">
-                <div
-                  v-for="m in sentinelDao.committee"
-                  :key="m.stake_address"
-                  class="flex items-center justify-between text-xs"
-                >
-                  <code class="truncate font-mono text-muted-foreground">{{ m.stake_address }}</code>
-                  <AppBadge :variant="m.role === 'chair' ? 'primary' : 'secondary'">
-                    {{ m.role }}
-                  </AppBadge>
-                </div>
-              </div>
-            </details>
+        <!-- Holdout summary card -->
+        <div class="card p-5">
+          <div class="mb-2 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.holdout.title') }}</h2>
+            <AppBadge :variant="holdouts.length > 0 ? 'success' : 'secondary'">
+              {{ $t('sentinel.holdout.sets', { count: holdouts.length }, holdouts.length) }}
+            </AppBadge>
           </div>
-
-          <!-- Holdout summary card -->
-          <div class="card p-5">
-            <div class="mb-2 flex items-center justify-between">
-              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.holdout.title') }}</h2>
-              <AppBadge :variant="holdouts.length > 0 ? 'success' : 'secondary'">
-                {{ $t('sentinel.holdout.sets', { count: holdouts.length }, holdouts.length) }}
-              </AppBadge>
-            </div>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('sentinel.holdout.description', { threshold: holdouts[0]?.threshold ?? 'N' }) }}
-            </p>
-            <div v-if="holdouts.length === 0" class="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              <i18n-t keypath="sentinel.holdout.empty" tag="span">
-                <template #command><code class="font-mono">sentinel_holdout_upload</code></template>
-              </i18n-t>
-            </div>
-            <div v-else class="mt-3">
-              <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/holdout-evaluate')">
-                {{ $t('sentinel.holdout.run') }}
-              </AppButton>
-            </div>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('sentinel.holdout.description', { threshold: holdouts[0]?.threshold ?? 'N' }) }}
+          </p>
+          <div v-if="holdouts.length === 0" class="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <i18n-t keypath="sentinel.holdout.empty" tag="span">
+              <template #command><code class="font-mono">sentinel_holdout_upload</code></template>
+            </i18n-t>
+          </div>
+          <div v-else class="mt-3">
+            <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/holdout-evaluate')">
+              {{ $t('sentinel.holdout.run') }}
+            </AppButton>
           </div>
         </div>
 
@@ -1008,26 +943,13 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               {{ pasteClassifierEnabled ? $t('sentinel.aiScoring.enabled') : $t('sentinel.aiScoring.disabled') }}
             </AppButton>
           </div>
-          <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
-            <div class="rounded bg-muted/40 p-2">
-              <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.loadedModel') }}</div>
-              <div class="font-mono text-foreground">
-                {{ loadedClassifier.version ?? '—' }}
-                <span v-if="loadedClassifier.source" class="ms-1 text-muted-foreground">
-                  ({{ loadedClassifier.source }})
-                </span>
-              </div>
-            </div>
-            <div class="rounded bg-muted/40 p-2">
-              <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.activeModel') }}</div>
-              <div v-if="activeDaoClassifier" class="font-mono text-foreground">
-                {{ activeDaoClassifier.version }}
-                <span class="ms-1 text-muted-foreground">
-                  TPR={{ activeDaoClassifier.eval_tpr.toFixed(2) }}
-                  FPR={{ activeDaoClassifier.eval_fpr.toFixed(2) }}
-                </span>
-              </div>
-              <div v-else class="font-mono text-muted-foreground">{{ $t('sentinel.pasteClassifier.bundledFallback') }}</div>
+          <div class="mt-4 rounded bg-muted/40 p-2 text-xs">
+            <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.loadedModel') }}</div>
+            <div class="font-mono text-foreground">
+              {{ loadedClassifier.version ?? '—' }}
+              <span v-if="loadedClassifier.source" class="ms-1 text-muted-foreground">
+                ({{ loadedClassifier.source }})
+              </span>
             </div>
           </div>
         </div>

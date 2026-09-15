@@ -16,9 +16,6 @@ dev-seed = []
 # Compile the obsolete caller-supplied taxonomy ratification path only for
 # explicit local compatibility testing. Code also checks `debug_assertions`.
 legacy-taxonomy-ratification = []
-# Compile the obsolete approved-status/placeholder-signature Sentinel prior
-# authority only for explicit local compatibility testing.
-legacy-sentinel-prior-ratification = []
 legacy-integrity-attestation = []
 # Compile the obsolete caller-supplied goal-template/question-bank
 # ratification (IPC and inbound content-version gossip) only for explicit

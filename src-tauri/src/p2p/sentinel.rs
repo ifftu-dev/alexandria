@@ -1,211 +1,42 @@
-//! Sentinel gossip — inbound handler for `/alexandria/sentinel-priors/1.0`.
+//! Sentinel prior gossip — `/alexandria/sentinel-priors/1.0`.
 //!
-//! Mirrors `p2p::governance::handle_governance_message` in structure.
-//! Applies the authority gate (signer must be a Sentinel DAO committee
-//! member) and the ordering invariant (the referenced governance
-//! proposal must be locally known and `approved` before the
-//! `sentinel_priors` row is mirrored) before persisting. Idempotent:
-//! re-receiving the same announcement is a no-op.
-
-#[cfg(any(
-    test,
-    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
-))]
-use rusqlite::params;
+//! The community prior library, its ratification and runtime classifier
+//! replacement are deleted. The topic stays subscribed until the
+//! coordinated wire-protocol removal, and every inbound message is
+//! rejected before any database access.
 
 use crate::db::Database;
-use crate::domain::sentinel::SentinelPriorAnnouncement;
 use crate::p2p::types::SignedGossipMessage;
 
-#[cfg(any(
-    test,
-    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
-))]
-const SENTINEL_DAO_ID: &str = "sentinel-dao";
+pub const LEGACY_SENTINEL_PRIORS_DISABLED: &str =
+    "Sentinel prior gossip is retired; the community prior library and its ratification are deleted";
 
-/// Handle an incoming Sentinel prior announcement.
-///
-/// Returns the deserialized announcement on success even when the
-/// persistence step is skipped (e.g. proposal not yet known locally),
-/// mirroring `handle_governance_message`'s behavior so callers can log
-/// meaningfully. Real validation failures (bad kind, unauthorized
-/// signer) return `Err`.
+/// Reject an inbound Sentinel prior announcement.
 pub fn handle_sentinel_prior_message(
-    db: &Database,
-    message: &SignedGossipMessage,
-) -> Result<SentinelPriorAnnouncement, String> {
-    #[cfg(not(all(debug_assertions, feature = "legacy-sentinel-prior-ratification")))]
-    {
-        let _ = (db, message);
-        Err("legacy Sentinel prior gossip is disabled; a verified committee outcome certificate is required"
-            .into())
-    }
-
-    #[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
-    {
-        handle_legacy_sentinel_prior_message(db, message)
-    }
-}
-
-#[cfg(any(
-    test,
-    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
-))]
-fn handle_legacy_sentinel_prior_message(
-    db: &Database,
-    message: &SignedGossipMessage,
-) -> Result<SentinelPriorAnnouncement, String> {
-    let ann: SentinelPriorAnnouncement = serde_json::from_slice(&message.payload)
-        .map_err(|e| format!("invalid sentinel prior announcement: {e}"))?;
-
-    validate_announcement(&ann)?;
-
-    // Authority gate: signer must be on the Sentinel DAO committee.
-    // This is the same pattern used for taxonomy/committee updates —
-    // we trust the local view of committee membership, which is
-    // itself established via authorized governance gossip.
-    if !is_sentinel_committee_member(db, &message.stake_address) {
-        return Err(format!(
-            "unauthorized sentinel prior from '{}': not on Sentinel DAO committee",
-            message.stake_address
-        ));
-    }
-
-    // Ordering invariant: the approving proposal must already be
-    // locally known and status='approved'. If we haven't seen it yet,
-    // skip rather than fail — governance gossip may arrive shortly
-    // after, and a re-gossip of the prior will pick it up.
-    let proposal_status: Option<String> = db
-        .conn()
-        .query_row(
-            "SELECT status FROM governance_proposals WHERE id = ?1",
-            params![ann.proposal_id],
-            |row| row.get(0),
-        )
-        .ok();
-    match proposal_status.as_deref() {
-        Some("approved") => {}
-        Some(other) => {
-            return Err(format!(
-                "sentinel prior references proposal '{}' in state '{}', expected 'approved'",
-                ann.proposal_id, other
-            ));
-        }
-        None => {
-            log::debug!(
-                "Sentinel: proposal '{}' not in local DB — deferring prior '{}'",
-                ann.proposal_id,
-                ann.prior_id,
-            );
-            return Ok(ann);
-        }
-    }
-
-    // Idempotent upsert — same prior_id from the same CID must be a
-    // no-op; a conflicting entry (shouldn't happen given the
-    // deterministic id) is ignored in favor of the local row.
-    let signature_hex = hex::encode(&message.signature);
-    crate::db::with_transaction(db.conn(), || {
-        db.conn()
-            .execute(
-                "INSERT OR IGNORE INTO sentinel_priors
-                     (id, proposal_id, cid, model_kind, label, schema_version,
-                      sample_count, notes, ratified_at, signature)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
-                    ann.prior_id,
-                    ann.proposal_id,
-                    ann.cid,
-                    ann.model_kind,
-                    ann.label,
-                    i64::from(ann.schema_version),
-                    ann.sample_count,
-                    ann.notes,
-                    ann.ratified_at,
-                    ann.signature,
-                ],
-            )
-            .map_err(|e| format!("failed to insert sentinel prior: {e}"))?;
-
-        db.conn()
-            .execute(
-                "INSERT INTO sync_log (entity_type, entity_id, direction, peer_id, signature)
-                 VALUES ('sentinel_prior', ?1, 'received', ?2, ?3)",
-                params![ann.prior_id, message.stake_address, signature_hex],
-            )
-            .map_err(|e| format!("failed to record sync_log: {e}"))?;
-        Ok(())
-    })?;
-
-    log::info!(
-        "Sentinel: mirrored prior '{}' ({} / {}) from '{}'",
-        ann.prior_id,
-        ann.model_kind,
-        ann.label,
-        message.stake_address,
-    );
-
-    Ok(ann)
-}
-
-#[cfg(any(
-    test,
-    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
-))]
-fn validate_announcement(ann: &SentinelPriorAnnouncement) -> Result<(), String> {
-    if ann.prior_id.is_empty() {
-        return Err("sentinel prior announcement missing prior_id".into());
-    }
-    if ann.proposal_id.is_empty() {
-        return Err("sentinel prior announcement missing proposal_id".into());
-    }
-    if ann.cid.is_empty() {
-        return Err("sentinel prior announcement missing cid".into());
-    }
-    if ann.label.trim().is_empty() {
-        return Err("sentinel prior announcement missing label".into());
-    }
-    // Face kind is forbidden across the board — see decision 2 in
-    // docs/sentinel-federation.md. Reject loudly on gossip too, so a
-    // malicious peer can't sneak face data in via a drifted client.
-    match ann.model_kind.as_str() {
-        "keystroke" | "mouse" => Ok(()),
-        "face" => Err(
-            "face kind is forbidden for sentinel priors (see sentinel-federation.md decision 2)"
-                .into(),
-        ),
-        other => Err(format!("unknown model_kind: {other}")),
-    }
-}
-
-#[cfg(any(
-    test,
-    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
-))]
-fn is_sentinel_committee_member(db: &Database, stake_address: &str) -> bool {
-    db.conn()
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM governance_dao_members
-             WHERE dao_id = ?1 AND stake_address = ?2 AND role IN ('committee', 'chair')",
-            params![SENTINEL_DAO_ID, stake_address],
-            |row| row.get::<_, bool>(0),
-        )
-        .unwrap_or(false)
+    _db: &Database,
+    _message: &SignedGossipMessage,
+) -> Result<(), String> {
+    Err(LEGACY_SENTINEL_PRIORS_DISABLED.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
 
-    fn test_db() -> Database {
-        let db = Database::open_in_memory().expect("in-memory db");
-        db.run_migrations().expect("migrations");
-        db
+    fn count(db: &Database, table: &str) -> i64 {
+        db.conn()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
     }
 
-    fn committee_setup(db: &Database, signer: &str) {
-        // Migration 037 seeded the Sentinel DAO row; add the signer
-        // as a committee member.
+    #[test]
+    fn committee_signed_prior_announcement_is_rejected_without_mutation() {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        let signer = "stake_test1signer";
         db.conn()
             .execute(
                 "INSERT INTO governance_dao_members (dao_id, stake_address, role)
@@ -213,209 +44,44 @@ mod tests {
                 params![signer],
             )
             .unwrap();
-    }
-
-    fn approved_proposal(db: &Database, proposal_id: &str) {
         db.conn()
             .execute(
                 "INSERT INTO governance_proposals
                     (id, dao_id, title, category, proposer, status)
-                 VALUES (?1, 'sentinel-dao', 'test', 'sentinel_prior', 'stake_test1', 'approved')",
-                params![proposal_id],
+                 VALUES ('prop1', 'sentinel-dao', 'test', 'sentinel_prior', 'stake_test1', 'approved')",
+                [],
             )
             .unwrap();
-    }
+        let priors_before = count(&db, "sentinel_priors");
+        let sync_before = count(&db, "sync_log");
 
-    fn make_message(ann: &SentinelPriorAnnouncement, signer: &str) -> SignedGossipMessage {
-        SignedGossipMessage {
+        let announcement = serde_json::json!({
+            "prior_id": "prior1",
+            "proposal_id": "prop1",
+            "cid": "cid-123",
+            "model_kind": "keystroke",
+            "label": "paste_macro",
+            "schema_version": 1,
+            "sample_count": 42,
+            "notes": null,
+            "signature": "deadbeef",
+            "ratified_at": "2026-04-18T00:00:00Z",
+        });
+        let message = SignedGossipMessage {
             topic: crate::p2p::types::TOPIC_SENTINEL_PRIORS.into(),
-            payload: serde_json::to_vec(ann).unwrap(),
+            payload: serde_json::to_vec(&announcement).unwrap(),
             signature: vec![0xDE, 0xAD],
             public_key: vec![0; 32],
             stake_address: signer.into(),
             timestamp: 1_700_000_000,
             encrypted: false,
             key_id: None,
-        }
-    }
+        };
 
-    fn make_ann(proposal_id: &str, prior_id: &str, kind: &str) -> SentinelPriorAnnouncement {
-        SentinelPriorAnnouncement {
-            prior_id: prior_id.into(),
-            proposal_id: proposal_id.into(),
-            cid: "cid-123".into(),
-            model_kind: kind.into(),
-            label: "paste_macro".into(),
-            schema_version: 1,
-            sample_count: 42,
-            notes: None,
-            signature: "deadbeef".into(),
-            ratified_at: "2026-04-18T00:00:00Z".into(),
-        }
-    }
+        let error = handle_sentinel_prior_message(&db, &message).unwrap_err();
 
-    #[test]
-    fn mirrors_approved_prior_from_committee_signer() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        approved_proposal(&db, "prop1");
-        let ann = make_ann("prop1", "prior1", "keystroke");
-
-        let result =
-            handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"));
-        assert!(result.is_ok(), "got {result:?}");
-
-        let count: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM sentinel_priors WHERE id = 'prior1'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn mirror_rolls_back_when_sync_log_fails() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        approved_proposal(&db, "prop1");
-        let ann = make_ann("prop1", "prior1", "keystroke");
-        db.conn()
-            .execute_batch(
-                "CREATE TRIGGER fail_sentinel_prior_sync BEFORE INSERT ON sync_log \
-                 WHEN NEW.entity_type = 'sentinel_prior' \
-                 BEGIN SELECT RAISE(ABORT, 'injected Sentinel prior sync failure'); END;",
-            )
-            .unwrap();
-
-        let error =
-            handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-                .unwrap_err();
-
-        assert!(error.contains("injected Sentinel prior sync failure"));
-        let count: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM sentinel_priors", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
-
-        db.conn()
-            .execute_batch("DROP TRIGGER fail_sentinel_prior_sync")
-            .unwrap();
-        handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-            .unwrap();
-    }
-
-    #[cfg(not(all(debug_assertions, feature = "legacy-sentinel-prior-ratification")))]
-    #[test]
-    fn production_handler_rejects_legacy_sentinel_prior_gossip() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        approved_proposal(&db, "prop1");
-        let ann = make_ann("prop1", "prior1", "keystroke");
-
-        let error = handle_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-            .unwrap_err();
-
-        assert!(error.contains("verified committee outcome certificate"));
-        let count: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM sentinel_priors", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn rejects_non_committee_signer() {
-        let db = test_db();
-        approved_proposal(&db, "prop1");
-        let ann = make_ann("prop1", "prior1", "keystroke");
-
-        let err = handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_attacker"))
-            .unwrap_err();
-        assert!(err.contains("unauthorized"), "got {err}");
-
-        let count: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM sentinel_priors", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn rejects_face_kind() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        approved_proposal(&db, "prop1");
-        let ann = make_ann("prop1", "prior1", "face");
-
-        let err =
-            handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-                .unwrap_err();
-        assert!(err.contains("face"), "got {err}");
-    }
-
-    #[test]
-    fn defers_when_proposal_unknown_locally() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        // No proposal inserted — ordering invariant kicks in.
-        let ann = make_ann("prop-unknown", "prior1", "mouse");
-
-        let result =
-            handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"));
-        assert!(result.is_ok(), "defer should return Ok, got {result:?}");
-
-        let count: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM sentinel_priors", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn rejects_unapproved_proposal() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        db.conn()
-            .execute(
-                "INSERT INTO governance_proposals
-                    (id, dao_id, title, category, proposer, status)
-                 VALUES ('prop1', 'sentinel-dao', 'test', 'sentinel_prior',
-                         'stake_test1', 'rejected')",
-                [],
-            )
-            .unwrap();
-        let ann = make_ann("prop1", "prior1", "mouse");
-
-        let err =
-            handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-                .unwrap_err();
-        assert!(err.contains("expected 'approved'"), "got {err}");
-    }
-
-    #[test]
-    fn mirror_is_idempotent() {
-        let db = test_db();
-        committee_setup(&db, "stake_test1signer");
-        approved_proposal(&db, "prop1");
-        let ann = make_ann("prop1", "prior1", "keystroke");
-
-        handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-            .unwrap();
-        handle_legacy_sentinel_prior_message(&db, &make_message(&ann, "stake_test1signer"))
-            .unwrap();
-
-        let count: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM sentinel_priors WHERE id = 'prior1'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(error, LEGACY_SENTINEL_PRIORS_DISABLED);
+        assert_eq!(count(&db, "sentinel_priors"), priors_before);
+        assert_eq!(count(&db, "sync_log"), sync_before);
     }
 }

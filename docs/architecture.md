@@ -478,11 +478,11 @@ path within the same process hangs indefinitely.
 | PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
 | Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
 | Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Reserved compatibility topic; subscribed and scored, but grants no authority and has no inbound persistence handler |
-| Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
+| Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
 | Goal Templates | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates |
 | Question Banks | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
-The taxonomy, governance, goal-template, and question-bank topics are still subscribed and validated, but release builds reject every inbound message on them before any database read or write (no rows, sync-log entry, or UI event) until handlers consume verified committee outcome certificates. The legacy apply paths compile only in debug builds with `legacy-taxonomy-ratification`, `legacy-local-governance`, or `legacy-content-ratification`.
+The taxonomy, governance, Sentinel prior, goal-template, and question-bank topics are still subscribed and validated, but release builds reject every inbound message on them before any database read or write (no rows, sync-log entry, or UI event) until handlers consume verified committee outcome certificates. The governance and Sentinel prior handlers only reject. The legacy taxonomy and content apply paths compile only in debug builds with `legacy-taxonomy-ratification` or `legacy-content-ratification`.
 
 Six request-response protocols (libp2p `request-response` + CBOR
 codec) run alongside the gossip mesh and are not part of the
@@ -754,8 +754,7 @@ list.
 | attestation | 4 | `get_course_completion_endorsement_request`, `sign_course_completion_endorsement`, `import_course_completion_endorsement`, `get_course_completion_endorsement_status` |
 | opinions | 6 | `publish_opinion`, `list_opinions`, `withdraw_own_opinion` |
 | integrity | 6 | `integrity_start_session`, `integrity_submit_snapshot`, `integrity_get_session` |
-| sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_load_dao_classifier`, `sentinel_paste_classifier_info`, `sentinel_revert_classifier_to_bundled`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
-| sentinel_priors | 9 | `sentinel_propose_prior`, `sentinel_ratify_prior`, `sentinel_priors_list`, `sentinel_priors_sync`, `sentinel_priors_load`, `sentinel_get_active_paste_classifier`, `sentinel_set_kill_switch`, `sentinel_blocklist_version`, `sentinel_unblocklist_version` |
+| sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_paste_classifier_info`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
 | content | 6 | `content_add`, `content_get`, `content_resolve` |
 | pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
 | storage | 4 | `storage_stats`, `storage_get_quota`, `storage_set_quota`, `storage_evict_now` |

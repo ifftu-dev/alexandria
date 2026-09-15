@@ -33,17 +33,16 @@ use serde::{Deserialize, Serialize};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::commands::sentinel_priors::{validate_prior_blob, ModelKind, PriorBlob};
 use crate::content_store::{content, storage};
 use crate::crypto::group_key::{decrypt_message, encrypt_message, generate_group_key};
 use crate::crypto::hash::entity_id;
 use crate::crypto::shamir::{self, Share};
 use crate::db::executor::DatabaseWorkload;
+use crate::sentinel::prior_blob::{validate_prior_blob, ModelKind, PriorBlob};
 use crate::AppState;
 
-/// Pin type for encrypted holdout blobs. Separate from 'sentinel_prior'
-/// so eviction heuristics can treat them independently — the holdout is
-/// smaller and re-creating it is a governance event, not a re-sync.
+/// Pin type for encrypted holdout blobs, kept apart from cache pins so
+/// eviction never drops a holdout set.
 const PIN_TYPE_SENTINEL_HOLDOUT: &str = "sentinel_holdout";
 
 // ============================================================================

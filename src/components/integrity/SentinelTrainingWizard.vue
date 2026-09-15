@@ -130,8 +130,8 @@ const actionError = ref<string | null>(null)
 let retryAction: (() => Promise<void>) | null = null
 const retryStepAction = () => retryAction?.()
 const aiTrainingResults = ref<{
-  keystrokeAE: { trained: boolean; loss: number; samples: number; priorDigraphs: number }
-  mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
+  keystrokeAE: { trained: boolean; loss: number; samples: number }
+  mouseCNN: { trained: boolean; loss: number; samples: number }
   faceEmbedder: { enrolled: boolean; progress: number }
 } | null>(null)
 

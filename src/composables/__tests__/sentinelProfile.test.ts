@@ -146,7 +146,7 @@ describe('Sentinel profile-lock boundary', () => {
     await profiles.lockProfile()
   })
 
-  it.each(['priors', 'save', 'gaze'] as const)('cancels %s follow-up work without requiring a profile lock', async action => {
+  it.each(['train', 'save', 'gaze'] as const)('cancels %s follow-up work without requiring a profile lock', async action => {
     const { profiles, sentinel } = await services()
     await profiles.unlockProfile('A', 'password')
     const keyboardCleanup = sentinel.startTrainingKeystrokes()
@@ -159,7 +159,7 @@ describe('Sentinel profile-lock boundary', () => {
     const response = deferred<unknown>()
     const requested = deferred<void>()
     const commandToPause = {
-      priors: 'sentinel_priors_list', save: 'sentinel_train_keystroke_ae', gaze: 'sentinel_train_gaze_calib',
+      train: 'sentinel_train_keystroke_ae', save: 'sentinel_train_keystroke_ae', gaze: 'sentinel_train_gaze_calib',
     }[action]
     const fallback = mocks.invoke.getMockImplementation()!
     mocks.invoke.mockImplementation(async (command, args, options) => {
@@ -167,7 +167,7 @@ describe('Sentinel profile-lock boundary', () => {
       return fallback(command, args, options)
     })
     const controller = new AbortController()
-    const training = action === 'priors' ? sentinel.trainAIModels(controller.signal)
+    const training = action === 'train' ? sentinel.trainAIModels(controller.signal)
       : action === 'save' ? sentinel.saveTrainingProfile(controller.signal)
         : sentinel.trainGazeCalibration([
             { yaw: 0, pitch: 0, roll: 0, irisDx: 0, irisDy: 0, targetX: 0.5, targetY: 0.5 },
@@ -176,11 +176,9 @@ describe('Sentinel profile-lock boundary', () => {
       : expect(training).rejects.toThrow('Sentinel operation was cancelled')
     await requested.promise
     controller.abort()
-    response.resolve(action === 'priors' ? [{ id: 'private-prior' }]
-      : { trained_epochs: 99, training_samples: 20, train_loss: 0.1 })
+    response.resolve({ trained_epochs: 99, training_samples: 20, train_loss: 0.1 })
     await settled
     const commands = mocks.invoke.mock.calls.map(([command]) => command)
-    expect(commands).not.toContain('sentinel_priors_load')
     expect(commands).not.toContain('sentinel_train_mouse_cnn')
     expect(commands).not.toContain('sentinel_user_models_status')
     expect(sentinel.getAIModelStatus().keystrokeAE).toBeNull()
@@ -479,55 +477,4 @@ describe('Sentinel profile-lock boundary', () => {
     await profiles.lockProfile()
   })
 
-  it('cancels a prior-fetch chain before loading its blobs or beginning training', async () => {
-    const { profiles, sentinel } = await services()
-    await profiles.unlockProfile('A', 'password')
-    await sentinel.start('enrollment')
-    for (let i = 0; i < 20; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
-    const response = deferred<unknown>()
-    const requested = deferred<void>()
-    const fallback = mocks.invoke.getMockImplementation()!
-    mocks.invoke.mockImplementation(async (command, args, options) => {
-      if (command === 'sentinel_priors_list') { requested.resolve(); return response.promise }
-      return fallback(command, args, options)
-    })
-    const training = sentinel.trainAIModels()
-    const rejected = expect(training).rejects.toThrow('cancelled by locking')
-    await requested.promise
-    await profiles.lockProfile()
-    await profiles.unlockProfile('B', 'password')
-    response.resolve([{ id: 'private-prior' }])
-    await rejected
-    const commands = mocks.invoke.mock.calls.map(([command]) => command)
-    expect(commands).not.toContain('sentinel_priors_load')
-    expect(commands).not.toContain('sentinel_train_keystroke_ae')
-    await profiles.lockProfile()
-  })
-
-  it('discards an old DAO candidate and permits a new profile to perform its own lookup', async () => {
-    const { profiles, sentinel } = await services()
-    await profiles.unlockProfile('A', 'password')
-    const response = deferred<unknown>()
-    const requested = deferred<void>()
-    const fallback = mocks.invoke.getMockImplementation()!
-    mocks.invoke.mockImplementation(async (command, args, options) => {
-      if (command === 'sentinel_get_active_paste_classifier' && mocks.active === 'A') {
-        requested.resolve(); return response.promise
-      }
-      return fallback(command, args, options)
-    })
-    await sentinel.start('enrollment-A')
-    await requested.promise
-    await profiles.lockProfile()
-    await profiles.unlockProfile('B', 'password')
-    await sentinel.start('enrollment-B')
-    await flushPromises()
-    response.resolve({ weights_cid: 'old-profile-cid', version: 'old' })
-    await flushPromises()
-    const lookups = mocks.invoke.mock.calls.filter(([command]) => command === 'sentinel_get_active_paste_classifier')
-    expect(lookups).toHaveLength(2)
-    expect(lookups[1]?.[2]?.headers).toEqual({ 'x-alexandria-profile-session': 'token-B' })
-    expect(mocks.invoke.mock.calls.some(([command]) => command === 'content_resolve_bytes')).toBe(false)
-    await profiles.lockProfile()
-  })
 })

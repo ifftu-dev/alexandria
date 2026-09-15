@@ -6,8 +6,7 @@ via `tract-onnx` (embedded into the Rust backend at compile time via
 
 **Out-of-tree by intent.** Per `docs/sentinel-federation.md`, the training
 side-channel does not ship with the Alexandria client. This directory exists
-inside the monorepo for convenience while the pipeline is being bootstrapped;
-once Phase 2b ratifies the first model, move this to its own repo so the
+inside the monorepo for convenience; it can move to its own repo so the
 client build never pulls Python deps.
 
 ## Pipeline
@@ -46,7 +45,9 @@ synth-sentinel  ->  featurize.py  ->  train.py  ->  paste-v1.onnx
    where it is embedded into the Rust binary at compile time via `include_bytes!`
    (see `src-tauri/src/sentinel/paste_classifier.rs`) — no `tauri.conf.json`
    `resources` entry is needed. Refresh the `paste-v1.onnx.sha256` lockfile
-   alongside it. The DAO-ratified path (Phase 4) replaces this manual copy.
+   alongside it. An app release is the only way a model reaches users; no
+   command loads replacement weights at runtime. See
+   `docs/sentinel-runbook.md`.
 
 ## Why MLP, not transformer
 
@@ -59,7 +60,7 @@ later sequence-level feature path lands.
 
 ## Gate thresholds
 
-A model only ratifies (Phase 4) if its `eval.json` reports:
+A model only ships if its `eval.json` reports:
 
 - macro TPR ≥ 0.92
 - macro FPR ≤ 0.03

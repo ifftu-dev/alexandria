@@ -3,12 +3,10 @@
   "subtitle": "让你的测评保持诚信",
   "actions": {
     "resetProfile": "重置设置",
-    "proposeCheat": "提议作弊模式",
     "recalibrate": "重新设置",
     "train": "设置 Sentinel",
     "open": "打开",
-    "runTest": "运行测试",
-    "openCommunity": "打开社区"
+    "runTest": "运行测试"
   },
   "tabs": {
     "overview": "概览",
@@ -32,14 +30,6 @@
     "clean": "无异常",
     "flagged": "已标记",
     "suspended": "已暂停"
-  },
-  "community": {
-    "title": "Sentinel 社区",
-    "active": "活跃",
-    "pending": "正在起步",
-    "description": "审核每份 Sentinel 副本都从中学习的共享作弊模式库。",
-    "noCouncil": "尚未选出理事会。在 Alexandria 主社区中提议第一个 Sentinel 理事会，以解锁批准和准确性测试。",
-    "members": "理事会成员"
   },
   "holdout": {
     "title": "准确性测试集",
@@ -208,9 +198,7 @@
   "pasteClassifier": {
     "title": "Sentinel 粘贴检测器",
     "description": "在智能评分开启时加入粘贴检测器信号。如果它标记了太多诚实的答案，可将其关闭；其他智能信号会继续工作。",
-    "loadedModel": "已加载的检测器",
-    "activeModel": "社区检测器",
-    "bundledFallback": "内置默认"
+    "loadedModel": "已加载的检测器"
   },
   "reset": {
     "title": "清除你的设置",
@@ -265,48 +253,6 @@
     "verdictAttack": "作弊测试集：Sentinel 的平均告警水平为 {score}%（越高越好）。{count} 个{kind}样本中有 {adv}% 被识别为作弊——这就是你对“{label}”类别的捕获率。",
     "note": "已解锁的测试集留在此设备上。请勿分享带标签的样本——泄露它们等于把答案交给作弊者。",
     "holdoutOption": "{kind} · 阈值 {threshold} · {date}"
-  },
-  "propose": {
-    "back": "返回 Sentinel",
-    "title": "提议一个作弊模式",
-    "subtitle": "提交一个带标签的作弊模式，供 Sentinel 社区审核。获批的模式会教会每份 Sentinel 副本识别那类作弊。不接受人脸模式。",
-    "submittedTitle": "提案已发送",
-    "submittedBody": "提案 ID：{id}。Sentinel 社区成员将对它投票——到社区工作台查看进展。",
-    "another": "再提议一个",
-    "step1": "1. 哪个模型",
-    "step1Body": "哪个模型应学会捕捉这个模式？人脸数据绝不共享。",
-    "step2": "2. 标签",
-    "step2Body": "这是哪类作弊？选择一个已知标签或输入你自己的。",
-    "labelPlaceholder": "或输入自定义标签（会覆盖上面的选择）",
-    "step3": "3. 样本文件",
-    "step3Body": "一个格式为 1 的 JSON 文件，其模型与你上面的选择一致，带一个标签，且至少有 20 个样本。格式详见 {doc}。",
-    "selected": "已选择：{name}",
-    "parsedOk": "看起来不错——{count} 个样本，标签 {label}。",
-    "kindMismatch": "请注意：文件的模型是“{fileKind}”，但你选择的是“{selectedKind}”。提交前请更改其一。",
-    "selfCheckTitle": "Sentinel 自检",
-    "step4": "4. 来源会话（可选）",
-    "step4Body": "如果这些样本取自你自己的某次测评会话，请在此选择。被标记或暂停的会话不能使用——作弊数据不得塑造检测器。无论如何 Sentinel 都会再次检查。",
-    "sessionNone": "无",
-    "step5": "5. 提案摘要",
-    "titlePlaceholder": "向投票者展示的简短标题",
-    "descriptionPlaceholder": "为什么应该批准它？你是如何收集数据的？",
-    "submit": "提交提案",
-    "verdict": {
-      "untrained": "Sentinel 在此尚未设置，因此无法自检。请先设置 Sentinel，看看这是否真的像作弊。",
-      "strong": "Sentinel 对此强烈标记（平均 {pct}%，{adv}% 的样本越线）。是个可靠的作弊模式。",
-      "weak": "Sentinel 认为这接近正常（平均 {pct}%）。批准它可能会教模型去标记诚实的人——提交前请再考虑。",
-      "borderline": "临界：平均 {pct}%，{adv}% 被标记。该模式可能较弱或混杂——再看看这些样本。"
-    },
-    "errors": {
-      "samplesArray": "“samples”必须是一个列表。",
-      "tooFew": "至少需要 20 个样本（实际 {count} 个）。",
-      "faceForbidden": "不接受人脸模式。",
-      "unsupportedKind": "不支持的模型：{kind}。",
-      "unsupportedSchema": "不支持的格式：{schema}。",
-      "emptyLabel": "标签不能为空。",
-      "readFailed": "无法读取该文件：{error}"
-    },
-    "statusOption": "{date} — 状态：{status}"
   },
   "wizard": {
     "welcomeTitle": "设置 Sentinel",

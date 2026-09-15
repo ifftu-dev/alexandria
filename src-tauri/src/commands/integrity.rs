@@ -4,7 +4,6 @@ use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-use crate::commands::sentinel_dao::SENTINEL_DAO_ID;
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::integrity_attestation::{
@@ -12,6 +11,9 @@ use crate::domain::integrity_attestation::{
     CoSignature,
 };
 use crate::AppState;
+
+/// DAO row whose committee members co-sign integrity attestations.
+const SENTINEL_DAO_ID: &str = "sentinel-dao";
 
 // ============================================================================
 // Types
