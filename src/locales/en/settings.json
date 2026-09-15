@@ -40,6 +40,10 @@
       "directories": {
         "label": "Directories",
         "desc": "Services you have asked to tell you what they hold about you."
+      },
+      "assistants": {
+        "label": "Assistant access",
+        "desc": "External AI assistants that can read this profile"
       }
     }
   },
@@ -266,5 +270,26 @@
     "showPhrase": "Show phrase",
     "decrypting": "Decrypting…",
     "tryAgain": "Try again"
+  },
+  "assistants": {
+    "title": "Assistant access",
+    "intro": "Connect an external MCP assistant, such as Claude Code, to this profile. You choose what it may read; drafts it proposes wait for your approval in Workflows → Runs.",
+    "unavailable": "Local assistant access is unavailable. It currently requires Alexandria running on macOS or Linux.",
+    "name": "Assistant name",
+    "permissions": "Permissions",
+    "learningScope": "Read published courses: the catalog, course outlines, lesson text, video chapters, and quiz questions without answers. Lessons not stored on this device may be fetched from peers. Assessments are never shared.",
+    "draftsScope": "Read your own course drafts: titles, text lessons, instructor instructions and selected source notes.",
+    "proposeScope": "Also allow submitting lesson proposals for my review.",
+    "expiry": "Access expires after one hour and is revoked when you lock, switch profiles or close Alexandria. Your assistant may send what it reads to its model provider.",
+    "grant": "Grant access for one hour",
+    "ready": "Access granted",
+    "setup": "Add this server configuration to your MCP client.",
+    "setupHelp": "Use the full path to the built alexandria-mcp executable if it is not on your PATH. Keep Alexandria open. The private connection file contains the grant; do not share it.",
+    "scopeLearning": "Published courses",
+    "scopeDrafts": "Read drafts",
+    "scopePropose": "Propose drafts",
+    "expiresAt": "Expires {time}",
+    "revoke": "Revoke access",
+    "none": "No active assistant grants."
   }
 }

@@ -138,6 +138,25 @@ impl alexandria_studio::broker::BrokerHost for AppBroker {
     ) -> Result<serde_json::Value, String> {
         with_db(self.state(), |db| f(db))
     }
+
+    fn fetch_content(&self, blob: &str) -> alexandria_studio::broker::ContentFuture<'_> {
+        let blob = blob.to_string();
+        Box::pin(async move {
+            let resolver = self
+                .state()
+                .resolver
+                .lock()
+                .await
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| "content resolver unavailable".to_string())?;
+            let resolved = resolver
+                .resolve(&blob)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(resolved.bytes.to_vec())
+        })
+    }
 }
 
 #[cfg(all(desktop, unix))]

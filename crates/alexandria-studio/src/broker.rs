@@ -4,7 +4,9 @@
 //! sends one newline-delimited JSON request per connection; every request is
 //! reauthorized against scope, expiry and the current profile epoch.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,12 +18,17 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::{
     grants::{Grants, StudioGrant},
-    store, Error, Result,
+    learning, store, Error, Result,
 };
 
 pub const MAX_REQUEST_BYTES: usize = 262_144;
 pub const MAX_CONCURRENT_REQUESTS: usize = 8;
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a lesson fetch from peers may take before it is reported unavailable.
+pub const CONTENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub type ContentFuture<'a> =
+    Pin<Box<dyn Future<Output = std::result::Result<Vec<u8>, String>> + Send + 'a>>;
 
 /// Application state the broker needs. The app implements this over its
 /// Tauri state; tests implement it over fixture profiles.
@@ -39,6 +46,11 @@ pub trait BrokerHost: Send + Sync + 'static {
         &self,
         f: &mut dyn FnMut(&Connection) -> Result<Value>,
     ) -> std::result::Result<Value, String>;
+    /// Fetches a published content blob by hash: from this device, else from
+    /// peers. Hosts without a content store report it unavailable.
+    fn fetch_content(&self, _blob: &str) -> ContentFuture<'_> {
+        Box::pin(std::future::ready(Err("no content store".to_string())))
+    }
 }
 
 #[derive(Deserialize)]
@@ -56,6 +68,34 @@ pub struct Request {
     text: String,
     #[serde(default)]
     request_id: String,
+    #[serde(default)]
+    query: String,
+    #[serde(default)]
+    skill_id: String,
+    #[serde(default)]
+    stored_only: bool,
+    #[serde(default)]
+    limit: u32,
+    #[serde(default)]
+    cursor: String,
+    #[serde(default)]
+    start: usize,
+}
+
+/// A lesson body fetched between the two authorized phases of `read_lesson`.
+struct Fetched {
+    blob: String,
+    content: std::result::Result<Vec<u8>, String>,
+}
+
+enum Dispatched {
+    Value(Value),
+    NeedsContent(String),
+}
+
+enum Step {
+    Respond(Value),
+    Fetch(String),
 }
 
 /// Accepts connections until the listener fails. Excess concurrent
@@ -87,13 +127,28 @@ async fn handle<H: BrokerHost>(host: &H, stream: UnixStream) -> std::result::Res
         match serde_json::from_slice::<Request>(&bytes) {
             Err(_) => json!({"error":"invalid_input: malformed broker request"}),
             Ok(request) => {
+                let blob = {
+                    let _lease = host.gate().read().await;
+                    match authorized_step(host, &request, None) {
+                        Step::Respond(response) => {
+                            return write_frame(&mut writer, &response).await
+                        }
+                        Step::Fetch(blob) => blob,
+                    }
+                };
+                // Published lesson content is fetched outside the lease, so a slow
+                // peer cannot hold up a profile lock. The request is authorized
+                // again, under the lease, before anything is returned.
+                let content = tokio::time::timeout(CONTENT_TIMEOUT, host.fetch_content(&blob))
+                    .await
+                    .unwrap_or_else(|_| Err("timed out".into()));
+                let fetched = Fetched { blob, content };
                 let _lease = host.gate().read().await;
-                let result = host.with_db(&mut |db| {
-                    dispatch(db, host.grants(), host.epoch(), host.now(), &request)
-                });
-                let response = match result {
-                    Ok(value) => json!({"result":value}),
-                    Err(error) => json!({"error":error}),
+                let response = match authorized_step(host, &request, Some(&fetched)) {
+                    Step::Respond(response) => response,
+                    Step::Fetch(_) => {
+                        json!({"error":"unavailable: the lesson changed while it was loading; try again"})
+                    }
                 };
                 return write_frame(&mut writer, &response).await;
             }
@@ -111,14 +166,41 @@ async fn write_frame(
     writer.write_all(&frame).await.map_err(|_| ())
 }
 
+/// Authorizes and runs one request against the profile database. A lesson
+/// whose body must first be fetched asks for it instead of responding.
+fn authorized_step<H: BrokerHost>(host: &H, request: &Request, fetched: Option<&Fetched>) -> Step {
+    let mut blob = None;
+    let result = host.with_db(&mut |db| match dispatch(
+        db,
+        host.grants(),
+        host.epoch(),
+        host.now(),
+        request,
+        fetched,
+    )? {
+        Dispatched::Value(value) => Ok(value),
+        Dispatched::NeedsContent(needed) => {
+            blob = Some(needed);
+            Ok(Value::Null)
+        }
+    });
+    match (result, blob) {
+        (Ok(_), Some(blob)) => Step::Fetch(blob),
+        (Ok(value), None) => Step::Respond(json!({"result":value})),
+        (Err(error), _) => Step::Respond(json!({"error":error})),
+    }
+}
+
 fn dispatch(
     db: &Connection,
     grants: &Mutex<Grants>,
     epoch: u64,
     now: i64,
     request: &Request,
-) -> Result<Value> {
+    fetched: Option<&Fetched>,
+) -> Result<Dispatched> {
     let scope = match request.operation.as_str() {
+        "search_catalog" | "get_course" | "read_lesson" => "learning:read",
         "list_course_drafts" | "read_lesson_draft" => "drafts:read",
         "propose_lesson_draft" => "drafts:propose",
         _ => return Err(Error::Permission),
@@ -129,7 +211,29 @@ fn dispatch(
         epoch,
         now,
     )?;
-    match request.operation.as_str() {
+    let value = match request.operation.as_str() {
+        "search_catalog" => learning::search_catalog(
+            db,
+            &learning::CatalogQuery {
+                query: &request.query,
+                skill_id: &request.skill_id,
+                stored_only: request.stored_only,
+                limit: request.limit,
+                cursor: &request.cursor,
+            },
+        )?,
+        "get_course" => learning::get_course(db, &request.course_id)?,
+        "read_lesson" => {
+            let target = learning::lesson_target(db, &request.course_id, &request.element_id)?;
+            let body = match (target.blob(), fetched) {
+                (None, _) => learning::Body::Stored,
+                (Some(blob), Some(fetched)) if fetched.blob == blob => {
+                    learning::Body::Fetched(fetched.content.as_deref().map_err(String::as_str))
+                }
+                (Some(blob), _) => return Ok(Dispatched::NeedsContent(blob.to_string())),
+            };
+            learning::render_lesson(db, &target, body, request.start)?
+        }
         "list_course_drafts" => {
             let mut stmt = db.prepare(
                 "SELECT c.id,c.title,e.id,e.title FROM courses c JOIN local_identity i ON i.id=1 AND i.stake_address=c.author_address LEFT JOIN course_chapters ch ON ch.course_id=c.id LEFT JOIN course_elements e ON e.chapter_id=ch.id AND e.element_type='text' ORDER BY c.id,ch.position,e.position LIMIT 101",
@@ -140,9 +244,9 @@ fn dispatch(
             let mut items = rows.collect::<std::result::Result<Vec<_>, _>>()?;
             let truncated = items.len() > 100;
             items.truncate(100);
-            Ok(json!({"items":items,"truncated":truncated}))
+            json!({"items":items,"truncated":truncated})
         }
-        "read_lesson_draft" => store::read_draft(db, &request.course_id, &request.element_id),
+        "read_lesson_draft" => store::read_draft(db, &request.course_id, &request.element_id)?,
         "propose_lesson_draft" => {
             let proposal = store::propose_draft(
                 db,
@@ -153,12 +257,11 @@ fn dispatch(
                 &grant.client_name,
                 &format!("{}:{}", grant.id, request.request_id),
             )?;
-            Ok(
-                json!({"run_id":proposal.id,"status":proposal.value.status,"requires_instructor_review":true}),
-            )
+            json!({"run_id":proposal.id,"status":proposal.value.status,"requires_instructor_review":true})
         }
-        _ => Err(Error::Permission),
-    }
+        _ => return Err(Error::Permission),
+    };
+    Ok(Dispatched::Value(value))
 }
 
 /// Returns the private per-user broker directory, creating it with 0700.

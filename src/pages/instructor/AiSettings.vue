@@ -5,35 +5,12 @@ import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useStudio } from '@/composables/useStudio'
 import { AppButton, AppInput, AppTextarea, AppTabs, ConfirmDialog } from '@/components/ui'
-import type { StudioConnection, StudioDocument, StudioSettings, StudioAssistantAccess, StudioAssistantConnection } from '@/types'
+import type { StudioConnection, StudioDocument, StudioSettings } from '@/types'
 
 const { t } = useI18n()
 const { invoke } = useLocalApi()
 const studio = useStudio()
 const tab = ref('roles')
-const assistantAccess = ref<StudioAssistantAccess | null>(null)
-const assistantName = ref('')
-const allowProposals = ref(false)
-const assistantConnection = ref<StudioAssistantConnection | null>(null)
-async function loadAssistantAccess() {
-  assistantAccess.value = await invoke<StudioAssistantAccess>('studio_assistant_access')
-}
-async function grantAssistant() {
-  saving.value = true; error.value = ''
-  try {
-    assistantConnection.value = await invoke<StudioAssistantConnection>('studio_grant_assistant', { clientName: assistantName.value, scopes: allowProposals.value ? ['drafts:read', 'drafts:propose'] : ['drafts:read'] })
-    assistantName.value = ''; allowProposals.value = false
-    await loadAssistantAccess()
-  } catch (e) { error.value = String(e) } finally { saving.value = false }
-}
-async function revokeAssistant(id: string) {
-  saving.value = true; error.value = ''
-  try {
-    await invoke('studio_revoke_assistant', { grantId: id })
-    if (assistantConnection.value?.grant.id === id) assistantConnection.value = null
-    await loadAssistantAccess()
-  } catch (e) { error.value = String(e) } finally { saving.value = false }
-}
 const draft = ref<StudioDocument<StudioSettings> | null>(null)
 const connection = ref<StudioDocument<StudioConnection> | null>(null)
 const apiKey = ref('')
@@ -54,7 +31,7 @@ onBeforeRouteLeave(() => {
 function answerLeave(allow: boolean) { leave.value = false; resolveLeave?.(allow); resolveLeave = null }
 async function load() {
   try {
-    await Promise.all([studio.refresh(), loadAssistantAccess()])
+    await studio.refresh()
     if (studio.settings.value) draft.value = JSON.parse(JSON.stringify(studio.settings.value)) as StudioDocument<StudioSettings>
     baseline.value = JSON.stringify(draft.value)
   } catch (e) { error.value = String(e) }
@@ -88,8 +65,8 @@ async function saveConnection() {
 
 <template>
   <div class="mx-auto max-w-5xl space-y-6">
-    <header><h1 class="text-2xl font-bold">{{ t('instructor.studio.aiSettings') }}</h1><p class="mt-2 text-sm text-muted-foreground">{{ t('instructor.studio.aiIntro') }}</p></header>
-    <AppTabs v-model="tab" :tabs="[{ key: 'roles', label: t('instructor.studio.roles') }, { key: 'connections', label: t('instructor.studio.connections') }, { key: 'assistants', label: t('instructor.studio.assistantAccess') }]" />
+    <header><h1 class="text-2xl font-bold">{{ t('instructor.studio.aiSettings') }}</h1><p class="mt-2 text-sm text-muted-foreground">{{ t('instructor.studio.aiIntro') }}</p><p class="mt-2 text-sm text-muted-foreground">{{ t('instructor.studio.assistantMoved') }} <RouterLink to="/settings/assistants" class="text-primary hover:underline">{{ t('instructor.studio.openAssistantAccess') }}</RouterLink></p></header>
+    <AppTabs v-model="tab" :tabs="[{ key: 'roles', label: t('instructor.studio.roles') }, { key: 'connections', label: t('instructor.studio.connections') }]" />
     <p v-if="error" role="alert" class="text-sm text-error">{{ error }}</p>
     <p v-if="saved" role="status" class="text-sm text-success">{{ saved }}</p>
     <div v-if="tab === 'roles' && draft" class="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -122,27 +99,6 @@ async function saveConnection() {
         <p v-if="!studio.connections.value.length" class="p-6 text-sm text-muted-foreground">{{ t('instructor.studio.noConnections') }}</p>
       </div>
     </div>
-    <section v-if="tab === 'assistants'" class="space-y-5">
-      <div><h2 class="font-semibold">{{ t('instructor.studio.assistantAccess') }}</h2><p class="mt-2 text-sm text-muted-foreground">{{ t('instructor.studio.assistantIntro') }}</p></div>
-      <p v-if="assistantAccess && !assistantAccess.available" role="status" class="rounded-xl border border-border p-5 text-sm text-muted-foreground">{{ t('instructor.studio.assistantUnavailable') }}</p>
-      <form v-else-if="assistantAccess" class="space-y-4 rounded-xl border border-border bg-card p-5" @submit.prevent="grantAssistant">
-        <AppInput v-model="assistantName" :label="t('instructor.studio.assistantName')" required :maxlength="100" />
-        <p class="text-sm">{{ t('instructor.studio.assistantReadScope') }}</p>
-        <label class="flex items-start gap-2 text-sm"><input v-model="allowProposals" type="checkbox" class="mt-1">{{ t('instructor.studio.assistantProposeScope') }}</label>
-        <p class="text-xs text-muted-foreground">{{ t('instructor.studio.assistantExpiry') }}</p>
-        <AppButton type="submit" :loading="saving" :disabled="!assistantName.trim()">{{ t('instructor.studio.grantAccess') }}</AppButton>
-      </form>
-      <div v-if="assistantConnection" class="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-5" role="status">
-        <h3 class="font-semibold">{{ t('instructor.studio.assistantReady') }}</h3>
-        <p class="text-sm">{{ t('instructor.studio.assistantSetup') }}</p>
-        <pre class="overflow-x-auto rounded-lg bg-background p-3 text-xs">{{ JSON.stringify({ command: 'alexandria-mcp', env: { ALEXANDRIA_MCP_CONNECTION_FILE: assistantConnection.connection_file } }, null, 2) }}</pre>
-        <p class="text-xs text-muted-foreground">{{ t('instructor.studio.assistantSetupHelp') }}</p>
-      </div>
-      <div class="divide-y divide-border rounded-xl border border-border bg-card">
-        <div v-for="grant in assistantAccess?.grants" :key="grant.id" class="flex flex-wrap items-center gap-4 p-5"><div class="min-w-0 flex-1"><h3 class="font-semibold">{{ grant.client_name }}</h3><p class="mt-1 text-xs text-muted-foreground">{{ t(grant.scopes.includes('drafts:propose') ? 'instructor.studio.readAndPropose' : 'instructor.studio.readOnly') }} · {{ t('instructor.studio.expiresAt', { time: new Date(grant.expires_at * 1000).toLocaleTimeString() }) }}</p></div><AppButton type="button" variant="secondary" :loading="saving" @click="revokeAssistant(grant.id)">{{ t('instructor.studio.revokeAccess') }}</AppButton></div>
-        <p v-if="!assistantAccess?.grants.length" class="p-5 text-sm text-muted-foreground">{{ t('instructor.studio.noAssistants') }}</p>
-      </div>
-    </section>
     <ConfirmDialog :open="leave" :title="t('instructor.studio.unsaved')" :message="t('instructor.studio.discardMessage')" :confirm-label="t('instructor.studio.discard')" @confirm="answerLeave(true)" @cancel="answerLeave(false)" />
   </div>
 </template>

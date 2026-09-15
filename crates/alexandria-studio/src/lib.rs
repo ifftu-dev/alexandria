@@ -1,6 +1,7 @@
 #[cfg(unix)]
 pub mod broker;
 pub mod grants;
+pub mod learning;
 pub mod model;
 pub mod provider;
 pub mod store;
@@ -9,6 +10,8 @@ pub mod store;
 pub enum Error {
     #[error("permission_denied: course not found or not authored by you")]
     Permission,
+    #[error("not_found: no published course or lesson with that identifier")]
+    NotFound,
     #[error("profile_locked: unlock your profile")]
     Locked,
     #[error("conflict: this draft changed; reload before saving")]

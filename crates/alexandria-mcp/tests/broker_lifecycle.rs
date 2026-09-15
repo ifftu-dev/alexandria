@@ -5,7 +5,7 @@
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
@@ -44,6 +44,10 @@ struct Profile {
     locked: AtomicBool,
     now: AtomicI64,
     pause: Mutex<Option<Pause>>,
+    /// Content blobs "peers" can provide, and a hold the test can keep a fetch waiting on.
+    content: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    fetch_hold: Arc<tokio::sync::Mutex<()>>,
+    fetches: AtomicUsize,
 }
 
 impl BrokerHost for Profile {
@@ -78,6 +82,16 @@ impl BrokerHost for Profile {
         }
         f(&db).map_err(|error| error.to_string())
     }
+
+    fn fetch_content(&self, blob: &str) -> broker::ContentFuture<'_> {
+        let blob = blob.to_string();
+        Box::pin(async move {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
+            let _hold = self.fetch_hold.lock().await;
+            let found = self.content.lock().unwrap().get(&blob).cloned();
+            found.ok_or_else(|| "not provided".to_string())
+        })
+    }
 }
 
 impl Profile {
@@ -105,6 +119,9 @@ impl Profile {
             locked: AtomicBool::new(false),
             now: AtomicI64::new(1_000_000),
             pause: Mutex::new(None),
+            content: Mutex::default(),
+            fetch_hold: Arc::default(),
+            fetches: AtomicUsize::new(0),
         })
     }
 
@@ -179,6 +196,10 @@ impl Profile {
 
 fn lesson() -> Value {
     json!({"course_id":"course","element_id":"lesson"})
+}
+
+fn learn(course: &str, element: &str) -> Value {
+    json!({"course_id":course,"element_id":element})
 }
 
 fn token_of(file: &Path) -> String {
@@ -354,6 +375,204 @@ async fn two_profiles_and_clients_stay_isolated_and_scoped() {
         }
     }
     for client in [client_a, client_b, client_crossed] {
+        client.cancel().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn learners_read_published_content_without_answers_or_drafts() {
+    let a = Profile::new("A");
+    let _server = a.serve();
+    a.db.lock()
+        .unwrap()
+        .execute_batch(
+            r#"INSERT INTO courses(id,title,author_address,status) VALUES
+                 ('pub','Published Course','someone','published'),
+                 ('draft2','Hidden Draft','someone','draft');
+               INSERT INTO catalog(course_id,title,author_address,content_cid,tags,skill_ids,version,published_at,signature) VALUES
+                 ('pub','Published Course','someone','root-pub','["rust"]','["skill_a"]',1,'2026-09-01','sig'),
+                 ('remote','Remote Course','someone','root-remote','[]','[]',1,'2026-09-02','sig');
+               INSERT INTO course_chapters(id,course_id,title,position) VALUES
+                 ('pch','pub','Basics',0),('dch','draft2','Draft chapter',0);
+               INSERT INTO course_elements(id,chapter_id,title,element_type,content_inline,content_cid,position) VALUES
+                 ('intro','pch','Intro','text','Inline lesson text',NULL,0),
+                 ('blob','pch','Blob lesson','text',NULL,'blobhash',1),
+                 ('quiz','pch','Quiz','quiz','{"title":"Q","questions":[{"id":"q1","type":"single_choice","prompt":"Pick one","options":["a","b"],"correct_indices":[1],"explanation":"EXPLAINS","points":1,"difficulty":1}]}',NULL,2),
+                 ('mcq','pch','MCQ','objective_single_mcq','{"question":"Which?","options":[{"id":"o1","text":"x"},{"id":"o2","text":"y"}],"correct_option_index":1,"explanation":"EXPLAINS"}',NULL,3),
+                 ('final','pch','Final','assessment','SECRET FINAL',NULL,4),
+                 ('vid','pch','Video','video',NULL,'vidhash',5),
+                 ('gone','pch','Gone','text',NULL,'absent',6),
+                 ('dl','dch','Draft lesson','text','DRAFT TEXT',NULL,0);
+               INSERT INTO video_chapters(id,element_id,title,start_seconds,position) VALUES
+                 ('vc1','vid','Start',0,0);"#,
+        )
+        .unwrap();
+    a.content
+        .lock()
+        .unwrap()
+        .insert("blobhash".into(), b"Blob lesson body".to_vec());
+    let (_, learner_file) = a.grant("Learner", &["learning:read"]);
+    let (_, drafts_file) = a.grant("Drafts", &["drafts:read"]);
+    let (learner, drafter) = (client(&learner_file).await, client(&drafts_file).await);
+    let mut outputs = Vec::new();
+
+    let (error, page) = call(&learner, "search_catalog", json!({"query": ""})).await;
+    assert!(!error, "{page}");
+    let items = page["structuredContent"]["items"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["course_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        ["remote", "pub"],
+        "published courses only, newest first"
+    );
+    assert_eq!(items[0]["stored_on_device"], false);
+    assert_eq!(items[1]["stored_on_device"], true);
+    let (_, by_skill) = call(&learner, "search_catalog", json!({"skill_id": "skill_a"})).await;
+    assert_eq!(
+        by_skill["structuredContent"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let (_, wildcard) = call(&learner, "search_catalog", json!({"query": "_"})).await;
+    assert!(
+        wildcard["structuredContent"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "LIKE wildcards in a query are literal"
+    );
+    outputs.extend([page, by_skill, wildcard]);
+
+    let (error, outline) = call(&learner, "get_course", json!({"course_id": "pub"})).await;
+    assert!(!error, "{outline}");
+    let contents: Vec<&str> = outline["structuredContent"]["chapters"][0]["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|element| element["content"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        contents,
+        [
+            "text",
+            "text",
+            "questions",
+            "questions",
+            "withheld",
+            "video_chapters",
+            "text"
+        ]
+    );
+    let (error, remote) = call(&learner, "get_course", json!({"course_id": "remote"})).await;
+    assert!(!error, "{remote}");
+    assert_eq!(remote["structuredContent"]["stored_on_device"], false);
+    assert!(remote["structuredContent"]["chapters"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    outputs.extend([outline, remote]);
+
+    // The profile's own authored course and someone's unpublished draft do not exist for a learning grant.
+    for hidden in ["course", "draft2"] {
+        let (error, body) = call(&learner, "get_course", json!({"course_id": hidden})).await;
+        assert!(error && body.to_string().contains("not_found"), "{body}");
+        outputs.push(body);
+    }
+    for (course, element) in [("course", "lesson"), ("course", "exam"), ("draft2", "dl")] {
+        let (error, body) = call(&learner, "read_lesson", learn(course, element)).await;
+        assert!(error && body.to_string().contains("not_found"), "{body}");
+        outputs.push(body);
+    }
+
+    let (error, intro) = call(&learner, "read_lesson", learn("pub", "intro")).await;
+    assert!(!error, "{intro}");
+    assert_eq!(intro["structuredContent"]["text"], "Inline lesson text");
+    let (_, blob) = call(&learner, "read_lesson", learn("pub", "blob")).await;
+    assert_eq!(blob["structuredContent"]["text"], "Blob lesson body");
+    let (_, gone) = call(&learner, "read_lesson", learn("pub", "gone")).await;
+    assert_eq!(gone["structuredContent"]["status"], "unavailable");
+    let (_, quiz) = call(&learner, "read_lesson", learn("pub", "quiz")).await;
+    assert_eq!(
+        quiz["structuredContent"]["questions"][0]["prompt"],
+        "Pick one"
+    );
+    assert_eq!(
+        quiz["structuredContent"]["questions"][0]["options"],
+        json!(["a", "b"])
+    );
+    let (_, mcq) = call(&learner, "read_lesson", learn("pub", "mcq")).await;
+    assert_eq!(
+        mcq["structuredContent"]["questions"][0]["options"],
+        json!(["x", "y"])
+    );
+    let (_, exam) = call(&learner, "read_lesson", learn("pub", "final")).await;
+    assert_eq!(exam["structuredContent"]["status"], "withheld");
+    let (_, video) = call(&learner, "read_lesson", learn("pub", "vid")).await;
+    assert_eq!(
+        video["structuredContent"]["video_chapters"][0]["title"],
+        "Start"
+    );
+    outputs.extend([intro, blob, gone, quiz, mcq, exam, video]);
+
+    // Learning and draft scopes do not stand in for each other.
+    let (error, body) = call(&learner, "list_course_drafts", json!({})).await;
+    assert!(
+        error && body.to_string().contains("permission_denied"),
+        "{body}"
+    );
+    outputs.push(body);
+    let (error, body) = call(&drafter, "read_lesson", learn("pub", "intro")).await;
+    assert!(
+        error && body.to_string().contains("permission_denied"),
+        "{body}"
+    );
+    outputs.push(body);
+
+    for output in &outputs {
+        let text = output.to_string();
+        for secret in [
+            "EXPLAINS",
+            "correct",
+            "SECRET",
+            "DRAFT TEXT",
+            "Profile A lesson",
+        ] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+    }
+
+    // A lock while a lesson is being fetched from peers is not held up by the
+    // fetch, and the fetched content is not returned afterwards.
+    let hold = a.fetch_hold.clone().lock_owned().await;
+    let before = a.fetches.load(Ordering::SeqCst);
+    let pending = tokio::spawn(async move {
+        let result = call(&learner, "read_lesson", learn("pub", "blob")).await;
+        (learner, result)
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while a.fetches.load(Ordering::SeqCst) == before {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the fetch started");
+    tokio::time::timeout(Duration::from_secs(2), a.lock())
+        .await
+        .expect("a content fetch must not hold up a profile lock");
+    drop(hold);
+    let (learner, (error, body)) = pending.await.unwrap();
+    assert!(error, "{body}");
+    assert!(!body.to_string().contains("Blob lesson body"), "{body}");
+
+    for client in [learner, drafter] {
         client.cancel().await.unwrap();
     }
 }

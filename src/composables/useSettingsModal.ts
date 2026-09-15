@@ -14,4 +14,5 @@ export type SettingsSectionId =
   | 'guardian'
   | 'directories'
   | 'integrity'
+  | 'assistants'
   | 'advanced'

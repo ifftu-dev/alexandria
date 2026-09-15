@@ -25,13 +25,13 @@ impl Grants {
         if name.trim().is_empty()
             || name.len() > 100
             || scopes.is_empty()
-            || scopes.len() > 2
+            || scopes.len() > 3
             || scopes
                 .iter()
-                .any(|s| !["drafts:read", "drafts:propose"].contains(&s.as_str()))
+                .any(|s| !["learning:read", "drafts:read", "drafts:propose"].contains(&s.as_str()))
         {
             return Err(Error::Invalid(
-                "Choose a client name and supported draft permissions".into(),
+                "Choose a client name and supported permissions".into(),
             ));
         }
         self.entries

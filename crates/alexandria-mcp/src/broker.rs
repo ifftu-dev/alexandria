@@ -92,7 +92,8 @@ impl Broker {
                     .map(Value::take)
                     .ok_or_else(|| "unavailable: invalid broker response".to_string())
             };
-            tokio::time::timeout(std::time::Duration::from_secs(6), exchange)
+            // Longer than the broker's own limit, which covers fetching a lesson from peers.
+            tokio::time::timeout(std::time::Duration::from_secs(20), exchange)
                 .await
                 .map_err(|_| "unavailable: broker request timed out".to_string())?
         }
