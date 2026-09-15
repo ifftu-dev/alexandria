@@ -723,6 +723,28 @@ Governance in Alexandria MUST be fully decentralised, meritocratic, and evidence
 
 The governance hierarchy mirrors the platform's knowledge taxonomy. When a new Subject Field is created, the system MUST automatically instantiate a corresponding top-level DAO. Each Subject within a Subject Field MUST automatically receive its own Sub-DAO.
 
+#### 10.2.1 Founding Genesis and DAO Identity
+
+An active DAO MUST begin from a public, one-time founding-genesis document accepted by exactly seven independently controlled founding members. Its canonical core MUST contain the human-readable name and scope, protocol and rules versions, all seven member identifiers and their distinct identity, consensus, and governance public keys, five-of-seven receipt and outcome thresholds, the two-thirds proposal-approval fraction, a positive minimum eligible-voter turnout count, the initial qualification policy, and CometBFT activation parameters. The core MUST NOT contain a DAO ID or genesis hash.
+
+Each listed founder MUST prove control of all three declared keys by signing the same domain-separated, JCS-canonical core bytes. Member identifiers, members, acceptances, issuer identifiers, and assessment-evidence identifiers MUST use their specified canonical ordering, and key material and signatures MUST use canonical lowercase encodings. A conforming verifier MUST reject missing, duplicate, reordered, reused, malformed, or invalid members, keys, and acceptances. Five operational signatures are insufficient to create a founding roster: all seven founding acceptances are required.
+
+After verifying the complete canonical envelope, the verifier MUST derive both the genesis hash and DAO ID as the lowercase BLAKE2b-256 digest of `"alexandria/governance/genesis-id/v1" || 0x00 || canonical_envelope`. The canonical JSON envelope is the authoritative genesis artifact and MUST NOT exceed 256 KiB. Competing envelopes, including envelopes with the same display name or scope, derive different DAO identities.
+
+A client MUST explicitly pin the exact verified canonical envelope before treating the DAO or any descendant committee certificate as trusted. Discovery, sync, an application default or update, and optional Cardano anchoring MUST NOT automatically create, replace, or reset that local trust anchor.
+
+#### 10.2.2 Portable Genesis Locators
+
+A portable genesis locator is discovery metadata, not authority. It MUST NOT embed the founding-genesis envelope or cause automatic retrieval or pinning. Its encoded form MUST NOT exceed 2 KiB and MUST contain only:
+
+- the genesis-derived, lowercase 64-hex DAO ID;
+- the lowercase 64-hex BLAKE3 hash of the authoritative canonical JSON bytes; and
+- between two and eight distinct content-addressed retrieval locations.
+
+The accepted top-level forms are `alexandria://governance/genesis/<dao-id>` and `https://alexandria.ifftu.dev/governance/genesis/<dao-id>`. They carry one `content=<BLAKE3>` field and repeated `source=<location>` fields. Unknown or duplicate singleton fields, credentials, ports, fragments, whitespace, and non-canonical paths MUST be rejected. A source MUST be either the exact identifier `iroh://<BLAKE3>` or an HTTPS URL with the same expected digest in an unsent `#blake3=<BLAKE3>` fragment. Canonicalized duplicate sources MUST be rejected.
+
+Opening a locator MAY parse, normalize, and display these identifiers, but MUST perform no network access and MUST NOT mutate content or governance trust state. Retrieval requires a separate explicit user action. The retrieved bytes MUST match the declared BLAKE3 digest, satisfy the founding-genesis size and canonicalization rules, verify every founding acceptance, and derive the locator's declared DAO ID. A client MUST then show the complete material trust facts, including all founder identifiers and keys, rules, thresholds, qualification policy, scope, activation data, and full DAO ID. Pinning requires a third explicit user action confirming the complete DAO ID and MUST persist the exact reviewed canonical bytes. QR codes encode only this locator. Source concurrency, racing, and timeout budgets are implementation policy and remain subject to the performance profile; they do not weaken any verification or consent requirement.
+
 ### 10.3 Elections
 
 Top-level DAO elections MUST be held every four (4) years for all seats on the governing committee. Sub-DAO elections MUST be held annually for all roles.

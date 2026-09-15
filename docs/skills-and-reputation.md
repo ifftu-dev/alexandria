@@ -5,8 +5,9 @@
 > **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** Every
 > reference to `skill_proofs`, `evidence_records`, or
 > `skill_assessments` in this doc describes the retired pipeline.
-> Credentials are now W3C VCs auto-earned via a Cardano completion
-> validator. Reputation computation has been repointed at credentials
+> Credentials are now W3C VCs, including locally issued learner
+> self-claims with optional Cardano completion witnesses. Reputation
+> computation has been repointed at credentials
 > (distribution math unchanged). See [`vc-migration.md`](./vc-migration.md).
 
 **Status:** Draft
@@ -85,7 +86,7 @@ Course elements (`course_elements`) are tagged with skills via `element_skill_ta
 
 The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. There are three issuance paths:
 
-1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), computes a Merkle root, and **self-issues the credential locally at claim time**. A Cardano completion-witness mint is a best-effort on-chain *anchor* (treasury-funded when configured, learner still signs), not a hard requirement — the local observer path remains as a secondary confirmation. Courses with no gradeable elements issue a **content-only** credential at a baseline proficiency (`CONTENT_COMPLETION_SCORE = 0.3`) with a deterministic completion root and no on-chain witness. `get_course_completion_status` reports the still-unmet gradeable elements, driving the "why no credential yet" surface.
+1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), and computes a Merkle root. It issues one learner-signed **`SelfAssertion` per course skill**, without an instructor signature or a required chain witness. An optional Cardano completion-witness mint is treasury-funded when configured (the learner still signs), otherwise learner-funded. A witnessed completion credential requires a confirmed successful ledger receipt and its matching stored observation; a submission acknowledgement is insufficient. Courses with no gradeable elements use `CONTENT_COMPLETION_SCORE = 0.3`, a deterministic completion root, and no on-chain witness. `get_course_completion_status` reports still-unmet gradeable elements.
 2. **Document bootstrap** — skills confirmed from an uploaded resume / transcript are self-issued as `SelfAssertion` credentials carrying a provenance tier (see §6.1).
 3. **Assessment** — passing a dynamic, Sentinel-gated question-bank attempt issues an `AssessmentCredential` bound to the integrity session (see §6.2).
 
@@ -107,7 +108,7 @@ A `SkillClaim` may carry an optional `ProvenanceTier` (migration 068) that grade
 | `accredited_document` | Backed by an accredited institution's document | a university transcript |
 | `issuer_signed` | Issued by a third party (issuer ≠ subject) | a formal credential |
 
-Higher tiers carry more aggregation confidence. A `None` provenance reproduces the pre-068 behavior exactly (quality triple `(1,1,1)`), so the `calculation_version` bump `1.0 → 1.1` is the only observable change for legacy claims.
+Higher tiers carry more aggregation confidence. A `None` provenance retains the pre-068 quality triple `(1,1,1)` under calculation version `1.1`. These weights apply only to scoring inputs: the exact-match issuer exclusion in §6.3 can remove a legacy credential from those inputs without changing its signed payload.
 
 ### 6.2 Dynamic assessments
 
@@ -116,6 +117,59 @@ Community-contributed, DAO-ratified **question banks** (migration 070; see [`pro
 - `assessment_start_attempt` draws a randomized, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`bank_questions.correct_indices`) is **never** included in the returned questions.
 - Sentinel auto-activates for every attempt (the learner is told), binding the attempt to an integrity session.
 - `assessment_grade` grades **host-side** against the locally-held key and, on pass, issues an `AssessmentCredential` bound to that integrity session, then recomputes derived skill states.
+
+Attempt ownership is checked against the authenticated learner's DID. Grading
+also verifies that the actual signing key derives that DID; a request-supplied
+identity or another learner's attempt cannot authorize issuance. Adaptive answer
+submission and finalization enforce the same learner binding.
+
+Required grading writes are atomic: item results, the successful credential and
+its local issuance records, attempt closure, and required derived-state
+recomputation commit together. A database, issuance, or recomputation failure
+rolls the batch back, leaving the attempt retryable rather than recording a pass
+without its credential. Adaptive startup commits the attempt with its first
+item; answer submission commits the answer with selection of the next item.
+Finalization rejects an unanswered pending item and, while unused bank items
+remain, requires the configured adaptive stopping rule to be met. It does not
+issue a credential merely because the current estimate exceeds the pass mark.
+
+The standalone runner does not start a backend attempt after monitoring startup
+fails. A grading failure retains answers, the attempt ID, and monitoring for
+retry. Successful grading closes monitoring; if that cleanup fails, the grade is
+retained and cleanup alone is retried, with retake disabled until it succeeds.
+Late responses after leaving the view cannot advance it or stop a newer session.
+These guarantees do not yet provide durable UI recovery after a lost successful
+IPC response or restart; the backend rejects an already-graded attempt instead
+of implementing a result-reconciliation protocol.
+
+Every new fixed or adaptive attempt requires a live integrity session. Retrying
+the start request with that same live session returns the existing draw or
+adaptive turn, including when it occupies the final permitted attempt slot. If
+the app reloads, exits, or otherwise presents a different monitoring session,
+the exposed attempt is ended as interrupted and remains ungraded. It cannot be
+resumed or credentialed, and it counts under the normal attempt limit and
+cooldown. Where policy permits an immediate further attempt, that attempt gets a
+new draw and the new session; otherwise the normal policy refusal is returned.
+
+The diagnostics workflow ends an active attempt before entry, preserving
+fixed-form selections and the adaptive answers already stored per turn. Saving
+and Sentinel cleanup must both succeed before diagnostics is enabled. The
+unfinished attempt receives a distinct diagnostics-ended state rather than a
+grade, failure, credential, or misconduct penalty, but it remains consumed for
+the bank's ordinary attempt limit and cooldown because its questions were shown.
+See [Sentinel](sentinel.md#diagnostics-transition).
+
+### 6.3 Completion endorsement and historical issuer exclusion
+
+Offline completion produces a learner's own claim, not an instructor's endorsement. The application must not derive an instructor signing key from a public author address. A genuine instructor endorsement is a separate, independently signed artifact; the new endorsement-request/response experience is still pending. A valid signature proves control of a key, not expertise or qualification under a DAO policy.
+
+Migration 085 recognizes the former public-derived issuers by reproducing their DID from a known public author address. `public_derived_issuers` retains the exact DID/preimage pair even after normal course edits or deletion. A credential is excluded from aggregation and reputation sampling only when its stored signed payload names one of those matched issuers. The `instructor_attestation` assessment label, an unsigned issuer column, or absent metadata is **not** enough to classify an issuer. Unmatched historical attestations remain unchanged.
+
+Original credential bytes and revocation flags are preserved. Recognition invalidates affected current skill caches and queues repair; affected reputation rows are hidden until recomputed in place, or retained as excluded if no scoring evidence remains. Old derived-history points are retained with validity metadata and omitted from the current history view when invalidated; normal same-day snapshot replacement still applies. Known public-derived issuers are labelled unverified rather than instructors. The current skill, provenance, talent-index, reputation, and new reputation-snapshot inputs use the exclusion policy; old signed on-chain claims are not rewritten or automatically replaced.
+
+Completion returns after local persistence, without awaiting an instructor or making a Cardano request, including when Cardano is configured. Migration 086 stores an idempotent completion receipt: the original credential IDs, enrollment completion, and any optional witness request commit together. Retrying the same learner/course/root returns those IDs rather than issuing duplicate self-claims. The existing profile-scoped worker resumes unsigned requests after restart while the profile is unlocked; it builds at most one per pass, with persisted retry backoff. Once a transaction is signed and journaled, only its original identity is reconciled—no automatic replacement. Changed evidence cannot inherit an earlier witness.
+
+The celebration shows local credential readiness separately from the optional witness's pending, submitted, outcome-unknown, confirmed, failed, or unavailable state. Time elapsed and a transaction hash do not imply confirmation. Locking clears the private celebration and discards late responses. The approved request deadlines and bounded background cleanup remain tracked in the [remediation plan](assessment-remediation-plan.md); removing provider I/O from completion does not establish device performance budgets or a cleanup-time guarantee.
 
 ---
 
@@ -126,7 +180,9 @@ Credentials are W3C Verifiable Credentials stored in the `credentials` table (th
 - Lifecycle (issue / suspend / reinstate / revoke) tracked via a RevocationList2020 status list (`credential_status_lists`)
 - Credential **integrity** is anchored on Cardano with a metadata-only transaction (label 1697) that timestamps the canonical VC hash — no NFT mint, no on-chain credential content
 
-The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. A CIP-68 soulbound **reputation snapshot** path exists (`submit_snapshot_tx`); its reference scripts (`REPUTATION_MINTING_REF_UTXO` / `SOULBOUND_REF_UTXO`) are deployed on preprod, so the mint is live.
+The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. Migration 088 also retires new CIP-68 reputation-token minting. A new reputation snapshot is a self-signed `DerivedCredential`: its subject properties freeze an explicit as-of time, the `as_of_all_eligible_evidence` scope, scaled scores, confidence method, computation specification, and the ID plus integrity hash of every contributing eligible credential. The normal credential-hash queue can optionally anchor the snapshot VC's canonical hash without publishing the credential or delaying local creation. `submit_snapshot_tx` now only schedules that background anchor; it never performs provider I/O itself.
+
+Historical CIP-68 snapshot rows remain labelled `legacy_cip68`. If an exact signed transaction was already journaled, the recovery worker may reconcile that transaction and project its receipt. An unsigned legacy row cannot initiate a mint, and neither path rebuilds or replaces signed bytes.
 
 ---
 
@@ -199,7 +255,7 @@ ReputationAssertion {
 }
 ```
 
-Stored in `reputation_assertions`, computed directly from the subject's non-revoked `credentials` (the `reputation_evidence` table was dropped in migration 040). The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
+Stored in `reputation_assertions`, computed from non-revoked `scoring_credentials` (a filtered view over the preserved `credentials` table; §6.3). The `reputation_evidence` table was dropped in migration 040. Current readers use `current_reputation_assertions`, which excludes invalidated/unusable rows. The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
 
 ### 12.4 Instructor Impact
 
@@ -208,9 +264,9 @@ Impact(I, S, P) =
   Σ learners [ ΔConfidence × Attribution ]
 ```
 
-Computed in `evidence/reputation.rs` directly from the subject's non-revoked `credentials` (the `reputation_impact_deltas` table was dropped in migration 040 — there is no per-evidence delta store).
+The expression above is the historical design, not the current VC implementation. `evidence/reputation.rs` currently uses the maximum accepted sample score for learners and the mean score issued for instructors, with distribution statistics and distinct counterparties computed over non-revoked `scoring_credentials`. Self-claims contribute only to learner reputation. The `reputation_impact_deltas` table was dropped in migration 040; there is no per-evidence delta store.
 
-Reputation snapshots can be anchored on-chain as CIP-68 soulbound tokens with CBOR-encoded datums (`reputation_snapshots` table); the reference scripts (`REPUTATION_MINTING_REF_UTXO` / `SOULBOUND_REF_UTXO`) are deployed on preprod, so the mint is live.
+Reputation snapshots are as-of views of all evidence eligible under the scoring policy at creation time; they are not rolling 30-day scores. The snapshot is a signed `DerivedCredential`, while `reputation_snapshots` stores its display/index metadata and joins to `credential_anchors` for optional background anchoring status. The signed payload declares each skill's actual computation specification and freezes the complete contributing credential ID/hash set. Creation fails if that set no longer matches the derived evidence count, rather than certifying a stale score. Historical CIP-68 rows remain recovery-only and retain their original window interpretation.
 
 ---
 
@@ -398,6 +454,7 @@ implementation-status preamble.
 | Anti-gaming (cluster cap, inflation z-score, §15) | `aggregation::antigaming` | PR 7 |
 | Issuer clustering / pairwise dependence | `aggregation::independence` | PR 7 (per-DID v1; richer signals deferred) |
 | Persisted derived-state cache (§16) | `commands::aggregation` (`derived_skill_states` table) | PR 13 |
+| Exact-match public-derived issuer exclusion and cache repair (§6.3) | `public_derived_issuers`, `scoring_credentials`, `commands::aggregation`, `evidence::reputation` | mig 085 |
 | Recruiter / consumer query API (§17) | `get_derived_skill_state`, `list_derived_states`, `recompute_all` IPC | PR 13 |
 
 The §26 worked example is reproduced end-to-end by the four

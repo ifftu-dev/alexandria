@@ -65,7 +65,6 @@ All processing happens client-side. There is no server-side component in the app
 | `tab_switches` | Rule | count | 0.15 | Tab focus changes during assessment (webview) |
 | `app_switch` | Native | event | advisory | OS frontmost-app change (NSWorkspace / GetForegroundWindow / X11); emitted on `sentinel://focus` |
 | `paste_events` / `pasted_chars` | Rule | count | 0.10 | Clipboard paste activity |
-| `devtools_detected` | Rule | bool | 0.10 | DevTools heuristic |
 | `face_present` / `face_count` | Rule | bool/int | 0.15* | Face verification every 3s while camera opted in (* opt-in only; loop driven by the course player) |
 | `ai_keystroke_anomaly` | AI | 0-1 | 0.05† | Autoencoder reconstruction error |
 | `ai_mouse_human_prob` | AI | 0-1 | 0.05† | CNN human vs bot classification |
@@ -76,6 +75,14 @@ All processing happens client-side. There is no server-side component in the app
 
 † Only applied when advisory AI scoring is toggled on (see §Runtime Toggle).
 
+The weights are relative coefficients, not fixed percentages of the final score.
+The client divides the weighted sum by the sum of coefficients actually included,
+then clamps the result to [0, 1]. The five base rule terms sum to 0.75; available,
+opted-in camera presence adds 0.15. Available enabled AI terms add 0.05 each.
+Missing optional signals contribute neither a score nor a denominator term.
+There is no developer-tools term or reserved 0.10 share: removing it does not
+cap an otherwise perfect score at 0.90.
+
 ## Rule-Based System (Active)
 
 ### Client-Side (`useSentinel.ts`)
@@ -85,7 +92,7 @@ All processing happens client-side. There is no server-side component in the app
 - **Profile storage**: localStorage keyed by `sentinel_profile_{userId}_{deviceFp[0:16]}`
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
 - **Consistency scoring**: Activates after `sampleCount > 10`
-- **Integrity score**: Weighted average of all signals (see weights above)
+- **Integrity score**: Normalized weighted average of the included signals (see above)
 
 ### Flagging Logic
 
@@ -94,21 +101,51 @@ Per-snapshot checks:
 2. Low consistency score (< 0.35) → `behavior_shift` warning
 3. Excessive tab switching (> 10) → `tab_switching` info
 4. Excessive pasting (> 500 chars) → `paste_detected` warning
-5. DevTools detected → `devtools_detected` critical
-6. Bot-like mouse variance → `bot_suspected` critical
-7. Face absent (camera opted in) → `no_face` info
-8. Multiple faces → `multiple_faces` warning
-9. Face identity mismatch (enrolled) → `face_mismatch` critical
-10. Prolonged absence (5+ consecutive checks ~15s) → `prolonged_absence` warning
-11. Frequent absence (>50% of checks in snapshot window) → `frequent_absence` info
-12. Paste classifier ≥ 0.95 → `paste_classifier_anomaly` warning
-13. Paste classifier ≥ 0.99 → `paste_classifier_critical` critical
-14. Gaze off-screen ratio > 0.30 (camera opted in) → `gaze_wander` warning
-15. ≥ 3 downward off-screen glances in the window → `device_glance` critical
-16. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
-17. Native OS focus moved to another application → `app_switch` warning (distinct from the webview-only `tab_switching`; detected natively via NSWorkspace / GetForegroundWindow / X11, emitted on `sentinel://focus`)
+5. Bot-like mouse variance → `bot_suspected` critical
+6. Face absent (camera opted in) → `no_face` info
+7. Multiple faces → `multiple_faces` warning
+8. Face identity mismatch (enrolled) → `face_mismatch` critical
+9. Prolonged absence (5+ consecutive checks ~15s) → `prolonged_absence` warning
+10. Frequent absence (>50% of checks in snapshot window) → `frequent_absence` info
+11. Paste classifier ≥ 0.95 → `paste_classifier_anomaly` warning
+12. Paste classifier ≥ 0.99 → `paste_classifier_critical` critical
+13. Gaze off-screen ratio > 0.30 (camera opted in) → `gaze_wander` warning
+14. ≥ 3 downward off-screen glances in the window → `device_glance` critical
+15. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
+16. Native OS focus moved to another application → `app_switch` warning (distinct from the webview-only `tab_switching`; detected natively via NSWorkspace / GetForegroundWindow / X11, emitted on `sentinel://focus`)
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
+
+Developer-tools detection is retired as both a score input and a misconduct rule.
+Window resizing does not generate a developer-tools flag. The backend rejects a
+new snapshot containing a non-null `devtools_score` or `devtools_detected` flag
+before persisting scores or counters; it cannot safely reconstruct a composite
+from an older client that included the retired term. Historical snapshots and
+their stored outcomes are preserved, not silently rescored.
+
+### Diagnostics transition
+
+The release workflow uses explicit diagnostics entry/exit from the profile menu;
+the normal desktop menu contains no always-visible developer submenu. Entry
+during an active assessment saves fixed-form selections (adaptive answers are
+already persisted per turn), ends Sentinel, and only then asks the backend to
+end the attempt and enable diagnostics. A save or cleanup error leaves
+diagnostics disabled and presents retryable feedback.
+Diagnostics itself adds no misconduct flag or penalty and does not assign a
+failing grade to the unfinished attempt. That attempt still counts toward the
+assessment's normal attempt limit and cooldown because its questions were shown.
+
+The backend refuses entry while a linked integrity session is unfinished, marks
+open attempts with a distinct `ended_at` / `end_reason = diagnostics` state, and
+rejects later answer, grading, or finalization calls for those attempts. While
+the process-local mode is active, a persistent banner exposes the supported
+reload, web-inspector, Sentinel live-view, and CLI-install actions. Exit, profile
+lock, or application restart disables the mode; exit unmounts diagnostic views
+and closes open web inspectors. CLI-management commands also enforce the mode.
+
+Neither hiding developer tools nor offering diagnostics makes a user-controlled
+device tamper-proof. Existing backend authorization and IPC capability checks
+remain required in either mode.
 
 Session outcome determination:
 - **Clean**: Default
@@ -261,7 +298,10 @@ AI signals are advisory by default and do not contribute to the integrity score.
 - `ai_face_similarity` × 0.05 (only if camera opted in)
 - `(1 − ai_paste_anomaly)` × 0.05 (only if both the master AI toggle AND the per-signal `sentinel_paste_classifier_enabled` toggle are on)
 
-Total advisory contribution is capped at 0.20 (all four signals at once), well under any single rule-based weight. Toggle off if false-positive rate spikes.
+The four advisory coefficients sum to at most 0.20 before normalization. Their
+final share depends on the other included coefficients; they are not four fixed
+five-percentage-point additions to the final score. Toggle off if false-positive
+rate spikes.
 
 **Per-signal opt-out**: the paste classifier has its own toggle in the Sentinel dashboard ("Paste Classifier (ONNX)") backed by `setSetting('sentinel.paste_classifier_enabled')` in the profile-scoped settings DB. Defaults to `on`; flipping it off keeps the other AI signals contributing. Useful if the paste classifier specifically generates FPs.
 
@@ -441,9 +481,13 @@ is a design decision with real consequences for the person flagged.
 
 A flag that leaves the device carries the derived scores and nothing else: the
 per-signal values (`typing_score`, `mouse_score`, `human_score`, `tab_score`,
-`paste_score`, `devtools_score`, `camera_score`), the `composite_score`, and
+`paste_score`, `camera_score`), the `composite_score`, and
 timestamps. These are already what `integrity_snapshots` holds locally, so no new
 class of data is created by sending them.
+
+The legacy nullable `devtools_score` storage/serialization field remains for
+historical compatibility; new submissions must leave it null. Its presence in
+an old record does not authorize a new developer-tools misconduct rule.
 
 It may **not** carry keystroke timings, mouse traces, face embeddings, gaze
 estimates, or anything else from which behaviour could be reconstructed. Those are
