@@ -9,10 +9,15 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use alexandria_verify::course::CourseCompletionPolicy;
+
+pub const LEGACY_COURSE_DOCUMENT_VERSION: u32 = 1;
+pub const COURSE_DOCUMENT_VERSION: u32 = 2;
+
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {
-    /// Document format version (currently 1).
+    /// Document format version. Version 2 adds the immutable completion policy.
     pub version: u32,
     /// Deterministic course ID: blake2b(author_address + title + timestamp).
     pub course_id: String,
@@ -38,6 +43,10 @@ pub struct CourseDocumentPayload {
     /// keeps documents from older nodes parseable as regular courses.
     #[serde(default = "default_kind")]
     pub kind: String,
+    /// Author-selected endorsement requirements for this exact document.
+    /// Absence means completion remains a learner self-claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_policy: Option<CourseCompletionPolicy>,
 }
 
 fn default_kind() -> String {
@@ -110,6 +119,8 @@ pub struct SignedCourseDocument {
     pub updated_at: i64,
     #[serde(default = "default_kind")]
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_policy: Option<CourseCompletionPolicy>,
 
     // -- Cryptographic fields --
     /// Ed25519 signature over the payload JSON (hex-encoded, 128 chars).
@@ -134,6 +145,7 @@ impl SignedCourseDocument {
             created_at: self.created_at,
             updated_at: self.updated_at,
             kind: self.kind.clone(),
+            completion_policy: self.completion_policy.clone(),
         }
     }
 }
@@ -179,6 +191,7 @@ mod tests {
             created_at: 1700000000,
             updated_at: 1700100000,
             kind: "course".into(),
+            completion_policy: None,
             signature: "deadbeef".into(),
             public_key: "cafebabe".into(),
         }
@@ -223,6 +236,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             kind: "course".into(),
+            completion_policy: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         let parsed: CourseDocumentPayload = serde_json::from_str(&json).unwrap();

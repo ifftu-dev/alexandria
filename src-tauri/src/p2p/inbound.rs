@@ -528,6 +528,7 @@ mod tests {
     fn catalog_message(content_cid: &str) -> (String, SignedGossipMessage) {
         let author = "stake_test1uinbounddispatch";
         let announcement = crate::p2p::catalog::build_catalog_announcement(
+            &"11".repeat(32),
             author,
             "Inbound fencing",
             None,

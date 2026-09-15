@@ -9,7 +9,6 @@ use rusqlite::params;
 use serde::Deserialize;
 
 use crate::content_store::course as content_course;
-use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::catalog::CatalogEntry;
 use crate::domain::course_document::SignedCourseDocument;
@@ -281,6 +280,7 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             kind: "course".into(),
+            completion_policy: None,
             signature: "verified-before-persistence".into(),
             public_key: "verified-before-persistence".into(),
         };
@@ -429,13 +429,6 @@ pub async fn hydrate_catalog_courses(
             .map_err(|e| format!("invalid course document for {}: {e}", row.content_cid))?;
         content_course::verify_course_document(&signed_doc)
             .map_err(|e| format!("invalid signature for {}: {e}", row.content_cid))?;
-        let expected_course_id = entity_id(&[&row.author_address, &row.content_cid]);
-        if row.course_id != expected_course_id {
-            return Err(format!(
-                "catalog entry for {} has invalid deterministic course_id",
-                row.content_cid
-            ));
-        }
         if signed_doc.author_address != row.author_address {
             return Err(format!(
                 "hydrated course document author mismatch for {}",

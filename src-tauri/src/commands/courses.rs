@@ -447,7 +447,7 @@ pub async fn publish_course(
                 let updated_at = chrono::Utc::now().timestamp();
 
                 Ok(CourseDocumentPayload {
-                    version: 1,
+                    version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
                     course_id: course.id.clone(),
                     author_address: course.author_address.clone(),
                     title: course.title.clone(),
@@ -459,6 +459,7 @@ pub async fn publish_course(
                     created_at,
                     updated_at,
                     kind: course.kind.clone(),
+                    completion_policy: None,
                 })
             },
         )
@@ -508,6 +509,7 @@ pub async fn publish_course(
 
                 // Build a catalog announcement for P2P discovery
                 let announcement = catalog::build_catalog_announcement(
+                    &payload.course_id,
                     &payload.author_address,
                     &payload.title,
                     payload.description.as_deref(),

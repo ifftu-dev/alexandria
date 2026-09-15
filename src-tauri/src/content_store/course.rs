@@ -12,7 +12,8 @@ use thiserror::Error;
 use crate::content_store::content;
 use crate::content_store::node::ContentNode;
 use crate::domain::course_document::{
-    CourseDocumentPayload, PublishCourseResult, SignedCourseDocument,
+    CourseDocumentPayload, PublishCourseResult, SignedCourseDocument, COURSE_DOCUMENT_VERSION,
+    LEGACY_COURSE_DOCUMENT_VERSION,
 };
 
 #[derive(Error, Debug)]
@@ -31,6 +32,10 @@ pub enum CourseDocError {
     InvalidPublicKey(String),
     #[error("deserialization failed: {0}")]
     Deserialization(String),
+    #[error("unsupported course document version: {0}")]
+    UnsupportedVersion(u32),
+    #[error("invalid completion policy: {0}")]
+    InvalidCompletionPolicy(String),
 }
 
 /// Sign a course document payload with the given Ed25519 signing key.
@@ -40,8 +45,8 @@ pub fn sign_course_document(
     payload: &CourseDocumentPayload,
     key: &SigningKey,
 ) -> Result<SignedCourseDocument, CourseDocError> {
-    let payload_json =
-        serde_json::to_vec(payload).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    validate_payload(payload)?;
+    let payload_json = signing_bytes(payload)?;
 
     let signature = key.sign(&payload_json);
     let public_key = key.verifying_key();
@@ -59,6 +64,7 @@ pub fn sign_course_document(
         created_at: payload.created_at,
         updated_at: payload.updated_at,
         kind: payload.kind.clone(),
+        completion_policy: payload.completion_policy.clone(),
         signature: hex::encode(signature.to_bytes()),
         public_key: hex::encode(public_key.to_bytes()),
     })
@@ -70,8 +76,8 @@ pub fn sign_course_document(
 /// the included public key.
 pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), CourseDocError> {
     let payload = signed.payload();
-    let payload_json =
-        serde_json::to_vec(&payload).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    validate_payload(&payload)?;
+    let payload_json = signing_bytes(&payload)?;
 
     let sig_bytes: [u8; 64] = hex::decode(&signed.signature)
         .map_err(|e| CourseDocError::InvalidPublicKey(format!("bad signature hex: {e}")))?
@@ -90,6 +96,37 @@ pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), Cours
     verifying_key
         .verify(&payload_json, &signature)
         .map_err(|_| CourseDocError::InvalidSignature)
+}
+
+fn validate_payload(payload: &CourseDocumentPayload) -> Result<(), CourseDocError> {
+    match payload.version {
+        LEGACY_COURSE_DOCUMENT_VERSION => {
+            if payload.completion_policy.is_some() {
+                return Err(CourseDocError::InvalidCompletionPolicy(
+                    "version 1 cannot carry a completion policy".into(),
+                ));
+            }
+        }
+        COURSE_DOCUMENT_VERSION => {
+            if let Some(policy) = &payload.completion_policy {
+                policy
+                    .validate()
+                    .map_err(|error| CourseDocError::InvalidCompletionPolicy(error.to_string()))?;
+            }
+        }
+        version => return Err(CourseDocError::UnsupportedVersion(version)),
+    }
+    Ok(())
+}
+
+fn signing_bytes(payload: &CourseDocumentPayload) -> Result<Vec<u8>, CourseDocError> {
+    if payload.version == LEGACY_COURSE_DOCUMENT_VERSION {
+        serde_json::to_vec(payload)
+            .map_err(|error| CourseDocError::Serialization(error.to_string()))
+    } else {
+        serde_json_canonicalizer::to_vec(payload)
+            .map_err(|error| CourseDocError::Serialization(error.to_string()))
+    }
 }
 
 /// Publish a signed course document to the iroh blob store.
@@ -153,6 +190,11 @@ pub async fn resolve_course_document(
 mod tests {
     use super::*;
     use crate::domain::course_document::{DocumentChapter, DocumentElement};
+    use alexandria_verify::course::{
+        AuthorizedAttestor, CourseCompletionPolicy, EvidenceRequirement,
+        COMPLETION_POLICY_FORMAT_VERSION,
+    };
+    use alexandria_verify::did::did_from_verifying_key;
     use ed25519_dalek::SigningKey;
     use tempfile::TempDir;
 
@@ -175,6 +217,7 @@ mod tests {
             tags: vec!["algorithms".to_string(), "cs".to_string()],
             skill_ids: vec!["skill_001".to_string()],
             kind: "course".to_string(),
+            completion_policy: None,
             chapters: vec![DocumentChapter {
                 id: "ch_001".to_string(),
                 position: 0,
@@ -206,6 +249,21 @@ mod tests {
         }
     }
 
+    fn completion_policy(key: &SigningKey) -> CourseCompletionPolicy {
+        CourseCompletionPolicy {
+            format_version: COMPLETION_POLICY_FORMAT_VERSION,
+            required_attestors: 1,
+            authorized_attestors: vec![AuthorizedAttestor {
+                did: did_from_verifying_key(&key.verifying_key()),
+                public_key_hex: hex::encode(key.verifying_key().as_bytes()),
+            }],
+            evidence_requirements: vec![EvidenceRequirement {
+                kind: "graded-submissions".into(),
+                format_version: 1,
+            }],
+        }
+    }
+
     #[test]
     fn sign_and_verify_roundtrip() {
         let key = make_signing_key();
@@ -217,6 +275,54 @@ mod tests {
         assert_eq!(signed.public_key.len(), 64); // 32 bytes hex
 
         verify_course_document(&signed).unwrap();
+    }
+
+    #[test]
+    fn version_two_signs_immutable_completion_policy() {
+        let author_key = make_signing_key();
+        let attestor_key = make_signing_key();
+        let mut payload = make_payload();
+        payload.version = COURSE_DOCUMENT_VERSION;
+        payload.completion_policy = Some(completion_policy(&attestor_key));
+
+        let mut signed = sign_course_document(&payload, &author_key).unwrap();
+        verify_course_document(&signed).unwrap();
+
+        signed
+            .completion_policy
+            .as_mut()
+            .unwrap()
+            .required_attestors = 2;
+        assert!(matches!(
+            verify_course_document(&signed),
+            Err(CourseDocError::InvalidCompletionPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn version_one_remains_parseable_without_a_completion_policy() {
+        let key = make_signing_key();
+        let signed = sign_course_document(&make_payload(), &key).unwrap();
+        let json = serde_json::to_string(&signed).unwrap();
+        assert!(!json.contains("completion_policy"));
+
+        let parsed: SignedCourseDocument = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.version, LEGACY_COURSE_DOCUMENT_VERSION);
+        assert!(parsed.completion_policy.is_none());
+        verify_course_document(&parsed).unwrap();
+    }
+
+    #[test]
+    fn version_one_refuses_a_completion_policy() {
+        let author_key = make_signing_key();
+        let attestor_key = make_signing_key();
+        let mut payload = make_payload();
+        payload.completion_policy = Some(completion_policy(&attestor_key));
+
+        assert!(matches!(
+            sign_course_document(&payload, &author_key),
+            Err(CourseDocError::InvalidCompletionPolicy(_))
+        ));
     }
 
     #[test]
