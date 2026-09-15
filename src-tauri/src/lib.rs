@@ -310,6 +310,8 @@ impl AppState {
             let _guard = self.db.lock().map_err(|_| "storage_error".to_string())?;
             self.studio.invalidate();
         }
+        #[cfg(all(desktop, unix))]
+        commands::studio_mcp::remove_connection_files(&self.app_data_dir);
         // 0. Drop any Sentinel evidence staged but never consented to. It has
         // not been written anywhere, and it must not survive into the next
         // profile's session — see `sentinel::evidence`.

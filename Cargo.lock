@@ -242,11 +242,13 @@ dependencies = [
 name = "alexandria-mcp"
 version = "0.1.0"
 dependencies = [
+ "alexandria-studio",
  "alexandria-verify",
  "chrono",
  "futures",
  "libc",
  "rmcp",
+ "rusqlite",
  "schemars 1.2.1",
  "serde",
  "serde_json",

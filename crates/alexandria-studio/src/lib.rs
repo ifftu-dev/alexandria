@@ -1,3 +1,5 @@
+#[cfg(unix)]
+pub mod broker;
 pub mod grants;
 pub mod model;
 pub mod provider;
