@@ -39,8 +39,9 @@ onMounted(async () => {
   // Load existing config blob for display, best-effort.
   if (props.element.plugin_config_cid) {
     try {
-      const bytes = await invoke<number[]>('content_get', { hash: props.element.plugin_config_cid })
-      configJson.value = new TextDecoder().decode(new Uint8Array(bytes))
+      configJson.value = await invoke<string>('content_get_text', {
+        hash: props.element.plugin_config_cid,
+      })
     } catch { /* config stays blank; saving writes a fresh blob */ }
   }
   configLoaded.value = true

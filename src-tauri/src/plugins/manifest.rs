@@ -127,6 +127,34 @@ pub fn validate(manifest: &PluginManifest) -> Result<(), String> {
         validate_relative_path(icon, "icon_path")?;
     }
 
+    if let Some(files) = &manifest.files {
+        if files.is_empty() {
+            return Err("plugin manifest 'files' must not be empty when present".into());
+        }
+        for (path, digest) in files {
+            validate_relative_path(path, "files path")?;
+            if matches!(path.as_str(), "manifest.json" | "manifest.sig") {
+                return Err(format!(
+                    "manifest 'files' must not include the signed manifest envelope '{path}'"
+                ));
+            }
+            if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(format!(
+                    "manifest file '{path}' must have a 64-character BLAKE3 hex digest"
+                ));
+            }
+        }
+        if !files.contains_key(&manifest.entry) {
+            return Err(format!(
+                "manifest entry '{}' must be included in 'files'",
+                manifest.entry
+            ));
+        }
+        if manifest.grader.is_some() && !files.contains_key("grader.wasm") {
+            return Err("a graded plugin must include 'grader.wasm' in 'files'".into());
+        }
+    }
+
     Ok(())
 }
 
@@ -163,10 +191,15 @@ fn validate_relative_path(p: &str, field: &str) -> Result<(), String> {
     if p.starts_with('/') || p.starts_with('\\') {
         return Err(format!("manifest '{field}' must be relative, got '{p}'"));
     }
-    for component in p.split(['/', '\\']) {
-        if component == ".." {
+    if p.contains('\\') || p.contains(':') {
+        return Err(format!(
+            "manifest '{field}' must use portable forward-slash paths"
+        ));
+    }
+    for component in p.split('/') {
+        if component.is_empty() || component == "." || component == ".." {
             return Err(format!(
-                "manifest '{field}' must not contain parent-directory references"
+                "manifest '{field}' must contain only normalized path components"
             ));
         }
         if component.contains('\0') {
@@ -253,6 +286,43 @@ mod tests {
                 "entry": "../outside/index.html"
             }"#;
         assert!(parse_and_validate(bad.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_non_portable_entry_path() {
+        let bad = sample_manifest_json("1").replace("ui/index.html", "ui\\index.html");
+        assert!(parse_and_validate(bad.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_files_map() {
+        let bad = sample_manifest_json("1").replace(
+            "\"entry\": \"ui/index.html\"",
+            "\"files\": {}, \"entry\": \"ui/index.html\"",
+        );
+        let error = parse_and_validate(bad.as_bytes()).unwrap_err();
+        assert!(error.contains("must not be empty"), "{error}");
+    }
+
+    #[test]
+    fn rejects_files_map_without_entry() {
+        let digest = "a".repeat(64);
+        let bad = sample_manifest_json("1").replace(
+            "\"entry\": \"ui/index.html\"",
+            &format!("\"files\": {{\"ui/app.js\": \"{digest}\"}}, \"entry\": \"ui/index.html\""),
+        );
+        let error = parse_and_validate(bad.as_bytes()).unwrap_err();
+        assert!(error.contains("must be included"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_file_digest() {
+        let bad = sample_manifest_json("1").replace(
+            "\"entry\": \"ui/index.html\"",
+            "\"files\": {\"ui/index.html\": \"not-a-digest\"}, \"entry\": \"ui/index.html\"",
+        );
+        let error = parse_and_validate(bad.as_bytes()).unwrap_err();
+        assert!(error.contains("64-character"), "{error}");
     }
 
     #[test]

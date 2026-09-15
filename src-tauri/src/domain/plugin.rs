@@ -1,7 +1,6 @@
 //! Plugin domain types.
 //!
-//! Phase 1 of the community plugin system (see
-//! `/Users/hack/.claude/plans/prancy-bubbling-grove.md`). A plugin is an
+//! Phase 1 of the community plugin system (see `docs/plugins.md`). A plugin is an
 //! iroh blob with a signed manifest plus a `ui/` bundle that renders inside
 //! a sandboxed iframe. In Phase 2 a `grader.wasm` is added for credential-
 //! eligible assessments. For Phase 1 we only deal with interactive plugins,
@@ -140,17 +139,18 @@ pub struct PluginManifest {
     pub platforms: Vec<String>,
     /// Relative path to a small icon inside the bundle (optional).
     pub icon_path: Option<String>,
-    /// BLAKE3 (hex) of every file in the bundle, keyed by bundle-relative
-    /// path. Optional for compatibility with manifests written before this
-    /// field existed; when present it is enforced at install.
+    /// BLAKE3 (hex) of every executable, grader, UI, and supporting file in
+    /// the bundle, keyed by bundle-relative path. Embedded built-ins may omit
+    /// the map because their bytes are compiled into the trusted host binary;
+    /// community installation requires a complete, non-empty map.
     ///
     /// Without it, `plugin_cid = BLAKE3(manifest.json)` identifies the
     /// manifest and nothing else — so two bundles with identical manifests,
     /// identical author signatures and identical CIDs could ship completely
     /// different `ui/index.html`, and a Plugin DAO attestation over
     /// `(plugin_cid, grader_cid)` would say nothing about the code the learner
-    /// actually runs. `grader.wasm` was already covered by
-    /// `PluginGraderRef::blake3`; this extends that to the rest of the bundle.
+    /// actually runs. `grader.wasm` is also required in this map even though
+    /// `PluginGraderRef::blake3` independently covers it.
     #[serde(default)]
     pub files: Option<std::collections::BTreeMap<String, String>>,
     /// Relative path to the iframe entry HTML. Defaults to `ui/index.html`.
