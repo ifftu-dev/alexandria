@@ -419,7 +419,7 @@ impl App {
     fn try_unlock(&mut self, password: &str) {
         match vault::unlock_with_password(&self.ctx, password) {
             Ok(signer) => {
-                log::info!("vault unlocked for profile {}", self.ctx.profile.label());
+                log::info!("vault unlocked");
                 self.signer = Some(signer);
                 self.screen = Screen::Browse;
                 self.refresh();
@@ -1842,6 +1842,80 @@ impl App {
     }
 }
 
+/// Read a page of rows from `table`.
+///
+/// Free-standing rather than a method so it can be exercised against a real
+/// SQLite database in tests, without a vault or an unlocked keystore.
+/// Render one SQLite value as display text.
+///
+/// `limit` differs between the grid and the expanded row: the grid needs cells
+/// short enough to lay out, the expanded row exists precisely to show what the
+/// grid cut.
+fn cell_text(row: &rusqlite::Row, i: usize, limit: usize) -> rusqlite::Result<String> {
+    use rusqlite::types::ValueRef;
+
+    let text = match row.get_ref(i)? {
+        ValueRef::Null => "NULL".to_string(),
+        ValueRef::Integer(n) => n.to_string(),
+        ValueRef::Real(f) => f.to_string(),
+        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
+        // Never dump binary into a terminal: it corrupts the display and tells
+        // the reader nothing.
+        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
+    };
+    Ok(clip(&text, limit))
+}
+
+/// Read every column of one row, without the grid's narrow cell cap.
+///
+/// Re-queried rather than taken from the loaded page, so the values are the
+/// full ones. `LIMIT 1 OFFSET n` against the same unordered `SELECT *` returns
+/// the same row the page put at position `n`: identical statement, unchanged
+/// table.
+pub(super) fn read_row(conn: &Connection, table: &str, index: usize) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT 1 OFFSET {index}"))?;
+    let count = stmt.column_count();
+    let mut rows = stmt.query([])?;
+    let row = rows
+        .next()?
+        .ok_or_else(|| anyhow::anyhow!("row {} is no longer there", index + 1))?;
+    Ok((0..count)
+        .map(|i| cell_text(row, i, MAX_DETAIL_CELL))
+        .collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
+pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
+    // Table names come from sqlite_master, not from user input, so
+    // interpolating one here cannot inject. Quoted anyway, because plenty
+    // of them would otherwise collide with SQL keywords.
+    let total: i64 = conn
+        .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(-1);
+
+    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {ROW_PAGE}"))?;
+    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+    let column_count = columns.len();
+
+    let rows = stmt
+        .query_map([], |row| {
+            (0..column_count)
+                .map(|i| cell_text(row, i, MAX_CELL))
+                .collect::<rusqlite::Result<Vec<String>>>()
+        })?
+        .collect::<rusqlite::Result<Vec<Vec<String>>>>()?;
+
+    Ok(TableRows {
+        table: table.to_string(),
+        columns,
+        rows,
+        total,
+        selected: 0,
+        col_offset: 0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3010,78 +3084,4 @@ mod tests {
         assert!(matches!(app.modal, Modal::None));
         assert!(!app.should_quit, "closing help does not quit");
     }
-}
-
-/// Read a page of rows from `table`.
-///
-/// Free-standing rather than a method so it can be exercised against a real
-/// SQLite database in tests, without a vault or an unlocked keystore.
-/// Render one SQLite value as display text.
-///
-/// `limit` differs between the grid and the expanded row: the grid needs cells
-/// short enough to lay out, the expanded row exists precisely to show what the
-/// grid cut.
-fn cell_text(row: &rusqlite::Row, i: usize, limit: usize) -> rusqlite::Result<String> {
-    use rusqlite::types::ValueRef;
-
-    let text = match row.get_ref(i)? {
-        ValueRef::Null => "NULL".to_string(),
-        ValueRef::Integer(n) => n.to_string(),
-        ValueRef::Real(f) => f.to_string(),
-        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
-        // Never dump binary into a terminal: it corrupts the display and tells
-        // the reader nothing.
-        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
-    };
-    Ok(clip(&text, limit))
-}
-
-/// Read every column of one row, without the grid's narrow cell cap.
-///
-/// Re-queried rather than taken from the loaded page, so the values are the
-/// full ones. `LIMIT 1 OFFSET n` against the same unordered `SELECT *` returns
-/// the same row the page put at position `n`: identical statement, unchanged
-/// table.
-pub(super) fn read_row(conn: &Connection, table: &str, index: usize) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT 1 OFFSET {index}"))?;
-    let count = stmt.column_count();
-    let mut rows = stmt.query([])?;
-    let row = rows
-        .next()?
-        .ok_or_else(|| anyhow::anyhow!("row {} is no longer there", index + 1))?;
-    Ok((0..count)
-        .map(|i| cell_text(row, i, MAX_DETAIL_CELL))
-        .collect::<rusqlite::Result<Vec<String>>>()?)
-}
-
-pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
-    // Table names come from sqlite_master, not from user input, so
-    // interpolating one here cannot inject. Quoted anyway, because plenty
-    // of them would otherwise collide with SQL keywords.
-    let total: i64 = conn
-        .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |r| {
-            r.get(0)
-        })
-        .unwrap_or(-1);
-
-    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {ROW_PAGE}"))?;
-    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
-    let column_count = columns.len();
-
-    let rows = stmt
-        .query_map([], |row| {
-            (0..column_count)
-                .map(|i| cell_text(row, i, MAX_CELL))
-                .collect::<rusqlite::Result<Vec<String>>>()
-        })?
-        .collect::<rusqlite::Result<Vec<Vec<String>>>>()?;
-
-    Ok(TableRows {
-        table: table.to_string(),
-        columns,
-        rows,
-        total,
-        selected: 0,
-        col_offset: 0,
-    })
 }

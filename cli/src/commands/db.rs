@@ -64,8 +64,7 @@ pub fn execute(
 }
 
 // ── Migration runner ────────────────────────────────────────────────
-// Mirrors the logic in src-tauri/src/db/mod.rs — small enough to
-// duplicate rather than pulling in the full app_lib crate.
+// The CLI already links app_lib; use its atomic runner and schema extensions.
 
 pub(crate) fn ensure_migration_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -93,25 +92,7 @@ pub(crate) fn latest_version() -> i64 {
 }
 
 pub(crate) fn apply_migrations(conn: &Connection) -> Result<usize> {
-    ensure_migration_table(conn)?;
-
-    let current = current_version(conn);
-    let mut applied = 0;
-
-    for (version, name, sql) in schema::MIGRATIONS {
-        if *version > current {
-            output::info(&format!("Applying migration {}: {}", version, name));
-            conn.execute_batch(sql)
-                .with_context(|| format!("Migration {} ({}) failed", version, name))?;
-            conn.execute(
-                "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
-                rusqlite::params![version, name],
-            )?;
-            applied += 1;
-        }
-    }
-
-    Ok(applied)
+    app_lib::db::run_migrations_on_connection(conn).context("Database migration failed")
 }
 
 /// Insert the demo taxonomy/courses/governance rows if the database is empty.
@@ -166,6 +147,7 @@ fn open_db(ctx: &ProjectContext, password_file: Option<&std::path::Path>) -> Res
     conn.pragma_update(None, "key", format!("x'{key_hex}'"))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    app_lib::db::register_issuer_recognition(&conn)?;
 
     // Verify the key works by reading sqlite_master
     conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
@@ -520,4 +502,140 @@ fn dir_size(path: &std::path::Path) -> u64 {
         }
     }
     total
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn cli_seed_failure_rolls_back_and_retries() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        apply_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail_cli_seed BEFORE INSERT ON bank_questions
+             BEGIN SELECT RAISE(ABORT, 'injected CLI seed failure'); END;",
+        )
+        .unwrap();
+        let error = seed_if_empty(&conn).unwrap_err();
+        assert!(
+            error.to_string().contains("injected CLI seed failure"),
+            "{error}"
+        );
+        assert!(conn.is_autocommit());
+        for table in ["subject_fields", "courses", "credentials", "goal_templates"] {
+            assert_eq!(
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(current_version(&conn), latest_version());
+        assert!(conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+            .unwrap());
+        conn.execute_batch("DROP TRIGGER fail_cli_seed").unwrap();
+        assert!(seed_if_empty(&conn).unwrap());
+        assert!(!seed_if_empty(&conn).unwrap());
+    }
+
+    #[test]
+    fn cli_seed_backfill_failure_preserves_existing_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        apply_migrations(&conn).unwrap();
+        seed_if_empty(&conn).unwrap();
+        conn.execute_batch(
+            "DELETE FROM opinions;
+             UPDATE courses SET title = 'Preserved title', thumbnail_svg = NULL;
+             CREATE TEMP TRIGGER fail_cli_backfill BEFORE INSERT ON bank_questions
+             BEGIN SELECT RAISE(ABORT, 'injected CLI backfill failure'); END;",
+        )
+        .unwrap();
+        assert!(seed_if_empty(&conn).is_err());
+        assert!(conn.is_autocommit());
+        for query in [
+            "SELECT COUNT(*) FROM opinions",
+            "SELECT COUNT(*) FROM courses WHERE title != 'Preserved title' OR thumbnail_svg IS NOT NULL",
+        ] {
+            assert_eq!(conn.query_row(query, [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        }
+        conn.execute_batch("DROP TRIGGER fail_cli_backfill")
+            .unwrap();
+        assert!(!seed_if_empty(&conn).unwrap());
+        assert!(
+            conn.query_row("SELECT COUNT(*) FROM opinions", [], |r| r.get::<_, i64>(0))
+                .unwrap()
+                > 0
+        );
+    }
+
+    #[test]
+    fn cli_migrations_install_the_same_issuer_recognition_as_the_app() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert_eq!(apply_migrations(&conn).unwrap(), schema::MIGRATIONS.len());
+        assert_eq!(apply_migrations(&conn).unwrap(), 0);
+        conn.execute(
+            "INSERT INTO courses (id, title, author_address) VALUES ('course', 'Course', 'public-author')",
+            [],
+        ).unwrap();
+        let did: String = conn.query_row(
+            "SELECT issuer_did FROM public_derived_issuers WHERE author_address = 'public-author'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            did,
+            app_lib::crypto::did::course_authority_did("public-author").as_str()
+        );
+    }
+
+    #[test]
+    fn cli_migration_record_failure_rolls_back_schema_and_allows_retry() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_migration_table(&conn).unwrap();
+        for (version, name, sql) in schema::MIGRATIONS.iter().filter(|(v, _, _)| *v < 85) {
+            let tx = conn.unchecked_transaction().unwrap();
+            tx.execute_batch(sql).unwrap();
+            tx.execute(
+                "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
+                rusqlite::params![version, name],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail_record BEFORE INSERT ON _migrations
+            WHEN NEW.version = 85 BEGIN SELECT RAISE(ABORT, 'injected record failure'); END;",
+        )
+        .unwrap();
+        assert!(apply_migrations(&conn).is_err());
+        assert_eq!(current_version(&conn), 84);
+        let partial: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'public_derived_issuers'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(partial, 0);
+        conn.execute_batch("DROP TRIGGER fail_record").unwrap();
+        assert_eq!(
+            apply_migrations(&conn).unwrap(),
+            schema::MIGRATIONS
+                .iter()
+                .filter(|(v, _, _)| *v >= 85)
+                .count()
+        );
+        conn.execute(
+            "UPDATE _migrations SET name = 'unsupported' WHERE version = 85",
+            [],
+        )
+        .unwrap();
+        assert!(
+            apply_migrations(&conn).is_err(),
+            "the CLI must reject incompatible migration history"
+        );
+    }
 }

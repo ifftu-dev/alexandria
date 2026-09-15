@@ -18,7 +18,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 owo-colors = "4"
-indicatif = "0.17"
+indicatif = "0.18.6"
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher"] }
 dirs = "6"
 anyhow = "1"
@@ -41,8 +41,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # agree on the type. Cargo unifies them through the workspace lock.
 ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
 clap_complete = "4"
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "underline-color"] }
+crossterm = "0.29"
 
 # `alexandria credentials` shares its impl functions with the Tauri backend so
 # `list_credentials_impl`, `export_bundle_impl`, `verify_bundle_offline_impl`
