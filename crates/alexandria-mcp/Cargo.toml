@@ -23,3 +23,4 @@ tokio = { version = "1", features = ["process", "time"] }
 tempfile = "3"
 alexandria-studio = { path = "../alexandria-studio" }
 rusqlite = "0.38"
+jsonschema = { version = "=0.46.10", default-features = false }

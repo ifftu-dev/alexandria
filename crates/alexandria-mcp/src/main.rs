@@ -1,20 +1,27 @@
 mod broker;
+mod stdio;
 
 use alexandria_verify::{
     vc::{verify::verify_credential, VerifiableCredential, VerificationPolicy},
     NullStore,
 };
 use futures::StreamExt;
-use rmcp::model::{ClientJsonRpcMessage, ServerJsonRpcMessage};
-use rmcp::transport::async_rw::JsonRpcMessageCodec;
+use rmcp::model::{
+    CacheScope, CallToolRequestParams, CallToolResponse, CompleteRequestMethod,
+    CompleteRequestParams, CompleteResult, ListPromptsRequestMethod, ListPromptsResult,
+    ListResourceTemplatesRequestMethod, ListResourceTemplatesResult, ListResourcesRequestMethod,
+    ListResourcesResult, ListToolsResult, MetaObject, PaginatedRequestParams, ProtocolVersion,
+    ResultType, ServerJsonRpcMessage,
+};
 use rmcp::{
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
     model::{Implementation, ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router, Json, ServerHandler, ServiceExt,
+    service::RequestContext,
+    tool, tool_handler, tool_router, ErrorData, Json, RoleServer, ServerHandler, ServiceExt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio_util::codec::FramedRead;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -64,11 +71,31 @@ struct ProposalInput {
     request_id: String,
 }
 
+/// A nullable string described with `anyOf`: several MCP clients misread the
+/// `type: ["string", "null"]` form schemars generates for `Option<String>`.
+struct NullableString;
+
+impl JsonSchema for NullableString {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NullableString".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"anyOf": [{"type": "string"}, {"type": "null"}]})
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct DraftListItem {
     course_id: String,
     course_title: String,
+    #[schemars(with = "NullableString")]
     element_id: Option<String>,
+    #[schemars(with = "NullableString")]
     element_title: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -88,6 +115,7 @@ struct DraftRead {
     course_id: String,
     element_id: String,
     title: String,
+    #[schemars(with = "NullableString")]
     text: Option<String>,
     fingerprint: String,
     audience: String,
@@ -242,6 +270,16 @@ impl AlexandriaMcp {
     }
 }
 
+/// `io.modelcontextprotocol/serverInfo`, which results SHOULD carry.
+fn server_meta() -> MetaObject {
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "io.modelcontextprotocol/serverInfo".into(),
+        serde_json::json!({"name":"alexandria-mcp","version":env!("CARGO_PKG_VERSION")}),
+    );
+    MetaObject(meta)
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AlexandriaMcp {
     fn get_info(&self) -> ServerInfo {
@@ -249,25 +287,115 @@ impl ServerHandler for AlexandriaMcp {
             Implementation::new("alexandria-mcp", env!("CARGO_PKG_VERSION")),
         )
     }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let modern = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools: self.tool_router.list_all(),
+            meta: Some(server_meta()),
+            next_cursor: None,
+            // The list depends on the configured assistant grant, so shared caches must not reuse it.
+            ttl_ms: modern.then_some(0),
+            cache_scope: modern.then_some(CacheScope::Private),
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let response = self
+            .tool_router
+            .call(ToolCallContext::new(self, request, context))
+            .await?;
+        Ok(match response {
+            CallToolResponse::Complete(mut result) => {
+                result
+                    .meta
+                    .get_or_insert_with(MetaObject::default)
+                    .0
+                    .extend(server_meta().0);
+                CallToolResponse::Complete(result)
+            }
+            other => other,
+        })
+    }
+
+    // Resources, prompts and completion are not advertised, so they are not methods of this server.
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Err(ErrorData::method_not_found::<ListResourcesRequestMethod>())
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        Err(ErrorData::method_not_found::<
+            ListResourceTemplatesRequestMethod,
+        >())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Err(ErrorData::method_not_found::<ListPromptsRequestMethod>())
+    }
+
+    async fn complete(
+        &self,
+        _request: CompleteRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        Err(ErrorData::method_not_found::<CompleteRequestMethod>())
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use tokio::io::AsyncWriteExt;
+    // One writer serializes SDK responses and framing rejections onto stdout.
+    let (output, mut frames) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let writer = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(frame) = frames.recv().await {
+            stdout.write_all(&frame).await?;
+            stdout.flush().await?;
+        }
+        Ok::<_, std::io::Error>(())
+    });
+    let mut framing = stdio::Framing::new(output.clone());
     let input = FramedRead::new(
         tokio::io::stdin(),
-        JsonRpcMessageCodec::<ClientJsonRpcMessage>::new_with_max_length(262144),
-    );
-    let input = input
-        .take_while(|result| std::future::ready(result.is_ok()))
-        .filter_map(|result| std::future::ready(result.ok()));
-    let output = FramedWrite::new(
-        tokio::io::stdout(),
-        JsonRpcMessageCodec::<ServerJsonRpcMessage>::default(),
-    );
+        stdio::LineCodec::new(stdio::MAX_FRAME_BYTES),
+    )
+    .take_while(|line| std::future::ready(line.is_ok()))
+    .filter_map(move |line| std::future::ready(line.ok().and_then(|line| framing.parse(&line))));
+    let sink = futures::sink::unfold(output, |output, message: ServerJsonRpcMessage| async move {
+        output
+            .send(stdio::frame(&message)?)
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))?;
+        Ok::<_, std::io::Error>(output)
+    });
     AlexandriaMcp::new()
-        .serve((output, input))
+        .serve((Box::pin(sink), Box::pin(input)))
         .await?
         .waiting()
         .await?;
+    writer.await??;
     Ok(())
 }

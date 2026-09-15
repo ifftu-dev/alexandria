@@ -1,0 +1,11 @@
+mcp-2026-07-28.schema.json is an unmodified copy of the Model Context Protocol
+specification JSON Schema, used only by the alexandria-mcp conformance tests.
+
+Source:  https://github.com/modelcontextprotocol/modelcontextprotocol/blob/271ecc9accafdd9b83a3c869fa67c22953b2af80/schema/2026-07-28/schema.json
+Commit:  271ecc9accafdd9b83a3c869fa67c22953b2af80 (2026-07-28)
+SHA-256: ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203
+
+Copyright Model Context Protocol contributors. Specification contributions are
+licensed under the Apache License, Version 2.0; contributions whose authors
+have not consented to relicensing remain under the MIT License. The license
+text from the same commit is included as LICENSE-MCP-SPECIFICATION.
