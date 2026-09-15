@@ -1,5 +1,5 @@
 {
-  "description": "The subject id is not a DID, so the credential is not bound to a holder and cannot be non-transferable.",
+  "description": "The signature is authentic, but the referenced status list is not supplied. The decision is pending rather than accepting absence as proof of non-revocation.",
   "verificationTime": "2026-06-01T00:00:00Z",
   "policy": {
     "reject_expired": true,
@@ -28,18 +28,25 @@
     "issuer": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
     "validFrom": "2026-01-01T00:00:00Z",
     "credentialSubject": {
-      "id": "not-a-did",
+      "id": "did:key:z6MknENeHzKx2gvkZPqYvz8B7xCyTeJHfH6FvnHSBJAEeagD",
       "evidenceRefs": [],
       "level": 3,
       "score": 0.9,
       "skillId": "skill_vector"
+    },
+    "credentialStatus": {
+      "id": "urn:uuid:missing-status-entry",
+      "type": "RevocationList2020Status",
+      "statusPurpose": "revocation",
+      "statusListIndex": "0",
+      "statusListCredential": "urn:uuid:missing-status-list"
     },
     "proof": {
       "type": "Ed25519Signature2020",
       "created": "2026-01-01T00:00:00Z",
       "verificationMethod": "",
       "proofPurpose": "assertionMethod",
-      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..NZKauHyxbwKVu7Zc-Dk34igwN4Wvq33b65MIukknIhY1xJYn0mRHE_VGuywopxW2oLUcQSbUEM333no5PCQ1Dw"
+      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..SDew-sX7x0VqbJQhr_lIHtevFuNku74KUpQB73siiJT97ye7hWsyyw9KcH7oOPIxQnWPzdmBQfVaZfOo8egMCA"
     }
   },
   "store": {
@@ -55,12 +62,14 @@
     "revoked": false,
     "statusValid": true,
     "expired": false,
-    "subjectBound": false,
+    "subjectBound": true,
     "integrityAnchored": false,
     "suspended": false,
     "superseded": false,
     "verificationTime": "2026-06-01T00:00:00Z",
-    "pendingReasons": [],
-    "acceptanceDecision": "reject"
+    "pendingReasons": [
+      "status_list_missing"
+    ],
+    "acceptanceDecision": "pending"
   }
 }

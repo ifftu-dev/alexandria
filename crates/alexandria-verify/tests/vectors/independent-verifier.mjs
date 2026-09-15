@@ -41,6 +41,11 @@ function pubkeyFromDidKey(did) {
   return createPublicKey({ key: spki, format: 'der', type: 'spki' })
 }
 
+function allowedType(vc, policy) {
+  const allowed = policy.allowed_types ?? []
+  return allowed.length === 0 || vc.type.some(type => allowed.includes(type))
+}
+
 let pass = 0, fail = 0
 for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   const v = JSON.parse(readFileSync(f, 'utf8'))
@@ -52,47 +57,94 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
 
   // 3-5: detached JWS, RFC 7797 raw payload
   let validSignature = false
+  let issuerResolved = false
+  const pendingReasons = []
+  let key
   try {
-    const [hdr, mid, sigB64] = vc.proof.jws.split('.')
-    if (mid !== '') throw new Error('not detached')
-    const sig = Buffer.from(sigB64, 'base64url')
-    const input = Buffer.concat([Buffer.from(hdr, 'utf8'), Buffer.from('.'), signingBytes])
     // Key: registry entry covering verificationTime, else did:key self-resolution
     const rows = (v.store?.keyRegistry ?? []).filter(r =>
       r.did === vc.issuer && r.validFrom <= v.verificationTime &&
       (r.validUntil === null || r.validUntil > v.verificationTime))
-    let key
     if (rows.length) {
       rows.sort((a, b) => a.validFrom < b.validFrom ? 1 : -1)
       const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'),
                                   Buffer.from(rows[0].publicKeyHex, 'hex')])
       key = createPublicKey({ key: spki, format: 'der', type: 'spki' })
-    } else {
+      issuerResolved = true
+    } else if (vc.issuer.startsWith('did:key:')) {
       key = pubkeyFromDidKey(vc.issuer)
+      issuerResolved = true
+    } else {
+      pendingReasons.push('issuer_key_missing')
     }
-    validSignature = verify(null, input, key, sig)
-  } catch { validSignature = false }
+  } catch {
+    issuerResolved = false
+  }
+  if (key) {
+    try {
+      const parts = vc.proof.jws.split('.')
+      if (parts.length !== 3 || parts[1] !== '') throw new Error('not detached')
+      const [hdr, , sigB64] = parts
+      const sig = Buffer.from(sigB64, 'base64url')
+      const input = Buffer.concat([Buffer.from(hdr, 'utf8'), Buffer.from('.'), signingBytes])
+      validSignature = verify(null, input, key, sig)
+    } catch { validSignature = false }
+  }
 
-  // 6: expiry, subject binding, status list
+  // 6: expiry, subject binding, and conclusive status evidence
   const expired = !!(vc.validUntil && vc.validUntil < v.verificationTime)
   const subjectBound = String(vc.credentialSubject.id).startsWith('did:')
   let revoked = false
+  let statusValid = true
   if (vc.credentialStatus) {
-    const bitsHex = v.store?.statusLists?.[vc.credentialStatus.statusListCredential]
-    if (bitsHex) {
-      const bits = Buffer.from(bitsHex, 'hex')
-      const n = parseInt(vc.credentialStatus.statusListIndex, 10)
-      revoked = ((bits[n >> 3] ?? 0) & (1 << (n & 7))) !== 0
+    const listId = vc.credentialStatus.statusListCredential
+    const lists = v.store?.statusLists ?? {}
+    if (Object.hasOwn(lists, listId)) {
+      const indexText = vc.credentialStatus.statusListIndex
+      const bits = Buffer.from(lists[listId], 'hex')
+      if (!/^\d+$/.test(indexText)) {
+        statusValid = false
+      } else {
+        const n = Number(indexText)
+        const byte = Math.floor(n / 8)
+        if (!Number.isSafeInteger(n) || byte >= bits.length) statusValid = false
+        else revoked = (bits[byte] & (1 << (n % 8))) !== 0
+      }
+    } else {
+      pendingReasons.push('status_list_missing')
     }
   }
 
+  const suspendedUntil = v.store?.suspended?.[vc.id]
+  const suspended = Object.hasOwn(v.store?.suspended ?? {}, vc.id) &&
+    (suspendedUntil === null || suspendedUntil > v.verificationTime)
+  const superseded = (v.store?.superseded ?? []).includes(vc.id)
+  const integrityAnchored = false
+
+  const issuerCanComplete = (validSignature && issuerResolved) ||
+    (!issuerResolved && pendingReasons.includes('issuer_key_missing'))
+  const passes = issuerCanComplete && statusValid && subjectBound &&
+    allowedType(vc, v.policy) && !revoked &&
+    !(v.policy.reject_expired && expired) &&
+    !(v.policy.reject_suspended && suspended) &&
+    !(v.policy.reject_superseded && superseded) &&
+    !(v.policy.require_integrity_anchor && !integrityAnchored)
+  const acceptanceDecision = !passes ? 'reject' : pendingReasons.length ? 'pending' : 'accept'
+
   const e = v.expect
-  const ok = validSignature === e.validSignature && expired === e.expired &&
-             subjectBound === e.subjectBound && revoked === e.revoked
+  const got = {
+    validSignature, issuerResolved, revoked, statusValid, expired, subjectBound,
+    integrityAnchored, suspended, superseded, pendingReasons, acceptanceDecision,
+  }
+  const fields = Object.keys(got)
+  const ok = fields.every(field => JSON.stringify(got[field]) === JSON.stringify(e[field]))
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${f}`)
   if (!ok) {
-    console.log(`      got sig=${validSignature} exp=${expired} bound=${subjectBound} rev=${revoked}`)
-    console.log(`      want sig=${e.validSignature} exp=${e.expired} bound=${e.subjectBound} rev=${e.revoked}`)
+    for (const field of fields) {
+      if (JSON.stringify(got[field]) !== JSON.stringify(e[field])) {
+        console.log(`      ${field}: got=${JSON.stringify(got[field])} want=${JSON.stringify(e[field])}`)
+      }
+    }
     fail++
   } else pass++
 }

@@ -62,7 +62,8 @@ function back() {
 
 const decisionVariant = computed(() => {
   if (!verification.value) return 'secondary'
-  return verification.value.acceptance_decision === 'accept' ? 'success' : 'error'
+  if (verification.value.acceptanceDecision === 'accept') return 'success'
+  return verification.value.acceptanceDecision === 'pending' ? 'warning' : 'error'
 })
 </script>
 
@@ -88,7 +89,7 @@ const decisionVariant = computed(() => {
           <div class="mt-2 flex items-center gap-2">
             <AppBadge variant="primary">{{ classOf(credential) }}</AppBadge>
             <AppBadge :variant="decisionVariant">
-              {{ verification?.acceptance_decision ?? $t('credentials.detail.notVerified') }}
+              {{ verification?.acceptanceDecision ?? $t('credentials.detail.notVerified') }}
             </AppBadge>
           </div>
         </div>
@@ -107,24 +108,24 @@ const decisionVariant = computed(() => {
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.signature') }}</dt>
             <dd>
-              <AppBadge :variant="verification.valid_signature ? 'success' : 'error'">
-                {{ verification.valid_signature ? $t('credentials.value.signed') : $t('credentials.value.notSigned') }}
+              <AppBadge :variant="verification.validSignature ? 'success' : 'error'">
+                {{ verification.validSignature ? $t('credentials.value.signed') : $t('credentials.value.notSigned') }}
               </AppBadge>
             </dd>
           </div>
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.issuerResolved') }}</dt>
             <dd>
-              <AppBadge :variant="verification.issuer_resolved ? 'success' : 'error'">
-                {{ verification.issuer_resolved ? $t('credentials.value.yes') : $t('credentials.value.no') }}
+              <AppBadge :variant="verification.issuerResolved ? 'success' : 'error'">
+                {{ verification.issuerResolved ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.subjectBound') }}</dt>
             <dd>
-              <AppBadge :variant="verification.subject_bound ? 'success' : 'error'">
-                {{ verification.subject_bound ? $t('credentials.value.yes') : $t('credentials.value.no') }}
+              <AppBadge :variant="verification.subjectBound ? 'success' : 'error'">
+                {{ verification.subjectBound ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
@@ -147,14 +148,14 @@ const decisionVariant = computed(() => {
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.tamperProof') }}</dt>
             <dd>
-              <AppBadge :variant="verification.integrity_anchored ? 'success' : 'secondary'">
-                {{ verification.integrity_anchored ? $t('credentials.value.yes') : $t('credentials.value.pending') }}
+              <AppBadge :variant="verification.integrityAnchored ? 'success' : 'secondary'">
+                {{ verification.integrityAnchored ? $t('credentials.value.yes') : $t('credentials.value.pending') }}
               </AppBadge>
             </dd>
           </div>
         </dl>
         <p class="mt-3 text-xs text-muted-foreground">
-          {{ $t('credentials.detail.verifiedAt', { time: verification.verification_time }) }}
+          {{ $t('credentials.detail.verifiedAt', { time: verification.verificationTime }) }}
         </p>
       </section>
 

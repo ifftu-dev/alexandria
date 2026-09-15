@@ -417,10 +417,9 @@ pub struct Proof {
 
 /// Output of the verification algorithm (§13.1).
 ///
-/// `suspended` and `superseded` were added in the §11.3/§11.4
-/// follow-up. `#[serde(default)]` is set so older persisted results
-/// (e.g. ones hydrated from an earlier schema or an older peer's
-/// gossip) round-trip without a migration.
+/// Lifecycle flags and typed pending reasons use serde defaults so older
+/// persisted results (for example, data hydrated from an earlier schema or an
+/// older peer's gossip) round-trip without a migration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResult {
@@ -430,6 +429,11 @@ pub struct VerificationResult {
     pub valid_signature: bool,
     pub issuer_resolved: bool,
     pub revoked: bool,
+    /// False only when a present status reference is malformed or outside the
+    /// supplied list. Missing/unavailable list evidence is represented by
+    /// `pending_reasons` instead.
+    #[serde(default = "default_true")]
+    pub status_valid: bool,
     pub expired: bool,
     pub subject_bound: bool,
     pub integrity_anchored: bool,
@@ -442,13 +446,27 @@ pub struct VerificationResult {
     #[serde(default)]
     pub superseded: bool,
     pub verification_time: String,
+    #[serde(default)]
+    pub pending_reasons: Vec<VerificationPendingReason>,
     pub acceptance_decision: AcceptanceDecision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationPendingReason {
+    IssuerKeyMissing,
+    IssuerKeyUnavailable,
+    StatusListMissing,
+    StatusListUnavailable,
+    SuspensionStateUnavailable,
+    SupersessionStateUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AcceptanceDecision {
     Accept,
+    Pending,
     Reject,
 }
 
@@ -557,6 +575,8 @@ mod tests {
         // Spec §13.1 shows `"acceptanceDecision": "accept"`.
         let json = serde_json::to_string(&AcceptanceDecision::Accept).unwrap();
         assert_eq!(json, "\"accept\"");
+        let pending = serde_json::to_string(&AcceptanceDecision::Pending).unwrap();
+        assert_eq!(pending, "\"pending\"");
     }
 
     fn sample_entitlement() -> EntitlementClaim {

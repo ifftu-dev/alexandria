@@ -38,7 +38,7 @@ use alexandria_verify::vc::{
     AcceptanceDecision, CredentialStatus, CredentialSubject, CredentialType, Proof,
     VerifiableCredential, VerificationPolicy, VerificationResult,
 };
-use alexandria_verify::VerificationStore;
+use alexandria_verify::{StoreLookup, VerificationStore};
 
 // ---------------------------------------------------------------------------
 // Vector format
@@ -88,7 +88,7 @@ struct RegistryRow {
 }
 
 impl VerificationStore for VectorStore {
-    fn key_at(&self, did: &Did, at: &str) -> Option<KeyRegistryEntry> {
+    fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry> {
         self.key_registry
             .iter()
             .filter(|r| {
@@ -107,22 +107,28 @@ impl VerificationStore for VectorStore {
                     rotated_by: None,
                 })
             })
+            .map(StoreLookup::Found)
+            .unwrap_or(StoreLookup::Missing)
     }
 
-    fn status_list_bits(&self, list_id: &str) -> Option<Vec<u8>> {
+    fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>> {
         self.status_lists
             .get(list_id)
             .and_then(|h| hex::decode(h).ok())
+            .map(StoreLookup::Found)
+            .unwrap_or(StoreLookup::Missing)
     }
 
-    fn suspension(&self, credential_id: &str) -> Option<(bool, Option<String>)> {
+    fn suspension(&self, credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
         self.suspended
             .get(credential_id)
             .map(|until| (true, until.clone()))
+            .map(StoreLookup::Found)
+            .unwrap_or(StoreLookup::Missing)
     }
 
-    fn is_superseded(&self, credential_id: &str) -> bool {
-        self.superseded.iter().any(|s| s == credential_id)
+    fn is_superseded(&self, credential_id: &str) -> StoreLookup<bool> {
+        StoreLookup::Found(self.superseded.iter().any(|s| s == credential_id))
     }
 }
 
@@ -212,6 +218,53 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                     "A correctly signed credential with no expiry, verified with no local \
                               context. did:key self-resolution supplies the issuer key."
                         .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store: VectorStore::default(),
+                expect,
+            },
+        ));
+    }
+
+    // --- incomplete verification evidence -------------------------------
+    {
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.credential_status = Some(CredentialStatus {
+            id: "urn:uuid:missing-status-entry".into(),
+            type_: "RevocationList2020Status".into(),
+            status_purpose: "revocation".into(),
+            status_list_credential: "urn:uuid:missing-status-list".into(),
+            status_list_index: "0".into(),
+        });
+        let vc = signed(vc, &issuer_key, &issuer);
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        out.push((
+            "11-missing-status-list",
+            Vector {
+                description: "The signature is authentic, but the referenced status list is not supplied. The decision is pending rather than accepting absence as proof of non-revocation."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store: VectorStore::default(),
+                expect,
+            },
+        ));
+    }
+    {
+        let external_issuer = Did("did:web:issuer.example".into());
+        let vc = signed(
+            skeleton(external_issuer.clone(), subject.clone(), None),
+            &issuer_key,
+            &external_issuer,
+        );
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        out.push((
+            "12-missing-issuer-key",
+            Vector {
+                description: "The issuer uses a DID method that is not self-resolving in this verifier and no key binding is supplied. The decision remains pending until that binding is acquired."
+                    .into(),
                 verification_time: NOW.into(),
                 policy: default_policy.clone(),
                 credential: vc,
@@ -537,6 +590,12 @@ fn vectors_match_this_implementation() {
             path.display()
         );
         assert_eq!(got.revoked, v.expect.revoked, "{}: revoked", path.display());
+        assert_eq!(
+            got.status_valid,
+            v.expect.status_valid,
+            "{}: statusValid",
+            path.display()
+        );
         assert_eq!(got.expired, v.expect.expired, "{}: expired", path.display());
         assert_eq!(
             got.subject_bound,
@@ -548,6 +607,12 @@ fn vectors_match_this_implementation() {
             got.acceptance_decision,
             v.expect.acceptance_decision,
             "{}: acceptanceDecision",
+            path.display()
+        );
+        assert_eq!(
+            got.pending_reasons,
+            v.expect.pending_reasons,
+            "{}: pendingReasons",
             path.display()
         );
     }

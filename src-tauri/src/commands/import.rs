@@ -99,6 +99,12 @@ pub fn import_credential_impl(
         .ok_or_else(|| "credential has no envelope id".to_string())?;
 
     let result = verify_credential_db(conn, vc, now, &import_policy());
+    if result.acceptance_decision == AcceptanceDecision::Pending {
+        return Err(format!(
+            "credential verification pending: {}",
+            super::credentials::rejection_reasons(&result).join(", ")
+        ));
+    }
     if result.acceptance_decision != AcceptanceDecision::Accept {
         // Report the failed checks rather than a bare "invalid" — an import
         // that fails for an expired credential and one that fails for a bad
@@ -115,6 +121,9 @@ pub fn import_credential_impl(
         }
         if result.revoked {
             why.push("revoked");
+        }
+        if !result.status_valid {
+            why.push("invalid status reference");
         }
         if result.expired {
             why.push("expired");
@@ -423,7 +432,7 @@ mod tests {
     use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
     use crate::db::Database;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::domain::vc::{CredentialType, Proof};
+    use crate::domain::vc::{CredentialStatus, CredentialType, Proof};
     use ed25519_dalek::SigningKey;
 
     const NOW: &str = "2026-04-13T00:00:00Z";
@@ -551,6 +560,47 @@ mod tests {
 
         let err = import_credential_impl(db.conn(), &vc, NOW).unwrap_err();
         assert!(err.contains("expired"), "unexpected reason: {err}");
+    }
+
+    #[test]
+    fn a_credential_with_an_unavailable_status_list_remains_pending() {
+        let db = open_db();
+        let issuer_key = key("issuer");
+        let issuer = derive_did_key(&issuer_key);
+        let mut vc = signed_vc(
+            &issuer_key,
+            CredentialType::EntitlementCredential,
+            "urn:test:import:pending-status",
+            entitlement_props(),
+            None,
+        );
+        vc.credential_status = Some(CredentialStatus {
+            id: "urn:test:missing-status#0".into(),
+            type_: "RevocationList2020Status".into(),
+            status_purpose: "revocation".into(),
+            status_list_index: "0".into(),
+            status_list_credential: "urn:test:missing-status".into(),
+        });
+        let vc = sign_credential(UnsignedCredential { credential: vc }, &issuer_key, &issuer)
+            .expect("re-sign status-bearing credential");
+
+        let err = import_credential_impl(db.conn(), &vc, NOW).unwrap_err();
+        assert!(
+            err.contains("verification pending"),
+            "unexpected reason: {err}"
+        );
+        assert!(
+            err.contains("status list is missing"),
+            "unexpected reason: {err}"
+        );
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "pending credentials must not enter the active store"
+        );
     }
 
     /// Delivery channels retry and customers click links twice.

@@ -384,7 +384,7 @@ export interface RecomputeResult {
   duration_ms: number
 }
 
-export interface VerificationResult {
+export interface ReputationVerificationResult {
   score_matches: boolean
   confidence_matches: boolean
   recomputed_score: number
@@ -1416,7 +1416,15 @@ export type CredentialType =
   | 'DerivedCredential'
   | 'SelfAssertion'
 
-export type AcceptanceDecision = 'accept' | 'reject'
+export type AcceptanceDecision = 'accept' | 'pending' | 'reject'
+
+export type VerificationPendingReason =
+  | 'issuer_key_missing'
+  | 'issuer_key_unavailable'
+  | 'status_list_missing'
+  | 'status_list_unavailable'
+  | 'suspension_state_unavailable'
+  | 'supersession_state_unavailable'
 
 /**
  * Strongly-typed view over a `credentialSubject`'s skill properties.
@@ -1607,19 +1615,21 @@ export interface CreateRoleAssessmentRequest {
 }
 
 export interface VerificationResult {
-  credential_id: string
-  valid_signature: boolean
-  issuer_resolved: boolean
+  credentialId: string
+  validSignature: boolean
+  issuerResolved: boolean
   revoked: boolean
+  statusValid: boolean
   expired: boolean
-  subject_bound: boolean
-  integrity_anchored: boolean
+  subjectBound: boolean
+  integrityAnchored: boolean
   /** §11.3: temporary invalidation window currently active. */
   suspended: boolean
   /** §11.4: a newer credential supersedes this one. */
   superseded: boolean
-  verification_time: string
-  acceptance_decision: AcceptanceDecision
+  verificationTime: string
+  pendingReasons: VerificationPendingReason[]
+  acceptanceDecision: AcceptanceDecision
 }
 
 // --- Survivability bundle (§20.4) ----------------------------------------

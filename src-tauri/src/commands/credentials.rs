@@ -16,7 +16,7 @@ use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
     Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof, VerifiableCredential,
-    VerificationResult,
+    VerificationPendingReason, VerificationResult,
 };
 use crate::AppState;
 
@@ -963,6 +963,28 @@ pub struct OfflineVerification {
 /// would report two independent failures where only one thing happened, and
 /// would send the reader looking at the signature when the problem is the DID.
 pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
+    if result.acceptance_decision == crate::domain::vc::AcceptanceDecision::Pending {
+        return result
+            .pending_reasons
+            .iter()
+            .map(|reason| match reason {
+                VerificationPendingReason::IssuerKeyMissing => "issuer key is missing",
+                VerificationPendingReason::IssuerKeyUnavailable => {
+                    "issuer key lookup is unavailable"
+                }
+                VerificationPendingReason::StatusListMissing => "status list is missing",
+                VerificationPendingReason::StatusListUnavailable => {
+                    "status list lookup is unavailable"
+                }
+                VerificationPendingReason::SuspensionStateUnavailable => {
+                    "suspension lookup is unavailable"
+                }
+                VerificationPendingReason::SupersessionStateUnavailable => {
+                    "supersession lookup is unavailable"
+                }
+            })
+            .collect();
+    }
     if !result.issuer_resolved {
         return vec!["issuer DID could not be resolved — signature not checked"];
     }
@@ -979,6 +1001,9 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
     }
     if result.revoked {
         reasons.push("revoked");
+    }
+    if !result.status_valid {
+        reasons.push("invalid status reference");
     }
     if result.suspended {
         reasons.push("suspended");
@@ -1129,7 +1154,7 @@ impl crate::domain::vc::VerificationStore for BundleStore {
         &self,
         did: &alexandria_verify::did::Did,
         at: &str,
-    ) -> Option<alexandria_verify::did::KeyRegistryEntry> {
+    ) -> crate::domain::vc::StoreLookup<alexandria_verify::did::KeyRegistryEntry> {
         self.keys
             .iter()
             .filter(|e| {
@@ -1148,21 +1173,28 @@ impl crate::domain::vc::VerificationStore for BundleStore {
                     rotated_by: e.rotated_by.clone(),
                 })
             })
+            .map(crate::domain::vc::StoreLookup::Found)
+            .unwrap_or(crate::domain::vc::StoreLookup::Missing)
     }
 
-    fn status_list_bits(&self, list_id: &str) -> Option<Vec<u8>> {
+    fn status_list_bits(&self, list_id: &str) -> crate::domain::vc::StoreLookup<Vec<u8>> {
         self.status_lists
             .iter()
             .find(|(id, _)| id == list_id)
             .map(|(_, bits)| bits.clone())
+            .map(crate::domain::vc::StoreLookup::Found)
+            .unwrap_or(crate::domain::vc::StoreLookup::Missing)
     }
 
-    fn suspension(&self, _credential_id: &str) -> Option<(bool, Option<String>)> {
-        None
+    fn suspension(
+        &self,
+        _credential_id: &str,
+    ) -> crate::domain::vc::StoreLookup<(bool, Option<String>)> {
+        crate::domain::vc::StoreLookup::Missing
     }
 
-    fn is_superseded(&self, _credential_id: &str) -> bool {
-        false
+    fn is_superseded(&self, _credential_id: &str) -> crate::domain::vc::StoreLookup<bool> {
+        crate::domain::vc::StoreLookup::Missing
     }
 }
 
@@ -1190,7 +1222,7 @@ pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<Str
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::domain::vc::SkillClaim;
+    use crate::domain::vc::{AcceptanceDecision, SkillClaim};
 
     const NOW: &str = "2026-04-13T00:00:00Z";
 
@@ -1236,7 +1268,7 @@ mod tests {
     // ---- Shape-agnostic offline verification ---------------------------
 
     #[test]
-    fn verify_offline_accepts_a_bare_credential() {
+    fn verify_offline_marks_a_status_bearing_bare_credential_pending() {
         // Reported as a bug: pasting a single credential into offline verify
         // failed with "missing field `format_version`", because only the
         // bundle shape was accepted. A credential signed by a `did:key` issuer
@@ -1255,9 +1287,17 @@ mod tests {
         let report = verify_offline_impl(&json, NOW).unwrap();
 
         assert_eq!(report.source, OfflineSource::Credential);
-        assert_eq!((report.accepted, report.total), (1, 1));
+        assert_eq!((report.accepted, report.total), (0, 1));
         assert!(report.results[0].valid_signature);
         assert!(report.results[0].issuer_resolved, "did:key self-resolution");
+        assert_eq!(
+            report.results[0].acceptance_decision,
+            AcceptanceDecision::Pending
+        );
+        assert_eq!(
+            report.results[0].pending_reasons,
+            vec![VerificationPendingReason::StatusListMissing]
+        );
         // A bare credential carries no status list, so this must not read as
         // a clean bill of health.
         assert!(report.revocation_unknown);
@@ -1284,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_offline_accepts_an_array_of_credentials() {
+    fn verify_offline_marks_status_bearing_credential_arrays_pending() {
         let (db, issuer_key, issuer, subject) = setup();
         let vc = issue_credential_impl(
             db.conn(),
@@ -1298,7 +1338,11 @@ mod tests {
         let json = serde_json::to_string(&vec![vc.clone(), vc]).unwrap();
         let report = verify_offline_impl(&json, NOW).unwrap();
         assert_eq!(report.source, OfflineSource::Credentials);
-        assert_eq!((report.accepted, report.total), (2, 2));
+        assert_eq!((report.accepted, report.total), (0, 2));
+        assert!(report
+            .results
+            .iter()
+            .all(|result| result.acceptance_decision == AcceptanceDecision::Pending));
     }
 
     #[test]
