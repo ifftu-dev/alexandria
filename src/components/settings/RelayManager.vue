@@ -6,8 +6,10 @@
 // traffic but cannot forge handle ownership.
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import { AppButton, AppInput } from '@/components/ui'
+
+const { invoke } = useLocalApi()
 
 const { t } = useI18n()
 

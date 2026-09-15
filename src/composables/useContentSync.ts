@@ -1,4 +1,5 @@
 import { computed, readonly, ref } from 'vue'
+import { onProfileLocked } from './useProfiles'
 
 type ContentSyncPhase = 'idle' | 'running' | 'success' | 'error'
 
@@ -17,6 +18,8 @@ const error = ref<string | null>(null)
 const visible = ref(false)
 
 let hideTimer: ReturnType<typeof setTimeout> | null = null
+let profileGeneration = 0
+let activeSyncGeneration: number | null = null
 
 function clearHideTimer() {
   if (!hideTimer) return
@@ -26,6 +29,7 @@ function clearHideTimer() {
 
 function startContentSync() {
   clearHideTimer()
+  activeSyncGeneration = profileGeneration
   phase.value = 'running'
   error.value = null
   visible.value = true
@@ -38,6 +42,7 @@ function completeContentSync(payload: {
   afterCourses: number
   durationMs: number
 }) {
+  if (activeSyncGeneration !== profileGeneration) return
   clearHideTimer()
   const newCourses = Math.max(0, payload.afterCourses - payload.beforeCourses)
   stats.value = {
@@ -57,6 +62,7 @@ function completeContentSync(payload: {
 }
 
 function failContentSync(message: string) {
+  if (activeSyncGeneration !== profileGeneration) return
   clearHideTimer()
   phase.value = 'error'
   error.value = message
@@ -77,6 +83,16 @@ const statusMessage = computed(() => {
     return `Content sync failed: ${error.value}`
   }
   return ''
+})
+
+onProfileLocked(() => {
+  profileGeneration += 1
+  activeSyncGeneration = null
+  clearHideTimer()
+  phase.value = 'idle'
+  stats.value = null
+  error.value = null
+  visible.value = false
 })
 
 export function useContentSync() {

@@ -24,7 +24,10 @@
 
 use std::time::Duration;
 
+use futures::StreamExt;
 use iroh::{Endpoint, EndpointAddr};
+use iroh_blobs::api::blobs::BlobStatus;
+use iroh_blobs::api::remote::GetProgressItem;
 use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::{Hash, HashAndFormat};
 use thiserror::Error;
@@ -51,6 +54,8 @@ pub enum FetchError {
     NoProvider { tried: usize },
     #[error("blob still missing locally after fetch: {0}")]
     MissingAfterFetch(String),
+    #[error("blob is at least {size} bytes, exceeding the {max_bytes}-byte limit")]
+    TooLarge { size: u64, max_bytes: usize },
 }
 
 /// Fetch a blob directly from a single known provider, then tag it locally.
@@ -73,7 +78,7 @@ pub async fn fetch_from_peer(
         .map_err(|_| FetchError::NodeNotRunning)?
         .clone();
 
-    fetch_into(&endpoint, &store, provider, hash).await?;
+    fetch_into(&endpoint, &store, provider, hash, None).await?;
 
     // Confirm the blob really landed before we claim success.
     let present = store
@@ -86,6 +91,50 @@ pub async fn fetch_from_peer(
 
     tag_retained(&store, hash).await?;
     Ok(())
+}
+
+/// Fetch at most `max_bytes` from one provider without creating a retention
+/// tag. Used for preview flows where retrieval must not become an implicit
+/// pin. Dropping the progress stream cancels an oversized transfer; any
+/// partial untagged data remains eligible for the store's garbage collection.
+pub async fn fetch_from_peer_unretained_bounded(
+    node: &ContentNode,
+    provider: EndpointAddr,
+    hash: Hash,
+    max_bytes: usize,
+) -> Result<(), FetchError> {
+    let endpoint = node.endpoint().await.ok_or(FetchError::NodeNotRunning)?;
+    let store: FsStore = node
+        .store()
+        .await
+        .map_err(|_| FetchError::NodeNotRunning)?
+        .clone();
+
+    if let BlobStatus::Complete { size } | BlobStatus::Partial { size: Some(size) } = store
+        .status(hash)
+        .await
+        .map_err(|error| FetchError::Fetch(error.to_string()))?
+    {
+        if size > max_bytes as u64 {
+            return Err(FetchError::TooLarge { size, max_bytes });
+        }
+    }
+
+    fetch_into(&endpoint, &store, provider, hash, Some(max_bytes)).await?;
+
+    match store
+        .status(hash)
+        .await
+        .map_err(|error| FetchError::Fetch(error.to_string()))?
+    {
+        BlobStatus::Complete { size } if size <= max_bytes as u64 => Ok(()),
+        BlobStatus::Complete { size } | BlobStatus::Partial { size: Some(size) }
+            if size > max_bytes as u64 =>
+        {
+            Err(FetchError::TooLarge { size, max_bytes })
+        }
+        _ => Err(FetchError::MissingAfterFetch(hash.to_hex().to_string())),
+    }
 }
 
 /// Try each candidate provider in order until one serves the blob.
@@ -118,6 +167,34 @@ pub async fn fetch_from_any(
     })
 }
 
+/// Try candidate providers without retaining the fetched blob and stop each
+/// attempt once the caller's byte budget is crossed.
+pub async fn fetch_from_any_unretained_bounded(
+    node: &ContentNode,
+    providers: &[EndpointAddr],
+    hash: Hash,
+    max_bytes: usize,
+) -> Result<EndpointAddr, FetchError> {
+    if providers.is_empty() {
+        return Err(FetchError::NoProvider { tried: 0 });
+    }
+    for provider in providers {
+        match fetch_from_peer_unretained_bounded(node, provider.clone(), hash, max_bytes).await {
+            Ok(()) => return Ok(provider.clone()),
+            Err(error) => {
+                log::warn!(
+                    "bounded P2P fetch of {} from {} failed: {error}",
+                    hash.to_hex(),
+                    provider.id.fmt_short()
+                );
+            }
+        }
+    }
+    Err(FetchError::NoProvider {
+        tried: providers.len(),
+    })
+}
+
 /// Convenience wrapper: fetch by hex hash string from a single provider.
 pub async fn fetch_hex_from_peer(
     node: &ContentNode,
@@ -134,6 +211,7 @@ async fn fetch_into(
     store: &FsStore,
     provider: EndpointAddr,
     hash: Hash,
+    max_bytes: Option<usize>,
 ) -> Result<(), FetchError> {
     let fut = async {
         let conn = endpoint
@@ -142,12 +220,28 @@ async fn fetch_into(
             .map_err(|e| FetchError::Connect(e.to_string()))?;
         // `Remote::fetch` takes the locally-available ranges into account and
         // downloads only what is missing, writing into the store.
-        store
-            .remote()
-            .fetch(conn, hash)
-            .await
-            .map_err(|e| FetchError::Fetch(e.to_string()))?;
-        Ok::<(), FetchError>(())
+        let stream = store.remote().fetch(conn, hash).stream();
+        tokio::pin!(stream);
+        while let Some(item) = stream.next().await {
+            match item {
+                GetProgressItem::Progress(size)
+                    if max_bytes.is_some_and(|limit| size > limit as u64) =>
+                {
+                    return Err(FetchError::TooLarge {
+                        size,
+                        max_bytes: max_bytes.expect("checked as some"),
+                    });
+                }
+                GetProgressItem::Progress(_) => {}
+                GetProgressItem::Done(_) => return Ok(()),
+                GetProgressItem::Error(error) => {
+                    return Err(FetchError::Fetch(error.to_string()));
+                }
+            }
+        }
+        Err(FetchError::Fetch(
+            "provider closed the transfer without a result".to_string(),
+        ))
     };
     match tokio::time::timeout(FETCH_TIMEOUT, fut).await {
         Ok(res) => res,
@@ -165,4 +259,37 @@ async fn tag_retained(store: &FsStore, hash: Hash) -> Result<(), FetchError> {
         .await
         .map_err(|e| FetchError::Fetch(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn bounded_unretained_fetch_stops_oversized_peer_blob() {
+        let provider_dir = TempDir::new().expect("provider temp dir");
+        let provider = ContentNode::new(provider_dir.path());
+        provider.start(None).await.expect("start provider");
+        let bytes = vec![0x5a; 512 * 1024];
+        let added = super::super::content::add_bytes_unencrypted(&provider, &bytes)
+            .await
+            .expect("add provider blob");
+        let hash = super::super::content::parse_hash(&added.hash).expect("parse blob hash");
+
+        let receiver_dir = TempDir::new().expect("receiver temp dir");
+        let receiver = ContentNode::new(receiver_dir.path());
+        receiver.start(None).await.expect("start receiver");
+        let result = fetch_from_peer_unretained_bounded(
+            &receiver,
+            provider.endpoint_addr().await.expect("provider address"),
+            hash,
+            256 * 1024,
+        )
+        .await;
+        assert!(matches!(result, Err(FetchError::TooLarge { .. })));
+
+        receiver.shutdown().await.expect("shutdown receiver");
+        provider.shutdown().await.expect("shutdown provider");
+    }
 }

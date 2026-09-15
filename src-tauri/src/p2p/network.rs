@@ -205,6 +205,10 @@ fn apple_sysctl(name: &str) -> Option<String> {
     let key = CString::new(name).ok()?;
     let mut size: usize = 0;
 
+    // SAFETY: `key` is NUL-terminated and lives across both calls. The first
+    // call requests the required length without an output pointer; the second
+    // supplies a writable allocation of exactly that length. A value that
+    // grows between calls makes `sysctlbyname` fail rather than exceed it.
     unsafe {
         if libc::sysctlbyname(
             key.as_ptr(),
@@ -302,6 +306,7 @@ pub struct P2pNode {
     peer_id: PeerId,
     /// Whether the node is running.
     running: bool,
+    task: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Commands sent to the swarm event loop from the application layer.
@@ -485,6 +490,28 @@ pub async fn start_node_with_db(
     db: Option<Arc<StdMutex<Option<Database>>>>,
     dht_server: bool,
 ) -> Result<P2pNode, NetworkError> {
+    start_configured_node(keypair, event_tx, known_peers, db, dht_server, false).await
+}
+
+/// Start a loopback-only fixture using the real transport and protocol handlers.
+/// Public bootstrap and periodic discovery are disabled; callers connect peers
+/// explicitly. This does not change the production startup defaults.
+pub async fn start_loopback_node_with_db(
+    keypair: Keypair,
+    event_tx: mpsc::Sender<P2pEvent>,
+    db: Option<Arc<StdMutex<Option<Database>>>>,
+) -> Result<P2pNode, NetworkError> {
+    start_configured_node(keypair, event_tx, vec![], db, false, true).await
+}
+
+async fn start_configured_node(
+    keypair: Keypair,
+    event_tx: mpsc::Sender<P2pEvent>,
+    known_peers: Vec<KnownPeer>,
+    db: Option<Arc<StdMutex<Option<Database>>>>,
+    dht_server: bool,
+    loopback_only: bool,
+) -> Result<P2pNode, NetworkError> {
     let peer_id = keypair.public().to_peer_id();
     diag::log(&format!("start_node: PeerId: {peer_id}"));
 
@@ -621,10 +648,20 @@ pub async fn start_node_with_db(
 
     diag::log("start_node: topics subscribed, binding listener...");
 
+    if loopback_only {
+        swarm
+            .listen_on(
+                "/ip4/127.0.0.1/tcp/0"
+                    .parse()
+                    .expect("valid loopback address"),
+            )
+            .map_err(|e| NetworkError::Listen(e.to_string()))?;
+    }
+
     // Listen on all interfaces, OS-assigned port.
     // Desktop: QUIC (UDP). Mobile: TCP.
     #[cfg(desktop)]
-    {
+    if !loopback_only {
         // Listen on both TCP and QUIC so desktop can connect to mobile (TCP) and other desktops (QUIC)
         let tcp_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm
@@ -647,7 +684,7 @@ pub async fn start_node_with_db(
     }
 
     #[cfg(target_os = "android")]
-    {
+    if !loopback_only {
         diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
         let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm.listen_on(listen_addr).map_err(|e| {
@@ -676,7 +713,7 @@ pub async fn start_node_with_db(
     }
 
     #[cfg(all(mobile, not(target_os = "android")))]
-    {
+    if !loopback_only {
         diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
         let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm.listen_on(listen_addr).map_err(|e| {
@@ -696,7 +733,11 @@ pub async fn start_node_with_db(
     // Dial bootstrap/relay peers for internet-wide discovery.
     // These are public relay nodes that all peers connect to first.
     // Through Kademlia DHT on the relay, peers discover each other.
-    let bootstrap_addrs = super::discovery::bootstrap_peers();
+    let bootstrap_addrs = if loopback_only {
+        vec![]
+    } else {
+        super::discovery::bootstrap_peers()
+    };
     for addr in &bootstrap_addrs {
         diag::log(&format!("start_node: dialing bootstrap {addr}"));
         match swarm.dial(addr.clone()) {
@@ -778,8 +819,14 @@ pub async fn start_node_with_db(
     // Spawn the swarm event loop. The db handle (None for tests /
     // dev tooling, populated by every production call site) lets
     // the loop answer inbound vc-fetch requests synchronously.
-    tokio::spawn(swarm_event_loop(
-        swarm, command_rx, event_tx, validator, db, dht_server,
+    let task = tokio::spawn(swarm_event_loop(
+        swarm,
+        command_rx,
+        event_tx,
+        validator,
+        db,
+        dht_server,
+        loopback_only,
     ));
 
     diag::log("start_node: event loop spawned, node running");
@@ -788,6 +835,7 @@ pub async fn start_node_with_db(
         command_tx,
         peer_id,
         running: true,
+        task: Some(task),
     })
 }
 
@@ -1069,6 +1117,7 @@ async fn swarm_event_loop(
     validator: Arc<MessageValidator>,
     db: Option<Arc<std::sync::Mutex<Option<Database>>>>,
     dht_server: bool,
+    loopback_only: bool,
 ) {
     use libp2p::swarm::SwarmEvent;
 
@@ -1176,7 +1225,11 @@ async fn swarm_event_loop(
     // Track which relays we've already requested reservations from.
     // We request a reservation from each relay after the Identify
     // handshake confirms we're connected to it.
-    let relay_peer_ids = super::discovery::relay_peer_ids();
+    let relay_peer_ids = if loopback_only {
+        std::collections::HashSet::new()
+    } else {
+        super::discovery::relay_peer_ids()
+    };
     let mut relay_reservations_requested: std::collections::HashSet<libp2p::PeerId> =
         std::collections::HashSet::new();
 
@@ -1302,20 +1355,20 @@ async fn swarm_event_loop(
     loop {
         tokio::select! {
             // Periodic Kademlia bootstrap
-            _ = kad_bootstrap_interval.tick() => {
+            _ = kad_bootstrap_interval.tick(), if !loopback_only => {
                 let _ = swarm.behaviour_mut().kademlia.bootstrap();
             }
             // Initial provider publish shortly after startup
-            _ = &mut provider_initial, if !initial_provider_done => {
+            _ = &mut provider_initial, if !loopback_only && !initial_provider_done => {
                 initial_provider_done = true;
                 refresh_provider_records(&mut swarm, &namespace_key, "initial warm-up");
             }
             // Fast provider refresh during the startup window
-            _ = provider_warmup_interval.tick(), if initial_provider_done && tokio::time::Instant::now() < provider_warmup_deadline => {
+            _ = provider_warmup_interval.tick(), if !loopback_only && initial_provider_done && tokio::time::Instant::now() < provider_warmup_deadline => {
                 refresh_provider_records(&mut swarm, &namespace_key, "warm-up interval");
             }
             // Periodic provider refresh
-            _ = provider_interval.tick(), if initial_provider_done => {
+            _ = provider_interval.tick(), if !loopback_only && initial_provider_done => {
                 refresh_provider_records(&mut swarm, &namespace_key, "steady-state interval");
                 // Advertise as a relay when contributing, and always look
                 // for relays to adopt (capped + reputation-scored).
@@ -1336,7 +1389,7 @@ async fn swarm_event_loop(
                 );
             }
             // Periodic peer exchange broadcast
-            _ = peer_exchange_interval.tick() => {
+            _ = peer_exchange_interval.tick(), if !loopback_only => {
                 publish_peer_exchange(&mut swarm);
             }
             // Process commands from the application
@@ -2710,7 +2763,26 @@ impl P2pNode {
     /// Shutdown the node.
     pub async fn shutdown(&mut self) {
         self.running = false;
-        let _ = self.command_tx.send(SwarmCommand::Shutdown).await;
+        if let Some(task) = self.task.as_mut() {
+            // A full event/reply channel must not prevent shutdown. Aborting
+            // drops the swarm and its DB references; joining proves that drop
+            // finished before the caller can repoint profile resources.
+            task.abort();
+            if let Err(error) = task.await {
+                if !error.is_cancelled() {
+                    log::warn!("P2P task failed during shutdown: {error}");
+                }
+            }
+            self.task = None;
+        }
+    }
+}
+
+impl Drop for P2pNode {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.as_ref() {
+            task.abort();
+        }
     }
 }
 
@@ -2719,6 +2791,63 @@ mod tests {
     use super::*;
 
     const TEST_DEVICE_ID: [u8; 32] = [0xCCu8; 32];
+
+    fn pending_node(owner: oneshot::Sender<()>) -> P2pNode {
+        let (command_tx, command_rx) = mpsc::channel(1);
+        command_tx
+            .try_send(SwarmCommand::Shutdown)
+            .expect("fill queue");
+        let task = tokio::spawn(async move {
+            let _owner = owner;
+            let _receiver = command_rx;
+            std::future::pending::<()>().await;
+        });
+        P2pNode {
+            command_tx,
+            peer_id: Keypair::generate_ed25519().public().to_peer_id(),
+            running: true,
+            task: Some(task),
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_joins_swarm_even_when_command_queue_is_full() {
+        let (owner, mut released) = oneshot::channel();
+        let mut node = pending_node(owner);
+        tokio::time::timeout(Duration::from_secs(5), node.shutdown())
+            .await
+            .expect("shutdown cannot wait on a full queue");
+        assert!(node.task.is_none());
+        assert!(matches!(
+            released.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        node.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn interrupted_shutdown_retains_the_join_handle_for_retry() {
+        let (owner, released) = oneshot::channel();
+        let mut node = pending_node(owner);
+        {
+            let mut cleanup = Box::pin(node.shutdown());
+            assert!(futures::poll!(&mut cleanup).is_pending());
+        }
+        assert!(node.task.is_some());
+        node.shutdown().await;
+        assert!(released.await.is_err());
+        assert!(node.task.is_none());
+    }
+
+    #[tokio::test]
+    async fn dropping_unpublished_node_aborts_its_swarm() {
+        let (owner, released) = oneshot::channel();
+        drop(pending_node(owner));
+        assert!(tokio::time::timeout(Duration::from_secs(5), released)
+            .await
+            .expect("task drops its resources")
+            .is_err());
+    }
 
     #[test]
     fn apple_device_labels_use_retail_names_not_hardware_generations() {

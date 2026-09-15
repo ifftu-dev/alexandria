@@ -5,12 +5,13 @@
 //! `content_resolve` command additionally accepts a public URL and
 //! caches the fetched bytes into the local store.
 
+use crate::profile::scope::ProfileState as State;
 use serde::Serialize;
-use tauri::State;
 
 use crate::content_store::content;
 use crate::content_store::resolver;
 use crate::content_store::storage;
+use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
 
 /// Status of the content node.
@@ -45,11 +46,19 @@ pub async fn content_add(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Track as a cache pin (auto_unpin = true) by default
-    if let Ok(guard) = state.db.lock() {
-        if let Some(db) = guard.as_ref() {
-            storage::upsert_pin(db.conn(), &result.hash, "cache", result.size, true);
-        }
+    // Track as a cache pin (auto_unpin = true) by default.
+    let pin_hash = result.hash.clone();
+    if let Err(error) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            state.profile_lease(),
+            "content.add.track-pin",
+            move |db| storage::upsert_pin(db.conn(), &pin_hash, "cache", result.size, true),
+        )
+        .await
+    {
+        log::warn!("content_add: failed to track cache pin: {error}");
     }
 
     // Trigger eviction if over quota
@@ -69,21 +78,30 @@ pub async fn content_add(
     Ok(result)
 }
 
-/// Fetch content from the local blob store by BLAKE3 hash.
-///
-/// Returns the raw bytes. Errors if the content is not available locally.
-/// Updates the pin's last_accessed timestamp.
+/// Fetch UTF-8 text from the local blob store without expanding every byte
+/// into a JSON number in the webview bridge.
 #[tauri::command]
-pub async fn content_get(state: State<'_, AppState>, hash: String) -> Result<Vec<u8>, String> {
-    let bytes = content::get_bytes(&state.content_node, &hash)
+pub async fn content_get_text(state: State<'_, AppState>, hash: String) -> Result<String, String> {
+    decode_utf8(get_and_touch(&state, &hash).await?)
+}
+
+async fn get_and_touch(state: &State<'_, AppState>, hash: &str) -> Result<Vec<u8>, String> {
+    let bytes = content::get_bytes(&state.content_node, hash)
         .await
         .map_err(|e| e.to_string())?;
 
-    // Touch last_accessed so frequently-read content is evicted last
-    if let Ok(guard) = state.db.lock() {
-        if let Some(db) = guard.as_ref() {
-            storage::touch_pin(db.conn(), &hash);
-        }
+    let pin_hash = hash.to_string();
+    if let Err(error) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            state.profile_lease(),
+            "content.get.touch-pin",
+            move |db| storage::touch_pin(db.conn(), &pin_hash),
+        )
+        .await
+    {
+        log::warn!("content_get: failed to update cache access time: {error}");
     }
 
     Ok(bytes)
@@ -122,36 +140,7 @@ pub async fn content_resolve(
     state: State<'_, AppState>,
     identifier: String,
 ) -> Result<ResolveResponse, String> {
-    let resolver = {
-        let guard = state.resolver.lock().await;
-        guard
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "content resolver not initialized".to_string())?
-    };
-
-    let result = resolver
-        .resolve(&identifier)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // Track resolved content as a cache pin
-    if result.source != resolver::ResolveSource::Local {
-        if let Ok(guard) = state.db.lock() {
-            if let Some(db) = guard.as_ref() {
-                storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
-            }
-        }
-        // Trigger eviction if over quota
-        storage::maybe_evict(&state.content_node, &state.db).await;
-    } else {
-        // Touch existing pin on local hit
-        if let Ok(guard) = state.db.lock() {
-            if let Some(db) = guard.as_ref() {
-                storage::touch_pin(db.conn(), &result.blake3_hash);
-            }
-        }
-    }
+    let result = resolve_and_track(&state, &identifier).await?;
 
     Ok(ResolveResponse {
         blake3_hash: result.blake3_hash,
@@ -176,18 +165,7 @@ pub async fn content_cache_file(
     state: State<'_, AppState>,
     identifier: String,
 ) -> Result<String, String> {
-    let resolver = {
-        let guard = state.resolver.lock().await;
-        guard
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "content resolver not initialized".to_string())?
-    };
-
-    let result = resolver
-        .resolve(&identifier)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = resolve_and_track(&state, &identifier).await?;
 
     let path = state
         .video_cache_dir()?
@@ -203,20 +181,6 @@ pub async fn content_cache_file(
             .map_err(|e| format!("failed to write video cache file: {e}"))?;
     }
 
-    // Track resolved content as a cache pin (mirrors content_resolve_bytes).
-    if result.source != resolver::ResolveSource::Local {
-        if let Ok(guard) = state.db.lock() {
-            if let Some(db) = guard.as_ref() {
-                storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
-            }
-        }
-        storage::maybe_evict(&state.content_node, &state.db).await;
-    } else if let Ok(guard) = state.db.lock() {
-        if let Some(db) = guard.as_ref() {
-            storage::touch_pin(db.conn(), &result.blake3_hash);
-        }
-    }
-
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -229,6 +193,23 @@ pub async fn content_resolve_bytes(
     state: State<'_, AppState>,
     identifier: String,
 ) -> Result<Vec<u8>, String> {
+    Ok(resolve_and_track(&state, &identifier).await?.bytes)
+}
+
+/// Resolve UTF-8 text without serializing the payload as a JavaScript
+/// `number[]`. Binary consumers must continue to use a binary/file path.
+#[tauri::command]
+pub async fn content_resolve_text(
+    state: State<'_, AppState>,
+    identifier: String,
+) -> Result<String, String> {
+    decode_utf8(resolve_and_track(&state, &identifier).await?.bytes)
+}
+
+async fn resolve_and_track(
+    state: &State<'_, AppState>,
+    identifier: &str,
+) -> Result<resolver::ResolveResult, String> {
     let resolver = {
         let guard = state.resolver.lock().await;
         guard
@@ -238,23 +219,55 @@ pub async fn content_resolve_bytes(
     };
 
     let result = resolver
-        .resolve(&identifier)
+        .resolve(identifier)
         .await
         .map_err(|e| e.to_string())?;
 
-    // Track resolved content as a cache pin
     if result.source != resolver::ResolveSource::Local {
-        if let Ok(guard) = state.db.lock() {
-            if let Some(db) = guard.as_ref() {
-                storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
-            }
+        let pin_hash = result.blake3_hash.clone();
+        if let Err(error) = state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Background,
+                state.profile_lease(),
+                "content.resolve.track-pin",
+                move |db| storage::upsert_pin(db.conn(), &pin_hash, "cache", result.size, true),
+            )
+            .await
+        {
+            log::warn!("content_resolve: failed to track cache pin: {error}");
         }
         storage::maybe_evict(&state.content_node, &state.db).await;
-    } else if let Ok(guard) = state.db.lock() {
-        if let Some(db) = guard.as_ref() {
-            storage::touch_pin(db.conn(), &result.blake3_hash);
+    } else {
+        let pin_hash = result.blake3_hash.clone();
+        if let Err(error) = state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Background,
+                state.profile_lease(),
+                "content.resolve.touch-pin",
+                move |db| storage::touch_pin(db.conn(), &pin_hash),
+            )
+            .await
+        {
+            log::warn!("content_resolve: failed to update cache access time: {error}");
         }
     }
 
-    Ok(result.bytes)
+    Ok(result)
+}
+
+fn decode_utf8(bytes: Vec<u8>) -> Result<String, String> {
+    String::from_utf8(bytes).map_err(|error| format!("content is not valid UTF-8: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_utf8;
+
+    #[test]
+    fn text_payloads_require_valid_utf8() {
+        assert_eq!(decode_utf8("नमस्ते".as_bytes().to_vec()).unwrap(), "नमस्ते");
+        assert!(decode_utf8(vec![0xff, 0xfe]).is_err());
+    }
 }

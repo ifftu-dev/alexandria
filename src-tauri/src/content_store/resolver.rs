@@ -139,7 +139,7 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
 /// An allowlist of "is this public" rather than a blocklist of known-bad
 /// ranges: the blocklist shape is what let `2130706433` and `::ffff:127.0.0.1`
 /// through, because both are only bad once you have normalised them.
-fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
+pub(crate) fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
     // Normalise IPv4-*mapped* IPv6 down to its v4 form, so
     // `::ffff:127.0.0.1` is judged as 127.0.0.1.
     //
@@ -148,10 +148,34 @@ fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
     // reading, so loopback would normalise to the perfectly routable 0.0.0.1
     // and be allowed. The v6 predicates below judge `::1` correctly, so the
     // compatible form is left alone.
+    //
+    // Transition prefixes that a gateway translates to an embedded IPv4
+    // address are judged by that address too: on an IPv6-only network with
+    // DNS64/NAT64, `64:ff9b::c0a8:101` reaches 192.168.1.1.
     let ip = match ip {
         std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => std::net::IpAddr::V4(v4),
-            None => std::net::IpAddr::V6(v6),
+            None => {
+                let s = v6.segments();
+                let low32 = std::net::Ipv4Addr::new(
+                    (s[6] >> 8) as u8,
+                    s[6] as u8,
+                    (s[7] >> 8) as u8,
+                    s[7] as u8,
+                );
+                match s {
+                    // NAT64 well-known prefix (RFC 6052), 64:ff9b::/96.
+                    [0x64, 0xff9b, 0, 0, 0, 0, _, _] => std::net::IpAddr::V4(low32),
+                    // 6to4 (RFC 3056), 2002:AABB:CCDD::/48.
+                    [0x2002, hi, lo, ..] => std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+                        (hi >> 8) as u8,
+                        hi as u8,
+                        (lo >> 8) as u8,
+                        lo as u8,
+                    )),
+                    _ => std::net::IpAddr::V6(v6),
+                }
+            }
         },
         v4 => v4,
     };
@@ -162,9 +186,12 @@ fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
                 || v4.is_private()
                 || v4.is_link_local()
                 || v4.is_broadcast()
-                || v4.is_unspecified()
+                // "This network", 0.0.0.0/8 (not only 0.0.0.0).
+                || v4.octets()[0] == 0
                 || v4.is_multicast()
                 || v4.is_documentation()
+                // IETF protocol assignments (RFC 6890), 192.0.0.0/24.
+                || (v4.octets()[..3] == [192, 0, 0])
                 // Shared address space (RFC 6598, carrier-grade NAT).
                 || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
                 // Benchmarking (RFC 2544).
@@ -180,6 +207,20 @@ fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
                 || (v6.segments()[0] & 0xfe00) == 0xfc00
                 // Link-local unicast (fe80::/10).
                 || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // Deprecated site-local (fec0::/10).
+                || (v6.segments()[0] & 0xffc0) == 0xfec0
+                // Deprecated IPv4-compatible (::/96) and IPv4-translated
+                // (::ffff:0:0/96) forms; `::1` and `::` are caught above.
+                || matches!(v6.segments(), [0, 0, 0, 0, 0, 0, _, _] | [0, 0, 0, 0, 0xffff, 0, _, _])
+                // Local-use NAT64 (RFC 8215), 64:ff9b:1::/48.
+                || matches!(v6.segments(), [0x64, 0xff9b, 1, ..])
+                // Teredo (2001::/32) tunnels to an embedded, obfuscated IPv4
+                // client address.
+                || matches!(v6.segments(), [0x2001, 0, ..])
+                // Documentation (2001:db8::/32).
+                || matches!(v6.segments(), [0x2001, 0x0db8, ..])
+                // Discard-only (100::/64).
+                || matches!(v6.segments(), [0x0100, 0, 0, 0, ..])
         }
     };
 
@@ -273,6 +314,99 @@ impl ContentResolver {
             ContentId::Blake3Hex(hash) => self.resolve_blake3(hash).await,
             ContentId::Url(url) => self.resolve_url(url).await,
         }
+    }
+
+    /// Resolve bytes for an explicit preview without retaining newly fetched
+    /// content. Local content may be reused, but peer fetches receive no named
+    /// retention tag and URL responses are neither cached nor mapped. Every
+    /// allocation/network attempt is bounded by `max_bytes`.
+    pub async fn resolve_preview_bounded(
+        &self,
+        identifier: &str,
+        max_bytes: usize,
+    ) -> Result<ResolveResult, ResolveError> {
+        let content_id = cid::parse_content_id(identifier)
+            .map_err(|error| ResolveError::InvalidId(error.to_string()))?;
+        match content_id {
+            ContentId::Blake3Hex(hash) => {
+                self.resolve_blake3_preview_bounded(&hash, max_bytes).await
+            }
+            ContentId::Url(url) => self.fetch_url_preview_bounded(&url, max_bytes).await,
+        }
+    }
+
+    async fn resolve_blake3_preview_bounded(
+        &self,
+        hash: &str,
+        max_bytes: usize,
+    ) -> Result<ResolveResult, ResolveError> {
+        match content::get_bytes_bounded(&self.node, hash, max_bytes).await {
+            Ok(bytes) => {
+                let size = bytes.len() as u64;
+                return Ok(ResolveResult {
+                    bytes,
+                    blake3_hash: hash.to_string(),
+                    external_id: self.lookup_external_for_blake3(hash).await,
+                    source: ResolveSource::Local,
+                    size,
+                });
+            }
+            Err(content::ContentError::NotFound(_)) => {}
+            Err(error) => return Err(ResolveError::Store(error.to_string())),
+        }
+
+        if let Some(discovery) = &self.discovery {
+            if let Ok(parsed) = content::parse_hash(hash) {
+                let providers = discovery.find_providers(parsed).await;
+                if !providers.is_empty()
+                    && fetch::fetch_from_any_unretained_bounded(
+                        &self.node, &providers, parsed, max_bytes,
+                    )
+                    .await
+                    .is_ok()
+                {
+                    let bytes = content::get_bytes_bounded(&self.node, hash, max_bytes)
+                        .await
+                        .map_err(|error| ResolveError::Store(error.to_string()))?;
+                    let size = bytes.len() as u64;
+                    return Ok(ResolveResult {
+                        bytes,
+                        blake3_hash: hash.to_string(),
+                        external_id: self.lookup_external_for_blake3(hash).await,
+                        source: ResolveSource::Local,
+                        size,
+                    });
+                }
+            }
+        }
+
+        if let Some(mapped_url) = self.lookup_external_for_blake3(hash).await {
+            if is_http_url(&mapped_url) {
+                return self.fetch_url_preview_bounded(&mapped_url, max_bytes).await;
+            }
+        }
+        Err(ResolveError::NotFound(format!("blake3:{hash}")))
+    }
+
+    async fn fetch_url_preview_bounded(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> Result<ResolveResult, ResolveError> {
+        reject_private_url(url)?;
+        let bytes = self
+            .http
+            .fetch_by_url_with_limit(url, max_bytes)
+            .await
+            .map_err(|error| ResolveError::Fetch(error.to_string()))?;
+        let size = bytes.len() as u64;
+        Ok(ResolveResult {
+            blake3_hash: blake3::hash(&bytes).to_hex().to_string(),
+            external_id: Some(url.to_string()),
+            source: ResolveSource::Url,
+            bytes,
+            size,
+        })
     }
 
     /// Resolve by BLAKE3 hash: local store, then peers, then mapped URL.
@@ -481,6 +615,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preview_resolution_enforces_exact_local_byte_limit() {
+        let (resolver, _tmp) = make_resolver().await;
+        let data = b"bounded governance preview";
+        let add = content::add_bytes_unencrypted(&resolver.node, data)
+            .await
+            .expect("add");
+
+        assert!(matches!(
+            resolver
+                .resolve_preview_bounded(&add.hash, data.len() - 1)
+                .await,
+            Err(ResolveError::Store(message)) if message.contains("exceeding")
+        ));
+        assert_eq!(
+            resolver
+                .resolve_preview_bounded(&add.hash, data.len())
+                .await
+                .expect("resolve at exact limit")
+                .bytes,
+            data
+        );
+
+        resolver.node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
     async fn resolve_blake3_fetches_from_peer_before_url() {
         use crate::content_store::discovery::ContentDiscovery;
 
@@ -632,6 +792,43 @@ mod tests {
                 "{url} should have been refused"
             );
         }
+    }
+
+    #[test]
+    fn transition_and_reserved_addresses_are_refused() {
+        for url in [
+            // The rest of 0.0.0.0/8 and IETF protocol assignments.
+            "http://0.1.2.3/",
+            "http://192.0.0.8/",
+            // NAT64 to a private and a metadata address; a DNS64 network
+            // translates these back to IPv4 on the way out.
+            "http://[64:ff9b::c0a8:101]/",
+            "http://[64:ff9b::a9fe:a9fe]/",
+            "http://[64:ff9b:1::1]/",
+            // 6to4 wrapping 192.168.1.1 and 127.0.0.1.
+            "http://[2002:c0a8:101::1]/",
+            "http://[2002:7f00:1::1]/",
+            // Teredo, IPv4-compatible, IPv4-translated, site-local,
+            // documentation and discard-only.
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",
+            "http://[::c0a8:101]/",
+            "http://[::ffff:0:c0a8:101]/",
+            "http://[fec0::1]/",
+            "http://[2001:db8::1]/",
+            "http://[100::1]/",
+        ] {
+            assert!(
+                reject_private_url(url).is_err(),
+                "{url} should have been refused"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_addresses_wrapping_public_ipv4_are_allowed() {
+        // NAT64 and 6to4 are judged by the IPv4 address they carry.
+        assert!(reject_private_url("http://[64:ff9b::808:808]/").is_ok());
+        assert!(reject_private_url("http://[2002:808:808::1]/").is_ok());
     }
 
     #[test]

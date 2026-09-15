@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iroh::endpoint::QuicTransportConfig;
-use iroh::protocol::Router;
+use iroh::protocol::{AcceptError, ProtocolHandler, Router};
 use iroh::{Endpoint, SecretKey};
 use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::BlobsProtocol;
@@ -28,6 +28,7 @@ use iroh_gossip::Gossip;
 use live::Live;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use zeroize::Zeroize;
 
 /// Name of the file where the node's Ed25519 secret key is persisted.
 const SECRET_KEY_FILE: &str = "node_secret.key";
@@ -57,6 +58,38 @@ struct RunningNode {
     store: FsStore,
     gossip: Gossip,
     live: Live,
+    closing: bool,
+    store_shutdown: ShutdownStatus,
+}
+
+type ShutdownStatus = Arc<std::sync::Mutex<Option<Result<(), String>>>>;
+
+#[derive(Debug)]
+struct TrackedBlobsProtocol {
+    blobs: BlobsProtocol,
+    shutdown_status: ShutdownStatus,
+}
+
+impl ProtocolHandler for TrackedBlobsProtocol {
+    async fn accept(&self, connection: iroh::endpoint::Connection) -> Result<(), AcceptError> {
+        self.blobs.accept(connection).await
+    }
+
+    async fn shutdown(&self) {
+        // The stock handler logs and discards this result. Keep evidence of
+        // the one store shutdown requested by the router instead of issuing
+        // a second shutdown RPC against an already-stopped actor.
+        let result = self
+            .blobs
+            .store()
+            .shutdown()
+            .await
+            .map_err(|e| e.to_string());
+        *self
+            .shutdown_status
+            .lock()
+            .expect("shutdown status poisoned") = Some(result);
+    }
 }
 
 /// The embedded iroh content node.
@@ -91,15 +124,20 @@ impl ContentNode {
     /// MUST be called while the node is not running (i.e. after
     /// `shutdown()`). Used to reroute the singleton ContentNode at a
     /// freshly-unlocked profile's blob directory.
-    pub async fn set_data_dir(&self, new_dir: PathBuf) {
+    pub async fn set_data_dir(&self, new_dir: PathBuf) -> Result<(), NodeError> {
+        let inner = self.inner.lock().await;
+        if inner.is_some() {
+            return Err(NodeError::AlreadyRunning);
+        }
         *self.data_dir.lock().await = new_dir;
+        Ok(())
     }
 
     /// Clear the in-memory content key (called when the active profile
     /// is locked). Subsequent encrypt calls will fail until a new key
     /// is supplied via [`Self::set_content_key`].
     pub async fn clear_content_key(&self) {
-        *self.content_key.lock().await = None;
+        self.content_key.lock().await.zeroize();
     }
 
     /// Set the content encryption key (derived from vault password).
@@ -127,20 +165,11 @@ impl ContentNode {
             return Err(NodeError::AlreadyRunning);
         }
 
-        // Create persistent blob store
         let data_dir = self.data_dir.lock().await.clone();
-        crate::diag::log(&format!(
-            "node.start: FsStore::load at {}...",
-            data_dir.display()
-        ));
-        let store = FsStore::load(&data_dir)
-            .await
-            .map_err(|e| NodeError::StoreInit(e.to_string()))?;
-        crate::diag::log("node.start: FsStore loaded OK");
-
-        log::info!("iroh blob store loaded at {}", data_dir.display());
-
-        // Load or generate the node's persistent identity key
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| NodeError::KeyPersistence(format!("create node directory: {e}")))?;
+        // Validate the key before opening a store actor that would otherwise
+        // survive a key error. Profile startup runs as an owned operation.
         let secret_key = load_or_generate_secret_key(&data_dir, node_enc_key)?;
 
         // QUIC transport: aggressive timeouts for real-time media.
@@ -190,11 +219,25 @@ impl ContentNode {
         ));
         log::info!("iroh endpoint bound, node ID: {node_id}");
 
+        // Binding can fail too. Open the store only once the key and endpoint
+        // are ready, and close the endpoint if loading the store fails.
+        let store = match FsStore::load(&data_dir).await {
+            Ok(store) => store,
+            Err(error) => {
+                endpoint.close().await;
+                return Err(NodeError::StoreInit(error.to_string()));
+            }
+        };
+
         // Register protocols on the shared router.
         // All platforms: blobs + gossip (room peer discovery) + MoQ (media streaming)
         // Desktop: full video + audio via the live crate with ffmpeg
         // Mobile: audio-only via the live crate without ffmpeg (pure Opus codec)
-        let blobs = BlobsProtocol::new(&store, None);
+        let store_shutdown = Arc::new(std::sync::Mutex::new(None));
+        let blobs = TrackedBlobsProtocol {
+            blobs: BlobsProtocol::new(&store, None),
+            shutdown_status: store_shutdown.clone(),
+        };
         let gossip = Gossip::builder().spawn(endpoint.clone());
         let live = Live::new(endpoint.clone());
 
@@ -213,6 +256,8 @@ impl ContentNode {
             store,
             gossip,
             live,
+            closing: false,
+            store_shutdown,
         });
         Ok(())
     }
@@ -224,14 +269,13 @@ impl ContentNode {
     /// `start()` on the same data directory within this process
     /// (e.g. after a profile switch) succeeds.
     ///
-    /// `Router::shutdown` alone is NOT enough: iroh-blobs spawns the
-    /// blob store on its own tokio runtime which only terminates when
-    /// `Store::shutdown` is called. Without that explicit shutdown,
-    /// the redb `blobs.db` lock persists and a follow-up `FsStore::load`
-    /// on the same path hangs indefinitely.
+    /// The router's blobs handler requests store shutdown exactly once and
+    /// records its result. Failed or unconfirmed cleanup retains the handles,
+    /// refuses content operations, and prevents restart or directory changes.
     pub async fn shutdown(&self) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
-        let node = inner.take().ok_or(NodeError::NotRunning)?;
+        let node = inner.as_mut().ok_or(NodeError::NotRunning)?;
+        node.closing = true;
 
         crate::diag::log("node.shutdown: router.shutdown()...");
         log::info!("shutting down iroh node...");
@@ -240,13 +284,15 @@ impl ContentNode {
             .await
             .map_err(|e| NodeError::Shutdown(e.to_string()))?;
 
-        // Explicitly terminate the blob store actor so its tokio
-        // runtime drops and releases the redb file lock.
-        crate::diag::log("node.shutdown: store.shutdown()...");
-        if let Err(e) = node.store.shutdown().await {
-            log::warn!("iroh blob store shutdown error (continuing): {e}");
-            crate::diag::log(&format!("node.shutdown: store shutdown error: {e}"));
-        }
+        let store_result = node
+            .store_shutdown
+            .lock()
+            .expect("shutdown status poisoned")
+            .clone();
+        store_result
+            .ok_or_else(|| NodeError::Shutdown("store shutdown was not confirmed".to_string()))?
+            .map_err(NodeError::Shutdown)?;
+        *inner = None;
 
         crate::diag::log("node.shutdown: complete");
         log::info!("iroh node shut down");
@@ -256,7 +302,7 @@ impl ContentNode {
     /// Check if the node is currently running.
     pub async fn is_running(&self) -> bool {
         let inner = self.inner.lock().await;
-        inner.is_some()
+        inner.as_ref().is_some_and(|node| !node.closing)
     }
 
     /// Get the node's public key (peer ID) as a hex string.
@@ -264,7 +310,10 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn node_id(&self) -> Option<String> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.router.endpoint().id().to_string())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.router.endpoint().id().to_string())
     }
 
     /// Get this node's dialable address (endpoint id + relay + direct addrs).
@@ -273,7 +322,10 @@ impl ContentNode {
     /// content over iroh. Returns `None` if the node is not running.
     pub async fn endpoint_addr(&self) -> Option<iroh::EndpointAddr> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.router.endpoint().addr())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.router.endpoint().addr())
     }
 
     /// Get a clone of the running Endpoint for use by other protocols.
@@ -281,7 +333,10 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn endpoint(&self) -> Option<Endpoint> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.router.endpoint().clone())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.router.endpoint().clone())
     }
 
     /// Get a clone of the Gossip instance for tutoring room peer discovery.
@@ -292,7 +347,10 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn gossip(&self) -> Option<Gossip> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.gossip.clone())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.gossip.clone())
     }
 
     /// Get a clone of the Live instance for MoQ media streaming.
@@ -301,7 +359,10 @@ impl ContentNode {
     /// Desktop: full video + audio; Mobile: audio-only (no ffmpeg).
     pub async fn live(&self) -> Option<Live> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.live.clone())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.live.clone())
     }
 
     /// Access the blob store for content operations.
@@ -313,7 +374,7 @@ impl ContentNode {
         &self,
     ) -> Result<impl std::ops::Deref<Target = FsStore> + '_, NodeError> {
         let guard = self.inner.lock().await;
-        if guard.is_none() {
+        if guard.as_ref().is_none_or(|node| node.closing) {
             return Err(NodeError::NotRunning);
         }
         Ok(StoreGuard(guard))
@@ -384,7 +445,7 @@ fn load_or_generate_secret_key(
         };
 
         let key = SecretKey::from_bytes(&key_bytes);
-        log::info!("loaded existing iroh node key from {}", key_path.display());
+        log::info!("loaded existing encrypted iroh node key");
         Ok(key)
     } else {
         // Generate 32 random bytes for the Ed25519 secret key.
@@ -507,6 +568,57 @@ mod tests {
         node.shutdown().await.expect("shutdown failed");
 
         assert_eq!(id1, id2, "node ID should be stable across restarts");
+    }
+
+    #[tokio::test]
+    async fn invalid_key_does_not_open_a_blob_store() {
+        let directory = TempDir::new().expect("temporary content directory");
+        std::fs::write(directory.path().join(SECRET_KEY_FILE), b"invalid")
+            .expect("write invalid key fixture");
+        let node = ContentNode::new(directory.path());
+        assert!(matches!(
+            node.start(None).await,
+            Err(NodeError::KeyPersistence(_))
+        ));
+        assert!(!node.is_running().await);
+        assert!(!directory.path().join("blobs.db").exists());
+    }
+
+    #[tokio::test]
+    async fn failed_shutdown_evidence_retains_resources_and_refuses_reuse() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let next_directory = TempDir::new().expect("next content directory");
+        let node = ContentNode::new(directory.path());
+        node.start(None).await.expect("start node");
+        let status = {
+            let inner = node.inner.lock().await;
+            let running = inner.as_ref().expect("running node");
+            running
+                .router
+                .shutdown()
+                .await
+                .expect("shutdown fixture router");
+            running.store_shutdown.clone()
+        };
+        assert!(matches!(*status.lock().expect("status"), Some(Ok(()))));
+        // Inject a failed callback result into the production verification path.
+        *status.lock().expect("status") = Some(Err("store failure fixture".to_string()));
+        assert!(matches!(node.shutdown().await, Err(NodeError::Shutdown(_))));
+        assert!(!node.is_running().await);
+        assert!(node.endpoint().await.is_none());
+        assert!(node.store().await.is_err());
+        assert!(node.inner.lock().await.is_some());
+        assert!(node.start(None).await.is_err());
+        assert!(node
+            .set_data_dir(next_directory.path().to_path_buf())
+            .await
+            .is_err());
+        // Restore the actual successful result to finish fixture cleanup.
+        *status.lock().expect("status") = Some(Ok(()));
+        node.shutdown().await.expect("finish cleanup");
+        node.set_data_dir(next_directory.path().to_path_buf())
+            .await
+            .expect("repoint after cleanup");
     }
 
     #[test]

@@ -313,86 +313,95 @@ where
     F: Fn() -> Option<Arc<dyn ChainFetcher>> + Send + Sync + 'static,
     I: Fn() -> u64 + Send + Sync + 'static,
 {
-    tokio::spawn(async move {
-        // First iteration runs immediately so a freshly-started node
-        // catches up before privileged-topic traffic flows. Sleep is
-        // at the end of the loop so the interval applies *between*
-        // ticks, not before the first one. The labelled-block
-        // pattern keeps every skip path inside the same sleep, so a
-        // misconfigured factory can't hot-spin.
-        //
-        // `bootstrap_mode` is set inside the labelled block whenever
-        // the tick produced zero Blockfrost traffic (no fetcher, or
-        // no profile DB yet). In that case the inter-tick sleep
-        // shortens to `BOOTSTRAP_REFRESH_SECS` so a late profile
-        // unlock or a newly-set Blockfrost project id is picked up
-        // within tens of seconds — without this, the default 1-hour
-        // interval gates the first useful tick after unlock.
-        loop {
-            let mut bootstrap_mode = false;
-            'tick: {
-                let Some(fetcher) = fetcher_factory() else {
-                    log::debug!(
-                        "registry refresh: skipping tick — no Blockfrost project id configured \
+    tokio::spawn(refresh_loop(db, fetcher_factory, interval_factory))
+}
+
+pub(crate) async fn refresh_loop<F, I>(
+    db: Arc<Mutex<Option<Database>>>,
+    fetcher_factory: F,
+    interval_factory: I,
+) where
+    F: Fn() -> Option<Arc<dyn ChainFetcher>> + Send + Sync + 'static,
+    I: Fn() -> u64 + Send + Sync + 'static,
+{
+    // First iteration runs immediately so a freshly-started node
+    // catches up before privileged-topic traffic flows. Sleep is
+    // at the end of the loop so the interval applies *between*
+    // ticks, not before the first one. The labelled-block
+    // pattern keeps every skip path inside the same sleep, so a
+    // misconfigured factory can't hot-spin.
+    //
+    // `bootstrap_mode` is set inside the labelled block whenever
+    // the tick produced zero Blockfrost traffic (no fetcher, or
+    // no profile DB yet). In that case the inter-tick sleep
+    // shortens to `BOOTSTRAP_REFRESH_SECS` so a late profile
+    // unlock or a newly-set Blockfrost project id is picked up
+    // within tens of seconds — without this, the default 1-hour
+    // interval gates the first useful tick after unlock.
+    loop {
+        let mut bootstrap_mode = false;
+        'tick: {
+            let Some(fetcher) = fetcher_factory() else {
+                log::debug!(
+                    "registry refresh: skipping tick — no Blockfrost project id configured \
                          (set in Settings → Cardano or via BLOCKFROST_PROJECT_ID); \
                          polling again in {BOOTSTRAP_REFRESH_SECS}s"
-                    );
-                    bootstrap_mode = true;
+                );
+                bootstrap_mode = true;
+                break 'tick;
+            };
+            let entries = match fetcher.fetch().await {
+                Ok(e) => e,
+                Err(e) => {
+                    log::warn!("registry refresh: fetch failed: {e}");
                     break 'tick;
-                };
-                let entries = match fetcher.fetch().await {
-                    Ok(e) => e,
+                }
+            };
+            if entries.is_empty() {
+                break 'tick;
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let apply_result = {
+                let guard = match db.lock() {
+                    Ok(g) => g,
                     Err(e) => {
-                        log::warn!("registry refresh: fetch failed: {e}");
+                        log::warn!("registry refresh: db lock poisoned: {e}");
                         break 'tick;
                     }
                 };
-                if entries.is_empty() {
+                let Some(db_ref) = guard.as_ref() else {
+                    // No active profile yet — drop this tick
+                    // AND mark the tick as bootstrap so the next
+                    // wait is short. We did spend a Blockfrost
+                    // call here (above), so a fast retry costs
+                    // one call per BOOTSTRAP_REFRESH_SECS until
+                    // unlock; acceptable trade for prompt
+                    // pickup. The refresh task outlives any
+                    // single profile.
+                    bootstrap_mode = true;
                     break 'tick;
-                }
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let apply_result = {
-                    let guard = match db.lock() {
-                        Ok(g) => g,
-                        Err(e) => {
-                            log::warn!("registry refresh: db lock poisoned: {e}");
-                            break 'tick;
-                        }
-                    };
-                    let Some(db_ref) = guard.as_ref() else {
-                        // No active profile yet — drop this tick
-                        // AND mark the tick as bootstrap so the next
-                        // wait is short. We did spend a Blockfrost
-                        // call here (above), so a fast retry costs
-                        // one call per BOOTSTRAP_REFRESH_SECS until
-                        // unlock; acceptable trade for prompt
-                        // pickup. The refresh task outlives any
-                        // single profile.
-                        bootstrap_mode = true;
-                        break 'tick;
-                    };
-                    apply_chain_entries(db_ref.conn(), &entries, now)
                 };
-                match apply_result {
-                    Ok(stats) => log::info!(
-                        "registry refresh: upserted {} chain rows, evicted {} snapshot rows",
-                        stats.upserted,
-                        stats.evicted
-                    ),
-                    Err(e) => log::warn!("registry refresh: apply failed: {e}"),
-                }
-            }
-            let secs = if bootstrap_mode {
-                BOOTSTRAP_REFRESH_SECS
-            } else {
-                interval_factory().max(MIN_REFRESH_SECS)
+                apply_chain_entries(db_ref.conn(), &entries, now)
             };
-            tokio::time::sleep(Duration::from_secs(secs)).await;
+            match apply_result {
+                Ok(stats) => log::info!(
+                    "registry refresh: upserted {} chain rows, evicted {} snapshot rows",
+                    stats.upserted,
+                    stats.evicted
+                ),
+                Err(e) => log::warn!("registry refresh: apply failed: {e}"),
+            }
         }
-    })
+        let secs = if bootstrap_mode {
+            BOOTSTRAP_REFRESH_SECS
+        } else {
+            interval_factory().max(MIN_REFRESH_SECS)
+        };
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+    }
 }
 
 #[cfg(test)]
@@ -414,6 +423,61 @@ mod tests {
             valid_until: until,
             on_chain_tx: tx.into(),
         }
+    }
+
+    struct DelayedFetcher {
+        started: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+
+    impl ChainFetcher for DelayedFetcher {
+        fn fetch<'a>(
+            &'a self,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<ChainEntry>, String>> + Send + 'a>,
+        > {
+            Box::pin(async move {
+                self.started.notify_one();
+                self.release.notified().await;
+                Ok(vec![entry("stake1u_old", "aa", 0, None, "tx-old")])
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn profile_cleanup_cancels_inflight_registry_fetch_before_database_reuse() {
+        let handle = Arc::new(Mutex::new(Some(test_db())));
+        let operations = crate::profile::operations::ProfileOperations::default();
+        let fetcher = Arc::new(DelayedFetcher {
+            started: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let factory = fetcher.clone();
+        operations
+            .spawn_job(refresh_loop(
+                handle.clone(),
+                move || Some(factory.clone()),
+                || 60,
+            ))
+            .await;
+        tokio::time::timeout(Duration::from_secs(5), fetcher.started.notified())
+            .await
+            .expect("fetch starts");
+        operations.stop_jobs().await;
+        // Only the fixture keeps the fetcher alive now: no detached request
+        // can resume and apply its result through the shared database slot.
+        assert_eq!(Arc::strong_count(&fetcher), 1);
+        *handle.lock().expect("database slot") = Some(test_db());
+        fetcher.release.notify_one();
+        tokio::task::yield_now().await;
+        let guard = handle.lock().expect("database slot");
+        assert!(!lookup(
+            guard.as_ref().expect("new database").conn(),
+            "stake1u_old",
+            "aa",
+            0
+        )
+        .expect("lookup old row"));
     }
 
     #[test]

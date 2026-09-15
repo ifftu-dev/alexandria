@@ -1,97 +1,62 @@
 //! §5.3 + §11.2 — DID doc + status list propagation.
 //!
-//! The "two-node" tests exercise the real libp2p swarm via
-//! `start_test_node` (lifted from `p2p::stress`). Where mDNS
-//! discovery fails (typical in CI / containers), the tests SKIP
-//! gracefully — same resilience pattern the existing stress tests
-//! use. The local-only test (`credential_queued_until_issuer_did_doc_arrives`)
+//! Two-node tests connect real loopback swarms directly and fail on missed
+//! delivery. The local-only test (`credential_queued_until_issuer_did_doc_arrives`)
 //! exercises the pending-verification sweeper in `p2p::vc_did`
 //! without a network.
 
-use super::common::{await_gossip_on, await_peers_connected, new_test_db, start_test_node};
+use super::common::{
+    await_gossip_on, await_peers_connected, discard_events, new_test_db, publish_until_ready,
+    start_test_node,
+};
 use app_lib::p2p::vc_did::{handle_did_message, promote_pending_for, queue_pending, DidIngest};
 use app_lib::p2p::vc_status::{handle_status_message, StatusIngest};
 use base64::Engine as _;
 use ed25519_dalek::Signer as _;
 
 #[tokio::test]
-#[ignore = "flaky on CI: depends on libp2p DHT bootstrap to a discovery peer; \
-            races and times out non-deterministically. Track in a separate issue \
-            before re-enabling — likely needs a stub bootstrap or deterministic mock."]
 async fn did_doc_rotation_propagates_to_second_node() {
     // Node A publishes a DID rotation message → Node B receives
     // the gossip → Node B's DB reflects the rotated_by linkage.
-    let (mut a, _rx_a) = match start_test_node("did-rotation-a", 32).await {
-        Some(t) => t,
-        None => return,
-    };
-    let (mut b, mut rx_b) = match start_test_node("did-rotation-b", 64).await {
-        Some(t) => t,
-        None => {
-            a.shutdown().await;
-            return;
-        }
-    };
-
-    if !await_peers_connected(&a, &b, 10).await {
-        a.shutdown().await;
-        b.shutdown().await;
-        eprintln!("SKIP: mDNS discovery timed out");
-        return;
-    }
-    // Give GossipSub time to finish mesh propagation.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let payload = br#"{"did":"did:key:zRotA","rotated_to":"did:key:zRotA2"}"#.to_vec();
+    let (mut a, rx_a) = start_test_node("did-rotation-a", 32).await;
+    let _events_a = discard_events(rx_a);
+    let (mut b, mut rx_b) = start_test_node("did-rotation-b", 64).await;
+    await_peers_connected(&a, &b, 10).await;
     let key = super::common::test_key("did-rotation-a");
-    if let Err(e) = a
-        .publish_vc_did(payload.clone(), &key, "stake_test1urotation")
-        .await
-    {
-        eprintln!("SKIP: publish failed: {e:?}");
-        a.shutdown().await;
-        b.shutdown().await;
-        return;
-    }
-
-    let received = await_gossip_on(&mut rx_b, "vc-did", 5).await;
-    let payload_bytes = match received {
-        Some(p) => p,
-        None => {
-            eprintln!("SKIP: gossip propagation timed out");
-            a.shutdown().await;
-            b.shutdown().await;
-            return;
-        }
-    };
-    assert_eq!(payload_bytes, payload);
+    let did = alexandria_verify::did::derive_did_key(&key);
+    let successor = super::common::test_did("did-rotation-successor");
+    let announcement = serde_json::to_vec(&serde_json::json!({"did": did.as_str()})).unwrap();
+    publish_until_ready(|| a.publish_vc_did(announcement.clone(), &key, "stake_test1urotation"))
+        .await;
+    let announcement = await_gossip_on(&mut rx_b, "vc-did", 5).await;
 
     // Drive the handler against the received bytes to simulate what
     // the application-layer dispatcher would do. Assert the DB
     // records the rotated_by linkage.
     let db = new_test_db();
-    let msg = app_lib::p2p::types::SignedGossipMessage {
-        topic: "/alexandria/vc-did/1.0".into(),
-        payload: payload_bytes,
-        signature: vec![0; 64],
-        public_key: vec![0; 32],
-        stake_address: "stake_test1urotation".into(),
-        timestamp: 1_712_880_000,
-        encrypted: false,
-        key_id: None,
-    };
+    assert_eq!(
+        handle_did_message(&db, &announcement).unwrap(),
+        DidIngest::Stored
+    );
+    let payload = serde_json::to_vec(
+        &serde_json::json!({"did": did.as_str(), "rotated_to": successor.as_str()}),
+    )
+    .unwrap();
+    publish_until_ready(|| a.publish_vc_did(payload.clone(), &key, "stake_test1urotation")).await;
+    let msg = await_gossip_on(&mut rx_b, "vc-did", 5).await;
+    assert_eq!(msg.payload, payload);
     let outcome = handle_did_message(&db, &msg).unwrap();
     assert_eq!(outcome, DidIngest::UpdatedRegistry);
     let rotated_by: Option<String> = db
         .conn()
         .query_row(
             "SELECT rotated_by FROM key_registry \
-             WHERE did = 'did:key:zRotA' AND rotated_by IS NOT NULL",
-            [],
+             WHERE did = ?1 AND rotated_by IS NOT NULL",
+            [did.as_str()],
             |r| r.get(0),
         )
         .ok();
-    assert_eq!(rotated_by.as_deref(), Some("did:key:zRotA2"));
+    assert_eq!(rotated_by.as_deref(), Some(successor.as_str()));
 
     a.shutdown().await;
     b.shutdown().await;
@@ -104,24 +69,10 @@ async fn status_list_revocation_propagates() {
     // the issuer in B's key_registry (the handler defers otherwise);
     // the real P2P flow is a DID doc landing before the status list,
     // which is what the application dispatcher coordinates.
-    let (mut a, _rx_a) = match start_test_node("status-a", 32).await {
-        Some(t) => t,
-        None => return,
-    };
-    let (mut b, mut rx_b) = match start_test_node("status-b", 64).await {
-        Some(t) => t,
-        None => {
-            a.shutdown().await;
-            return;
-        }
-    };
-    if !await_peers_connected(&a, &b, 10).await {
-        a.shutdown().await;
-        b.shutdown().await;
-        eprintln!("SKIP: mDNS discovery timed out");
-        return;
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let (mut a, rx_a) = start_test_node("status-a", 32).await;
+    let _events_a = discard_events(rx_a);
+    let (mut b, mut rx_b) = start_test_node("status-b", 64).await;
+    await_peers_connected(&a, &b, 10).await;
 
     // Signed by the issuer whose DID the payload names, because that is the
     // only kind of status list the handler accepts.
@@ -156,27 +107,9 @@ async fn status_list_revocation_propagates() {
         "proof": proof,
     }))
     .expect("payload serialises");
-    if let Err(e) = a
-        .publish_vc_status(payload.clone(), &key, "stake_test1ustatus")
-        .await
-    {
-        eprintln!("SKIP: publish failed: {e:?}");
-        a.shutdown().await;
-        b.shutdown().await;
-        return;
-    }
-
-    let received = await_gossip_on(&mut rx_b, "vc-status", 5).await;
-    let payload_bytes = match received {
-        Some(p) => p,
-        None => {
-            eprintln!("SKIP: gossip propagation timed out");
-            a.shutdown().await;
-            b.shutdown().await;
-            return;
-        }
-    };
-    assert_eq!(payload_bytes, payload);
+    publish_until_ready(|| a.publish_vc_status(payload.clone(), &key, "stake_test1ustatus")).await;
+    let msg = await_gossip_on(&mut rx_b, "vc-status", 5).await;
+    assert_eq!(msg.payload, payload);
 
     // Drive the handler against a seeded DB where the issuer is known.
     let db = new_test_db();
@@ -187,16 +120,6 @@ async fn status_list_revocation_propagates() {
             rusqlite::params![issuer.as_str()],
         )
         .unwrap();
-    let msg = app_lib::p2p::types::SignedGossipMessage {
-        topic: "/alexandria/vc-status/1.0".into(),
-        payload: payload_bytes,
-        signature: vec![0; 64],
-        public_key: vec![0; 32],
-        stake_address: "stake_test1ustatus".into(),
-        timestamp: 1_712_880_000,
-        encrypted: false,
-        key_id: None,
-    };
     let outcome = handle_status_message(&db, &msg).unwrap();
     assert_eq!(outcome, StatusIngest::Applied);
     let version: i64 = db

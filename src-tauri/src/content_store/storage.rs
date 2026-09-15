@@ -70,12 +70,15 @@ pub fn get_storage_quota(conn: &Connection) -> u64 {
 }
 
 /// Persist the storage quota.
-pub fn set_storage_quota(conn: &Connection, bytes: u64) {
-    let _ = crate::settings::SettingsStore::set(
+pub fn set_storage_quota(
+    conn: &Connection,
+    bytes: u64,
+) -> Result<(), crate::settings::store::SettingsError> {
+    crate::settings::SettingsStore::set(
         conn,
         crate::settings::registry::keys::STORAGE_QUOTA_BYTES,
         bytes,
-    );
+    )
 }
 
 // ── Pin tracking ────────────────────────────────────────────────────────
@@ -90,8 +93,9 @@ pub fn upsert_pin(
     pin_type: &str,
     size_bytes: u64,
     auto_unpin: bool,
-) {
-    let _ = conn.execute(
+) -> Result<(), String> {
+    let size_bytes = i64::try_from(size_bytes).map_err(|_| "pin size exceeds SQLite range")?;
+    conn.execute(
         "INSERT INTO pins (cid, pin_type, size_bytes, last_accessed, auto_unpin, pinned_at) \
          VALUES (?1, ?2, ?3, datetime('now'), ?4, datetime('now')) \
          ON CONFLICT(cid) DO UPDATE SET \
@@ -99,16 +103,20 @@ pub fn upsert_pin(
            size_bytes = excluded.size_bytes, \
            auto_unpin = excluded.auto_unpin, \
            last_accessed = datetime('now')",
-        params![blake3_hash, pin_type, size_bytes as i64, auto_unpin as i32],
-    );
+        params![blake3_hash, pin_type, size_bytes, auto_unpin as i32],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Update `last_accessed` for a pin (called on content reads).
-pub fn touch_pin(conn: &Connection, blake3_hash: &str) {
-    let _ = conn.execute(
+pub fn touch_pin(conn: &Connection, blake3_hash: &str) -> Result<(), String> {
+    conn.execute(
         "UPDATE pins SET last_accessed = datetime('now') WHERE cid = ?1",
         params![blake3_hash],
-    );
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Total bytes tracked across all pins.
@@ -376,5 +384,32 @@ pub fn backfill_pins(conn: &Connection) {
         .unwrap_or(0);
     if count > 0 {
         log::info!("[storage] Pin table has {count} entries after backfill");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quota_and_pin_statistics_round_trip() {
+        let db = Database::open_in_memory().expect("database");
+        db.run_migrations().expect("migrations");
+        set_storage_quota(db.conn(), 1_000).expect("quota");
+        upsert_pin(db.conn(), "cache-hash", "cache", 600, true).expect("cache pin");
+        upsert_pin(db.conn(), "course-hash", "course", 100, false).expect("course pin");
+
+        let stats = storage_stats(db.conn());
+        assert_eq!(stats.quota_bytes, 1_000);
+        assert_eq!(stats.total_pinned_bytes, 700);
+        assert_eq!(stats.evictable_bytes, 600);
+        assert_eq!(stats.pin_count, 2);
+        assert_eq!(stats.usage_percent, Some(70.0));
+    }
+
+    #[test]
+    fn quota_write_reports_missing_settings_store() {
+        let conn = Connection::open_in_memory().expect("database");
+        assert!(set_storage_quota(&conn, 1_000).is_err());
     }
 }

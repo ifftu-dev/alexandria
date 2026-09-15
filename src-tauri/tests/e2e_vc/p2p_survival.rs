@@ -1,6 +1,9 @@
 //! §20.4 — subject offline, PinBoard pinner online → credential still resolvable.
 
-use super::common::{await_gossip_on, await_peers_connected, new_test_db, start_test_node};
+use super::common::{
+    await_gossip_on, await_peers_connected, discard_events, new_test_db, publish_until_ready,
+    start_test_node,
+};
 use app_lib::content_store::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
 use app_lib::crypto::did::Did;
 use app_lib::p2p::pinboard::{handle_pinboard_message, PinboardCommitment};
@@ -49,24 +52,10 @@ async fn credential_resolvable_when_subject_offline_via_pinboard() {
 async fn pinboard_observation_propagates_via_gossip() {
     // B declares commitment → broadcasts on TOPIC_PINBOARD →
     // C's handler inserts pinboard_observations row.
-    let (mut b, _rx_b) = match start_test_node("pinboard-b", 32).await {
-        Some(t) => t,
-        None => return,
-    };
-    let (mut c, mut rx_c) = match start_test_node("pinboard-c", 64).await {
-        Some(t) => t,
-        None => {
-            b.shutdown().await;
-            return;
-        }
-    };
-    if !await_peers_connected(&b, &c, 10).await {
-        b.shutdown().await;
-        c.shutdown().await;
-        eprintln!("SKIP: mDNS discovery timed out");
-        return;
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let (mut b, rx_b) = start_test_node("pinboard-b", 32).await;
+    let _events_b = discard_events(rx_b);
+    let (mut c, mut rx_c) = start_test_node("pinboard-c", 64).await;
+    await_peers_connected(&b, &c, 10).await;
 
     // Signed by the pinner it names.
     //
@@ -77,7 +66,7 @@ async fn pinboard_observation_propagates_via_gossip() {
     // `pinboard_observations` by any peer — and forged commitments claiming N
     // peers pin a subject are how a node talks itself into dropping content
     // that exists nowhere else. The literal outlived the fix and was hidden by
-    // the SKIP above, which fires whenever mDNS does not connect.
+    // the former discovery skip when mDNS did not connect.
     let key = super::common::test_key("pinboard-b");
     let pinner = alexandria_verify::did::derive_did_key(&key);
     let mut commit = PinboardCommitment {
@@ -97,40 +86,13 @@ async fn pinboard_observation_propagates_via_gossip() {
             .to_bytes(),
     );
     let payload = serde_json::to_vec(&commit).unwrap();
-    if let Err(e) = b
-        .publish_pinboard(payload.clone(), &key, "stake_test1upinb")
-        .await
-    {
-        eprintln!("SKIP: publish failed: {e:?}");
-        b.shutdown().await;
-        c.shutdown().await;
-        return;
-    }
-
-    let received = await_gossip_on(&mut rx_c, "pinboard", 5).await;
-    let payload_bytes = match received {
-        Some(p) => p,
-        None => {
-            eprintln!("SKIP: gossip propagation timed out");
-            b.shutdown().await;
-            c.shutdown().await;
-            return;
-        }
-    };
+    publish_until_ready(|| b.publish_pinboard(payload.clone(), &key, "stake_test1upinb")).await;
+    let msg = await_gossip_on(&mut rx_c, "pinboard", 5).await;
+    assert_eq!(msg.payload, payload);
 
     // Drive the handler against a fresh DB to assert the
     // application-layer effect.
     let db = new_test_db();
-    let msg = app_lib::p2p::types::SignedGossipMessage {
-        topic: "/alexandria/pinboard/1.0".into(),
-        payload: payload_bytes,
-        signature: vec![0; 64],
-        public_key: vec![0; 32],
-        stake_address: "stake_test1upinb".into(),
-        timestamp: 1_712_880_000,
-        encrypted: false,
-        key_id: None,
-    };
     handle_pinboard_message(&db, &msg).unwrap();
 
     let found = list_pinners_for(db.conn(), &Did("did:key:zSubjectE2E".into())).unwrap();

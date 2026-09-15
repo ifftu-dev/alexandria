@@ -5,13 +5,14 @@
 //! are thin adapters around `content_store::pinboard` + `crypto::wallet` —
 //! unit tests hit the impls directly.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
-use tauri::State;
 
 use crate::content_store::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::p2p::pinboard::PinboardCommitment;
 use crate::AppState;
 
@@ -139,12 +140,23 @@ pub async fn declare_pinboard_commitment(
     scope: Vec<String>,
 ) -> Result<PinboardCommitment, String> {
     let (signing_key, pinner) = load_pinner_key(&state).await?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    declare_my_commitment_impl(db.conn(), &pinner, &Did(subject_did), &scope, &signing_key)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pinboard.declare",
+            move |db| {
+                declare_my_commitment_impl(
+                    db.conn(),
+                    &pinner,
+                    &Did(subject_did),
+                    &scope,
+                    &signing_key,
+                )
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -152,48 +164,62 @@ pub async fn revoke_pinboard_commitment(
     state: State<'_, AppState>,
     commitment_id: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    revoke_commitment(db.conn(), &commitment_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pinboard.revoke",
+            move |db| revoke_commitment(db.conn(), &commitment_id),
+        )
+        .await
 }
 
 #[tauri::command]
 pub async fn list_my_commitments(
     state: State<'_, AppState>,
 ) -> Result<Vec<PinboardCommitment>, String> {
-    let (_signing_key, pinner) = load_pinner_key(&state).await?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_my_commitments_impl(db.conn(), &pinner)
+    let (signing_key, pinner) = load_pinner_key(&state).await?;
+    drop(signing_key);
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pinboard.list-mine",
+            move |db| list_my_commitments_impl(db.conn(), &pinner),
+        )
+        .await
 }
 
 #[tauri::command]
 pub async fn list_incoming_commitments(
     state: State<'_, AppState>,
 ) -> Result<Vec<PinboardCommitment>, String> {
-    let (_signing_key, self_did) = load_pinner_key(&state).await?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_incoming_commitments_impl(db.conn(), &self_did)
+    let (signing_key, self_did) = load_pinner_key(&state).await?;
+    drop(signing_key);
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pinboard.list-incoming",
+            move |db| list_incoming_commitments_impl(db.conn(), &self_did),
+        )
+        .await
 }
 
 #[tauri::command]
 pub async fn get_quota_breakdown(state: State<'_, AppState>) -> Result<QuotaBreakdown, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    quota_breakdown_impl(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pinboard.quota-breakdown",
+            move |db| quota_breakdown_impl(db.conn()),
+        )
+        .await
 }
 
 #[cfg(test)]

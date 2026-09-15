@@ -451,6 +451,72 @@ mod tests {
         assert_eq!(validator.seen_count(), 2);
     }
 
+    #[test]
+    fn dedup_capacity_evicts_only_oldest_unique_envelope() {
+        let key = test_key();
+        let messages: Vec<_> = (0..3)
+            .map(|id| {
+                sign_gossip_message(
+                    "/alexandria/catalog/1.0",
+                    format!("{{\"id\":{id}}}").into_bytes(),
+                    &key,
+                    "stake_test_dedup",
+                )
+            })
+            .collect();
+        let validator = MessageValidator {
+            seen: Mutex::new(LruCache::new(NonZeroUsize::new(2).unwrap())),
+            db: None,
+        };
+        assert!(validator.validate(&messages[0]).is_ok());
+        assert!(validator.validate(&messages[1]).is_ok());
+        assert!(matches!(
+            validator.validate(&messages[0]),
+            Err(ValidationError::Duplicate { .. })
+        ));
+        assert!(validator.validate(&messages[2]).is_ok());
+        assert_eq!(validator.seen_count(), 2);
+        for message in &messages[1..] {
+            assert!(matches!(
+                validator.validate(message),
+                Err(ValidationError::Duplicate { .. })
+            ));
+        }
+        assert!(validator.validate(&messages[0]).is_ok());
+        assert_eq!(validator.seen_count(), 2);
+    }
+
+    #[test]
+    fn concurrent_duplicate_validation_accepts_once() {
+        let key = test_key();
+        let message = valid_message(&key, "/alexandria/catalog/1.0");
+        let validator = MessageValidator::new();
+        let barrier = std::sync::Barrier::new(8);
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        validator.validate(&message)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ValidationError::Duplicate { .. })))
+                .count(),
+            7
+        );
+        assert_eq!(validator.seen_count(), 1);
+    }
+
     // -- Identity binding tests --
     //
     // The old TOFU model is gone (see docs/stake-pubkey-registry.md);
