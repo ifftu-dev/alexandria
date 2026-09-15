@@ -9,6 +9,163 @@
 use super::schema::MIGRATIONS;
 use crate::db::Database;
 
+#[test]
+fn credential_snapshot_migration_preserves_legacy_format_and_adds_vc_link() {
+    let db = Database::open_in_memory().unwrap();
+    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version <= 87) {
+        db.conn().execute_batch(sql).unwrap();
+    }
+    db.conn()
+        .execute(
+            "INSERT INTO reputation_snapshots
+             (id, actor_address, subject_id, role, skill_count, tx_status)
+             VALUES ('legacy', 'stake', 'subject', 'learner', 0, 'pending')",
+            [],
+        )
+        .unwrap();
+    let (_, _, sql) = MIGRATIONS
+        .iter()
+        .find(|(version, _, _)| *version == 88)
+        .unwrap();
+    db.conn().execute_batch(sql).unwrap();
+
+    let legacy: (String, String, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT snapshot_format, snapshot_scope, credential_id
+             FROM reputation_snapshots WHERE id = 'legacy'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        legacy,
+        ("legacy_cip68".into(), "legacy_declared_window".into(), None)
+    );
+    assert!(db
+        .conn()
+        .execute(
+            "UPDATE reputation_snapshots SET snapshot_format = 'unknown' WHERE id = 'legacy'",
+            [],
+        )
+        .is_err());
+    assert!(db
+        .conn()
+        .execute(
+            "UPDATE reputation_snapshots SET credential_id = 'missing' WHERE id = 'legacy'",
+            [],
+        )
+        .is_err());
+}
+
+#[test]
+fn recovery_members_migration_preserves_signed_checkpoint_and_requires_new_receipt() {
+    let db = Database::open_in_memory().unwrap();
+    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version <= 83) {
+        db.conn().execute_batch(sql).unwrap();
+    }
+    db.conn()
+        .execute(
+            "INSERT INTO chain_submissions
+         (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json, status,
+          last_error, created_at, updated_at)
+         VALUES ('cardano-preprod', 'test', 'original', ?1, X'010203', '{\"version\":1}',
+                 'confirmed', 'original error', '2026-01-01', '2026-01-02')",
+            ["a".repeat(64)],
+        )
+        .unwrap();
+    let snapshot = || {
+        db.conn().query_row(
+        "SELECT json_array(network, operation_kind, operation_id, tx_hash, hex(signed_cbor),
+                           context_json, status, last_error, created_at, updated_at)
+         FROM chain_submissions", [], |row| row.get::<_, String>(0)).unwrap()
+    };
+    let original = snapshot();
+    let (_, _, sql) = MIGRATIONS
+        .iter()
+        .find(|(version, _, _)| *version == 84)
+        .unwrap();
+    let tx = db.conn().unchecked_transaction().unwrap();
+    tx.execute_batch(sql).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(snapshot(), original);
+    let slot: Option<i64> = db
+        .conn()
+        .query_row("SELECT confirmed_slot FROM chain_submissions", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        slot, None,
+        "old confirmations must not acquire fabricated ledger receipts"
+    );
+    assert!(db.conn().execute(
+        "INSERT INTO chain_submission_members VALUES ('cardano-preprod', 'claim', 'claim-id', 'test', 'missing')", []
+    ).is_err());
+    db.conn().execute(
+        "INSERT INTO chain_submission_members VALUES ('cardano-preprod', 'claim', 'claim-id', 'test', 'original')", []
+    ).unwrap();
+    assert!(
+        db.conn()
+            .execute("DELETE FROM chain_submissions", [])
+            .is_err(),
+        "reservations must not lose their checkpoint"
+    );
+}
+
+#[test]
+fn recovery_migration_preserves_every_legacy_queue_column_and_widens_status() {
+    let db = Database::open_in_memory().unwrap();
+    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version < 83) {
+        db.conn().execute_batch(sql).unwrap();
+    }
+    db.conn()
+        .execute_batch(
+            "INSERT INTO onchain_governance_queue
+         (id, action_type, payload_json, target_table, target_id, status,
+          tx_hash, attempts, last_error, created_at, updated_at)
+         VALUES ('q', 'resolve_proposal', '{\"test\":true}', 'governance_proposals', 'p',
+                 'submitted', 'original', 3, 'original error', '2026-01-01', '2026-01-02');",
+        )
+        .unwrap();
+    let snapshot =
+        || {
+            db.conn().query_row(
+        "SELECT json_array(id, action_type, payload_json, target_table, target_id, status,
+                           tx_hash, attempts, last_error, created_at, updated_at)
+         FROM onchain_governance_queue WHERE id = 'q'", [], |row| row.get::<_, String>(0)).unwrap()
+        };
+    let original = snapshot();
+    let (_, _, sql) = MIGRATIONS
+        .iter()
+        .find(|(version, _, _)| *version == 83)
+        .unwrap();
+    let tx = db.conn().unchecked_transaction().unwrap();
+    tx.execute_batch(sql).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(snapshot(), original);
+    db.conn()
+        .execute(
+            "UPDATE onchain_governance_queue SET status = 'outcome_unknown' WHERE id = 'q'",
+            [],
+        )
+        .unwrap();
+    assert!(db
+        .conn()
+        .execute(
+            "UPDATE onchain_governance_queue SET status = 'invented' WHERE id = 'q'",
+            []
+        )
+        .is_err());
+    let violations: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(violations, 0);
+}
+
 /// Apply migration 072 again over rows inserted afterwards.
 ///
 /// The migration is written to be idempotent — `CREATE TABLE IF NOT
@@ -483,4 +640,59 @@ fn delivery_mode_is_constrained() {
         bad.is_err(),
         "delivery_mode CHECK should reject unknown modes"
     );
+}
+
+// ---- migration 089: diagnostics assessment exit ------------------------
+
+#[test]
+fn diagnostics_exit_fields_preserve_ungraded_attempts_and_are_constrained() {
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    db.conn()
+        .execute_batch(
+            "INSERT INTO question_banks (id, skill_id, label, ratified)
+             VALUES ('b_diag', 's_diag', 'Diagnostics', 1);
+             INSERT INTO assessment_attempts
+               (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                started_at, ended_at, end_reason, draft_answers_json)
+             VALUES ('a_diag', 'did:key:zLearner', 'b_diag', 's_diag', 1, '[]', '[]',
+                     '2026-09-14T00:00:00Z', '2026-09-14T00:05:00Z', 'diagnostics', '[]');",
+        )
+        .expect("valid diagnostics exit");
+
+    let state: (Option<String>, Option<String>, Option<String>, Option<i64>) = db
+        .conn()
+        .query_row(
+            "SELECT ended_at, end_reason, graded_at, passed FROM assessment_attempts
+              WHERE id = 'a_diag'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("attempt");
+    assert!(state.0.is_some());
+    assert_eq!(state.1.as_deref(), Some("diagnostics"));
+    assert!(state.2.is_none());
+    assert!(state.3.is_none());
+
+    db.conn()
+        .execute(
+            "UPDATE assessment_attempts SET end_reason = 'interrupted' WHERE id = 'a_diag'",
+            [],
+        )
+        .expect("interrupted is a supported terminal reason");
+
+    assert!(db
+        .conn()
+        .execute(
+            "UPDATE assessment_attempts SET end_reason = 'operator' WHERE id = 'a_diag'",
+            [],
+        )
+        .is_err());
+    assert!(db
+        .conn()
+        .execute(
+            "UPDATE assessment_attempts SET draft_answers_json = 'not-json' WHERE id = 'a_diag'",
+            [],
+        )
+        .is_err());
 }

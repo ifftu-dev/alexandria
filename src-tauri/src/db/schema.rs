@@ -90,7 +90,299 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (80, "sentinel_flag_notice", MIGRATION_080),
     (81, "account_roles_set", MIGRATION_081),
     (82, "escrow_datum_recipients", MIGRATION_082),
+    (83, "durable_chain_submissions", MIGRATION_083),
+    (84, "chain_submission_recovery_members", MIGRATION_084),
+    (85, "public_derived_issuer_exclusion", MIGRATION_085),
+    (86, "durable_completion_requests", MIGRATION_086),
+    (87, "frozen_reputation_snapshots", MIGRATION_087),
+    (88, "credential_backed_reputation_snapshots", MIGRATION_088),
+    (89, "assessment_diagnostics_exit", MIGRATION_089),
+    (90, "governance_genesis_trust_anchors", MIGRATION_090),
 ];
+
+const MIGRATION_090: &str = r#"
+-- A row exists only after an explicit local trust decision. Discovery, sync,
+-- Cardano anchors, and matching human-readable names must never insert here.
+-- Exact canonical bytes are retained so future verification does not depend
+-- on a mutable projection or a network provider.
+CREATE TABLE governance_genesis_trust_anchors (
+    dao_id TEXT PRIMARY KEY CHECK (length(dao_id) = 64),
+    genesis_hash TEXT NOT NULL UNIQUE
+        CHECK (length(genesis_hash) = 64 AND genesis_hash = dao_id),
+    genesis_json BLOB NOT NULL CHECK (length(genesis_json) > 0),
+    name TEXT NOT NULL CHECK (length(name) > 0),
+    scope_type TEXT NOT NULL CHECK (length(scope_type) > 0),
+    scope_id TEXT NOT NULL CHECK (length(scope_id) > 0),
+    rules_hash TEXT NOT NULL CHECK (length(rules_hash) = 64),
+    pinned_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_governance_genesis_trust_scope
+    ON governance_genesis_trust_anchors(scope_type, scope_id);
+"#;
+
+const MIGRATION_089: &str = r#"
+-- An assessment ended for diagnostics or after monitoring continuity is lost
+-- is neither graded nor failed, but it is consumed for normal attempt-limit /
+-- cooldown accounting because its questions were shown. Fixed-form answers
+-- can be saved locally before the transition.
+ALTER TABLE assessment_attempts ADD COLUMN ended_at TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN end_reason TEXT
+    CHECK (end_reason IS NULL OR end_reason IN ('diagnostics', 'interrupted'));
+ALTER TABLE assessment_attempts ADD COLUMN draft_answers_json TEXT
+    CHECK (draft_answers_json IS NULL OR json_valid(draft_answers_json));
+CREATE INDEX idx_assessment_attempts_open
+    ON assessment_attempts(subject_did, started_at DESC)
+    WHERE graded_at IS NULL AND ended_at IS NULL;
+"#;
+
+const MIGRATION_088: &str = r#"
+-- New reputation snapshots are signed DerivedCredential VCs whose integrity
+-- hash is handled by the existing credential anchor queue. Older CIP-68 rows
+-- remain distinguishable and may only reconcile already-signed transactions.
+ALTER TABLE reputation_snapshots ADD COLUMN snapshot_format TEXT NOT NULL
+    DEFAULT 'legacy_cip68' CHECK (snapshot_format IN ('legacy_cip68', 'credential_hash_vc'));
+ALTER TABLE reputation_snapshots ADD COLUMN snapshot_scope TEXT NOT NULL
+    DEFAULT 'legacy_declared_window' CHECK (
+        snapshot_scope IN ('legacy_declared_window', 'as_of_all_eligible_evidence')
+    );
+ALTER TABLE reputation_snapshots ADD COLUMN computation_spec TEXT;
+ALTER TABLE reputation_snapshots ADD COLUMN credential_id TEXT REFERENCES credentials(id);
+CREATE UNIQUE INDEX idx_reputation_snapshots_credential
+    ON reputation_snapshots(credential_id) WHERE credential_id IS NOT NULL;
+"#;
+
+const MIGRATION_087: &str = r#"
+-- Preserve old records, including uncertain legacy transactions. Missing frozen
+-- inputs are not permission to reconstruct a potentially different transaction.
+CREATE TABLE reputation_snapshot_inputs (
+    snapshot_id TEXT PRIMARY KEY REFERENCES reputation_snapshots(id),
+    context_json TEXT NOT NULL CHECK (json_valid(context_json))
+);
+-- The request is visibly uncertain from the same durable checkpoint as its
+-- signed bytes, even if the process stops before the provider POST returns.
+CREATE TRIGGER snapshot_submission_checkpoint AFTER INSERT ON chain_submissions
+WHEN NEW.network = 'cardano-preprod' AND NEW.operation_kind = 'reputation_snapshot'
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM reputation_snapshot_inputs WHERE snapshot_id = NEW.operation_id
+            AND context_json = NEW.context_json
+    ) THEN RAISE(ABORT, 'snapshot checkpoint differs from frozen inputs') END;
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM reputation_snapshots WHERE id = NEW.operation_id
+            AND tx_hash IS NOT NULL AND tx_hash != NEW.tx_hash
+    ) THEN RAISE(ABORT, 'snapshot already has a different transaction') END;
+    UPDATE reputation_snapshots SET tx_status = 'outcome_unknown', tx_hash = NEW.tx_hash,
+        error_message = NULL, confirmed_at = NULL WHERE id = NEW.operation_id;
+END;
+"#;
+
+const MIGRATION_086: &str = r#"
+CREATE TABLE completion_claims (
+    id TEXT PRIMARY KEY,
+    subject_did TEXT NOT NULL,
+    course_id TEXT NOT NULL,
+    completion_root TEXT NOT NULL,
+    credential_ids_json TEXT NOT NULL CHECK (json_valid(credential_ids_json)),
+    witness_unavailable INTEGER NOT NULL DEFAULT 0 CHECK (witness_unavailable IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (subject_did, course_id, completion_root)
+);
+-- Local, immutable intent. No keys or provider secrets; never synced to peers.
+CREATE TABLE completion_witness_requests (
+    operation_id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL UNIQUE REFERENCES completion_claims(id),
+    context_json TEXT NOT NULL CHECK (json_valid(context_json)),
+    blocked INTEGER NOT NULL DEFAULT 0 CHECK (blocked IN (0, 1)),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_completion_witness_due
+    ON completion_witness_requests(next_attempt_at, operation_id) WHERE blocked = 0;
+-- Remove signed requests from the dispatch index in the journal transaction.
+-- Their user-visible state comes from receipt recovery, not this dispatch flag.
+CREATE TRIGGER completion_request_journal_handoff AFTER INSERT ON chain_submissions
+WHEN NEW.network = 'cardano-preprod' AND NEW.operation_kind = 'completion_witness'
+BEGIN
+    UPDATE completion_witness_requests SET blocked = 1 WHERE operation_id = NEW.operation_id;
+END;
+CREATE TRIGGER completion_request_existing_journal AFTER INSERT ON completion_witness_requests
+WHEN EXISTS (SELECT 1 FROM chain_submissions WHERE network = 'cardano-preprod'
+    AND operation_kind = 'completion_witness' AND operation_id = NEW.operation_id)
+BEGIN
+    UPDATE completion_witness_requests SET blocked = 1 WHERE operation_id = NEW.operation_id;
+END;
+"#;
+
+const MIGRATION_085: &str = r#"
+-- Local recognition evidence, not an issuer-trust allowlist. A matching public
+-- preimage proves that the historical private key can be reproduced by anyone.
+CREATE TABLE public_derived_issuers (
+    issuer_did TEXT PRIMARY KEY,
+    author_address TEXT NOT NULL CHECK (length(author_address) > 0),
+    recognized_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (issuer_did = legacy_course_authority_did(author_address))
+);
+CREATE TABLE derived_skill_refresh_queue (
+    subject_did TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    PRIMARY KEY (subject_did, skill_id)
+);
+CREATE INDEX idx_credentials_scoring_issuer ON credentials (
+    CASE WHEN json_valid(signed_vc_json) THEN json_extract(signed_vc_json, '$.issuer') END
+);
+ALTER TABLE reputation_assertions ADD COLUMN input_policy_state TEXT NOT NULL
+    DEFAULT 'valid' CHECK (input_policy_state IN ('valid', 'needs_refresh', 'excluded'));
+CREATE INDEX idx_reputation_needs_refresh ON reputation_assertions(id)
+    WHERE input_policy_state = 'needs_refresh';
+ALTER TABLE derived_skill_state_history ADD COLUMN input_policy_valid INTEGER NOT NULL
+    DEFAULT 1 CHECK (input_policy_valid IN (0, 1));
+
+-- Use the signed payload's issuer, not an assessment label or a mutable
+-- denormalized issuer column. Unmatched historical credentials stay untouched.
+CREATE VIEW scoring_credentials AS
+SELECT c.* FROM credentials c
+WHERE NOT EXISTS (
+    SELECT 1 FROM public_derived_issuers p
+    WHERE p.issuer_did = CASE WHEN json_valid(c.signed_vc_json)
+        THEN json_extract(c.signed_vc_json, '$.issuer') END
+);
+CREATE VIEW current_reputation_assertions AS
+SELECT r.* FROM reputation_assertions r
+WHERE r.input_policy_state = 'valid'
+  AND NOT (r.role = 'instructor' AND EXISTS (
+      SELECT 1 FROM public_derived_issuers p WHERE p.issuer_did = r.actor_address
+  ));
+
+CREATE TRIGGER public_derived_issuer_recognized AFTER INSERT ON public_derived_issuers
+BEGIN
+    INSERT OR IGNORE INTO derived_skill_refresh_queue (subject_did, skill_id)
+    SELECT subject_did, skill_id FROM credentials
+    WHERE skill_id IS NOT NULL AND CASE WHEN json_valid(signed_vc_json)
+        THEN json_extract(signed_vc_json, '$.issuer') END = NEW.issuer_did;
+    DELETE FROM derived_skill_states
+    WHERE (subject_did, skill_id) IN (SELECT subject_did, skill_id FROM derived_skill_refresh_queue);
+    UPDATE derived_skill_state_history SET input_policy_valid = 0
+    WHERE (subject_did, skill_id) IN (SELECT subject_did, skill_id FROM derived_skill_refresh_queue);
+    UPDATE reputation_assertions SET input_policy_state = 'needs_refresh'
+    WHERE (role = 'instructor' AND actor_address = NEW.issuer_did)
+       OR (role = 'instructor' AND (actor_address, skill_id) IN
+           (SELECT issuer_did, skill_id FROM credentials WHERE
+            CASE WHEN json_valid(signed_vc_json) THEN json_extract(signed_vc_json, '$.issuer') END
+                = NEW.issuer_did))
+       OR (role = 'learner' AND (actor_address, skill_id) IN
+           (SELECT subject_did, skill_id FROM derived_skill_refresh_queue));
+END;
+
+-- Retain old recognition evidence when a course is edited or deleted.
+CREATE TRIGGER course_authority_recognized_insert AFTER INSERT ON courses
+WHEN NEW.author_address <> ''
+BEGIN
+    INSERT OR IGNORE INTO public_derived_issuers (issuer_did, author_address)
+    VALUES (legacy_course_authority_did(NEW.author_address), NEW.author_address);
+END;
+CREATE TRIGGER course_authority_recognized_update AFTER UPDATE OF author_address ON courses
+WHEN NEW.author_address <> '' AND NEW.author_address <> OLD.author_address
+BEGIN
+    INSERT OR IGNORE INTO public_derived_issuers (issuer_did, author_address)
+    VALUES (legacy_course_authority_did(NEW.author_address), NEW.author_address);
+END;
+INSERT OR IGNORE INTO public_derived_issuers (issuer_did, author_address)
+SELECT legacy_course_authority_did(author_address), author_address
+FROM (SELECT DISTINCT author_address FROM courses WHERE author_address <> '');
+"#;
+
+const MIGRATION_084: &str = r#"
+-- Preserve v83 checkpoints while distinguishing successful ledger execution
+-- from inclusion with a failed script. New fields are unknown for old rows;
+-- recovery must fetch a receipt before treating those rows as executed.
+ALTER TABLE chain_submissions RENAME TO chain_submissions_v83;
+CREATE TABLE chain_submissions (
+    network TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK (length(operation_kind) > 0),
+    operation_id TEXT NOT NULL CHECK (length(operation_id) > 0),
+    tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
+    signed_cbor BLOB NOT NULL CHECK (length(signed_cbor) > 0),
+    context_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'outcome_unknown'
+           CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed_on_chain')),
+    confirmed_slot INTEGER CHECK (confirmed_slot >= 0),
+    applied_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network, operation_kind, operation_id)
+);
+INSERT INTO chain_submissions
+    (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json,
+     status, last_error, created_at, updated_at)
+SELECT network, operation_kind, operation_id, tx_hash, signed_cbor, context_json,
+       status, last_error, created_at, updated_at FROM chain_submissions_v83;
+DROP TABLE chain_submissions_v83;
+CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
+CREATE INDEX idx_chain_submissions_recovery
+    ON chain_submissions(network, operation_kind, applied_at, updated_at);
+
+-- A batch binds each member before sending. Overlapping batches cannot send
+-- replacement transactions for an item already owned by another checkpoint.
+CREATE TABLE chain_submission_members (
+    network TEXT NOT NULL,
+    member_kind TEXT NOT NULL CHECK (length(member_kind) > 0),
+    member_id TEXT NOT NULL CHECK (length(member_id) > 0),
+    operation_kind TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    PRIMARY KEY (network, member_kind, member_id),
+    FOREIGN KEY (network, operation_kind, operation_id)
+        REFERENCES chain_submissions(network, operation_kind, operation_id)
+);
+"#;
+
+const MIGRATION_083: &str = r#"
+-- Local-only recovery journal. Never sync signed transactions or these
+-- operation bindings to peers. Commit the exact bytes BEFORE network I/O.
+-- An interrupted submission is uncertain, not permission to build another.
+CREATE TABLE chain_submissions (
+    network         TEXT NOT NULL,
+    operation_kind  TEXT NOT NULL CHECK (length(operation_kind) > 0),
+    operation_id    TEXT NOT NULL CHECK (length(operation_id) > 0),
+    tx_hash         TEXT NOT NULL CHECK (length(tx_hash) = 64),
+    signed_cbor     BLOB NOT NULL CHECK (length(signed_cbor) > 0),
+    context_json    TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'outcome_unknown'
+                    CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed')),
+    last_error      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network, operation_kind, operation_id)
+);
+CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
+
+-- Widen the legacy queue's status constraint without discarding its rows.
+CREATE TABLE onchain_governance_queue_recovery (
+    id TEXT PRIMARY KEY,
+    action_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    target_table TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+           CHECK (status IN ('pending', 'outcome_unknown', 'submitted', 'confirmed', 'failed')),
+    tx_hash TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO onchain_governance_queue_recovery
+    (id, action_type, payload_json, target_table, target_id, status,
+     tx_hash, attempts, last_error, created_at, updated_at)
+SELECT id, action_type, payload_json, target_table, target_id, status,
+       tx_hash, attempts, last_error, created_at, updated_at
+FROM onchain_governance_queue;
+DROP TABLE onchain_governance_queue;
+ALTER TABLE onchain_governance_queue_recovery RENAME TO onchain_governance_queue;
+CREATE INDEX idx_onchain_queue_status ON onchain_governance_queue(status);
+"#;
 
 const MIGRATION_001: &str = r#"
 -- ============================================================
@@ -1467,7 +1759,7 @@ ALTER TABLE opinions ADD COLUMN provenance TEXT;
 const MIGRATION_032: &str = r#"
 -- ============================================================
 -- Migration 032: Community plugin system — Phase 1
--- See /Users/hack/.claude/plans/prancy-bubbling-grove.md
+-- See docs/plugins.md
 --
 -- Phase 1 ships: iframe-sandboxed interactive plugins, installed
 -- from a local file (no P2P discovery yet), with a persistent

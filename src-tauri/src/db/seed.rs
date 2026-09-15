@@ -8,11 +8,27 @@
 //! The seed function is idempotent: it only runs when the `subject_fields`
 //! table is empty.
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 /// Seed the database with demo taxonomy, courses, and governance data.
 /// Returns `Ok(true)` if seed data was inserted, `Ok(false)` if skipped.
 pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let inserted = seed_within_transaction(&tx)?;
+    tx.commit()?;
+
+    // Rebinding is optional and has its own atomic boundary. A failed bind
+    // leaves the committed seed intact and can be retried on the next startup.
+    if let Err(error) = bind_current_user_to_seed(conn) {
+        log::warn!("Demo learner rebinding failed: {error}");
+    }
+    if inserted {
+        log::info!("Seed data inserted successfully");
+    }
+    Ok(inserted)
+}
+
+fn seed_within_transaction(conn: &Connection) -> Result<bool, rusqlite::Error> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM subject_fields", [], |row| row.get(0))?;
 
     if count > 0 {
@@ -41,15 +57,8 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
     // so content is available on all platforms (including mobile without iroh).
     seed_inline_content(conn)?;
 
-    log::info!("Seed data inserted successfully");
-
     // Genesis goal templates + skill synonyms (idempotent).
     seed_goal_templates(conn)?;
-
-    // If the wallet is already populated (rare on a fresh seed, but
-    // possible in tests and in the backfill-after-seed flow), try to
-    // rebind the demo learner to the real wallet right away.
-    let _ = bind_current_user_to_seed(conn);
 
     Ok(true)
 }
@@ -193,6 +202,8 @@ pub fn bind_current_user_to_seed_with_did(
     conn: &Connection,
     real_did: Option<&str>,
 ) -> Result<usize, rusqlite::Error> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let conn = &tx;
     const ADDRESS_SENTINEL: &str = "addr_demo_learner";
     const DID_SENTINEL: &str = "did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX";
 
@@ -257,6 +268,7 @@ pub fn bind_current_user_to_seed_with_did(
         }
     }
 
+    tx.commit()?;
     if total > 0 {
         log::info!("Rebound {total} demo-learner rows to real wallet");
     }
@@ -292,7 +304,6 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     {
         log::info!("Backfilling demo data for new tables…");
         conn.execute_batch(BACKFILL_SQL)?;
-        log::info!("Demo data backfill complete");
     }
 
     // Backfill thumbnails — runs every time so existing DBs that were
@@ -318,9 +329,6 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     // SkillGraph empty. Idempotent — rows already in the new shape get
     // the same bytes written back.
     migrate_demo_vc_blobs_in_place(conn)?;
-
-    // Always retry the bind after seed/backfill — cheap and idempotent.
-    let _ = bind_current_user_to_seed(conn);
 
     Ok(())
 }
@@ -1351,9 +1359,6 @@ INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
 "##;
 
 const BACKFILL_SQL: &str = r##"
--- Temporarily disable FK checks during bulk seed insert
-PRAGMA foreign_keys = OFF;
-
 -- ============================================================
 -- P1: ENROLLMENTS & PROGRESS
 -- ============================================================
@@ -1395,7 +1400,8 @@ INSERT INTO reputation_assertions (id, actor_address, role, skill_id, proficienc
     -- Author 3: Design instructor
     ('rep_008', 'addr_seed_author_3', 'instructor', 'skill_user_research', 'evaluate', 0.86, 7, 0.06, 0.03, 0.10, 5, 0.005, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
     ('rep_009', 'addr_seed_author_3', 'instructor', 'skill_ia',            'create',   0.84, 6, 0.05, 0.03, 0.08, 4, 0.004, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
-    ('rep_010', 'addr_seed_author_3', 'instructor', 'skill_wireframing',   'create',   0.83, 5, 0.05, 0.02, 0.07, 4, 0.006, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2');
+    ('rep_010', 'addr_seed_author_3', 'instructor', 'skill_wireframing',   'create',   0.83, 5, 0.05, 0.02, 0.07, 4, 0.006, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2')
+ON CONFLICT DO NOTHING;
 
 -- (reputation_evidence / reputation_impact_deltas seed blocks
 --  removed with migration 040; both tables were dropped and will be
@@ -1443,13 +1449,15 @@ INSERT INTO governance_dao_members (dao_id, stake_address, role) VALUES
     ('dao_data', 'addr_seed_member_5', 'committee'),
     ('dao_data', 'addr_seed_member_6', 'committee'),
     ('dao_data', 'addr_seed_member_18', 'member'),
-    ('dao_data', 'addr_seed_member_19', 'member');
+    ('dao_data', 'addr_seed_member_19', 'member')
+ON CONFLICT DO NOTHING;
 
 -- Elections: 1 finalized, 1 in voting phase, 1 in nomination phase
 INSERT INTO governance_elections (id, dao_id, title, description, phase, seats, nominee_min_proficiency, voter_min_proficiency, nomination_start, nomination_end, voting_end, finalized_at) VALUES
     ('election_001', 'dao_cs', 'Q1 2026 CS Committee Election', 'Annual election for the Computer Science DAO committee seats', 'finalized', 5, 'apply', 'remember', '2025-12-01T00:00:00', '2025-12-15T00:00:00', '2025-12-31T00:00:00', '2026-01-02T00:00:00'),
     ('election_002', 'dao_web', 'Q2 2026 Web Dev Committee Election', 'Election for Web Development DAO committee seats', 'voting', 5, 'apply', 'remember', '2026-03-01T00:00:00', '2026-03-15T00:00:00', '2026-04-15T00:00:00', NULL),
-    ('election_003', 'dao_design', 'Q2 2026 Design Committee Election', 'Election for Design DAO committee seats', 'nomination', 5, 'apply', 'remember', '2026-04-01T00:00:00', '2026-04-30T00:00:00', NULL, NULL);
+    ('election_003', 'dao_design', 'Q2 2026 Design Committee Election', 'Election for Design DAO committee seats', 'nomination', 5, 'apply', 'remember', '2026-04-01T00:00:00', '2026-04-30T00:00:00', NULL, NULL)
+ON CONFLICT DO NOTHING;
 
 -- Election nominees
 INSERT INTO governance_election_nominees (id, election_id, stake_address, accepted, votes_received, is_winner) VALUES
@@ -1464,7 +1472,8 @@ INSERT INTO governance_election_nominees (id, election_id, stake_address, accept
     ('nom_007', 'election_002', 'addr_seed_member_9',  1, 3, 0),
     -- Design nomination: 2 nominees so far
     ('nom_008', 'election_003', 'addr_seed_author_3',  1, 0, 0),
-    ('nom_009', 'election_003', 'addr_seed_member_12', 0, 0, 0);
+    ('nom_009', 'election_003', 'addr_seed_member_12', 0, 0, 0)
+ON CONFLICT DO NOTHING;
 
 -- Election votes (for finalized + active elections)
 INSERT INTO governance_election_votes (id, election_id, voter, nominee_id) VALUES
@@ -1474,7 +1483,8 @@ INSERT INTO governance_election_votes (id, election_id, voter, nominee_id) VALUE
     ('evote_004', 'election_001', 'addr_seed_member_6', 'nom_003'),
     ('evote_005', 'election_002', 'addr_seed_member_10', 'nom_005'),
     ('evote_006', 'election_002', 'addr_seed_member_11', 'nom_005'),
-    ('evote_007', 'election_002', 'addr_seed_member_3',  'nom_006');
+    ('evote_007', 'election_002', 'addr_seed_member_3',  'nom_006')
+ON CONFLICT DO NOTHING;
 
 -- Proposals: varied states across DAOs
 INSERT INTO governance_proposals (id, dao_id, title, description, category, status, proposer, votes_for, votes_against, voting_deadline, min_vote_proficiency) VALUES
@@ -1482,7 +1492,8 @@ INSERT INTO governance_proposals (id, dao_id, title, description, category, stat
     ('prop_002', 'dao_cs', 'Require 3 evidence records for analyze-level proofs', 'Increase minimum evidence threshold for analyze-level skill proofs from 2 to 3 to improve credential rigor.', 'policy', 'active', 'addr_seed_member_1', 3, 2, '2026-04-30T00:00:00', 'remember'),
     ('prop_003', 'dao_web', 'Add WebAssembly skill under Frontend', 'Proposal to add WASM as a new skill under Frontend Development: compiling Rust/C++ to WebAssembly, JS interop, and performance optimization.', 'taxonomy_change', 'active', 'addr_seed_author_1', 2, 0, '2026-04-20T00:00:00', 'apply'),
     ('prop_004', 'dao_design', 'Content moderation policy for design courses', 'Establish guidelines for reviewing design course content: original work requirements, attribution standards, and accessibility compliance.', 'content_moderation', 'draft', 'addr_seed_author_3', 0, 0, NULL, 'remember'),
-    ('prop_005', 'dao_math', 'Add Applied Mathematics subject', 'Create a new Applied Mathematics subject covering numerical methods, optimization, and mathematical modelling.', 'taxonomy_change', 'rejected', 'addr_seed_member_7', 1, 4, '2026-03-15T00:00:00', 'apply');
+    ('prop_005', 'dao_math', 'Add Applied Mathematics subject', 'Create a new Applied Mathematics subject covering numerical methods, optimization, and mathematical modelling.', 'taxonomy_change', 'rejected', 'addr_seed_member_7', 1, 4, '2026-03-15T00:00:00', 'apply')
+ON CONFLICT DO NOTHING;
 
 -- Proposal votes
 INSERT INTO governance_proposal_votes (id, proposal_id, voter, in_favor) VALUES
@@ -1503,7 +1514,8 @@ INSERT INTO governance_proposal_votes (id, proposal_id, voter, in_favor) VALUES
     ('pvote_015', 'prop_005', 'addr_seed_member_1',  0),
     ('pvote_016', 'prop_005', 'addr_seed_member_6',  0),
     ('pvote_017', 'prop_005', 'addr_seed_member_8',  0),
-    ('pvote_018', 'prop_005', 'addr_seed_member_7',  1);
+    ('pvote_018', 'prop_005', 'addr_seed_member_7',  1)
+ON CONFLICT DO NOTHING;
 
 -- ============================================================
 -- P5: CLASSROOMS
@@ -1511,7 +1523,8 @@ INSERT INTO governance_proposal_votes (id, proposal_id, voter, in_favor) VALUES
 INSERT INTO classrooms (id, name, description, owner_address) VALUES
     ('class_algo_study', 'Algorithms Study Group', 'A collaborative space for learners working through Algorithms 101. Share solutions, discuss approaches, and prep for assessments.', 'addr_seed_author_1'),
     ('class_web_cohort', 'Web Dev Cohort — Spring 2026', 'Spring 2026 cohort for the Full-Stack Web Development course. Weekly sync calls, code reviews, and project feedback.', 'addr_seed_author_1'),
-    ('class_design_crit', 'Design Critique Circle', 'Weekly design critiques and portfolio reviews. Share your work, get constructive feedback, and improve together.', 'addr_seed_author_3');
+    ('class_design_crit', 'Design Critique Circle', 'Weekly design critiques and portfolio reviews. Share your work, get constructive feedback, and improve together.', 'addr_seed_author_3')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO classroom_members (classroom_id, stake_address, role, joined_at) VALUES
     -- Algo study group
@@ -1528,7 +1541,8 @@ INSERT INTO classroom_members (classroom_id, stake_address, role, joined_at) VAL
     -- Design crit circle
     ('class_design_crit', 'addr_seed_author_3',  'owner',     '2026-03-01T10:00:00'),
     ('class_design_crit', 'addr_seed_learner_1', 'member',    '2026-03-02T09:00:00'),
-    ('class_design_crit', 'addr_seed_member_13', 'member',    '2026-03-03T13:30:00');
+    ('class_design_crit', 'addr_seed_member_13', 'member',    '2026-03-03T13:30:00')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO classroom_channels (id, classroom_id, name, description, channel_type) VALUES
     ('chan_001', 'class_algo_study', 'general',     'General discussion and announcements', 'text'),
@@ -1537,7 +1551,8 @@ INSERT INTO classroom_channels (id, classroom_id, name, description, channel_typ
     ('chan_004', 'class_web_cohort', 'code-review', 'Share code for peer review', 'text'),
     ('chan_005', 'class_web_cohort', 'standups',    'Async daily standups — what did you learn today?', 'text'),
     ('chan_006', 'class_design_crit', 'general',    'Announcements and scheduling', 'text'),
-    ('chan_007', 'class_design_crit', 'critique',   'Post your designs for feedback', 'text');
+    ('chan_007', 'class_design_crit', 'critique',   'Post your designs for feedback', 'text')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO classroom_messages (id, channel_id, classroom_id, sender_address, content, sent_at) VALUES
     ('msg_001', 'chan_001', 'class_algo_study', 'addr_seed_author_1',  'Welcome to the Algorithms Study Group! Post questions anytime, and lets use the #help channel for specific problem discussions.', '2026-01-20T10:05:00'),
@@ -1553,12 +1568,14 @@ INSERT INTO classroom_messages (id, channel_id, classroom_id, sender_address, co
     ('msg_011', 'chan_006', 'class_design_crit', 'addr_seed_author_3',  'Welcome to the Design Critique Circle! Post your work in #critique anytime, and well do live critique sessions every Friday at 3pm UTC.', '2026-03-01T10:15:00'),
     ('msg_012', 'chan_007', 'class_design_crit', 'addr_seed_learner_1', 'Sharing my first wireframe for a learning dashboard. Looking for feedback on the information hierarchy — is the skill progress too buried?', '2026-03-05T14:00:00'),
     ('msg_013', 'chan_007', 'class_design_crit', 'addr_seed_author_3',  'Good start! I would move the skill progress above the course list — its the primary metric learners care about. Also consider a sparkline showing progress over time.', '2026-03-05T15:30:00'),
-    ('msg_014', 'chan_007', 'class_design_crit', 'addr_seed_member_13', 'Agree with the feedback above. Also the color contrast on the secondary text might not meet WCAG AA — try bumping it to at least 4.5:1.', '2026-03-05T16:00:00');
+    ('msg_014', 'chan_007', 'class_design_crit', 'addr_seed_member_13', 'Agree with the feedback above. Also the color contrast on the secondary text might not meet WCAG AA — try bumping it to at least 4.5:1.', '2026-03-05T16:00:00')
+ON CONFLICT DO NOTHING;
 
 -- Join request for the approval-required classroom
 INSERT INTO classroom_join_requests (id, classroom_id, stake_address, message, status) VALUES
     ('jr_001', 'class_web_cohort', 'addr_seed_learner_6', 'Hi, I am enrolled in the Web Dev course and would love to join the cohort for code reviews and weekly syncs.', 'pending'),
-    ('jr_002', 'class_web_cohort', 'addr_seed_learner_7', 'Currently in chapter 3 of the course. Looking for study partners!', 'approved');
+    ('jr_002', 'class_web_cohort', 'addr_seed_learner_7', 'Currently in chapter 3 of the course. Looking for study partners!', 'approved')
+ON CONFLICT DO NOTHING;
 
 -- ============================================================
 -- P6: SENTINEL (integrity), TUTORING, APP SETTINGS
@@ -1571,7 +1588,8 @@ INSERT INTO classroom_join_requests (id, classroom_id, stake_address, message, s
 INSERT INTO tutoring_sessions (id, title, status, created_at, ended_at) VALUES
     ('tutor_001', 'Dynamic Programming — Top-down vs Bottom-up', 'ended', '2026-02-25T15:05:00', '2026-02-25T16:00:00'),
     ('tutor_002', 'Wireframing Review — Learning Dashboard', 'ended', '2026-03-10T14:02:00', '2026-03-10T15:00:00'),
-    ('tutor_003', 'Graph Algorithms — BFS & DFS Walkthrough', 'active', '2026-04-10T16:00:00', NULL);
+    ('tutor_003', 'Graph Algorithms — BFS & DFS Walkthrough', 'active', '2026-04-10T16:00:00', NULL)
+ON CONFLICT DO NOTHING;
 
 -- App settings are no longer seeded here. Defaults live in the
 -- typed registry in `src-tauri/src/settings/registry.rs`; the table
@@ -2124,9 +2142,6 @@ INSERT OR IGNORE INTO completion_attestations (
     'Witnessed live; integrity score 0.92'
 );
 
--- Re-enable FK checks
-PRAGMA foreign_keys = ON;
-
 "##;
 
 // Gate tests behind `has_app_lib` because this file is shared with the CLI
@@ -2136,6 +2151,210 @@ PRAGMA foreign_keys = ON;
 mod tests {
     use super::*;
     use crate::db::Database;
+
+    fn table_counts(conn: &Connection) -> Vec<(String, i64)> {
+        conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|name| {
+                let name = name.unwrap();
+                let count = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM \"{}\"", name.replace('"', "\"\"")),
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                (name, count)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn seed_rolls_back_each_phase_and_retries_as_fresh() {
+        for table in ["subjects", "classrooms", "bank_questions"] {
+            let db = Database::open_in_memory().unwrap();
+            db.run_migrations().unwrap();
+            let conn = db.conn();
+            let before = table_counts(conn);
+            conn.execute_batch(&format!(
+                "CREATE TEMP TRIGGER fail_seed BEFORE INSERT ON {table}
+                 BEGIN SELECT RAISE(ABORT, 'injected seed failure'); END;"
+            ))
+            .unwrap();
+            let error = seed_if_empty(conn).unwrap_err();
+            assert!(
+                error.to_string().contains("injected seed failure"),
+                "{error}"
+            );
+            assert!(conn.is_autocommit());
+            assert_eq!(table_counts(conn), before, "partial seed at {table}");
+            assert!(conn
+                .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+                .unwrap());
+            conn.execute_batch("DROP TRIGGER fail_seed").unwrap();
+            assert!(seed_if_empty(conn).unwrap());
+            assert!(!seed_if_empty(conn).unwrap());
+        }
+    }
+
+    #[test]
+    fn seed_commit_failure_rolls_back_and_allows_retry() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        conn.execute_batch(
+            "CREATE TABLE seed_parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE seed_child (id INTEGER REFERENCES seed_parent(id) DEFERRABLE INITIALLY DEFERRED);
+             CREATE TEMP TRIGGER fail_commit AFTER INSERT ON bank_questions
+             BEGIN INSERT INTO seed_child VALUES (1); END;",
+        ).unwrap();
+        let before = table_counts(conn);
+        let error = seed_if_empty(conn).unwrap_err();
+        assert_eq!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::ConstraintViolation)
+        );
+        assert!(conn.is_autocommit());
+        assert_eq!(table_counts(conn), before);
+        conn.execute_batch("DROP TRIGGER fail_commit").unwrap();
+        assert!(seed_if_empty(conn).unwrap());
+    }
+
+    #[test]
+    fn seed_backfill_failure_preserves_existing_data_and_allows_retry() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        seed_if_empty(conn).unwrap();
+        conn.execute_batch(
+            "DELETE FROM opinions;
+             UPDATE courses SET title = 'Preserved title', thumbnail_svg = NULL;
+             UPDATE skills SET synonyms = 'Preserved synonyms';
+             UPDATE governance_proposals SET title = 'Preserved proposal', votes_for = 17;
+             UPDATE reputation_assertions SET score = 0.123;
+             UPDATE tutoring_sessions SET status = 'ended';
+             CREATE TEMP TRIGGER fail_backfill BEFORE INSERT ON bank_questions
+             BEGIN SELECT RAISE(ABORT, 'injected backfill failure'); END;",
+        )
+        .unwrap();
+        let before = table_counts(conn);
+        let error = seed_if_empty(conn).unwrap_err();
+        assert!(
+            error.to_string().contains("injected backfill failure"),
+            "{error}"
+        );
+        assert!(conn.is_autocommit());
+        assert_eq!(table_counts(conn), before);
+        for query in [
+            "SELECT COUNT(*) FROM courses WHERE title != 'Preserved title' OR thumbnail_svg IS NOT NULL",
+            "SELECT COUNT(*) FROM skills WHERE synonyms != 'Preserved synonyms'",
+        ] {
+            assert_eq!(conn.query_row(query, [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        }
+        conn.execute_batch("DROP TRIGGER fail_backfill").unwrap();
+        assert!(!seed_if_empty(conn).unwrap());
+        assert!(
+            conn.query_row("SELECT COUNT(*) FROM opinions", [], |r| r.get::<_, i64>(0))
+                .unwrap()
+                > 0
+        );
+        for query in [
+            "SELECT COUNT(*) FROM governance_proposals WHERE title != 'Preserved proposal' OR votes_for != 17",
+            "SELECT COUNT(*) FROM reputation_assertions WHERE score != 0.123",
+            "SELECT COUNT(*) FROM tutoring_sessions WHERE status != 'ended'",
+        ] {
+            assert_eq!(conn.query_row(query, [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn seed_rejects_caller_transaction_without_touching_it() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        let tx = conn.unchecked_transaction().unwrap();
+        tx.execute(
+            "INSERT INTO subject_fields (id, name) VALUES ('caller', 'Caller')",
+            [],
+        )
+        .unwrap();
+        let before = table_counts(conn);
+        assert!(seed_if_empty(conn).is_err());
+        assert!(bind_current_user_to_seed(conn).is_err());
+        assert!(!conn.is_autocommit());
+        assert_eq!(table_counts(conn), before);
+        tx.commit().unwrap();
+        assert_eq!(table_counts(conn), before);
+    }
+
+    #[test]
+    fn seed_binding_failure_rolls_back_credentials_and_assertions() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        seed_if_empty(conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, 'stake_test', 'addr_test');
+             CREATE TEMP TRIGGER fail_bind BEFORE UPDATE ON derived_skill_states
+             BEGIN SELECT RAISE(ABORT, 'injected binding failure'); END;",
+        ).unwrap();
+        let credentials = || {
+            conn.prepare("SELECT subject_did, signed_vc_json FROM credentials ORDER BY id")
+                .unwrap()
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let before = credentials();
+        assert!(bind_current_user_to_seed_with_did(conn, Some("did:key:real-test")).is_err());
+        assert!(conn.is_autocommit());
+        assert_eq!(credentials(), before);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = 'stake_test'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        conn.execute_batch("DROP TRIGGER fail_bind").unwrap();
+        assert!(bind_current_user_to_seed_with_did(conn, Some("did:key:real-test")).unwrap() > 0);
+        assert_eq!(
+            bind_current_user_to_seed_with_did(conn, Some("did:key:real-test")).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn seed_optional_binding_failure_keeps_seed_and_retries() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        conn.execute_batch(
+            "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, 'stake_test', 'addr_test');
+             CREATE TEMP TRIGGER fail_optional_bind BEFORE UPDATE ON reputation_assertions
+             WHEN OLD.id = 'rep_demo_02'
+             BEGIN SELECT RAISE(FAIL, 'injected optional binding failure'); END;",
+        ).unwrap();
+        assert!(seed_if_empty(conn).unwrap());
+        assert!(conn.is_autocommit());
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = 'stake_test'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        conn.execute_batch("DROP TRIGGER fail_optional_bind")
+            .unwrap();
+        assert!(bind_current_user_to_seed(conn).unwrap() > 0);
+    }
 
     #[test]
     fn seed_inserts_data() {
