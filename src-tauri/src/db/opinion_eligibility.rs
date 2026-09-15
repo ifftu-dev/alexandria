@@ -287,6 +287,29 @@ pub(crate) mod test_support {
         level: u8,
         status: Option<CredentialStatus>,
     ) {
+        store_scored_credential(
+            db,
+            credential_id,
+            issuer,
+            subject,
+            skill_id,
+            level,
+            0.9,
+            status,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn store_scored_credential(
+        db: &Database,
+        credential_id: &str,
+        issuer: &SigningKey,
+        subject: &Did,
+        skill_id: &str,
+        level: u8,
+        score: f64,
+        status: Option<CredentialStatus>,
+    ) {
         let issuer_did = derive_did_key(issuer);
         let class = if issuer_did == *subject {
             "SelfAssertion"
@@ -296,7 +319,7 @@ pub(crate) mod test_support {
         let claim = Claim::Skill(SkillClaim {
             skill_id: skill_id.into(),
             level,
-            score: 0.9,
+            score,
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
@@ -337,14 +360,15 @@ pub(crate) mod test_support {
             .execute(
                 "INSERT INTO credentials (id, issuer_did, subject_did, credential_type, \
                  claim_kind, skill_id, issuance_date, signed_vc_json, integrity_hash, revoked) \
-                 VALUES (?1, ?2, ?3, ?4, 'skill', ?5, '2026-01-01T00:00:00Z', ?6, ?1, 0)",
+                 VALUES (?1, ?2, ?3, ?4, 'skill', ?5, '2026-01-01T00:00:00Z', ?6, ?7, 0)",
                 params![
                     credential_id,
                     issuer_did.as_str(),
                     subject.as_str(),
                     class,
                     skill_id,
-                    serde_json::to_string(&credential).unwrap()
+                    serde_json::to_string(&credential).unwrap(),
+                    crate::commands::credentials::integrity_hash_of(&credential).unwrap()
                 ],
             )
             .unwrap();

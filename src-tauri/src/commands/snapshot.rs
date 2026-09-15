@@ -110,7 +110,7 @@ fn create_snapshot(
             .map(|skill| skill.computation_spec.as_str())
             .collect::<std::collections::BTreeSet<_>>();
         let computation_spec = if computation_specs.is_empty() {
-            "v3-vc".to_string()
+            "v4-verified-vc".to_string()
         } else {
             computation_specs.into_iter().collect::<Vec<_>>().join("+")
         };
@@ -266,36 +266,23 @@ fn collect_evidence(
     skill_id: &str,
     level: &str,
 ) -> Result<Vec<SnapshotEvidenceRef>, String> {
-    let actor_column = match role {
-        ReputationRole::Learner => "subject_did",
-        ReputationRole::Instructor => "issuer_did",
+    let role_name = match role {
+        ReputationRole::Learner => "learner",
+        ReputationRole::Instructor => "instructor",
         _ => return Err("unsupported reputation snapshot role".into()),
     };
-    let third_party_only = if role == ReputationRole::Instructor {
-        "AND issuer_did != subject_did"
-    } else {
-        ""
-    };
     let level = crate::cardano::snapshot::proficiency_to_index(level) as i64;
-    let sql = format!(
-        "SELECT id, integrity_hash FROM scoring_credentials
-         WHERE {actor_column} = ?1 AND skill_id = ?2 AND claim_kind = 'skill'
-           AND revoked = 0
-           AND CAST(json_extract(signed_vc_json, '$.credentialSubject.level') AS INTEGER) = ?3
-           {third_party_only}
-         ORDER BY id"
-    );
-    let mut stmt = conn.prepare(&sql).map_err(|error| error.to_string())?;
-    let evidence = stmt
-        .query_map(params![actor_did, skill_id, level], |row| {
-            Ok(SnapshotEvidenceRef {
-                credential_id: row.get(0)?,
-                integrity_hash: row.get(1)?,
-            })
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+    // Freeze exactly the verified set that produced the reputation row, so a
+    // snapshot can never cite an unverified or self-issued instructor input.
+    let evidence = crate::evidence::reputation::verified_reputation_inputs(
+        conn, role_name, actor_did, skill_id, level,
+    )?
+    .into_iter()
+    .map(|input| SnapshotEvidenceRef {
+        credential_id: input.credential_id,
+        integrity_hash: input.integrity_hash,
+    })
+    .collect::<Vec<_>>();
     for item in &evidence {
         if hex::decode(&item.integrity_hash)
             .ok()
@@ -466,7 +453,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         ).unwrap();
         let did = crate::crypto::did::did_from_verifying_key(&wallet.signing_key.verifying_key());
-        setup_reputation_data(&db, did.as_str());
+        setup_reputation_data(&db, &wallet.signing_key);
         let request = CreateSnapshotParams {
             subject_id: "sub1".into(),
             role: "instructor".into(),
@@ -494,11 +481,19 @@ mod tests {
         assert_eq!(original.as_of, "2024-04-24T23:06:40+00:00");
         assert_eq!(original.skills[0].impact_score_ppm, 850_000);
         assert_eq!(original.skills[0].computation_spec, "v3-vc");
+        let source_hash: String = db
+            .conn()
+            .query_row(
+                "SELECT integrity_hash FROM credentials WHERE id = 'source-credential'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(
             original.skills[0].evidence,
             vec![SnapshotEvidenceRef {
                 credential_id: "source-credential".into(),
-                integrity_hash: "ab".repeat(32),
+                integrity_hash: source_hash,
             }]
         );
         let (signed_json, integrity_hash, queued): (String, String, bool) = db
@@ -555,8 +550,10 @@ mod tests {
         );
     }
 
-    fn setup_reputation_data(db: &Database, actor_did: &str) {
+    fn setup_reputation_data(db: &Database, actor_key: &ed25519_dalek::SigningKey) {
         let conn = db.conn();
+        let actor = crate::crypto::did::did_from_verifying_key(&actor_key.verifying_key());
+        let actor_did = actor.as_str();
 
         // Identity
         conn.execute(
@@ -591,25 +588,20 @@ mod tests {
             [actor_did],
         )
         .unwrap();
-        let signed = serde_json::json!({
-            "issuer": actor_did,
-            "credentialSubject": {
-                "id": "did:key:learner",
-                "skillId": "sk1",
-                "level": 2,
-                "score": 0.85
-            }
-        })
-        .to_string();
-        conn.execute(
-            "INSERT INTO credentials
-             (id, issuer_did, subject_did, credential_type, claim_kind, skill_id,
-              issuance_date, signed_vc_json, integrity_hash)
-             VALUES ('source-credential', ?1, 'did:key:learner', 'AssessmentCredential',
-                     'skill', 'sk1', '2024-01-01T00:00:00Z', ?2, ?3)",
-            params![actor_did, signed, "ab".repeat(32)],
-        )
-        .unwrap();
+        // A genuinely signed credential the actor issued to another learner:
+        // snapshot evidence is re-verified, so an unsigned row would not count.
+        let learner =
+            crate::crypto::did::derive_did_key(&ed25519_dalek::SigningKey::from_bytes(&[5; 32]));
+        crate::db::opinion_eligibility::test_support::store_scored_credential(
+            db,
+            "source-credential",
+            actor_key,
+            &learner,
+            "sk1",
+            2,
+            0.85,
+            None,
+        );
     }
 
     #[test]
@@ -693,7 +685,10 @@ mod tests {
     #[test]
     fn snapshot_rejects_a_stale_evidence_count() {
         let db = test_db();
-        setup_reputation_data(&db, "did:key:instructor");
+        let instructor = ed25519_dalek::SigningKey::from_bytes(&[21; 32]);
+        let instructor_did =
+            crate::crypto::did::did_from_verifying_key(&instructor.verifying_key());
+        setup_reputation_data(&db, &instructor);
         db.conn()
             .execute(
                 "UPDATE reputation_assertions SET evidence_count = 2 WHERE id = 'ra1'",
@@ -702,7 +697,7 @@ mod tests {
             .unwrap();
         let error = collect_scores(
             db.conn(),
-            "did:key:instructor",
+            instructor_did.as_str(),
             "sub1",
             ReputationRole::Instructor,
         )
@@ -732,8 +727,7 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
         )
         .unwrap();
-        let did = crate::crypto::did::did_from_verifying_key(&wallet.signing_key.verifying_key());
-        setup_reputation_data(&db, did.as_str());
+        setup_reputation_data(&db, &wallet.signing_key);
         let request = CreateSnapshotParams {
             subject_id: "sub1".into(),
             role: "instructor".into(),

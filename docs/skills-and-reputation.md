@@ -139,8 +139,17 @@ diversity. Each cached state records a fingerprint of the local credential,
 revocation, suspension, status-list, issuer-key, supersession and endorsement
 state it was computed from; readers recompute on any change, and a state whose
 last verified input is revoked, altered or removed is deleted rather than kept
-with its old score. Reputation and talent-index readers still use their earlier
-inputs and are later T03 slices.
+with its old score.
+
+Reputation rows (computation spec `v4-verified-vc`) use the same verified
+inputs. A learner row samples every verified credential about the subject at
+the skill and level. An instructor row samples only credentials classified as
+verified issuer-signed, so a self-claim, a course-endorsed self-claim or an
+unverifiable row never credits its issuer, and issuer inequality alone is not
+the test. A row whose verified sample becomes empty is marked excluded rather
+than rewritten with a zero score. Reputation snapshots cite exactly that
+verified set, so a snapshot cannot freeze unverified or self-issued instructor
+evidence. The talent-index Bloom level reader is a later T03 slice.
 
 The shared credential verifier now classifies incomplete issuer-key or
 status-list evidence as `pending`, separately from `reject`. Only `accept` is an
@@ -181,7 +190,7 @@ a login, or a local row never makes a policy applicable.
 | Governance eligibility | legacy `check_proficiency` (test/debug `legacy-local-governance` builds only) | qualification policy bound to the pinned genesis/opening (G02/G06), evaluated at certified submission | committee genesis, not the network profile | not active; the legacy gate is deleted in D01 |
 | Role evidence | cloud role specification (C04) | signed organisation specification plus learner-signed result | organisation signature | out of scope for T03 |
 | Derived skill states | `commands/aggregation.rs`, `db/scoring_inputs.rs` | re-verified proofs; self-issued claims gain no independence weight; fingerprinted cache invalidation | calculation version `1.2` | implemented; no privilege is granted |
-| Reputation rows | `evidence/reputation.rs` | re-verified proofs; instructor credit only from verified issuer-signed credentials | computation spec | later T03 slice |
+| Reputation rows and snapshots | `evidence/reputation.rs`, `commands/snapshot.rs` | re-verified proofs; instructor credit only from verified issuer-signed credentials; empty samples excluded; snapshots cite the same verified set | computation spec `v4-verified-vc` | implemented; no privilege is granted |
 
 A policy lists accepted `did:key` issuers, permitted routes
 (`accepted_issuer`, `accepted_course_endorsement`), the governed subject fields,

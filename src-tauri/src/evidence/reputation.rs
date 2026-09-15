@@ -7,15 +7,20 @@
 //! `learner` row per (subject, skill, level) and one `instructor` row
 //! per (issuer, skill, level) — directly from `credentials`:
 //!
-//! * **Learner reputation**: for every accepted skill-kind VC, the
-//!   `subject_did` accumulates a reputation row at (skill, level)
-//!   whose score mirrors the highest `SkillClaim.score` observed.
-//! * **Instructor reputation**: when `issuer_did != subject_did`
-//!   (a third-party-issued credential, not a self-asserted one), the
-//!   issuer accumulates a reputation row at (skill, level) whose
-//!   score is the mean of the scores they've issued. Self-asserted /
-//!   self-witnessed VCs (our auto-issuance path) contribute only to
-//!   the learner row — there's no instructor to credit.
+//! * **Learner reputation**: for every skill-kind VC that verifies now and
+//!   whose signed subject, skill and id match its row, the subject
+//!   accumulates a reputation row at (skill, level) whose score mirrors
+//!   the highest `SkillClaim.score` observed.
+//! * **Instructor reputation**: only credentials classified as verified
+//!   issuer-signed — a distinct issuer's valid signature over someone
+//!   else's claim — credit that issuer, whose row at (skill, level) is the
+//!   mean of the scores they issued. Self-asserted, self-witnessed and
+//!   course-endorsed self-claims contribute only to the learner row. Issuer
+//!   inequality alone is not the test; the signature is.
+//!
+//! Samples come from `db::scoring_inputs`, never from stored JSON alone. A
+//! row whose verified sample becomes empty is marked excluded rather than
+//! rewritten with a zero score.
 //!
 //! Distribution metrics (median, p25/p75, variance, learner count)
 //! are computed over the sampled scores backing each row — instructor
@@ -35,6 +40,11 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::crypto::hash::entity_id;
+use crate::db::opinion_eligibility::verification_time_now;
+use crate::db::scoring_inputs::{
+    verified_issued_skill_inputs, verified_skill_inputs, VerifiedSkillInput,
+};
+use crate::network_profile::embedded_preprod;
 
 /// Map a SkillClaim integer level (0..=5) to the canonical string.
 pub fn level_to_str(level: i64) -> &'static str {
@@ -170,13 +180,10 @@ pub fn refresh_invalidated(conn: &Connection) -> Result<(), String> {
         let Some(level) = (0..=5).find(|n| Some(level_to_str(*n)) == level.as_deref()) else {
             continue;
         };
-        let (scores, count) = match role.as_str() {
-            "learner" => fetch_samples(conn, "subject_did", "issuer_did", &actor, &skill, level)?,
-            "instructor" => {
-                fetch_samples(conn, "issuer_did", "subject_did", &actor, &skill, level)?
-            }
-            _ => continue,
-        };
+        if !matches!(role.as_str(), "learner" | "instructor") {
+            continue;
+        }
+        let (scores, count) = verified_samples(conn, &role, &actor, &skill, level)?;
         if scores.is_empty() {
             continue;
         }
@@ -303,54 +310,71 @@ pub fn compute_distribution(scores: &[f64]) -> Distribution {
     }
 }
 
-/// Fetch the `(score, counterparty_did)` samples for one actor at a
-/// given (skill, level). `actor_col` is `subject_did` (learner side)
-/// or `issuer_did` (instructor side); `counterparty_col` is the other.
-fn fetch_samples(
+/// The verified credentials backing one reputation row, ordered by
+/// credential id. `learner` rows use every verified credential about the
+/// actor at (skill, level); `instructor` rows use only credentials the actor
+/// verifiably issued to someone else. Reputation and snapshot evidence share
+/// this set so their counts cannot diverge.
+pub(crate) fn verified_reputation_inputs(
     conn: &Connection,
-    actor_col: &str,
-    counterparty_col: &str,
+    role: &str,
+    actor_did: &str,
+    skill_id: &str,
+    level: i64,
+) -> Result<Vec<VerifiedSkillInput>, String> {
+    let network_id = &embedded_preprod()
+        .map_err(|error| error.to_string())?
+        .network_id;
+    let now = verification_time_now();
+    let inputs = match role {
+        "learner" => verified_skill_inputs(conn, actor_did, skill_id, &now, network_id)?,
+        "instructor" => verified_issued_skill_inputs(conn, actor_did, skill_id, &now, network_id)?
+            .into_iter()
+            .filter(VerifiedSkillInput::issuer_signed)
+            .collect(),
+        other => return Err(format!("unsupported reputation role: {other}")),
+    };
+    let mut inputs = inputs
+        .into_iter()
+        .filter(|input| i64::from(input.claim.level) == level)
+        .collect::<Vec<_>>();
+    inputs.sort_by(|left, right| left.credential_id.cmp(&right.credential_id));
+    Ok(inputs)
+}
+
+/// Verified `(scores, distinct counterparty count)` for one reputation row.
+/// The counterparty is the issuer for a learner row and the subject for an
+/// instructor row.
+fn verified_samples(
+    conn: &Connection,
+    role: &str,
     actor_did: &str,
     skill_id: &str,
     level: i64,
 ) -> Result<(Vec<f64>, i64), String> {
-    let third_party_only = if actor_col == "issuer_did" {
-        "AND issuer_did != subject_did"
-    } else {
-        ""
-    };
-    let sql = format!(
-        "SELECT \
-            CAST(json_extract(signed_vc_json, '$.credentialSubject.score') AS REAL), \
-            {counterparty_col} \
-         FROM scoring_credentials \
-         WHERE {actor_col} = ?1 \
-           AND skill_id = ?2 \
-           AND claim_kind = 'skill' \
-           AND revoked = 0 \
-           AND CAST(json_extract(signed_vc_json, \
-                '$.credentialSubject.level') AS INTEGER) = ?3 \
-           {third_party_only}"
-    );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![actor_did, skill_id, level], |row| {
-            Ok((
-                row.get::<_, Option<f64>>(0)?.unwrap_or(0.0),
-                row.get::<_, String>(1)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    let mut distinct: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut scores = Vec::with_capacity(rows.len());
-    for (score, counterparty) in rows {
-        scores.push(score.clamp(0.0, 1.0));
-        distinct.insert(counterparty);
+    let inputs = verified_reputation_inputs(conn, role, actor_did, skill_id, level)?;
+    let mut distinct = std::collections::HashSet::new();
+    let mut scores = Vec::with_capacity(inputs.len());
+    for input in &inputs {
+        scores.push(input.claim.score.clamp(0.0, 1.0));
+        let counterparty = if role == "learner" {
+            input.credential.issuer.as_str()
+        } else {
+            input.credential.credential_subject.id.as_str()
+        };
+        distinct.insert(counterparty.to_string());
     }
     Ok((scores, distinct.len() as i64))
+}
+
+/// Keep a row whose verified evidence disappeared, but stop presenting it.
+fn exclude_row(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE reputation_assertions SET input_policy_state = 'excluded' WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Persist a reputation row with its computed distribution. `score` is
@@ -375,7 +399,7 @@ fn upsert_row(
          (id, actor_address, role, skill_id, proficiency_level, \
           score, evidence_count, median_impact, impact_p25, impact_p75, \
           learner_count, impact_variance, computation_spec) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'v3-vc') \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'v4-verified-vc') \
          ON CONFLICT(id) DO UPDATE SET \
              score = excluded.score, \
              evidence_count = excluded.evidence_count, \
@@ -416,18 +440,13 @@ fn update_learner(
     let level_str = level_to_str(level);
     let id = entity_id(&[subject_did, "learner", skill_id, level_str]);
 
-    // Sample every non-revoked skill credential awarded to this learner
-    // at (skill, level). Headline learner score is the max observed —
-    // later credentials never lower it — while the distribution and
-    // distinct-issuer count come from the full sample.
-    let (scores, issuer_count) = fetch_samples(
-        conn,
-        "subject_did",
-        "issuer_did",
-        subject_did,
-        skill_id,
-        level,
-    )?;
+    // Sample every verified skill credential awarded to this learner at
+    // (skill, level). Headline learner score is the max observed, while the
+    // distribution and distinct-issuer count come from the full sample.
+    let (scores, issuer_count) = verified_samples(conn, "learner", subject_did, skill_id, level)?;
+    if scores.is_empty() {
+        return exclude_row(conn, &id);
+    }
     let max_score = scores.iter().cloned().fold(0.0_f64, f64::max);
 
     upsert_row(
@@ -452,19 +471,13 @@ fn update_instructor(
     let level_str = level_to_str(level);
     let id = entity_id(&[issuer_did, "instructor", skill_id, level_str]);
 
-    // Sample every non-revoked skill credential this instructor issued
-    // at (skill, level). Headline instructor score is the mean across
-    // the sample; learner_count is the number of distinct subjects.
-    let (scores, learner_count) = fetch_samples(
-        conn,
-        "issuer_did",
-        "subject_did",
-        issuer_did,
-        skill_id,
-        level,
-    )?;
+    // Sample every verified issuer-signed credential this instructor issued
+    // at (skill, level). Headline instructor score is the mean across the
+    // sample; learner_count is the number of distinct subjects.
+    let (scores, learner_count) =
+        verified_samples(conn, "instructor", issuer_did, skill_id, level)?;
     if scores.is_empty() {
-        return Ok(());
+        return exclude_row(conn, &id);
     }
     let mean_score = scores.iter().sum::<f64>() / scores.len() as f64;
 
@@ -514,6 +527,20 @@ mod tests {
         db
     }
 
+    /// Deterministic test-only signing key for a named party.
+    fn key(name: &str) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(blake3::hash(name.as_bytes()).as_bytes())
+    }
+
+    /// The `did:key` of a named party.
+    fn did(name: &str) -> String {
+        crate::crypto::did::derive_did_key(&key(name))
+            .as_str()
+            .to_string()
+    }
+
+    /// Stores a credential signed by `issuer` about `subject`, both named
+    /// parties. Reputation re-verifies it, so it must be genuinely signed.
     fn insert_skill_credential(
         db: &Database,
         id: &str,
@@ -523,33 +550,16 @@ mod tests {
         level: i64,
         score: f64,
     ) {
-        let vc = serde_json::json!({
-            "@context": ["https://www.w3.org/ns/credentials/v2"],
-            "credentialSubject": {
-                "id": subject,
-                "skillId": skill_id,
-                "level": level,
-                "score": score,
-                "evidenceRefs": [],
-            }
-        });
-        db.conn()
-            .execute(
-                "INSERT INTO credentials ( \
-                   id, issuer_did, subject_did, credential_type, claim_kind, \
-                   skill_id, issuance_date, signed_vc_json, integrity_hash, \
-                   revoked \
-                 ) VALUES (?1, ?2, ?3, 'FormalCredential', 'skill', ?4, \
-                           datetime('now'), ?5, 'h', 0)",
-                params![
-                    id,
-                    issuer,
-                    subject,
-                    skill_id,
-                    serde_json::to_string(&vc).unwrap(),
-                ],
-            )
-            .unwrap();
+        crate::db::opinion_eligibility::test_support::store_scored_credential(
+            db,
+            id,
+            &key(issuer),
+            &crate::crypto::did::Did(did(subject)),
+            skill_id,
+            u8::try_from(level).unwrap(),
+            score,
+            None,
+        );
     }
 
     #[test]
@@ -592,9 +602,9 @@ mod tests {
             .conn()
             .query_row(
                 "SELECT score, evidence_count FROM reputation_assertions \
-                 WHERE actor_address = 'did:key:zLearner' AND role = 'learner' \
+                 WHERE actor_address = ?1 AND role = 'learner' \
                    AND skill_id = 'skill_a' AND proficiency_level = 'apply'",
-                [],
+                [did("did:key:zLearner")],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
@@ -643,14 +653,14 @@ mod tests {
         on_credential_accepted(db.conn(), "third-party").unwrap();
         insert_skill_credential(&db, "self", instructor, instructor, "skill_a", 2, 0.1);
         on_credential_accepted(db.conn(), "self").unwrap();
-        recompute_for_subject(db.conn(), instructor).unwrap();
+        recompute_for_subject(db.conn(), &did(instructor)).unwrap();
 
         let (score, count): (f64, i64) = db
             .conn()
             .query_row(
                 "SELECT score, evidence_count FROM reputation_assertions
                  WHERE actor_address = ?1 AND role = 'instructor'",
-                [instructor],
+                [did(instructor)],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
@@ -671,8 +681,8 @@ mod tests {
             .conn()
             .query_row(
                 "SELECT score, evidence_count FROM reputation_assertions \
-                 WHERE actor_address = 'did:key:zInstructor' AND role = 'instructor'",
-                [],
+                 WHERE actor_address = ?1 AND role = 'instructor'",
+                [did("did:key:zInstructor")],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
@@ -694,14 +704,14 @@ mod tests {
             .unwrap();
 
         // Re-run — the revoked row must drop out of the instructor mean.
-        recompute_for_subject(db.conn(), instructor).unwrap();
+        recompute_for_subject(db.conn(), &did(instructor)).unwrap();
 
         let (score, count): (f64, i64) = db
             .conn()
             .query_row(
                 "SELECT score, evidence_count FROM reputation_assertions \
-                 WHERE actor_address = 'did:key:zInstructor' AND role = 'instructor'",
-                [],
+                 WHERE actor_address = ?1 AND role = 'instructor'",
+                [did("did:key:zInstructor")],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
@@ -780,8 +790,8 @@ mod tests {
             .query_row(
                 "SELECT median_impact, impact_p25, impact_p75, learner_count, impact_variance \
                  FROM reputation_assertions \
-                 WHERE actor_address = 'did:key:zInstructor' AND role = 'instructor'",
-                [],
+                 WHERE actor_address = ?1 AND role = 'instructor'",
+                [did("did:key:zInstructor")],
                 |row| {
                     Ok((
                         row.get(0)?,

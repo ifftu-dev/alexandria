@@ -451,13 +451,28 @@ mod tests {
             )
             .unwrap();
 
-        let vc = serde_json::json!({
+        // A genuinely signed self-assertion.
+        let learner_key = ed25519_dalek::SigningKey::from_bytes(&[11; 32]);
+        let learner = crate::crypto::did::derive_did_key(&learner_key);
+        crate::db::opinion_eligibility::test_support::store_scored_credential(
+            &db,
+            "c1",
+            &learner_key,
+            &learner,
+            "sk",
+            2,
+            0.77,
+            None,
+        );
+
+        // An unsigned row claiming a skill for another subject.
+        let forged = serde_json::json!({
             "@context": ["https://www.w3.org/ns/credentials/v2"],
             "credentialSubject": {
-                "id": "did:L",
+                "id": "did:forged",
                 "skillId": "sk",
-                "level": 2,
-                "score": 0.77,
+                "level": 5,
+                "score": 1.0,
                 "evidenceRefs": [],
             }
         });
@@ -467,22 +482,27 @@ mod tests {
                    id, issuer_did, subject_did, credential_type, claim_kind, \
                    skill_id, issuance_date, signed_vc_json, integrity_hash, \
                    revoked \
-                 ) VALUES ('c1', 'did:L', 'did:L', 'SelfAssertion', 'skill', 'sk', \
+                 ) VALUES ('forged', 'did:forged', 'did:forged', 'SelfAssertion', 'skill', 'sk', \
                     datetime('now'), ?1, 'h', 0)",
-                params![serde_json::to_string(&vc).unwrap()],
+                params![serde_json::to_string(&forged).unwrap()],
             )
             .unwrap();
 
-        reputation::recompute_for_subject(db.conn(), "did:L").unwrap();
-        let count: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = 'did:L'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
+        let count = |actor: &str| -> i64 {
+            db.conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM current_reputation_assertions WHERE actor_address = ?1",
+                    [actor],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        reputation::recompute_for_subject(db.conn(), learner.as_str()).unwrap();
         // One learner row; no instructor row (self-asserted).
-        assert_eq!(count, 1);
+        assert_eq!(count(learner.as_str()), 1);
+
+        reputation::recompute_for_subject(db.conn(), "did:forged").unwrap();
+        // Unsigned rows never produce presented reputation.
+        assert_eq!(count("did:forged"), 0);
     }
 }

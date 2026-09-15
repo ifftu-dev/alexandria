@@ -27,8 +27,10 @@ const FINGERPRINT_DOMAIN: &[u8] = b"alexandria/scoring-input-fingerprint/v1";
 /// A scoring input that verified at the requested time.
 pub(crate) struct VerifiedSkillInput {
     pub(crate) credential_id: String,
+    pub(crate) integrity_hash: String,
     pub(crate) credential: VerifiableCredential,
     pub(crate) claim: SkillClaim,
+    pub(crate) trust: CredentialTrust,
 }
 
 impl VerifiedSkillInput {
@@ -37,6 +39,19 @@ impl VerifiedSkillInput {
     pub(crate) fn self_issued(&self) -> bool {
         self.credential.issuer == self.credential.credential_subject.id
     }
+
+    /// Whether a distinct issuer signed this credential directly. Only such
+    /// credentials credit the issuer as an instructor.
+    pub(crate) fn issuer_signed(&self) -> bool {
+        matches!(self.trust, CredentialTrust::VerifiedIssuerSigned { .. })
+    }
+}
+
+/// Which party the scoring actor is on a credential.
+#[derive(Debug, Clone, Copy)]
+enum ScoringActor<'a> {
+    Subject(&'a str),
+    Issuer(&'a str),
 }
 
 /// Verified skill inputs for one subject and skill, oldest first.
@@ -51,18 +66,60 @@ pub(crate) fn verified_skill_inputs(
     verification_time: &str,
     network_id: &str,
 ) -> Result<Vec<VerifiedSkillInput>, String> {
+    verified_inputs(
+        conn,
+        ScoringActor::Subject(subject_did),
+        skill_id,
+        verification_time,
+        network_id,
+    )
+}
+
+/// Verified skill inputs signed by `issuer_did`, oldest first, under the same
+/// exclusion rules as [`verified_skill_inputs`].
+pub(crate) fn verified_issued_skill_inputs(
+    conn: &Connection,
+    issuer_did: &str,
+    skill_id: &str,
+    verification_time: &str,
+    network_id: &str,
+) -> Result<Vec<VerifiedSkillInput>, String> {
+    verified_inputs(
+        conn,
+        ScoringActor::Issuer(issuer_did),
+        skill_id,
+        verification_time,
+        network_id,
+    )
+}
+
+fn verified_inputs(
+    conn: &Connection,
+    actor: ScoringActor<'_>,
+    skill_id: &str,
+    verification_time: &str,
+    network_id: &str,
+) -> Result<Vec<VerifiedSkillInput>, String> {
+    let (column, actor_did) = match actor {
+        ScoringActor::Subject(did) => ("subject_did", did),
+        ScoringActor::Issuer(did) => ("issuer_did", did),
+    };
     let rows = {
         let mut statement = conn
-            .prepare(
-                "SELECT id, signed_vc_json FROM scoring_credentials \
-                 WHERE subject_did = ?1 AND skill_id = ?2 AND claim_kind = 'skill' \
+            .prepare(&format!(
+                "SELECT id, integrity_hash, signed_vc_json FROM scoring_credentials \
+                 WHERE {column} = ?1 AND skill_id = ?2 AND claim_kind = 'skill' \
                    AND revoked = 0 \
-                 ORDER BY issuance_date, id",
-            )
+                 ORDER BY issuance_date, id"
+            ))
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map(params![subject_did, skill_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            .query_map(params![actor_did, skill_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
@@ -72,15 +129,19 @@ pub(crate) fn verified_skill_inputs(
 
     let policy = VerificationPolicy::default();
     let mut inputs = Vec::with_capacity(rows.len());
-    for (credential_id, signed_json) in rows {
+    for (credential_id, integrity_hash, signed_json) in rows {
         let Ok(credential) = serde_json::from_str::<VerifiableCredential>(&signed_json) else {
             continue;
+        };
+        let signed_actor = match actor {
+            ScoringActor::Subject(_) => credential.credential_subject.id.as_str(),
+            ScoringActor::Issuer(_) => credential.issuer.as_str(),
         };
         if credential
             .id
             .as_deref()
             .is_some_and(|id| id != credential_id)
-            || credential.credential_subject.id.as_str() != subject_did
+            || signed_actor != actor_did
         {
             continue;
         }
@@ -107,8 +168,10 @@ pub(crate) fn verified_skill_inputs(
         }
         inputs.push(VerifiedSkillInput {
             credential_id,
+            integrity_hash,
             credential,
             claim,
+            trust,
         });
     }
     Ok(inputs)
@@ -292,8 +355,29 @@ mod tests {
             .map(|input| input.credential_id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["issued", "self"]);
-        assert!(!inputs[0].self_issued());
-        assert!(inputs[1].self_issued());
+        assert!(inputs[0].issuer_signed() && !inputs[0].self_issued());
+        assert!(inputs[1].self_issued() && !inputs[1].issuer_signed());
+
+        // Issuer-keyed inputs return only what that issuer verifiably signed.
+        let issued = verified_issued_skill_inputs(
+            db.conn(),
+            derive_did_key(&instructor).as_str(),
+            "skill",
+            NOW,
+            "preprod",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|input| input.credential_id)
+        .collect::<Vec<_>>();
+        assert_eq!(issued, vec!["issued"]);
+        let own =
+            verified_issued_skill_inputs(db.conn(), learner.as_str(), "skill", NOW, "preprod")
+                .unwrap()
+                .into_iter()
+                .map(|input| input.credential_id)
+                .collect::<Vec<_>>();
+        assert_eq!(own, vec!["self"]);
 
         // Indexed under the learner but signed for someone else: excluded.
         let someone_else = derive_did_key(&key(9));
