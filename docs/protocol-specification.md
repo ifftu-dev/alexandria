@@ -3,7 +3,7 @@
 **Status:** Draft v0.2.0 (VC-first cutover, migration 040)
 **Category:** Standards Track
 **Created:** 2025
-**Updated:** 2026-04-24
+**Updated:** 2026-09-15
 **Author:** Pratyush Pundir
 
 ---
@@ -426,6 +426,8 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates (exam/curriculum/job-role) |
 | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
+Until domain handlers consume verified committee outcome certificates (§10.2.1), the current implementation still subscribes to and validates the taxonomy, governance, goal-template, and question-bank topics, but its release-build handlers reject every inbound message on them before any database read or write, so no rows, sync-log entry, or UI event result. The earlier single-signer apply paths compile only in debug builds that enable an explicit legacy feature (`legacy-taxonomy-ratification`, `legacy-local-governance`, or `legacy-content-ratification`).
+
 All 15 topics MUST be subscribed on node startup. In addition, six
 request-response protocols (libp2p `request-response` + CBOR codec)
 run alongside the gossip mesh and are 1-to-1, not gossip topics:
@@ -547,7 +549,7 @@ Every incoming gossip message MUST pass through a 6-step validation pipeline. A 
 | 3. Freshness | Timestamp within ±5 minutes of local clock | `ExpiredMessage` |
 | 4. Dedup | Blake2b-256 hash not in LRU cache (100,000 entries) | `DuplicateMessage` |
 | 5. Schema | Payload deserialises to expected topic-specific type | `InvalidSchema` |
-| 6. Authority | Topic-specific permission checks (e.g. committee membership for taxonomy) | `Unauthorized` |
+| 6. Authority | Topic-specific permission checks; release builds reject taxonomy, governance, goal-template and question-bank messages outright (§6.5) | `Unauthorized` |
 
 The first failing step rejects the message. Validation outcomes MUST feed gossipsub peer scoring via `report_message_validation_result` — `Reject` on protocol-violation failures (signature, envelope parse, identity binding), `Ignore` on rate-limit drops, `Accept` on success — so the source's per-topic `invalid_message_deliveries` score moves correctly.
 
@@ -648,7 +650,7 @@ Skills carry references to external taxonomies (ESCO, O*NET) to support interope
 
 ### 8.3 Taxonomy Governance
 
-Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and old proofs remain valid across taxonomy versions. Backward-compatible parsing is required.
+Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and old proofs remain valid across taxonomy versions. Backward-compatible parsing is required. Release builds currently disable legacy taxonomy ratification and reject inbound taxonomy gossip pending verified committee outcome certificates (§6.5).
 
 ### 8.4 Content Ratification (Goal Templates & Question Banks)
 
@@ -658,6 +660,8 @@ Two further content types are DAO-ratified through the same committee-gated, ver
 - **Question banks** — assessment question banks (`question_banks`, versioned in `question_bank_versions`), propagated on `/alexandria/question-banks/1.0` under the `question_bank_change` category. Answer keys (`bank_questions.correct_indices`) are held locally and **never** published in the ratified document or over any command.
 
 Both follow propose → signed-vote → resolve → publish (content CID) → peers fetch + apply, mirroring taxonomy ratification. Genesis-ratified templates and banks are seeded so day-one offline use works before any gossip arrives.
+
+**Implementation status**: the legacy flow above accepts caller-supplied ratifiers and applies received version documents without a committee authority check, so it is not the approved five-of-seven committee model. Release builds disable it: `propose_goal_template_change`, `publish_goal_template_ratification`, `propose_question_bank_change`, `publish_question_bank_ratification`, and `apply_content_version` return a disabled error, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). The implementations compile only in debug builds with the `legacy-content-ratification` feature. Seeded templates and banks are unaffected.
 
 ---
 
@@ -727,11 +731,13 @@ The governance hierarchy mirrors the platform's knowledge taxonomy. When a new S
 
 An active DAO MUST begin from a public, one-time founding-genesis document accepted by exactly seven independently controlled founding members. Its canonical core MUST contain the human-readable name and scope, protocol and rules versions, all seven member identifiers and their distinct identity, consensus, and governance public keys, five-of-seven receipt and outcome thresholds, the two-thirds proposal-approval fraction, a positive minimum eligible-voter turnout count, the initial qualification policy, and CometBFT activation parameters. The core MUST NOT contain a DAO ID or genesis hash.
 
-Each listed founder MUST prove control of all three declared keys by signing the same domain-separated, JCS-canonical core bytes. Member identifiers, members, acceptances, issuer identifiers, and assessment-evidence identifiers MUST use their specified canonical ordering, and key material and signatures MUST use canonical lowercase encodings. A conforming verifier MUST reject missing, duplicate, reordered, reused, malformed, or invalid members, keys, and acceptances. Five operational signatures are insufficient to create a founding roster: all seven founding acceptances are required.
+Each listed founder MUST prove control of all three declared keys by signing the same domain-separated, JCS-canonical core bytes. Each member identifier MUST equal the `did:key` derived from that member's identity public key. Member identifiers, members, acceptances, issuer identifiers, and assessment-evidence identifiers MUST use their specified canonical ordering, and key material and signatures MUST use canonical lowercase encodings. A conforming verifier MUST reject missing, duplicate, reordered, reused, malformed, or invalid members, keys, and acceptances. Five operational signatures are insufficient to create a founding roster: all seven founding acceptances are required.
 
-After verifying the complete canonical envelope, the verifier MUST derive both the genesis hash and DAO ID as the lowercase BLAKE2b-256 digest of `"alexandria/governance/genesis-id/v1" || 0x00 || canonical_envelope`. The canonical JSON envelope is the authoritative genesis artifact and MUST NOT exceed 256 KiB. Competing envelopes, including envelopes with the same display name or scope, derive different DAO identities.
+Every accepted value MUST have one reviewable spelling. The display name MUST be at most 256 UTF-8 bytes with no leading or trailing space, and MUST NOT contain control or format characters (including bidirectional overrides and zero-width characters), other invisible default-ignorable characters, private-use or noncharacter code points, or any whitespace other than an inner U+0020 space. Scope, version, assessment-evidence, and member identifiers MUST be non-empty printable ASCII without spaces, at most 128 bytes; accepted issuer identifiers follow the same rule with a 256-byte limit; and each qualification-policy list MUST contain at most 64 entries. The CometBFT chain ID MUST be at most 50 bytes of lowercase ASCII letters, digits, `-`, `_`, and `.`, beginning and ending with a letter or digit. Because JCS encodes numbers as IEEE-754 doubles, integers whose magnitude exceeds 2^53−1 MUST be rejected.
 
-A client MUST explicitly pin the exact verified canonical envelope before treating the DAO or any descendant committee certificate as trusted. Discovery, sync, an application default or update, and optional Cardano anchoring MUST NOT automatically create, replace, or reset that local trust anchor.
+The genesis hash and DAO ID MUST both be the lowercase hex BLAKE2b-256 digest of `"alexandria/governance/genesis-core-id/v1" || 0x00 || JCS(core)`. Acceptances are excluded from this digest: Ed25519 signatures over identical bytes can differ, so re-signing an unchanged core MUST NOT produce a second DAO ID. The ID identifies a DAO only after the verifier has verified the complete canonical envelope, including all seven acceptances and their 21 key-control signatures; a claimed ID that does not match the core MUST be rejected. The canonical JSON envelope is the authoritative genesis artifact and MUST NOT exceed 256 KiB. Different cores, including cores with the same display name or scope, derive different DAO identities.
+
+A client MUST explicitly pin the exact verified canonical envelope before treating the DAO or any descendant committee certificate as trusted. Discovery, sync, an application default or update, and optional Cardano anchoring MUST NOT automatically create, replace, or reset that local trust anchor. Pinning identical bytes again is idempotent. A different valid envelope over an already pinned core MUST NOT replace the stored bytes; the implementation accepts it without storing it and reports `newly_pinned: false` with `stored_envelope_differs: true`. Any other envelope under a pinned DAO ID MUST be rejected. An epoch of committee authority is obtainable only from a verified genesis, not from separately stored or deserialized epoch data.
 
 #### 10.2.2 Portable Genesis Locators
 
@@ -739,11 +745,11 @@ A portable genesis locator is discovery metadata, not authority. It MUST NOT emb
 
 - the genesis-derived, lowercase 64-hex DAO ID;
 - the lowercase 64-hex BLAKE3 hash of the authoritative canonical JSON bytes; and
-- between two and eight distinct content-addressed retrieval locations.
+- between two and eight content-addressed retrieval locations, each on a distinct origin.
 
-The accepted top-level forms are `alexandria://governance/genesis/<dao-id>` and `https://alexandria.ifftu.dev/governance/genesis/<dao-id>`. They carry one `content=<BLAKE3>` field and repeated `source=<location>` fields. Unknown or duplicate singleton fields, credentials, ports, fragments, whitespace, and non-canonical paths MUST be rejected. A source MUST be either the exact identifier `iroh://<BLAKE3>` or an HTTPS URL with the same expected digest in an unsent `#blake3=<BLAKE3>` fragment. Canonicalized duplicate sources MUST be rejected.
+The accepted top-level forms are `alexandria://governance/genesis/<dao-id>` and `https://alexandria.ifftu.dev/governance/genesis/<dao-id>`. They carry one `content=<BLAKE3>` field and repeated `source=<location>` fields. Unknown or duplicate singleton fields, credentials, ports, fragments, whitespace, and non-canonical paths MUST be rejected. A source MUST be either the exact identifier `iroh://<BLAKE3>` or an HTTPS URL with the same expected digest in an unsent `#blake3=<BLAKE3>` fragment. An HTTPS source MUST use the `https` scheme on its default port and MUST NOT contain userinfo, an IP-literal host, a trailing-dot host, or a single-label or special-use/private-use name (such as `localhost`, `.local`, `.internal`, `.home.arpa`, `.onion`, `.test`, or `.example`). Sources are normalized (including host case, the default port, and RFC 3986 percent-encoding of the path and query) and counted by origin: the iroh network, or one HTTPS host. Two sources on the same origin, including different paths or spellings of one host, MUST be rejected, so one party cannot satisfy the two-source minimum alone.
 
-Opening a locator MAY parse, normalize, and display these identifiers, but MUST perform no network access and MUST NOT mutate content or governance trust state. Retrieval requires a separate explicit user action. The retrieved bytes MUST match the declared BLAKE3 digest, satisfy the founding-genesis size and canonicalization rules, verify every founding acceptance, and derive the locator's declared DAO ID. A client MUST then show the complete material trust facts, including all founder identifiers and keys, rules, thresholds, qualification policy, scope, activation data, and full DAO ID. Pinning requires a third explicit user action confirming the complete DAO ID and MUST persist the exact reviewed canonical bytes. QR codes encode only this locator. Source concurrency, racing, and timeout budgets are implementation policy and remain subject to the performance profile; they do not weaken any verification or consent requirement.
+Opening a locator MAY parse, normalize, and display these identifiers, but MUST perform no network access and MUST NOT mutate content or governance trust state. Retrieval requires a separate explicit user action and MUST fetch only the normalized sources of the reviewed locator: a client MUST NOT follow HTTP redirects or fall back to any other location recorded for the same content hash. The retrieved bytes MUST match the declared BLAKE3 digest, satisfy the founding-genesis size and canonicalization rules, verify every founding acceptance, and derive the locator's declared DAO ID. A client MUST then show the complete material trust facts, including all founder identifiers and keys, rules, thresholds, qualification policy, scope, activation data, the full DAO ID and equal core hash, and the BLAKE3 hash of the exact envelope bytes. Pinning requires a third explicit user action confirming the complete DAO ID and MUST persist the exact reviewed canonical bytes. QR codes encode only the normalized locator. Source concurrency, racing, and timeout budgets are implementation policy and remain subject to the performance profile; they do not weaken any verification or consent requirement. The implementation performs no blocking DNS lookup inside those budgets: reviewed hosts are checked without DNS, and its HTTP client's connect-time resolver rejects non-public addresses.
 
 ### 10.3 Elections
 
@@ -761,6 +767,8 @@ DAO membership is any actor who holds the relevant skill levels within the scope
 
 To participate in governance (open an election, nominate, accept a nomination, start/finalize voting, submit/approve/vote on proposals), an actor's stake address MUST be bound to its signing public key in the persistent `stake_pubkey_registry`. Peers verify this binding before accepting a gossiped governance action, and the local node refuses to produce one without it. The binding is established by a signed on-chain `stake_pubkey_registration` or a multisig-signed bootstrap snapshot.
 
+The lifecycle above describes the target governance rules. In the current release, the local election and proposal actions it names are disabled and inbound governance messages are rejected until verified committee certificates exist; see §10.6.
+
 ### 10.6 On-Chain Footprint (lean model)
 
 Governance runs a **lean** model. The live state machine is local SQLite; the full lifecycle — elections, nominations, and votes — propagates as **signed P2P gossip** on `/alexandria/governance/1.0`, and each node tallies the verified votes itself. **Votes are not on-chain transactions.**
@@ -775,6 +783,8 @@ Only these facts are written to Cardano, all **operator-signed** (the platform's
 The Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion, challenge_escrow) are deployed as CIP-33 reference scripts on **preprod testnet** and verified, but the per-transition spend validators (election/proposal state machine, per-user reputation soulbound tokens) are **not on the lean live path** — they are the upgrade path to full on-chain enforcement.
 
 **Upgrade path**: move the election/proposal state machine and per-user reputation tokens fully on-chain (the verified spend validators), trading higher cost + UTxO contention for trustless enforcement.
+
+**Current release status**: this lean local/operator model is not the approved five-of-seven committee model, and release builds disable its authority. Operator DAO creation compiles only in debug builds with `legacy-governance-bootstrap`. The twelve state-changing election, nomination, committee, and proposal commands (`open_election`, `nominate`, `accept_nomination`, `start_election_voting`, `cast_election_vote`, `finalize_election`, `install_committee`, `submit_proposal`, `approve_proposal`, `cancel_proposal`, `cast_proposal_vote`, `resolve_proposal`) return a disabled error, and their implementations compile only in debug builds with `legacy-local-governance`. Inbound `/alexandria/governance/1.0` events are rejected (§6.5). The on-chain queue still reconciles and confirms already journaled submissions but builds no governance transactions, and release seeding keeps neutral DAO rows without committees, elections, proposals, or votes. In every build, a committee install fails unless every elected winner resolves to a registered key: the operator key pays for and signs transactions but is never substituted for the committee. Read-only DAO, election, proposal, and queue-status queries remain available.
 
 ### 10.7 Spec Stewardship
 
@@ -922,7 +932,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Unauthorized modification of the global skill graph.
 
-**Mitigations**: Highest topic weight (1.0) and strongest invalid penalty (-50.0) in peer scoring. Committee authority verification at validation layer. Full committee membership check at domain handler layer. CommitteeUpdated events replace entire committee (no incremental adds).
+**Mitigations**: Highest topic weight (1.0) and strongest invalid penalty (-50.0) in peer scoring. Privileged-topic identity binding at the validation layer (§6.7). Until handlers consume verified committee outcome certificates, release builds reject every inbound taxonomy, governance, goal-template, and question-bank message before any database access (§6.5), so neither a single-signer taxonomy update nor a `CommitteeUpdated` event can change local state. The legacy domain-handler committee checks, and `CommitteeUpdated` replacement of the entire committee, remain only in debug builds that enable the corresponding legacy feature.
 
 ### 13.6 Content Tampering
 

@@ -194,6 +194,13 @@ for authority. Today that's exactly the set returned by
 - `/alexandria/question-banks/1.0` — DAO-ratified question-bank
   publications.
 
+The registry check still runs on every privileged topic. Separately, release
+builds currently reject every inbound message on the taxonomy, governance,
+Sentinel-prior, goal-template, and question-bank topics in the domain handler,
+before any database read or write, until those handlers consume verified
+committee outcome certificates. Registration is therefore necessary but not
+sufficient for authority.
+
 Non-privileged topics (`profiles`, `opinions`, catalog, plugin
 announcements, VC-layer topics, classroom messages, etc.) skip the
 registry check — they're authored by arbitrary peers, and their

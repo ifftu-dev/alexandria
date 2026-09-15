@@ -15,7 +15,7 @@
 > Only the legacy evidence-based versions were retired.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-09-15 (completion issuer policy, snapshot credential anchoring, shared migration path, profile cleanup ownership, and staged database executor; other sections retain their earlier implementation scope)
+**Last updated**: 2026-09-15 (completion issuer policy, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, legacy governance release gating, and genesis core identity; other sections retain their earlier implementation scope)
 
 ---
 
@@ -291,7 +291,9 @@ job carries the active profile lease: work still waiting when profile admission
 closes is rejected before it can acquire the database, while a transaction that
 has started retains its lease and finishes before lock cleanup may reuse the
 shared slot. Network, provider, and vault operations are kept outside executor
-closures.
+closures. A job that panics while holding the connection is caught inside the
+guard: any transaction it left open is rolled back and the caller receives an
+error, so the shared database mutex is not poisoned and later jobs still run.
 
 The waiting queues reserve 16 learner, 8 instructor, and 8 background slots.
 Filling one lane cannot consume another lane's reservation. A full lane rejects
@@ -442,6 +444,8 @@ path within the same process hangs indefinitely.
 | Goal Templates | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates |
 | Question Banks | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
+The taxonomy, governance, goal-template, and question-bank topics are still subscribed and validated, but release builds reject every inbound message on them before any database read or write (no rows, sync-log entry, or UI event) until handlers consume verified committee outcome certificates. The legacy apply paths compile only in debug builds with `legacy-taxonomy-ratification`, `legacy-local-governance`, or `legacy-content-ratification`.
+
 Six request-response protocols (libp2p `request-response` + CBOR
 codec) run alongside the gossip mesh and are not part of the
 gossip-topic set: `/alexandria/vc-fetch/1.0` handles
@@ -466,7 +470,7 @@ exchanges.
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
 5. **Schema** — valid JSON
-6. **Authority** — taxonomy/governance/Sentinel and content-governance (goal-template, question-bank) handlers re-check committee membership via on-chain governance tables
+6. **Authority** — in release builds the taxonomy, governance, Sentinel-prior, and content-governance (goal-template, question-bank) handlers reject every message pending verified committee outcome certificates; their legacy committee-membership checks against local governance tables compile only in debug builds with the matching `legacy-*` feature
 
 Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature, envelope-parse, or identity-binding failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
 
@@ -611,24 +615,24 @@ remains).
 ### Structure
 
 - One DAO per subject field or subject
-- Each DAO identity is the BLAKE2b-256 digest of its fully accepted founding-genesis envelope
-- A founding genesis names seven independently controlled committee members; every member accepts the same core with its identity, consensus, and governance keys
+- Each DAO identity is the domain-separated BLAKE2b-256 digest of its founding-genesis core; it identifies a DAO only once all seven founders' acceptances verify
+- A founding genesis names seven independently controlled committee members; every member accepts the same core with its identity, consensus, and governance keys, and each member ID must be the `did:key` of that member's identity key
 - Operational submission receipts and final outcomes require five of the seven committee members
-- Committees gate taxonomy updates and DAO-ratified content (goal templates, question banks)
+- Committees gate taxonomy updates and DAO-ratified content (goal templates, question banks); until verified committee certificates are wired in, release builds disable the legacy local paths for both (see [Features](#features))
 
 ### Trust bootstrap and import
 
-The canonical JSON founding-genesis envelope is the authoritative bootstrap artifact. It is limited to 256 KiB, contains no self-referential DAO ID, and is accepted only after canonical decoding, validation of all seven founders' three key-control signatures, and derivation of the DAO ID from the complete signed envelope. The exact verified bytes are persisted when a learner explicitly pins that DAO; a matching name or scope does not confer authority, and sync, discovery, Cardano, or an application update cannot create or replace the pin.
+The canonical JSON founding-genesis envelope is the authoritative bootstrap artifact. It is limited to 256 KiB, contains no self-referential DAO ID, and is accepted only after canonical decoding, validation of all seven founders' three key-control signatures, bounded display and identifier text, a strict CometBFT chain-ID grammar, and integers no larger than 2^53−1. The DAO ID is derived from the canonical core alone, so re-signing an unchanged core cannot mint a second ID, while verification still requires every acceptance. The exact verified bytes are persisted when a learner explicitly pins that DAO; pinning is a single conflict-safe insert, and a differently signed valid envelope for an already pinned core succeeds without replacing the stored bytes (`newly_pinned: false`, `stored_envelope_differs: true`); a matching name or scope does not confer authority, and sync, discovery, Cardano, or an application update cannot create or replace the pin.
 
-Portable QR codes and deep links carry discovery metadata only. A locator is limited to 2 KiB and contains the DAO ID, the BLAKE3 content hash of the canonical JSON, and two to eight distinct content-addressed sources. Sources are either `iroh://<BLAKE3>` or HTTPS URLs whose unsent `#blake3=<BLAKE3>` fragment binds the expected bytes. Only the `alexandria://governance/genesis/<dao-id>` custom scheme and the corresponding `https://alexandria.ifftu.dev/governance/genesis/<dao-id>` app link are accepted.
+Portable QR codes and deep links carry discovery metadata only. A locator is limited to 2 KiB and contains the DAO ID, the BLAKE3 content hash of the canonical JSON, and two to eight content-addressed sources on distinct origins. Sources are either `iroh://<BLAKE3>` or HTTPS URLs whose unsent `#blake3=<BLAKE3>` fragment binds the expected bytes. HTTPS sources must use the default port and a public DNS name: plain `http`, userinfo, IP literals, trailing-dot hosts, and special-use names are refused. Sources are normalized and counted per origin (the iroh network or one HTTPS host), so different paths or spellings of one host count once. Only the `alexandria://governance/genesis/<dao-id>` custom scheme and the corresponding `https://alexandria.ifftu.dev/governance/genesis/<dao-id>` app link are accepted.
 
 Import is deliberately split into three user-visible steps:
 
-1. Opening or pasting a locator parses and displays its identifiers without network access or state mutation.
-2. An explicit retrieve action fetches a source, recomputes the BLAKE3 hash, verifies the canonical envelope and derived DAO ID, and displays every material trust fact.
+1. Opening or pasting a locator parses, normalizes, and displays its identifiers without network access or state mutation. Retrieval and the QR code use the reviewed canonical encoding, not the typed text.
+2. An explicit retrieve action fetches only the reviewed sources, recomputes the BLAKE3 hash, verifies the canonical envelope and derived DAO ID, and displays every material trust fact, including the core hash and the BLAKE3 envelope hash.
 3. An explicit pin action requires the learner to enter the complete derived DAO ID and stores the exact reviewed bytes.
 
-Neither locator review nor retrieval auto-pins content. The source-racing, concurrency, and timeout policy is intentionally not fixed here pending the performance review.
+Neither locator review nor retrieval auto-pins content. Retrieval races at most three sources, with a 10 s limit per source and 30 s overall. It performs no blocking DNS lookup inside that budget: reviewed hosts are checked without DNS, the HTTP client's connect-time resolver rejects non-public addresses, redirects are not followed, and a missing iroh blob does not fall back to any other URL mapped to the same hash.
 
 ### Features
 
@@ -637,12 +641,14 @@ Neither locator review nor retrieval auto-pins content. The source-racing, concu
 | Founding-genesis verification and explicit local pinning | Implemented; governance activation is not yet wired to it |
 | Locator/deep-link review, verified retrieval, and QR display | Implemented; locator publishing/export and retrieval scheduling remain open |
 | Legacy operator DAO creation | Development-only behind `legacy-governance-bootstrap`; not a production authority path |
-| Committee management | Implemented |
-| Proposal lifecycle (draft → published → approved/rejected) | Implemented (off-chain; outcome anchored) |
-| Election lifecycle (nomination → voting → finalized) | Implemented (off-chain; finalized election published on-chain) |
-| 2/3 supermajority voting | Implemented (off-chain tally over signed gossiped votes) |
-| Signed-vote + full-lifecycle P2P gossip | Implemented |
-| On-chain (operator-signed): DAO create, election finalize, committee install, proposal-outcome anchor | Implemented |
+| Legacy local elections, proposals, committee install, and operator governance transactions | Development-only behind `legacy-local-governance`; the twelve state-changing commands return a disabled error in release, inbound governance gossip is rejected, and the operator queue builds no governance transactions |
+| Legacy goal-template and question-bank ratification | Development-only behind `legacy-content-ratification`; the five content commands return a disabled error in release and inbound version documents are rejected |
+| Committee management | Legacy implementation, development-only (above); a committee install fails in every build unless every elected winner resolves to a registered key |
+| Proposal lifecycle (draft → published → approved/rejected) | Legacy implementation, development-only (off-chain; outcome anchored) |
+| Election lifecycle (nomination → voting → finalized) | Legacy implementation, development-only (off-chain; finalized election published on-chain) |
+| 2/3 supermajority voting | Legacy implementation, development-only (off-chain tally over signed gossiped votes) |
+| Signed-vote + full-lifecycle P2P gossip | Legacy implementation, development-only; release rejects inbound events |
+| On-chain (operator-signed): DAO create, election finalize, committee install, proposal-outcome anchor | Legacy implementation, development-only; release reconciles and confirms journaled submissions only |
 | Per-vote / per-transition on-chain Plutus spends | Not used (lean model — validators deployed as the upgrade path) |
 
 Governance runs a **lean** on-chain model: the live state machine is local
@@ -651,6 +657,14 @@ only the four operator-signed facts above are written to Cardano (the proposal
 anchor carries the tally plus a Merkle root over the signed votes, so the
 off-chain tally is auditable). The full per-transition Plutus spend validators
 are deployed + verified on preprod but are not on the live path.
+
+That lean model is not the approved five-of-seven committee model, so release
+builds disable its authority as listed above. Listing and reading DAOs,
+elections, proposals, and on-chain queue status still work. Release seeding
+keeps the neutral DAO rows other features depend on but creates no
+committees, elections, proposals, or votes. The operator key only pays for and
+signs transactions; it is never installed as a committee in place of
+unresolvable winners.
 
 ---
 
@@ -706,7 +720,7 @@ The frontend communicates with the Rust backend via ~320 registered Tauri IPC ha
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` |
+| governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` (in release builds `create_dao` and the twelve state-changing election/proposal commands return a disabled error; list/get and queue-status commands work) |
 | tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
 | taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |

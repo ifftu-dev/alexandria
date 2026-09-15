@@ -251,7 +251,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, seeds taxonomy/courses/governance data, and starts the iroh content store.
+The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, seeds taxonomy/courses and neutral DAO rows (no committees, elections, proposals, or votes), and starts the iroh content store.
 
 ### Building for iOS
 
@@ -447,7 +447,7 @@ prompts for the active profile's password.
 ```bash
 alexandria db status        # Table row counts, migration version, data sizes
 alexandria db migrate       # Run pending schema migrations
-alexandria db seed          # Seed demo data (taxonomy, courses, governance)
+alexandria db seed          # Seed demo data (taxonomy, courses, neutral DAO rows)
 alexandria db seed --force  # Clear and re-seed
 alexandria db reset --force # Delete ALL app data on this device
 ```
