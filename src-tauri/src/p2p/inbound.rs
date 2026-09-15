@@ -527,8 +527,11 @@ mod tests {
 
     fn catalog_message(content_cid: &str) -> (String, SignedGossipMessage) {
         let author = "stake_test1uinbounddispatch";
+        // Catalog rows are keyed by the stable course id, so each message needs
+        // its own id or a refused write would be masked by an accepted one.
+        let course_id = blake3::hash(content_cid.as_bytes()).to_hex().to_string();
         let announcement = crate::p2p::catalog::build_catalog_announcement(
-            &"11".repeat(32),
+            &course_id,
             author,
             "Inbound fencing",
             None,
