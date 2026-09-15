@@ -90,6 +90,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (80, "sentinel_flag_notice", MIGRATION_080),
     (81, "account_roles_set", MIGRATION_081),
     (82, "escrow_datum_recipients", MIGRATION_082),
+    (84, "instructor_studio", alexandria_studio::store::SCHEMA),
 ];
 
 const MIGRATION_001: &str = r#"

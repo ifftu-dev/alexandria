@@ -2078,3 +2078,34 @@ export type GoalInput =
   | { kind: 'job_role'; key: string }
   | { kind: 'jd_text'; text: string }
   | { kind: 'jd_link'; url: string }
+
+export interface StudioSource { id: string; title: string; text: string; selected: boolean }
+export interface TutorPolicy { enabled: boolean; guidance: 'socratic' | 'balanced' | 'direct'; initial_prompt: string }
+export interface CourseStudio { audience: string; prerequisites: string; outcome: string; initial_prompt: string; sources: StudioSource[]; tutor: TutorPolicy }
+export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean }
+export interface StudioRole { role: string; connection_id: string | null; initial_prompt: string }
+export interface StudioSettings { roles: StudioRole[] }
+export interface StudioStep { id: string; role: string; connection_id: string | null; initial_prompt: string }
+export interface StudioWorkflow { id: string; name: string; initial_prompt: string; steps: StudioStep[] }
+export interface StudioDocument<T> { id: string; revision: number; value: T }
+export interface StudioRunStep { role: string; connection: StudioConnection; effective_prompt: string; output: string | null }
+export interface StudioRun { id: string; course_id: string; element_id: string; workflow_name: string; workflow_revision: number; target_fingerprint: string; original_content: string | null; context: string; status: string; steps: StudioRunStep[]; error: string | null; created_at: string; applied_fingerprint: string | null }
+export interface TutorMessage { role: 'learner' | 'tutor'; text: string; created_at: string }
+export interface TutorThread { id: string; course_id: string; element_id: string; connection_id: string; messages: TutorMessage[] }
+export interface TutorReply { thread: TutorThread; provider_location: 'local' | 'cloud' }
+export interface LessonFeedback { id: string; course_id: string; element_id: string; element_title: string; rating: number; comment: string; created_at: string }
+
+export interface StudioAssistantGrant {
+  id: string
+  client_name: string
+  scopes: string[]
+  expires_at: number
+}
+export interface StudioAssistantAccess {
+  available: boolean
+  grants: StudioAssistantGrant[]
+}
+export interface StudioAssistantConnection {
+  grant: StudioAssistantGrant
+  connection_file: string
+}

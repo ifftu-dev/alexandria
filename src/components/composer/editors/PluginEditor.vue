@@ -1,14 +1,14 @@
 <script setup lang="ts">
 // Plugin element editor: bind an installed plugin (e.g. a code editor) and
 // author its per-element config, stored as a blob → plugin_config_cid.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, AppButton } from '@/components/ui'
 import type { Element, InstalledPlugin } from '@/types'
 
 const props = defineProps<{ element: Element }>()
-const emit = defineEmits<{ updated: [Element] }>()
+const emit = defineEmits<{ updated: [Element]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -18,6 +18,7 @@ const selectedCid = ref(props.element.plugin_cid ?? '')
 const configJson = ref('')
 const configLoaded = ref(false)
 const dirty = ref(false)
+watch(dirty, value => emit('dirty', value), { flush: 'sync' })
 const saving = ref(false)
 const error = ref('')
 

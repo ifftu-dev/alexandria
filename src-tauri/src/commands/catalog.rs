@@ -454,6 +454,13 @@ pub async fn hydrate_catalog_courses(
         )
         .map_err(|e| format!("clear chapters failed: {e}"))?;
 
+        alexandria_studio::store::write_tutor_policy(
+            &tx,
+            &signed_doc.course_id,
+            &signed_doc.tutor_policy,
+        )
+        .map_err(|e| format!("save tutor policy failed: {e}"))?;
+
         for chapter in &signed_doc.chapters {
             tx.execute(
                 "INSERT INTO course_chapters (id, course_id, title, description, position) VALUES (?1, ?2, ?3, ?4, ?5)",

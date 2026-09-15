@@ -294,6 +294,7 @@ pub async fn publish_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<PublishCourseResult, String> {
+    let studio_epoch = state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst);
     // Get the wallet signing key from the vault
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
@@ -303,13 +304,17 @@ pub async fn publish_course(
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
     // Read course data from DB (scoped to release the lock before iroh calls)
-    let payload = {
+    let (mut payload, inline_text) = {
+        let mut inline_text: Vec<(String, String)> = Vec::new();
         let db_guard = state
             .db
             .lock()
             .map_err(|_| "database lock poisoned".to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         let course = get_course_by_id(db.conn(), &course_id)?;
+        if course.author_address != w.stake_address {
+            return Err("course not found or not authored by you".into());
+        }
 
         // Read chapters with their elements
         let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
@@ -337,7 +342,7 @@ pub async fn publish_course(
                 let mut el_stmt = db
                     .conn()
                     .prepare(
-                        "SELECT id, title, element_type, content_cid, position, duration_seconds \
+                        "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
                          FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
                     )
                     .map_err(|e| e.to_string())?;
@@ -345,6 +350,12 @@ pub async fn publish_course(
                 let els = el_stmt
                     .query_map(params![ch_id], |row| {
                         let el_id: String = row.get(0)?;
+                        let element_type: String = row.get(2)?;
+                        if element_type == "text" {
+                            if let Some(text) = row.get::<_, Option<String>>(6)? {
+                                inline_text.push((el_id.clone(), text));
+                            }
+                        }
                         Ok(DocumentElement {
                             id: el_id,
                             title: row.get(1)?,
@@ -406,23 +417,37 @@ pub async fn publish_course(
         let created_at = parse_datetime_to_unix(&course.created_at);
         let updated_at = chrono::Utc::now().timestamp();
 
-        CourseDocumentPayload {
-            version: 1,
-            course_id: course.id.clone(),
-            author_address: course.author_address.clone(),
-            title: course.title.clone(),
-            description: course.description.clone(),
-            thumbnail_hash: course.thumbnail_cid.clone(),
-            tags: course.tags.clone().unwrap_or_default(),
-            skill_ids: course.skill_ids.clone().unwrap_or_default(),
-            chapters,
-            created_at,
-            updated_at,
-            kind: course.kind.clone(),
-        }
+        (
+            CourseDocumentPayload {
+                version: 1,
+                course_id: course.id.clone(),
+                author_address: course.author_address.clone(),
+                title: course.title.clone(),
+                description: course.description.clone(),
+                thumbnail_hash: course.thumbnail_cid.clone(),
+                tags: course.tags.clone().unwrap_or_default(),
+                skill_ids: course.skill_ids.clone().unwrap_or_default(),
+                chapters,
+                created_at,
+                updated_at,
+                kind: course.kind.clone(),
+                tutor_policy: alexandria_studio::store::tutor_policy(db.conn(), &course.id)
+                    .map_err(|error| error.to_string())?,
+            },
+            inline_text,
+        )
         // db lock dropped here
     };
 
+    if state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) != studio_epoch {
+        return Err("profile changed during publication".into());
+    }
+    content_course::materialize_text_lessons(&state.content_node, &mut payload, &inline_text)
+        .await
+        .map_err(|error| error.to_string())?;
+    if state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) != studio_epoch {
+        return Err("profile changed during publication".into());
+    }
     // Sign the document
     let signed = content_course::sign_course_document(&payload, &w.signing_key)
         .map_err(|e| e.to_string())?;
@@ -439,6 +464,18 @@ pub async fn publish_course(
             .lock()
             .map_err(|_| "database lock poisoned".to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
+        if state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) != studio_epoch {
+            return Err("profile changed during publication".into());
+        }
+        for (element_id, expected_text) in &inline_text {
+            let matches: bool = db.conn().query_row(
+                "SELECT EXISTS(SELECT 1 FROM course_elements e JOIN course_chapters ch ON ch.id=e.chapter_id WHERE e.id=?1 AND ch.course_id=?2 AND e.content_inline=?3 AND e.element_type='text')",
+                params![element_id, course_id, expected_text], |row| row.get(0),
+            ).map_err(|error| error.to_string())?;
+            if !matches {
+                return Err("lesson changed during publication; review and publish again".into());
+            }
+        }
         db.conn()
             .execute(
                 "UPDATE courses SET content_cid = ?1, status = 'published', \

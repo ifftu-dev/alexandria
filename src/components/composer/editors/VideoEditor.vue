@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // Video element editor: blob upload + duration probe + chapter markers.
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, AppButton } from '@/components/ui'
 import type { Element, VideoChapterInput } from '@/types'
 
 const props = defineProps<{ element: Element }>()
-const emit = defineEmits<{ updated: [Element] }>()
+const emit = defineEmits<{ updated: [Element]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -18,6 +18,7 @@ const error = ref('')
 
 const markers = ref<VideoChapterInput[]>([])
 const markersDirty = ref(false)
+watch(markersDirty, value => emit('dirty', value), { flush: 'sync' })
 const savingMarkers = ref(false)
 
 onMounted(async () => {

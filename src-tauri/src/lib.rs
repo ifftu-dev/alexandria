@@ -70,6 +70,7 @@ pub struct ActiveProfile {
 /// the `RefCell` from different OS threads — causing a SIGSEGV on iOS
 /// where the tokio thread pool is more aggressive about work-stealing.
 pub struct AppState {
+    pub studio: Arc<commands::studio::StudioRuntime>,
     // ─── per-device singletons ──────────────────────────────────────
     pub app_data_dir: PathBuf,
     pub profile_manager: Arc<ProfileManager>,
@@ -293,6 +294,10 @@ impl AppState {
             });
         }
 
+        {
+            let _guard = self.db.lock().map_err(|_| "storage_error".to_string())?;
+            self.studio.activate();
+        }
         log::info!("profile {} fully initialized", paths.id);
         Ok(())
     }
@@ -300,6 +305,11 @@ impl AppState {
     /// Tear down the active profile's resources. Safe to call when no
     /// profile is active (becomes a no-op).
     pub async fn stop_active_profile(&self) -> Result<(), String> {
+        let _broker_gate = self.studio.broker_gate.write().await;
+        {
+            let _guard = self.db.lock().map_err(|_| "storage_error".to_string())?;
+            self.studio.invalidate();
+        }
         // 0. Drop any Sentinel evidence staged but never consented to. It has
         // not been written anywhere, and it must not survive into the next
         // profile's session — see `sentinel::evidence`.
@@ -1087,6 +1097,7 @@ pub fn run() {
             );
 
             let app_state = AppState {
+                studio: Arc::new(commands::studio::StudioRuntime::default()),
                 app_data_dir: app_dir.clone(),
                 profile_manager,
                 active,
@@ -1112,6 +1123,8 @@ pub fn run() {
 
             diag::log("managing app state in Tauri");
             app.manage(app_state);
+            #[cfg(all(desktop, unix))]
+            commands::studio_mcp::start(app.handle().clone());
             diag::log("app setup complete — webview should be loading");
 
             // macOS: WKWebView ships with WKPreferences' `fullScreenEnabled`
@@ -1349,6 +1362,30 @@ pub fn run() {
             commands::guardian::guardian_revoke_link,
             commands::guardian::guardian_get_child_activity,
             // Instructor dashboard + inbox
+            commands::studio_mcp::studio_assistant_access,
+            commands::studio_mcp::studio_grant_assistant,
+            commands::studio_mcp::studio_revoke_assistant,
+            commands::studio::studio_get_course,
+            commands::studio::studio_save_course,
+            commands::studio::studio_get_tutor_policy,
+            commands::studio::studio_get_tutor_thread,
+            commands::studio::studio_ask_tutor,
+            commands::studio::studio_clear_tutor_thread,
+            commands::studio::studio_submit_lesson_feedback,
+            commands::studio::studio_list_lesson_feedback,
+            commands::studio::studio_get_settings,
+            commands::studio::studio_save_settings,
+            commands::studio::studio_list_connections,
+            commands::studio::studio_save_connection,
+            commands::studio::studio_list_workflows,
+            commands::studio::studio_save_workflow,
+            commands::studio::studio_prepare_run,
+            commands::studio::studio_list_runs,
+            commands::studio::studio_get_run,
+            commands::studio::studio_start_run,
+            commands::studio::studio_stop_run,
+            commands::studio::studio_apply_run,
+            commands::studio::studio_undo_run,
             commands::instructor::instructor_overview,
             commands::instructor::instructor_course_learners,
             commands::instructor::instructor_inbox,

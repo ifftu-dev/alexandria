@@ -65,3 +65,7 @@ pub use tutoring_mobile as tutoring;
 
 #[cfg(not(any(desktop, target_os = "ios", target_os = "android")))]
 pub mod tutoring_stubs;
+
+pub mod studio;
+
+pub mod studio_mcp;

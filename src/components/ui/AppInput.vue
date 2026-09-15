@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useId } from 'vue'
+
+const generatedId = useId()
 
 interface Props {
+  id?: string
+  maxlength?: number
+  required?: boolean
+  autocomplete?: string
   modelValue: string
   label?: string
   placeholder?: string
@@ -39,10 +45,15 @@ defineExpose({ focus, select, blur })
 
 <template>
   <div>
-    <label v-if="label" class="label text-xs text-muted-foreground">
+    <label v-if="label" :for="id ?? generatedId" class="label text-xs text-muted-foreground">
       {{ label }}
     </label>
     <input
+      :id="id ?? generatedId"
+      :maxlength="maxlength"
+      :required="required"
+      :autocomplete="autocomplete"
+      :aria-invalid="error ? true : undefined"
       ref="inputEl"
       :value="modelValue"
       :type="type"

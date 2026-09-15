@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use alexandria_studio::model::TutorPolicy;
+
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {
@@ -38,6 +40,10 @@ pub struct CourseDocumentPayload {
     /// keeps documents from older nodes parseable as regular courses.
     #[serde(default = "default_kind")]
     pub kind: String,
+    /// Public learner-tutor behavior chosen by the instructor. Disabled policies
+    /// are omitted so signatures on course documents from older nodes remain valid.
+    #[serde(default, skip_serializing_if = "TutorPolicy::is_disabled")]
+    pub tutor_policy: TutorPolicy,
 }
 
 fn default_kind() -> String {
@@ -110,6 +116,8 @@ pub struct SignedCourseDocument {
     pub updated_at: i64,
     #[serde(default = "default_kind")]
     pub kind: String,
+    #[serde(default, skip_serializing_if = "TutorPolicy::is_disabled")]
+    pub tutor_policy: TutorPolicy,
 
     // -- Cryptographic fields --
     /// Ed25519 signature over the payload JSON (hex-encoded, 128 chars).
@@ -134,6 +142,7 @@ impl SignedCourseDocument {
             created_at: self.created_at,
             updated_at: self.updated_at,
             kind: self.kind.clone(),
+            tutor_policy: self.tutor_policy.clone(),
         }
     }
 }
@@ -179,6 +188,7 @@ mod tests {
             created_at: 1700000000,
             updated_at: 1700100000,
             kind: "course".into(),
+            tutor_policy: TutorPolicy::default(),
             signature: "deadbeef".into(),
             public_key: "cafebabe".into(),
         }
@@ -223,6 +233,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             kind: "course".into(),
+            tutor_policy: TutorPolicy::default(),
         };
         let json = serde_json::to_string(&payload).unwrap();
         let parsed: CourseDocumentPayload = serde_json::from_str(&json).unwrap();

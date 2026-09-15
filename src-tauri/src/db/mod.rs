@@ -118,14 +118,13 @@ impl Database {
             );",
         )?;
 
-        let current_version: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(version), 0) FROM _migrations",
-            [],
-            |row| row.get(0),
-        )?;
-
         for (version, name, sql) in schema::MIGRATIONS {
-            if *version > current_version {
+            let applied: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _migrations WHERE version = ?1)",
+                [version],
+                |row| row.get(0),
+            )?;
+            if !applied {
                 log::info!("Running migration {}: {}", version, name);
                 self.conn.execute_batch(sql).map_err(|e| {
                     DbError::Migration(format!("migration {} ({}) failed: {}", version, name, e))
@@ -179,6 +178,34 @@ mod tests {
         db.run_migrations().expect("first migration failed");
         db.run_migrations()
             .expect("second migration should be idempotent");
+    }
+
+    #[test]
+    fn missing_lower_migrations_run_after_a_higher_version() {
+        let db = Database::open_in_memory().expect("failed to open in-memory db");
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE _migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO _migrations(version, name) VALUES (999, 'future_branch');",
+            )
+            .unwrap();
+
+        db.run_migrations()
+            .expect("missing migrations below the highest version should run");
+
+        let applied: bool = db
+            .conn()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM _migrations WHERE version = 84 AND name = 'instructor_studio')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(applied);
     }
 
     /// P0 #3 — exercise migration 047 (`sentinel_user_models`) on a DB

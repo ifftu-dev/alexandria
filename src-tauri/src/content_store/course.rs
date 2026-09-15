@@ -59,6 +59,7 @@ pub fn sign_course_document(
         created_at: payload.created_at,
         updated_at: payload.updated_at,
         kind: payload.kind.clone(),
+        tutor_policy: payload.tutor_policy.clone(),
         signature: hex::encode(signature.to_bytes()),
         public_key: hex::encode(public_key.to_bytes()),
     })
@@ -92,6 +93,28 @@ pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), Cours
         .map_err(|_| CourseDocError::InvalidSignature)
 }
 
+pub async fn materialize_text_lessons(
+    node: &ContentNode,
+    payload: &mut CourseDocumentPayload,
+    inline_text: &[(String, String)],
+) -> Result<(), CourseDocError> {
+    for (id, text) in inline_text {
+        let element = payload
+            .chapters
+            .iter_mut()
+            .flat_map(|chapter| &mut chapter.elements)
+            .find(|element| element.id == *id && element.element_type == "text")
+            .ok_or_else(|| {
+                CourseDocError::Store("text lesson no longer exists in release".into())
+            })?;
+        let added = content::add_bytes_unencrypted(node, text.as_bytes())
+            .await
+            .map_err(|error| CourseDocError::Store(error.to_string()))?;
+        element.content_hash = Some(added.hash);
+    }
+    Ok(())
+}
+
 /// Publish a signed course document to the iroh blob store.
 ///
 /// Serializes the signed document to JSON and stores it. Returns the
@@ -103,7 +126,7 @@ pub async fn publish_course_document(
     let doc_json =
         serde_json::to_vec(signed).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
 
-    let result = content::add_bytes(node, &doc_json)
+    let result = content::add_bytes_unencrypted(node, &doc_json)
         .await
         .map_err(|e| CourseDocError::Store(e.to_string()))?;
 
@@ -203,6 +226,7 @@ mod tests {
             }],
             created_at: 1700000000,
             updated_at: 1700100000,
+            tutor_policy: alexandria_studio::model::TutorPolicy::default(),
         }
     }
 
@@ -241,6 +265,26 @@ mod tests {
         let mut signed = sign_course_document(&payload, &key).unwrap();
         signed.chapters[0].title = "Tampered Chapter".to_string();
 
+        assert!(matches!(
+            verify_course_document(&signed),
+            Err(CourseDocError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn enabled_tutor_policy_is_signed_and_tamper_evident() {
+        let key = make_signing_key();
+        let mut payload = make_payload();
+        payload.tutor_policy = alexandria_studio::model::TutorPolicy {
+            enabled: true,
+            guidance: "balanced".into(),
+            initial_prompt: "Use course vocabulary.".into(),
+        };
+        let mut signed = sign_course_document(&payload, &key).unwrap();
+        verify_course_document(&signed).unwrap();
+        let json = serde_json::to_string(&signed).unwrap();
+        assert!(json.contains("tutor_policy"));
+        signed.tutor_policy.guidance = "direct".into();
         assert!(matches!(
             verify_course_document(&signed),
             Err(CourseDocError::InvalidSignature)
@@ -293,6 +337,49 @@ mod tests {
         assert_eq!(deserialized.title, signed.title);
         assert_eq!(deserialized.signature, signed.signature);
         verify_course_document(&deserialized).unwrap();
+    }
+
+    #[tokio::test]
+    async fn published_text_release_is_readable_without_author_profile_key() {
+        let tmp = TempDir::new().unwrap();
+        let node = ContentNode::new(tmp.path());
+        node.start(None).await.unwrap();
+        node.set_content_key([17; 32]).await;
+        let mut payload = make_payload();
+        payload.chapters[0].elements[0].element_type = "text".into();
+        materialize_text_lessons(
+            &node,
+            &mut payload,
+            &[("el_001".into(), "Approved lesson text".into())],
+        )
+        .await
+        .unwrap();
+        let text_hash = payload.chapters[0].elements[0]
+            .content_hash
+            .clone()
+            .unwrap();
+        let signed = sign_course_document(&payload, &make_signing_key()).unwrap();
+        let published = publish_course_document(&node, &signed).await.unwrap();
+        node.clear_content_key().await;
+        let release = resolve_course_document(&node, &published.content_hash)
+            .await
+            .unwrap();
+        assert_eq!(
+            release.chapters[0].elements[0].content_hash.as_deref(),
+            Some(text_hash.as_str())
+        );
+        assert_eq!(
+            content::get_bytes(&node, &text_hash).await.unwrap(),
+            b"Approved lesson text"
+        );
+        assert!(materialize_text_lessons(
+            &node,
+            &mut payload,
+            &[("el_002".into(), "Assessment answers".into())]
+        )
+        .await
+        .is_err());
+        node.shutdown().await.unwrap();
     }
 
     #[tokio::test]
