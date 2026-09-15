@@ -67,11 +67,11 @@ central API, no hosted database, and no Docker infrastructure.
 |                                                       |
 |  +----------------+         +----------------------+  |
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
-|  |   (WebView)    | ~320    |                      |  |
+|  |   (WebView)    | ~280    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  48 pages      |         |  |   SQLite DB    |  |  |
-|  |  77 components |         |  |   ~96 tables   |  |  |
-|  |  30 composables|         |  |   77 migrations|  |  |
+|  |  51 pages      |         |  |   SQLite DB    |  |  |
+|  |  89 components |         |  |   ~106 tables  |  |  |
+|  |  32 composables|         |  |   83 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -206,7 +206,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Tables**: ~96 live (106 created, 10 dropped in migration 040) across 77 migrations
+**Tables**: ~106 live (116 created, 10 dropped in migration 040) across 83 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -217,6 +217,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Credentials | `credentials`, `credential_status_lists`, `key_registry` |
 | Reputation | derived from `credentials`; `reputation_snapshots` |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
+| Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
@@ -254,7 +255,7 @@ and neither can currently do the other's job:
 
 | | libp2p (§6) | iroh (this section) |
 |---|---|---|
-| Carries | mesh: discovery, gossip, sync, pairing, guardian, username receipts | content blobs, tutoring media (MoQ), room presence |
+| Carries | mesh: discovery, gossip, sync, pairing, guardian, username receipts | content blobs, tutoring media (MoQ), room presence, room chat/captions |
 | Relays | Circuit Relay v2 + DCUtR, self-hosted | iroh relays |
 | Discovery | private Kademlia DHT | DNS / pkarr |
 | Identity | libp2p `PeerId` | iroh `EndpointId` |
@@ -290,6 +291,22 @@ The router accepts three ALPNs — `iroh_blobs`, `iroh_gossip`, and `live::ALPN`
 whether or not the user ever joins a tutoring session. The feature flags gate
 only the codec layer (ffmpeg, VideoToolbox, Opus), not the protocol
 registration.
+
+### Live rooms, captions, and interview records
+
+Tutoring owns the live-room lifecycle, media, invitations, chat, and
+participant-controlled captions. Caption speech recognition is exposed only
+when the WebView supports the explicit `processLocally` control. Final text
+segments are sent over the encrypted iroh room gossip channel with the internal
+`ALXTR1` prefix; this is not a libp2p global gossip topic. Tutoring retains the
+caption list in memory and clears it when the room is left.
+
+The interview assistant reuses that transport but persists a separate record in
+the active profile's SQLCipher database. A remote caption becomes an interview
+transcript segment only after it is matched to a participant who consented to
+transcription. Interview tables never enter cross-device sync or global gossip,
+and their configured expiry is enforced by the interview list/purge command.
+See [Interview Assistant](interview-assistant.md).
 
 ### Operations
 
@@ -576,6 +593,9 @@ are deployed + verified on preprod but are not on the live path.
 | Join Requests | `/classrooms/:id/requests` | Review pending join requests |
 | Tutoring Index | `/tutoring` | Live tutoring sessions list |
 | Tutoring Session | `/tutoring/:id` | Active video/audio/screen session |
+| Interviews | `/interviews` | Instructor-only interview planning and local record list |
+| Interview Session | `/interviews/:id` | Consent/preflight and live interview workspace |
+| Interview Review | `/interviews/:id/review` | Transcript, criteria coverage, summary, conclusion, and export |
 | My Courses | `/dashboard/courses` | Enrolled courses, progress |
 | Credentials | `/dashboard/credentials` | W3C Verifiable Credentials — the same view is embedded as the default tab of `/skills` |
 | Reputation | `/dashboard/reputation` | Distribution-based reputation (median/p25/p75) |
@@ -596,13 +616,14 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via ~320 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **52 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`, `adaptive`, `graph`):
+The frontend communicates with the Rust backend via ~280 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **59 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`, `adaptive`, `graph`):
 
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
 | governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` |
-| tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
+| tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
+| interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
 | taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
@@ -659,6 +680,11 @@ Note: `tutoring` has platform-specific variants. Desktop and Android share the f
 - Only derived integrity scores (0.0-1.0) are stored and transmitted otherwise
 - Cross-device sync is encrypted with a key derived from the wallet signing key
 - Public gossip contains only evidence scores and governance actions — no personal data beyond stake addresses
+- Interview plans, participant names, transcripts, notes, and summaries remain in
+  the active profile's SQLCipher database and are excluded from cross-device
+  sync and global gossip. Only participant-enabled final caption text and the
+  room display name travel to current live-room peers; see
+  [`interview-assistant.md`](interview-assistant.md#pii-and-privacy-boundaries).
 
 ---
 

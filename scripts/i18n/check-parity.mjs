@@ -63,6 +63,11 @@ const PENDING_TRANSLATION = [
   // Credential import surface. English-only pending a translate pass.
   'credentials.import.',
   'credentials.page.import',
+  // Interview assistant and participant caption consent. English-only until
+  // the next translation pass; consent copy should be prioritised in that pass.
+  'interviews.',
+  'tutoring.captions.',
+  'nav.primary.interviews',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

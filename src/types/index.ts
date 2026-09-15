@@ -901,7 +901,7 @@ export type FlagType =
 
 export interface IntegritySession {
   id: string
-  enrollment_id: string
+  enrollment_id: string | null
   status: string
   integrity_score: number | null
   critical_count: number
@@ -1254,6 +1254,14 @@ export interface TutoringChatMessage {
   timestamp: number
 }
 
+export interface TutoringTranscriptMessage {
+  sender: string
+  sender_name: string | null
+  text: string
+  confidence: number | null
+  timestamp: number
+}
+
 export interface DeviceCheckResult {
   has_camera: boolean
   camera_name: string | null
@@ -1283,6 +1291,141 @@ export interface DeviceList {
 export interface AudioLevelEvent {
   mic_level: number
   output_level: number
+}
+
+// ---- Interview assistant ----
+
+export type InterviewStatus = 'draft' | 'ready' | 'live' | 'completed'
+export type InterviewParticipantRole = 'interviewer' | 'candidate' | 'observer'
+export type InterviewCriterionStatus = 'not_covered' | 'partial' | 'covered'
+export type InterviewTranscriptSource = 'local_stt' | 'remote_stt' | 'manual'
+export type InterviewFollowupStatus = 'suggested' | 'asked' | 'dismissed'
+
+export interface InterviewSession {
+  id: string
+  title: string
+  objective: string | null
+  role_assessment_id: string | null
+  tutoring_session_id: string | null
+  status: InterviewStatus
+  duration_minutes: number
+  retention_days: number
+  record_audio: boolean
+  record_video: boolean
+  sentinel_enabled: boolean
+  integrity_session_id: string | null
+  summary: string | null
+  conclusion: string | null
+  created_at: string
+  started_at: string | null
+  ended_at: string | null
+  expires_at: string
+}
+
+export interface InterviewParticipant {
+  id: string
+  session_id: string
+  peer_id: string | null
+  display_name: string
+  role: InterviewParticipantRole
+  pseudonym: string
+  consent_transcription: boolean
+  consent_audio_recording: boolean
+  consent_video_recording: boolean
+  consent_sentinel: boolean
+  consent_camera: boolean
+  consented_at: string | null
+  revoked_at: string | null
+}
+
+export interface InterviewCriterion {
+  id: string
+  session_id: string
+  label: string
+  position: number
+  status: InterviewCriterionStatus
+  notes: string | null
+}
+
+export interface InterviewTranscriptSegment {
+  id: string
+  session_id: string
+  participant_id: string
+  speaker_label: string
+  text: string
+  start_ms: number
+  end_ms: number
+  is_final: boolean
+  confidence: number | null
+  source: InterviewTranscriptSource
+  created_at: string
+}
+
+export interface InterviewNote {
+  id: string
+  session_id: string
+  text: string
+  is_private: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface InterviewFollowup {
+  id: string
+  session_id: string
+  source_segment_id: string | null
+  criterion_id: string | null
+  question: string
+  reason: string
+  status: InterviewFollowupStatus
+  created_at: string
+}
+
+export interface InterviewBundle {
+  session: InterviewSession
+  participants: InterviewParticipant[]
+  criteria: InterviewCriterion[]
+  transcript: InterviewTranscriptSegment[]
+  notes: InterviewNote[]
+  followups: InterviewFollowup[]
+}
+
+export interface CreateInterviewRequest {
+  title: string
+  objective?: string
+  role_assessment_id?: string
+  tutoring_session_id?: string
+  duration_minutes: number
+  retention_days: number
+  record_audio: boolean
+  record_video: boolean
+  sentinel_enabled: boolean
+  participants: Array<{
+    display_name: string
+    role: InterviewParticipantRole
+    peer_id?: string
+  }>
+  criteria: string[]
+}
+
+export interface InterviewConsentRequest {
+  consent_transcription: boolean
+  consent_audio_recording: boolean
+  consent_video_recording: boolean
+  consent_sentinel: boolean
+  consent_camera: boolean
+}
+
+export interface AppendInterviewTranscriptRequest {
+  session_id: string
+  participant_id: string
+  speaker_label: string
+  text: string
+  start_ms: number
+  end_ms: number
+  is_final: boolean
+  confidence?: number
+  source: InterviewTranscriptSource
 }
 
 // ---- Health ----

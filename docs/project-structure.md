@@ -66,6 +66,7 @@ src-tauri/
     │   ├── challenge.rs    # Evidence challenges and voting
     │   ├── opinions.rs     # Field Commentary opinions
     │   ├── integrity.rs    # Sentinel sessions and snapshots
+    │   ├── interview.rs    # Local interview plans, consent, transcript, follow-ups, review, retention
     │   ├── assessment.rs   # Dynamic Sentinel-gated assessments: start attempt, host-side grade
     │   ├── goal_templates.rs # Resolve learner goals → skill graph; list/get DAO goal templates
     │   ├── skill_bootstrap.rs # Bootstrap skill graph from uploaded resume/transcript
@@ -218,6 +219,8 @@ src/
 │   ├── useP2P.ts
 │   ├── usePlatform.ts
 │   ├── useSentinel.ts      # AI / paste-classifier toggles synced via `sentinel.*` settings
+│   ├── useInterviews.ts    # Interview record CRUD, consent, transcript, follow-ups, review
+│   ├── useLocalSpeechRecognition.ts # On-device-only speech recognition capability gate
 │   ├── useSettingsModal.ts # Type-only now: the `SettingsSectionId` union (settings is a full page, not a modal)
 │   ├── useDisplayNames.ts  # DID→username resolver (cached) — usernames shown app-wide instead of DIDs
 │   ├── useSkillGraphHover.ts
@@ -235,6 +238,7 @@ src/
 │   ├── course/             # Content renderers + quiz widgets
 │   ├── governance/         # Governance badges/gates/countdowns
 │   ├── integrity/          # Sentinel training/calibration UI
+│   ├── live/               # Shared tutoring/interview participant, controls, diagnostics UI
 │   ├── layout/             # Sidebar, top bar (avatar dropdown), bottom bar, PiP, ticker, modal shell
 │   ├── omni/               # Omni search surface
 │   ├── settings/           # Settings-page panels (AdvancedSettingsPanel, PluginsPanel)
@@ -279,6 +283,10 @@ src/
 │   │   ├── Inbox.vue
 │   │   ├── MyCourses.vue
 │   │   └── SubmissionReview.vue
+│   ├── interviews/
+│   │   ├── Index.vue       # Plans and retention-aware local record list
+│   │   ├── Session.vue     # Consent/preflight and live interview assistant
+│   │   └── Review.vue      # Transcript, coverage, summary, conclusion, export
 │   ├── learn/
 │   │   ├── Player.vue
 │   │   └── AssessmentRunner.vue # Sentinel-gated dynamic assessment (/assessment/:skillId)

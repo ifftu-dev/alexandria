@@ -208,6 +208,49 @@ mod tests {
         assert!(applied);
     }
 
+    #[test]
+    fn interview_migration_applies_after_instructor_studio() {
+        // A profile can record 084 before the 083 interview migration is
+        // integrated; the runner must still apply the lower version later.
+        let db = Database::open_in_memory().expect("failed to open in-memory db");
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE _migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            )
+            .unwrap();
+        for (version, name, sql) in schema::MIGRATIONS {
+            if *version == 83 {
+                continue;
+            }
+            db.conn()
+                .execute_batch(sql)
+                .unwrap_or_else(|e| panic!("migration {version} failed: {e}"));
+            db.conn()
+                .execute(
+                    "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
+                    rusqlite::params![version, name],
+                )
+                .unwrap();
+        }
+
+        db.run_migrations()
+            .expect("083 should apply after 084 is already recorded");
+
+        let interview_tables: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'interview_sessions'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(interview_tables, 1);
+    }
+
     /// P0 #3 — exercise migration 047 (`sentinel_user_models`) on a DB
     /// that already has rows in tables that existed before. Catches
     /// ALTER-TABLE / FK / unique-index regressions a fresh `migrate()`

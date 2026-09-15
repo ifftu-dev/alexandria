@@ -16,7 +16,7 @@
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 77
+**Migrations**: 83
 
 ---
 
@@ -117,6 +117,8 @@
 | 79 | `sentinel_evidence_release` | Adds `integrity_evidence_release` — where a learner sent evidence to contest a flag, and whether a withdrawal is still owed. Deliberately no FK to `integrity_sessions`: a withdrawal must outlive the local deletion of everything that explains why it was wanted |
 | 80 | `sentinel_flag_notice` | Adds `integrity_flag_notice` — which remote flags this device has already told the learner about, so an accusation is raised once rather than on every unlock. `told_at`, not `accepted_at` |
 | 81 | `account_roles_set` | Add `account_roles` (JSON array, always containing `learner`, plus any of `instructor`/`parent`) to `local_identity`, backfilled from `account_role`. The app reads this; `account_role` keeps being written as the first extra role for older builds. |
+| 82 | `escrow_datum_recipients` | Add the challenger and treasury payment-key hashes to `credential_challenges`, so challenge settlement derives recipients from the locally persisted datum inputs instead of accepting them from the frontend. |
+| 83 | `interview_assistant` | Add `purpose` (`assessment` / `interview`) to `integrity_sessions` and six local-only interview tables for participants and consent, criteria, attributed transcript segments, private notes, follow-ups, summaries, conclusions, and retention. See [`interview-assistant.md`](interview-assistant.md). |
 
 ---
 
@@ -254,7 +256,7 @@ discovery (Phase 3).
 - **`reputation_snapshots`** — Snapshot/anchoring records for
   reputation assertions, keyed by actor with `tx_status` and subject.
 
-### Integrity (Sentinel) (8 tables)
+### Integrity (Sentinel) (12 tables)
 
 - **`integrity_sessions`** — Sentinel sessions with `status`,
   `integrity_score`, `critical_count` / `warning_count` (migration 040),
@@ -262,6 +264,9 @@ discovery (Phase 3).
   assessment attempts run with a NULL enrollment (migration 070). The
   assurance ladder (migration 061) adds `assurance_level` (`'local'` default
   / `'anchored'` / `'high_assurance'`), `commitment_root`, and `anchor_ref`.
+  Migration 083 adds `purpose` (`'assessment'` default / `'interview'`) so
+  interview monitoring can use observational lifecycle rules and avoid the
+  assessment appeal-evidence staging path.
 - **`integrity_snapshots`** — Snapshot rows keyed by `session_id`, with
   per-signal scores (`typing_score`, `mouse_score`, `human_score`,
   `tab_score`, `paste_score`, `devtools_score`, `camera_score`),
@@ -288,6 +293,14 @@ discovery (Phase 3).
   (`gaze_calib`, a per-user 5→16→2 net) weights, keyed by
   `(user_address, device_fp_prefix, model_kind)`. Moved out of browser
   localStorage into the encrypted DB.
+- **`sentinel_holdout_refs`** — References and evaluation metadata for
+  Sentinel holdout artifacts.
+- **`integrity_evidence_consent`**, **`integrity_evidence`**, and
+  **`integrity_evidence_release`** — learner-controlled, expiring appeal
+  evidence and its release/withdrawal ledger (migrations 078–079). These apply
+  to assessment-purpose sessions, not interview-purpose sessions.
+- **`integrity_flag_notice`** — records which remote session flags have already
+  been shown to the learner (migration 080).
 
 ### P2P, Content, and Sync Support (12 tables)
 
@@ -375,6 +388,28 @@ discovery (Phase 3).
   stores values the user has actually changed. See
   [`settings.md`](settings.md) for the architecture and the
   current list of registered settings.
+
+### Interviews (6 tables, migration 083)
+
+These tables are private to the active profile. They are not members of the
+cross-device `SYNCABLE_TABLES` set and are not published over global gossip.
+
+- **`interview_sessions`** — plan and lifecycle metadata, optional role-
+  assessment/tutoring/integrity links, retention policy, editable summary and
+  conclusion, and absolute `expires_at`.
+- **`interview_participants`** — interviewer/candidate/observer identity within
+  a session, optional room `peer_id`, export pseudonym, and separate consent
+  choices for transcription, audio, video, Sentinel, and camera processing.
+- **`interview_criteria`** — ordered rubric rows with `not_covered`, `partial`,
+  or `covered` status and optional notes.
+- **`interview_transcript_segments`** — final or interim text attributed to a
+  participant, with timestamps, optional confidence, and a source of
+  `local_stt`, `remote_stt`, or `manual`. Appends require active transcription
+  consent.
+- **`interview_notes`** — local interviewer notes, private by default.
+- **`interview_followups`** — deterministic question suggestions linked to an
+  optional source segment/criterion, with `suggested`, `asked`, or `dismissed`
+  status.
 
 ### Verifiable Credentials Layer
 
@@ -475,6 +510,13 @@ erDiagram
     reputation_assertions ||--o{ reputation_snapshots : anchors
 
     integrity_sessions ||--o{ integrity_snapshots : snapshots
+
+    interview_sessions ||--o{ interview_participants : participants
+    interview_sessions ||--o{ interview_criteria : criteria
+    interview_sessions ||--o{ interview_transcript_segments : transcript
+    interview_sessions ||--o{ interview_notes : notes
+    interview_sessions ||--o{ interview_followups : followups
+    interview_participants ||--o{ interview_transcript_segments : speaks
 
     governance_daos ||--o{ governance_proposals : has
     governance_daos ||--o{ governance_dao_members : members

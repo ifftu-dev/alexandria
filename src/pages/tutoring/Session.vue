@@ -3,7 +3,9 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecognition'
 import { usePlatform } from '@/composables/usePlatform'
+import { LiveDiagnosticsModal } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
 
@@ -15,6 +17,7 @@ const {
   lastError,
   videoFrames,
   chatMessages,
+  transcriptMessages,
   peerNames,
   unreadChatCount,
   micLevel,
@@ -25,6 +28,7 @@ const {
   toggleAudio,
   toggleScreenShare,
   sendChat,
+  sendTranscript,
   startPolling,
   stopPolling,
   setupEventListeners,
@@ -35,6 +39,7 @@ const {
 } = useTutoringRoom()
 
 const { isMobilePlatform, isIOS } = usePlatform()
+const speech = useLocalSpeechRecognition()
 
 const sessionId = computed(() => route.params.id as string)
 const ticketCopied = ref(false)
@@ -46,10 +51,10 @@ const chatInput = ref('')
 const chatScrollRef = ref<HTMLElement | null>(null)
 const showTicketFallback = ref(false)
 const showQrInvite = ref(false)
-const diagnosticsCopied = ref(false)
-const showDiagFallback = ref(false)
 const dismissedError = ref(false)
 const showAudioDevices = ref(false)
+const showCaptionConsent = ref(false)
+const sharedCaptionsEnabled = ref(false)
 const loadingAudioDevices = ref(false)
 const applyingAudioDevices = ref(false)
 const availableDevices = ref<DeviceList | null>(null)
@@ -76,6 +81,7 @@ onUnmounted(() => {
   stopPolling()
   setChatOpen(false)
   stopSelfPreview()
+  speech.stop()
   if (durationInterval) {
     clearInterval(durationInterval)
     durationInterval = null
@@ -100,6 +106,7 @@ const connectedPeerCount = computed(() => peers.value.filter(p => p.connected).l
 const videoEnabled = computed(() => sessionStatus.value?.video_enabled ?? false)
 const audioEnabled = computed(() => sessionStatus.value?.audio_enabled ?? false)
 const screenSharing = computed(() => sessionStatus.value?.screen_sharing ?? false)
+const latestCaption = computed(() => transcriptMessages.value[transcriptMessages.value.length - 1] ?? null)
 // Fallback for screen-share preview, which still flows through the Rust JPEG
 // bridge. Camera self-preview is rendered via a native MediaStream below to
 // avoid the Rust→JS JPEG-over-IPC bottleneck that produced choppy, low-res
@@ -316,23 +323,26 @@ async function handleSendChat() {
   }
 }
 
+function requestCaptions() {
+  if (sharedCaptionsEnabled.value) {
+    speech.stop()
+    sharedCaptionsEnabled.value = false
+  } else {
+    showCaptionConsent.value = true
+  }
+}
+
+function enableSharedCaptions() {
+  const started = speech.start((segment) => {
+    if (segment.isFinal) sendTranscript(segment.text, segment.confidence).catch(() => undefined)
+  })
+  sharedCaptionsEnabled.value = started
+  if (started) showCaptionConsent.value = false
+}
+
 async function handleShowDiagnostics() {
   diagnosticsData.value = await getDiagnostics()
   showDiagnostics.value = true
-  diagnosticsCopied.value = false
-  showDiagFallback.value = false
-}
-
-async function copyDiagnostics() {
-  if (!diagnosticsData.value) return
-  const json = JSON.stringify(diagnosticsData.value, null, 2)
-  try {
-    await navigator.clipboard.writeText(json)
-    diagnosticsCopied.value = true
-    setTimeout(() => { diagnosticsCopied.value = false }, 2000)
-  } catch {
-    showDiagFallback.value = true
-  }
 }
 
 function formatChatTime(ts: number) {
@@ -492,6 +502,17 @@ function peerInitials(nodeId: string): string {
           </span>
         </button>
 
+        <button
+          v-if="isActive"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs font-medium transition-colors"
+          :class="sharedCaptionsEnabled ? 'border-primary bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'"
+          :title="sharedCaptionsEnabled ? $t('tutoring.captions.stopTitle') : $t('tutoring.captions.startTitle')"
+          @click="requestCaptions"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h-1.875A2.625 2.625 0 003 10.875v2.25a2.625 2.625 0 002.625 2.625H7.5m9-7.5h1.875A2.625 2.625 0 0121 10.875v2.25a2.625 2.625 0 01-2.625 2.625H16.5M8.25 12h7.5" /></svg>
+          <span class="hidden sm:inline">{{ $t('tutoring.captions.button') }}</span>
+        </button>
+
         <!-- Leave -->
         <button
           v-if="isActive"
@@ -511,7 +532,11 @@ function peerInitials(nodeId: string): string {
       <!-- Video / Audio area -->
       <div class="flex-1 flex flex-col" :class="showChat ? 'border-e border-border' : ''">
         <div v-if="isActive" class="flex-1 overflow-auto p-4">
-          <div class="mx-auto max-w-5xl space-y-4">
+          <div v-if="latestCaption" class="sticky top-0 z-10 mx-auto mb-3 max-w-3xl rounded-xl bg-black/75 px-4 py-2 text-center text-sm text-white shadow-lg backdrop-blur-sm">
+            <span class="me-2 text-xs font-semibold text-white/70">{{ latestCaption.sender === 'self' ? $t('tutoring.session.you') : (latestCaption.sender_name || peerDisplayName(latestCaption.sender)) }}</span>
+            {{ latestCaption.text }}
+          </div>
+          <div class="mx-auto max-w-6xl space-y-4">
 
             <!-- ═══ MOBILE: Video + audio UI ═══ -->
             <template v-if="isMobilePlatform">
@@ -657,7 +682,7 @@ function peerInitials(nodeId: string): string {
                     </span>
                   </div>
                   <!-- Speaker VU indicator -->
-                  <div v-if="outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 end-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute end-4 top-1/2 -translate-y-1/2'">
+                  <div v-if="peers.length === 1 && outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 end-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute end-4 top-1/2 -translate-y-1/2'">
                     <svg class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
                     </svg>
@@ -691,7 +716,10 @@ function peerInitials(nodeId: string): string {
             <!-- ═══ DESKTOP: Full video + audio UI ═══ -->
             <template v-else>
               <!-- Self video / camera status -->
-              <div class="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
+              <div
+                class="relative mx-auto aspect-video w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-[max-width]"
+                :class="peers.length > 0 && !screenSharing ? 'max-w-sm' : 'max-w-4xl'"
+              >
                 <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
                 <video
                   v-if="selfStreamActive"
@@ -793,7 +821,7 @@ function peerInitials(nodeId: string): string {
                     </span>
                   </div>
                   <!-- Speaker VU indicator on peer card -->
-                  <div v-if="outputLevel > 0.05" class="absolute bottom-2 end-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+                  <div v-if="peers.length === 1 && outputLevel > 0.05" class="absolute bottom-2 end-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
                     <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
                     </svg>
@@ -1261,57 +1289,26 @@ function peerInitials(nodeId: string): string {
       </Transition>
     </Teleport>
 
-    <!-- Diagnostics modal -->
+    <LiveDiagnosticsModal
+      :open="showDiagnostics"
+      :diagnostics="diagnosticsData"
+      @close="showDiagnostics = false"
+      @refresh="handleShowDiagnostics"
+    />
+
     <Teleport to="body">
-      <Transition
-        enter-active-class="transition-all duration-200"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
-      >
-        <div v-if="showDiagnostics" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showDiagnostics = false">
-          <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl mx-4 max-h-[80vh] overflow-auto">
-            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.diagnostics.title') }}</h2>
-            <pre v-if="diagnosticsData && !showDiagFallback" class="mt-3 rounded-lg bg-muted p-3 text-xs font-mono text-foreground overflow-auto max-h-[50vh] whitespace-pre-wrap break-all select-all">{{ JSON.stringify(diagnosticsData, null, 2) }}</pre>
-            <!-- Fallback textarea for iOS where clipboard API is blocked -->
-            <textarea
-              v-if="diagnosticsData && showDiagFallback"
-              readonly
-              class="mt-3 w-full rounded-lg bg-muted p-3 text-xs font-mono text-foreground max-h-[50vh] resize-none border border-border"
-              :rows="12"
-              :value="JSON.stringify(diagnosticsData, null, 2)"
-              @focus="($event.target as HTMLTextAreaElement).select()"
-            />
-            <p v-if="showDiagFallback" class="mt-1 text-xs text-muted-foreground">{{ $t('tutoring.diagnostics.selectManual') }}</p>
-            <p v-if="!diagnosticsData" class="mt-3 text-sm text-muted-foreground">{{ $t('tutoring.diagnostics.noSession') }}</p>
-            <div class="mt-4 flex gap-2">
-              <button
-                class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                @click="handleShowDiagnostics"
-              >
-                {{ $t('tutoring.diagnostics.refresh') }}
-              </button>
-              <button
-                v-if="diagnosticsData"
-                class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-                :class="diagnosticsCopied ? 'text-success border-success' : 'text-foreground'"
-                @click="copyDiagnostics"
-              >
-                {{ diagnosticsCopied ? $t('common.actions.copied') : $t('tutoring.diagnostics.copyJson') }}
-              </button>
-              <div class="flex-1" />
-              <button
-                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                @click="showDiagnostics = false"
-              >
-                {{ $t('common.actions.close') }}
-              </button>
-            </div>
+      <div v-if="showCaptionConsent" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" @click.self="showCaptionConsent = false">
+        <div class="card w-full max-w-md p-6">
+          <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.captions.title') }}</h2>
+          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ $t('tutoring.captions.description') }}</p>
+          <p v-if="!speech.locallyAvailable.value" class="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">{{ $t('tutoring.captions.unavailable') }}</p>
+          <p v-if="speech.error.value" class="mt-2 text-xs text-destructive">{{ speech.error.value }}</p>
+          <div class="mt-6 flex justify-end gap-2">
+            <button class="btn btn-outline" @click="showCaptionConsent = false">{{ $t('tutoring.captions.cancel') }}</button>
+            <button class="btn btn-primary" :disabled="!speech.locallyAvailable.value" @click="enableSharedCaptions">{{ $t('tutoring.captions.enable') }}</button>
           </div>
         </div>
-      </Transition>
+      </div>
     </Teleport>
   </div>
 </template>

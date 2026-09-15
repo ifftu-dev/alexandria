@@ -162,5 +162,15 @@
     "connected": "{connected}/{total} connected",
     "micOn": "Mic On",
     "micOff": "Mic Off"
+  },
+  "captions": {
+    "button": "Captions",
+    "startTitle": "Share on-device captions with the room",
+    "stopTitle": "Stop sharing on-device captions",
+    "title": "Share live captions?",
+    "description": "Alexandria will transcribe this device's microphone only when the WebView guarantees on-device processing, then share final text segments and your room display name with current peers. Tutoring does not persist these captions.",
+    "unavailable": "On-device speech recognition is not available in this WebView, so captions cannot be enabled without risking audio leaving the device.",
+    "cancel": "Cancel",
+    "enable": "Enable and share text"
   }
 }
