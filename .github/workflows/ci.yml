@@ -214,12 +214,12 @@ jobs:
       - name: Check Rust formatting
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy (lint)
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
-        run: cargo clippy --features tutoring-video-static -- -D warnings
+        run: cargo clippy --workspace --all-targets --features tutoring-video-static -- -D warnings
 
       - name: Run Rust tests
         if: needs.changes.outputs.backend == 'true'
@@ -232,14 +232,16 @@ jobs:
         env:
           CARGO_PROFILE_TEST_DEBUG: "0"
           CARGO_BUILD_JOBS: "2"
-        run: cargo test --features tutoring-video-static
+        run: cargo test --workspace --features tutoring-video-static
 
       - name: Tauri command guard
         # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
         # run whenever either surface changed. Pure Node, no npm deps needed.
         if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
-        run: node scripts/check-tauri-commands.mjs
+        run: |
+          node scripts/check-tauri-commands.mjs
+          node --test scripts/check-tauri-commands.test.mjs
       - name: CSP style hashes match the libraries that inject styles
         # style-src carries sha256 hashes for the <style> blocks two libraries
         # inject at runtime. A version bump changes the CSS, the hash stops

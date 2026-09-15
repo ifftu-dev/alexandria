@@ -9,23 +9,21 @@ ignore = [
     # tract-nnef 0.21.10 — integer overflow in the NNEF tensor parser giving an
     # out-of-bounds read on model load (RUSTSEC-2026-0217, CVSS 6.1).
     #
-    # NOT ignored because it is unreachable. It is reachable: the
-    # `sentinel_load_dao_classifier` IPC command takes ONNX bytes the frontend
-    # fetched over the network, and the two bundled models
-    # (`sentinel/face_detect.rs`, `sentinel/paste_classifier.rs`) are not the
-    # only thing that reaches the parser.
-    #
     # Ignored because the upgrade is genuinely blocked: tract 0.21.16 pins
     # `half = "=2.4.1"` (exact), and naga 27 — via wgpu, eframe, and the
     # vendored moq-media crate — requires `half ^2.5`. There is no version of
     # `half` that satisfies both, so `cargo update -p tract-onnx` fails to
     # resolve.
     #
-    # Mitigated instead at the call site: `sentinel_load_dao_classifier` now
-    # refuses any blob whose BLAKE3 is not a ratified `sentinel_priors.cid`, so
-    # only artifacts the Sentinel DAO voted on reach the parser. That check is
-    # the reason this is an acceptance rather than an open hole; if it is ever
-    # removed, this ignore must go with it.
+    # Production mitigates the vulnerable untrusted-artifact path by refusing
+    # `sentinel_load_dao_classifier` entirely until verified committee outcome
+    # certificates are implemented. The legacy loader exists only in debug
+    # builds with the explicit `legacy-sentinel-prior-ratification` feature;
+    # even there it verifies the artifact's BLAKE3 digest against its ratified
+    # record before parsing. The two release paths that still reach tract parse
+    # fixed model bytes embedded at build time, not network-supplied models.
+    # Any future committee-backed activation must preserve exact-byte digest
+    # verification before the parser or remove this acceptance.
     #
     # Revisit when tract relaxes its `half` pin, or when the media stack moves
     # to a wgpu/naga release that accepts `half 2.4`.
@@ -34,32 +32,31 @@ ignore = [
     # rkyv 0.7.x — insufficient archive validation, out-of-bounds reads on
     # archives containing Rc/Arc (RUSTSEC-2026-0235).
     #
-    # Reached only transitively; nothing in this codebase constructs or
-    # deserializes an rkyv archive, and no rkyv-encoded bytes cross a trust
-    # boundary here. The fix is >= 0.8.17, a semver-major move that the
-    # dependency pinning it has not made.
+    # The package remains in Cargo.lock as rust_decimal's optional rkyv 0.7
+    # integration, but that feature is not activated in any workspace target:
+    # `cargo tree --workspace --target all --edges all -i rkyv@0.7.46` is
+    # empty. Nothing in this codebase constructs or deserializes an rkyv
+    # archive. The fix is >= 0.8.17, a semver-major move for any dependency
+    # that later activates the integration.
     #
-    # Revisit whenever `cargo tree -i rkyv` changes shape, and immediately if
-    # any code path starts deserializing rkyv data that came off the network.
+    # Revisit whenever that tree becomes non-empty, and immediately if any
+    # code path starts deserializing rkyv data that came off the network.
     "RUSTSEC-2026-0235",
 
     # quick-xml 0.30.0 and 0.39.4 — unbounded namespace-declaration allocation
     # (RUSTSEC-2026-0195) and quadratic runtime on duplicate attribute names
     # (RUSTSEC-2026-0194). Both are denial-of-service on hostile XML.
     #
-    # Neither copy parses anything an attacker supplies:
-    #   - 0.30.0 via `plist`, which reads macOS bundle Info.plist files that
-    #     ship inside the application.
-    #   - 0.39.4 via `wayland-scanner` and `xcb`, which parse protocol
-    #     definition XML at build time on Linux.
+    # Neither copy parses runtime input:
+    #   - 0.30.0 is an `xcb` build-dependency reached through `xcap`; it parses
+    #     the dependency's protocol definition XML while building on Linux.
+    #   - 0.39.4 is reached through `wayland-scanner`; it likewise parses
+    #     dependency protocol definition XML while building Linux GUI code.
     #
     # Both are pinned by their dependents (`cargo update -p quick-xml@…` is a
-    # no-op), so the fix has to come from `plist`, `wayland-scanner` and `xcb`
-    # releasing against >= 0.41.
-    #
-    # Note the contrast with alexandria-cloud, where quick-xml parses uploaded
-    # .docx files and the same advisories were fixed by upgrading rather than
-    # accepted — same crate, different reachability, different answer.
+    # no-op), so the fix has to come from `wayland-scanner` and `xcb` releasing
+    # against >= 0.41. Revisit immediately if either version enters a runtime
+    # path or parses user-controlled XML.
     "RUSTSEC-2026-0195",
     "RUSTSEC-2026-0194",
 
@@ -67,13 +64,14 @@ ignore = [
     # (RUSTSEC-2026-0119) and an unbounded NSEC3 validation loop
     # (RUSTSEC-2026-0118, no fix at any version).
     #
-    # Reached through `libp2p-mdns`, so the exposure is mDNS on the local link
-    # only — not names an internet peer chooses. libp2p 0.56 pins hickory 0.25
-    # and 0.26 is a semver-major move, so this cannot be taken here.
+    # The 0.25 package remains in Cargo.lock beneath `libp2p-mdns`, but the
+    # workspace's explicit libp2p feature set does not enable mDNS and the
+    # resolved all-target tree for hickory-proto 0.25.2 is empty. The active
+    # DNS stack uses hickory-proto 0.26.1.
     #
-    # Revisit when libp2p ships on hickory >= 0.26.1. Re-evaluate immediately
-    # if any peer-supplied hostname ever gets resolved by name rather than
-    # dialled by address.
+    # Remove these accepts when the stale lock record disappears. Re-evaluate
+    # immediately if libp2p mDNS is enabled or any other 0.25 consumer enters
+    # the resolved graph.
     "RUSTSEC-2026-0119",
     "RUSTSEC-2026-0118",
 ]

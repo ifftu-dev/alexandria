@@ -34,15 +34,16 @@ step() {
   fi
 }
 
-cd "$ROOT/src-tauri"
-step "cargo fmt --check" cargo fmt --check
-step "cargo clippy -D warnings" cargo clippy -- -D warnings
+cd "$ROOT"
+step "cargo fmt --check" cargo fmt --all -- --check
+step "cargo clippy -D warnings" cargo clippy --workspace --all-targets -- -D warnings
 if [[ $FAST -eq 0 ]]; then
-  step "cargo test" cargo test
+  step "cargo test" cargo test --workspace
 fi
 
 cd "$ROOT"
 step "tauri command guard" node scripts/check-tauri-commands.mjs
+step "tauri command guard regressions" node --test scripts/check-tauri-commands.test.mjs
 step "i18n catalog parity" node scripts/i18n/check-parity.mjs
 step "i18n no-raw-text" node scripts/i18n/check-no-raw-text.mjs
 step "vue-tsc type-check" npx vue-tsc -b --noEmit
