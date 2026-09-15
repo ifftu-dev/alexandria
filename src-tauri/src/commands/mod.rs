@@ -4,7 +4,6 @@ pub mod assessment;
 pub mod attestation;
 pub mod auto_issuance;
 pub mod catalog;
-pub mod challenge;
 pub mod chapters;
 pub mod classroom;
 pub mod cli_install;

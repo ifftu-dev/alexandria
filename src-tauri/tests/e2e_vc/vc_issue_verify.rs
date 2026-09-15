@@ -118,8 +118,14 @@ async fn revoked_credential_is_rejected() {
     let before = verify_credential_db(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
     assert_eq!(before.acceptance_decision, AcceptanceDecision::Accept);
 
-    revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "superseded", TEST_NOW)
-        .expect("revoke");
+    revoke_credential_impl(
+        db.conn(),
+        &issuer_did,
+        vc.id.as_deref().unwrap(),
+        "superseded",
+        TEST_NOW,
+    )
+    .expect("revoke");
 
     // Post-revocation: verifier rejects with revoked=true.
     let after = verify_credential_db(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());

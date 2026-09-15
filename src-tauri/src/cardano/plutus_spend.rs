@@ -4,7 +4,7 @@
 //! reference script, and (re)creates a continuing output carrying the
 //! new datum — the shape every governance state transition takes
 //! (election nominate / start-voting / finalize, proposal submit /
-//! approve / vote / resolve, committee install, escrow settle).
+//! approve / vote / resolve and committee install).
 //!
 //! This is the spend-side counterpart to `plutus_mint`. Both use
 //! pallas-txbuilder's native Plutus API so the redeemer purpose and

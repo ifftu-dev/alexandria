@@ -1,0 +1,13 @@
+{
+  "_comment": "Security-sensitive legacy authority commands that must not be registered, invoked, or allowlisted.",
+  "submit_credential_challenge": "retired local challenge authority",
+  "vote_on_credential_challenge": "retired event-supplied committee authority",
+  "resolve_credential_challenge": "retired local challenge authority",
+  "list_credential_challenges": "retired challenge surface",
+  "get_credential_challenge": "retired challenge surface",
+  "expire_overdue_credential_challenges": "retired local challenge worker",
+  "lock_challenge_stake": "retired challenge escrow",
+  "settle_challenge_stake": "retired challenge escrow",
+  "plugin_attestation_status": "retired legacy attestation projection",
+  "plugin_ingest_attestation": "retired event-supplied committee-key authority"
+}

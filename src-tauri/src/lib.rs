@@ -920,11 +920,6 @@ pub fn run() {
                                     {
                                         log::debug!("completion recovery: {error}");
                                     }
-                                    if let Err(error) =
-                                        cardano::escrow_recovery::tick(&chain_journal, client).await
-                                    {
-                                        log::debug!("escrow recovery: {error}");
-                                    }
                                 }
 
                                 // Governance tx queue (elections, proposals, soulbound)
@@ -1503,15 +1498,6 @@ pub fn run() {
             commands::attestation::list_completion_attestation_requirements,
             commands::attestation::submit_completion_attestation,
             commands::attestation::get_completion_attestation_status,
-            // Credential challenges (VC-first rebuild).
-            commands::challenge::submit_credential_challenge,
-            commands::challenge::vote_on_credential_challenge,
-            commands::challenge::resolve_credential_challenge,
-            commands::challenge::list_credential_challenges,
-            commands::challenge::get_credential_challenge,
-            commands::challenge::expire_overdue_credential_challenges,
-            commands::challenge::lock_challenge_stake,
-            commands::challenge::settle_challenge_stake,
             // Completion-witness flow (Merkle root + tx submission).
             commands::completion::preview_completion_root,
             commands::completion::submit_completion_witness,
@@ -1705,10 +1691,9 @@ pub fn run() {
             // marker remains only as a fallback for any future target that
             // cannot run Pulley.
             commands::plugins::plugin_submit_and_grade,
-            // Phase 3 — P2P discovery + Plugin DAO attestation
+            // P2P plugin discovery. Committee attestation remains disabled
+            // until the replacement certificate protocol lands.
             commands::plugins::plugin_browse_catalog,
-            commands::plugins::plugin_attestation_status,
-            commands::plugins::plugin_ingest_attestation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

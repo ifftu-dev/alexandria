@@ -2,8 +2,8 @@
 //!
 //! Persistent replacement for the TOFU identity binding that
 //! previously lived in `MessageValidator`. Every privileged-topic
-//! gossip message (taxonomy, governance, Sentinel priors, plugin
-//! attestations, goal templates, question banks) is authorized by
+//! gossip message (taxonomy, governance, Sentinel priors, the reserved
+//! plugin-certificate topic, goal templates, question banks) is authorized by
 //! checking that the message's
 //! `(stake_address, public_key)` pair appears in this registry within
 //! its validity window.

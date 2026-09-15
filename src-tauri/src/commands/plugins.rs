@@ -18,12 +18,12 @@ use crate::crypto::hash::entity_id;
 use crate::crypto::wallet;
 use crate::db::{executor::DatabaseWorkload, Database};
 use crate::domain::plugin::{
-    InstalledPlugin, IrlSubmission, PluginAttestationEvent, PluginAttestationStatus,
-    PluginCapability, PluginCatalogEntry, PluginManifest, PluginPermissionRecord,
+    InstalledPlugin, IrlSubmission, PluginCapability, PluginCatalogEntry, PluginManifest,
+    PluginPermissionRecord,
 };
 #[cfg(grader)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
-use crate::plugins::{attestation, builtins, catalog, irl_review, manifest, registry, verifier};
+use crate::plugins::{builtins, catalog, irl_review, manifest, registry, verifier};
 use crate::AppState;
 
 async fn plugin_db<T, F>(
@@ -688,12 +688,12 @@ pub async fn plugin_submit_and_grade(
     // hold the lock across grader execution.
     let resolved_plugin_cid = plugin_cid.clone();
     let resolved_bundle_dir = bundle_dir.clone();
-    let (manifest, grader_path, cwasm_path, grader_cid) = plugin_db(
+    let (manifest, manifest_json, grader_path, cwasm_path, grader_cid) = plugin_db(
         &state,
         DatabaseWorkload::Learner,
         "plugin.grade-resolve",
         move |db| {
-            registry::get_installed(db, &resolved_plugin_cid)?
+            let installed = registry::get_installed(db, &resolved_plugin_cid)?
                 .ok_or_else(|| format!("plugin not installed: {resolved_plugin_cid}"))?;
             let manifest = registry::get_manifest(db, &resolved_plugin_cid)?;
             let grader = manifest
@@ -705,7 +705,13 @@ pub async fn plugin_submit_and_grade(
                 .clone();
             let grader_path = resolved_bundle_dir.join(registry::GRADER_FILENAME);
             let cwasm_path = resolved_bundle_dir.join(registry::grader_cwasm_filename());
-            Ok((manifest, grader_path, cwasm_path, grader.cid))
+            Ok((
+                manifest,
+                installed.manifest_json,
+                grader_path,
+                cwasm_path,
+                grader.cid,
+            ))
         },
     )
     .await?;
@@ -730,6 +736,13 @@ pub async fn plugin_submit_and_grade(
             "grader.wasm hash mismatch: manifest declared {grader_cid}, on-disk is {computed}"
         ));
     }
+
+    let issuance_block = credential_trust(
+        &plugin_cid,
+        manifest_json.as_bytes(),
+        &grader_cid,
+        &wasm_bytes,
+    )?;
 
     // Build the input envelope. Pre-canonicalize via serde_json::Value
     // so the bytes the grader sees match what we hash for content_cid /
@@ -855,8 +868,6 @@ pub async fn plugin_submit_and_grade(
             // Only a trusted grader may mint a credential. An untrusted grade still
             // ran and its score is returned to the learner (practice is fine); it
             // just carries no weight into the credential graph. See `credential_trust`.
-            let issuance_block =
-                credential_trust(db, &persisted_plugin_cid, &persisted_grader_cid)?;
             if let Some(reason) = &issuance_block {
                 log::info!(
                     "plugin grade: withholding credential for cid={persisted_plugin_cid} — {reason}"
@@ -952,7 +963,7 @@ pub async fn plugin_submit_and_grade(
 }
 
 /// Minimum grade fraction (0.0–1.0) that earns a skill credential from a graded
-/// plugin. A single challenge is coarse evidence, so the bar is a strong-but-
+/// plugin. A single submission is coarse evidence, so the bar is a strong-but-
 /// not-perfect pass; the aggregation layer weighs it by provenance afterward.
 const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 
@@ -964,14 +975,8 @@ const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 /// could mint self-issued `AssessmentCredential`s. That is the governance
 /// hole this closes.
 ///
-/// A grader is trusted for issuance when either:
-///
-/// * it is **built-in** — its bytes are `include_bytes!`'d into the app
-///   binary and CID-verified at install, so the app's own signature already
-///   vouches for them; committee attestation would be redundant; or
-/// * it carries a **committee attestation** for exactly this
-///   `(plugin_cid, grader_cid)` pair, and the committee has not since flagged
-///   the grader as `known_flawed`.
+/// A grader is trusted for issuance only when its plugin manifest and grader
+/// bytes exactly match one of the bundles embedded in the signed app.
 ///
 /// Grading itself is never blocked — running an unattested grader is
 /// harmless (sandboxed, deterministic) and useful for practice. Only
@@ -981,36 +986,48 @@ const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 /// Returns `Ok(None)` when trusted, or `Ok(Some(reason))` explaining the
 /// refusal for the log and, later, the UI.
 fn credential_trust(
-    db: &Database,
     plugin_cid: &str,
+    plugin_manifest_bytes: &[u8],
     grader_cid: &str,
+    grader_bytes: &[u8],
 ) -> Result<Option<String>, String> {
-    // Built-in graders are vouched for by the signed app binary.
-    if crate::plugins::builtins::find_bundle_by_cid(plugin_cid).is_some() {
-        return Ok(None);
-    }
-
-    let status = crate::plugins::attestation::status_for(db, plugin_cid)?;
-    let Some(attestation) = status.attestation.as_ref() else {
+    let Some(bundle) = crate::plugins::builtins::find_bundle_by_cid(plugin_cid) else {
         return Ok(Some(
-            "grader is not attested by a governance committee".to_string(),
+            "only exact graders bundled with this app may issue credentials".to_string(),
         ));
     };
-
-    // The attestation binds a specific grader; a plugin that swapped in a
-    // different grader after attestation must not ride the old approval.
-    if attestation.grader_cid != grader_cid {
+    if bundle.manifest_json != plugin_manifest_bytes {
+        return Ok(Some(
+            "the installed manifest does not exactly match the bundled manifest".to_string(),
+        ));
+    }
+    let bundled_manifest = manifest::parse_and_validate(bundle.manifest_json)?;
+    let Some(bundled_grader) = bundled_manifest.grader else {
+        return Ok(Some(
+            "the bundled plugin has no credential grader".to_string(),
+        ));
+    };
+    if bundled_grader.cid != grader_cid {
         return Ok(Some(format!(
-            "attestation covers grader {} but this grade used {grader_cid}",
-            attestation.grader_cid
+            "the bundled plugin requires grader {} but this grade used {grader_cid}",
+            bundled_grader.cid
         )));
     }
-
-    // An attested-but-since-flagged grader must not keep minting credentials.
-    if status.advisories.iter().any(|a| a.kind == "known_flawed") {
+    let Some(bundled_bytes) = bundle.grader_wasm else {
         return Ok(Some(
-            "grader is under a 'known_flawed' advisory".to_string(),
+            "the bundled plugin's grader bytes are unavailable".to_string(),
         ));
+    };
+    if bundled_bytes != grader_bytes {
+        return Ok(Some(
+            "the executed grader bytes do not exactly match the bundled grader".to_string(),
+        ));
+    }
+    let bundled_cid = blake3::hash(bundled_bytes).to_hex().to_string();
+    if bundled_cid != grader_cid {
+        return Ok(Some(format!(
+            "the embedded grader bytes identify as {bundled_cid}, not {grader_cid}"
+        )));
     }
 
     Ok(None)
@@ -1263,7 +1280,7 @@ pub async fn irl_post_review(
     .await
 }
 
-// ---- Phase 3: discovery + DAO attestation IPC -----------------------------
+// ---- P2P discovery --------------------------------------------------------
 
 /// List every plugin known to this node — built-ins + locally-installed +
 /// any plugins seen on the `/alexandria/plugins/1.0` gossip topic. The
@@ -1277,45 +1294,6 @@ pub async fn plugin_browse_catalog(
         DatabaseWorkload::Learner,
         "plugin.browse-catalog",
         catalog::list_catalog,
-    )
-    .await
-}
-
-/// Look up the Plugin DAO attestation status for a single plugin CID.
-/// Returns `attested = true` when a multi-sig committee attestation row
-/// exists in `plugin_attestations`. Active advisory notes are surfaced
-/// as well — they don't affect attestation status, but the UI should
-/// display them prominently.
-#[tauri::command]
-pub async fn plugin_attestation_status(
-    state: State<'_, AppState>,
-    plugin_cid: String,
-) -> Result<PluginAttestationStatus, String> {
-    plugin_db(
-        &state,
-        DatabaseWorkload::Learner,
-        "plugin.attestation-status",
-        move |db| attestation::status_for(db, &plugin_cid),
-    )
-    .await
-}
-
-/// Submit a fully-formed attestation event for verification + storage.
-/// The host validates the multi-sig threshold against the embedded
-/// committee pubkeys before persisting. Used by the gossip handler when
-/// a new attestation arrives on `/alexandria/plugin-attestations/1.0`,
-/// and by tests / CLI tooling. Idempotent — duplicates are no-ops.
-#[tauri::command]
-pub async fn plugin_ingest_attestation(
-    state: State<'_, AppState>,
-    event: PluginAttestationEvent,
-) -> Result<(), String> {
-    attestation::verify_event(&event, &attestation::AttestationPolicy::default())?;
-    plugin_db(
-        &state,
-        DatabaseWorkload::Background,
-        "plugin.ingest-attestation",
-        move |db| attestation::persist_event(db, &event),
     )
     .await
 }
@@ -1440,102 +1418,95 @@ mod grade_credential_tests {
         assert_eq!(n, skills.len() as i64);
     }
 
-    // ---- credential_trust: the plugin governance gate --------------------
+    // ---- credential_trust: exact bundled identity gate -------------------
 
-    fn trust_db() -> Database {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        db
-    }
-
-    fn seed_attestation(db: &Database, plugin_cid: &str, grader_cid: &str) {
-        db.conn()
-            .execute(
-                "INSERT INTO plugin_attestations                  (plugin_cid, grader_cid, attestation_terms, threshold_signature_blob,                   committee_pubkeys_json, issued_at)                  VALUES (?1, ?2, '{}', x'00', '[]', '2026-07-23T00:00:00Z')",
-                params![plugin_cid, grader_cid],
-            )
-            .unwrap();
-    }
-
-    fn seed_advisory(db: &Database, plugin_cid: &str, kind: &str) {
-        db.conn()
-            .execute(
-                "INSERT INTO plugin_advisories                  (id, plugin_cid, kind, message, threshold_signature_blob, committee_pubkeys_json)                  VALUES (?1, ?2, ?3, 'flagged', x'00', '[]')",
-                params![format!("adv_{kind}"), plugin_cid, kind],
-            )
-            .unwrap();
+    fn bundled_mcq_identity() -> (String, &'static [u8], String, &'static [u8]) {
+        let plugin_cid = crate::plugins::builtins::mcq_plugin_cid();
+        let bundle = crate::plugins::builtins::find_bundle_by_cid(&plugin_cid).unwrap();
+        let grader_cid = manifest::parse_and_validate(bundle.manifest_json)
+            .unwrap()
+            .grader
+            .unwrap()
+            .cid;
+        (
+            plugin_cid,
+            bundle.manifest_json,
+            grader_cid,
+            bundle.grader_wasm.unwrap(),
+        )
     }
 
     #[test]
-    fn builtin_graders_are_trusted_without_attestation() {
-        // The built-in MCQ grader ships in the signed binary; requiring
-        // committee attestation for it would break the first-party graded
-        // flow that works today.
-        let db = trust_db();
-        let cid = crate::plugins::builtins::mcq_plugin_cid();
+    fn exact_bundled_plugin_and_grader_are_trusted() {
+        let (plugin_cid, manifest, grader_cid, grader) = bundled_mcq_identity();
         assert_eq!(
-            credential_trust(&db, &cid, "any-grader").unwrap(),
-            None,
-            "a builtin plugin must be trusted for issuance"
-        );
-    }
-
-    #[test]
-    fn an_unattested_third_party_grader_is_blocked() {
-        // The hole: any installed plugin could mint credentials. An unknown,
-        // unattested plugin must not.
-        let db = trust_db();
-        let reason = credential_trust(&db, "did:key:zEvil#grader", "g1").unwrap();
-        assert!(reason.is_some(), "unattested grader should be blocked");
-        assert!(reason.unwrap().contains("not attested"));
-    }
-
-    #[test]
-    fn an_attested_grader_is_trusted() {
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        assert_eq!(
-            credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap(),
+            credential_trust(&plugin_cid, manifest, &grader_cid, grader).unwrap(),
             None
         );
     }
 
     #[test]
-    fn attestation_does_not_cover_a_swapped_grader() {
-        // The attestation binds one grader; installing a different grader
-        // under the same plugin id must not inherit the old approval.
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        let reason = credential_trust(&db, "did:key:zAuthor#p", "grader_v2").unwrap();
-        assert!(
-            reason.is_some(),
-            "a swapped grader must not ride old attestation"
-        );
-        assert!(reason.unwrap().contains("attestation covers grader"));
+    fn bundled_plugin_with_a_swapped_grader_is_blocked() {
+        let (plugin_cid, manifest, _, grader) = bundled_mcq_identity();
+        let reason = credential_trust(&plugin_cid, manifest, &"f".repeat(64), grader)
+            .unwrap()
+            .expect("swapped grader must be blocked");
+        assert!(reason.contains("bundled plugin requires grader"));
     }
 
     #[test]
-    fn a_known_flawed_advisory_blocks_even_an_attested_grader() {
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        seed_advisory(&db, "did:key:zAuthor#p", "known_flawed");
-        let reason = credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap();
-        assert!(reason.is_some());
-        assert!(reason.unwrap().contains("known_flawed"));
+    fn bundled_plugin_cid_mismatch_is_blocked() {
+        let (plugin_cid, manifest, grader_cid, grader) = bundled_mcq_identity();
+        let mut mismatched_cid = plugin_cid;
+        let replacement = if mismatched_cid.ends_with('0') {
+            "1"
+        } else {
+            "0"
+        };
+        mismatched_cid.replace_range(mismatched_cid.len() - 1.., replacement);
+
+        let reason = credential_trust(&mismatched_cid, manifest, &grader_cid, grader)
+            .unwrap()
+            .expect("a near-match plugin CID must be blocked");
+        assert!(reason.contains("only exact graders bundled"));
     }
 
     #[test]
-    fn a_non_blocking_advisory_does_not_block_issuance() {
-        // 'deprecated' is informational — it should surface in the UI but not
-        // stop an otherwise-valid, attested grader from crediting.
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        seed_advisory(&db, "did:key:zAuthor#p", "deprecated");
-        assert_eq!(
-            credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap(),
-            None,
-            "a deprecation notice must not block issuance"
-        );
+    fn unknown_plugin_is_blocked_even_with_a_forged_persisted_attestation() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO plugin_attestations \
+                 (plugin_cid, grader_cid, attestation_terms, threshold_signature_blob, \
+                  committee_pubkeys_json, issued_at) \
+                 VALUES ('plugin', 'grader', '{}', x'00', '[]', '2026-07-23T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let reason = credential_trust("plugin", b"forged", "grader", b"forged")
+            .unwrap()
+            .expect("stored legacy authority must be ignored");
+        assert!(reason.contains("only exact graders bundled"));
+    }
+
+    #[test]
+    fn forged_manifest_for_a_bundled_cid_is_blocked() {
+        let (plugin_cid, _, grader_cid, grader) = bundled_mcq_identity();
+        let reason = credential_trust(&plugin_cid, b"{}", &grader_cid, grader)
+            .unwrap()
+            .expect("forged persisted manifest must be blocked");
+        assert!(reason.contains("manifest does not exactly match"));
+    }
+
+    #[test]
+    fn copied_grader_cid_with_different_bytes_is_blocked() {
+        let (plugin_cid, manifest, grader_cid, _) = bundled_mcq_identity();
+        let reason = credential_trust(&plugin_cid, manifest, &grader_cid, b"copied-key grader")
+            .unwrap()
+            .expect("copied identity with different bytes must be blocked");
+        assert!(reason.contains("grader bytes do not exactly match"));
     }
 
     #[test]

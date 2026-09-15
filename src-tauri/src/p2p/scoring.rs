@@ -301,8 +301,8 @@ fn topic_params_sentinel_priors() -> TopicScoreParams {
     }
 }
 
-/// Plugin DAO attestations — threshold-signed `(plugin_cid,
-/// grader_cid)` approvals. Mirrors taxonomy/governance authority.
+/// Reserved plugin-certificate topic. It remains strongly scored so malformed
+/// traffic cannot become a cheap spam path while application handling is off.
 fn topic_params_plugin_attestations() -> TopicScoreParams {
     TopicScoreParams {
         topic_weight: 1.0,

@@ -90,3 +90,15 @@ test("stale generated command names fail the guard", () => {
   assert.equal(result.exitCode, 1);
   assert.match(result.output, /Generated command names are stale/);
 });
+
+test("retired authority commands cannot be registered again", () => {
+  const result = runGuard({
+    "src-tauri/src/lib.rs": source => source.replace(
+      "commands::health::check_health,",
+      "commands::health::check_health,\n            commands::plugins::plugin_ingest_attestation,",
+    ),
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /Retired authority commands restored/);
+  assert.match(result.output, /plugin_ingest_attestation/);
+});

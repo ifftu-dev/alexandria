@@ -15,7 +15,6 @@
 //!   reproducible execution. Phase 2.
 
 pub mod asset_protocol;
-pub mod attestation;
 pub mod builtins;
 pub mod catalog;
 pub mod irl_review;

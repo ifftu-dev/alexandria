@@ -42,10 +42,8 @@ pub const TOPIC_PINBOARD: &str = "/alexandria/pinboard/1.0";
 /// bundle bytes are *not* on this topic — they're fetched on demand from
 /// the iroh blob store via the manifest CID.
 pub const TOPIC_PLUGINS: &str = "/alexandria/plugins/1.0";
-/// Plugin DAO attestations — the canonical Alexandria Plugin DAO
-/// publishes threshold-signed (plugin_cid, grader_cid) attestations on
-/// this topic. Verifiers cross-reference attestations from this topic
-/// to decide whether a graded plugin's submissions are credential-eligible.
+/// Reserved for the replacement committee certificate protocol. Messages on
+/// this topic currently confer no plugin or credential authority.
 pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0";
 
 /// Ratified Sentinel adversarial priors — the Sentinel DAO broadcasts

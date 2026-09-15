@@ -34,14 +34,13 @@ VALIDATORS = {
     "reputation_minting.reputation_minting.mint": "reputation_minting",
     "soulbound.soulbound.spend": "soulbound",
     "completion.completion_minting.mint": "completion_minting",
-    "challenge_escrow.challenge_escrow.spend": "challenge_escrow",
 }
 
 # Two batches, each funded by one pure-ADA UTxO, each under the 16 KB tx limit.
 BATCHES = [
     ["proposal", "election", "dao_registry"],
     ["reputation_minting", "completion_minting", "soulbound",
-     "vote_minting", "dao_minting", "challenge_escrow"],
+     "vote_minting", "dao_minting"],
 ]
 FEE = 2_000_000  # flat 2 ADA — well above min fee for these sizes
 

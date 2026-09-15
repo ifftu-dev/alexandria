@@ -776,56 +776,6 @@ export interface SyncHistoryEntry {
   direction: string
 }
 
-// ---- Challenge (VC-first) ----
-//
-// The legacy evidence/skill_proof/opinion challenge shape is gone.
-// Challenges now target individual credentials; upholding a challenge
-// revokes the credential via its RevocationList2020 status list.
-
-export type ChallengeStatus = 'pending' | 'reviewing' | 'upheld' | 'rejected' | 'expired'
-
-export interface CredentialChallenge {
-  id: string
-  challenger: string
-  credential_id: string
-  reason: string
-  stake_lovelace: number
-  stake_tx_hash: string | null
-  status: string
-  dao_id: string
-  resolution_tx: string | null
-  signature: string
-  created_at: string
-  resolved_at: string | null
-  expires_at: string | null
-}
-
-export interface ChallengeVote {
-  id: string
-  challenge_id: string
-  voter: string
-  upheld: boolean
-  reason: string | null
-  voted_at: string
-}
-
-export interface SubmitCredentialChallengeParams {
-  credential_id: string
-  reason: string
-  stake_lovelace: number
-  dao_id: string
-}
-
-export interface ChallengeResolution {
-  challenge_id: string
-  status: string
-  votes_for_uphold: number
-  votes_for_reject: number
-  credential_revoked: boolean
-}
-
-// ---- Attestation ----
-
 // ---- Completion Attestation (VC-first) ----
 //
 // Replaces the legacy evidence-cosigning types. Requirements now key
@@ -1916,7 +1866,7 @@ export interface PluginPermissionRecord {
   granted_until: string | null
 }
 
-// ---- Phase 3: discovery + DAO attestation ----
+// ---- Plugin discovery ----
 
 /** A row in the local plugin discovery cache. */
 export interface PluginCatalogEntry {
@@ -1938,31 +1888,6 @@ export interface PluginCatalogEntry {
   last_seen_at: string
 }
 
-/** Verifier-policy view of "is this plugin attested?" */
-export interface PluginAttestationStatus {
-  plugin_cid: string
-  attested: boolean
-  attestation: StoredPluginAttestation | null
-  advisories: PluginAdvisoryRecord[]
-}
-
-export interface StoredPluginAttestation {
-  plugin_cid: string
-  grader_cid: string
-  attestation_terms: unknown
-  committee_pubkeys: string[]
-  issued_at: string
-  advisory_kind: string | null
-  advisory_message: string | null
-}
-
-export interface PluginAdvisoryRecord {
-  id: string
-  plugin_cid: string
-  kind: 'deprecated' | 'superseded' | 'known_flawed'
-  message: string
-  issued_at: string
-}
 
 // ---- Skill graph (public) + learning path ----
 // Mirrors src-tauri/src/p2p/graph_fetch.rs + commands/graph.rs.

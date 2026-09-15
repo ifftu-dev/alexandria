@@ -13,6 +13,7 @@
 //   - an allowlisted command now HAS a caller                             -> stale allowlist
 //   - an allowlisted command is no longer registered                      -> dangling allowlist
 //   - the generated frontend command-name union is stale                   -> drift
+//   - a security-sensitive retired command is restored anywhere            -> regression
 //
 // Run from the alexandria/ directory (see package.json "check:tauri-commands").
 
@@ -118,6 +119,11 @@ function extractAllowlist() {
   return new Set(Object.keys(raw).filter((k) => k !== "_comment"));
 }
 
+function extractRetired() {
+  const raw = JSON.parse(readText("scripts/retired-tauri-commands.json"));
+  return new Set(Object.keys(raw).filter((k) => k !== "_comment"));
+}
+
 // --- generated frontend command names ------------------------------------
 // This is deliberately derived from the backend handler registration rather
 // than maintained as a second hand-written command list. It makes misspelled
@@ -144,6 +150,7 @@ function renderGeneratedCommands(commands) {
 const registered = extractRegistered();
 const invoked = extractInvoked();
 const allow = extractAllowlist();
+const retired = extractRetired();
 const generatedCommands = renderGeneratedCommands(registered);
 
 if (process.argv?.includes("--write")) {
@@ -156,6 +163,9 @@ const orphans = [...registered]
   .sort();
 const stale = [...allow].filter((c) => invoked.has(c)).sort();
 const dangling = [...allow].filter((c) => !registered.has(c)).sort();
+const restored = [...retired]
+  .filter((c) => registered.has(c) || invoked.has(c) || allow.has(c))
+  .sort();
 // The direction that actually breaks at runtime: the frontend calls a command
 // the backend never registered, so the button silently does nothing until
 // someone clicks it. Every other check here is about tidiness; this one is
@@ -247,6 +257,13 @@ if (dangling.length) {
     `Allowlisted commands that are no longer registered (${dangling.length}):\n` +
       dangling.map((c) => `    - ${c}`).join("\n") +
       "\n  Fix: remove these from scripts/tauri-command-allowlist.json.",
+  );
+}
+if (restored.length) {
+  failures.push(
+    `Retired authority commands restored (${restored.length}):\n` +
+      restored.map((c) => `    - ${c}`).join("\n") +
+      "\n  These commands were removed because their legacy trust model was unsafe.",
   );
 }
 

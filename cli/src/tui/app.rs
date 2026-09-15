@@ -1326,25 +1326,51 @@ impl App {
 
     fn revoke(&mut self, id: &str, reason: &str) -> Result<String> {
         let now = vault::now_rfc3339();
-        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::commands::credentials::revoke_credential_impl(conn, id, reason, &now)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        app_lib::commands::credentials::revoke_credential_impl(
+            &signer.conn,
+            &signer.issuer_did,
+            id,
+            reason,
+            &now,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
         Ok(format!("Revoked {id}"))
     }
 
     fn suspend(&mut self, id: &str, until: Option<&str>, reason: Option<&str>) -> Result<String> {
         let now = vault::now_rfc3339();
-        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::commands::credentials::suspend_credential_impl(conn, id, until, reason, &now)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        app_lib::commands::credentials::suspend_credential_impl(
+            &signer.conn,
+            &signer.issuer_did,
+            id,
+            until,
+            reason,
+            &now,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
         Ok(format!("Suspended {id}"))
     }
 
     fn reinstate(&mut self, id: &str) {
         let result = (|| -> Result<String> {
-            let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-            app_lib::commands::credentials::reinstate_credential_impl(conn, id)
-                .map_err(|e| anyhow::anyhow!(e))?;
+            let signer = self
+                .signer
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+            app_lib::commands::credentials::reinstate_credential_impl(
+                &signer.conn,
+                &signer.issuer_did,
+                id,
+            )
+            .map_err(|e| anyhow::anyhow!(e))?;
             Ok(format!("Reinstated {id}"))
         })();
         match result {

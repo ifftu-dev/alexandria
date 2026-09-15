@@ -52,15 +52,6 @@ pub const SOULBOUND_SCRIPT_HASH: &str = "9c823cf7b9d72f459ef68b7091606992654dad5
 pub const COMPLETION_MINTING_SCRIPT_HASH: &str =
     "6380450179a6933acdf76213732f8626e1486b9ed5cc7fe7f46c98e0";
 
-/// Script hash for the challenge-stake escrow spending validator.
-///
-/// Compiled from `cardano/governance/validators/challenge_escrow.ak`.
-/// A challenger locks their stake at this script address; the DAO
-/// authority later settles it to the challenger (`Refund`, challenge
-/// upheld) or the DAO treasury (`Forfeit`, challenge rejected).
-pub const CHALLENGE_ESCROW_SCRIPT_HASH: &str =
-    "ead373d24790d337c0d94324988b11f760563ec3f09ff1ef48d1e519";
-
 // ---- Reference UTxO Locations (populated after deployment) ----
 // These are the UTxOs where each validator's compiled script is stored
 // as a reference script (CIP-33). Transactions reference these instead
@@ -124,12 +115,6 @@ pub const COMPLETION_MINTING_REF_UTXO: (&str, u64) = (
     1,
 );
 
-/// Reference UTxO for the challenge-escrow spending validator.
-pub const CHALLENGE_ESCROW_REF_UTXO: (&str, u64) = (
-    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
-    5,
-);
-
 // ---- Utility ----
 
 /// Governance metadata label (CIP-68 / custom).
@@ -174,11 +159,4 @@ pub fn ref_utxos_deployed() -> bool {
 /// land on-chain.
 pub fn completion_ref_deployed() -> bool {
     COMPLETION_MINTING_REF_UTXO.0 != "DEPLOY_PENDING"
-}
-
-/// Check if the challenge-escrow validator has been deployed as a
-/// reference script. The lock tx (paying the script) works without a
-/// reference script, but settlement (spending the script) needs it.
-pub fn challenge_escrow_deployed() -> bool {
-    CHALLENGE_ESCROW_REF_UTXO.0 != "DEPLOY_PENDING"
 }

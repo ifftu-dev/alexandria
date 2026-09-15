@@ -1,7 +1,6 @@
 pub mod attestation;
 pub mod bloom;
 pub mod catalog;
-pub mod challenge;
 pub mod classroom;
 pub mod completion;
 pub mod content_ratification;

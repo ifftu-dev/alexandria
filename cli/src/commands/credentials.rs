@@ -264,12 +264,18 @@ fn run_revoke(
     output::kv("ID", id);
     output::kv("Reason", reason);
 
-    let conn = vault::open_db(ctx, password_file)?;
+    let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    app_lib::commands::credentials::revoke_credential_impl(&conn, id, reason, &now)
-        .map_err(|e| anyhow::anyhow!(e))
-        .context("revoke_credential_impl failed")?;
+    app_lib::commands::credentials::revoke_credential_impl(
+        &signer.conn,
+        &signer.issuer_did,
+        id,
+        reason,
+        &now,
+    )
+    .map_err(|e| anyhow::anyhow!(e))
+    .context("revoke_credential_impl failed")?;
 
     output::blank();
     output::success("Revoked — this is permanent and cannot be reinstated");
@@ -293,12 +299,19 @@ fn run_suspend(
         output::kv("Reason", r);
     }
 
-    let conn = vault::open_db(ctx, password_file)?;
+    let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    app_lib::commands::credentials::suspend_credential_impl(&conn, id, until, reason, &now)
-        .map_err(|e| anyhow::anyhow!(e))
-        .context("suspend_credential_impl failed")?;
+    app_lib::commands::credentials::suspend_credential_impl(
+        &signer.conn,
+        &signer.issuer_did,
+        id,
+        until,
+        reason,
+        &now,
+    )
+    .map_err(|e| anyhow::anyhow!(e))
+    .context("suspend_credential_impl failed")?;
 
     output::blank();
     output::success("Suspended — reversible with `alexandria credentials reinstate`");
@@ -316,8 +329,8 @@ fn run_reinstate(ctx: &ProjectContext, password_file: Option<&Path>, id: &str) -
     output::header("Reinstate credential");
     output::kv("ID", id);
 
-    let conn = vault::open_db(ctx, password_file)?;
-    app_lib::commands::credentials::reinstate_credential_impl(&conn, id)
+    let signer = vault::unlock(ctx, password_file)?;
+    app_lib::commands::credentials::reinstate_credential_impl(&signer.conn, &signer.issuer_did, id)
         .map_err(|e| anyhow::anyhow!(e))
         .context("reinstate_credential_impl failed")?;
 
