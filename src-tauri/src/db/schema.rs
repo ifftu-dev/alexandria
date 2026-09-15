@@ -99,6 +99,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (89, "assessment_diagnostics_exit", MIGRATION_089),
     (90, "governance_genesis_trust_anchors", MIGRATION_090),
     (91, "exact_course_enrollment_binding", MIGRATION_091),
+    (92, "interview_assistant", MIGRATION_092),
 ];
 
 const MIGRATION_091: &str = r#"
@@ -3615,4 +3616,122 @@ const MIGRATION_082: &str = r#"
 
 ALTER TABLE credential_challenges ADD COLUMN escrow_challenger_pkh TEXT;
 ALTER TABLE credential_challenges ADD COLUMN escrow_treasury_pkh TEXT;
+"#;
+
+const MIGRATION_092: &str = r#"
+-- ============================================================
+-- Migration 092: local-first interview assistant
+--
+-- Interview content is deliberately separate from tutoring transport state.
+-- It is private to the active profile, is never placed on gossip topics, and
+-- has an explicit expiry date so transcript PII can be removed predictably.
+-- ============================================================
+
+ALTER TABLE integrity_sessions ADD COLUMN purpose TEXT NOT NULL DEFAULT 'assessment'
+    CHECK (purpose IN ('assessment', 'interview'));
+
+CREATE TABLE IF NOT EXISTS interview_sessions (
+    id                       TEXT PRIMARY KEY,
+    title                    TEXT NOT NULL,
+    objective                TEXT,
+    role_assessment_id       TEXT REFERENCES role_assessments(id) ON DELETE SET NULL,
+    tutoring_session_id      TEXT,
+    status                   TEXT NOT NULL DEFAULT 'draft'
+                             CHECK (status IN ('draft', 'ready', 'live', 'completed')),
+    duration_minutes         INTEGER NOT NULL DEFAULT 45 CHECK (duration_minutes > 0),
+    retention_days           INTEGER NOT NULL DEFAULT 30 CHECK (retention_days BETWEEN 1 AND 365),
+    record_audio             INTEGER NOT NULL DEFAULT 0,
+    record_video             INTEGER NOT NULL DEFAULT 0,
+    sentinel_enabled         INTEGER NOT NULL DEFAULT 1,
+    integrity_session_id     TEXT REFERENCES integrity_sessions(id) ON DELETE SET NULL,
+    summary                  TEXT,
+    conclusion               TEXT,
+    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at               TEXT,
+    ended_at                 TEXT,
+    expires_at               TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_sessions_status
+    ON interview_sessions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_interview_sessions_expiry
+    ON interview_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS interview_participants (
+    id                       TEXT PRIMARY KEY,
+    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    peer_id                  TEXT,
+    display_name             TEXT NOT NULL,
+    role                     TEXT NOT NULL CHECK (role IN ('interviewer', 'candidate', 'observer')),
+    pseudonym                TEXT NOT NULL,
+    consent_transcription    INTEGER NOT NULL DEFAULT 0,
+    consent_audio_recording  INTEGER NOT NULL DEFAULT 0,
+    consent_video_recording  INTEGER NOT NULL DEFAULT 0,
+    consent_sentinel         INTEGER NOT NULL DEFAULT 0,
+    consent_camera           INTEGER NOT NULL DEFAULT 0,
+    consented_at             TEXT,
+    revoked_at               TEXT,
+    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_participants_session
+    ON interview_participants(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS interview_criteria (
+    id                       TEXT PRIMARY KEY,
+    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    label                    TEXT NOT NULL,
+    position                 INTEGER NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'not_covered'
+                             CHECK (status IN ('not_covered', 'partial', 'covered')),
+    notes                    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_criteria_session
+    ON interview_criteria(session_id, position);
+
+CREATE TABLE IF NOT EXISTS interview_transcript_segments (
+    id                       TEXT PRIMARY KEY,
+    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    participant_id           TEXT NOT NULL REFERENCES interview_participants(id) ON DELETE CASCADE,
+    speaker_label            TEXT NOT NULL,
+    text                     TEXT NOT NULL,
+    start_ms                 INTEGER NOT NULL DEFAULT 0,
+    end_ms                   INTEGER NOT NULL DEFAULT 0,
+    is_final                 INTEGER NOT NULL DEFAULT 1,
+    confidence               REAL,
+    source                   TEXT NOT NULL DEFAULT 'manual'
+                             CHECK (source IN ('local_stt', 'remote_stt', 'manual')),
+    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_transcript_session
+    ON interview_transcript_segments(session_id, start_ms, created_at);
+
+CREATE TABLE IF NOT EXISTS interview_notes (
+    id                       TEXT PRIMARY KEY,
+    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    text                     TEXT NOT NULL,
+    is_private               INTEGER NOT NULL DEFAULT 1,
+    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_notes_session
+    ON interview_notes(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS interview_followups (
+    id                       TEXT PRIMARY KEY,
+    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    source_segment_id        TEXT REFERENCES interview_transcript_segments(id) ON DELETE SET NULL,
+    criterion_id             TEXT REFERENCES interview_criteria(id) ON DELETE SET NULL,
+    question                 TEXT NOT NULL,
+    reason                   TEXT NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'suggested'
+                             CHECK (status IN ('suggested', 'asked', 'dismissed')),
+    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_followups_session
+    ON interview_followups(session_id, status, created_at DESC);
 "#;

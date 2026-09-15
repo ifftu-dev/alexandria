@@ -27,6 +27,7 @@ pub mod identity;
 pub mod import;
 pub mod instructor;
 pub mod integrity;
+pub mod interview;
 pub mod opinions;
 pub mod pinning;
 pub mod plugins;

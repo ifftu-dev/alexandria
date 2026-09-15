@@ -350,6 +350,16 @@ pub async fn tutoring_send_chat(text: String, state: State<'_, AppState>) -> Res
     state.tutoring.send_chat(text).await
 }
 
+/// Share a participant-controlled on-device transcript segment with the room.
+#[tauri::command]
+pub async fn tutoring_send_transcript(
+    text: String,
+    confidence: Option<f64>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.tutoring.send_transcript(text, confidence).await
+}
+
 /// Get the current session status (or null if not in a session).
 #[tauri::command]
 pub async fn tutoring_status(

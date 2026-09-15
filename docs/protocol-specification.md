@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Format-version-2 public sidecar `profiles_index.json` — immutable network IDs, display names, and avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, governance, verifiable credentials) across 91 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, interviews, governance, verifiable credentials) across 92 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -110,7 +110,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend through Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across domain-facing modules including profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, P2P, aggregation, presentation, health, guardian, instructor, completion, pairing, assessment, goal templates, skill bootstrap, content governance, role assessment, Sentinel, updater, users, and username registry. The retired challenge and plugin-attestation ingest/status commands are absent from the handler list and are enforced by a source-level denylist test. The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
+The frontend communicates with the Rust backend through Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across domain-facing modules including profile, settings, classroom, governance, taxonomy, tutoring, interview, identity, credentials, sync, courses, attestation, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, P2P, aggregation, presentation, health, guardian, instructor, completion, pairing, assessment, goal templates, skill bootstrap, content governance, role assessment, Sentinel, updater, users, and username registry. The retired challenge and plugin-attestation ingest/status commands are absent from the handler list and are enforced by a source-level denylist test. The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`). Interview records are local application state rather than a normative Alexandria gossip protocol; see [`interview-assistant.md`](interview-assistant.md).
 
 ---
 
@@ -2033,13 +2033,13 @@ The reference implementation is a Tauri v2 application — a single binary that 
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4 | Pages, reusable components, and singleton composables |
-| Database | SQLite (rusqlite, bundled) | Local encrypted store, 91 migrations |
+| Database | SQLite (rusqlite, bundled) | Local encrypted store, 92 migrations |
 | Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
 | Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance experiments, completion-witness minting, and legacy CIP-68 reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
-| Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only |
+| Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only; opt-in on-device caption text over encrypted room gossip |
 | CLI | Rust, clap 4 | Developer tooling (`alexandria`) |
 | **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,verify}` | Ed25519Signature2020 detached JWS over RFC 8785 JCS bytes, §14.7 / §14.13 |
 | **Trust aggregation** | `aggregation::{mod,weights,level,independence,antigaming,config}` | §14.14 engine + §14.15 anti-gaming; reproduces the §14.26 worked example |
@@ -2048,7 +2048,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 91.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 92.
 
 | Domain | Tables |
 |--------|--------|
@@ -2066,6 +2066,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Retired challenges | `credential_challenges`, `credential_challenge_votes` remain as legacy storage; the earlier evidence tables were dropped in migration 040 |
 | Completion endorsement | `completion_claims`, `course_completion_endorsements`; exact policy/CID snapshots are stored on `enrollments` |
 | Tutoring | `tutoring_sessions` |
+| Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` (local-only; not a global gossip or device-sync domain) |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
 | Governance (on-chain) | `onchain_governance_queue` |
 | Settings | `app_settings` |

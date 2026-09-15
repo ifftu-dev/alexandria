@@ -73,7 +73,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |                | cmds    |  +----------------+  |  |
 |  |  Vue pages     |         |  |   SQLite DB    |  |  |
 |  |  + components |         |  |  local schema  |  |  |
-|  |  + composables|         |  |   91 migrations|  |  |
+|  |  + composables|         |  |   92 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -249,7 +249,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Schema**: 91 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
+**Schema**: 92 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
 
 | Domain | Tables |
 |--------|--------|
@@ -262,6 +262,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Issuer recognition (local-only) | `public_derived_issuers`, `derived_skill_refresh_queue` (migration 085) |
 | Completion persistence (local-only) | `completion_claims`, `completion_witness_requests`, `course_completion_endorsements`; enrollments and claims freeze exact course-document identity/policy (migrations 086, 091) |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
+| Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
@@ -358,7 +359,7 @@ and neither can currently do the other's job:
 
 | | libp2p (§6) | iroh (this section) |
 |---|---|---|
-| Carries | mesh: discovery, gossip, sync, pairing, guardian, username receipts | content blobs, tutoring media (MoQ), room presence |
+| Carries | mesh: discovery, gossip, sync, pairing, guardian, username receipts | content blobs, tutoring media (MoQ), room presence, room chat/captions |
 | Relays | Circuit Relay v2 + DCUtR, self-hosted | iroh relays |
 | Discovery | private Kademlia DHT | DNS / pkarr |
 | Identity | libp2p `PeerId` | iroh `EndpointId` |
@@ -394,6 +395,22 @@ The router accepts three ALPNs — `iroh_blobs`, `iroh_gossip`, and `live::ALPN`
 whether or not the user ever joins a tutoring session. The feature flags gate
 only the codec layer (ffmpeg, VideoToolbox, Opus), not the protocol
 registration.
+
+### Live rooms, captions, and interview records
+
+Tutoring owns the live-room lifecycle, media, invitations, chat, and
+participant-controlled captions. Caption speech recognition is exposed only
+when the WebView supports the explicit `processLocally` control. Final text
+segments are sent over the encrypted iroh room gossip channel with the internal
+`ALXTR1` prefix; this is not a libp2p global gossip topic. Tutoring retains the
+caption list in memory and clears it when the room is left.
+
+The interview assistant reuses that transport but persists a separate record in
+the active profile's SQLCipher database. A remote caption becomes an interview
+transcript segment only after it is matched to a participant who consented to
+transcription. Interview tables never enter cross-device sync or global gossip,
+and their configured expiry is enforced by the interview list/purge command.
+See [Interview Assistant](interview-assistant.md).
 
 ### Operations
 
@@ -709,6 +726,9 @@ unresolvable winners.
 | Join Requests | `/classrooms/:id/requests` | Review pending join requests |
 | Tutoring Index | `/tutoring` | Live tutoring sessions list |
 | Tutoring Session | `/tutoring/:id` | Active video/audio/screen session |
+| Interviews | `/interviews` | Instructor-only interview planning and local record list |
+| Interview Session | `/interviews/:id` | Consent/preflight and live interview workspace |
+| Interview Review | `/interviews/:id/review` | Transcript, criteria coverage, summary, conclusion, and export |
 | My Courses | `/dashboard/courses` | Enrolled courses, progress |
 | Credentials | `/dashboard/credentials` | W3C Verifiable Credentials — the same view is embedded as the default tab of `/skills` |
 | Reputation | `/dashboard/reputation` | Distribution-based reputation (median/p25/p75) |
@@ -740,7 +760,8 @@ list.
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
 | governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` (in release builds `create_dao` and the twelve state-changing election/proposal commands return a disabled error; list/get and queue-status commands work) |
-| tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
+| tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
+| interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
 | taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
@@ -796,6 +817,11 @@ Note: `tutoring` has platform-specific variants. Desktop and Android share the f
 - Only derived integrity scores (0.0-1.0) are stored and transmitted otherwise
 - Cross-device sync is encrypted with a key derived from the wallet signing key
 - Public gossip contains only evidence scores and governance actions — no personal data beyond stake addresses
+- Interview plans, participant names, transcripts, notes, and summaries remain in
+  the active profile's SQLCipher database and are excluded from cross-device
+  sync and global gossip. Only participant-enabled final caption text and the
+  room display name travel to current live-room peers; see
+  [`interview-assistant.md`](interview-assistant.md#pii-and-privacy-boundaries).
 
 ---
 

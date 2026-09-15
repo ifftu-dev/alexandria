@@ -1,5 +1,7 @@
 import { ref, readonly, reactive } from 'vue'
 
+type SentinelSessionPurpose = 'assessment' | 'interview'
+
 import { listen as tauriListen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from './useLocalApi'
 import { useAuth } from './useAuth'
@@ -1015,7 +1017,12 @@ function createSentinelService() {
   // Public API
   // =========================================================================
 
-  const startSession = async (enrollmentId: string | null, optInCamera: boolean, generation: number) => {
+  const startSession = async (
+    enrollmentId: string | null,
+    optInCamera: boolean,
+    purpose: SentinelSessionPurpose,
+    generation: number,
+  ) => {
     if (isActive.value || generation !== lifecycleGeneration) return
     if (sessionId.value) throw new Error('Finish closing the previous Sentinel session before starting another')
 
@@ -1031,7 +1038,7 @@ function createSentinelService() {
     if (generation !== lifecycleGeneration) return
 
     try {
-      const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId })
+      const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId, purpose })
       sessionId.value = response.session_id
       clearTrainingBuffers()
       isActive.value = true
@@ -1362,9 +1369,13 @@ function createSentinelService() {
     return currentSessionId
   }
 
-  const start = (enrollmentId: string | null, optInCamera = false) => {
+  const start = (
+    enrollmentId: string | null,
+    optInCamera = false,
+    purpose: SentinelSessionPurpose = 'assessment',
+  ) => {
     const generation = lifecycleGeneration
-    return serializeTransition(() => startSession(enrollmentId, optInCamera, generation))
+    return serializeTransition(() => startSession(enrollmentId, optInCamera, purpose, generation))
   }
 
   const stop = () => {

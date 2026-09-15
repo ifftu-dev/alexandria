@@ -72,6 +72,11 @@ const PENDING_TRANSLATION = [
   'instructor.compose.blockerPolicyUnsaved',
   'instructor.inbox.endorsement',
   'courses.completion.endorsement',
+  // Interview assistant and participant caption consent. English-only until
+  // the next translation pass; consent copy should be prioritised in that pass.
+  'interviews.',
+  'tutoring.captions.',
+  'nav.primary.interviews',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

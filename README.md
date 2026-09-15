@@ -17,6 +17,7 @@
   <a href="docs/project-structure.md">Project Structure</a> &middot;
   <a href="docs/skills-and-reputation.md">Skills & Reputation</a> &middot;
   <a href="docs/sentinel.md">Sentinel</a> &middot;
+  <a href="docs/interview-assistant.md">Interview Assistant</a> &middot;
   <a href="docs/plugins.md">Plugins</a> &middot;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -36,6 +37,7 @@
 The capabilities below describe how each of these works — the underlying technical implementation.
 
 - **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging. Separately, **dynamic assessments** verify claimed skills through community-contributed, DAO-ratified question banks: each attempt draws a randomized, difficulty-stratified subset, is graded host-side (the answer key never reaches the client), and auto-activates Sentinel — a pass issues an `AssessmentCredential`.
+- **Interview Assistant** — Instructors can prepare standalone or sponsored-role interviews, record per-participant consent choices, conduct the call over the live tutoring transport, capture an attributed transcript, track rubric coverage, receive local follow-up suggestions, keep private notes, and edit/export a timestamped summary. Interview records stay in the active profile's encrypted database, expire on a configurable schedule, and export with pseudonyms and without private notes by default. Raw audio/video is not recorded, and speech-to-text is available only when the WebView guarantees on-device processing. See [`docs/interview-assistant.md`](docs/interview-assistant.md).
 - **Goals & Learning Paths** — learners set a goal (a nationalized exam, a K-12 board-grade curriculum, a job role, or a pasted/linked job description); it resolves to an ideal skill graph via DAO-ratified goal templates or on-device job-description parsing, and computed prerequisite paths chart the route.
 - **Skill-Graph Bootstrap** — a new learner uploads a resume, transcript, or credential; on-device parsing suggests skills to confirm, each becoming a self-asserted credential whose **provenance tier** (self-declared → document-backed → accredited-document → issuer-signed) weights how much aggregation confidence it carries.
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
@@ -68,6 +70,7 @@ names where the detail lives.
 | **Authenticated DAO model distribution** | The Sentinel prior signature is a **public Blake2b digest, not a signature** — it binds metadata to a row and authenticates nobody. Advisory AI scoring is therefore off by default. See [`docs/sentinel-federation.md`](docs/sentinel-federation.md) §12. |
 | **Federated learning (Option A)** | Per-user gradient sharing, DP-SGD, secure aggregation and stake-gated submissions are design-phase. Option B — DAO-published adversarial priors — is what shipped. |
 | **Real-world integrity measurement** | Sentinel's false-positive rate is measured against a **synthetic** holdout only. No real-world validity study has been done, by us or independently. |
+| **Recorded interview media or generative interview coaching** | The interview assistant stores attributed text, criteria, notes, and an editable deterministic summary. It does not yet record raw audio/video, call a hosted transcription service, or use an LLM for follow-up questions. On-device speech recognition depends on WebView support. See [`docs/interview-assistant.md`](docs/interview-assistant.md#scope-and-status). |
 | **Push notifications** | Research complete, not scheduled. See [`docs/push-notifications-rfc.md`](docs/push-notifications-rfc.md). |
 | **Relay-independent bootstrap** | Fresh peer discovery uses the relays in the bundled, validated `preprod` network profile. The profile centralizes relay identities, HTTPS registry origins, fallback IPs, and trust roots, but remains part of the application release. DNS seeds and user-pinned bootstrap lists are post-launch. Existing credentials and content survive relays disappearing; discovering new peers does not. |
 | **Privilege qualification policy** | Credentials from any authentic issuer remain visible, but field-opinion posting and other proficiency-derived privileges are not yet restricted by the explicit subject/DAO accepted-issuer policy. This is the next trust-policy package in the remediation plan. |
@@ -142,9 +145,9 @@ alexandria/
 │       ├── aggregation/ # Deterministic aggregation engine with anti-gaming penalties, weights, independence
 │       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies, metadata anchoring
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
-│       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including profile lifecycle
+│       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including interviews and profile lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite schema (90 migrations + seed data) — one encrypted DB per profile
+│       ├── db/       # SQLite schema (92 migrations + seed data) — one encrypted DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine; legacy evidence/challenge pipeline retired
@@ -155,9 +158,9 @@ alexandria/
 │       ├── settings/ # Unified per-profile settings: typed registry + sync/device-scoped store
 │       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)
 ├── src/              # Vue 3 + TypeScript frontend
-│   ├── pages/        # Route views (ProfileSelect, Onboarding, courses, skills, governance, opinions, tutoring, ...)
-│   ├── components/   # UI components + auth + course + layout + profile (picker tiles + avatar)
-│   ├── composables/  # useProfiles (canonical), useSettings (per-profile prefs + cross-device sync), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
+│   ├── pages/        # Route views (ProfileSelect, Onboarding, courses, skills, interviews, tutoring, ...)
+│   ├── components/   # UI components + auth + course + shared live-session + layout + profile
+│   ├── composables/  # Shared state/services, including profiles, settings, Sentinel, interviews, local STT, and tutoring rooms
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alexandria) — Rust + clap
 ├── crates/           # Workspace members: live (our room/session layer),
@@ -606,7 +609,8 @@ Use `alexandria path` to print the active profile's directory on any platform, a
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
 | [Username Registry](docs/username-registry.md) | Decentralized @handles: DHT claims, relay receipts, Cardano anchoring |
-| [Sentinel](docs/sentinel.md) | Assessment integrity — behavioral fingerprinting, ML models |
+| [Sentinel](docs/sentinel.md) | Assessment and interview integrity — behavioral fingerprinting, ML models |
+| [Interview Assistant](docs/interview-assistant.md) | Structured live interviews — consent, attributed transcript, follow-ups, review, and PII boundaries |
 | [Security Audit](docs/security-audit.md) | 32 findings (1 critical, 7 high, 10 medium, 9 low, 5 informational) |
 | [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 informational) |
 

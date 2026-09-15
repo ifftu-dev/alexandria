@@ -191,6 +191,26 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // Structured interviews — reuses the live tutoring media transport.
+    {
+      path: '/interviews',
+      name: 'interviews',
+      component: () => import('@/pages/interviews/Index.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    {
+      path: '/interviews/:id',
+      name: 'interview-session',
+      component: () => import('@/pages/interviews/Session.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    {
+      path: '/interviews/:id/review',
+      name: 'interview-review',
+      component: () => import('@/pages/interviews/Review.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+
     // Skills & Taxonomy
     {
       path: '/skills',

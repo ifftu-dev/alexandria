@@ -176,8 +176,13 @@ pub async fn integrity_start_session(
     // (e.g. a skill assessment not tied to a course) pass null and the session
     // is recorded with a NULL enrollment (the column is nullable).
     enrollment_id: Option<String>,
+    purpose: Option<String>,
 ) -> Result<StartSessionResponse, String> {
     let seed = enrollment_id.as_deref().unwrap_or("standalone");
+    let purpose = purpose.unwrap_or_else(|| "assessment".to_owned());
+    if !matches!(purpose.as_str(), "assessment" | "interview") {
+        return Err(format!("invalid integrity session purpose: {purpose}"));
+    }
     let session_id = entity_id(&[seed, &chrono::Utc::now().to_rfc3339()]);
     let persisted_session_id = session_id.clone();
     state
@@ -189,9 +194,9 @@ pub async fn integrity_start_session(
             move |db| {
                 db.conn()
                     .execute(
-                        "INSERT INTO integrity_sessions (id, enrollment_id, status)
-                         VALUES (?1, ?2, 'active')",
-                        params![persisted_session_id, enrollment_id],
+                        "INSERT INTO integrity_sessions (id, enrollment_id, status, purpose)
+                         VALUES (?1, ?2, 'active', ?3)",
+                        params![persisted_session_id, enrollment_id, purpose],
                     )
                     .map_err(|e| e.to_string())?;
                 Ok(())
@@ -209,21 +214,34 @@ pub async fn integrity_submit_snapshot(
     req: SubmitSnapshotRequest,
 ) -> Result<IntegritySnapshot, String> {
     let staging_session_id = req.session_id.clone();
-    let snapshot = state
+    let (snapshot, purpose) = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "integrity.submit-snapshot",
-            move |db| persist_snapshot(db.conn(), &req),
+            move |db| {
+                let snapshot = persist_snapshot(db.conn(), &req)?;
+                let purpose: String = db
+                    .conn()
+                    .query_row(
+                        "SELECT purpose FROM integrity_sessions WHERE id = ?1",
+                        params![req.session_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok((snapshot, purpose))
+            },
         )
         .await?;
     // Stage appeal evidence only after every snapshot/session write commits.
     // The learner's consent remains required before evidence is persisted.
-    if snapshot
-        .anomaly_flags
-        .iter()
-        .any(|flag| flag_severity(flag) != Severity::Info)
+    // Interview monitoring never stages camera frames as appeal evidence.
+    if purpose == "assessment"
+        && snapshot
+            .anomaly_flags
+            .iter()
+            .any(|flag| flag_severity(flag) != Severity::Info)
     {
         state
             .evidence_staging
@@ -279,11 +297,11 @@ fn persist_snapshot(
     // 'suspended' or 'completed' it stops accepting new data, but 'flagged'
     // sessions continue (a learner may recover or a single critical flag
     // may not be the final verdict).
-    let (current_status, ended_at): (String, Option<String>) = conn
+    let (current_status, ended_at, purpose): (String, Option<String>, String) = conn
         .query_row(
-            "SELECT status, ended_at FROM integrity_sessions WHERE id = ?1",
+            "SELECT status, ended_at, purpose FROM integrity_sessions WHERE id = ?1",
             params![req.session_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
@@ -385,12 +403,21 @@ fn persist_snapshot(
         )
         .map_err(|e| e.to_string())?;
 
-    let new_status = compute_outcome(
-        cumulative_critical,
-        cumulative_warning,
-        running_score.unwrap_or(1.0),
-        false,
-    );
+    let new_status = if purpose == "interview" {
+        if cumulative_critical > 0 || cumulative_warning > 0 || running_score.unwrap_or(1.0) < 0.40
+        {
+            "flagged"
+        } else {
+            "active"
+        }
+    } else {
+        compute_outcome(
+            cumulative_critical,
+            cumulative_warning,
+            running_score.unwrap_or(1.0),
+            false,
+        )
+    };
 
     // Only promote severity. Never demote (e.g. a recovering session stays
     // flagged until end_session). Terminal transitions happen in end_session.

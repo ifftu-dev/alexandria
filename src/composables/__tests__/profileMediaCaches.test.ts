@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Classroom, TutoringChatMessage, TutoringSessionInfo } from '@/types'
+import type {
+  Classroom,
+  TutoringChatMessage,
+  TutoringSessionInfo,
+  TutoringTranscriptMessage,
+} from '@/types'
 
 type ProfileLockCallback = () => void | Promise<void>
 type EventCallback = (event: { payload: unknown }) => void
@@ -332,22 +337,33 @@ describe('profile-scoped media and classroom caches', () => {
       text: 'private message',
       timestamp: 1,
     }
+    const transcript: TutoringTranscriptMessage = {
+      sender: 'peer-private',
+      sender_name: 'Private learner',
+      text: 'private caption',
+      confidence: 0.9,
+      timestamp: 2,
+    }
     mocks.eventCallbacks.get('tutoring:chat')?.({ payload: chat })
+    mocks.eventCallbacks.get('tutoring:transcript')?.({ payload: transcript })
     mocks.eventCallbacks.get('tutoring:peer-name')?.({
       payload: { node_id: 'peer-private', display_name: 'Private learner' },
     })
     expect(tutoringStore.chatMessages.value).toEqual([chat])
+    expect(tutoringStore.transcriptMessages.value).toEqual([transcript])
     expect(tutoringStore.peerNames.value).toEqual({ 'peer-private': 'Private learner' })
 
     await lockProfile()
     mocks.eventCallbacks.get('tutoring:chat')?.({ payload: chat })
+    mocks.eventCallbacks.get('tutoring:transcript')?.({ payload: transcript })
 
     expect(tutoringStore.chatMessages.value).toEqual([])
+    expect(tutoringStore.transcriptMessages.value).toEqual([])
     expect(tutoringStore.peerNames.value).toEqual({})
     expect(tutoringStore.videoFrames.value).toEqual({})
     expect(tutoringStore.micLevel.value).toBe(0)
     expect(tutoringStore.outputLevel.value).toBe(0)
-    expect([...unlisteners.values()]).toHaveLength(5)
+    expect([...unlisteners.values()]).toHaveLength(6)
     for (const unlisten of unlisteners.values()) expect(unlisten).toHaveBeenCalledOnce()
   })
 })

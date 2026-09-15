@@ -5,6 +5,7 @@ import type {
   TutoringPeer,
   TutoringVideoFrame,
   TutoringChatMessage,
+  TutoringTranscriptMessage,
   DeviceCheckResult,
   DeviceList,
   AudioLevelEvent,
@@ -26,6 +27,9 @@ const videoFrames = ref<Record<string, string>>({})
 
 /** Chat message history for the current session. */
 const chatMessages = ref<TutoringChatMessage[]>([])
+
+/** Participant-controlled on-device transcript segments shared in the room. */
+const transcriptMessages = ref<TutoringTranscriptMessage[]>([])
 
 /** Map of node_id → display name (learned via gossip /names topic). */
 const peerNames = ref<Record<string, string>>({})
@@ -49,6 +53,7 @@ let pollSubscribers = 0
 
 let videoUnlisten: (() => void) | null = null
 let chatUnlisten: (() => void) | null = null
+let transcriptUnlisten: (() => void) | null = null
 let peerEndedUnlisten: (() => void) | null = null
 let peerNameUnlisten: (() => void) | null = null
 let audioLevelUnlisten: (() => void) | null = null
@@ -79,6 +84,7 @@ async function setupEventListeners() {
   if (
     videoUnlisten
     && chatUnlisten
+    && transcriptUnlisten
     && peerEndedUnlisten
     && peerNameUnlisten
     && audioLevelUnlisten
@@ -111,6 +117,16 @@ async function setupEventListeners() {
         }
       })
       installed.push(nextChatUnlisten)
+      if (!isCurrentProfile(generation)) return
+
+      const nextTranscriptUnlisten = await listen<TutoringTranscriptMessage>(
+        'tutoring:transcript',
+        (event) => {
+          if (!isCurrentProfile(generation)) return
+          transcriptMessages.value = [...transcriptMessages.value, event.payload].slice(-200)
+        },
+      )
+      installed.push(nextTranscriptUnlisten)
       if (!isCurrentProfile(generation)) return
 
       const nextPeerEndedUnlisten = await listen<{ node_id: string }>(
@@ -153,6 +169,7 @@ async function setupEventListeners() {
 
       videoUnlisten = nextVideoUnlisten
       chatUnlisten = nextChatUnlisten
+      transcriptUnlisten = nextTranscriptUnlisten
       peerEndedUnlisten = nextPeerEndedUnlisten
       peerNameUnlisten = nextPeerNameUnlisten
       audioLevelUnlisten = nextAudioLevelUnlisten
@@ -179,6 +196,10 @@ function teardownEventListeners() {
   if (chatUnlisten) {
     chatUnlisten()
     chatUnlisten = null
+  }
+  if (transcriptUnlisten) {
+    transcriptUnlisten()
+    transcriptUnlisten = null
   }
   if (peerEndedUnlisten) {
     peerEndedUnlisten()
@@ -215,6 +236,7 @@ function resetForProfileLock(): void {
   loading.value = false
   videoFrames.value = {}
   chatMessages.value = []
+  transcriptMessages.value = []
   peerNames.value = {}
   unreadChatCount.value = 0
   chatOpen.value = false
@@ -274,6 +296,7 @@ async function createRoom(
     await setupEventListeners()
     if (!isCurrentProfile(generation)) throw new Error('Profile changed while creating room')
     chatMessages.value = []
+    transcriptMessages.value = []
     videoFrames.value = {}
     peerNames.value = {}
     unreadChatCount.value = 0
@@ -313,6 +336,7 @@ async function joinRoom(
     await setupEventListeners()
     if (!isCurrentProfile(generation)) throw new Error('Profile changed while joining room')
     chatMessages.value = []
+    transcriptMessages.value = []
     videoFrames.value = {}
     peerNames.value = {}
     unreadChatCount.value = 0
@@ -338,6 +362,7 @@ async function leaveRoom(): Promise<void> {
     sessionStatus.value = null
     videoFrames.value = {}
     chatMessages.value = []
+    transcriptMessages.value = []
     peerNames.value = {}
     unreadChatCount.value = 0
     teardownEventListeners()
@@ -402,6 +427,27 @@ async function sendChat(text: string): Promise<void> {
         timestamp: Date.now(),
       },
     ]
+  } catch (e: unknown) {
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
+    throw e
+  }
+}
+
+async function sendTranscript(text: string, confidence?: number): Promise<void> {
+  const generation = profileGeneration
+  try {
+    await invoke('tutoring_send_transcript', { text, confidence })
+    if (!isCurrentProfile(generation)) return
+    transcriptMessages.value = [
+      ...transcriptMessages.value,
+      {
+        sender: 'self',
+        sender_name: null,
+        text,
+        confidence: confidence ?? null,
+        timestamp: Date.now(),
+      },
+    ].slice(-200)
   } catch (e: unknown) {
     if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
@@ -522,6 +568,7 @@ export function useTutoringRoom() {
     loading: readonly(loading),
     videoFrames: readonly(videoFrames),
     chatMessages: readonly(chatMessages),
+    transcriptMessages: readonly(transcriptMessages),
     peerNames: readonly(peerNames),
     unreadChatCount: readonly(unreadChatCount),
     micLevel: readonly(micLevel),
@@ -535,6 +582,7 @@ export function useTutoringRoom() {
     toggleAudio,
     toggleScreenShare,
     sendChat,
+    sendTranscript,
     getPeers,
     checkDevices,
     listDevices,
