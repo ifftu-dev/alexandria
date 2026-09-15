@@ -22,6 +22,20 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Returned by production governance IPC, gossip and queue paths while the
+/// local/operator election and proposal authority remains unverified.
+pub const LEGACY_GOVERNANCE_DISABLED: &str =
+    "legacy governance is disabled pending verified committee certificates";
+
+/// Whether the obsolete local/operator governance authority is compiled in.
+///
+/// True only for debug builds that explicitly enable
+/// `legacy-local-governance`. Unlike some other legacy gates this is also
+/// false in the default test build, so tests can prove production behavior.
+pub const fn legacy_local_governance_enabled() -> bool {
+    cfg!(all(debug_assertions, feature = "legacy-local-governance"))
+}
+
 // ---- P2P Gossip Types ----
 
 /// A governance announcement broadcast on `/alexandria/governance/1.0`.

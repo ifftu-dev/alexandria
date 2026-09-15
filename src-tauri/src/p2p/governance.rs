@@ -9,21 +9,53 @@
 //!
 //! Committee updates are critical — they modify the `governance_dao_members`
 //! table which controls the authority check for taxonomy messages.
+//!
+//! **Authority**: every event here is legacy local authority. Senders are
+//! checked only against local committee rows, without phase, deadline or
+//! eligibility validation, and one signature can replace a whole committee.
+//! Production rejects all governance events until the handler consumes
+//! verified committee outcome certificates. The old apply path is available
+//! only in an explicitly enabled development build.
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 use rusqlite::{params, Transaction, TransactionBehavior};
 
-use crate::crypto::hash::entity_id;
-use crate::db::governance::{record_election_vote, record_proposal_vote, VoteEvidence};
 use crate::db::Database;
-use crate::domain::governance::{GovernanceAnnouncement, GovernanceEventType};
+use crate::domain::governance::GovernanceAnnouncement;
 use crate::p2p::types::SignedGossipMessage;
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
+use crate::{
+    crypto::hash::entity_id,
+    db::governance::{record_election_vote, record_proposal_vote, VoteEvidence},
+    domain::governance::GovernanceEventType,
+};
 
 /// Handle an incoming governance announcement from the P2P network.
 ///
+/// Builds without the explicit development feature reject every event type
+/// before any read or write, so a rejected message records no `sync_log`
+/// entry and changes no governance rows.
+pub fn handle_governance_message(
+    db: &Database,
+    message: &SignedGossipMessage,
+) -> Result<GovernanceAnnouncement, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (db, message);
+        Err(crate::domain::governance::LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        handle_legacy_governance_message(db, message)
+    }
+}
+
 /// Deserializes the message payload, validates, and processes the event.
 /// Committee updates modify `governance_dao_members` (affects taxonomy
 /// authority checks). Proposal events update `governance_proposals`.
-pub fn handle_governance_message(
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
+fn handle_legacy_governance_message(
     db: &Database,
     message: &SignedGossipMessage,
 ) -> Result<GovernanceAnnouncement, String> {
@@ -66,11 +98,13 @@ pub fn handle_governance_message(
         } => {
             handle_proposal_resolved(
                 &tx,
+                &announcement.dao_id,
                 proposal_id,
                 status,
                 *votes_for,
                 *votes_against,
                 on_chain_tx.as_deref(),
+                &message.stake_address,
             )?;
         }
         GovernanceEventType::CommitteeUpdated {
@@ -200,6 +234,7 @@ pub fn handle_governance_message(
 }
 
 /// Handle a new proposal creation announcement.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn handle_proposal_created(
     tx: &Transaction<'_>,
     dao_id: &str,
@@ -245,18 +280,43 @@ fn handle_proposal_created(
     Ok(())
 }
 
-/// Handle a proposal resolution announcement.
+/// Handle a proposal resolution announcement. Sender must be committee of
+/// the DAO that owns the proposal.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
+#[allow(clippy::too_many_arguments)]
 fn handle_proposal_resolved(
     tx: &Transaction<'_>,
+    dao_id: &str,
     proposal_id: &str,
     status: &str,
     votes_for: i64,
     votes_against: i64,
     on_chain_tx: Option<&str>,
+    sender_address: &str,
 ) -> Result<(), String> {
     const ALLOWED_STATUSES: &[&str] = &["approved", "rejected", "expired", "withdrawn"];
     if !ALLOWED_STATUSES.contains(&status) {
         return Err(format!("invalid proposal status: '{status}'"));
+    }
+
+    let proposal_dao: Option<String> = tx
+        .query_row(
+            "SELECT dao_id FROM governance_proposals WHERE id = ?1",
+            params![proposal_id],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(proposal_dao) = proposal_dao {
+        if proposal_dao != dao_id {
+            return Err(format!(
+                "proposal '{proposal_id}' belongs to DAO '{proposal_dao}', not '{dao_id}'"
+            ));
+        }
+        if !is_committee_authority(tx, dao_id, sender_address) {
+            return Err(format!(
+                "unauthorized proposal resolution by '{sender_address}' for DAO '{dao_id}'"
+            ));
+        }
     }
 
     let rows = tx
@@ -296,6 +356,7 @@ fn handle_proposal_resolved(
 /// `handle_proposal_created`); the authoritative tally is built by the
 /// operator node (which holds the full election) and committed as a
 /// Merkle root on-chain at finalize.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 #[allow(clippy::too_many_arguments)]
 fn handle_election_vote_recorded(
     tx: &Transaction<'_>,
@@ -350,6 +411,7 @@ fn handle_election_vote_recorded(
 /// Handle a signed proposal vote gossiped by a peer. Mirrors
 /// `handle_election_vote_recorded`; proposals ARE gossiped, so the
 /// referenced proposal is usually present.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 #[allow(clippy::too_many_arguments)]
 fn handle_proposal_vote_recorded(
     tx: &Transaction<'_>,
@@ -402,6 +464,7 @@ fn handle_proposal_vote_recorded(
 /// Handle a gossiped election open. Replicates the election locally so
 /// the node can hold + tally it. Sender must be a committee member of
 /// the DAO (mirrors the on-chain "committee opens elections" rule).
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 #[allow(clippy::too_many_arguments)]
 fn handle_election_opened(
     tx: &Transaction<'_>,
@@ -454,6 +517,7 @@ fn handle_election_opened(
 }
 
 /// Handle a gossiped self-nomination. Sender must be the nominee.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn handle_nominee_submitted(
     tx: &Transaction<'_>,
     election_id: &str,
@@ -488,6 +552,7 @@ fn handle_nominee_submitted(
 
 /// Handle a gossiped nomination acceptance. Sender must be the nominee
 /// whose row is being accepted.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn handle_nominee_accepted(
     tx: &Transaction<'_>,
     election_id: &str,
@@ -523,6 +588,7 @@ fn handle_nominee_accepted(
 /// Sender must be committee. Transitions are guarded (voting only from
 /// nomination, finalized only from voting). For `finalized`, the winning
 /// nominee rows are flagged.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn handle_election_phase(
     tx: &Transaction<'_>,
     election_id: &str,
@@ -573,6 +639,7 @@ fn handle_election_phase(
 }
 
 /// Check if the given stake address is a committee member or chair for a DAO.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn is_committee_authority(tx: &Transaction<'_>, dao_id: &str, stake_address: &str) -> bool {
     tx.query_row(
         "SELECT COUNT(*) > 0 FROM governance_dao_members \
@@ -591,6 +658,7 @@ fn is_committee_authority(tx: &Transaction<'_>, dao_id: &str, stake_address: &st
 /// Security: the gossip sender must be a current committee member or
 /// chair of the DAO to authorize a committee change. Unauthenticated
 /// committee updates are rejected to prevent governance takeover.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn handle_committee_updated(
     tx: &Transaction<'_>,
     dao_id: &str,
@@ -707,7 +775,7 @@ mod tests {
             timestamp: 1_700_000_000,
         };
 
-        let result = handle_governance_message(&db, &make_message(&ann));
+        let result = handle_legacy_governance_message(&db, &make_message(&ann));
         assert!(result.is_ok());
 
         let title: String = db
@@ -725,6 +793,7 @@ mod tests {
     fn handle_proposal_resolved_updates() {
         let db = test_db();
         insert_test_dao(&db);
+        make_sender_committee(&db);
 
         // Create proposal first
         db.conn()
@@ -747,7 +816,7 @@ mod tests {
             timestamp: 1_700_000_000,
         };
 
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
 
         let status: String = db
             .conn()
@@ -758,6 +827,210 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "approved");
+    }
+
+    #[test]
+    fn legacy_proposal_resolution_requires_committee_of_the_owning_dao() {
+        let db = test_db();
+        insert_test_dao(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO governance_proposals (id, dao_id, title, category, proposer, status) \
+                 VALUES ('prop1', 'dao1', 'Test', 'policy', 'stake_test1', 'published')",
+                [],
+            )
+            .unwrap();
+        let resolution = |dao_id: &str| GovernanceAnnouncement {
+            event_type: GovernanceEventType::ProposalResolved {
+                proposal_id: "prop1".into(),
+                status: "approved".into(),
+                votes_for: 5,
+                votes_against: 0,
+                on_chain_tx: None,
+            },
+            dao_id: dao_id.into(),
+            timestamp: 1_700_000_000,
+        };
+
+        let error =
+            handle_legacy_governance_message(&db, &make_message(&resolution("dao1"))).unwrap_err();
+        assert!(error.contains("unauthorized"), "{error}");
+        make_sender_committee(&db);
+        let error =
+            handle_legacy_governance_message(&db, &make_message(&resolution("other"))).unwrap_err();
+        assert!(error.contains("belongs to DAO"), "{error}");
+
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM governance_proposals WHERE id = 'prop1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "published");
+    }
+
+    /// Production builds reject every governance event before any database
+    /// access, mirroring the taxonomy and Sentinel gossip handlers.
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    mod production {
+        use super::*;
+
+        fn governance_rows(db: &Database) -> Vec<String> {
+            [
+                "governance_daos",
+                "governance_dao_members",
+                "governance_elections",
+                "governance_election_nominees",
+                "governance_election_votes",
+                "governance_proposals",
+                "governance_proposal_votes",
+                "sync_log",
+            ]
+            .iter()
+            .flat_map(|table| {
+                let mut statement = db
+                    .conn()
+                    .prepare(&format!("SELECT * FROM {table}"))
+                    .unwrap();
+                let columns = statement.column_count();
+                statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{table}: {:?}", row.unwrap()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+        }
+
+        fn assert_rejected_without_mutation(db: &Database, announcement: &GovernanceAnnouncement) {
+            let before = governance_rows(db);
+            let error = handle_governance_message(db, &make_message(announcement)).unwrap_err();
+            assert!(error.contains("verified committee certificates"), "{error}");
+            assert_eq!(
+                governance_rows(db),
+                before,
+                "{:?} mutated governance state",
+                announcement.event_type
+            );
+        }
+
+        /// A DAO with an existing committee, a published proposal and an
+        /// election in voting with one accepted nominee.
+        fn populated_db() -> Database {
+            let db = test_db();
+            insert_test_dao(&db);
+            db.conn()
+                .execute_batch(
+                    "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
+                     VALUES ('dao1', 'stake_test1old', 'committee'); \
+                     INSERT INTO governance_proposals \
+                     (id, dao_id, title, category, proposer, status) \
+                     VALUES ('prop1', 'dao1', 'P', 'policy', 'stake_test1', 'published');",
+                )
+                .unwrap();
+            insert_voting_election(&db);
+            db
+        }
+
+        fn announcement(event_type: GovernanceEventType) -> GovernanceAnnouncement {
+            GovernanceAnnouncement {
+                event_type,
+                dao_id: "dao1".into(),
+                timestamp: 1_700_000_000,
+            }
+        }
+
+        #[test]
+        fn production_rejects_proposal_resolution_from_any_sender() {
+            let db = populated_db();
+            let resolution = announcement(GovernanceEventType::ProposalResolved {
+                proposal_id: "prop1".into(),
+                status: "approved".into(),
+                votes_for: 5,
+                votes_against: 0,
+                on_chain_tx: Some("tx".into()),
+            });
+
+            assert_rejected_without_mutation(&db, &resolution);
+            make_sender_committee(&db);
+            assert_rejected_without_mutation(&db, &resolution);
+        }
+
+        #[test]
+        fn production_rejects_committee_update_and_election_finalization() {
+            let db = populated_db();
+            make_sender_committee(&db);
+
+            assert_rejected_without_mutation(
+                &db,
+                &announcement(GovernanceEventType::CommitteeUpdated {
+                    members: vec!["stake_test1attacker".into()],
+                    on_chain_tx: None,
+                }),
+            );
+            assert_rejected_without_mutation(
+                &db,
+                &announcement(GovernanceEventType::ElectionFinalized {
+                    election_id: "elec1".into(),
+                    winner_nominee_ids: vec!["nom1".into()],
+                }),
+            );
+        }
+
+        #[test]
+        fn production_rejects_every_other_governance_event() {
+            let db = populated_db();
+            make_sender_committee(&db);
+
+            for event_type in [
+                GovernanceEventType::ProposalCreated {
+                    proposal_id: "prop2".into(),
+                    title: "T".into(),
+                    description: None,
+                    category: "policy".into(),
+                    proposer: "stake_test1proposer".into(),
+                },
+                GovernanceEventType::ElectionVoteRecorded {
+                    election_id: "elec1".into(),
+                    voter: "stake_test1proposer".into(),
+                    nominee_id: "nom1".into(),
+                },
+                GovernanceEventType::ProposalVoteRecorded {
+                    proposal_id: "prop1".into(),
+                    voter: "stake_test1proposer".into(),
+                    in_favor: true,
+                },
+                GovernanceEventType::ElectionOpened {
+                    election_id: "e2".into(),
+                    title: "T".into(),
+                    seats: 1,
+                    nominee_min_proficiency: "remember".into(),
+                    voter_min_proficiency: "remember".into(),
+                    nomination_end: None,
+                    voting_end: None,
+                },
+                GovernanceEventType::NomineeSubmitted {
+                    election_id: "elec1".into(),
+                    nominee_id: "nomX".into(),
+                    nominee: "stake_test1proposer".into(),
+                },
+                GovernanceEventType::NomineeAccepted {
+                    election_id: "elec1".into(),
+                    nominee_id: "nom1".into(),
+                },
+                GovernanceEventType::ElectionStarted {
+                    election_id: "elec1".into(),
+                },
+            ] {
+                assert_rejected_without_mutation(&db, &announcement(event_type));
+            }
+        }
     }
 
     #[test]
@@ -791,7 +1064,7 @@ mod tests {
         };
 
         // make_message sets stake_address to "stake_test1proposer" (a committee member)
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
 
         // Old members should be gone
         let old_count: i64 = db
@@ -840,7 +1113,7 @@ mod tests {
         };
 
         // make_message sets stake_address to "stake_test1proposer" — NOT in committee
-        let result = handle_governance_message(&db, &make_message(&ann));
+        let result = handle_legacy_governance_message(&db, &make_message(&ann));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unauthorized"));
 
@@ -880,7 +1153,7 @@ mod tests {
         };
 
         // Should succeed — sender is the chair
-        let result = handle_governance_message(&db, &make_message(&ann));
+        let result = handle_legacy_governance_message(&db, &make_message(&ann));
         assert!(result.is_ok());
     }
 
@@ -896,7 +1169,7 @@ mod tests {
             timestamp: 0,
         };
 
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_err());
     }
 
     /// Insert an election in the voting phase with one accepted nominee.
@@ -945,7 +1218,7 @@ mod tests {
 
         // make_message signs as "stake_test1proposer" — voter must match.
         let ann = election_vote_ann(&elec, &nom, "stake_test1proposer");
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
 
         let votes: i64 = db
             .conn()
@@ -980,7 +1253,7 @@ mod tests {
             "CREATE TRIGGER fail_tally BEFORE UPDATE OF votes_received ON governance_election_nominees \
              BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
         ).unwrap();
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_err());
         assert_eq!(
             db.conn()
                 .query_row("SELECT COUNT(*) FROM governance_election_votes", [], |r| {
@@ -990,8 +1263,8 @@ mod tests {
             0
         );
         db.conn().execute_batch("DROP TRIGGER fail_tally").unwrap();
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
         assert_eq!(
             db.conn()
                 .query_row(
@@ -1016,7 +1289,7 @@ mod tests {
              BEGIN SELECT RAISE(ABORT, 'injected log failure'); END;",
             )
             .unwrap();
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_err());
         assert_eq!(
             db.conn()
                 .query_row("SELECT COUNT(*) FROM governance_election_votes", [], |r| {
@@ -1037,8 +1310,8 @@ mod tests {
         );
         assert!(db.conn().is_autocommit());
         db.conn().execute_batch("DROP TRIGGER fail_log").unwrap();
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
         assert_eq!(
             db.conn()
                 .query_row(
@@ -1070,7 +1343,7 @@ mod tests {
              BEGIN SELECT RAISE(ABORT, 'injected log failure'); END;",
             )
             .unwrap();
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_err());
         let members: Vec<String> = db
             .conn()
             .prepare("SELECT stake_address FROM governance_dao_members WHERE dao_id = 'dao1'")
@@ -1103,7 +1376,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_err());
         assert_eq!(
             db.conn()
                 .query_row("SELECT COUNT(*) FROM governance_proposal_votes", [], |r| {
@@ -1113,8 +1386,8 @@ mod tests {
             0
         );
         db.conn().execute_batch("DROP TRIGGER fail_tally").unwrap();
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
         assert_eq!(
             db.conn()
                 .query_row(
@@ -1135,7 +1408,7 @@ mod tests {
 
         // voter ("stake_test1someoneelse") != gossip sender ("stake_test1proposer")
         let ann = election_vote_ann(&elec, &nom, "stake_test1someoneelse");
-        let result = handle_governance_message(&db, &make_message(&ann));
+        let result = handle_legacy_governance_message(&db, &make_message(&ann));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("does not match gossip sender"));
     }
@@ -1148,7 +1421,7 @@ mod tests {
 
         let ann = election_vote_ann("elec1", "nonexistent_nominee", "stake_test1proposer");
         // Graceful skip — no error, no vote row.
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_ok());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_ok());
         let count: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM governance_election_votes", [], |r| {
@@ -1165,9 +1438,9 @@ mod tests {
         let (elec, nom) = insert_voting_election(&db);
 
         let ann = election_vote_ann(&elec, &nom, "stake_test1proposer");
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
         // Same voter, same election — INSERT OR IGNORE, tally stays 1.
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
 
         let votes: i64 = db
             .conn()
@@ -1202,7 +1475,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
 
         let (vf, va): (i64, i64) = db
             .conn()
@@ -1238,7 +1511,7 @@ mod tests {
             timestamp: 1_700_000_000,
         };
         // Draft proposal — vote skipped gracefully.
-        assert!(handle_governance_message(&db, &make_message(&ann)).is_ok());
+        assert!(handle_legacy_governance_message(&db, &make_message(&ann)).is_ok());
         let count: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM governance_proposal_votes", [], |r| {
@@ -1278,7 +1551,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&ann)).unwrap();
 
         let phase: String = db
             .conn()
@@ -1309,7 +1582,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        let r = handle_governance_message(&db, &make_message(&ann));
+        let r = handle_legacy_governance_message(&db, &make_message(&ann));
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("unauthorized"));
     }
@@ -1339,7 +1612,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        handle_governance_message(&db, &make_message(&sub)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&sub)).unwrap();
 
         let accepted: bool = db
             .conn()
@@ -1360,7 +1633,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        handle_governance_message(&db, &make_message(&acc)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&acc)).unwrap();
 
         let accepted: bool = db
             .conn()
@@ -1393,7 +1666,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        assert!(handle_governance_message(&db, &make_message(&sub)).is_err());
+        assert!(handle_legacy_governance_message(&db, &make_message(&sub)).is_err());
     }
 
     #[test]
@@ -1416,7 +1689,7 @@ mod tests {
             dao_id: "dao1".into(),
             timestamp: 1_700_000_000,
         };
-        handle_governance_message(&db, &make_message(&started)).unwrap();
+        handle_legacy_governance_message(&db, &make_message(&started)).unwrap();
         let phase: String = db
             .conn()
             .query_row(
@@ -1446,7 +1719,7 @@ mod tests {
         };
 
         // Should succeed (graceful skip) but not insert the proposal
-        let result = handle_governance_message(&db, &make_message(&ann));
+        let result = handle_legacy_governance_message(&db, &make_message(&ann));
         assert!(result.is_ok());
 
         let count: i64 = db
@@ -1517,7 +1790,7 @@ mod tests {
         {
             let guard = arc.lock().unwrap();
             let dbref = guard.as_ref().unwrap();
-            handle_governance_message(dbref, &signed).expect("handle");
+            handle_legacy_governance_message(dbref, &signed).expect("handle");
 
             let votes: i64 = dbref
                 .conn()

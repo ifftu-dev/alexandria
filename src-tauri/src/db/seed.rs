@@ -47,7 +47,7 @@ fn seed_within_transaction(conn: &Connection) -> Result<bool, rusqlite::Error> {
     log::info!("Seeding database with demo taxonomy, courses, and governance data…");
 
     conn.execute_batch(SEED_SQL)?;
-    conn.execute_batch(BACKFILL_SQL)?;
+    execute_backfill_sql(conn)?;
 
     // Visual assets are applied via parameterized queries (not execute_batch)
     // because sqlite3_exec can silently fail on long SVG strings or emoji.
@@ -293,7 +293,8 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     // some tables already have rows but others don't.
     // NB: enrollments are intentionally never seeded (no auto-enrol), so they
     // can't be a backfill trigger — key off other demo tables instead.
-    if needs_backfill("governance_dao_members")
+    // Governance members are a trigger only where their demo rows are seeded.
+    if (legacy_governance_demo_enabled() && needs_backfill("governance_dao_members"))
         || needs_backfill("classrooms")
         || needs_backfill("video_chapters")
         || needs_backfill("opinions")
@@ -303,7 +304,7 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         || needs_backfill("completion_attestation_requirements")
     {
         log::info!("Backfilling demo data for new tables…");
-        conn.execute_batch(BACKFILL_SQL)?;
+        execute_backfill_sql(conn)?;
     }
 
     // Backfill thumbnails — runs every time so existing DBs that were
@@ -331,6 +332,29 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     migrate_demo_vc_blobs_in_place(conn)?;
 
     Ok(())
+}
+
+/// Apply the idempotent demo backfill. Legacy governance authority rows are
+/// included only where [`legacy_governance_demo_enabled`] allows them.
+fn execute_backfill_sql(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(BACKFILL_SQL)?;
+    if legacy_governance_demo_enabled() {
+        conn.execute_batch(LEGACY_GOVERNANCE_DEMO_SQL)?;
+    }
+    conn.execute_batch(BACKFILL_TAIL_SQL)
+}
+
+/// The app crate seeds legacy governance authority rows only in debug builds
+/// with `legacy-local-governance`. The CLI shares this file via `#[path]`
+/// and never seeds them.
+#[cfg(has_app_lib)]
+fn legacy_governance_demo_enabled() -> bool {
+    crate::domain::governance::legacy_local_governance_enabled()
+}
+
+#[cfg(not(has_app_lib))]
+fn legacy_governance_demo_enabled() -> bool {
+    false
 }
 
 /// Rewrite the seeded demo learner's VC blobs to the W3C VC v2 shape
@@ -1407,6 +1431,12 @@ ON CONFLICT DO NOTHING;
 --  removed with migration 040; both tables were dropped and will be
 --  reintroduced — repointed at credentials — in a follow-up session.)
 
+"##;
+
+/// Demo committee/chair members, finalized elections with winners, and
+/// resolved proposals. These rows carry legacy local governance authority, so
+/// they are seeded only by debug builds with `legacy-local-governance`.
+const LEGACY_GOVERNANCE_DEMO_SQL: &str = r##"
 -- ============================================================
 -- P4: GOVERNANCE (members, elections, proposals, votes)
 -- ============================================================
@@ -1516,7 +1546,9 @@ INSERT INTO governance_proposal_votes (id, proposal_id, voter, in_favor) VALUES
     ('pvote_017', 'prop_005', 'addr_seed_member_8',  0),
     ('pvote_018', 'prop_005', 'addr_seed_member_7',  1)
 ON CONFLICT DO NOTHING;
+"##;
 
+const BACKFILL_TAIL_SQL: &str = r##"
 -- ============================================================
 -- P5: CLASSROOMS
 -- ============================================================
@@ -2545,6 +2577,43 @@ mod tests {
             "SVG should start with <svg, got: {}",
             &svg[..40.min(svg.len())]
         );
+    }
+
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    #[test]
+    fn production_seed_and_backfill_grant_no_governance_authority() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        let conn = db.conn();
+        assert!(seed_if_empty(conn).unwrap());
+        conn.execute(
+            "INSERT INTO local_identity (id, stake_address, payment_address) \
+             VALUES (1, 'stake_test_user_1', 'addr_test_user_1')",
+            [],
+        )
+        .unwrap();
+        bind_current_user_to_seed_with_did(conn, Some("did:key:real-test")).unwrap();
+        // An existing database takes the backfill path.
+        assert!(!seed_if_empty(conn).unwrap());
+
+        for query in [
+            "SELECT COUNT(*) FROM governance_dao_members WHERE role IN ('committee', 'chair')",
+            "SELECT COUNT(*) FROM governance_elections",
+            "SELECT COUNT(*) FROM governance_election_nominees",
+            "SELECT COUNT(*) FROM governance_proposals",
+            "SELECT COUNT(*) FROM governance_proposal_votes",
+        ] {
+            assert_eq!(
+                conn.query_row(query, [], |r| r.get::<_, i64>(0)).unwrap(),
+                0,
+                "{query}"
+            );
+        }
+        // Neutral DAO scope rows stay for completion requirements and UI.
+        let daos: i64 = conn
+            .query_row("SELECT COUNT(*) FROM governance_daos", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(daos, 8);
     }
 
     #[test]

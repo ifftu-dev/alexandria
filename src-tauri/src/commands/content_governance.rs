@@ -2,16 +2,29 @@
 //! question banks): propose → (vote via governance) → publish → apply, plus a
 //! direct apply for received/ratified version docs (gossip inbound / import).
 //! Thin wrappers over [`crate::domain::content_ratification`].
+//!
+//! These commands accept caller-declared ratifiers and signatures and rely on
+//! local committee rows, so the authority-bearing implementations are compiled
+//! only for debug builds that explicitly enable `legacy-content-ratification`.
+//! Every other build retains the IPC names for compatibility but fails closed
+//! until content publication consumes a verified committee outcome certificate.
 
 use crate::profile::scope::ProfileState as State;
 
-use crate::crypto::wallet;
-use crate::db::{executor::DatabaseWorkload, Database};
-use crate::domain::content_ratification::{self as cr, ContentKind, PublishResult, VersionDoc};
-use crate::p2p::signing::sign_gossip_message;
-use crate::p2p::types::{TOPIC_GOAL_TEMPLATES, TOPIC_QUESTION_BANKS};
+#[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
+use crate::domain::content_ratification::LEGACY_CONTENT_RATIFICATION_DISABLED;
+use crate::domain::content_ratification::{PublishResult, VersionDoc};
 use crate::AppState;
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
+use crate::{
+    crypto::wallet,
+    db::{executor::DatabaseWorkload, Database},
+    domain::content_ratification::{self as cr, ContentKind},
+    p2p::signing::sign_gossip_message,
+    p2p::types::{TOPIC_GOAL_TEMPLATES, TOPIC_QUESTION_BANKS},
+};
 
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
 async fn content_governance_db<T, F>(
     state: &State<'_, AppState>,
     workload: DatabaseWorkload,
@@ -28,6 +41,7 @@ where
         .await
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
 fn topic_for_category(category: &str) -> Option<&'static str> {
     match category {
         "goal_template_change" => Some(TOPIC_GOAL_TEMPLATES),
@@ -36,6 +50,7 @@ fn topic_for_category(category: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
 fn proposer(conn: &rusqlite::Connection) -> Result<String, String> {
     conn.query_row(
         "SELECT stake_address FROM local_identity WHERE id = 1",
@@ -45,6 +60,7 @@ fn proposer(conn: &rusqlite::Connection) -> Result<String, String> {
     .map_err(|e| format!("no local identity: {e}"))
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
 async fn propose(
     state: &State<'_, AppState>,
     kind: ContentKind,
@@ -74,6 +90,7 @@ async fn propose(
     .await
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
 async fn publish(
     state: &State<'_, AppState>,
     proposal_id: String,
@@ -113,6 +130,7 @@ async fn publish(
     Ok(result)
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
 async fn wallet_for_broadcast(state: &State<'_, AppState>) -> Result<wallet::Wallet, String> {
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked")?;
@@ -129,15 +147,24 @@ pub async fn propose_goal_template_change(
     description: Option<String>,
     change_json: String,
 ) -> Result<String, String> {
-    propose(
-        &state,
-        ContentKind::GoalTemplate,
-        dao_id,
-        title,
-        description,
-        change_json,
-    )
-    .await
+    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
+    {
+        let _ = (state, dao_id, title, description, change_json);
+        Err(LEGACY_CONTENT_RATIFICATION_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
+    {
+        propose(
+            &state,
+            ContentKind::GoalTemplate,
+            dao_id,
+            title,
+            description,
+            change_json,
+        )
+        .await
+    }
 }
 
 #[tauri::command]
@@ -147,7 +174,16 @@ pub async fn publish_goal_template_ratification(
     ratified_by: Vec<String>,
     signature: String,
 ) -> Result<PublishResult, String> {
-    publish(&state, proposal_id, ratified_by, signature).await
+    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
+    {
+        let _ = (state, proposal_id, ratified_by, signature);
+        Err(LEGACY_CONTENT_RATIFICATION_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
+    {
+        publish(&state, proposal_id, ratified_by, signature).await
+    }
 }
 
 #[tauri::command]
@@ -158,15 +194,24 @@ pub async fn propose_question_bank_change(
     description: Option<String>,
     change_json: String,
 ) -> Result<String, String> {
-    propose(
-        &state,
-        ContentKind::QuestionBank,
-        dao_id,
-        title,
-        description,
-        change_json,
-    )
-    .await
+    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
+    {
+        let _ = (state, dao_id, title, description, change_json);
+        Err(LEGACY_CONTENT_RATIFICATION_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
+    {
+        propose(
+            &state,
+            ContentKind::QuestionBank,
+            dao_id,
+            title,
+            description,
+            change_json,
+        )
+        .await
+    }
 }
 
 #[tauri::command]
@@ -176,22 +221,40 @@ pub async fn publish_question_bank_ratification(
     ratified_by: Vec<String>,
     signature: String,
 ) -> Result<PublishResult, String> {
-    publish(&state, proposal_id, ratified_by, signature).await
+    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
+    {
+        let _ = (state, proposal_id, ratified_by, signature);
+        Err(LEGACY_CONTENT_RATIFICATION_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
+    {
+        publish(&state, proposal_id, ratified_by, signature).await
+    }
 }
 
 /// Apply a ratified version document (received over gossip, or imported).
-/// Idempotent; verifies nothing beyond structural validity — trust comes from
-/// the DAO signature the publishing node attached.
+/// Idempotent; verifies nothing beyond structural validity, so it exists only
+/// in the explicitly enabled development build.
 #[tauri::command]
 pub async fn apply_content_version(
     state: State<'_, AppState>,
     doc: VersionDoc,
 ) -> Result<usize, String> {
-    content_governance_db(
-        &state,
-        DatabaseWorkload::Background,
-        "content-governance.apply-version",
-        move |db| cr::apply_version_doc(db.conn(), &doc),
-    )
-    .await
+    #[cfg(not(all(debug_assertions, feature = "legacy-content-ratification")))]
+    {
+        let _ = (state, doc);
+        Err(LEGACY_CONTENT_RATIFICATION_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-content-ratification"))]
+    {
+        content_governance_db(
+            &state,
+            DatabaseWorkload::Background,
+            "content-governance.apply-version",
+            move |db| cr::apply_version_doc(db.conn(), &doc),
+        )
+        .await
+    }
 }

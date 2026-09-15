@@ -12,16 +12,29 @@
 //!   and stamps the proposal.
 //! - `apply_doc` upserts a received version document into the local tables
 //!   (used by `publish` and by the gossip inbound handler) — idempotent.
+//!
+//! The ratifier list and signature are caller-declared and committee checks
+//! read local rows, so propose/publish/apply are compiled only for tests and
+//! debug builds that explicitly enable `legacy-content-ratification`.
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 use crate::crypto::hash::entity_id;
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 use crate::domain::bloom::BloomLevel;
+
+/// Returned by production content-ratification IPC and gossip paths until
+/// publication consumes a verified committee outcome certificate.
+pub const LEGACY_CONTENT_RATIFICATION_DISABLED: &str =
+    "legacy content ratification is disabled pending verified committee certificates";
 
 /// Minimum proficiency to author an assessment for a skill: a credential in
 /// that skill at `analyze` or above. High enough to mean real competence, low
 /// enough that many proven learners qualify.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 const MIN_AUTHOR_LEVEL: BloomLevel = BloomLevel::Analyze;
 
 /// The two community-content kinds ratified through this module.
@@ -149,6 +162,7 @@ pub struct PublishResult {
 
 // ---- propose ------------------------------------------------------------
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 pub fn propose(
     conn: &Connection,
     kind: ContentKind,
@@ -220,6 +234,7 @@ pub fn propose(
 /// assessment for a skill cannot require a credential that only that
 /// assessment could produce, so the elected committee seeds it. Once
 /// assessments exist, proven peers carry the load.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 fn gate_question_bank_authorship(
     conn: &Connection,
     dao_id: &str,
@@ -265,6 +280,7 @@ fn gate_question_bank_authorship(
 }
 
 /// Whether `stake_address` is on the DAO's committee (or its chair).
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 fn proposer_is_committee(
     conn: &Connection,
     dao_id: &str,
@@ -283,7 +299,8 @@ fn proposer_is_committee(
 /// at or above `min_level`.
 ///
 /// Reads the Bloom rank from the credential's `credentialSubject.level`,
-/// which serialises as an integer 0..=5 matching [`BloomLevel::rank`].
+/// which serialises as an integer 0..=5 matching `BloomLevel::rank`.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 fn author_holds_skill(
     conn: &Connection,
     subject_did: &str,
@@ -307,6 +324,7 @@ fn author_holds_skill(
 /// to a subject field or a subject, never a single skill, so this walks
 /// skill → subject → subject_field to match. A `sentinel`-scoped DAO governs
 /// no skills and so authors no assessments.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 fn skill_in_dao_scope(conn: &Connection, dao_id: &str, skill_id: &str) -> Result<bool, String> {
     let (scope_type, scope_id): (String, String) = conn
         .query_row(
@@ -338,6 +356,7 @@ fn skill_in_dao_scope(conn: &Connection, dao_id: &str, skill_id: &str) -> Result
     }
 }
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 fn validate_change(kind: ContentKind, change_json: &str) -> Result<(), String> {
     match kind {
         ContentKind::GoalTemplate => {
@@ -354,6 +373,9 @@ fn validate_change(kind: ContentKind, change_json: &str) -> Result<(), String> {
 
 // ---- publish ------------------------------------------------------------
 
+/// Apply an approved proposal's change, record its version, and stamp the
+/// proposal atomically.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 pub fn publish(
     conn: &Connection,
     proposal_id: &str,
@@ -404,31 +426,34 @@ pub fn publish(
     let doc_json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
     let content_cid = hex::encode(crate::crypto::hash::blake2b_256(doc_json.as_bytes()));
 
-    let rows_applied = apply_change(conn, kind, &change_json)?;
+    let rows_applied = crate::db::with_transaction(conn, || {
+        let rows_applied = apply_change(conn, kind, &change_json)?;
 
-    conn.execute(
-        &format!(
-            "INSERT OR REPLACE INTO {} \
-             (version, content_cid, previous_cid, ratified_by, signature, published_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            kind.versions_table()
-        ),
-        params![
-            version,
-            content_cid,
-            previous_cid,
-            serde_json::to_string(ratified_by).unwrap_or_default(),
-            signature,
-            now,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+        conn.execute(
+            &format!(
+                "INSERT OR REPLACE INTO {} \
+                 (version, content_cid, previous_cid, ratified_by, signature, published_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                kind.versions_table()
+            ),
+            params![
+                version,
+                content_cid,
+                previous_cid,
+                serde_json::to_string(ratified_by).unwrap_or_default(),
+                signature,
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
 
-    conn.execute(
-        "UPDATE governance_proposals SET content_cid = ?1 WHERE id = ?2",
-        params![content_cid, proposal_id],
-    )
-    .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE governance_proposals SET content_cid = ?1 WHERE id = ?2",
+            params![content_cid, proposal_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(rows_applied)
+    })?;
 
     Ok(PublishResult {
         version,
@@ -442,34 +467,38 @@ pub fn publish(
 // ---- apply --------------------------------------------------------------
 
 /// Apply a received/ratified [`VersionDoc`] (from gossip) into local tables +
-/// record the version. Idempotent — INSERT OR REPLACE throughout.
+/// record the version atomically. Idempotent — INSERT OR REPLACE throughout.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 pub fn apply_version_doc(conn: &Connection, doc: &VersionDoc) -> Result<usize, String> {
     let kind = ContentKind::from_category(&doc.kind)
         .ok_or_else(|| format!("unknown content kind '{}'", doc.kind))?;
     let change_json = serde_json::to_string(&doc.content).map_err(|e| e.to_string())?;
     let doc_json = serde_json::to_string(doc).map_err(|e| e.to_string())?;
     let content_cid = hex::encode(crate::crypto::hash::blake2b_256(doc_json.as_bytes()));
-    let rows = apply_change(conn, kind, &change_json)?;
-    conn.execute(
-        &format!(
-            "INSERT OR REPLACE INTO {} \
-             (version, content_cid, previous_cid, ratified_by, signature, published_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            kind.versions_table()
-        ),
-        params![
-            doc.version,
-            content_cid,
-            doc.previous_cid,
-            serde_json::to_string(&doc.ratified_by).unwrap_or_default(),
-            doc.signature,
-            doc.ratified_at,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(rows)
+    crate::db::with_transaction(conn, || {
+        let rows = apply_change(conn, kind, &change_json)?;
+        conn.execute(
+            &format!(
+                "INSERT OR REPLACE INTO {} \
+                 (version, content_cid, previous_cid, ratified_by, signature, published_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                kind.versions_table()
+            ),
+            params![
+                doc.version,
+                content_cid,
+                doc.previous_cid,
+                serde_json::to_string(&doc.ratified_by).unwrap_or_default(),
+                doc.signature,
+                doc.ratified_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(rows)
+    })
 }
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-content-ratification")))]
 fn apply_change(conn: &Connection, kind: ContentKind, change_json: &str) -> Result<usize, String> {
     match kind {
         ContentKind::GoalTemplate => {
@@ -615,6 +644,49 @@ mod tests {
             })
             .unwrap();
         assert_eq!(v, 1);
+    }
+
+    #[test]
+    fn publish_rolls_back_content_and_version_before_retry() {
+        let conn = setup();
+        let change = r#"{"templates":[{"id":"gt_x","kind":"job_role","key":"data_scientist",
+            "label":"Data Scientist","skill_ids":["skill_stats"]}]}"#;
+        let pid = propose(
+            &conn,
+            ContentKind::GoalTemplate,
+            "dao1",
+            "Add DS role",
+            None,
+            change,
+            "stakeX",
+        )
+        .unwrap();
+        approve(&conn, &pid);
+        conn.execute_batch(
+            "CREATE TRIGGER fail_publish_stamp BEFORE UPDATE OF content_cid ON governance_proposals \
+             BEGIN SELECT RAISE(ABORT, 'injected publish stamp failure'); END;",
+        )
+        .unwrap();
+
+        let error = publish(&conn, &pid, &["m1".into()], "sig").unwrap_err();
+
+        assert!(error.contains("injected publish stamp failure"), "{error}");
+        assert!(conn.is_autocommit());
+        for table in ["goal_templates", "goal_template_versions"] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "partial publish survived in {table}");
+        }
+
+        conn.execute_batch("DROP TRIGGER fail_publish_stamp")
+            .unwrap();
+        assert_eq!(
+            publish(&conn, &pid, &["m1".into()], "sig")
+                .unwrap()
+                .rows_applied,
+            1
+        );
     }
 
     #[test]

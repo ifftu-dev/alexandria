@@ -7,24 +7,42 @@
 //!
 //! Port of `api/internal/handler/governance.go` (20 endpoints) adapted for
 //! local-first operation. Committee/admin checks use local identity.
+//!
+//! That local/operator election and proposal authority is not the approved
+//! verified-committee protocol. Its mutating implementations are compiled
+//! only for debug builds that explicitly enable `legacy-local-governance`;
+//! every other build keeps the IPC names registered but fails closed. The
+//! read-only DAO, election, proposal and queue-status queries stay available.
 
 use crate::profile::scope::ProfileState as State;
-use rusqlite::{params, Transaction, TransactionBehavior};
+use rusqlite::params;
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
+use rusqlite::{Transaction, TransactionBehavior};
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 use std::str::FromStr;
 
-use crate::cardano::onchain_queue;
-use crate::crypto::did::{derive_did_key, Did};
-use crate::crypto::hash::entity_id;
-use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
-use crate::db::governance::{record_election_vote, record_proposal_vote, VoteEvidence};
-use crate::domain::bloom::BloomLevel;
+#[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+use crate::domain::governance::LEGACY_GOVERNANCE_DISABLED;
 use crate::domain::governance::{
-    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, GovernanceAnnouncement,
-    GovernanceEventType, OpenElectionParams, Proposal, ProposalVote, SubmitProposalParams,
+    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, OpenElectionParams, Proposal,
+    ProposalVote, SubmitProposalParams,
 };
 use crate::AppState;
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+use crate::{
+    cardano::onchain_queue,
+    crypto::wallet,
+    db::governance::{record_election_vote, record_proposal_vote, VoteEvidence},
+    domain::governance::{GovernanceAnnouncement, GovernanceEventType},
+};
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
+use crate::{
+    crypto::did::{derive_did_key, Did},
+    crypto::hash::entity_id,
+    domain::bloom::BloomLevel,
+};
 
 async fn governance_db<T, F>(
     state: &State<'_, AppState>,
@@ -42,6 +60,7 @@ where
         .await
 }
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn governance_transaction<T>(
     db: &crate::db::Database,
     operation: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
@@ -58,6 +77,7 @@ fn governance_transaction<T>(
 /// callers can persist its signature + public key alongside the local
 /// row. Signing is synchronous; the actual broadcast is awaited after the
 /// caller has dropped its DB lock.
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 fn sign_governance_event(
     w: &wallet::Wallet,
     dao_id: &str,
@@ -79,6 +99,7 @@ fn sign_governance_event(
 
 /// Broadcast an already-signed gossip message via the P2P node, if one is
 /// running. Best-effort — never fails the parent command.
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 async fn broadcast_signed(state: &AppState, signed: &crate::p2p::types::SignedGossipMessage) {
     let node = state.p2p_node.lock().await;
     if let Some(ref n) = *node {
@@ -97,6 +118,7 @@ async fn broadcast_signed(state: &AppState, signed: &crate::p2p::types::SignedGo
 /// up-front gives a clear error instead of a silent drop on the receiver
 /// side. Being a registered user is a hard requirement to act on anything
 /// in Alexandria governance.
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 fn ensure_registered(conn: &rusqlite::Connection, w: &wallet::Wallet) -> Result<(), String> {
     let pubkey_hex = hex::encode(w.signing_key.verifying_key().to_bytes());
     let now = std::time::SystemTime::now()
@@ -117,6 +139,7 @@ fn ensure_registered(conn: &rusqlite::Connection, w: &wallet::Wallet) -> Result<
 
 /// Load the local wallet from the unlocked vault (needed to sign
 /// governance actions). Errors if the vault is locked.
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 async fn load_wallet(state: &AppState) -> Result<wallet::Wallet, String> {
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
@@ -126,9 +149,11 @@ async fn load_wallet(state: &AppState) -> Result<wallet::Wallet, String> {
 }
 
 /// Default proposal voting deadline: 14 days from approval.
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 const DEFAULT_VOTING_DAYS: i64 = 14;
 
 /// Evaluate the approved two-thirds proposal threshold exactly.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn has_two_thirds(votes_for: i64, votes_against: i64) -> Result<bool, String> {
     if votes_for < 0 || votes_against < 0 {
         return Err("proposal tallies cannot be negative".into());
@@ -138,6 +163,7 @@ fn has_two_thirds(votes_for: i64, votes_against: i64) -> Result<bool, String> {
     Ok(total > 0 && 3 * votes_for >= 2 * total)
 }
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn select_unambiguous_winners(
     ranked_nominees: &[(String, i64)],
     seats: i64,
@@ -174,6 +200,7 @@ fn select_unambiguous_winners(
 ///
 /// Returns Ok(()) if the check passes, or an Err with a human-readable
 /// message if the user lacks sufficient proficiency.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn check_proficiency(
     conn: &rusqlite::Connection,
     subject_did: &Did,
@@ -258,6 +285,7 @@ fn check_proficiency(
 
 /// Parse an optional ISO 8601 deadline string and check if it has passed.
 /// Returns Ok(()) if no deadline is set, or the deadline has not passed.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn check_before_deadline(deadline: Option<&str>, action: &str) -> Result<(), String> {
     if let Some(dl) = deadline {
         let parsed = chrono::DateTime::parse_from_rfc3339(dl)
@@ -271,6 +299,7 @@ fn check_before_deadline(deadline: Option<&str>, action: &str) -> Result<(), Str
 
 /// Parse an optional ISO 8601 deadline string and check if it has been reached.
 /// Returns Ok(()) if no deadline is set, or the deadline has been reached.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn check_after_deadline(deadline: Option<&str>, action: &str) -> Result<(), String> {
     if let Some(dl) = deadline {
         let parsed = chrono::DateTime::parse_from_rfc3339(dl)
@@ -286,6 +315,7 @@ fn check_after_deadline(deadline: Option<&str>, action: &str) -> Result<(), Stri
 
 /// Fire-and-forget enqueue for on-chain governance transactions.
 /// Logs a warning if enqueue fails but never fails the parent command.
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 fn try_enqueue(db: &crate::db::Database, action: &str, target_table: &str, target_id: &str) {
     let payload = serde_json::json!({ "action": action, "target_id": target_id }).to_string();
     if let Err(e) = onchain_queue::enqueue(db, action, &payload, target_table, target_id) {
@@ -572,7 +602,7 @@ async fn create_dao_legacy(
 
     // Persist the DAO + its on-chain links. The state token + datum land
     // at output #0 (the recipient), so that's the live state UTxO.
-    let dao_id = entity_id(&[&scope_type, &scope_id, &name]);
+    let dao_id = crate::crypto::hash::entity_id(&[&scope_type, &scope_id, &name]);
     let asset_name_hex = hex::encode(&asset_name);
     let dao_state_utxo = format!("{tx_hash}#0");
     let persisted_dao_id = dao_id.clone();
@@ -634,6 +664,23 @@ async fn create_dao_legacy(
 /// Open a new election for a DAO.
 #[tauri::command]
 pub async fn open_election(
+    state: State<'_, AppState>,
+    params: OpenElectionParams,
+) -> Result<Election, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, params);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        open_election_legacy(state, params).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn open_election_legacy(
     state: State<'_, AppState>,
     params: OpenElectionParams,
 ) -> Result<Election, String> {
@@ -827,6 +874,24 @@ pub async fn nominate(
     election_id: String,
     stake_address: String,
 ) -> Result<ElectionNominee, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, election_id, stake_address);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        nominate_legacy(state, election_id, stake_address).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn nominate_legacy(
+    state: State<'_, AppState>,
+    election_id: String,
+    stake_address: String,
+) -> Result<ElectionNominee, String> {
     // Self-nomination: the nominee is the local wallet (it signs).
     let _ = stake_address;
     let w = load_wallet(&state).await?;
@@ -917,6 +982,23 @@ pub async fn accept_nomination(
     state: State<'_, AppState>,
     nominee_id: String,
 ) -> Result<(), String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, nominee_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        accept_nomination_legacy(state, nominee_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn accept_nomination_legacy(
+    state: State<'_, AppState>,
+    nominee_id: String,
+) -> Result<(), String> {
     let w = load_wallet(&state).await?;
 
     let signed = governance_db(
@@ -992,6 +1074,23 @@ pub async fn accept_nomination(
 /// Transition an election from nomination to voting phase.
 #[tauri::command]
 pub async fn start_election_voting(
+    state: State<'_, AppState>,
+    election_id: String,
+) -> Result<(), String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, election_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        start_election_voting_legacy(state, election_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn start_election_voting_legacy(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<(), String> {
@@ -1072,6 +1171,25 @@ pub async fn start_election_voting(
 /// Cast a vote in an election (one vote per voter).
 #[tauri::command]
 pub async fn cast_election_vote(
+    state: State<'_, AppState>,
+    election_id: String,
+    voter: String,
+    nominee_id: String,
+) -> Result<ElectionVote, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, election_id, voter, nominee_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        cast_election_vote_legacy(state, election_id, voter, nominee_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn cast_election_vote_legacy(
     state: State<'_, AppState>,
     election_id: String,
     voter: String,
@@ -1207,6 +1325,23 @@ pub async fn finalize_election(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<Vec<ElectionNominee>, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, election_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        finalize_election_legacy(state, election_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn finalize_election_legacy(
+    state: State<'_, AppState>,
+    election_id: String,
+) -> Result<Vec<ElectionNominee>, String> {
     let w = load_wallet(&state).await?;
 
     let (nominees, signed) = governance_db(
@@ -1310,6 +1445,23 @@ pub async fn install_committee(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<Vec<DaoMember>, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, election_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        install_committee_legacy(state, election_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn install_committee_legacy(
+    state: State<'_, AppState>,
+    election_id: String,
+) -> Result<Vec<DaoMember>, String> {
     governance_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1330,6 +1482,23 @@ pub async fn install_committee(
 /// Submit a new proposal to a DAO.
 #[tauri::command]
 pub async fn submit_proposal(
+    state: State<'_, AppState>,
+    params: SubmitProposalParams,
+) -> Result<Proposal, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, params);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        submit_proposal_legacy(state, params).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn submit_proposal_legacy(
     state: State<'_, AppState>,
     params: SubmitProposalParams,
 ) -> Result<Proposal, String> {
@@ -1485,6 +1654,23 @@ pub async fn approve_proposal(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<Proposal, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, proposal_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        approve_proposal_legacy(state, proposal_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn approve_proposal_legacy(
+    state: State<'_, AppState>,
+    proposal_id: String,
+) -> Result<Proposal, String> {
     governance_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1528,6 +1714,23 @@ pub async fn cancel_proposal(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<(), String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, proposal_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        cancel_proposal_legacy(state, proposal_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn cancel_proposal_legacy(
+    state: State<'_, AppState>,
+    proposal_id: String,
+) -> Result<(), String> {
     governance_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1564,6 +1767,25 @@ pub async fn cancel_proposal(
 /// Cast a vote on a proposal (one vote per voter).
 #[tauri::command]
 pub async fn cast_proposal_vote(
+    state: State<'_, AppState>,
+    proposal_id: String,
+    voter: String,
+    in_favor: bool,
+) -> Result<ProposalVote, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, proposal_id, voter, in_favor);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        cast_proposal_vote_legacy(state, proposal_id, voter, in_favor).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn cast_proposal_vote_legacy(
     state: State<'_, AppState>,
     proposal_id: String,
     voter: String,
@@ -1683,6 +1905,23 @@ pub async fn resolve_proposal(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<Proposal, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    {
+        let _ = (state, proposal_id);
+        Err(LEGACY_GOVERNANCE_DISABLED.into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+    {
+        resolve_proposal_legacy(state, proposal_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
+async fn resolve_proposal_legacy(
+    state: State<'_, AppState>,
+    proposal_id: String,
+) -> Result<Proposal, String> {
     governance_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1776,6 +2015,7 @@ pub async fn retry_onchain_submission(
 
 // ---- Internal Helpers ----
 
+#[cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
 fn replace_elected_committee(
     conn: &rusqlite::Connection,
     election_id: &str,
@@ -1912,6 +2152,7 @@ fn query_nominees(
     Ok(nominees)
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-local-governance"))]
 fn query_proposal(conn: &rusqlite::Connection, proposal_id: &str) -> Result<Proposal, String> {
     conn.query_row(
         "SELECT id, dao_id, title, description, category, status, proposer, \
@@ -2469,5 +2710,192 @@ mod tests {
         assert_eq!(winners.len(), 2);
         assert_eq!(winners[0].1, 10); // nominee1 with 10 votes
         assert_eq!(winners[1].1, 8); // nominee3 with 8 votes
+    }
+
+    /// The registered governance and content-ratification IPC names fail
+    /// closed through real Tauri dispatch in builds without the legacy
+    /// features.
+    #[cfg(not(any(
+        all(debug_assertions, feature = "legacy-local-governance"),
+        all(debug_assertions, feature = "legacy-content-ratification")
+    )))]
+    mod ipc_stubs {
+        use std::sync::Arc;
+
+        use serde_json::json;
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime};
+
+        use crate::domain::content_ratification::LEGACY_CONTENT_RATIFICATION_DISABLED;
+        use crate::domain::governance::LEGACY_GOVERNANCE_DISABLED;
+        use crate::AppState;
+
+        fn app_state(directory: &std::path::Path) -> AppState {
+            let db = Arc::new(std::sync::Mutex::new(None));
+            AppState {
+                app_data_dir: directory.to_path_buf(),
+                profile_manager: Arc::new(
+                    crate::profile::ProfileManager::open(directory).expect("profile manager"),
+                ),
+                active: Arc::new(std::sync::RwLock::new(None)),
+                profile_operations: crate::profile::operations::ProfileOperations::default(),
+                tutoring: Arc::new(crate::TutoringManager::new()),
+                classroom: Arc::new(crate::ClassroomManager::new()),
+                #[cfg(grader)]
+                grader_runtime: Arc::new(
+                    crate::plugins::wasm_runtime::GraderRuntime::new().expect("grader"),
+                ),
+                last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
+                ipc_limiter: Arc::new(std::sync::Mutex::new(
+                    crate::commands::ratelimit::IpcRateLimiter::new(),
+                )),
+                evidence_staging: Arc::new(crate::sentinel::evidence::EvidenceStaging::new()),
+                db_executor: crate::db::executor::DatabaseExecutor::new(db.clone()),
+                db,
+                keystore: Arc::new(tokio::sync::Mutex::new(None)),
+                content_node: Arc::new(crate::content_store::node::ContentNode::new(
+                    &directory.join("unused-content"),
+                )),
+                resolver: Arc::new(tokio::sync::Mutex::new(None)),
+                discovery: Arc::new(crate::content_store::discovery::ContentDiscovery::new()),
+                p2p_node: Arc::new(tokio::sync::Mutex::new(None)),
+            }
+        }
+
+        async fn invoke(
+            webview: &tauri::WebviewWindow<MockRuntime>,
+            session: &str,
+            command: &str,
+            args: serde_json::Value,
+        ) -> Result<serde_json::Value, serde_json::Value> {
+            let mut headers = tauri::http::HeaderMap::new();
+            headers.insert(
+                "x-alexandria-profile-session",
+                session.parse().expect("header value"),
+            );
+            let webview = webview.clone();
+            let command = command.to_string();
+            tokio::task::spawn_blocking(move || {
+                get_ipc_response(
+                    &webview,
+                    tauri::webview::InvokeRequest {
+                        cmd: command,
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: if cfg!(any(target_os = "windows", target_os = "android")) {
+                            "http://tauri.localhost"
+                        } else {
+                            "tauri://localhost"
+                        }
+                        .parse()
+                        .expect("local URL"),
+                        body: tauri::ipc::InvokeBody::Json(args),
+                        headers,
+                        invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                    },
+                )
+                .map(|body| body.deserialize::<serde_json::Value>().expect("response"))
+            })
+            .await
+            .expect("IPC task")
+        }
+
+        #[tokio::test]
+        async fn legacy_governance_and_content_commands_return_the_disabled_error() {
+            let directory = tempfile::TempDir::new().expect("temporary app directory");
+            let state = app_state(directory.path());
+            let operations = state.profile_operations.clone();
+            let app = mock_builder()
+                .manage(state)
+                .invoke_handler(tauri::generate_handler![
+                    crate::commands::governance::open_election,
+                    crate::commands::governance::nominate,
+                    crate::commands::governance::accept_nomination,
+                    crate::commands::governance::start_election_voting,
+                    crate::commands::governance::cast_election_vote,
+                    crate::commands::governance::finalize_election,
+                    crate::commands::governance::install_committee,
+                    crate::commands::governance::submit_proposal,
+                    crate::commands::governance::approve_proposal,
+                    crate::commands::governance::cancel_proposal,
+                    crate::commands::governance::cast_proposal_vote,
+                    crate::commands::governance::resolve_proposal,
+                    crate::commands::content_governance::propose_goal_template_change,
+                    crate::commands::content_governance::publish_goal_template_ratification,
+                    crate::commands::content_governance::propose_question_bank_change,
+                    crate::commands::content_governance::publish_question_bank_ratification,
+                    crate::commands::content_governance::apply_content_version,
+                ])
+                .build(mock_context(noop_assets()))
+                .expect("mock app");
+            let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+                .build()
+                .expect("mock webview");
+            operations
+                .activate(async { Ok(()) }, async { Ok(()) })
+                .await
+                .expect("activate profile");
+            let session = operations.session().expect("session");
+
+            let governance = [
+                (
+                    "open_election",
+                    json!({"params": {"dao_id": "dao1", "title": "Election"}}),
+                ),
+                (
+                    "nominate",
+                    json!({"electionId": "e1", "stakeAddress": "stake"}),
+                ),
+                ("accept_nomination", json!({"nomineeId": "n1"})),
+                ("start_election_voting", json!({"electionId": "e1"})),
+                (
+                    "cast_election_vote",
+                    json!({"electionId": "e1", "voter": "stake", "nomineeId": "n1"}),
+                ),
+                ("finalize_election", json!({"electionId": "e1"})),
+                ("install_committee", json!({"electionId": "e1"})),
+                (
+                    "submit_proposal",
+                    json!({"params": {"dao_id": "dao1", "title": "P", "category": "policy"}}),
+                ),
+                ("approve_proposal", json!({"proposalId": "p1"})),
+                ("cancel_proposal", json!({"proposalId": "p1"})),
+                (
+                    "cast_proposal_vote",
+                    json!({"proposalId": "p1", "voter": "stake", "inFavor": true}),
+                ),
+                ("resolve_proposal", json!({"proposalId": "p1"})),
+            ];
+            for (command, args) in governance {
+                assert_eq!(
+                    invoke(&webview, &session, command, args).await,
+                    Err(json!(LEGACY_GOVERNANCE_DISABLED)),
+                    "{command}"
+                );
+            }
+
+            let proposal = json!({"daoId": "dao1", "title": "T", "changeJson": "{}"});
+            let publication = json!({"proposalId": "p1", "ratifiedBy": ["m1"], "signature": "sig"});
+            let content = [
+                ("propose_goal_template_change", proposal.clone()),
+                ("propose_question_bank_change", proposal),
+                ("publish_goal_template_ratification", publication.clone()),
+                ("publish_question_bank_ratification", publication),
+                (
+                    "apply_content_version",
+                    json!({"doc": {
+                        "kind": "question_bank_change", "version": 1, "previous_cid": null,
+                        "ratified_by": ["m1"], "ratified_at": "2026-01-01T00:00:00Z",
+                        "signature": "sig", "taxonomy_version": null, "content": {}
+                    }}),
+                ),
+            ];
+            for (command, args) in content {
+                assert_eq!(
+                    invoke(&webview, &session, command, args).await,
+                    Err(json!(LEGACY_CONTENT_RATIFICATION_DISABLED)),
+                    "{command}"
+                );
+            }
+        }
     }
 }

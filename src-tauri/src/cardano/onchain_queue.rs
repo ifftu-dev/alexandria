@@ -319,6 +319,13 @@ pub async fn process_queue(
     // above needs no signing key. The user `wallet` is unused here (votes
     // and nominations are off-chain gossip, not queued).
     let _ = wallet;
+    // Every queued action (finalized-election publication, committee
+    // install, proposal-outcome anchor) carries the legacy local/operator
+    // governance authority, so production builds none of them. Journaled
+    // items above still reconcile and confirm.
+    if !crate::domain::governance::legacy_local_governance_enabled() {
+        return Ok(recovered + confirmed);
+    }
     let operator = match super::operator::load_operator_key() {
         Some(op) => op,
         None => return Ok(recovered + confirmed),
@@ -533,12 +540,9 @@ async fn build_and_submit(
             .await?
         }
         "install_committee" => {
-            let mut d = read_install_data(db, &item.target_id)?;
-            // No registry-resolvable winners → install the operator as the
-            // sole committee so the DAO stays governable.
-            if d.committee_vkhs.is_empty() {
-                d.committee_vkhs = vec![operator.payment_key_hash()];
-            }
+            // The operator only pays for and signs the transaction; it is
+            // never substituted for an unresolvable elected committee.
+            let d = read_install_data(db, &item.target_id)?;
             let params = gov_onchain::InstallParams {
                 dao_state_utxo: (&d.dao_state_tx, d.dao_state_idx),
                 dao_state_lovelace: d.dao_state_lovelace,
@@ -749,26 +753,7 @@ fn read_install_data(
     let name_hex = name_hex.ok_or("DAO has no state-token name")?;
     let rep = rep.ok_or("DAO has no reputation policy")?;
 
-    // Winners → on-chain VKHs via the stake-pubkey registry.
-    let mut committee_vkhs = Vec::new();
-    {
-        let mut stmt = conn
-            .prepare(
-                "SELECT stake_address FROM governance_election_nominees \
-                 WHERE election_id = ?1 AND is_winner = 1",
-            )
-            .map_err(|e| e.to_string())?;
-        let winners: Vec<String> = stmt
-            .query_map(params![election_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        for w in winners {
-            if let Some(vkh) = super::gov_onchain::stake_to_vkh(conn, &w, now_secs) {
-                committee_vkhs.push(vkh);
-            }
-        }
-    }
+    let committee_vkhs = certified_committee_vkhs(conn, election_id, now_secs)?;
 
     Ok(InstallData {
         dao_state_tx,
@@ -785,6 +770,39 @@ fn read_install_data(
         election_ref_idx: 0,
         committee_vkhs,
     })
+}
+
+/// Resolve every election winner to an on-chain VKH via the stake-pubkey
+/// registry. Fails when there are no winners or any winner is unregistered:
+/// installing a partial committee, or the operator in its place, would grant
+/// authority nobody elected.
+fn certified_committee_vkhs(
+    conn: &rusqlite::Connection,
+    election_id: &str,
+    now_secs: i64,
+) -> Result<Vec<[u8; 28]>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT stake_address FROM governance_election_nominees \
+             WHERE election_id = ?1 AND is_winner = 1",
+        )
+        .map_err(|e| e.to_string())?;
+    let winners: Vec<String> = stmt
+        .query_map(params![election_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if winners.is_empty() {
+        return Err("cannot install committee: election has no winners".into());
+    }
+    winners
+        .iter()
+        .map(|winner| {
+            super::gov_onchain::stake_to_vkh(conn, winner, now_secs).ok_or_else(|| {
+                format!("cannot install committee: winner '{winner}' has no registered key")
+            })
+        })
+        .collect()
 }
 
 /// DAO state UTxOs are created with this min-ADA (see create_dao).
@@ -890,6 +908,58 @@ mod tests {
             last_error: None,
             confirmed_slot: (status == SubmissionStatus::Confirmed).then_some(42),
         }
+    }
+
+    #[cfg(not(all(debug_assertions, feature = "legacy-local-governance")))]
+    #[test]
+    fn production_queue_builds_no_governance_actions() {
+        assert!(!crate::domain::governance::legacy_local_governance_enabled());
+    }
+
+    #[test]
+    fn committee_install_never_falls_back_to_the_operator() {
+        let db = test_db();
+        db.conn()
+            .execute_batch(&format!(
+                "UPDATE governance_elections SET on_chain_tx = '{tx}' WHERE id = 'election';
+                 UPDATE governance_daos SET state_token_policy = '{hash}',
+                     state_token_name = '64616f', reputation_policy = '{hash}' WHERE id = 'dao';",
+                tx = "b".repeat(64),
+                hash = "00".repeat(28),
+            ))
+            .unwrap();
+        let db = std::sync::Arc::new(std::sync::Mutex::new(Some(db)));
+        let install = |db: &std::sync::Arc<std::sync::Mutex<Option<Database>>>| {
+            read_install_data(db, "election").map(|data| data.committee_vkhs)
+        };
+
+        let error = install(&db).expect_err("no winners must not install");
+        assert!(error.contains("no winners"), "{error}");
+
+        let execute = |sql: &str| {
+            db.lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .conn()
+                .execute_batch(sql)
+                .unwrap()
+        };
+        execute(
+            "INSERT INTO governance_election_nominees
+                 (id, election_id, stake_address, accepted, is_winner)
+             VALUES ('winner', 'election', 'stake_winner', 1, 1),
+                    ('unregistered', 'election', 'stake_unregistered', 1, 1);
+             INSERT INTO stake_pubkey_registry
+                 (stake_address, public_key_hex, valid_from, valid_until, source)
+             VALUES ('stake_winner', '11111111111111111111111111111111', 0, NULL, 'snapshot');",
+        );
+        let error = install(&db)
+            .expect_err("an unregistered winner must not be dropped from the committee");
+        assert!(error.contains("stake_unregistered"), "{error}");
+
+        execute("DELETE FROM governance_election_nominees WHERE id = 'unregistered'");
+        assert_eq!(install(&db).unwrap().len(), 1);
     }
 
     #[test]

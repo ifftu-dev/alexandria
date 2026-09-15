@@ -13,6 +13,11 @@
 //! the operator's deployment configures it; on every other node the key
 //! is absent and the queue simply skips admin actions.
 //!
+//! The key is a transaction signer, never a governance authority: the queue
+//! builds governance actions only in debug builds with
+//! `legacy-local-governance`, and a committee install fails rather than
+//! naming the operator when elected winners cannot be resolved.
+//!
 //! Configuration (checked in order):
 //!   * `OPERATOR_SKEY_PATH` — path to a cardano-cli signing-key file
 //!     (`PaymentSigningKeyShelley_ed25519`, a JSON envelope whose

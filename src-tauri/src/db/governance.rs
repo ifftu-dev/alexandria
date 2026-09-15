@@ -1,3 +1,7 @@
+//! Vote persistence for the legacy local governance paths, which are compiled
+//! only for tests and debug builds that enable `legacy-local-governance`.
+#![cfg(any(test, all(debug_assertions, feature = "legacy-local-governance")))]
+
 use rusqlite::{params, Transaction};
 
 use crate::crypto::hash::entity_id;
