@@ -16,7 +16,7 @@
 > schema remains only as pre-launch legacy storage pending migration D03.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and endorsement persistence, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
+**Last updated**: 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and explicit endorsement workflow, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
 
 ---
 

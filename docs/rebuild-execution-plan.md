@@ -28,15 +28,16 @@ package record. At this documentation checkpoint:
 | F04 | Verified | Proxy bypass closure and actual-workspace CI classification |
 | G01 | Source complete | CometBFT/ABCI spike and no-std verifier compile checks; target-runtime known-answer execution and G02 timing design remain |
 | T01 | Verified | `530831d`: challenge/escrow and arbitrary plugin-attestation authority retired; credential status lifecycle issuer-bound |
-| T02 | In progress | `f183607`: shared bounded endorsement verifier and author-signed course-document v2 policy; `758b09a`: exact enrollment/claim binding, verified endorsement import/status, migration-042 authority removal, and caller-supplied completion IPC retirement; `664b0b9`: typed pending credential verification and conclusive status handling; author/instructor UI, authenticated acquisition, and trust-state integration remain |
+| T02 | In progress | `f183607`: shared bounded endorsement verifier and author-signed course-document v2 policy; `758b09a`: exact enrollment/claim binding, verified endorsement import/status, migration-042 authority removal, and caller-supplied completion IPC retirement; `664b0b9`: typed pending credential verification and conclusive status handling; `5ce6f7e`: author policy editor plus explicit learner export/import and instructor review/sign UI; authenticated acquisition and trust-state integration remain |
 | N01 | In progress | `79d6688`: strict preprod profile and centralized trust/service contract; `26cb204`: immutable profile network identity; wire/service migration pending |
-| Documentation | Current through T02 typed-verification slice | Active architecture, protocol, schema, VC migration, verifier README/vectors, and skills docs describe migration 091, accepted/pending/rejected verification, and the remaining UI/trust-state work |
+| Documentation | Current through T02 explicit-artifact UI slice | Active architecture, protocol, schema, VC migration, verifier README/vectors, skills docs, and root README describe migration 091, accepted/pending/rejected verification, the manual endorsement workflow, and the remaining delivery/trust-state work |
 
-The next T02 slice adds the author policy and explicit endorsement review UI,
-then connects accepted endorsement thresholds to privilege-bearing trust state.
+The next T02 slice connects accepted endorsement thresholds to
+policy-qualified, privilege-bearing trust state.
 Authenticated addressed request delivery remains part of the hosted/headless
-integration; the current backend supports explicit request export, local
-signing, verified import, and status. Missing issuer-key or referenced status
+integration; the current app supports author policy editing, explicit request
+export, human review, local signing, verified import, and threshold status.
+Missing issuer-key or referenced status
 evidence now remains typed pending and cannot enter the active credential store.
 N01 wire migration can proceed independently,
 using separate sequential commits across the recorded service worktrees; deploy no
@@ -444,16 +445,20 @@ compiler, with that target previously green at F03.
 6. Preserve immediate offline self-claims. No requirement means self-attested completion; even if a learner verifies an assessment locally, the app must not manufacture an instructor signature.
 7. Build real instructor acquisition through authenticated addressed requests or an explicit sign/import workflow; a hosted instructor must verify the requested evidence and course binding before signing.
 
-**Implementation checkpoint (`664b0b9`).** Items 1–6 are implemented for the
+**Implementation checkpoint (`5ce6f7e`).** Items 1–6 are implemented for the
 backend path. Shared store adapters return `Found`, `Missing`, or `Unavailable`;
 credential results return `accept`, `pending`, or `reject` with stable reason
 codes. Bare status-bearing credentials and unresolved external issuers remain
 pending, database lookup failure remains unavailable, and import does not place
 pending credentials in the active table. Exact endorsement request export,
 local authorized signing, verified import, and threshold status implement the
-explicit artifact path in item 7. Author policy editing, human request review,
-authenticated addressed delivery, and promotion into privilege-bearing trust
-state remain.
+explicit artifact path in item 7. Authors can edit and save the policy that the
+next signed publication will carry. Learners can copy the exact request, paste
+a returned endorsement, and see verified threshold status; instructors must
+parse and inspect every bound fact before the local signing action is exposed.
+The current exchange is manual and does not authenticate the transport or
+recipient. Authenticated addressed delivery and promotion into
+policy-qualified privilege-bearing trust state remain.
 
 **Required tests:** unlisted attestor refused; malformed DID fails rather than bypassing consistency check; one attestor counts once; threshold bounds; altered subject/course/evidence/network fails; newer course requirements do not affect old completion; missing status/key binding is pending; offline self-claim succeeds without any network; instructor unavailable does not block local completion.
 

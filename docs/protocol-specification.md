@@ -355,7 +355,7 @@ documents remain readable and retain their original signing bytes; they cannot
 carry a completion policy. No policy means the completion is a learner
 self-claim.
 
-Migration 091 freezes the verified course-document CID, format version, and
+Migration 091 freezes the verified course-document CID, published course version, and
 canonical completion policy on each new enrollment. Completion claims bind that
 snapshot, the learner, the root, evidence, network, and exact enrollment. The
 registered claim path reconstructs gradeable evidence from persisted passing
@@ -365,9 +365,16 @@ The application can export the canonical endorsement request, sign it with an
 authorized local instructor key, import an endorsement only after shared
 verification, and report a distinct-attestor threshold. Migration 091 drops
 migration 042's mutable per-course requirement and raw transaction-hash
-signature tables without rebinding historical rows. The author policy editor,
-human review flow, authenticated addressed delivery, and use of a satisfied
-threshold in privilege-bearing trust decisions remain implementation work.
+signature tables without rebinding historical rows. The course composer edits
+the policy for the next signed publication and blocks publication while policy
+changes are unsaved. The learner completion surface exports the exact request,
+imports one signed artifact at a time through the verifier, and reports the
+accepted threshold. The instructor surface parses the request and displays its
+network, learner, course CID/version, root, evidence, and optional witness
+before enabling local signing. This is an explicit manual exchange; it does not
+authenticate delivery or the person presenting the request. Authenticated
+addressed delivery and use of a satisfied threshold in privilege-bearing trust
+decisions remain implementation work.
 
 ### 5.6 Credential Status Authority
 
