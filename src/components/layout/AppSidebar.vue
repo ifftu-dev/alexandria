@@ -31,7 +31,8 @@ const { isParent } = useAccountStatus()
 
 interface NavItem {
   path: string
-  labelKey: string
+  labelKey?: string
+  label?: string
   icon: string
 }
 
@@ -45,6 +46,7 @@ const LEARNER_NAV: NavItem[] = [
 
 const INSTRUCTOR_NAV: NavItem[] = [
   { path: '/instructor', labelKey: 'nav.primary.dashboard', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
+  { path: '/interviews', labelKey: 'nav.primary.interviews', icon: 'M8.25 6.75h7.5M8.25 10.5h7.5M8.25 14.25h4.5M6 21h12a2.25 2.25 0 002.25-2.25V5.25A2.25 2.25 0 0018 3H6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 006 21z' },
   { path: '/instructor/courses', labelKey: 'nav.primary.myCourses', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { path: '/instructor/inbox', labelKey: 'nav.primary.inbox', icon: 'M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z' },
   { path: '/skills', labelKey: 'nav.primary.skillsAndCredentials', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
@@ -158,7 +160,7 @@ const classroomPreviews = computed(() =>
           v-for="item in primaryNav"
           :key="item.path"
           :class="['sb-item', { 'sb-item--active': isActive(item.path) }]"
-          :title="collapsed ? $t(item.labelKey) : undefined"
+          :title="collapsed ? (item.label ?? (item.labelKey ? $t(item.labelKey) : '')) : undefined"
           @click="navigate(item.path)"
         >
           <svg v-if="item.icon" class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
@@ -169,7 +171,7 @@ const classroomPreviews = computed(() =>
             <circle cx="12" cy="12" r="4.5" />
             <circle cx="12" cy="12" r="0.75" fill="currentColor" />
           </svg>
-          <span class="sb-label">{{ $t(item.labelKey) }}</span>
+          <span class="sb-label">{{ item.label ?? (item.labelKey ? $t(item.labelKey) : '') }}</span>
           <span
             v-if="item.path === '/instructor/inbox' && inboxCount > 0 && !collapsed"
             class="ml-auto rounded-full bg-error px-1.5 text-[10px] font-bold leading-4 text-white"

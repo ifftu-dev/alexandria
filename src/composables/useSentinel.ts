@@ -946,7 +946,11 @@ export function useSentinel() {
   // Public API
   // =========================================================================
 
-  const start = async (enrollmentId: string | null, optInCamera = false) => {
+  const start = async (
+    enrollmentId: string | null,
+    optInCamera = false,
+    purpose: 'assessment' | 'interview' = 'assessment',
+  ) => {
     if (isActive.value) return
 
     cameraOptedIn.value = optInCamera
@@ -958,7 +962,7 @@ export function useSentinel() {
     }
 
     try {
-      const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId })
+      const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId, purpose })
       sessionId.value = response.session_id
       isActive.value = true
       sentinelDebug.active = true

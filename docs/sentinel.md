@@ -1,11 +1,11 @@
-# Sentinel — Assessment Integrity System
+# Sentinel — Assessment and Interview Integrity
 
-> Anti-cheat system for Alexandria that monitors learning-session integrity through multi-signal behavioral fingerprinting. Biometric and behavioural data is processed on-device and not persisted — only derived scores (0-1) and anomaly flags are stored locally. The single exception is learner-consented appeal evidence: on a *flagged* session, and only after the learner is shown the flag and explicitly chooses to keep it, the flagged snapshots' evidence is retained on-device for 14 days so they have something to contest with. Declining, or not answering, persists nothing. The one path by which anything more detailed reaches a server is a learner releasing it themselves to contest a flag; see [Review and adjudication](#review-and-adjudication).
+> On-device integrity system for Alexandria's learning, assessment, and interview surfaces. Biometric and behavioural data is processed on-device and not persisted — only derived scores (0-1) and anomaly flags are stored locally. The single exception is learner-consented **assessment appeal** evidence: on a *flagged assessment* session, and only after the learner is shown the flag and explicitly chooses to keep it, the flagged snapshots' evidence is retained on-device for 14 days so they have something to contest with. Interview-purpose sessions never enter this evidence-staging path. Declining, or not answering, persists nothing. The one path by which anything more detailed reaches a server is a learner releasing it themselves to contest an assessment flag; see [Review and adjudication](#review-and-adjudication).
 
 ## Design Principles
 
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored in the local database.
-2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
+2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals in assessment-purpose sessions. Interview-purpose findings do not suspend or end the live interview workflow.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
 4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!` or hot-swapped from a DAO-ratified CID. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
 5. **Incremental trust** — Behavioral profiles build over time. New users start with generous defaults; consistency scoring activates after 10+ samples.
@@ -80,7 +80,7 @@ All processing happens client-side. There is no server-side component in the app
 
 ### Client-Side (`useSentinel.ts`)
 
-- **Activation**: Starts when a learner opens the course player (enrolled) or begins any assessment attempt (standalone, with no enrollment); the active element context is updated as they navigate
+- **Activation**: Starts when a learner opens the course player (enrolled), begins any assessment attempt (standalone, with no enrollment), or an instructor starts a consented interview with Sentinel enabled. Interview monitoring observes the conductor device, preferring its interviewer participant and falling back to the candidate in a candidate-only plan.
 - **Snapshot interval**: Random 15-45 seconds
 - **Profile storage**: localStorage keyed by `sentinel_profile_{userId}_{deviceFp[0:16]}`
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
@@ -115,7 +115,14 @@ Session outcome determination:
 - **Flagged**: 1 critical OR 3+ warnings OR integrity < 0.40
 - **Suspended**: 2+ critical OR (1 critical + 2 warnings)
 
-**Where it runs:** the Rust backend re-evaluates status on every `integrity_submit_snapshot` and once more at `integrity_end_session`. Severity counters are denormalized on `integrity_sessions.critical_count` / `warning_count` for O(1) evaluation. Per-snapshot `anomaly_flags` are persisted as JSON on `integrity_snapshots.anomaly_flags` (migration 036). Status only promotes in severity mid-session (`active → flagged → suspended`); a clean session finalizes as `completed` at end.
+An integrity session also has a `purpose`. Assessment-purpose sessions use the
+outcomes above. While an interview-purpose session is live, any warning,
+critical finding, or sub-0.40 running score can promote it to `flagged`, but it
+is never promoted to `suspended` mid-interview and Sentinel does not stop the
+room. The final integrity row remains review context; it does not gate the
+interview assistant or make a hiring decision.
+
+**Where it runs:** the Rust backend re-evaluates status on every `integrity_submit_snapshot` and once more at `integrity_end_session`. Severity counters are denormalized on `integrity_sessions.critical_count` / `warning_count` for O(1) evaluation. Per-snapshot `anomaly_flags` are persisted as JSON on `integrity_snapshots.anomaly_flags` (migration 036). Assessment status only promotes in severity mid-session (`active → flagged → suspended`); interview status promotes at most to `flagged` while live. A clean session finalizes as `completed` at end.
 
 ### Trust Factor Integration
 
@@ -350,8 +357,9 @@ The issued credential carries the resolved `assuranceLevel` plus `commitmentRoot
 ## Database Schema
 
 ```sql
-integrity_sessions       -- One per learning session; assurance_level +
-                         --   commitment_root + anchor_ref (migration 061)
+integrity_sessions       -- One per monitored session; assurance_level +
+                         --   commitment_root + anchor_ref (migration 061),
+                         --   purpose=assessment|interview (migration 083)
   └── integrity_snapshots  -- Random-interval measurements, includes ai_paste_anomaly REAL (migration 044),
                          --   gaze_offscreen_ratio REAL (migration 060), commitment_hash (migration 061)
 integrity_attestations   -- Committee co-signatures per session (migration 061)
@@ -370,7 +378,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 
 | Command | Description |
 |---------|-------------|
-| `integrity_start_session` | Start integrity monitoring for a learning session; `enrollment_id` is optional (NULL for standalone assessment attempts) |
+| `integrity_start_session` | Start integrity monitoring; `enrollment_id` is optional and `purpose` defaults to `assessment` or accepts `interview` |
 | `integrity_get_session` | Get session with scores |
 | `integrity_end_session` | End session and compute final score |
 | `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`) |
@@ -426,6 +434,21 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 - `stop()` on unmount
 - `setCameraOptedIn(bool)` when the learner accepts/declines camera verification on an assessment element
 - A `setInterval(3000)` in `Player.vue` calls `sentinel.verifyFace(videoEl)` while the camera stream is live; the hidden `<video>` element is torn down on disable or unmount
+
+### Interview Assistant Integration
+
+The instructor-facing interview workspace calls
+`start(null, cameraOptedIn, 'interview')` only after the participant associated
+with the conductor device has recorded consent for Sentinel. Camera checks need
+the separate camera choice. It uses the same event buffers, native focus
+monitor, model pipeline, snapshot cadence, signal weights, and diagnostics as
+an assessment.
+
+The scope is local: Sentinel can observe only the conductor device. It does not
+silently activate on a remote candidate's device. Interview-purpose snapshots
+store derived scores and flags, but the backend does not stage their camera
+frames for the assessment appeal-evidence flow. See
+[Interview Assistant](interview-assistant.md#sentinel).
 
 ## Review and adjudication
 
@@ -616,3 +639,4 @@ These guarantees are architectural — they are enforced by the code structure, 
 6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern. The single path by which anything derived from a session reaches a server is a learner-initiated evidence release during an appeal — see [Review and adjudication](#review-and-adjudication). There is no automatic one, and no operator-initiated one.
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **DAO weights are bounded**: Incoming weights blobs are capped at 1 MiB (envelope/eval JSON) and 50 MiB (ONNX bytes); resolver round trips time out at 5 s. A malicious envelope cannot trigger unbounded download or memory allocation.
+9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.

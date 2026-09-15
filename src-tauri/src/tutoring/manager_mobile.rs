@@ -222,6 +222,7 @@ const CHAT_MAX_LENGTH: usize = 2000;
 
 /// Minimum interval between chat messages from the local user (ms).
 const CHAT_RATE_LIMIT_MS: u64 = 200;
+const TRANSCRIPT_PREFIX: &[u8] = b"ALXTR1";
 
 /// Interval for re-broadcasting our display name (seconds).
 const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
@@ -255,6 +256,15 @@ pub struct ChatMessage {
     pub timestamp: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TranscriptMessage {
+    sender: String,
+    sender_name: Option<String>,
+    text: String,
+    confidence: Option<f64>,
+    timestamp: u64,
+}
+
 // ── Name announcement protocol ─────────────────────────────────────
 
 /// A display name announcement broadcast over the `/names` gossip topic.
@@ -285,6 +295,15 @@ struct ChatMessageEvent {
     sender: String,
     sender_name: Option<String>,
     text: String,
+    timestamp: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TranscriptMessageEvent {
+    sender: String,
+    sender_name: Option<String>,
+    text: String,
+    confidence: Option<f64>,
     timestamp: u64,
 }
 
@@ -2269,6 +2288,43 @@ impl TutoringManager {
         Ok(())
     }
 
+    /// Broadcast a final transcript segment produced locally after the
+    /// participant explicitly enabled room captions.
+    pub async fn send_transcript(
+        &self,
+        text: String,
+        confidence: Option<f64>,
+    ) -> Result<(), String> {
+        if text.trim().is_empty() {
+            return Err("transcript text is required".into());
+        }
+        if text.len() > CHAT_MAX_LENGTH {
+            return Err(format!(
+                "transcript too long ({} bytes, max {CHAT_MAX_LENGTH})",
+                text.len()
+            ));
+        }
+        let inner = self.inner.lock().await;
+        let session = inner.as_ref().ok_or("not in a tutoring session")?;
+        let sender = session.chat_sender.as_ref().ok_or("chat not available")?;
+        let message = TranscriptMessage {
+            sender: session.our_node_id.clone(),
+            sender_name: Some(session.our_display_name.clone()),
+            text,
+            confidence: confidence.map(|value| value.clamp(0.0, 1.0)),
+            timestamp: Self::now_millis(),
+        };
+        let payload = postcard::to_stdvec(&message)
+            .map_err(|e| format!("failed to encode transcript: {e}"))?;
+        let mut encoded = Vec::with_capacity(TRANSCRIPT_PREFIX.len() + payload.len());
+        encoded.extend_from_slice(TRANSCRIPT_PREFIX);
+        encoded.extend_from_slice(&payload);
+        sender
+            .broadcast(Bytes::from(encoded))
+            .await
+            .map_err(|e| format!("failed to send transcript: {e}"))
+    }
+
     // ── Query ──────────────────────────────────────────────────────
 
     /// Get the current session status.
@@ -2585,6 +2641,28 @@ impl TutoringManager {
                     use futures::StreamExt;
                     while let Some(Ok(event)) = receiver.next().await {
                         if let iroh_gossip::api::Event::Received(msg) = event {
+                            if let Some(payload) = msg.content.strip_prefix(TRANSCRIPT_PREFIX) {
+                                match postcard::from_bytes::<TranscriptMessage>(payload) {
+                                    Ok(transcript) => {
+                                        if transcript.sender != our_id {
+                                            let _ = app_handle.emit(
+                                                "tutoring:transcript",
+                                                TranscriptMessageEvent {
+                                                    sender: transcript.sender,
+                                                    sender_name: transcript.sender_name,
+                                                    text: transcript.text,
+                                                    confidence: transcript.confidence,
+                                                    timestamp: transcript.timestamp,
+                                                },
+                                            );
+                                        }
+                                    }
+                                    Err(e) => log::warn!(
+                                        "tutoring: failed to decode transcript message: {e}"
+                                    ),
+                                }
+                                continue;
+                            }
                             match postcard::from_bytes::<ChatMessage>(&msg.content) {
                                 Ok(chat_msg) => {
                                     if chat_msg.sender == our_id {

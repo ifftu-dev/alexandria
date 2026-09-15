@@ -9,6 +9,12 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ### Changed
 
+- **Live tutoring now shares its session shell with interviews** — participant
+  tiles, media controls, and connection diagnostics use reusable components;
+  the existing ticket/QR invite, chat, audio-level, device-selection, and raw
+  diagnostic views remain available. Tutoring also gains opt-in, on-device-only
+  captions whose final text is shared with current encrypted-room peers and is
+  not persisted by tutoring.
 - **The developer CLI is now `alexandria`, renamed from `alex`** — the crate and
   the binary. `cargo test -p alex` becomes `cargo test -p alexandria`. Entries
   below this section name the binary as it was at the time and are left as
@@ -22,6 +28,13 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ### Added
 
+- **Local-first interview assistant** (migration 83) — Instructor mode can plan
+  standalone or sponsored-role interviews, record per-participant consent,
+  conduct the live call, persist an attributed transcript, track criteria,
+  receive deterministic follow-up suggestions, keep private notes, and edit or
+  export a summary. Interview data stays in the active profile's encrypted
+  database, expires on schedule, and exports pseudonymized without private
+  notes by default. Sentinel supports an observational `interview` purpose.
 - **`--json` on every command** — human output goes to stderr and the result
   document to stdout, so `alexandria --json … > out.json` captures exactly the
   result. Failures emit `{"error": …}` on stderr, letting a script tell a

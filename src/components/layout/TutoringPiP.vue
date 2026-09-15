@@ -33,7 +33,9 @@ onUnmounted(() => {
 })
 
 const isVisible = computed(() => {
-  return Boolean(sessionStatus.value) && route.name !== 'tutoring-session'
+  return Boolean(sessionStatus.value)
+    && route.name !== 'tutoring-session'
+    && route.name !== 'interview-session'
 })
 
 const sessionTitle = computed(() => sessionStatus.value?.session_title ?? t('tutoring.header.title'))

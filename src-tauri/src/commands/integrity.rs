@@ -18,7 +18,7 @@ use crate::AppState;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IntegritySession {
     pub id: String,
-    pub enrollment_id: String,
+    pub enrollment_id: Option<String>,
     pub status: String,
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
@@ -147,6 +147,7 @@ pub async fn integrity_start_session(
     // (e.g. a skill assessment not tied to a course) pass null and the session
     // is recorded with a NULL enrollment (the column is nullable).
     enrollment_id: Option<String>,
+    purpose: Option<String>,
 ) -> Result<StartSessionResponse, String> {
     let db_guard = state
         .db
@@ -155,13 +156,17 @@ pub async fn integrity_start_session(
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let seed = enrollment_id.as_deref().unwrap_or("standalone");
+    let purpose = purpose.unwrap_or_else(|| "assessment".to_owned());
+    if !matches!(purpose.as_str(), "assessment" | "interview") {
+        return Err(format!("invalid integrity session purpose: {purpose}"));
+    }
     let session_id = entity_id(&[seed, &chrono::Utc::now().to_rfc3339()]);
 
     db.conn()
         .execute(
-            "INSERT INTO integrity_sessions (id, enrollment_id, status)
-             VALUES (?1, ?2, 'active')",
-            params![session_id, enrollment_id],
+            "INSERT INTO integrity_sessions (id, enrollment_id, status, purpose)
+             VALUES (?1, ?2, 'active', ?3)",
+            params![session_id, enrollment_id, purpose],
         )
         .map_err(|e| e.to_string())?;
 
@@ -184,12 +189,12 @@ pub async fn integrity_submit_snapshot(
     // 'suspended' or 'completed' it stops accepting new data, but 'flagged'
     // sessions continue (a learner may recover or a single critical flag
     // may not be the final verdict).
-    let current_status: String = db
+    let (current_status, purpose): (String, String) = db
         .conn()
         .query_row(
-            "SELECT status FROM integrity_sessions WHERE id = ?1",
+            "SELECT status, purpose FROM integrity_sessions WHERE id = ?1",
             params![req.session_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
@@ -270,7 +275,7 @@ pub async fn integrity_submit_snapshot(
     // so this is where the parked camera frame is moved into staging. Staging is
     // memory-only: nothing reaches the database unless the learner is later
     // shown the flag and chooses to keep it. See `sentinel::evidence`.
-    if snap_critical > 0 || snap_warning > 0 {
+    if purpose == "assessment" && (snap_critical > 0 || snap_warning > 0) {
         state
             .evidence_staging
             .stage_last_frame(&req.session_id, &snapshot_id);
@@ -305,12 +310,21 @@ pub async fn integrity_submit_snapshot(
         )
         .map_err(|e| e.to_string())?;
 
-    let new_status = compute_outcome(
-        cumulative_critical,
-        cumulative_warning,
-        running_score.unwrap_or(1.0),
-        false,
-    );
+    let new_status = if purpose == "interview" {
+        if cumulative_critical > 0 || cumulative_warning > 0 || running_score.unwrap_or(1.0) < 0.40
+        {
+            "flagged"
+        } else {
+            "active"
+        }
+    } else {
+        compute_outcome(
+            cumulative_critical,
+            cumulative_warning,
+            running_score.unwrap_or(1.0),
+            false,
+        )
+    };
 
     // Only promote severity. Never demote (e.g. a recovering session stays
     // flagged until end_session). Terminal transitions happen in end_session.

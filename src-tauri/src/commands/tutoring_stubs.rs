@@ -129,6 +129,15 @@ pub async fn tutoring_send_chat(_text: String, _state: State<'_, AppState>) -> R
 }
 
 #[tauri::command]
+pub async fn tutoring_send_transcript(
+    _text: String,
+    _confidence: Option<f64>,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+#[tauri::command]
 pub async fn tutoring_status(
     _state: State<'_, AppState>,
 ) -> Result<Option<serde_json::Value>, String> {
