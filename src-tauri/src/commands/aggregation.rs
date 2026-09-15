@@ -19,7 +19,9 @@ use crate::aggregation::{
 };
 use crate::crypto::did::Did;
 use crate::db::executor::DatabaseWorkload;
-use crate::domain::vc::{CredentialType, ProvenanceTier, SkillClaim, VerifiableCredential};
+use crate::db::scoring_inputs::{scoring_input_fingerprint, verified_skill_inputs};
+use crate::domain::vc::{CredentialType, ProvenanceTier, VerifiableCredential};
+use crate::network_profile::embedded_preprod;
 use crate::AppState;
 
 /// Read a cached `DerivedSkillState` for `(subject, skill)` if one
@@ -44,50 +46,115 @@ fn get_derived_skill_state_in_transaction(
 ) -> Result<Option<DerivedSkillState>, String> {
     refresh_invalidated_states(conn, Some(subject_did.as_str()), now)?;
     let cfg = AggregationConfig::default();
+    let fingerprint =
+        scoring_input_fingerprint(conn, subject_did.as_str(), skill_id, &cfg.version)?;
 
-    // Cached lookup first — (subject, skill, version) PK gives O(1).
-    if let Some(state) = read_cached(conn, subject_did, skill_id, &cfg.version)? {
+    // A cached state is served only while its inputs are unchanged.
+    if let Some(state) = read_cached(conn, subject_did, skill_id, &cfg.version, &fingerprint)? {
         return Ok(Some(state));
     }
+    refresh_pair(conn, subject_did, skill_id, now, &cfg, &fingerprint)
+}
 
-    // Compute live, cache, and return.
-    let evidence = load_evidence_for(conn, subject_did, skill_id, &cfg)?;
+/// Recompute one pair from verified inputs and cache it with the fingerprint
+/// it was computed from. No verified input removes the cached state rather
+/// than leaving an old score behind.
+fn refresh_pair(
+    conn: &Connection,
+    subject: &Did,
+    skill_id: &str,
+    now: &str,
+    cfg: &AggregationConfig,
+    fingerprint: &str,
+) -> Result<Option<DerivedSkillState>, String> {
+    let evidence = load_evidence_for(conn, subject, skill_id, now, cfg)?;
     if evidence.is_empty() {
-        // No credentials at all ⇒ no state worth caching.
+        conn.execute(
+            "DELETE FROM derived_skill_states WHERE subject_did = ?1 AND skill_id = ?2",
+            params![subject.as_str(), skill_id],
+        )
+        .map_err(|e| e.to_string())?;
         return Ok(None);
     }
-    let state = aggregate_skill_state(subject_did, skill_id, &evidence, now, &cfg);
-    upsert_cached(conn, &state)?;
+    let state = aggregate_skill_state(subject, skill_id, &evidence, now, cfg);
+    upsert_cached(conn, &state, fingerprint)?;
     Ok(Some(state))
 }
 
-/// List every cached derived state, optionally filtered by subject.
-/// Live recomputation is the responsibility of `recompute_all`.
+/// Drop states from other calculation versions and recompute cached states
+/// whose inputs changed, so cached and direct readers agree.
+fn revalidate_cached_states(
+    conn: &Connection,
+    subject: Option<&str>,
+    now: &str,
+) -> Result<(), String> {
+    let cfg = AggregationConfig::default();
+    conn.execute(
+        "DELETE FROM derived_skill_states \
+         WHERE calculation_version != ?1 AND (?2 IS NULL OR subject_did = ?2)",
+        params![cfg.version, subject],
+    )
+    .map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT subject_did, skill_id, input_fingerprint FROM derived_skill_states \
+             WHERE ?1 IS NULL OR subject_did = ?1 ORDER BY subject_did, skill_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let cached = stmt
+        .query_map([subject], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    for (subject, skill, stored) in cached {
+        let did = Did(subject);
+        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)?;
+        if stored.as_deref() != Some(fingerprint.as_str()) {
+            refresh_pair(conn, &did, &skill, now, &cfg, &fingerprint)?;
+        }
+    }
+    Ok(())
+}
+
+/// List cached derived states, optionally filtered by subject. States are
+/// revalidated against their inputs, but pairs never computed are not
+/// computed here; live recomputation is the responsibility of `recompute_all`.
 pub fn list_derived_states_impl(
     conn: &Connection,
     subject_did: Option<&str>,
 ) -> Result<Vec<DerivedSkillState>, String> {
-    refresh_invalidated_states(conn, subject_did, &now_rfc3339())?;
-    let mut sql = String::from("SELECT state_json FROM derived_skill_states");
-    let mut args: Vec<String> = Vec::new();
-    if let Some(s) = subject_did {
-        sql.push_str(" WHERE subject_did = ?");
-        args.push(s.to_string());
-    }
-    sql.push_str(" ORDER BY subject_did, skill_id");
+    crate::db::with_transaction(conn, || {
+        let now = now_rfc3339();
+        refresh_invalidated_states(conn, subject_did, &now)?;
+        revalidate_cached_states(conn, subject_did, &now)?;
+        let mut sql = String::from("SELECT state_json FROM derived_skill_states");
+        let mut args: Vec<String> = Vec::new();
+        if let Some(s) = subject_did {
+            sql.push_str(" WHERE subject_did = ?");
+            args.push(s.to_string());
+        }
+        sql.push_str(" ORDER BY subject_did, skill_id");
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(args.iter()), |r| {
-            r.get::<_, String>(0)
-        })
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for r in rows {
-        let json = r.map_err(|e| e.to_string())?;
-        out.push(serde_json::from_str(&json).map_err(|e| e.to_string())?);
-    }
-    Ok(out)
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for r in rows {
+            let json = r.map_err(|e| e.to_string())?;
+            out.push(serde_json::from_str(&json).map_err(|e| e.to_string())?);
+        }
+        Ok(out)
+    })
 }
 
 /// Recompute every (subject, skill) pair present in the credentials
@@ -99,10 +166,20 @@ pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
 
 fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, String> {
     refresh_invalidated_states(conn, None, now)?;
+    let cfg = AggregationConfig::default();
+    conn.execute(
+        "DELETE FROM derived_skill_states WHERE calculation_version != ?1",
+        params![cfg.version],
+    )
+    .map_err(|e| e.to_string())?;
+    // Cached pairs are included so a pair whose inputs all disappeared is
+    // removed rather than left with its old score.
     let mut stmt = conn
         .prepare(
-            "SELECT DISTINCT subject_did, skill_id FROM scoring_credentials \
-             WHERE skill_id IS NOT NULL AND revoked = 0",
+            "SELECT subject_did, skill_id FROM scoring_credentials \
+             WHERE skill_id IS NOT NULL AND revoked = 0 \
+             UNION SELECT subject_did, skill_id FROM derived_skill_states \
+             ORDER BY 1, 2",
         )
         .map_err(|e| e.to_string())?;
     let pairs: Vec<(String, String)> = stmt
@@ -110,18 +187,15 @@ fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, Str
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    drop(stmt);
 
-    let cfg = AggregationConfig::default();
     let mut count = 0u32;
     for (subject, skill) in pairs {
         let did = Did(subject);
-        let evidence = load_evidence_for(conn, &did, &skill, &cfg)?;
-        if evidence.is_empty() {
-            continue;
+        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)?;
+        if refresh_pair(conn, &did, &skill, now, &cfg, &fingerprint)?.is_some() {
+            count += 1;
         }
-        let state = aggregate_skill_state(&did, &skill, &evidence, now, &cfg);
-        upsert_cached(conn, &state)?;
-        count += 1;
     }
     Ok(count)
 }
@@ -158,13 +232,8 @@ pub(crate) fn refresh_invalidated_states(
     let cfg = AggregationConfig::default();
     for (subject, skill) in pairs {
         let did = Did(subject);
-        let evidence = load_evidence_for(conn, &did, &skill, &cfg)?;
-        if !evidence.is_empty() {
-            upsert_cached(
-                conn,
-                &aggregate_skill_state(&did, &skill, &evidence, now, &cfg),
-            )?;
-        }
+        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)?;
+        refresh_pair(conn, &did, &skill, now, &cfg, &fingerprint)?;
         conn.execute(
             "DELETE FROM derived_skill_refresh_queue WHERE subject_did = ?1 AND skill_id = ?2",
             params![did.as_str(), skill],
@@ -177,64 +246,50 @@ pub(crate) fn refresh_invalidated_states(
     Ok(())
 }
 
-/// Load every accepted credential matching (subject, skill) and turn
-/// each into an `AggregationInput`. Revoked / non-skill rows are
-/// excluded by the SQL. The quality factors (rubric / proctoring /
+/// Turn the verified inputs for (subject, skill) into `AggregationInput`s.
+/// Only credentials that verify at `verification_time` and whose signed
+/// subject, skill and id match their row are scored (see
+/// `db::scoring_inputs`). The quality factors (rubric / proctoring /
 /// traceability) are derived from the claim's provenance tier via
 /// `config.quality_triple`; a claim with no provenance resolves to
-/// `(1.0, 1.0, 1.0)`, reproducing the original behavior exactly.
+/// `(1.0, 1.0, 1.0)`.
 fn load_evidence_for(
     conn: &Connection,
     subject: &Did,
     skill_id: &str,
+    verification_time: &str,
     config: &AggregationConfig,
 ) -> Result<Vec<AggregationInput>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, signed_vc_json FROM scoring_credentials \
-             WHERE subject_did = ?1 AND skill_id = ?2 AND revoked = 0 \
-             ORDER BY issuance_date",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![subject.as_str(), skill_id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    let network_id = &embedded_preprod()
+        .map_err(|error| error.to_string())?
+        .network_id;
+    let inputs = verified_skill_inputs(
+        conn,
+        subject.as_str(),
+        skill_id,
+        verification_time,
+        network_id,
+    )?;
+    Ok(inputs
+        .into_iter()
+        .map(|input| {
+            let self_issued = input.self_issued();
+            let credential_type = parse_credential_type(&input.credential);
+            let (rubric, proctoring, traceability) = config.quality_triple(input.claim.provenance);
+            AggregationInput {
+                credential_id: input.credential_id,
+                issuer: input.credential.issuer,
+                credential_type,
+                raw_score: input.claim.score.clamp(0.0, 1.0),
+                issuance_time: input.credential.valid_from,
+                expiration_time: input.credential.valid_until,
+                rubric_completeness: rubric,
+                proctoring_reliability: proctoring,
+                evidence_traceability: traceability,
+                self_issued,
+            }
         })
-        .map_err(|e| e.to_string())?;
-
-    let mut out = Vec::new();
-    for r in rows {
-        let (id, json) = r.map_err(|e| e.to_string())?;
-        let vc: VerifiableCredential = match serde_json::from_str(&json) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let credential_type = parse_credential_type(&vc);
-        // Read the SkillClaim out of the subject's inline properties.
-        // Non-skill credentials are filtered by the SQL `skill_id`
-        // predicate; this is a defensive guard for any oddly-shaped row.
-        let claim = match SkillClaim::extract(&vc.credential_subject) {
-            Some(s) => s,
-            None => continue,
-        };
-        let raw_score = claim.score.clamp(0.0, 1.0);
-        // Quality factors derive from the claim's provenance tier; a claim
-        // with no provenance resolves to (1.0, 1.0, 1.0) — identical to the
-        // pre-provenance behavior.
-        let (rubric, proctoring, traceability) = config.quality_triple(claim.provenance);
-        out.push(AggregationInput {
-            credential_id: id,
-            issuer: vc.issuer,
-            credential_type,
-            raw_score,
-            issuance_time: vc.valid_from,
-            expiration_time: vc.valid_until,
-            rubric_completeness: rubric,
-            proctoring_reliability: proctoring,
-            evidence_traceability: traceability,
-        });
-    }
-    Ok(out)
+        .collect())
 }
 
 /// `vc.type_` is `["VerifiableCredential", "<class>"]` per §7. Pull
@@ -258,12 +313,14 @@ fn read_cached(
     subject: &Did,
     skill_id: &str,
     version: &str,
+    fingerprint: &str,
 ) -> Result<Option<DerivedSkillState>, String> {
     let row: Option<String> = conn
         .query_row(
             "SELECT state_json FROM derived_skill_states \
-             WHERE subject_did = ?1 AND skill_id = ?2 AND calculation_version = ?3",
-            params![subject.as_str(), skill_id, version],
+             WHERE subject_did = ?1 AND skill_id = ?2 AND calculation_version = ?3 \
+               AND input_fingerprint = ?4",
+            params![subject.as_str(), skill_id, version, fingerprint],
             |r| r.get(0),
         )
         .optional()
@@ -274,7 +331,11 @@ fn read_cached(
     }
 }
 
-fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), String> {
+fn upsert_cached(
+    conn: &Connection,
+    state: &DerivedSkillState,
+    fingerprint: &str,
+) -> Result<(), String> {
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
     let dominant_provenance =
         dominant_provenance_for(conn, state.subject.as_str(), &state.skill_id);
@@ -282,9 +343,11 @@ fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), Str
         "INSERT INTO derived_skill_states \
          (subject_did, skill_id, calculation_version, raw_score, confidence, \
           trust_score, level, evidence_mass, unique_issuer_clusters, \
-          active_evidence_count, state_json, computed_at, dominant_provenance) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+          active_evidence_count, state_json, computed_at, dominant_provenance, \
+          input_fingerprint) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
          ON CONFLICT(subject_did, skill_id, calculation_version) DO UPDATE SET \
+            input_fingerprint = excluded.input_fingerprint, \
             raw_score = excluded.raw_score, \
             confidence = excluded.confidence, \
             trust_score = excluded.trust_score, \
@@ -309,6 +372,7 @@ fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), Str
             json,
             state.computed_at,
             dominant_provenance,
+            fingerprint,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -576,6 +640,86 @@ mod tests {
             .unwrap()
             .expect("re-call");
         assert_eq!(first.raw_score, second.raw_score);
+    }
+
+    fn cached_rows(db: &Database, subject: &Did, skill: &str) -> i64 {
+        db.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM derived_skill_states \
+                 WHERE subject_did = ?1 AND skill_id = ?2",
+                params![subject.as_str(), skill],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn revoking_the_last_input_removes_the_cached_state_for_every_reader() {
+        let (db, subject, skill) = setup_with("skill_revoked", 0.8);
+        assert!(
+            get_derived_skill_state_impl(db.conn(), &subject, &skill, NOW)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(cached_rows(&db, &subject, &skill), 1);
+
+        db.conn()
+            .execute("UPDATE credentials SET revoked = 1", [])
+            .unwrap();
+
+        // The cached reader notices the changed inputs instead of serving the
+        // old score, and agrees with a direct recomputation.
+        assert!(list_derived_states_impl(db.conn(), Some(subject.as_str()))
+            .unwrap()
+            .is_empty());
+        assert_eq!(cached_rows(&db, &subject, &skill), 0);
+        assert!(
+            get_derived_skill_state_impl(db.conn(), &subject, &skill, NOW)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(recompute_all_impl(db.conn(), NOW).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_row_whose_signed_body_was_altered_is_not_scored() {
+        let (db, subject, skill) = setup_with("skill_tampered", 0.3);
+        let before = get_derived_skill_state_impl(db.conn(), &subject, &skill, NOW)
+            .unwrap()
+            .expect("verified state");
+
+        db.conn()
+            .execute(
+                "UPDATE credentials SET signed_vc_json = \
+                 json_set(signed_vc_json, '$.credentialSubject.score', 1.0)",
+                [],
+            )
+            .unwrap();
+
+        assert!(before.raw_score < 0.5);
+        assert!(
+            get_derived_skill_state_impl(db.conn(), &subject, &skill, NOW)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(cached_rows(&db, &subject, &skill), 0);
+    }
+
+    #[test]
+    fn stale_cached_states_from_other_versions_are_dropped() {
+        let (db, subject, skill) = setup_with("skill_versions", 0.8);
+        recompute_all_impl(db.conn(), NOW).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE derived_skill_states SET calculation_version = 'retired'",
+                [],
+            )
+            .unwrap();
+
+        let states = list_derived_states_impl(db.conn(), Some(subject.as_str())).unwrap();
+
+        assert!(states.is_empty());
+        assert_eq!(cached_rows(&db, &subject, &skill), 0);
     }
 
     #[test]

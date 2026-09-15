@@ -1340,6 +1340,8 @@ mod tests {
             .is_empty());
         let state = super::super::aggregation::list_derived_states_impl(db.conn(), None).unwrap();
         assert_eq!(state.len(), 1);
-        assert_eq!(state[0].unique_issuer_clusters, 1);
+        // The learner's own completion claim is scored but is not independent
+        // corroboration, so it contributes no issuer cluster.
+        assert_eq!(state[0].unique_issuer_clusters, 0);
     }
 }

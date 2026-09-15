@@ -119,6 +119,7 @@ mod tests {
             rubric_completeness: rubric,
             proctoring_reliability: proctor,
             evidence_traceability: trace,
+            self_issued: false,
         }
     }
 

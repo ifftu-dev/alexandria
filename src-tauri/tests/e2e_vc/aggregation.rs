@@ -19,6 +19,7 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
             rubric_completeness: 0.92,
             proctoring_reliability: 0.90,
             evidence_traceability: 0.95,
+            self_issued: false,
         },
         AggregationInput {
             credential_id: "ev2".into(),
@@ -30,6 +31,7 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
             rubric_completeness: 0.88,
             proctoring_reliability: 0.85,
             evidence_traceability: 0.90,
+            self_issued: false,
         },
         AggregationInput {
             credential_id: "ev3".into(),
@@ -41,6 +43,7 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
             rubric_completeness: 0.70,
             proctoring_reliability: 0.50,
             evidence_traceability: 0.80,
+            self_issued: false,
         },
     ]
 }
@@ -87,11 +90,12 @@ async fn worked_example_26_yields_level_5() {
         &AggregationConfig::default(),
     );
     assert_eq!(state.level, 5);
-    // Config version bumped to 1.1 when provenance-weighted quality landed
-    // (a config change requires a new calculation_version). The worked
-    // example itself is unaffected — its evidence carries no provenance, so
-    // quality resolves to (1,1,1) and the derived level is unchanged.
-    assert_eq!(state.calculation_version, "1.1");
+    // Config version 1.1 added provenance-weighted quality; 1.2 stopped
+    // self-issued claims counting as independent issuer clusters (a rule
+    // change requires a new calculation_version). The worked example is
+    // unaffected: its evidence carries no provenance and no self-issued
+    // claims, so quality resolves to (1,1,1) and the derived level holds.
+    assert_eq!(state.calculation_version, "1.2");
 }
 
 #[tokio::test]

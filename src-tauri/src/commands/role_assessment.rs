@@ -292,12 +292,11 @@ pub fn issue_role_credential_impl(
     // Issue under the organisation's own DID, not the caller's personal one.
     //
     // This is what makes the credential independent evidence. Aggregation
-    // weighs a skill by how many *distinct* issuer clusters back it
-    // (`unique_issuer_clusters`); a learner's own self-issued assessment
-    // credentials all share one cluster and so cannot raise confidence past a
-    // structural cap. An organisation issuing under its own stable DID is a
-    // second, independent cluster — the thing an employer is actually paying
-    // for. Using the caller's personal DID here would collapse every org this
+    // weighs a skill by how many *distinct* independent issuer clusters back
+    // it (`unique_issuer_clusters`); a learner's own self-issued assessment
+    // credentials are scored but add no independent cluster at all. An
+    // organisation issuing under its own stable DID is an independent
+    // cluster — the thing an employer is actually paying for. Using the caller's personal DID here would collapse every org this
     // person administers into one issuer and defeat that.
     //
     // The caller must hold the org's key: an org's DID defaults to its
@@ -806,10 +805,10 @@ mod tests {
 
     #[test]
     fn an_org_credential_is_a_distinct_issuer_cluster_from_self_assessment() {
-        // The payoff finding 1 predicted: a learner's own assessment
-        // credentials share one issuer cluster and cannot lift confidence past
-        // a cap, but an org-issued role credential is a second, independent
-        // cluster — so it raises the count aggregation weighs.
+        // A learner's own assessment credentials are scored but are not
+        // corroboration, so they add no independent issuer cluster. An
+        // org-issued skill credential is an independent cluster, so it raises
+        // the count aggregation weighs.
         use crate::commands::aggregation::recompute_all_impl;
         use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
         use crate::domain::vc::SkillClaim;
@@ -880,7 +879,11 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(self_only, 1, "self-issued credentials are one cluster");
+        assert_eq!(
+            self_only, 0,
+            "self-issued credentials add no independent cluster"
+        );
+        assert_eq!(with_org, 1, "the org issuer is one independent cluster");
         assert!(
             with_org > self_only,
             "an independent org issuer must raise the cluster count: {with_org} !> {self_only}"

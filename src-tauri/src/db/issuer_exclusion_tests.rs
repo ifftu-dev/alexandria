@@ -101,7 +101,8 @@ fn exact_late_match_removes_only_public_derived_evidence_and_repairs_caches() {
     let before = get_derived_skill_state_impl(db.conn(), &subject, "skill", BEFORE)
         .unwrap()
         .unwrap();
-    assert_eq!(before.unique_issuer_clusters, 3);
+    // The learner's own claim is scored but adds no independent cluster.
+    assert_eq!(before.unique_issuer_clusters, 2);
     recognize(&db);
     let hidden: i64 = db
         .conn()
@@ -115,7 +116,7 @@ fn exact_late_match_removes_only_public_derived_evidence_and_repairs_caches() {
     let after = get_derived_skill_state_impl(db.conn(), &subject, "skill", AFTER)
         .unwrap()
         .unwrap();
-    assert_eq!(after.unique_issuer_clusters, 2);
+    assert_eq!(after.unique_issuer_clusters, 1);
     assert_eq!(after.active_evidence_count, 2);
     assert!(after.confidence < before.confidence);
     refresh_invalidated(db.conn()).unwrap();
@@ -238,12 +239,14 @@ fn failed_cache_repair_keeps_refresh_work_and_never_restores_stale_score() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_history")
         .unwrap();
+    // Only the learner's own claim remains: it is scored but is not an
+    // independent issuer cluster.
     assert_eq!(
         get_derived_skill_state_impl(db.conn(), &subject, "skill", AFTER)
             .unwrap()
             .unwrap()
             .unique_issuer_clusters,
-        1
+        0
     );
 }
 

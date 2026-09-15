@@ -29,15 +29,16 @@ package record. At this documentation checkpoint:
 | G01 | Source complete | CometBFT/ABCI spike and no-std verifier compile checks; target-runtime known-answer execution and G02 timing design remain |
 | T01 | Verified | `530831d`: challenge/escrow and arbitrary plugin-attestation authority retired; credential status lifecycle issuer-bound |
 | T02 | In progress | `f183607`: shared bounded endorsement verifier and author-signed course-document v2 policy; `758b09a`: exact enrollment/claim binding, verified endorsement import/status, migration-042 authority removal, and caller-supplied completion IPC retirement; `664b0b9`: typed pending credential verification and conclusive status handling; `5ce6f7e`: author policy editor plus explicit learner export/import and instructor review/sign UI; `85eb8fe`: shared trust classification (invalid, pending, self-claim, issuer-signed, exact course endorsement), stored-credential trust command and provenance panel; authenticated addressed acquisition remains for the hosted/headless integration |
-| T03 | In progress | Action-to-policy matrix recorded; pinned canonical subject qualification policy set and evaluator in `alexandria-verify` implemented and tested; app loading and opinion privilege boundaries (local publish, inbound gossip, pending promotion, eligible fields) are the next slice |
+| T03 | In progress | `3479942`: action-to-policy matrix plus pinned canonical subject qualification policies and evaluator; `b1622ff`: fail-closed startup policy loading and one evaluator for local publish, inbound gossip, pending promotion and eligible fields (preprod pins no policies, so posting is refused); verified scoring inputs with fingerprinted cache invalidation, then reputation and talent-index readers, are next |
 | N01 | In progress | `79d6688`: strict preprod profile and centralized trust/service contract; `26cb204`: immutable profile network identity; wire/service migration pending |
 | Integration | Current with main | `b36b450`: merged main's interview assistant (migration renumbered to 092, commands on the bounded executor, generation-fenced transcript listener); `4c80ef8`: CLI shares the app's profile network gate; `4dd6474` and `7a94e16`: stabilized inbound catalog and TUI log tests |
 | Documentation | Current through T02 trust classification | Active architecture, protocol, schema, VC migration, verifier README/vectors, skills docs, and root README describe migration 092, accepted/pending/rejected verification, trust classification, the manual endorsement workflow, and the T03 action-to-policy matrix |
 
-The next T03 slice loads the pinned qualification policy set fail-closed at
-startup and replaces every opinion privilege check with the shared evaluator.
-The preprod profile pins no policies yet, so opinion posting is refused with an
-actionable explanation until reviewed demo policies are pinned.
+The next T03 slice scores only verified credentials in derived skill states,
+removes self-issued claims from issuer independence, and invalidates cached
+states when their inputs change or disappear. The preprod profile pins no
+qualification policies yet, so opinion posting is refused with an actionable
+explanation until reviewed demo policies are pinned.
 Authenticated addressed request delivery remains part of the hosted/headless
 integration; the current app supports author policy editing, explicit request
 export, human review, local signing, verified import, and threshold status.

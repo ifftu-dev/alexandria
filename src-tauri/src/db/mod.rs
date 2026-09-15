@@ -7,6 +7,7 @@ pub(crate) mod opinion_eligibility;
 pub mod schema;
 #[cfg(test)]
 mod schema_tests;
+pub(crate) mod scoring_inputs;
 pub mod seed;
 pub mod seed_content;
 pub mod seed_plugin_demo;

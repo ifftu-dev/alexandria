@@ -23,7 +23,7 @@
 > to open until cleanup migration D03 removes obsolete storage.
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 92
+**Migrations**: 93
 
 ---
 
@@ -135,6 +135,7 @@
 | 90 | `governance_genesis_trust_anchors` | Exact canonical seven-founder genesis envelopes stored only after explicit local pinning |
 | 91 | `exact_course_enrollment_binding` | Freeze verified course-document identity/policy on enrollments and completion claims; add exact verified endorsements; drop migration-042 mutable attestation authority |
 | 92 | `interview_assistant` | Add `purpose` (`assessment` / `interview`) to `integrity_sessions` and six local-only interview tables for participants and consent, criteria, attributed transcript segments, private notes, follow-ups, summaries, conclusions, and retention. See [`interview-assistant.md`](interview-assistant.md). |
+| 93 | `scoring_input_fingerprints` | Add `input_fingerprint` to `derived_skill_states` so cached states recompute when their credential, status, key, supersession or endorsement inputs change; discard states computed before inputs were re-verified |
 
 ---
 

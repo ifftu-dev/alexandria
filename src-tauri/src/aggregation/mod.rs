@@ -56,6 +56,9 @@ pub struct AggregationInput {
     pub rubric_completeness: f64,
     pub proctoring_reliability: f64,
     pub evidence_traceability: f64,
+    /// The subject signed this claim about themselves. It keeps its weighted
+    /// score but never counts as an independent issuer cluster.
+    pub self_issued: bool,
 }
 
 /// Run the aggregation pipeline (§22.2) and return an explainable
@@ -115,11 +118,12 @@ pub fn aggregate_skill_state(
     };
     let evidence_mass = weights_sum;
 
-    // U: distinct issuer DIDs. PR 7's clustering replaces this with
-    // effective cluster count.
+    // U: distinct independent issuer DIDs. A subject's claims about
+    // themselves still carry their weighted score but never count as
+    // corroboration from another issuer.
     let unique_issuer_clusters = {
         let mut set = std::collections::HashSet::new();
-        for e in evidence {
+        for e in evidence.iter().filter(|e| !e.self_issued) {
             set.insert(e.issuer.as_str().to_string());
         }
         set.len() as u32
@@ -166,6 +170,7 @@ mod tests {
             rubric_completeness: 0.9,
             proctoring_reliability: 0.8,
             evidence_traceability: 0.9,
+            self_issued: false,
         }
     }
 
@@ -205,6 +210,7 @@ mod tests {
             rubric_completeness: q.0,
             proctoring_reliability: q.1,
             evidence_traceability: q.2,
+            self_issued: false,
         };
         let low = aggregate_skill_state(
             &Did("did:key:zA".into()),
@@ -314,5 +320,44 @@ mod tests {
             &cfg,
         );
         assert!(diverse.confidence > monolithic.confidence);
+    }
+
+    #[test]
+    fn self_issued_claims_add_no_issuer_independence() {
+        // A learner's own claims are scored, but they are not corroboration:
+        // adding them must not raise the independent issuer count or turn one
+        // issuer into apparent diversity.
+        let cfg = AggregationConfig::default();
+        let subject = Did("did:key:zAlice".into());
+        let own = |id: &str| AggregationInput {
+            self_issued: true,
+            ..ev(id, "Alice", CredentialType::SelfAssertion, 0.9)
+        };
+        let alone = aggregate_skill_state(
+            &subject,
+            "skill_x",
+            &[ev("e1", "Uni", CredentialType::FormalCredential, 0.8)],
+            TEST_NOW,
+            &cfg,
+        );
+        let padded = aggregate_skill_state(
+            &subject,
+            "skill_x",
+            &[
+                ev("e1", "Uni", CredentialType::FormalCredential, 0.8),
+                own("self-1"),
+                own("self-2"),
+            ],
+            TEST_NOW,
+            &cfg,
+        );
+        let only_self =
+            aggregate_skill_state(&subject, "skill_x", &[own("self-1")], TEST_NOW, &cfg);
+
+        assert_eq!(alone.unique_issuer_clusters, 1);
+        assert_eq!(padded.unique_issuer_clusters, 1);
+        assert_eq!(padded.active_evidence_count, 3);
+        assert_eq!(only_self.unique_issuer_clusters, 0);
+        assert!(only_self.confidence.abs() < 1e-12);
     }
 }

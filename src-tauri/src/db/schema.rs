@@ -100,7 +100,18 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (90, "governance_genesis_trust_anchors", MIGRATION_090),
     (91, "exact_course_enrollment_binding", MIGRATION_091),
     (92, "interview_assistant", MIGRATION_092),
+    (93, "scoring_input_fingerprints", MIGRATION_093),
 ];
+
+const MIGRATION_093: &str = r#"
+-- Derived skill states are projections of verified credentials. Each row
+-- records a fingerprint of the local credential, status, key, supersession
+-- and endorsement state it was computed from, so a read recomputes when any
+-- input changes, including removal of the last input. Existing rows were
+-- computed without re-verifying their inputs and are discarded.
+ALTER TABLE derived_skill_states ADD COLUMN input_fingerprint TEXT;
+DELETE FROM derived_skill_states;
+"#;
 
 const MIGRATION_091: &str = r#"
 -- Verified projections from an exact signed course document. These columns are
