@@ -101,7 +101,40 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (91, "exact_course_enrollment_binding", MIGRATION_091),
     (92, "interview_assistant", MIGRATION_092),
     (93, "scoring_input_fingerprints", MIGRATION_093),
+    (94, "retire_public_derived_issuer_exclusion", MIGRATION_094),
 ];
+
+const MIGRATION_094: &str = r#"
+-- Scoring re-verifies every signed input and caches by input fingerprint
+-- (migration 093), so the exact-match exclusion of reproducible legacy
+-- course-authority issuers is retired. A credential signed by such a key is
+-- scored like any other unaccepted issuer's and grants no privilege; trust
+-- classification and pinned qualification policies decide privilege. The
+-- recognition table, triggers, repair queue, filtered views and invalidated
+-- history marker are removed. Credential bytes and revocation state are not
+-- touched.
+DROP TRIGGER course_authority_recognized_insert;
+DROP TRIGGER course_authority_recognized_update;
+DROP TRIGGER public_derived_issuer_recognized;
+DROP VIEW scoring_credentials;
+DROP VIEW current_reputation_assertions;
+DROP INDEX idx_credentials_scoring_issuer;
+DROP INDEX idx_reputation_needs_refresh;
+DROP TABLE derived_skill_refresh_queue;
+DROP TABLE public_derived_issuers;
+DELETE FROM derived_skill_state_history WHERE input_policy_valid = 0;
+ALTER TABLE derived_skill_state_history DROP COLUMN input_policy_valid;
+
+-- Reputation rows record the fingerprint of the verified inputs they were
+-- computed from. Readers recompute a row whose inputs changed and keep a row
+-- whose verified inputs are gone as excluded. Existing rows carry no
+-- fingerprint, so each is recomputed on its next read.
+ALTER TABLE reputation_assertions ADD COLUMN input_fingerprint TEXT;
+UPDATE reputation_assertions SET input_policy_state = 'excluded'
+    WHERE input_policy_state = 'needs_refresh';
+CREATE VIEW current_reputation_assertions AS
+SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
+"#;
 
 const MIGRATION_093: &str = r#"
 -- Derived skill states are projections of verified credentials. Each row

@@ -2,8 +2,8 @@
 //!
 //! Derived skill states, reputation rows and talent-index projections may
 //! score only credentials whose signed bytes verify now and whose signed
-//! subject, skill and identifier match the indexed row. The scoring view, a
-//! stored `revoked = 0`, or a readable JSON shape is not evidence on its own.
+//! subject, skill and identifier match the indexed row. A stored
+//! `revoked = 0` or a readable JSON shape is not evidence on its own.
 //!
 //! Cached projections also record a fingerprint of the local state their
 //! inputs depend on: the rows, their revocation and suspension flags, the
@@ -107,7 +107,7 @@ fn verified_inputs(
     let rows = {
         let mut statement = conn
             .prepare(&format!(
-                "SELECT id, integrity_hash, signed_vc_json FROM scoring_credentials \
+                "SELECT id, integrity_hash, signed_vc_json FROM credentials \
                  WHERE {column} = ?1 AND skill_id = ?2 AND claim_kind = 'skill' \
                    AND revoked = 0 \
                  ORDER BY issuance_date, id"
@@ -185,11 +185,44 @@ pub(crate) fn scoring_input_fingerprint(
     skill_id: &str,
     calculation_version: &str,
 ) -> Result<String, String> {
+    input_fingerprint(
+        conn,
+        ScoringActor::Subject(subject_did),
+        skill_id,
+        calculation_version,
+    )
+}
+
+/// Fingerprint of the local state that can change the verified inputs
+/// `issuer_did` signed for one skill under `calculation_version`.
+pub(crate) fn issued_input_fingerprint(
+    conn: &Connection,
+    issuer_did: &str,
+    skill_id: &str,
+    calculation_version: &str,
+) -> Result<String, String> {
+    input_fingerprint(
+        conn,
+        ScoringActor::Issuer(issuer_did),
+        skill_id,
+        calculation_version,
+    )
+}
+
+fn input_fingerprint(
+    conn: &Connection,
+    actor: ScoringActor<'_>,
+    skill_id: &str,
+    calculation_version: &str,
+) -> Result<String, String> {
+    let (column, actor_did) = match actor {
+        ScoringActor::Subject(did) => ("subject_did", did),
+        ScoringActor::Issuer(did) => ("issuer_did", did),
+    };
     let mut statement = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT c.id, c.signed_vc_json, c.integrity_hash, c.revoked, c.suspended, \
                     c.suspended_until, c.status_list_id, c.status_list_index, \
-                    EXISTS(SELECT 1 FROM scoring_credentials s WHERE s.id = c.id), \
                     EXISTS(SELECT 1 FROM credentials n WHERE n.supersedes = c.id), \
                     (SELECT group_concat(entry, ';') FROM ( \
                         SELECT l.list_id || '|' || l.version || '|' || hex(l.bits) AS entry \
@@ -215,9 +248,9 @@ pub(crate) fn scoring_input_fingerprint(
                         ) \
                         ORDER BY cc.id, e.id)) \
              FROM credentials c \
-             WHERE c.subject_did = ?1 AND c.skill_id = ?2 \
-             ORDER BY c.id",
-        )
+             WHERE c.{column} = ?1 AND c.skill_id = ?2 \
+             ORDER BY c.id"
+        ))
         .map_err(|error| error.to_string())?;
     let columns = statement.column_count();
 
@@ -225,11 +258,12 @@ pub(crate) fn scoring_input_fingerprint(
     hasher.update(FINGERPRINT_DOMAIN);
     update_field(&mut hasher, calculation_version.as_bytes());
     update_field(&mut hasher, &TRUST_CALCULATION_VERSION.to_le_bytes());
-    update_field(&mut hasher, subject_did.as_bytes());
+    update_field(&mut hasher, column.as_bytes());
+    update_field(&mut hasher, actor_did.as_bytes());
     update_field(&mut hasher, skill_id.as_bytes());
 
     let mut rows = statement
-        .query(params![subject_did, skill_id])
+        .query(params![actor_did, skill_id])
         .map_err(|error| error.to_string())?;
     while let Some(row) = rows.next().map_err(|error| error.to_string())? {
         for index in 0..columns {
@@ -439,6 +473,40 @@ mod tests {
             fingerprint(VERSION),
             "removing the last input is visible"
         );
+    }
+
+    #[test]
+    fn issuer_fingerprint_tracks_what_the_issuer_signed() {
+        let db = test_db();
+        let instructor_key = key(3);
+        let instructor = derive_did_key(&instructor_key);
+        let issued =
+            || issued_input_fingerprint(db.conn(), instructor.as_str(), "skill", VERSION).unwrap();
+
+        let empty = issued();
+        store_skill_credential(&db, "self", &instructor_key, &instructor, "skill", 3);
+        let own = issued();
+        assert_ne!(empty, own);
+        assert_ne!(
+            own,
+            scoring_input_fingerprint(db.conn(), instructor.as_str(), "skill", VERSION).unwrap(),
+            "issuer and subject fingerprints of the same credential are distinct"
+        );
+
+        store_skill_credential(
+            &db,
+            "issued",
+            &instructor_key,
+            &derive_did_key(&key(1)),
+            "skill",
+            3,
+        );
+        let both = issued();
+        assert_ne!(own, both);
+        db.conn()
+            .execute("UPDATE credentials SET revoked = 1 WHERE id = 'issued'", [])
+            .unwrap();
+        assert_ne!(both, issued());
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub async fn list_reputation(
             state.profile_lease(),
             "evidence.list-reputation",
             move |db| {
-                crate::evidence::reputation::refresh_invalidated(db.conn())?;
+                crate::evidence::reputation::revalidate_rows(db.conn(), None)?;
 
                 let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
                     if let Some(ref role) = role {

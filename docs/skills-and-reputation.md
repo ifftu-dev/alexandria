@@ -108,7 +108,7 @@ A `SkillClaim` may carry an optional `ProvenanceTier` (migration 068) that grade
 | `accredited_document` | Backed by an accredited institution's document | a university transcript |
 | `issuer_signed` | Issued by a third party (issuer ≠ subject) | a formal credential |
 
-Higher tiers carry more aggregation confidence. A `None` provenance retains the pre-068 quality triple `(1,1,1)` under calculation version `1.2`. These weights apply only to scoring inputs: the exact-match issuer exclusion in §6.3 can remove a legacy credential from those inputs without changing its signed payload.
+Higher tiers carry more aggregation confidence. A `None` provenance retains the pre-068 quality triple `(1,1,1)` under calculation version `1.2`. These weights apply only to verified scoring inputs and never change a credential's signed payload.
 
 #### Authenticity, trust, and privilege
 
@@ -262,13 +262,11 @@ grade, failure, credential, or misconduct penalty, but it remains consumed for
 the bank's ordinary attempt limit and cooldown because its questions were shown.
 See [Sentinel](sentinel.md#diagnostics-transition).
 
-### 6.3 Completion endorsement and historical issuer exclusion
+### 6.3 Completion endorsement and retired issuer exclusion
 
 Offline completion produces a learner's own claim, not an instructor's endorsement. The application does not derive an instructor signing key from a public author address. A genuine instructor endorsement is a separate artifact signed by a key allowlisted in the exact author-signed course policy. Backend request export, local signing, verified import, and status are implemented; the human review and authenticated delivery experience is pending. A valid signature proves control of a key, not expertise or qualification under a DAO policy.
 
-Migration 085 recognizes the former public-derived issuers by reproducing their DID from a known public author address. `public_derived_issuers` retains the exact DID/preimage pair even after normal course edits or deletion. A credential is excluded from aggregation and reputation sampling only when its stored signed payload names one of those matched issuers. The `instructor_attestation` assessment label, an unsigned issuer column, or absent metadata is **not** enough to classify an issuer. Unmatched historical attestations remain unchanged.
-
-Original credential bytes and revocation flags are preserved. Recognition invalidates affected current skill caches and queues repair; affected reputation rows are hidden until recomputed in place, or retained as excluded if no scoring evidence remains. Old derived-history points are retained with validity metadata and omitted from the current history view when invalidated; normal same-day snapshot replacement still applies. Known public-derived issuers are labelled unverified rather than instructors. The current skill, provenance, talent-index, reputation, and new reputation-snapshot inputs use the exclusion policy; old signed on-chain claims are not rewritten or automatically replaced.
+Migration 085 once excluded credentials whose signed payload named a legacy course-authority issuer, whose key anyone could reproduce from a public author address. Scoring now re-verifies every input and caches by input fingerprint, so migration 094 retired that machinery: the recognition table and its triggers, the repair queue, the filtered `scoring_credentials` view, and the history validity marker. A credential signed by such a key is scored like any other unaccepted issuer's. It counts as one more issuer, as any fresh key would, and grants no privilege; only pinned qualification policies confer privilege (see Authenticity, trust, and privilege). Credential bytes and revocation flags were not rewritten. Invalidated history points were discarded, and reputation rows awaiting repair are recomputed on their next read. Old signed on-chain claims are not rewritten or automatically replaced.
 
 Completion returns after local persistence, without awaiting an instructor or making a Cardano request, including when Cardano is configured. Migration 086 stores an idempotent completion receipt: the original credential IDs, enrollment completion, and any optional witness request commit together. Retrying the same learner/course/root returns those IDs rather than issuing duplicate self-claims. The existing profile-scoped worker resumes unsigned requests after restart while the profile is unlocked; it builds at most one per pass, with persisted retry backoff. Once a transaction is signed and journaled, only its original identity is reconciled—no automatic replacement. Changed evidence cannot inherit an earlier witness.
 
@@ -358,7 +356,7 @@ ReputationAssertion {
 }
 ```
 
-Stored in `reputation_assertions`, computed from non-revoked `scoring_credentials` (a filtered view over the preserved `credentials` table; §6.3). The `reputation_evidence` table was dropped in migration 040. Current readers use `current_reputation_assertions`, which excludes invalidated/unusable rows. The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
+Stored in `reputation_assertions`, computed from non-revoked credentials that verify now and whose signed subject, skill and id match their row (`db::scoring_inputs`). The `reputation_evidence` table was dropped in migration 040. Each row records a fingerprint of the inputs it was computed from (migration 094). Readers revalidate rows first: a row whose inputs changed is recomputed in place, and a row whose verified inputs are gone is kept but excluded. Current readers use `current_reputation_assertions`, which presents only valid rows. The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
 
 ### 12.4 Instructor Impact
 
@@ -367,7 +365,7 @@ Impact(I, S, P) =
   Σ learners [ ΔConfidence × Attribution ]
 ```
 
-The expression above is the historical design, not the current VC implementation. `evidence/reputation.rs` currently uses the maximum accepted sample score for learners and the mean score issued for instructors, with distribution statistics and distinct counterparties computed over non-revoked `scoring_credentials`. Self-claims contribute only to learner reputation. The `reputation_impact_deltas` table was dropped in migration 040; there is no per-evidence delta store.
+The expression above is the historical design, not the current VC implementation. `evidence/reputation.rs` currently uses the maximum accepted sample score for learners and the mean score issued for instructors, with distribution statistics and distinct counterparties computed over non-revoked credentials that verify now. Self-claims contribute only to learner reputation. The `reputation_impact_deltas` table was dropped in migration 040; there is no per-evidence delta store.
 
 Reputation snapshots are as-of views of all evidence eligible under the scoring policy at creation time; they are not rolling 30-day scores. The snapshot is a signed `DerivedCredential`, while `reputation_snapshots` stores its display/index metadata and joins to `credential_anchors` for optional background anchoring status. The signed payload declares each skill's actual computation specification and freezes the complete contributing credential ID/hash set. Creation fails if that set no longer matches the derived evidence count, rather than certifying a stale score. Historical CIP-68 rows remain recovery-only and retain their original window interpretation.
 
@@ -553,11 +551,11 @@ implementation-status preamble.
 | Dynamic Sentinel-gated assessments (randomized draw, host-side grade) | `assessment::*`, `commands::assessment` | mig 070 |
 | W3C-style Verifiable Credentials | `domain::vc`, `commands::credentials` | PR 4–5 |
 | Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` | PR 6 |
-| Type weights, freshness, **provenance-weighted quality**, independence (§14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, calc version 1.1) | PR 6 / mig 068 |
+| Type weights, freshness, **provenance-weighted quality**, independence (§14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, calc version 1.2) | PR 6 / mig 068 |
 | Anti-gaming (cluster cap, inflation z-score, §15) | `aggregation::antigaming` | PR 7 |
 | Issuer clustering / pairwise dependence | `aggregation::independence` | PR 7 (per-DID v1; richer signals deferred) |
 | Persisted derived-state cache (§16) | `commands::aggregation` (`derived_skill_states` table) | PR 13 |
-| Exact-match public-derived issuer exclusion and cache repair (§6.3) | `public_derived_issuers`, `scoring_credentials`, `commands::aggregation`, `evidence::reputation` | mig 085 |
+| Verified scoring inputs, fingerprinted skill-state caches and reputation revalidation (§6.3, §12.3) | `db::scoring_inputs`, `commands::aggregation`, `evidence::reputation` | mig 093 / 094 |
 | Recruiter / consumer query API (§17) | `get_derived_skill_state`, `list_derived_states`, `recompute_all` IPC | PR 13 |
 
 The §26 worked example is reproduced end-to-end by the four

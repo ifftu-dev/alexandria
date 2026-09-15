@@ -103,7 +103,7 @@ fn create_snapshot(
         .to_rfc3339();
     let snapshot_id = entity_id(&[actor_did.as_str(), &request.subject_id, &request.role, &now]);
     crate::db::with_transaction(conn, || {
-        crate::evidence::reputation::refresh_invalidated(conn)?;
+        crate::evidence::reputation::revalidate_rows(conn, Some(actor_did.as_str()))?;
         let skills = collect_scores(conn, actor_did.as_str(), &request.subject_id, role)?;
         let computation_specs = skills
             .iter()
@@ -466,7 +466,9 @@ mod tests {
         );
         assert_eq!(record.snapshot_format, SNAPSHOT_FORMAT);
         assert_eq!(record.snapshot_scope, SNAPSHOT_SCOPE);
-        assert_eq!(record.computation_spec.as_deref(), Some("v3-vc"));
+        // The seeded row predates its verified inputs, so snapshotting
+        // recomputes it under the current spec before freezing it.
+        assert_eq!(record.computation_spec.as_deref(), Some("v4-verified-vc"));
         let credential_id = record.credential_id.as_deref().unwrap();
         let original_json: String = db
             .conn()
@@ -480,7 +482,7 @@ mod tests {
         assert_eq!(original.scope, SNAPSHOT_SCOPE);
         assert_eq!(original.as_of, "2024-04-24T23:06:40+00:00");
         assert_eq!(original.skills[0].impact_score_ppm, 850_000);
-        assert_eq!(original.skills[0].computation_spec, "v3-vc");
+        assert_eq!(original.skills[0].computation_spec, "v4-verified-vc");
         let source_hash: String = db
             .conn()
             .query_row(

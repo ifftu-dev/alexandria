@@ -20,7 +20,7 @@ use crate::aggregation::{
 use crate::crypto::did::Did;
 use crate::db::executor::DatabaseWorkload;
 use crate::db::scoring_inputs::{scoring_input_fingerprint, verified_skill_inputs};
-use crate::domain::vc::{CredentialType, ProvenanceTier, VerifiableCredential};
+use crate::domain::vc::{CredentialType, VerifiableCredential};
 use crate::network_profile::embedded_preprod;
 use crate::AppState;
 
@@ -44,7 +44,6 @@ fn get_derived_skill_state_in_transaction(
     skill_id: &str,
     now: &str,
 ) -> Result<Option<DerivedSkillState>, String> {
-    refresh_invalidated_states(conn, Some(subject_did.as_str()), now)?;
     let cfg = AggregationConfig::default();
     let fingerprint =
         scoring_input_fingerprint(conn, subject_did.as_str(), skill_id, &cfg.version)?;
@@ -67,7 +66,7 @@ fn refresh_pair(
     cfg: &AggregationConfig,
     fingerprint: &str,
 ) -> Result<Option<DerivedSkillState>, String> {
-    let evidence = load_evidence_for(conn, subject, skill_id, now, cfg)?;
+    let (evidence, dominant_provenance) = load_evidence_for(conn, subject, skill_id, now, cfg)?;
     if evidence.is_empty() {
         conn.execute(
             "DELETE FROM derived_skill_states WHERE subject_did = ?1 AND skill_id = ?2",
@@ -77,7 +76,7 @@ fn refresh_pair(
         return Ok(None);
     }
     let state = aggregate_skill_state(subject, skill_id, &evidence, now, cfg);
-    upsert_cached(conn, &state, fingerprint)?;
+    upsert_cached(conn, &state, fingerprint, dominant_provenance)?;
     Ok(Some(state))
 }
 
@@ -132,7 +131,6 @@ pub fn list_derived_states_impl(
 ) -> Result<Vec<DerivedSkillState>, String> {
     crate::db::with_transaction(conn, || {
         let now = now_rfc3339();
-        refresh_invalidated_states(conn, subject_did, &now)?;
         revalidate_cached_states(conn, subject_did, &now)?;
         let mut sql = String::from("SELECT state_json FROM derived_skill_states");
         let mut args: Vec<String> = Vec::new();
@@ -165,7 +163,6 @@ pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
 }
 
 fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, String> {
-    refresh_invalidated_states(conn, None, now)?;
     let cfg = AggregationConfig::default();
     conn.execute(
         "DELETE FROM derived_skill_states WHERE calculation_version != ?1",
@@ -176,7 +173,7 @@ fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, Str
     // removed rather than left with its old score.
     let mut stmt = conn
         .prepare(
-            "SELECT subject_did, skill_id FROM scoring_credentials \
+            "SELECT subject_did, skill_id FROM credentials \
              WHERE skill_id IS NOT NULL AND revoked = 0 \
              UNION SELECT subject_did, skill_id FROM derived_skill_states \
              ORDER BY 1, 2",
@@ -202,51 +199,9 @@ fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, Str
 
 // ---- helpers -------------------------------------------------------------
 
-/// Repair only pairs invalidated by an exact legacy issuer match. The original
-/// credentials and invalidated historical snapshots are retained. A failure
-/// keeps the work queued, and no stale current cache was left by recognition.
-pub(crate) fn refresh_invalidated_states(
-    conn: &Connection,
-    subject: Option<&str>,
-    now: &str,
-) -> Result<(), String> {
-    let tx = if conn.is_autocommit() {
-        Some(conn.unchecked_transaction().map_err(|e| e.to_string())?)
-    } else {
-        None
-    };
-    let mut stmt = conn
-        .prepare(
-            "SELECT subject_did, skill_id FROM derived_skill_refresh_queue \
-         WHERE ?1 IS NULL OR subject_did = ?1 ORDER BY subject_did, skill_id",
-        )
-        .map_err(|e| e.to_string())?;
-    let pairs = stmt
-        .query_map([subject], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    drop(stmt);
-    let cfg = AggregationConfig::default();
-    for (subject, skill) in pairs {
-        let did = Did(subject);
-        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)?;
-        refresh_pair(conn, &did, &skill, now, &cfg, &fingerprint)?;
-        conn.execute(
-            "DELETE FROM derived_skill_refresh_queue WHERE subject_did = ?1 AND skill_id = ?2",
-            params![did.as_str(), skill],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    if let Some(tx) = tx {
-        tx.commit().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// Turn the verified inputs for (subject, skill) into `AggregationInput`s.
+/// Turn the verified inputs for (subject, skill) into `AggregationInput`s,
+/// with the highest provenance tier among them as its snake_case token for
+/// UI badges.
 /// Only credentials that verify at `verification_time` and whose signed
 /// subject, skill and id match their row are scored (see
 /// `db::scoring_inputs`). The quality factors (rubric / proctoring /
@@ -259,7 +214,7 @@ fn load_evidence_for(
     skill_id: &str,
     verification_time: &str,
     config: &AggregationConfig,
-) -> Result<Vec<AggregationInput>, String> {
+) -> Result<(Vec<AggregationInput>, Option<String>), String> {
     let network_id = &embedded_preprod()
         .map_err(|error| error.to_string())?
         .network_id;
@@ -270,7 +225,12 @@ fn load_evidence_for(
         verification_time,
         network_id,
     )?;
-    Ok(inputs
+    let dominant_provenance = inputs
+        .iter()
+        .filter_map(|input| input.claim.provenance.as_ref())
+        .max()
+        .map(|tier| tier.as_str().to_string());
+    let evidence = inputs
         .into_iter()
         .map(|input| {
             let self_issued = input.self_issued();
@@ -289,7 +249,8 @@ fn load_evidence_for(
                 self_issued,
             }
         })
-        .collect())
+        .collect();
+    Ok((evidence, dominant_provenance))
 }
 
 /// `vc.type_` is `["VerifiableCredential", "<class>"]` per §7. Pull
@@ -335,10 +296,9 @@ fn upsert_cached(
     conn: &Connection,
     state: &DerivedSkillState,
     fingerprint: &str,
+    dominant_provenance: Option<String>,
 ) -> Result<(), String> {
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
-    let dominant_provenance =
-        dominant_provenance_for(conn, state.subject.as_str(), &state.skill_id);
     conn.execute(
         "INSERT INTO derived_skill_states \
          (subject_did, skill_id, calculation_version, raw_score, confidence, \
@@ -398,8 +358,7 @@ fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), 
             trust_score = excluded.trust_score, \
             level = excluded.level, \
             evidence_mass = excluded.evidence_mass, \
-            computed_at = excluded.computed_at, \
-            input_policy_valid = 1",
+            computed_at = excluded.computed_at",
         params![
             state.subject.as_str(),
             state.skill_id,
@@ -413,25 +372,6 @@ fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), 
     )
     .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-/// Highest provenance tier across a skill's non-revoked credentials, as its
-/// snake_case token (for UI badges). `None` if no row carries a provenance.
-fn dominant_provenance_for(conn: &Connection, subject_did: &str, skill_id: &str) -> Option<String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT provenance FROM scoring_credentials \
-             WHERE subject_did = ?1 AND skill_id = ?2 AND revoked = 0 \
-               AND provenance IS NOT NULL",
-        )
-        .ok()?;
-    let tiers = stmt
-        .query_map(params![subject_did, skill_id], |r| r.get::<_, String>(0))
-        .ok()?
-        .filter_map(|r| r.ok())
-        .filter_map(|s| serde_json::from_value::<ProvenanceTier>(serde_json::Value::String(s)).ok())
-        .collect::<Vec<_>>();
-    tiers.into_iter().max().map(|t| t.as_str().to_string())
 }
 
 fn now_rfc3339() -> String {
@@ -507,14 +447,13 @@ pub async fn get_skill_state_history(
     subject_did: String,
     skill_id: String,
 ) -> Result<Vec<SkillHistoryPoint>, String> {
-    let now = now_rfc3339();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "aggregation.get_skill_state_history",
-            move |db| get_skill_state_history_impl(db.conn(), &subject_did, &skill_id, &now),
+            move |db| get_skill_state_history_impl(db.conn(), &subject_did, &skill_id),
         )
         .await
 }
@@ -523,14 +462,12 @@ fn get_skill_state_history_impl(
     conn: &Connection,
     subject_did: &str,
     skill_id: &str,
-    now: &str,
 ) -> Result<Vec<SkillHistoryPoint>, String> {
-    refresh_invalidated_states(conn, Some(subject_did), now)?;
     let mut stmt = conn
         .prepare(
             "SELECT snapshot_date, raw_score, confidence, trust_score, level, evidence_mass \
                FROM derived_skill_state_history \
-              WHERE subject_did = ?1 AND skill_id = ?2 AND input_policy_valid = 1 \
+              WHERE subject_did = ?1 AND skill_id = ?2 \
               ORDER BY snapshot_date ASC",
         )
         .map_err(|e| e.to_string())?;

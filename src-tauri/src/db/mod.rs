@@ -1,12 +1,12 @@
 pub(crate) mod executor;
 pub(crate) mod governance;
 pub(crate) mod governance_genesis;
-#[cfg(test)]
-mod issuer_exclusion_tests;
 pub(crate) mod opinion_eligibility;
 pub mod schema;
 #[cfg(test)]
 mod schema_tests;
+#[cfg(test)]
+mod scoring_adversarial_tests;
 pub(crate) mod scoring_inputs;
 pub mod seed;
 pub mod seed_content;
@@ -127,7 +127,9 @@ impl Database {
 }
 
 /// Install the schema's pure SQL extension on externally owned connections.
-/// Call after configuring an encryption key, before migrations or course writes.
+/// Migration 085 calls it when the historical schema is replayed; migration
+/// 094 removed every schema object that called it afterwards. Call after
+/// configuring an encryption key, before migrations.
 pub fn register_issuer_recognition(conn: &Connection) -> rusqlite::Result<()> {
     use rusqlite::functions::FunctionFlags;
     conn.create_scalar_function(

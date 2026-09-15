@@ -351,41 +351,6 @@ fn resolve_display_names_db(
         }
     }
 
-    // Recognize historical public-derived issuers without presenting them as
-    // instructors. A cached display name cannot confer instructor control.
-    {
-        let mut stmt = conn
-            .prepare("SELECT author_address FROM public_derived_issuers")
-            .map_err(|e| e.to_string())?;
-        let authors = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>();
-        for author in authors {
-            let did = crate::crypto::did::course_authority_did(&author)
-                .as_str()
-                .to_string();
-            if requested.contains(did.as_str()) {
-                let short = if author.chars().count() > 16 {
-                    let head: String = author.chars().take(10).collect();
-                    let tail: String = author
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<String>()
-                        .chars()
-                        .rev()
-                        .collect();
-                    format!("{head}…{tail}")
-                } else {
-                    author.clone()
-                };
-                out.insert(did, format!("Unverified legacy issuer · {short}"));
-            }
-        }
-    }
-
     Ok(out)
 }
 
@@ -667,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn display_name_resolution_labels_only_proven_legacy_issuers() {
+    fn display_name_resolution_names_only_known_profiles() {
         let db = database();
         db.conn()
             .execute(
@@ -676,23 +641,12 @@ mod tests {
                 [],
             )
             .expect("peer profile");
-        let legacy_author = "addr_test_public_derived_author";
-        let legacy_did = crate::crypto::did::course_authority_did(legacy_author)
-            .as_str()
-            .to_string();
-        db.conn()
-            .execute(
-                "INSERT INTO public_derived_issuers (issuer_did, author_address) VALUES (?1, ?2)",
-                params![legacy_did, legacy_author],
-            )
-            .expect("recognized issuer");
 
         let names = resolve_display_names_db(
             db.conn(),
             vec![
                 "did:key:alice".into(),
                 "did:key:bob".into(),
-                legacy_did.clone(),
                 "did:key:unknown".into(),
             ],
             Some("did:key:alice".into()),
@@ -704,9 +658,6 @@ mod tests {
             Some("Alice")
         );
         assert_eq!(names.get("did:key:bob").map(String::as_str), Some("@bob"));
-        assert!(names
-            .get(&legacy_did)
-            .is_some_and(|name| name.starts_with("Unverified legacy issuer")));
         assert!(!names.contains_key("did:key:unknown"));
     }
 }

@@ -73,7 +73,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |                | cmds    |  +----------------+  |  |
 |  |  Vue pages     |         |  |   SQLite DB    |  |  |
 |  |  + components |         |  |  local schema  |  |  |
-|  |  + composables|         |  |   93 migrations|  |  |
+|  |  + composables|         |  |   94 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -249,7 +249,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Schema**: 93 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
+**Schema**: 94 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
 
 | Domain | Tables |
 |--------|--------|
@@ -258,8 +258,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
 | Credentials | `credentials`, `credential_status_lists`, `key_registry` |
-| Reputation | `reputation_assertions`, `derived_skill_states`, `derived_skill_state_history`, `reputation_snapshots`; scoring uses filtered views |
-| Issuer recognition (local-only) | `public_derived_issuers`, `derived_skill_refresh_queue` (migration 085) |
+| Reputation | `reputation_assertions`, `derived_skill_states`, `derived_skill_state_history`, `reputation_snapshots`; skill states and reputation rows record input fingerprints (migrations 093, 094) |
 | Completion persistence (local-only) | `completion_claims`, `completion_witness_requests`, `course_completion_endorsements`; enrollments and claims freeze exact course-document identity/policy (migrations 086, 091) |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` |
@@ -337,11 +336,9 @@ handling remain release acceptance work.
 
 ### Shared migrations and issuer recognition
 
-The app and CLI use `db::run_migrations_on_connection`: applied `(version, name)` records must be a supported schema prefix, and each migration's DDL/data changes and tracking record commit together. A failed migration rolls back before retry; the CLI no longer maintains an independent runner. Both app and CLI connection-opening paths install `legacy_course_authority_did`, a deterministic, side-effect-free SQL function, after encryption-key configuration and before schema-dependent writes. The function reproduces a historical public-derived DID; it does not confer issuer trust.
+The app and CLI use `db::run_migrations_on_connection`: applied `(version, name)` records must be a supported schema prefix, and each migration's DDL/data changes and tracking record commit together. A failed migration rolls back before retry; the CLI no longer maintains an independent runner. Both app and CLI connection-opening paths install `legacy_course_authority_did`, a deterministic, side-effect-free SQL function, after encryption-key configuration and before migrations. Migration 085 calls it when the historical schema is replayed; no schema object uses it after migration 094, and it confers no issuer trust.
 
-Migration 085 stores exact public author-address/DID matches in `public_derived_issuers`, with a schema check on the derivation. Course insert/update triggers maintain recognition; normal course edits/removal do not remove earlier matches. `scoring_credentials` excludes only stored payload issuers matching that table. It does not classify credentials from assessment labels or missing metadata, and it does not modify credential bytes or revocation state.
-
-Recognition atomically removes affected current skill caches, queues reconstruction, marks affected reputation rows for in-place repair, and invalidates affected historical score points. `current_reputation_assertions` hides pending/excluded rows. Skill/reputation readers repair the affected derived state; failed repair remains retryable and cannot reinstate an old inflated cache. Historical rows remain stored with validity metadata (normal same-day skill-history replacement still applies). Expression/partial indexes support exact issuer lookup and pending reputation repair; workload latency and memory budgets still require the planned device benchmarks.
+Migration 085 once recognized reproducible legacy course-authority issuers and excluded their credentials through filtered views, triggers and a repair queue. Migration 094 retires all of it. Scoring reads `credentials` directly, re-verifies each input, and records a fingerprint of the credential, status-list, issuer-key, supersession and endorsement state behind every derived skill state and reputation row. Readers compare fingerprints before presenting a cached value, so a revoked, altered or removed input forces recomputation, and a failed recomputation rolls back without reinstating a stale score. Workload latency and memory budgets still require the planned device benchmarks.
 
 ---
 
@@ -613,7 +610,7 @@ Confirmed successful ledger receipt → matching completion observation
     |
     v
 on_credential_accepted → distribution-based reputation
-    (median/p25/p75/variance per skill, from `scoring_credentials`)
+    (median/p25/p75/variance per skill, from verified credentials)
 ```
 
 The completion command performs no Cardano I/O. Migration 086 atomically persists local claims, their reusable receipt, enrollment completion, and an optional witness intent. The same learner/course/root returns the original credential IDs on retry. Only a completion requested with Cardano configured queues an intent; later configuration alone does not enqueue earlier local-only claims. Frozen evidence survives restart, and changed evidence never inherits an earlier transaction's witness.
@@ -626,7 +623,7 @@ The optional witness transaction is durably checkpointed before submission. A ti
 
 | Module | Responsibility |
 |--------|---------------|
-| `evidence/reputation` | Distribution-based reputation from `scoring_credentials`, plus in-place repair of invalidated rows |
+| `evidence/reputation` | Distribution-based reputation from verified credentials; rows are revalidated by input fingerprint before they are read |
 | `evidence/taxonomy` | Bloom's level thresholds and skill graph traversal |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
 
@@ -854,9 +851,9 @@ skill-proof + NFT pipeline it replaced has been deleted (no
 5. **Aggregation** — Deterministic, explainable trust scores via
    the §14 weighted-mean + saturating-confidence pipeline
    (`aggregation::aggregate_skill_state`, PR 6) + anti-gaming
-   (cluster cap, inflation z-score, PR 7). App scoring inputs exclude
-   exact-match public-derived issuers (migration 085; §4), without
-   quarantining unmatched historical attestations.
+   (cluster cap, inflation z-score, PR 7). App scoring inputs are
+   credentials that verify now and whose signed subject, skill and id
+   match their row.
 6. **Presentation** — Selective-disclosure envelopes signed by the
    subject (`commands::presentation`). JCS-canonical payload bound
    to (audience, nonce); replay-protected via `presentations_seen`.

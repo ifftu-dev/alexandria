@@ -573,22 +573,24 @@ mod migration_tests {
     }
 
     #[test]
-    fn cli_migrations_install_the_same_issuer_recognition_as_the_app() {
+    fn cli_migrations_replay_the_app_schema_and_retire_issuer_recognition() {
         let conn = Connection::open_in_memory().unwrap();
+        // Migration 085 replays through the SQL function the runner installs.
         assert_eq!(apply_migrations(&conn).unwrap(), schema::MIGRATIONS.len());
         assert_eq!(apply_migrations(&conn).unwrap(), 0);
         conn.execute(
             "INSERT INTO courses (id, title, author_address) VALUES ('course', 'Course', 'public-author')",
             [],
         ).unwrap();
-        let did: String = conn.query_row(
-            "SELECT issuer_did FROM public_derived_issuers WHERE author_address = 'public-author'",
-            [], |row| row.get(0),
-        ).unwrap();
-        assert_eq!(
-            did,
-            app_lib::crypto::did::course_authority_did("public-author").as_str()
-        );
+        let recognition: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN \
+                 ('public_derived_issuers', 'derived_skill_refresh_queue', 'scoring_credentials')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recognition, 0);
     }
 
     #[test]

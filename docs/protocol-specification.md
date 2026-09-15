@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Format-version-2 public sidecar `profiles_index.json` — immutable network IDs, display names, and avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, interviews, governance, verifiable credentials) across 93 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, interviews, governance, verifiable credentials) across 94 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -957,7 +957,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Actors attempt to inflate reputation via low-signal instruction, collusion, or selective assessment.
 
-**Mitigations**: Reputation inputs are signature-verified credentials filtered for revocation and known reproducible legacy issuers. Reputation remains skill- and proficiency-scoped, with distribution statistics, provenance/type weights, and independence penalties.
+**Mitigations**: Reputation inputs are credentials that verify now, are not revoked, and whose signed subject, skill and id match their row; stored rows are recomputed when those inputs change. Signature validity alone grants no privilege. Reputation remains skill- and proficiency-scoped, with distribution statistics, provenance/type weights, and independence penalties.
 
 ### 13.2 Assessment Inflation
 
@@ -2033,7 +2033,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4 | Pages, reusable components, and singleton composables |
-| Database | SQLite (rusqlite, bundled) | Local encrypted store, 93 migrations |
+| Database | SQLite (rusqlite, bundled) | Local encrypted store, 94 migrations |
 | Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
@@ -2048,7 +2048,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 93.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 94.
 
 | Domain | Tables |
 |--------|--------|

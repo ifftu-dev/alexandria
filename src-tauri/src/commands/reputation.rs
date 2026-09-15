@@ -116,7 +116,7 @@ fn list_reputation_rows_db(
     query: ReputationQuery,
 ) -> Result<Vec<ReputationRow>, String> {
     let conn = db.conn();
-    reputation::refresh_invalidated(conn)?;
+    reputation::revalidate_rows(conn, query.actor.as_deref())?;
 
     let mut conditions: Vec<String> = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -232,7 +232,7 @@ fn get_reputation_db(
     query: ReputationQuery,
 ) -> Result<Vec<FullReputationAssertion>, String> {
     let conn = db.conn();
-    reputation::refresh_invalidated(conn)?;
+    reputation::revalidate_rows(conn, query.actor.as_deref())?;
 
     let mut conditions: Vec<String> = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();

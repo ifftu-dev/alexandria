@@ -23,7 +23,7 @@
 > to open until cleanup migration D03 removes obsolete storage.
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 93
+**Migrations**: 94
 
 ---
 
@@ -127,7 +127,7 @@
 | 82 | `escrow_datum_recipients` | Historical recipient fields on the retired credential-challenge escrow tables |
 | 83 | `durable_chain_submissions` | Local recovery journal that checkpoints exact signed transaction bytes before provider I/O |
 | 84 | `chain_submission_recovery_members` | Receipt outcome fields plus exclusive member bindings for recoverable submission batches |
-| 85 | `public_derived_issuer_exclusion` | Exact signed-payload recognition of reproducible legacy course-authority issuers, repair queues, and filtered scoring views |
+| 85 | `public_derived_issuer_exclusion` | Exact signed-payload recognition of reproducible legacy course-authority issuers, repair queues, and filtered scoring views; retired by migration 094 |
 | 86 | `durable_completion_requests` | Atomic local completion receipts and durable optional completion-witness intents |
 | 87 | `frozen_reputation_snapshots` | Frozen snapshot inputs and a journal trigger that prevents rebuilding uncertain signed transactions |
 | 88 | `credential_backed_reputation_snapshots` | New reputation snapshots become signed `DerivedCredential` VCs with optional credential-hash anchoring; legacy CIP-68 rows remain distinguishable |
@@ -136,6 +136,7 @@
 | 91 | `exact_course_enrollment_binding` | Freeze verified course-document identity/policy on enrollments and completion claims; add exact verified endorsements; drop migration-042 mutable attestation authority |
 | 92 | `interview_assistant` | Add `purpose` (`assessment` / `interview`) to `integrity_sessions` and six local-only interview tables for participants and consent, criteria, attributed transcript segments, private notes, follow-ups, summaries, conclusions, and retention. See [`interview-assistant.md`](interview-assistant.md). |
 | 93 | `scoring_input_fingerprints` | Add `input_fingerprint` to `derived_skill_states` so cached states recompute when their credential, status, key, supersession or endorsement inputs change; discard states computed before inputs were re-verified |
+| 94 | `retire_public_derived_issuer_exclusion` | Drop migration 085's issuer recognition table, triggers, repair queue, `scoring_credentials` view and history validity marker; add `input_fingerprint` to `reputation_assertions` so readers recompute rows whose verified inputs changed |
 
 ---
 
@@ -279,7 +280,11 @@ discovery (Phase 3).
   `window_start`/`window_end`, with `score`, `evidence_count`,
   `computation_spec`, `cid`, and distribution metrics computed over
   the actor's credentials: `median_impact`, `impact_p25`,
-  `impact_p75`, `learner_count`, and `impact_variance`.
+  `impact_p75`, `learner_count`, and `impact_variance`. Each row records
+  the `input_fingerprint` of the verified credentials it was computed
+  from and an `input_policy_state` (`valid` or `excluded`); readers
+  recompute rows whose inputs changed and present only valid rows
+  through `current_reputation_assertions` (migration 094).
 - **`reputation_snapshots`** — Snapshot/anchoring records for
   reputation assertions, keyed by actor with `tx_status` and subject.
 
