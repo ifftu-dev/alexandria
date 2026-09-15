@@ -363,7 +363,12 @@ submissions; the former caller-supplied witness command is retired.
 
 The application can export the canonical endorsement request, sign it with an
 authorized local instructor key, import an endorsement only after shared
-verification, and report a distinct-attestor threshold. Migration 091 drops
+verification, and report a distinct-attestor threshold. An imported
+endorsement arrives as its exact JSON text. That text is parsed as strict
+bounded JSON before verification: 128 KiB, depth 8, 64 elements, 16 entries
+and 1024-byte strings, with no duplicate keys, unsafe numbers or trailing
+bytes. The verifier crate publishes exact-byte endorsement vectors, which the
+app import and an independent verifier check. Migration 091 drops
 migration 042's mutable per-course requirement and raw transaction-hash
 signature tables without rebinding historical rows. The course composer edits
 the policy for the next signed publication and blocks publication while policy

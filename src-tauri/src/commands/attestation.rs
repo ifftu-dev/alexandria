@@ -103,6 +103,20 @@ fn load_claim_context(conn: &Connection, claim_id: &str) -> Result<ClaimContext,
     Ok(ClaimContext { policy, binding })
 }
 
+/// Import a completion endorsement from the exact JSON bytes an instructor
+/// exported. The bytes are parsed under the verifier's endorsement limits, so
+/// duplicate keys, unsafe numbers, hostile nesting and oversized documents are
+/// refused before verification or storage.
+pub fn import_completion_endorsement_json_impl(
+    conn: &Connection,
+    claim_id: &str,
+    endorsement_json: &[u8],
+) -> Result<CourseCompletionEndorsement, String> {
+    let endorsement = alexandria_verify::course::decode_completion_endorsement(endorsement_json)
+        .map_err(|error| format!("invalid completion endorsement JSON: {error}"))?;
+    import_completion_endorsement_impl(conn, claim_id, &endorsement)
+}
+
 pub fn import_completion_endorsement_impl(
     conn: &Connection,
     claim_id: &str,
@@ -331,7 +345,7 @@ pub async fn sign_course_completion_endorsement(
 pub async fn import_course_completion_endorsement(
     state: State<'_, AppState>,
     claim_id: String,
-    endorsement: CourseCompletionEndorsement,
+    endorsement_json: String,
 ) -> Result<CourseCompletionEndorsement, String> {
     state
         .db_executor
@@ -339,7 +353,13 @@ pub async fn import_course_completion_endorsement(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "completion.endorsement.import",
-            move |db| import_completion_endorsement_impl(db.conn(), &claim_id, &endorsement),
+            move |db| {
+                import_completion_endorsement_json_impl(
+                    db.conn(),
+                    &claim_id,
+                    endorsement_json.as_bytes(),
+                )
+            },
         )
         .await
 }
@@ -469,6 +489,54 @@ mod tests {
         let mut tampered = first_endorsement;
         tampered.binding.network_id = "other".into();
         assert!(import_completion_endorsement_impl(db.conn(), "claim", &tampered).is_err());
+    }
+
+    /// The app consumes the verifier's exact endorsement vector bytes through
+    /// its import path and must reach the same outcome for each file.
+    #[test]
+    fn shared_endorsement_vectors_produce_the_same_outcomes_on_import() {
+        let (db, policy, binding, _, _) = fixture();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/alexandria-verify/tests/vectors/endorsements");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::from_value::<CourseCompletionPolicy>(manifest["policy"].clone()).unwrap(),
+            policy
+        );
+        assert_eq!(
+            serde_json::from_value::<CourseCompletionBinding>(manifest["expectedBinding"].clone())
+                .unwrap(),
+            binding
+        );
+
+        for case in manifest["cases"].as_array().unwrap() {
+            let file = case["file"].as_str().unwrap();
+            let expect = case["expect"].as_str().unwrap();
+            let bytes = std::fs::read(dir.join(file)).unwrap();
+            let result = import_completion_endorsement_json_impl(db.conn(), "claim", &bytes);
+            let reason = match (&result, expect) {
+                (Ok(_), "valid") => continue,
+                (Err(reason), _) if expect != "valid" => reason,
+                _ => panic!("{file}: expected {expect}, got {result:?}"),
+            };
+            let marker = match expect {
+                "binding_mismatch" => "does not match the expected completion binding",
+                "unauthorized_attestor" => "not authorized",
+                "invalid_signature" => "invalid Ed25519 signature",
+                "duplicate_key" => "duplicate JSON object key",
+                "too_large" => "exceeds",
+                "too_deep" => "nesting exceeds",
+                "unsafe_number" => "exactly representable",
+                other => panic!("{file}: unmapped outcome {other}"),
+            };
+            assert!(reason.contains(marker), "{file}: {reason}");
+        }
+
+        let status = completion_endorsement_status_impl(db.conn(), "claim").unwrap();
+        assert!(status.satisfied);
+        assert_eq!(status.valid_attestors.len(), 2);
+        assert_eq!(status.endorsements.len(), 2);
     }
 
     const CREDENTIAL_ID: &str = "urn:uuid:completion-self-claim";

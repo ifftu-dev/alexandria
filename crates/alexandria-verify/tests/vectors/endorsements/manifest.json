@@ -1,0 +1,177 @@
+{
+  "domain": "alexandria/course-completion-endorsement/v1",
+  "limits": {
+    "maxBytes": 131072,
+    "maxDepth": 8,
+    "maxArrayLen": 64,
+    "maxObjectEntries": 16,
+    "maxStringBytes": 1024
+  },
+  "policy": {
+    "format_version": 1,
+    "required_attestors": 2,
+    "authorized_attestors": [
+      {
+        "did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+        "public_key_hex": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394"
+      },
+      {
+        "did": "did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+        "public_key_hex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"
+      }
+    ],
+    "evidence_requirements": [
+      {
+        "kind": "completion-root",
+        "format_version": 1
+      }
+    ]
+  },
+  "expectedBinding": {
+    "format_version": 1,
+    "network_id": "preprod",
+    "subject_did": "did:key:z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3",
+    "course_id": "course",
+    "course_document_cid": "1111111111111111111111111111111111111111111111111111111111111111",
+    "course_document_version": 2,
+    "completion_root": "2222222222222222222222222222222222222222222222222222222222222222",
+    "evidence": [
+      {
+        "kind": "completion-root",
+        "format_version": 1,
+        "id": "course-completion",
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "file": "01-valid-first-attestor.json",
+      "description": "An authorized attestor's endorsement of the exact expected binding.",
+      "expect": "valid"
+    },
+    {
+      "file": "02-valid-second-attestor.json",
+      "description": "The second authorized attestor's endorsement of the same binding.",
+      "expect": "valid"
+    },
+    {
+      "file": "03-tampered-network-id.json",
+      "description": "The embedded binding names another network.",
+      "expect": "binding_mismatch"
+    },
+    {
+      "file": "04-tampered-course-document-cid.json",
+      "description": "The embedded binding names another course document.",
+      "expect": "binding_mismatch"
+    },
+    {
+      "file": "05-tampered-completion-root.json",
+      "description": "The embedded binding names another completion root.",
+      "expect": "binding_mismatch"
+    },
+    {
+      "file": "06-tampered-subject.json",
+      "description": "The embedded binding names another learner.",
+      "expect": "binding_mismatch"
+    },
+    {
+      "file": "07-tampered-evidence-digest.json",
+      "description": "The embedded binding carries another evidence digest.",
+      "expect": "binding_mismatch"
+    },
+    {
+      "file": "08-signature-bit-flip.json",
+      "description": "The last hex digit of the signature is changed.",
+      "expect": "invalid_signature"
+    },
+    {
+      "file": "09-uppercase-signature-hex.json",
+      "description": "The signature is spelled in uppercase hex, which is not canonical.",
+      "expect": "invalid_signature"
+    },
+    {
+      "file": "10-wrong-signing-domain.json",
+      "description": "Signed over the binding under a different domain string.",
+      "expect": "invalid_signature"
+    },
+    {
+      "file": "11-signature-over-other-binding.json",
+      "description": "Signed over a binding for another network, then presented with the expected binding.",
+      "expect": "invalid_signature"
+    },
+    {
+      "file": "12-unlisted-attestor.json",
+      "description": "A valid signature by a key the course policy does not authorize.",
+      "expect": "unauthorized_attestor"
+    },
+    {
+      "file": "13-swapped-public-key.json",
+      "description": "An authorized DID presented with the other attestor's public key.",
+      "expect": "unauthorized_attestor"
+    },
+    {
+      "file": "14-uppercase-public-key-hex.json",
+      "description": "The authorized public key spelled in uppercase hex, which does not match the policy.",
+      "expect": "unauthorized_attestor"
+    },
+    {
+      "file": "15-duplicate-key.json",
+      "description": "The signature key appears twice in the endorsement object.",
+      "expect": "duplicate_key"
+    },
+    {
+      "file": "16-bytes-at-limit.json",
+      "description": "The valid endorsement padded with whitespace to exactly the byte limit.",
+      "expect": "valid"
+    },
+    {
+      "file": "17-bytes-over-limit.json",
+      "description": "One byte over the byte limit, refused before parsing.",
+      "expect": "too_large"
+    },
+    {
+      "file": "18-nesting-over-limit.json",
+      "description": "A member nested one level beyond the depth limit.",
+      "expect": "too_deep"
+    },
+    {
+      "file": "19-unsafe-number.json",
+      "description": "A format version outside the exact JavaScript integer range.",
+      "expect": "unsafe_number"
+    }
+  ],
+  "thresholds": [
+    {
+      "description": "Two distinct authorized attestors meet the two-attestor policy.",
+      "files": [
+        "01-valid-first-attestor.json",
+        "02-valid-second-attestor.json"
+      ],
+      "validAttestors": 2,
+      "rejectedEndorsements": 0,
+      "satisfied": true
+    },
+    {
+      "description": "The same attestor twice counts once.",
+      "files": [
+        "01-valid-first-attestor.json",
+        "01-valid-first-attestor.json"
+      ],
+      "validAttestors": 1,
+      "rejectedEndorsements": 1,
+      "satisfied": false
+    },
+    {
+      "description": "Unauthorized and invalid endorsements never count toward the threshold.",
+      "files": [
+        "01-valid-first-attestor.json",
+        "12-unlisted-attestor.json",
+        "08-signature-bit-flip.json"
+      ],
+      "validAttestors": 1,
+      "rejectedEndorsements": 2,
+      "satisfied": false
+    }
+  ]
+}

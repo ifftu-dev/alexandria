@@ -169,6 +169,38 @@ each must produce. Every case starts from the credential in `01-valid.json` and
 changes one structural property, so a failure names exactly one limit. `accept`
 means the bytes pass these limits; it says nothing about the signature.
 
+## Course completion endorsements
+
+An instructor endorses a learner's course completion by signing its completion
+binding. `endorsements/manifest.json` supplies:
+- the signing `domain`;
+- the endorsement's structural `limits`;
+- the signed course `policy`;
+- the `expectedBinding` for the completion;
+- the outcome of each byte file in `endorsements/`;
+- `thresholds` evaluated over sets of those files.
+
+To verify one endorsement against the policy and expected binding:
+
+1. Parse the exact bytes as strict JSON under the manifest limits (see the
+   previous section). A structural refusal is the outcome.
+2. Its `binding` must equal the expected binding, compared as JCS. If not:
+   `binding_mismatch`.
+3. `attestor_did` must name an entry in `policy.authorized_attestors`, and
+   `attestor_public_key_hex` must equal that entry's key exactly. If not:
+   `unauthorized_attestor`.
+4. The key must be 64 lowercase hex digits (else `invalid_public_key`). Its
+   `did:key` must equal `attestor_did` (else `identity_mismatch`). A
+   `did:key` is `z` plus base58btc of `0xed 0x01` plus the 32 key bytes.
+5. `signature_hex` must be 128 lowercase hex digits. It must be a valid
+   Ed25519 signature over `domain || 0x00 || JCS(expected binding)`. If
+   either check fails: `invalid_signature`.
+6. Otherwise the outcome is `valid`.
+
+For a threshold, count each attestor DID at most once, and only for a `valid`
+endorsement. Every other endorsement in the set is rejected. The policy is
+satisfied when the count reaches `required_attestors`.
+
 ## A worked implementation
 
 `independent-verifier.mjs` in this directory is a complete verifier written from

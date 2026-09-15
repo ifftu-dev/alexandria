@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::did::{did_from_verifying_key, parse_did_key, Did};
+use crate::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
 
 pub const COMPLETION_POLICY_FORMAT_VERSION: u32 = 1;
 pub const COMPLETION_ENDORSEMENT_FORMAT_VERSION: u32 = 1;
@@ -17,6 +18,25 @@ pub const MAX_AUTHORIZED_ATTESTORS: usize = 64;
 pub const MAX_EVIDENCE_REQUIREMENTS: usize = 64;
 pub const MAX_COMPLETION_EVIDENCE: usize = 64;
 pub const MAX_COMPLETION_ENDORSEMENT_BYTES: usize = 128 * 1024;
+
+/// Structural limits for an untrusted completion endorsement document. An
+/// endorsement nests its binding's evidence four levels deep, carries at most
+/// the evidence limit in one array, and holds identifiers, DIDs and hex.
+pub const COMPLETION_ENDORSEMENT_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_COMPLETION_ENDORSEMENT_BYTES,
+    max_depth: 8,
+    max_array_len: MAX_COMPLETION_EVIDENCE,
+    max_object_entries: 16,
+    max_string_bytes: 1024,
+};
+
+/// Decode the exact bytes of an untrusted completion endorsement under
+/// [`COMPLETION_ENDORSEMENT_JSON_LIMITS`]. The result is not yet verified.
+pub fn decode_completion_endorsement(
+    bytes: &[u8],
+) -> Result<CourseCompletionEndorsement, UntrustedJsonError> {
+    decode_untrusted(bytes, &COMPLETION_ENDORSEMENT_JSON_LIMITS)
+}
 
 const MAX_IDENTIFIER_BYTES: usize = 256;
 const ENDORSEMENT_DOMAIN: &[u8] = b"alexandria/course-completion-endorsement/v1";

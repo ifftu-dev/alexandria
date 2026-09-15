@@ -284,5 +284,82 @@ for (const c of manifest.cases) {
   } else pass++
 }
 
+// Course completion endorsements (README.md, "Course completion
+// endorsements"). Strict bounded parsing first, then the binding, attestor
+// authorization, key identity, and the domain-separated Ed25519 signature.
+function b58encode(bytes) {
+  let n = BigInt('0x' + Buffer.from(bytes).toString('hex'))
+  let out = ''
+  while (n > 0n) {
+    out = ALPHA[Number(n % 58n)] + out
+    n /= 58n
+  }
+  for (const byte of bytes) {
+    if (byte !== 0) break
+    out = '1' + out
+  }
+  return out
+}
+
+function endorsementOutcome(bytes, context) {
+  const structural = strictParse(bytes, context.limits)
+  if (structural !== 'accept') return structural
+  const endorsement = JSON.parse(Buffer.from(bytes).toString('utf8'))
+  if (jcs(endorsement.binding) !== jcs(context.expectedBinding)) return 'binding_mismatch'
+  const authorized = context.policy.authorized_attestors
+    .find(attestor => attestor.did === endorsement.attestor_did)
+  if (!authorized || authorized.public_key_hex !== endorsement.attestor_public_key_hex) {
+    return 'unauthorized_attestor'
+  }
+  if (!/^[0-9a-f]{64}$/.test(endorsement.attestor_public_key_hex)) return 'invalid_public_key'
+  const rawKey = Buffer.from(endorsement.attestor_public_key_hex, 'hex')
+  const did = 'did:key:z' + b58encode(Buffer.concat([Buffer.from([0xed, 0x01]), rawKey]))
+  if (did !== endorsement.attestor_did) return 'identity_mismatch'
+  if (!/^[0-9a-f]{128}$/.test(endorsement.signature_hex)) return 'invalid_signature'
+  const key = createPublicKey({
+    key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), rawKey]),
+    format: 'der',
+    type: 'spki',
+  })
+  const message = Buffer.concat([
+    Buffer.from(context.domain, 'utf8'),
+    Buffer.from([0]),
+    Buffer.from(jcs(context.expectedBinding), 'utf8'),
+  ])
+  return verify(null, message, key, Buffer.from(endorsement.signature_hex, 'hex'))
+    ? 'valid'
+    : 'invalid_signature'
+}
+
+const endorsements = JSON.parse(readFileSync('endorsements/manifest.json', 'utf8'))
+for (const c of endorsements.cases) {
+  const got = endorsementOutcome(readFileSync(`endorsements/${c.file}`), endorsements)
+  const ok = got === c.expect
+  console.log(`${ok ? 'PASS' : 'FAIL'}  endorsements/${c.file}`)
+  if (!ok) {
+    console.log(`      got=${got} want=${c.expect}`)
+    fail++
+  } else pass++
+}
+for (const t of endorsements.thresholds) {
+  const counted = new Set()
+  let rejected = 0
+  for (const file of t.files) {
+    const bytes = readFileSync(`endorsements/${file}`)
+    const attestor = JSON.parse(bytes.toString('utf8')).attestor_did
+    if (endorsementOutcome(bytes, endorsements) === 'valid' && !counted.has(attestor)) {
+      counted.add(attestor)
+    } else rejected++
+  }
+  const satisfied = counted.size >= endorsements.policy.required_attestors
+  const ok = counted.size === t.validAttestors &&
+    rejected === t.rejectedEndorsements && satisfied === t.satisfied
+  console.log(`${ok ? 'PASS' : 'FAIL'}  endorsements threshold: ${t.description}`)
+  if (!ok) {
+    console.log(`      got valid=${counted.size} rejected=${rejected} satisfied=${satisfied}`)
+    fail++
+  } else pass++
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exitCode = fail ? 1 : 0

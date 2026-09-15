@@ -173,7 +173,7 @@ describe('durable completion witness display', () => {
     expect(await service.importEndorsementJson(json)).toBe(true)
     expect(mocks.invoke).toHaveBeenCalledWith('import_course_completion_endorsement', {
       claimId: 'claim',
-      endorsement: JSON.parse(json),
+      endorsementJson: json,
     })
     expect(service.endorsementMessage.value).toBe('imported')
   })

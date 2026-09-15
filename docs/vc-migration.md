@@ -212,8 +212,9 @@ The credential pages use the VC IPC surface, and the learner UI calls
 request export, local authorized signing, verified import, and threshold
 status. The composer now saves an author-scoped policy for the next signed
 publication and blocks publication while policy edits are unsaved. The learner
-completion modal copies the exact request, verifies each returned endorsement
-on import, and shows threshold status. The instructor inbox requires a separate
+completion modal copies the exact request. For each returned endorsement it
+passes the pasted JSON text unchanged to the backend, which parses it strictly
+and verifies it before import. The modal then shows threshold status. The instructor inbox requires a separate
 parse-and-review step before it will call the authorized local signer, then
 exports the resulting signed JSON. This workflow is manual; authenticated
 addressed transport remains pending. Credential verification DTOs use their

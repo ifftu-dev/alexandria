@@ -169,10 +169,11 @@ export function useCourseCompletion() {
     endorsementError.value = ''
     endorsementMessage.value = ''
     try {
-      const endorsement: unknown = JSON.parse(json)
+      // The exact text goes to the backend, which parses it strictly. Parsing
+      // it here would silently resolve duplicate keys before verification.
       await invoke<CourseCompletionEndorsement>('import_course_completion_endorsement', {
         claimId: currentClaimId,
-        endorsement,
+        endorsementJson: json,
       })
       if (!isOpen.value || claimId.value !== currentClaimId || generation !== currentGeneration) return false
       endorsementMessage.value = 'imported'
