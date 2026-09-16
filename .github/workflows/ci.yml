@@ -87,7 +87,7 @@ jobs:
             local path
             for path in "${changed_files[@]}"; do
               case "${path}" in
-                .github/workflows/*|cli/*|patches/*|scripts/*|src-tauri/*|Cargo.toml|Cargo.lock)
+                .github/workflows/*|cli/*|crates/*|patches/*|scripts/*|src-tauri/*|Cargo.toml|Cargo.lock)
                   if [ "$1" = "backend" ] || [ "$1" = "security" ]; then
                     return 0
                   fi
