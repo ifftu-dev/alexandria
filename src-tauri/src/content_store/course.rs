@@ -15,7 +15,6 @@ use crate::content_store::content;
 use crate::content_store::node::ContentNode;
 use crate::domain::course_document::{
     CourseDocumentPayload, PublishCourseResult, SignedCourseDocument, COURSE_DOCUMENT_VERSION,
-    LEGACY_COURSE_DOCUMENT_VERSION,
 };
 
 #[derive(Error, Debug)]
@@ -140,13 +139,6 @@ pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), Cours
 
 fn validate_payload(payload: &CourseDocumentPayload) -> Result<(), CourseDocError> {
     match payload.version {
-        LEGACY_COURSE_DOCUMENT_VERSION => {
-            if payload.completion_policy.is_some() {
-                return Err(CourseDocError::InvalidCompletionPolicy(
-                    "version 1 cannot carry a completion policy".into(),
-                ));
-            }
-        }
         COURSE_DOCUMENT_VERSION => {
             if payload.author_did.is_none() {
                 return Err(CourseDocError::InvalidPublicKey(
@@ -165,13 +157,8 @@ fn validate_payload(payload: &CourseDocumentPayload) -> Result<(), CourseDocErro
 }
 
 fn signing_bytes(payload: &CourseDocumentPayload) -> Result<Vec<u8>, CourseDocError> {
-    if payload.version == LEGACY_COURSE_DOCUMENT_VERSION {
-        serde_json::to_vec(payload)
-            .map_err(|error| CourseDocError::Serialization(error.to_string()))
-    } else {
-        serde_json_canonicalizer::to_vec(payload)
-            .map_err(|error| CourseDocError::Serialization(error.to_string()))
-    }
+    serde_json_canonicalizer::to_vec(payload)
+        .map_err(|error| CourseDocError::Serialization(error.to_string()))
 }
 
 /// Publish a signed course document to the iroh blob store.
@@ -250,13 +237,13 @@ mod tests {
         SigningKey::from_bytes(&bytes)
     }
 
-    fn make_payload() -> CourseDocumentPayload {
+    fn make_payload(key: &SigningKey) -> CourseDocumentPayload {
         CourseDocumentPayload {
-            version: 1,
+            version: COURSE_DOCUMENT_VERSION,
             course_id: "test_course_001".to_string(),
             author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy"
                 .to_string(),
-            author_did: None,
+            author_did: Some(did_from_verifying_key(&key.verifying_key())),
             title: "Algorithm Design and Analysis".to_string(),
             description: Some("A comprehensive course on algorithms".to_string()),
             thumbnail_hash: None,
@@ -313,7 +300,7 @@ mod tests {
     #[test]
     fn sign_and_verify_roundtrip() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let signed = sign_course_document(&payload, &key).unwrap();
         assert_eq!(signed.title, payload.title);
@@ -327,9 +314,7 @@ mod tests {
     fn version_two_signs_immutable_completion_policy() {
         let author_key = make_signing_key();
         let attestor_key = make_signing_key();
-        let mut payload = make_payload();
-        payload.version = COURSE_DOCUMENT_VERSION;
-        payload.author_did = Some(did_from_verifying_key(&author_key.verifying_key()));
+        let mut payload = make_payload(&author_key);
         payload.completion_policy = Some(completion_policy(&attestor_key));
 
         let mut signed = sign_course_document(&payload, &author_key).unwrap();
@@ -347,35 +332,46 @@ mod tests {
     }
 
     #[test]
-    fn version_one_remains_parseable_without_a_completion_policy() {
+    fn version_one_documents_are_refused() {
         let key = make_signing_key();
-        let signed = sign_course_document(&make_payload(), &key).unwrap();
-        let json = serde_json::to_string(&signed).unwrap();
-        assert!(!json.contains("completion_policy"));
+        let mut payload = make_payload(&key);
+        payload.version = 1;
 
-        let parsed: SignedCourseDocument = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.version, LEGACY_COURSE_DOCUMENT_VERSION);
-        assert!(parsed.completion_policy.is_none());
-        verify_course_document(&parsed).unwrap();
+        assert!(matches!(
+            sign_course_document(&payload, &key),
+            Err(CourseDocError::UnsupportedVersion(1))
+        ));
+
+        // A document that claims version 1 on the wire is refused on the way
+        // in too, so an old signed document cannot be imported.
+        let mut signed = sign_course_document(&make_payload(&key), &key).unwrap();
+        signed.version = 1;
+        assert!(matches!(
+            verify_course_document(&signed),
+            Err(CourseDocError::UnsupportedVersion(1))
+        ));
     }
 
     #[test]
-    fn version_one_refuses_a_completion_policy() {
+    fn version_one_with_a_completion_policy_is_refused_as_unsupported() {
         let author_key = make_signing_key();
         let attestor_key = make_signing_key();
-        let mut payload = make_payload();
+        let mut payload = make_payload(&author_key);
+        payload.version = 1;
         payload.completion_policy = Some(completion_policy(&attestor_key));
 
+        // The version is refused before the policy is even looked at, so a
+        // version 1 document cannot be signed whatever it carries.
         assert!(matches!(
             sign_course_document(&payload, &author_key),
-            Err(CourseDocError::InvalidCompletionPolicy(_))
+            Err(CourseDocError::UnsupportedVersion(1))
         ));
     }
 
     #[test]
     fn verify_rejects_tampered_title() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let mut signed = sign_course_document(&payload, &key).unwrap();
         signed.title = "Tampered Title".to_string();
@@ -389,7 +385,7 @@ mod tests {
     #[test]
     fn verify_rejects_tampered_chapter() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let mut signed = sign_course_document(&payload, &key).unwrap();
         signed.chapters[0].title = "Tampered Chapter".to_string();
@@ -404,22 +400,24 @@ mod tests {
     fn verify_rejects_wrong_key() {
         let key1 = make_signing_key();
         let key2 = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key1);
 
         let mut signed = sign_course_document(&payload, &key1).unwrap();
-        // Replace public key with key2's
+        // Replace public key with key2's. A v2 document binds its author DID
+        // to the signing key, so the swap is caught before the signature is
+        // even checked.
         signed.public_key = hex::encode(key2.verifying_key().to_bytes());
 
         assert!(matches!(
             verify_course_document(&signed),
-            Err(CourseDocError::InvalidSignature)
+            Err(CourseDocError::InvalidPublicKey(_))
         ));
     }
 
     #[test]
     fn payload_extraction_matches_original() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let signed = sign_course_document(&payload, &key).unwrap();
         let extracted = signed.payload();
@@ -436,7 +434,7 @@ mod tests {
     #[test]
     fn signed_document_serializes_to_json() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let signed = sign_course_document(&payload, &key).unwrap();
         let json = serde_json::to_string_pretty(&signed).unwrap();
@@ -450,7 +448,8 @@ mod tests {
 
     #[test]
     fn course_documents_are_bounded_before_verification() {
-        let signed = sign_course_document(&make_payload(), &make_signing_key()).unwrap();
+        let key = make_signing_key();
+        let signed = sign_course_document(&make_payload(&key), &key).unwrap();
         let bytes = serde_json::to_vec(&signed).unwrap();
         let max = COURSE_DOCUMENT_JSON_LIMITS.max_bytes;
 
@@ -482,9 +481,10 @@ mod tests {
         let node = ContentNode::new(tmp.path());
         node.start(None).await.unwrap();
 
-        let mut payload = make_payload();
+        let key = make_signing_key();
+        let mut payload = make_payload(&key);
         payload.description = Some("a".repeat(COURSE_DOCUMENT_JSON_LIMITS.max_string_bytes + 1));
-        let signed = sign_course_document(&payload, &make_signing_key()).unwrap();
+        let signed = sign_course_document(&payload, &key).unwrap();
         assert!(matches!(
             publish_course_document(&node, &signed).await,
             Err(CourseDocError::UntrustedJson(
@@ -502,7 +502,7 @@ mod tests {
         node.start(None).await.unwrap();
 
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
         let signed = sign_course_document(&payload, &key).unwrap();
 
         // Publish
@@ -529,7 +529,7 @@ mod tests {
         node.start(None).await.unwrap();
 
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
         let signed = sign_course_document(&payload, &key).unwrap();
 
         let r1 = publish_course_document(&node, &signed).await.unwrap();

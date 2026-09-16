@@ -4,9 +4,7 @@ use serde::Serialize;
 
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
-use crate::domain::course_document::{
-    CourseCompletionPolicy, COURSE_DOCUMENT_VERSION, LEGACY_COURSE_DOCUMENT_VERSION,
-};
+use crate::domain::course_document::{CourseCompletionPolicy, COURSE_DOCUMENT_VERSION};
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
 use crate::AppState;
 
@@ -206,10 +204,7 @@ fn validate_course_binding(
     let version = u32::try_from(course_document_version)
         .map_err(|_| "invalid verified course document version".to_string())?;
     match version {
-        LEGACY_COURSE_DOCUMENT_VERSION if completion_policy_json.is_some() => {
-            return Err("course document v1 cannot carry a completion policy".into());
-        }
-        LEGACY_COURSE_DOCUMENT_VERSION | COURSE_DOCUMENT_VERSION => {}
+        COURSE_DOCUMENT_VERSION => {}
         _ => {
             return Err(format!(
                 "unsupported verified course document version: {version}"

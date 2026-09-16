@@ -11,13 +11,13 @@ use serde::{Deserialize, Serialize};
 
 pub use alexandria_verify::course::CourseCompletionPolicy;
 
-pub const LEGACY_COURSE_DOCUMENT_VERSION: u32 = 1;
 pub const COURSE_DOCUMENT_VERSION: u32 = 2;
 
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {
-    /// Document format version. Version 2 adds the immutable completion policy.
+    /// Document format version. Version 2 is the only supported format; it
+    /// carries the author DID and the immutable completion policy.
     pub version: u32,
     /// Deterministic course ID: blake2b(author_address + title + timestamp).
     pub course_id: String,
@@ -172,7 +172,7 @@ mod tests {
 
     fn sample_signed_course_doc() -> SignedCourseDocument {
         SignedCourseDocument {
-            version: 1,
+            version: COURSE_DOCUMENT_VERSION,
             course_id: "course1".into(),
             author_address: "stake_test1u123".into(),
             author_did: None,
@@ -210,7 +210,7 @@ mod tests {
         let signed = sample_signed_course_doc();
         let payload = signed.payload();
 
-        assert_eq!(payload.version, 1);
+        assert_eq!(payload.version, COURSE_DOCUMENT_VERSION);
         assert_eq!(payload.course_id, "course1");
         assert_eq!(payload.author_address, "stake_test1u123");
         assert_eq!(payload.title, "Intro to Rust");
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn course_document_payload_serde_roundtrip() {
         let payload = CourseDocumentPayload {
-            version: 1,
+            version: COURSE_DOCUMENT_VERSION,
             course_id: "c1".into(),
             author_address: "addr1".into(),
             author_did: None,
