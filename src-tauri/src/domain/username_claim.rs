@@ -11,7 +11,7 @@
 //!   2. time — anchor slot / receipt time / self-asserted `claimed_at`
 //!   3. lexicographic DID as the final tiebreak
 //!
-//! Phase 1 produces bare claims only; `receipt` and `anchor` are
+//! Phase 1 produces bare claims only; `receipts` and `anchor` are
 //! carried in the format now so later phases need no migration.
 
 use std::cmp::Ordering;
@@ -63,6 +63,7 @@ pub struct CardanoAnchor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct UsernameClaim {
     pub version: u32,
     /// Normalized handle: lowercase `[a-z0-9_]{3,32}`.
@@ -72,12 +73,6 @@ pub struct UsernameClaim {
     pub claimed_at: i64,
     /// Ed25519 signature (hex) by the DID key over [`canonical_bytes`].
     pub sig: String,
-    /// Legacy single receipt — superseded by `receipts`, kept so
-    /// claims written by earlier builds still parse (and so this
-    /// build's claims stay readable by them). [`normalize`] folds it
-    /// into `receipts`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receipt: Option<RelayReceipt>,
     /// Receipts from independent relays. Ordering uses the UPPER
     /// MEDIAN of verified receipt times, so a minority of lying
     /// relays cannot backdate (or meaningfully delay) a claim.
@@ -114,7 +109,6 @@ impl UsernameClaim {
             did: did.as_str().to_string(),
             claimed_at,
             sig: hex::encode(sig.to_bytes()),
-            receipt: None,
             receipts: Vec::new(),
             anchor: None,
             release: None,
@@ -170,25 +164,13 @@ impl UsernameClaim {
         }
     }
 
-    /// Fold the legacy single `receipt` into `receipts` and dedupe by
-    /// relay (one receipt per relay counts). Call after deserializing.
+    /// Dedupe receipts by relay — one receipt per relay counts. Call
+    /// after deserializing.
     pub fn normalize(mut self) -> Self {
-        if let Some(r) = self.receipt.take() {
-            if !self
-                .receipts
-                .iter()
-                .any(|x| x.relay_peer_id == r.relay_peer_id)
-            {
-                self.receipts.push(r);
-            }
-        }
         self.receipts
             .sort_by(|a, b| a.relay_peer_id.cmp(&b.relay_peer_id));
         self.receipts
             .dedup_by(|a, b| a.relay_peer_id == b.relay_peer_id);
-        // Keep the legacy field mirroring the first receipt so older
-        // builds reading this claim still see tier 1.
-        self.receipt = self.receipts.first().cloned();
         self
     }
 
@@ -203,7 +185,6 @@ impl UsernameClaim {
             self.receipts
                 .sort_by(|a, b| a.relay_peer_id.cmp(&b.relay_peer_id));
         }
-        self.receipt = self.receipts.first().cloned();
     }
 
     /// Verify the owner signature against the key embedded in the DID.
@@ -229,7 +210,7 @@ impl UsernameClaim {
     pub fn tier(&self) -> u8 {
         if self.anchor.is_some() {
             2
-        } else if !self.receipts.is_empty() || self.receipt.is_some() {
+        } else if !self.receipts.is_empty() {
             1
         } else {
             0
@@ -246,11 +227,6 @@ impl UsernameClaim {
             return a.slot as i64;
         }
         let mut times: Vec<i64> = self.receipts.iter().map(|r| r.received_at).collect();
-        if times.is_empty() {
-            if let Some(r) = self.receipt.as_ref() {
-                times.push(r.received_at);
-            }
-        }
         if times.is_empty() {
             return self.claimed_at;
         }
@@ -361,11 +337,11 @@ mod tests {
         assert!(anchored.beats(&bare));
 
         let mut receipted = UsernameClaim::create("x_name", &d1, 100, &k1);
-        receipted.receipt = Some(RelayReceipt {
+        receipted.receipts = vec![RelayReceipt {
             relay_peer_id: "12D3".into(),
             received_at: 150,
             sig: String::new(),
-        });
+        }];
         assert!(anchored.beats(&receipted));
         assert!(receipted.beats(&bare));
     }
@@ -408,23 +384,48 @@ mod tests {
     }
 
     #[test]
-    fn normalize_folds_legacy_receipt_and_dedupes() {
+    fn normalize_keeps_one_receipt_per_relay() {
         let (k1, d1) = keypair(1);
         let mut c = UsernameClaim::create("x_name", &d1, 100, &k1);
-        c.receipt = Some(RelayReceipt {
-            relay_peer_id: "relayA".into(),
-            received_at: 100,
-            sig: "s".into(),
-        });
-        c.receipts = vec![RelayReceipt {
-            relay_peer_id: "relayA".into(),
-            received_at: 100,
-            sig: "s".into(),
-        }];
+        c.receipts = vec![
+            RelayReceipt {
+                relay_peer_id: "relayA".into(),
+                received_at: 100,
+                sig: "s".into(),
+            },
+            RelayReceipt {
+                relay_peer_id: "relayA".into(),
+                received_at: 140,
+                sig: "s2".into(),
+            },
+        ];
+
         let n = c.normalize();
+
         assert_eq!(n.receipts.len(), 1);
-        assert!(n.receipt.is_some()); // legacy mirror kept
         assert_eq!(n.tier(), 1);
+    }
+
+    #[test]
+    fn a_claim_carrying_the_retired_receipt_field_is_refused() {
+        let (k1, d1) = keypair(1);
+        let claim = UsernameClaim::create("x_name", &d1, 100, &k1);
+        let mut value = serde_json::to_value(&claim).expect("claim to json");
+        value.as_object_mut().expect("object").insert(
+            "receipt".into(),
+            serde_json::json!({
+                "relay_peer_id": "relayA",
+                "received_at": 100,
+                "sig": "s",
+            }),
+        );
+
+        let parsed = serde_json::from_value::<UsernameClaim>(value);
+
+        assert!(
+            parsed.is_err(),
+            "a claim carrying the retired single receipt must not parse"
+        );
     }
 
     #[test]

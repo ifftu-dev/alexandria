@@ -70,7 +70,6 @@ pub fn sanitize_claim(claim: UsernameClaim) -> UsernameClaim {
     let mut claim = claim.normalize();
     let sig = claim.sig.clone();
     claim.receipts.retain(|r| verify_receipt(&sig, r));
-    claim.receipt = claim.receipts.first().cloned();
     claim
 }
 
@@ -87,14 +86,14 @@ mod tests {
         let mut claim =
             crate::domain::username_claim::UsernameClaim::create("ada_99", &did, 100, &key);
         let bytes = canonical_receipt_bytes(&claim.sig, 200, &pid);
-        claim.receipt = Some(RelayReceipt {
+        claim.receipts = vec![RelayReceipt {
             relay_peer_id: pid,
             received_at: 200,
             sig: hex::encode(kp.sign(&bytes).unwrap()),
-        });
+        }];
         // Valid signature, but the relay isn't in the trusted set.
         let sanitized = sanitize_claim(claim);
-        assert!(sanitized.receipt.is_none());
+        assert!(sanitized.receipts.is_empty());
     }
 
     #[test]
@@ -103,11 +102,11 @@ mod tests {
         let did = crate::crypto::did::derive_did_key(&key);
         let mut claim =
             crate::domain::username_claim::UsernameClaim::create("ada_99", &did, 100, &key);
-        claim.receipt = Some(RelayReceipt {
+        claim.receipts = vec![RelayReceipt {
             relay_peer_id: "not-a-peer-id".into(),
             received_at: 200,
             sig: "zz".into(),
-        });
-        assert!(sanitize_claim(claim).receipt.is_none());
+        }];
+        assert!(sanitize_claim(claim).receipts.is_empty());
     }
 }

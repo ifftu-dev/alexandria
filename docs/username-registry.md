@@ -22,8 +22,9 @@ UsernameClaim {
 }
 ```
 
-(A legacy single `receipt` field is folded into `receipts` on read and
-mirrored back for older builds.)
+(The retired single `receipt` field is gone. A claim carrying it does not
+parse: the record type rejects unknown fields, so such a claim is treated as
+absent rather than silently counted at a lower tier.)
 
 `did:key` embeds the public key, so claims verify offline with no PKI.
 Forging a claim *for someone else's DID* is impossible; the attack
