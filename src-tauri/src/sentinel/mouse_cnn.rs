@@ -133,9 +133,9 @@ impl MouseTrajectoryCnn {
         Ok((total / segments.len() as f32).clamp(0.0, 1.0))
     }
 
-    /// Train on labeled trajectories. Positives are human points;
-    /// negatives are synthetic bot patterns or DAO-ratified prior
-    /// trajectories. Returns final BCE loss.
+    /// Train on labeled trajectories. Positives are human points and
+    /// negatives are synthetic bot patterns; the community prior library
+    /// that once supplied negatives is deleted. Returns final BCE loss.
     pub fn train(
         &mut self,
         human_points: &[MousePoint],

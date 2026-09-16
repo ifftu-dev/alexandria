@@ -54,7 +54,7 @@ fn columns(conn: &Connection, table: &str) -> Vec<String> {
 /// Tables the baseline must never create. Each lost the code that gave it
 /// authority in D01 or D02, and a schema is the last place such a thing can
 /// hide: the rows outlive the feature unless the table goes too.
-const FORBIDDEN_TABLES: [&str; 18] = [
+const FORBIDDEN_TABLES: [&str; 19] = [
     "credential_challenges",
     "credential_challenge_votes",
     "plugin_attestations",
@@ -73,6 +73,10 @@ const FORBIDDEN_TABLES: [&str; 18] = [
     "governance_proposal_votes",
     "bank_questions",
     "question_bank_versions",
+    // Recorded a DAO committee signature withdrawing an opinion. Its signing
+    // authority went with local governance, and its foreign key pointed at a
+    // table the baseline no longer creates.
+    "opinion_withdrawals",
 ];
 
 #[test]
@@ -147,6 +151,88 @@ fn the_schema_keeps_what_the_runtime_reads() {
         .iter()
         .any(|v| v == "current_reputation_assertions"));
     assert_eq!(names(db.conn(), "trigger").len(), 3);
+}
+
+/// Asserting that a wanted object is present cannot catch an unwanted one
+/// coming back. The retired scoring view would pass every other test in this
+/// file, so the view set is pinned exactly.
+#[test]
+fn the_view_set_is_exact() {
+    let db = migrated();
+    let mut views = names(db.conn(), "view");
+    views.sort();
+    assert_eq!(views, vec!["current_reputation_assertions".to_string()]);
+}
+
+/// The baseline was verified once, during construction, against a replay of
+/// the 94 migrations it replaced. That reference no longer exists in the repo,
+/// so the parity argument cannot be re-run. These counts are what remains: a
+/// drift detector that fails on any object added or removed without intent.
+#[test]
+fn the_schema_object_counts_are_pinned() {
+    let db = migrated();
+    let tables = names(db.conn(), "table")
+        .into_iter()
+        .filter(|t| t != "_migrations" && t != "_schema_identity")
+        .count();
+    assert_eq!(tables, 92, "baseline table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 105, "index count changed");
+    assert_eq!(
+        names(db.conn(), "trigger").len(),
+        3,
+        "trigger count changed"
+    );
+    assert_eq!(names(db.conn(), "view").len(), 1, "view count changed");
+}
+
+/// The scalar function the old chain registered on every open. Nothing in the
+/// baseline references it, and a database that still resolved it would mean
+/// the registration had crept back.
+#[test]
+fn the_retired_course_authority_function_is_not_registered() {
+    let db = migrated();
+    let resolved = db
+        .conn()
+        .query_row("SELECT legacy_course_authority_did('addr')", [], |row| {
+            row.get::<_, String>(0)
+        });
+    assert!(
+        resolved.is_err(),
+        "legacy_course_authority_did resolved; the retired registration is back"
+    );
+}
+
+/// Every foreign key must point at a table this schema creates.
+///
+/// `pragma_foreign_key_check` cannot catch this: it inspects existing rows, so
+/// a table that is always empty keeps a dangling reference indefinitely. That
+/// is exactly what happened when the baseline dropped the governance tables
+/// and left `opinion_withdrawals` pointing at one of them — the table applied
+/// cleanly, passed the row-level check, and would have failed on first insert
+/// with "no such table". Removing a table has to account for what points AT
+/// it, not only what it points at.
+#[test]
+fn no_foreign_key_points_at_a_missing_table() {
+    let db = migrated();
+    let tables: Vec<String> = names(db.conn(), "table");
+    let mut dangling = Vec::new();
+    for table in &tables {
+        let mut stmt = db
+            .conn()
+            .prepare(&format!("PRAGMA foreign_key_list({table})"))
+            .expect("prepare");
+        let targets: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(2))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("read targets");
+        for target in targets {
+            if !tables.iter().any(|t| t == &target) {
+                dangling.push(format!("{table} -> {target}"));
+            }
+        }
+    }
+    assert!(dangling.is_empty(), "dangling foreign keys: {dangling:?}");
 }
 
 #[test]
@@ -304,6 +390,27 @@ mod identity {
             message.contains("header and contents disagree"),
             "got: {message}"
         );
+    }
+
+    /// The branch that refuses a database from an older family. Until a second
+    /// epoch exists there is no upgrade path, and an untested refusal branch is
+    /// indistinguishable from one that silently accepts.
+    #[test]
+    fn an_earlier_schema_epoch_is_refused() {
+        let db = Database::open_in_memory().expect("open database");
+        db.conn()
+            .pragma_update(None, "application_id", SCHEMA_APPLICATION_ID)
+            .expect("stamp id");
+        db.conn()
+            .pragma_update(None, "user_version", SCHEMA_EPOCH - 1)
+            .expect("stamp earlier epoch");
+
+        let message = db
+            .run_migrations()
+            .expect_err("an earlier family must be refused")
+            .to_string();
+        assert!(message.contains("earlier schema family"), "got: {message}");
+        assert!(!table_exists(db.conn(), "credentials"));
     }
 
     #[test]

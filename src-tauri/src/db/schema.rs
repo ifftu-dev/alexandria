@@ -762,14 +762,6 @@ CREATE TABLE local_identity (
     account_roles TEXT NOT NULL DEFAULT '["learner"]'
 );
 
-CREATE TABLE opinion_withdrawals (
-    opinion_id TEXT PRIMARY KEY,
-    dao_id TEXT NOT NULL REFERENCES governance_daos(id),
-    reason TEXT NOT NULL,                                  -- e.g. 'challenge_upheld', 'author_request'
-    dao_signature TEXT NOT NULL,                           -- DAO committee signature over the record
-    withdrawn_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE opinions (
     id TEXT PRIMARY KEY,                                           -- blake2b(author_address + video_cid)
     author_address TEXT NOT NULL,                                  -- Cardano stake address
