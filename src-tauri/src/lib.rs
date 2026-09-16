@@ -864,12 +864,6 @@ pub fn run() {
                                     db::executor::DatabaseWorkload::Background,
                                 );
                                 if let Some(client) = bf.as_ref() {
-                                    if let Err(error) =
-                                        cardano::snapshot_recovery::tick(&chain_journal, client)
-                                            .await
-                                    {
-                                        log::debug!("snapshot recovery: {error}");
-                                    }
                                     if let Some(wallet) = wallet.as_ref() {
                                         if let Err(error) = cardano::completion_queue::tick(
                                             &chain_journal,

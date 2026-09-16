@@ -8,7 +8,7 @@
 use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
 
-use crate::cardano::{anchor_queue, snapshot_recovery, submission};
+use crate::cardano::{anchor_queue, snapshot_recovery};
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::reputation::{CreateSnapshotParams, ReputationRole, SnapshotRecord};
@@ -259,6 +259,19 @@ fn collect_scores(
         .collect()
 }
 
+/// Proficiency level string to reputation enum index (0-5).
+fn proficiency_to_index(level: &str) -> u8 {
+    match level {
+        "remember" => 0,
+        "understand" => 1,
+        "apply" => 2,
+        "analyze" => 3,
+        "evaluate" => 4,
+        "create" => 5,
+        _ => 2, // default to apply
+    }
+}
+
 fn collect_evidence(
     conn: &rusqlite::Connection,
     actor_did: &str,
@@ -271,7 +284,7 @@ fn collect_evidence(
         ReputationRole::Instructor => "instructor",
         _ => return Err("unsupported reputation snapshot role".into()),
     };
-    let level = crate::cardano::snapshot::proficiency_to_index(level) as i64;
+    let level = proficiency_to_index(level) as i64;
     // Freeze exactly the verified set that produced the reputation row, so a
     // snapshot can never cite an unverified or self-issued instructor input.
     let evidence = crate::evidence::reputation::verified_reputation_inputs(
@@ -393,8 +406,9 @@ pub async fn get_snapshot(
 /// Request background anchoring for a credential-backed snapshot.
 ///
 /// This command never contacts a chain provider. It makes an unsigned failed
-/// anchor retryable, while a durable signed transaction remains bound to its
-/// original journal entry. Legacy CIP-68 snapshots cannot start a new mint.
+/// anchor retryable. A snapshot written before the credential-hash format has
+/// no credential to anchor and is refused: the retired CIP-68 minting path
+/// cannot be resumed.
 #[tauri::command]
 pub async fn submit_snapshot_tx(
     state: State<'_, AppState>,
@@ -416,22 +430,15 @@ fn request_snapshot_anchor(
     snapshot_id: &str,
 ) -> Result<SnapshotRecord, String> {
     let record = snapshot_recovery::record(conn, snapshot_id)?;
-    if let Some(credential_id) = &record.credential_id {
-        anchor_queue::enqueue_or_retry(conn, credential_id)?;
-        return snapshot_recovery::record(conn, snapshot_id);
-    }
-    let operation = submission::Operation {
-        kind: snapshot_recovery::KIND,
-        id: snapshot_id,
+    let Some(credential_id) = &record.credential_id else {
+        return Err(
+            "snapshot has no signed credential to anchor: the retired CIP-68 \
+                    minting path cannot be resumed"
+                .into(),
+        );
     };
-    if let Some(saved) = submission::lookup(conn, operation)? {
-        snapshot_recovery::project(conn, operation, &saved)?;
-        return snapshot_recovery::record(conn, snapshot_id);
-    }
-    Err(
-        "legacy CIP-68 snapshot has no signed transaction to recover; new minting is disabled"
-            .into(),
-    )
+    anchor_queue::enqueue_or_retry(conn, credential_id)?;
+    snapshot_recovery::record(conn, snapshot_id)
 }
 
 #[cfg(test)]
@@ -708,18 +715,34 @@ mod tests {
     }
 
     #[test]
-    fn unsigned_legacy_snapshot_cannot_start_a_new_mint() {
+    fn preserved_legacy_snapshot_still_reads_but_cannot_be_anchored() {
         let db = test_db();
         db.conn()
             .execute(
                 "INSERT INTO reputation_snapshots
-                 (id, actor_address, subject_id, role, skill_count, tx_status)
-                 VALUES ('legacy', 'stake', 'subject', 'learner', 0, 'pending')",
+                 (id, actor_address, subject_id, role, skill_count, tx_status, tx_hash)
+                 VALUES ('legacy', 'stake', 'subject', 'learner', 0, 'pending', 'original')",
                 [],
             )
             .unwrap();
+
+        let preserved = snapshot_recovery::record(db.conn(), "legacy").unwrap();
+        assert_eq!(preserved.tx_hash.as_deref(), Some("original"));
+        assert_eq!(preserved.tx_status, "pending");
+
         let error = request_snapshot_anchor(db.conn(), "legacy").unwrap_err();
-        assert!(error.contains("new minting is disabled"));
+        assert!(error.contains("cannot be resumed"), "{error}");
+    }
+
+    #[test]
+    fn proficiency_to_index_all_levels() {
+        assert_eq!(proficiency_to_index("remember"), 0);
+        assert_eq!(proficiency_to_index("understand"), 1);
+        assert_eq!(proficiency_to_index("apply"), 2);
+        assert_eq!(proficiency_to_index("analyze"), 3);
+        assert_eq!(proficiency_to_index("evaluate"), 4);
+        assert_eq!(proficiency_to_index("create"), 5);
+        assert_eq!(proficiency_to_index("unknown"), 2); // default
     }
 
     #[test]

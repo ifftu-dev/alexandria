@@ -8,13 +8,10 @@ pub mod completion_tx_builder;
 pub mod cost_models;
 pub mod gov_tx_builder;
 pub mod plutus_data;
-pub mod plutus_mint;
 pub mod plutus_spend;
 pub mod relay_registry_chain;
 pub mod script_refs;
-pub mod snapshot;
 pub mod snapshot_recovery;
-pub mod soulbound_tx_builder;
 pub mod stake_pubkey;
 pub mod submission;
 #[cfg(test)]

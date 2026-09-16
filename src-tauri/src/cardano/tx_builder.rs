@@ -42,7 +42,7 @@ pub enum TxBuildError {
 
 /// Minimum ADA to send with an NFT output (2 ADA).
 ///
-/// Still used by `soulbound_tx_builder` for the CIP-68 reputation mint.
+/// Used by `completion_tx_builder` for the completion token output.
 pub const MIN_NFT_LOVELACE: u64 = 2_000_000;
 
 /// Minimum ADA required in a UTxO for coin selection (5 ADA).

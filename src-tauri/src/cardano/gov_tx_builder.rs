@@ -142,8 +142,6 @@ fn hash_from_hex(hex_str: &str) -> Result<[u8; 28], TxBuildError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cardano::blockfrost::BlockfrostClient;
-    use crate::cardano::plutus_data;
     use pallas_crypto::hash::Hash;
     use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
 
@@ -288,65 +286,5 @@ mod tests {
         } else {
             panic!("expected redeemers list");
         }
-    }
-
-    /// Live preprod soulbound transfer-guard spend: spends the CIP-68
-    /// reputation reference NFT UTxO with `UpdateReputation`, returning
-    /// it to the same soulbound script with the same owner/subject/role.
-    /// Signed by the authorized minter (= treasury).
-    ///
-    /// Env: SB_UTXO (`txhash#idx`), SB_LOVELACE.
-    #[test]
-    #[ignore]
-    fn live_soulbound_update() {
-        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
-        let treasury_addr =
-            "addr_test1qps9dhjrekj8d7nuf94ltzeslzwfj30u0f5tgy6ddmecxvm5wes3g9ja43ewdtq6ww3rccuzjvv7gdd4hghj9jdg7njqpu4uns";
-        let minter =
-            hash_from_hex("6056de43cda476fa7c496bf58b30f89c9945fc7a68b4134d6ef38333").unwrap();
-        let rep_policy = hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap();
-        // (100) reference NFT asset name: cip68 label 000643b0 ++ base
-        // (subject 16B "rep1.." ++ role byte 01).
-        let ref_asset = hex::decode("000643b07265703100000000000000000000000001").unwrap();
-        // Re-attach the identical ReputationDatum so owner/subject/role
-        // are provably preserved (the validator's only datum checks).
-        let datum = hex::decode(
-            "d87987581c6056de43cda476fa7c496bf58b30f89c9945fc7a68b4134d6ef383335072657031000000000000000000000000d8798081d879855000112233445566778899aabbccddeeffd87c801a000f424019232802021b0000019eef2378ca1b0000019f89a240ca",
-        )
-        .unwrap();
-
-        let su = std::env::var("SB_UTXO").unwrap();
-        let (sh, si_s) = su.split_once('#').unwrap();
-        let si: u64 = si_s.parse().unwrap();
-        let slov: u64 = std::env::var("SB_LOVELACE").unwrap().parse().unwrap();
-
-        let redeemer = plutus_data::encode_soulbound_redeemer("update").unwrap();
-        let assets = [(Hash::<28>::from(rep_policy), ref_asset, 1i64)];
-        let signers = [minter];
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let bf = BlockfrostClient::new(pid).unwrap();
-        let unsigned = rt
-            .block_on(crate::cardano::plutus_spend::build_spend_unsigned(
-                &bf,
-                &crate::cardano::plutus_spend::SpendScript {
-                    payment_address: treasury_addr,
-                    payment_key_extended: &[0u8; 64],
-                    required_signers: &signers,
-                    script_input: (sh, si),
-                    script_input_lovelace: slov,
-                    spend_redeemer: redeemer,
-                    continuing_address: script_address(script_refs::SOULBOUND_SCRIPT_HASH).unwrap(),
-                    continuing_lovelace: slov,
-                    continuing_datum: datum,
-                    continuing_assets: &assets,
-                    reference_inputs: &[script_refs::SOULBOUND_REF_UTXO],
-                    mint: None,
-                    invalid_from_slot: None,
-                    valid_from_slot: None,
-                },
-            ))
-            .expect("build soulbound update");
-        println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }
 }

@@ -1,10 +1,10 @@
-//! Plutus Data CBOR encoding for soulbound, reputation-mint and completion
-//! datums and redeemers. The governance datum and redeemer encoders are
-//! deleted with the obsolete governance transaction builders.
+//! Plutus Data CBOR encoding for completion datums and redeemers. The
+//! governance encoders went with the obsolete governance transaction
+//! builders, and the soulbound and reputation-mint redeemers with the
+//! retired CIP-68 reputation mint.
 //!
 //! Mirrors the Aiken types from `cardano/governance/lib/alexandria/types.ak`.
-//! Uses pallas_codec::minicbor for manual Plutus Data encoding, following the pattern
-//! established in `snapshot.rs::encode_reputation_datum`.
+//! Uses pallas_codec::minicbor for manual Plutus Data encoding.
 //!
 //! Plutus Data encoding rules:
 //! - `Constr(n, fields)` for n in 0..6 → CBOR tag (121+n) + array
@@ -53,46 +53,6 @@ fn encode_bytes(
         .bytes(val)
         .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
     Ok(())
-}
-
-// ---- Soulbound Redeemer ----
-
-/// Encode a `SoulboundRedeemer` as Plutus Data CBOR.
-pub fn encode_soulbound_redeemer(action: &str) -> Result<Vec<u8>, TxBuildError> {
-    let mut buf = Vec::new();
-    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
-
-    match action {
-        "update" => begin_constr(&mut encoder, 0, 0)?,
-        "revoke" => begin_constr(&mut encoder, 1, 0)?,
-        _ => {
-            return Err(TxBuildError::Cbor(format!(
-                "unknown soulbound redeemer: {action}"
-            )))
-        }
-    }
-
-    Ok(buf)
-}
-
-// ---- Reputation Minting Redeemer ----
-
-/// Encode a `ReputationMintRedeemer` as Plutus Data CBOR.
-pub fn encode_reputation_mint_redeemer(action: &str) -> Result<Vec<u8>, TxBuildError> {
-    let mut buf = Vec::new();
-    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
-
-    match action {
-        "mint" => begin_constr(&mut encoder, 0, 0)?,
-        "burn" => begin_constr(&mut encoder, 1, 0)?,
-        _ => {
-            return Err(TxBuildError::Cbor(format!(
-                "unknown reputation mint redeemer: {action}"
-            )))
-        }
-    }
-
-    Ok(buf)
 }
 
 // ---- CompletionDatum / CompletionRedeemer ----

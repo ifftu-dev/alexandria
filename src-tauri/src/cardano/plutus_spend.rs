@@ -6,8 +6,7 @@
 //! (election nominate / start-voting / finalize, proposal submit /
 //! approve / vote / resolve and committee install).
 //!
-//! This is the spend-side counterpart to `plutus_mint`. Both use
-//! pallas-txbuilder's native Plutus API so the redeemer purpose and
+//! It uses pallas-txbuilder's native Plutus API so the redeemer purpose and
 //! `script_data_hash` are emitted correctly; the legacy
 //! `gov_tx_builder::inject_plutus_fields` path hardcoded a Spend
 //! redeemer at index 0 and never set `script_data_hash`, so every script
