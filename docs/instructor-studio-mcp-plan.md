@@ -33,7 +33,7 @@ Updated: 2026-09-15
 | S5 — Media creation | S3, content storage | Capability-specific image/audio/video adapters, artifact provenance, accessible alternatives, provider failures, approval before attachment | Pending; text endpoints currently produce media briefs/scripts only |
 | S6 — Learner tutor | S1, S3, learner player | Signed public course policy, learner local/cloud model setup, lesson threads, assessment isolation, policy tests | Implemented for learner BYOM; native provider smoke and sponsored access remain open |
 | S7 — Sponsored access | S6, Cloud delegated auth | Server-held sponsor keys, per-course budgets/limits, learner entitlement, no key disclosure | Pending; unavailable until service exists |
-| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 slices 1–2 (catalog, course and lesson reads; skill graph, progress, goal resolution and learning path) implemented; M3 slice 3, M5–M8 pending; M4 foundation on the Cloud branch |
+| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5–M8 pending; M4 foundation on the Cloud branch |
 | M9+ — Further MCP writes | M2–M8 and domain services | Other reversible writes, consented disclosures, organizational actions | Pending; see Desktop plan |
 
 ### Work that can proceed asynchronously
@@ -121,6 +121,15 @@ M3 slice 2 (2026-09-16):
 - `cargo +1.91.0 clippy -p alexandria-node -p alexandria-studio -p alexandria-mcp --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed (existing warnings from the patched `tao` only).
 - No frontend change in this slice, so the Vue and locale checks were not rerun.
 
+M3 slice 3 (2026-09-16):
+
+- `cargo +1.91.0 test --no-fail-fast -p alexandria-studio -p alexandria-mcp`: all passed — studio 20 (summaries carry provenance but no signed document, another subject's credential is not found, a presentation is accepted once and then replayed, tampered and malformed ones are refused and record nothing), broker lifecycle 7, conformance 9 (fourteen tools with a broker), stdio 3, policy 9.
+- `credential_summaries_never_carry_the_signed_document` drives real `alexandria-mcp` processes: revoked credentials and other subjects are left out until asked for, a foreign credential reports `not_found`, a presentation for another audience is refused, an unverifiable one is refused without recording a nonce, a learning grant is refused all three tools, and no output contains the signed document.
+- Regression check for the delegation: `cargo +1.91.0 test -p alexandria-node --lib` passed 1184 with 13 ignored, including the existing presentation suite now running against the shared implementation. The P2P resolver test that failed once during slice 2 passed here.
+- `cargo +1.91.0 clippy -p alexandria-node -p alexandria-studio -p alexandria-mcp --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed (existing warnings from the patched `tao` only).
+- `npx vue-tsc -b --noEmit`, `npm test` (77), `i18n:parity` (8 locales, 2726 keys), `i18n:no-raw-text` and the Tauri command guard (389/306/83): passed. The fourth permission's strings are English in the other locales until translated.
+- Not yet done: a browser check of the four-permission panel, and Inspector against the credential tools.
+
 Provider tests use a controlled loopback HTTP server. No paid model or actual assistant account has been tested. Fixtures use in-memory databases and supplied verifier vectors; real profiles have not been opened or modified by the tests.
 
 ## Integration and next work
@@ -138,7 +147,7 @@ Approved inline text is materialized as public content-addressed text blobs befo
 
 ### MCP contract and client configuration
 
-Without `ALEXANDRIA_MCP_CONNECTION_FILE`, the binary exposes only offline `verify_credential` and does not discover profiles. With the connection file produced by Settings → Assistant access, it additionally advertises `search_catalog`, `get_course`, `read_lesson`, `get_skill_graph`, `get_learning_progress`, `resolve_goal` and `compute_learning_path` (`learning:read`) and `list_course_drafts`, `read_lesson_draft` and `propose_lesson_draft` (`drafts:read`, `drafts:propose`); a grant carries any combination of the three scopes. Every private call is reauthorized by the running app against scope, expiry and profile epoch. The executable itself never opens a profile database or vault. A read lease spans app authorization, database work and response writing; lock/revoke obtains the exclusive lease before invalidation. No new response/write can proceed under a stale grant after that invalidation point.
+Without `ALEXANDRIA_MCP_CONNECTION_FILE`, the binary exposes only offline `verify_credential` and does not discover profiles. With the connection file produced by Settings → Assistant access, it additionally advertises `search_catalog`, `get_course`, `read_lesson`, `get_skill_graph`, `get_learning_progress`, `resolve_goal` and `compute_learning_path` (`learning:read`), `list_my_credentials`, `get_credential` and `verify_presentation` (`credentials:read`) and `list_course_drafts`, `read_lesson_draft` and `propose_lesson_draft` (`drafts:read`, `drafts:propose`); a grant carries any combination of the four scopes. Every private call is reauthorized by the running app against scope, expiry and profile epoch. The executable itself never opens a profile database or vault. A read lease spans app authorization, database work and response writing; lock/revoke obtains the exclusive lease before invalidation. No new response/write can proceed under a stale grant after that invalidation point.
 
 A proposal only creates a review item under Workflows → Runs. Retry identity includes the grant, client name, request ID and target lesson; exact retries return the prior outcome even after instructor application, while changed payloads and stale target fingerprints conflict. There are no MCP apply, publish, grade or credential-issuance tools.
 
@@ -151,7 +160,7 @@ Decided with the user:
 - **Lesson content:** text (60,000 characters per call, continued with `next_start`); video chapter markers; quiz, multiple-choice and essay questions rebuilt from an allowlist of learner-visible fields (prompt, context, options, points, essay guidelines, word limits, rubric criteria), so answers, explanations and any field a new format adds are never copied. Credential-bearing assessments, interactive elements and plugins are withheld. Practice quizzes do feed completion and skill evidence; returning their questions without answers was the user's explicit choice.
 - **Network:** a lesson body not stored inline is fetched through the content resolver (device store, then peers, then a mapped URL) with a 10-second limit; `read_lesson` is marked open-world and says so. The fetch runs outside the broker lease and the request is authorized again under the lease before rendering, so a slow fetch cannot delay a profile lock or return content after it. The broker's per-request limit is now 15 s and the client's 20 s.
 
-Implementation: `crates/alexandria-studio/src/learning.rs` (queries and rendering), `broker.rs` (`learning:read`, two-phase `read_lesson`, `BrokerHost::fetch_content`), `grants.rs` (three scopes), `alexandria-mcp` tools with typed schemas, `src-tauri/src/commands/studio_mcp.rs` (resolver-backed fetch). Remaining M3 after slice 2: slice 3 (credential list/detail, presentation verification).
+Implementation: `crates/alexandria-studio/src/learning.rs` (queries and rendering), `broker.rs` (`learning:read`, two-phase `read_lesson`, `BrokerHost::fetch_content`), `grants.rs` (three scopes), `alexandria-mcp` tools with typed schemas, `src-tauri/src/commands/studio_mcp.rs` (resolver-backed fetch). Slice 3 follows below.
 
 ### Learner skills and goals (M3 slice 2, 2026-09-16)
 
@@ -163,6 +172,18 @@ Decided with the user:
 Shared services (the plan's "do not duplicate graph traversal" rule): `alexandria-studio::skills` now owns the skill-graph build, the learning-path computation with its course recommendations, goal-template lookup, skill entries and progress; `alexandria-studio::jd_parser` owns the on-device text matcher. The app's `p2p/graph_fetch.rs`, `commands/graph.rs`, `commands/goal_templates.rs` and `goals/jd_parser.rs` now call or re-export those, keeping their existing DTOs, public paths and behaviour. Settings the graph needs (`identity.local_did`, `instructor.graph_prefs`) are read from `app_settings` directly, so the studio crate stays free of app-only types.
 
 Bounds: at most 50 goal skills, 100,000 characters of goal text, 200 enrolments and 500 lesson progress rows per call, and up to three course recommendations per unearned skill.
+
+### Credentials and presentations (M3 slice 3, 2026-09-16)
+
+Decided with the user:
+
+- **Credential depth:** `list_my_credentials` and `get_credential` return issuer, subject, type, claim kind, skill, dates, revocation state, whether a status list exists, supersession and the integrity hash — never `signed_vc_json`. The signed document *is* the credential: anyone holding it can present it onward, so handing it to an assistant would send the whole claim to that assistant's model provider. Only the learner's own credentials are listed; another subject's reports `not_found` rather than a refusal, so the tool cannot be used to probe what else the device holds.
+- **Presentation verification:** broker-backed, with the real replay check. This is the one tool in the learner set that writes: accepting a presentation records its `(audience, nonce)` pair in `presentations_seen`, so the same presentation cannot be accepted twice. Its annotations say so (`read_only_hint = false`), and it sits behind `credentials:read` because it reads and changes device state.
+- **Permission:** a fourth grant scope, `credentials:read`, with its own checkbox in Settings → Assistant access. It is never implied by `learning:read`.
+
+Shared services: `alexandria-studio::credentials` owns the summaries and the verification, which keeps the original's deliberate ordering — audience, then the replay probe, then the signature — so response timing cannot reveal whether a nonce was used, and nothing is recorded unless a signature verifies. The envelope and verdict types moved there and the app re-exports them, so `commands/presentation.rs` keeps its public surface and IPC payloads unchanged while delegating. Studio gained `alexandria-verify` (for `did:key` resolution and base64url) and `ed25519-dalek`; the permissive verifier crate was deliberately left untouched rather than grown an app-specific presentation format.
+
+Bounds: 50 summaries per page, a 256,000-byte presentation payload, and a 300-character audience.
 
 ### MCP 2026-07-28 conformance ledger (stdio)
 
