@@ -33,7 +33,7 @@ Updated: 2026-09-15
 | S5 — Media creation | S3, content storage | Capability-specific image/audio/video adapters, artifact provenance, accessible alternatives, provider failures, approval before attachment | Pending; text endpoints currently produce media briefs/scripts only |
 | S6 — Learner tutor | S1, S3, learner player | Signed public course policy, learner local/cloud model setup, lesson threads, assessment isolation, policy tests | Implemented for learner BYOM; native provider smoke and sponsored access remain open |
 | S7 — Sponsored access | S6, Cloud delegated auth | Server-held sponsor keys, per-course budgets/limits, learner entitlement, no key disclosure | Pending; unavailable until service exists |
-| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 complete (roles, talent search, candidate summaries, candidate-to-role comparison, assessment runs, cohort reports, verification jobs) on the Cloud branch; M6–M8 pending |
+| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 complete on the Cloud branch; M6 part done (fixtures for both servers, with gaps listed below); M7–M8 pending |
 | M9+ — Further MCP writes | M2–M8 and domain services | Other reversible writes, consented disclosures, organizational actions | Pending; see Desktop plan |
 
 ### Work that can proceed asynchronously
@@ -137,7 +137,13 @@ M5 slice 1 (2026-09-16, Cloud worktree):
 - `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed.
 - Cloud `docs/deployment.md` gained a tools-and-scopes section stating the three rules enforced in code; `README.md` updated to match.
 - `python3 scripts/mcp/e2e.py` against fixture Keycloak 26.7.3: passed, now exercising all five tools with a live token. It seeds a role, two listed people who both clear its bar and a candidate who is one of them, then checks that a name is shown for somebody who answered this organisation and withheld for somebody who has not, that the search is written to the organisation's log, that the candidate summary carries no contact address, that the comparison reads requirement by requirement (`skill_rust` met, `skill_sql` reachable) and reports `listed_in_index: false` for a candidate with no listing, and that a token holding only `candidates:read` is refused the comparison with a challenge naming `roles:read`. Seeded identities carry the run marker and are removed afterwards, because the talent index is not organisation-scoped.
-- Not yet done: M6–M8 — reproducible fixtures for both servers, the automated acceptance matrix and CI, and real assistant clients plus the staging deployment remote connectors need.
+- Not yet done: M7–M8 — the automated acceptance matrix and CI, and real assistant clients plus the staging deployment remote connectors need. M6's remaining fixture gaps are listed in its section above.
+
+M6 (2026-09-16):
+
+- `python3 scripts/mcp/fixture_check.py`: passed. Fourteen tools offered with a grant; the two published courses found; the assessment marked withheld in the outline and withheld when read; the quiz question returned without its answer or explanation; the skill graph showing only the assessed skill; the goal resolving to gamma; the path ordering alpha earned, beta available, gamma locked with a course recommended for the unlocked step; one credential summary without its signed document; and `verify_credential` accepting a supplied vector while reporting revocation unknown.
+- `python3 scripts/mcp/e2e.py setup` then `cleanup`: verified by hand — the metadata endpoint answered while it was up, and afterwards the server, containers, organisation, index listings and state file were gone with the development database untouched.
+- `python3 scripts/mcp/e2e.py`: the default check still passes with the modes added.
 
 M5 slice 3 (2026-09-16, Cloud worktree):
 
@@ -329,6 +335,17 @@ Decided with the user:
 Cells below five are returned marked withheld, with the reason, rather than omitted — a reader cannot infer a value from which rows are missing, and an institution learns its cohort is too small to report on. Each aggregate read writes a `cohort_access_log` row, because an aggregate that included somebody is still a use of their data.
 
 `src/cohort.rs` gained the shared row query, `summarise` and the aggregate `module_report`; `src/verification.rs` is new. The console's cohort screen and job screen read through them, keeping their named lists, per-learner logs, cohort filter and result detail, so screen and assistant count a module one way.
+
+### Local fixtures (M6, 2026-09-16)
+
+Decided with the user: the app-side fixture is a **headless host**, not the desktop application. `crates/alexandria-studio/examples/fixture_host.rs` builds a throwaway profile, serves it over the same broker core the app runs, issues a grant and prints what to paste into an MCP client. It proves the tools and the broker against data whose shape is known; it does not exercise the vault or the profile lock/switch lifecycle, and says so.
+
+- App: `scripts/mcp/fixture.sh` serves it; `scripts/mcp/fixture_check.py` drives the real stdio binary against the grant and asserts every claim the fixture prints. The fixture lives under `/tmp/alexandria-mcp-fixture` because a Unix socket path has a hard length limit this checkout exceeds.
+- Cloud: `scripts/mcp/e2e.py` gained `setup` and `cleanup` beside the default check. Setup leaves the stack running and prints the resource, the realm, the sign-in it created and the seeded identifiers; cleanup stops the server, removes the fixture Compose project, and deletes the organisation and global index listings that run created. Verified by running setup, calling the metadata endpoint, then cleaning up and confirming the server, containers, organisation and state file were gone while the development database was untouched.
+
+Fixture data present: two published courses; the alpha → beta → gamma chain with the owner assessed on alpha only, so the goal is two steps away; a quiz whose answers exist in the database and must not be returned; an assessment that must never be shared; a Cloud organisation with a role, two listed people (one who answered it, one who did not), a candidate in the index and one outside it, a flagged run carrying scores, a module of six and one of three, and a verification job with one valid and one invalid entry.
+
+Still missing against the plan's fixture list, and worth closing before M7 calls this done: two Cloud organisations with deliberately similar names and separate candidates; distinct recruiter and instructor identities with different module scopes; cohorts of exactly four and six; a revoked-consent case; jobs belonging to different organisations; two learners on the app side; and exercising the tampered, expired, revoked and status-unknown credential vectors rather than only the valid one.
 
 Comparison evidence: oidc-provider 9.12.2 (MIT) passed every check, including a delegated-login authorization code flow with a resource-bound JWT and code-replay rejection. Ory Hydra v26.2.0 advertised no CIMD, no `iss` parameter and no RFC 8707 support.
 
