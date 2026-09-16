@@ -228,6 +228,14 @@ jobs:
         working-directory: alexandria/crates/alexandria-verify/tests/vectors
         run: node independent-verifier.mjs
 
+      - name: Schema document matches the baseline
+        # docs/database-schema.md is generated from schema.rs. The previous
+        # hand-written version described a deleted migration chain for weeks;
+        # this fails the build the moment the schema and its document diverge.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: python3 scripts/db/generate-schema-doc.py --check
+
       - name: CI change-classifier regressions
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria

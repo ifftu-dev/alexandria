@@ -2,575 +2,1287 @@
 
 > Alexandria — SQLite (local-first)
 
-> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** The
-> following tables are **dropped** and should be treated as absent
-> when cross-referencing this document:
-> `skill_proofs`, `skill_proof_evidence`, `evidence_records`,
-> `skill_assessments`, `reputation_evidence`,
-> `reputation_impact_deltas`, `evidence_challenges`,
-> `challenge_votes`, `attestation_requirements`,
-> `evidence_attestations`.
-> The `credentials` table gains four columns:
-> `witness_tx_hash`, `witness_validator_script_hash`,
-> `witness_validator_name`, `auto_issued`. See
-> [`vc-migration.md`](./vc-migration.md) for the full diff.
+> **Generated** from `src-tauri/src/db/schema.rs` by
+> `scripts/db/generate-schema-doc.py`. Do not edit by hand; regenerate, or run
+> it with `--check` to see whether this file is stale.
 
-> **Authority retirement (2026-09-15):** The later
-> `credential_challenges`, `credential_challenge_votes`, and
-> `plugin_attestations` tables still exist in the pre-launch schema, but no
-> release command, P2P handler, or credential-issuance path reads them as
-> authority. They are retained only so existing development databases continue
-> to open until cleanup migration D03 removes obsolete storage.
-
-**Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 94
+**Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
+**Schema**: one baseline migration, family `alexandria.profile`, epoch 1.
+**Objects**: 92 tables, 105 indexes, 1 view, 3 triggers.
 
 ---
 
-## Table of Contents
+## How the schema is managed
 
-1. [Design Principles](#design-principles)
-2. [Migration History](#migration-history)
-3. [Tables by Domain](#tables-by-domain)
-4. [Entity Relationship Summary](#entity-relationship-summary)
+One migration, `MIGRATION_001_BASELINE`, creates the whole schema. It replaced
+a chain of 94 migrations: that chain was replayed into a database, the result
+was dumped, the retired tables and columns were removed, and parity was checked
+object by object. The runner in `db/mod.rs` still applies migrations
+atomically, one transaction each, and records them in `_migrations`; the
+baseline is a starting point for future migrations, not a replacement for them.
 
----
+A database is stamped with its schema family before any normal query runs:
 
-## Design Principles
+- `PRAGMA application_id` = `162_114_141` — the first four bytes of `sha256("alexandria.profile")`, masked positive. A file carrying any other value was written by something else.
+- `PRAGMA user_version` = `1` — the family epoch. A new baseline bumps it; ordinary migrations never do.
+- `_schema_identity` — one row naming the family and epoch, so a refusal can say what a file belongs to.
 
-- **Deterministic IDs**: Most application entities use `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs.
-- **Singleton identity per profile**: `local_identity` is a one-row table with `CHECK (id = 1)`. Each user profile has its own SQLCipher database (see [`multi-user-profiles.md`](multi-user-profiles.md)), so "singleton" is scoped per-profile, not per-device — a device with three profiles has three independent `local_identity` rows, each in its own encrypted DB file.
-- **No server tables**: No hosted auth/session model exists; the app is profile-based and local-first.
-- **External content**: Course content, published profiles, evidence bundles, and other large artifacts live in the iroh content store as content-addressed (BLAKE3) blobs. SQLite stores metadata, references, and caches.
-- **Text timestamps**: Time values are stored as ISO-8601-ish `TEXT` for portability and easy inspection.
-- **Canonical source**: The exact DDL, defaults, `CHECK` constraints, indexes, and migration bodies live in `src-tauri/src/db/schema.rs`.
+`validate_or_stamp_identity` in `db/mod.rs` stamps an empty file and refuses
+everything else that does not match: a file with tables but no stamp (the old
+chain), a foreign `application_id`, an epoch ahead of this build, an epoch
+behind it, or a header that disagrees with `_schema_identity`. A refusal
+never converts or deletes the file. Pre-launch data is disposable, which is
+why there is no upgrade path from the old chain.
 
----
+## Deliberately absent
 
-## Migration History
+These tables existed in the old chain and are not created by the baseline.
+Each lost the code that gave it authority; `forbidden_tables_are_absent` in
+`db/schema_tests.rs` fails if one returns.
 
-| Version | Name | Description |
-|---------|------|-------------|
-| 1 | `initial_schema` | Core tables: identity, taxonomy, courses, learning, evidence, integrity, P2P, governance |
-| 2 | `profile_hash` | Add `profile_hash` to `local_identity` |
-| 3 | `content_mappings` | Bidirectional external ID (public URL)↔BLAKE3 mapping for the content store |
-| 4 | `assessment_columns` | Add `weight` and `source_element_id` to `skill_assessments` |
-| 5 | `governance_members` | DAO committee membership |
-| 6 | `reputation_engine` | Reputation evidence and impact-delta tables |
-| 7 | `governance_elections` | Elections, nominees, proposal voting, election voting |
-| 8 | `reputation_snapshots` | On-chain reputation snapshot records |
-| 9 | `taxonomy_ratification` | Add `ratified_by` and `ratified_at` to `taxonomy_versions` |
-| 10 | `cross_device_sync` | Devices, sync state, sync queue, local device metadata |
-| 11 | `evidence_challenges` | Challenge and challenge-vote tables |
-| 12 | `multi_party_attestation` | Attestation requirements and attestation records |
-| 13 | `visual_assets` | Add display/image fields such as `author_name`, `thumbnail_svg`, and `icon_emoji` |
-| 14 | `inline_content` | Add `content_inline` to `course_elements` |
-| 15 | `tutoring_sessions` | Live tutoring session metadata |
-| 16 | `classrooms` | Classrooms, members, join requests, channels, messages, calls |
-| 17 | `storage_settings` | Persistent app settings (`app_settings`) |
-| 18 | `onchain_governance_queue` | Async governance submission queue |
-| 19 | `classroom_encryption` | Classroom group keys plus X25519 key material |
-| 20 | `tutorials_and_video_chapters` | Course/tutorial discriminator and per-video chapter markers |
-| 21 | `opinions` | Field Commentary opinions, pending verification, DAO withdrawals |
-| 22 | `vc_key_registry` | Historical DID key registry for VC verification |
-| 23 | `vc_credentials_and_status_lists` | Canonical VC store and status-list bitmaps |
-| 24 | `vc_credential_anchors` | Cardano integrity-anchor queue for credential hashes |
-| 25 | `vc_pinboard_observations` | PinBoard commitment observations |
-| 26 | `vc_presentations_seen` | Replay-protection log for selective-disclosure presentations |
-| 27 | `vc_derived_skill_states` | Cached aggregation outputs |
-| 28 | `vc_credentials_pending_verification` | Queue for inbound credentials awaiting issuer DID resolution |
-| 29 | `vc_credential_suspension` | Add credential suspension metadata and supersession index |
-| 30 | `vc_credential_allowlist` | Subject-controlled allowlist for `/alexandria/vc-fetch/1.0` |
-| … | (migrations 31-39: content provenance, plugin system, plugin catalog/attestations, sentinel flags/priors/holdout) | |
-| 40 | `vc_first_cutover` | Hard cut to VC-first. Drops the SkillProof/evidence pipeline (`skill_proofs`, `skill_proof_evidence`, `evidence_records`, `skill_assessments`, `reputation_evidence`, `reputation_impact_deltas`, `evidence_challenges`, `challenge_votes`, `attestation_requirements`, `evidence_attestations`). Adds witness columns to `credentials`. |
-| 41 | `completion_observer` | `completion_observations` — observer memo for Cardano completion-mint events that auto-issue VCs |
-| 42 | `completion_attestation` | Historical mutable completion gate; both tables are dropped by migration 091 |
-| 43 | `credential_challenges` | Historical VC-first challenge experiment; its tables remain temporarily but its command and authority paths are retired |
-| 44 | `integrity_paste_anomaly` | Add `ai_paste_anomaly` column to `integrity_snapshots` |
-| 45 | `sentinel_priors_model_weights` | Add DAO-ratified model-weights columns (`weights_cid`, `eval_cid`, `eval_tpr`, `eval_fpr`, `version`) to `sentinel_priors` |
-| 46 | `sentinel_kill_switch_and_blocklist` | `sentinel_kill_switch` + `sentinel_weights_blocklist` — operator safety valves for the paste classifier |
-| 47 | `sentinel_user_models` | `sentinel_user_models` — per-user keystroke/mouse weights moved from browser localStorage into the encrypted DB |
-| 48 | `app_settings_scope` | Add `scope` column (`sync` / `device`) to `app_settings`. Reclassifies `storage_quota_bytes` as `device`-scoped. Powers the unified per-profile settings store; see [`settings.md`](settings.md). |
-| 49 | `device_pairing` | Add `stake_address` / `shared_key` / `paired` to `devices`; new `pending_pairings` table for explicit device pairing |
-| 50 | `challenge_stake_lifecycle` | Historical escrow fields on the retired challenge tables |
-| 51 | `element_submission_grader_version` | Add `grader_version` column to `element_submissions` |
-| 52 | `stake_pubkey_registry` | `stake_pubkey_registry` — persistent stake-address → libp2p Ed25519 pubkey bindings (chain + multisig-signed snapshot rows). Replaces the in-memory TOFU binding; see [`stake-pubkey-registry.md`](stake-pubkey-registry.md). |
-| 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
-| 54 | `usernames_profile_visibility` | `username` + `visibility` on `local_identity`; `peer_profiles` cache (filled by `/alexandria/profile-fetch/1.0`) |
-| 55 | `username_claim_cache` | `username_claims` — verified DHT registry winners (`tier` 0 bare / 1 receipted / 2 anchored) |
-| 56 | `username_anchor_verified` | `anchor_verified` flag gating tier 2 in conflict ordering |
-| 57 | `dht_record_mirror` | `dht_records` — local mirror of signed DHT registry records |
-| 58 | `governance_vote_signatures` | Add `signature` / `public_key` to `governance_election_votes` and `governance_proposal_votes` (off-chain signed votes for the lean on-chain governance bridge) |
-| 59 | `governance_dao_onchain_links` | Add on-chain link columns to `governance_daos` (`state_token_policy`, `state_token_name`, `reputation_policy`, `membership_subjects_json`, `dao_state_utxo`) |
-| 60 | `integrity_gaze_offscreen_ratio` | Add `gaze_offscreen_ratio` to `integrity_snapshots` (Sentinel gaze / second-device signal) |
-| 61 | `integrity_attestation` | Assurance ladder: add `assurance_level` / `commitment_root` / `anchor_ref` to `integrity_sessions`, `commitment_hash` to `integrity_snapshots`, plus `integrity_attestations` (automated attestation records) |
-| 62 | `org_role_assessments` | `organizations` + `role_assessments` — enterprise sponsors and role/JD-based skill assessments |
-| 63 | `plugin_dependencies` | `plugin_dependencies` — declared inter-plugin dependencies (e.g. codejudge language plugins on a shared parent) |
-| 64 | `plugin_element_state` | `plugin_element_state` — per-element plugin state persisted across navigation and restart |
-| 65 | `element_submission_answers` | Add `answers_json` to `element_submissions` (persisted learner responses) |
-| 66 | `account_role_birthdate_activation` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. Superseded as the source of truth by migration 81; still written for older builds. |
-| 67 | `guardian_links` | Cross-device parental oversight: `guardian_links` (ward↔guardian pairing, vault-sealed shared key, W3C VC ids, `status`), `guardian_pending_invites` (single-use `code_hash` PK, mirrors the pairing-code pattern), `guardian_activity_rows` (sealed activity the child pushes to the guardian). See [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol). **Never** added to device-sync `SYNCABLE_TABLES` or gossip. |
-| 68 | `skill_provenance` | Add `provenance` to `credentials` (denormalized `ProvenanceTier` mirror of `credentialSubject.provenance`) and `dominant_provenance` to `derived_skill_states` (highest provenance tier backing the skill) |
-| 69 | `goal_templates` | `goal_templates` + `goal_template_versions` (DAO-ratified exam/curriculum/job-role → ideal skill graph); add `synonyms` to `skills` for on-device JD/resume matching |
-| 70 | `assessment_question_banks` | `question_banks`, `bank_questions` (answer key `correct_indices` **never** sent to the client), `question_bank_versions`, `assessment_attempts` — dynamic Sentinel-gated community assessments |
-| 71 | `plugin_review_course_scope` | Add `course_id` to `plugin_irl_submissions`, generalizing it into the shared submit-for-review store for any plugin with the `instructor_review` capability; backfills course scope so the instructor inbox can be scoped to owned courses (legacy unresolved rows stay NULL / globally visible) |
-| 72 | `unified_assessment_items` | Adds `assessment_items`, `assessment_item_skills`, `attempt_items`; collapses host-side `bank_questions` grading onto the frozen wasm grader ABI |
-| 73 | `bloom_level_normalisation` | Normalises `skills.bloom_level` to the six `domain::bloom::BloomLevel` tokens and backfills `assessment_items.bloom_level` |
-| 74 | `assessment_attempt_policy` | `question_banks.max_attempts` + `cooldown_hours` (default `[0,24,72,168]`); `attempt_ordinal` on attempts |
-| 75 | `assessment_adaptive_delivery` | `question_banks.delivery_mode` (default `fixed`), `adaptive_se_target`, `adaptive_min_items`, `adaptive_max_items` |
-| 76 | `derived_skill_state_history` | Adds `derived_skill_state_history` — append-only daily snapshots per `(subject, skill, day)` |
-| 77 | `submission_evidence_published` | `element_submissions.evidence_published INTEGER NOT NULL DEFAULT 0` |
-| 78 | `sentinel_appeal_evidence` | Adds `integrity_evidence_consent` and `integrity_evidence` — a flagged session's raw capture, written **only** on the learner's explicit consent, with an absolute 14-day expiry |
-| 79 | `sentinel_evidence_release` | Adds `integrity_evidence_release` — where a learner sent evidence to contest a flag, and whether a withdrawal is still owed. Deliberately no FK to `integrity_sessions`: a withdrawal must outlive the local deletion of everything that explains why it was wanted |
-| 80 | `sentinel_flag_notice` | Adds `integrity_flag_notice` — which remote flags this device has already told the learner about, so an accusation is raised once rather than on every unlock. `told_at`, not `accepted_at` |
-| 81 | `account_roles_set` | Add `account_roles` (JSON array, always containing `learner`, plus any of `instructor`/`parent`) to `local_identity`, backfilled from `account_role`. The app reads this; `account_role` keeps being written as the first extra role for older builds. |
-| 82 | `escrow_datum_recipients` | Historical recipient fields on the retired credential-challenge escrow tables |
-| 83 | `durable_chain_submissions` | Local recovery journal that checkpoints exact signed transaction bytes before provider I/O |
-| 84 | `chain_submission_recovery_members` | Receipt outcome fields plus exclusive member bindings for recoverable submission batches |
-| 85 | `public_derived_issuer_exclusion` | Exact signed-payload recognition of reproducible legacy course-authority issuers, repair queues, and filtered scoring views; retired by migration 094 |
-| 86 | `durable_completion_requests` | Atomic local completion receipts and durable optional completion-witness intents |
-| 87 | `frozen_reputation_snapshots` | Frozen snapshot inputs and a journal trigger that prevents rebuilding uncertain signed transactions |
-| 88 | `credential_backed_reputation_snapshots` | New reputation snapshots become signed `DerivedCredential` VCs with optional credential-hash anchoring; legacy CIP-68 rows remain distinguishable |
-| 89 | `assessment_diagnostics_exit` | Explicit diagnostic/interrupted assessment endings and locally saved fixed-form draft answers |
-| 90 | `governance_genesis_trust_anchors` | Exact canonical seven-founder genesis envelopes stored only after explicit local pinning |
-| 91 | `exact_course_enrollment_binding` | Freeze verified course-document identity/policy on enrollments and completion claims; add exact verified endorsements; drop migration-042 mutable attestation authority |
-| 92 | `interview_assistant` | Add `purpose` (`assessment` / `interview`) to `integrity_sessions` and six local-only interview tables for participants and consent, criteria, attributed transcript segments, private notes, follow-ups, summaries, conclusions, and retention. See [`interview-assistant.md`](interview-assistant.md). |
-| 93 | `scoring_input_fingerprints` | Add `input_fingerprint` to `derived_skill_states` so cached states recompute when their credential, status, key, supersession or endorsement inputs change; discard states computed before inputs were re-verified |
-| 94 | `retire_public_derived_issuer_exclusion` | Drop migration 085's issuer recognition table, triggers, repair queue, `scoring_credentials` view and history validity marker; add `input_fingerprint` to `reputation_assertions` so readers recompute rows whose verified inputs changed |
+- `credential_challenges`
+- `credential_challenge_votes`
+- `plugin_attestations`
+- `plugin_advisories`
+- `sentinel_kill_switch`
+- `sentinel_weights_blocklist`
+- `sentinel_priors`
+- `integrity_attestations`
+- `onchain_governance_queue`
+- `governance_daos`
+- `governance_dao_members`
+- `governance_proposals`
+- `governance_elections`
+- `governance_election_nominees`
+- `governance_election_votes`
+- `governance_proposal_votes`
+- `bank_questions`
+- `question_bank_versions`
+- `opinion_withdrawals`
+
+Columns dropped with them: `local_identity.account_role` (superseded by the
+`account_roles` set) and the CIP-68 columns on `reputation_snapshots`
+(`policy_id`, `ref_asset_name`, `user_asset_name`, `snapshot_format`,
+`snapshot_scope`).
 
 ---
 
-## Tables by Domain
+## Design principles
 
-This section is a domain summary, not a copy of the full DDL. For exact
-columns and indexes, use `src-tauri/src/db/schema.rs`.
+- **Deterministic IDs**: most entities use `hex(blake2b_256(parts.join("|")))` rather than generated UUIDs.
+- **Singleton identity per profile**: `local_identity` has `CHECK (id = 1)`. Each profile is its own database file, so the singleton is per profile, not per device.
+- **No server tables**: the app is profile-based and local-first.
+- **External content**: course content, published profiles and evidence bundles live in the iroh content store as BLAKE3-addressed blobs; SQLite holds metadata, references and caches.
+- **Text timestamps**: ISO-8601 `TEXT`, for portability and inspection.
+- **Canonical source**: exact DDL, defaults, `CHECK` constraints and indexes are in `src-tauri/src/db/schema.rs`. This document is a rendering of it.
 
-### Identity
+---
 
-- **`local_identity`** — Singleton row for the *active profile's* owner.
-  Each profile's SQLCipher DB has exactly one row at `id = 1`. Stores
-  wallet/profile metadata such as `stake_address`, `payment_address`,
-  `display_name`, `bio`, `avatar_cid`, `profile_hash`, encrypted
-  mnemonic fallback, device metadata, and X25519 public key material.
-  The public-facing profile picker metadata (name shown on the
-  picker, avatar, accent color) lives separately in the unencrypted
-  `profiles_index.json` sidecar — see
-  [`multi-user-profiles.md`](multi-user-profiles.md).
-  Migration 66 adds `account_role`, `birthdate` (kept on-device, excluded
-  from the public `SignedProfile`), and `activation_state` — a minor
-  starts `pending_guardian` and flips to `active` only after a guardian
-  link is established. Migration 81 adds `account_roles`, a JSON array
-  that always contains `learner` (everybody is one) plus any of
-  `instructor` / `parent`; it is the value the app reads, and it is just
-  as local-only as the rest of the row.
+## Tables by domain
 
-### Guardianship (3 tables)
+### Identity (1)
 
-> Parental oversight is **cross-device and cross-user** — a minor and their
-> parent are separate identities on separate devices, linked over the sealed
-> `/alexandria/guardian/1.0` protocol. These tables and the birthdate are
-> deliberately excluded from device-sync and gossip; a unit test enforces that
-> guardian tables never appear in `SYNCABLE_TABLES`.
+#### `local_identity`
 
-- **`guardian_links`** — One row per link, on both sides (`side` = `ward` or
-  `guardian`). Holds the peer's DID / stake / peer id, the per-link shared key
-  (vault-sealed), the issued guardianship + ward VC ids, `status`
-  (`pending`/`active`/`revoked`), and the child's birthdate on the guardian side.
-- **`guardian_pending_invites`** — Single-use invites keyed by `code_hash`
-  (PK), with the sealed shared key and an `expires_at` (~7 days — the code
-  waits for an offline parent, not a live connection). Mirrors the single-use
-  pending-pairing pattern.
-- **`guardian_activity_rows`** — Sealed activity the child pushes to the
-  guardian (enrollments, progress, submissions), keyed by
-  `(link_id, table_name, entity_id)` and merged last-write-wins.
+- `id` INTEGER PK — Singleton
+- `stake_address` TEXT NOT NULL
+- `payment_address` TEXT NOT NULL
+- `display_name` TEXT
+- `bio` TEXT
+- `avatar_cid` TEXT
+- `mnemonic_enc` BLOB — Encrypted mnemonic (OS keychain preferred, this is fallback)
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `profile_hash` TEXT
+- `device_id` TEXT
+- `x25519_public_key` BLOB
+- `username` TEXT
+- `visibility` TEXT NOT NULL default `'public'`
+- `birthdate` TEXT
+- `activation_state` TEXT NOT NULL default `'active'`
+- `account_roles` TEXT NOT NULL default `'["learner"]'`
 
-### Taxonomy (6 tables)
+### Guardianship (3)
 
-- **`subject_fields`** — Top-level domains, including optional `icon_emoji`.
-- **`subjects`** — Child subjects linked to a `subject_field_id`.
-- **`skills`** — Skill records tied to a subject and Bloom level, plus
-  `synonyms` (comma-separated aliases for on-device JD/resume matching,
-  migration 069).
-- **`skill_prerequisites`** — Directed prerequisite edges.
-- **`skill_relations`** — Non-prerequisite skill relationships.
-- **`taxonomy_versions`** — Retired taxonomy version history (`cid`,
-  `previous_cid`, `ratified_by`, `ratified_at`, `signature`, `applied_at`);
-  nothing writes it since caller-declared ratification was deleted.
+#### `guardian_activity_rows`
 
-### Courses and Learning (10 tables)
+- `link_id` TEXT PK → `guardian_links.id`
+- `table_name` TEXT PK
+- `entity_id` TEXT PK
+- `payload_json` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
 
-- **`courses`** — Course/tutorial metadata. Important fields include
-  `title`, `description`, `author_address`, `author_name`, `content_cid`,
-  `thumbnail_cid`, `thumbnail_svg`, `tags`, `skill_ids`, `kind`,
-  `version`, `status`, `published_at`, and `on_chain_tx`. Migration 091 adds
-  the verified `course_document_version` and canonical
-  `completion_policy_json` projection plus the author's local
-  `draft_completion_policy_json`; publication signs the draft into v2 before
-  updating the verified projection.
-- **`course_chapters`** — Ordered chapter rows per course.
-- **`course_elements`** — Element rows with `title`, `element_type`,
-  `content_cid`, optional `content_inline`, `position`, and `duration_seconds`.
-- **`element_skill_tags`** — Element-to-skill mapping with `weight`.
-- **`video_chapters`** — Timestamp markers for video elements.
-- **`enrollments`** — Enrollment rows with `course_id`, `enrolled_at`,
-  `completed_at`, `status`, and `updated_at`. New rows also freeze the verified
-  `course_document_cid`, `course_document_version`, and canonical
-  `completion_policy_json`. Historical rows remain null and cannot produce a
-  new exact-binding completion.
-- **`element_progress`** — Per-element progress with `status`, `score`,
-  `time_spent`, `completed_at`, and `updated_at`.
-- **`course_notes`** — Notes scoped to an enrollment/chapter/element,
-  with `content_cid`, `preview_text`, and `video_timestamp_seconds`.
-- **`element_submissions`** — Plugin-graded element submissions, keyed
-  to an `element_id`/`enrollment_id`, with `submission_cid`,
-  `grader_cid`, `content_cid`, `score`, `score_details_json`,
-  `learner_did`, an optional `signed_attestation`, and the grader's
-  self-declared `grader_version` (migration 051; folded into the
-  completion Merkle leaf so the on-chain witness is reproducible), and
-  `answers_json` (migration 065; persisted learner responses so a
-  submission resumes read-only after navigation or restart).
-- **`catalog`** — Network-discovered course metadata mirroring the
-  publishable subset of `courses`.
+#### `guardian_links`
 
-### Community Plugins (8 tables)
+- `id` TEXT PK
+- `side` TEXT NOT NULL
+- `peer_did` TEXT NOT NULL
+- `peer_stake_address` TEXT
+- `peer_peer_id` TEXT — libp2p PeerId once known
+- `peer_display_name` TEXT
+- `shared_key` BLOB NOT NULL — 32-byte AEAD key (profile DB is vault-scoped)
+- `status` TEXT NOT NULL
+- `guardian_vc_id` TEXT — parent-issued RoleCredential(role='guardian')
+- `invite_code_hash` TEXT — guardian side: for retrying Link while pending
+- `child_birthdate` TEXT — guardian side only, from sealed payload
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `last_sync_at` TEXT
 
-The community plugin system (see [`plugins.md`](plugins.md)). Plugins are
-content-addressed iframe bundles; built-ins ship embedded in the host
-binary, community plugins install from a local directory (Phase 1) or P2P
-discovery (Phase 3).
+#### `guardian_pending_invites`
 
-- **`plugin_installed`** — One row per installed plugin CID: `name`,
-  `version`, `author_did`, `install_path`, `source`
-  (`local_file` / `builtin` / `p2p`), the full `manifest_json` captured at
-  install, `installed_at`, and an `enabled` flag (migration 053 — disabled
-  plugins remain installed but the player refuses to mount them).
-- **`plugin_permissions`** — Per-plugin, per-capability consent grants
-  (`scope` ∈ `once` / `session` / `always`). Cascades on uninstall.
-- **`plugin_catalog`** — Discovery cache of plugin announcements seen on
-  the `/alexandria/plugins/1.0` gossip topic (plus built-ins seeded at
-  startup). A row means "heard of", not "installed".
-- **`plugin_attestations`** — Legacy storage from the retired Plugin DAO
-  authority experiment. Rows do not make a plugin or grader
-  credential-eligible, and there is no active ingest/status IPC or inbound
-  persistence handler. A regression test writes a forged row to prove issuance
-  ignores it.
-- **`plugin_advisories`** — Advisory-only notes (deprecated / known-flawed)
-  that may surface without granting recognition.
-- **`plugin_irl_submissions`** — Local instructor-review inbox for the
-  `irl-review` builtin (migration 053). A learner's submission queues a
-  `pending` row (`submission_json` = files + comment, `skills_json` =
-  declared skills); an instructor posts back `score`, `feedback`,
-  `skill_ratings_json`, and flips `status` to `reviewed`. No network —
-  review stays on this node.
-- **`plugin_dependencies`** (migration 063) — Declared inter-plugin
-  dependencies (e.g. the `codejudge-multilang` umbrella depends on the
-  per-language judge plugins), so installing one auto-installs its deps.
-- **`plugin_element_state`** (migration 064) — Per-element plugin state
-  persisted across navigation and app restart.
+- `code_hash` TEXT PK
+- `shared_key` BLOB NOT NULL
+- `expires_at` TEXT NOT NULL
+- `created_at` TEXT NOT NULL default `datetime('now')`
 
-### Reputation (2 tables)
+### Taxonomy (6)
 
-> The SkillProof/evidence pipeline (`skill_assessments`,
-> `evidence_records`, `skill_proofs`, `skill_proof_evidence`,
-> `reputation_evidence`, `reputation_impact_deltas`) was dropped in
-> migration 040. Reputation now derives directly from the
-> `credentials` VC store.
+#### `skill_prerequisites`
 
-- **`reputation_assertions`** — Reputation rows keyed by
-  `actor_address`/`role`/`skill_id`/`proficiency_level` and a
-  `window_start`/`window_end`, with `score`, `evidence_count`,
-  `computation_spec`, `cid`, and distribution metrics computed over
-  the actor's credentials: `median_impact`, `impact_p25`,
-  `impact_p75`, `learner_count`, and `impact_variance`. Each row records
-  the `input_fingerprint` of the verified credentials it was computed
-  from and an `input_policy_state` (`valid` or `excluded`); readers
-  recompute rows whose inputs changed and present only valid rows
-  through `current_reputation_assertions` (migration 094).
-- **`reputation_snapshots`** — Snapshot/anchoring records for
-  reputation assertions, keyed by actor with `tx_status` and subject.
+- `skill_id` TEXT PK → `skills.id`
+- `prerequisite_id` TEXT PK → `skills.id`
 
-### Integrity (Sentinel) (12 tables)
+#### `skill_relations`
 
-- **`integrity_sessions`** — Sentinel sessions with `status`,
-  `integrity_score`, `critical_count` / `warning_count` (migration 040),
-  `started_at`, and `ended_at`. `enrollment_id` is **nullable** — standalone
-  assessment attempts run with a NULL enrollment (migration 070). The
-  assurance ladder (migration 061) adds `assurance_level` (`'local'` default),
-  `commitment_root`, and `anchor_ref`; issuance ignores the stored level and
-  anchor, which have no verified writer.
-  Migration 083 adds `purpose` (`'assessment'` default / `'interview'`) so
-  interview monitoring can use observational lifecycle rules and avoid the
-  assessment appeal-evidence staging path.
-- **`integrity_snapshots`** — Snapshot rows keyed by `session_id`, with
-  per-signal scores (`typing_score`, `mouse_score`, `human_score`,
-  `tab_score`, `paste_score`, `devtools_score`, `camera_score`),
-  `composite_score`, `anomaly_flags` (migration 040), `captured_at`, the
-  ONNX paste/typing-bot classifier output `ai_paste_anomaly` (nullable),
-  `gaze_offscreen_ratio` (migration 060), and `commitment_hash` (the running
-  chained commitment, migration 061).
-- **`integrity_attestations`** (migration 061) — Retired committee
-  co-signature table (`session_id`, `attestor_address`, `public_key`,
-  `signature`); nothing reads or writes it.
-- **`sentinel_priors`**, **`sentinel_kill_switch`**, and
-  **`sentinel_weights_blocklist`** — Retired community prior-library
-  tables. The prior ratification, runtime weights replacement, kill
-  switch and version blocklist are deleted; nothing reads or writes these
-  tables, and they drop with the baseline schema squash.
-- **`sentinel_user_models`** — Per-user keystroke autoencoder
-  (`keystroke_ae`), mouse CNN (`mouse_cnn`), and gaze-calibration MLP
-  (`gaze_calib`, a per-user 5→16→2 net) weights, keyed by
-  `(user_address, device_fp_prefix, model_kind)`. Moved out of browser
-  localStorage into the encrypted DB.
-- **`sentinel_holdout_refs`** — References and evaluation metadata for
-  Sentinel holdout artifacts.
-- **`integrity_evidence_consent`**, **`integrity_evidence`**, and
-  **`integrity_evidence_release`** — learner-controlled, expiring appeal
-  evidence and its release/withdrawal ledger (migrations 078–079). These apply
-  to assessment-purpose sessions, not interview-purpose sessions.
-- **`integrity_flag_notice`** — records which remote session flags have already
-  been shown to the learner (migration 080).
+- `skill_id` TEXT PK → `skills.id`
+- `related_skill_id` TEXT PK → `skills.id`
+- `relation_type` TEXT NOT NULL default `'related'` — related|complementary|alternative
 
-### P2P, Content, and Sync Support (12 tables)
+#### `skills`
 
-- **`peers`** — Known libp2p peers with `addresses`, `roles`, and local `reputation`.
-- **`pins`** — Local iroh pin state, including `size_bytes`,
-  `last_accessed`, `auto_unpin`, and `pinned_at`.
-- **`sync_log`** — Broadcast/receive audit trail for gossip-synced entities.
-- **`content_mappings`** — external ID (public URL, `external_id`) ↔ iroh BLAKE3 bridge table.
-- **`devices`** — Known devices for cross-device sync (`id`, `device_name`,
-  `platform`, `peer_id`, `is_local`, timestamps). Explicit pairing
-  (migration 049) adds `stake_address` (sync only proceeds when it
-  matches the local identity), `shared_key` (per-pair AES-256-GCM key,
-  NULL until paired), and `paired` (1 once the two-way handshake
-  completed).
-- **`pending_pairings`** — Short-lived pairing codes generated by this
-  device and awaiting acceptance, keyed by `code_hash` with a
-  `shared_key` and `expires_at`.
-- **`sync_state`** — Per-device per-table watermarks plus `row_count`.
-- **`sync_queue`** — Outbound row-change queue with `row_data`,
-  `updated_at`, `queued_at`, and `delivered_to`.
+- `id` TEXT PK
+- `name` TEXT NOT NULL
+- `description` TEXT
+- `subject_id` TEXT NOT NULL → `subjects.id`
+- `bloom_level` TEXT NOT NULL default `'apply'` — remember|understand|apply|analyze|evaluate|create
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `synonyms` TEXT
 
-### Governance (7 tables + 1 queue)
+#### `subject_fields`
 
-- **`governance_daos`** — DAO metadata scoped by `scope_type` and `scope_id`.
-- **`governance_proposals`** — Proposal lifecycle rows with category,
-  vote tallies, and optional `on_chain_tx`.
-- **`governance_dao_members`** — DAO committee membership.
-- **`governance_elections`** — Election cycles keyed by `phase`,
-  proficiency gates, timing windows, and `on_chain_tx`.
-- **`governance_election_nominees`** — Election nominees and results.
-- **`governance_election_votes`** — Individual election votes.
-- **`governance_proposal_votes`** — Individual proposal votes.
-- **`onchain_governance_queue`** — Persistent queue for async governance
-  submissions, with `attempts`, `last_error`, and status transitions.
+- `id` TEXT PK
+- `name` TEXT NOT NULL
+- `description` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `icon_emoji` TEXT
 
-### Exact Completion Endorsements, Opinions, and Retired Challenges (6 tables)
+#### `subjects`
 
-> The evidence-based challenge/attestation tables (`evidence_challenges`,
-> `challenge_votes`, `attestation_requirements`, `evidence_attestations`)
-> were dropped in migration 040. Migration 042 later introduced a mutable
-> per-course requirement and signatures over only a witness transaction hash.
-> Migration 091 drops both tables because they cannot prove the learner, exact
-> course version, evidence, or network. The migration-043 credential-challenge
-> rebuild was also retired; its two tables below are historical storage only.
+- `id` TEXT PK
+- `name` TEXT NOT NULL
+- `description` TEXT
+- `subject_field_id` TEXT NOT NULL → `subject_fields.id`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
 
-- **`course_completion_endorsements`** — Canonical shared-verifier-approved
-  endorsement artifacts, unique by `(claim_id, attestor_did)`. Each artifact
-  binds the network, learner DID, stable course ID, exact signed document CID
-  and format version, completion root, evidence identities, optional witness,
-  and an attestor authorized by that document's frozen policy.
-- **`credential_challenges`** *(retired)* — Historical stake-based challenges against a
-  `credential_id`, with `challenger`, `reason`, `stake_lovelace`,
-  `stake_tx_hash`, `status` (pending/reviewing/upheld/rejected/expired),
-  `dao_id`, `resolution_tx`, `signature`, and the stake-escrow lifecycle
-  fields `stake_status` (none/locked/returned/forfeited) and
-  `settle_tx_hash` (migration 050).
-- **`credential_challenge_votes`** *(retired)* — Historical committee votes on a `challenge_id`
-  (`voter`, `upheld`, optional `reason`; unique per `(challenge_id, voter)`).
-- **`opinions`** — Field Commentary video takes scoped to a `subject_field_id`,
-  with staked `credential_proof_ids`, signature, publication timestamps,
-  and withdrawal state.
-- **`opinions_pending_verification`** — Queue for opinions whose referenced
-  proofs have not synced locally yet.
-- **`opinion_withdrawals`** — DAO-signed withdrawal records.
+#### `taxonomy_versions`
 
-### Tutoring, Classrooms, and Settings (9 tables)
+- `version` INTEGER PK
+- `cid` TEXT NOT NULL — content ID (BLAKE3 hash) of the full taxonomy document
+- `previous_cid` TEXT — CID of the previous version
+- `ratified_by` TEXT — DAO committee multisig info
+- `ratified_at` TEXT
+- `signature` TEXT — Ed25519 signature
+- `applied_at` TEXT NOT NULL default `datetime('now')`
 
-- **`tutoring_sessions`** — Live tutoring session metadata:
-  `title`, `ticket`, `status`, `created_at`, `ended_at`.
-- **`classrooms`** — Group-space metadata with `owner_address`,
-  `invite_code`, and `status`.
-- **`classroom_members`** — Membership rows; migration 19 adds
-  `x25519_public_key`.
-- **`classroom_join_requests`** — Join request queue with review state.
-- **`classroom_channels`** — Text/announcement channels per classroom.
-- **`classroom_messages`** — Persisted messages with edit/delete flags.
-- **`classroom_calls`** — Live classroom A/V calls backed by `live` room tickets.
-- **`classroom_group_keys`** — Encrypted per-classroom group keys for E2E messaging.
-- **`app_settings`** — Unified per-profile settings KV store
-  (`key TEXT PRIMARY KEY`, `value TEXT`, `scope TEXT NOT NULL`,
-  `updated_at TEXT`). `scope` is one of `'sync'` (replicated across
-  the user's other devices via cross-device sync; LWW on
-  `updated_at`) or `'device'` (stays on this device only). The
-  Rust-side typed registry (`settings::registry::keys`) is the
-  source of truth for valid keys + defaults — the table only
-  stores values the user has actually changed. See
-  [`settings.md`](settings.md) for the architecture and the
-  current list of registered settings.
+### Courses and learning (9)
 
-### Interviews (6 tables, migration 083)
+#### `catalog`
 
-These tables are private to the active profile. They are not members of the
-cross-device `SYNCABLE_TABLES` set and are not published over global gossip.
+- `course_id` TEXT PK
+- `title` TEXT NOT NULL
+- `description` TEXT
+- `author_address` TEXT NOT NULL
+- `content_cid` TEXT NOT NULL
+- `thumbnail_cid` TEXT
+- `tags` TEXT — JSON array
+- `skill_ids` TEXT — JSON array of skill IDs
+- `version` INTEGER NOT NULL default `1`
+- `published_at` TEXT NOT NULL
+- `received_at` TEXT NOT NULL default `datetime('now')`
+- `pinned` INTEGER default `0`
+- `on_chain_tx` TEXT
+- `signature` TEXT NOT NULL — Author's signature over the record
+- `kind` TEXT NOT NULL default `'course'`
 
-- **`interview_sessions`** — plan and lifecycle metadata, optional role-
-  assessment/tutoring/integrity links, retention policy, editable summary and
-  conclusion, and absolute `expires_at`.
-- **`interview_participants`** — interviewer/candidate/observer identity within
-  a session, optional room `peer_id`, export pseudonym, and separate consent
-  choices for transcription, audio, video, Sentinel, and camera processing.
-- **`interview_criteria`** — ordered rubric rows with `not_covered`, `partial`,
-  or `covered` status and optional notes.
-- **`interview_transcript_segments`** — final or interim text attributed to a
-  participant, with timestamps, optional confidence, and a source of
-  `local_stt`, `remote_stt`, or `manual`. Appends require active transcription
-  consent.
-- **`interview_notes`** — local interviewer notes, private by default.
-- **`interview_followups`** — deterministic question suggestions linked to an
-  optional source segment/criterion, with `suggested`, `asked`, or `dismissed`
-  status.
+#### `course_chapters`
 
-### Verifiable Credentials Layer
+- `id` TEXT PK
+- `course_id` TEXT NOT NULL → `courses.id`
+- `title` TEXT NOT NULL
+- `description` TEXT
+- `position` INTEGER NOT NULL default `0`
+- `created_at` TEXT NOT NULL default `datetime('now')`
 
-These tables back the VC-first protocol described in
-`docs/protocol-specification.md`.
+#### `course_elements`
 
-- **`key_registry`** — Historical `(did, key_id)` public-key bindings with
-  validity windows.
-- **`credentials`** — Canonical signed VC store, with searchable mirrors
-  for issuer/subject/type/skill plus revocation, suspension, and
-  supersession state. Migration 040 adds on-chain witness metadata:
-  `witness_tx_hash`, `witness_validator_script_hash`,
-  `witness_validator_name`, and `auto_issued` (1 when the credential was
-  auto-issued by the completion observer rather than manually). Migration
-  068 adds `provenance` — a denormalized `ProvenanceTier` mirror of
-  `credentialSubject.provenance` (`self_declared` / `document_backed` /
-  `accredited_document` / `issuer_signed`) feeding the aggregation quality
-  weight.
-- **`credential_status_lists`** — Versioned RevocationList2020-style status bitmaps.
-- **`credential_anchors`** — Per-credential integrity-anchor queue.
-- **`pinboard_observations`** — Local and remote PinBoard commitments.
-- **`presentations_seen`** — `(audience, nonce)` replay-protection log.
-- **`derived_skill_states`** — Materialized aggregation cache for
-  recruiter/consumer queries, plus `dominant_provenance` (the highest
-  provenance tier among the credentials backing the skill, migration 068).
-- **`credentials_pending_verification`** — Queue for VCs that arrive
-  before the issuer DID document.
-- **`credential_allowlist`** — Per-credential fetch policy for
-  `/alexandria/vc-fetch/1.0`.
-- **`completion_observations`** — The completion observer's persistent
-  memo (migration 041). Keyed by `(policy_id, asset_name_hex)`, it
-  records each witnessed Cardano completion mint (`tx_hash`,
-  `subject_pubkey`, `course_id`, `completion_root`, `completion_time`)
-  and the `credential_id` populated once the VC is auto-issued, so the
-  observer neither re-issues nor misses mints that occurred while
-  offline.
-- **`completion_claims`** — Idempotent local completion receipts. Migration
-  091 adds the exact document CID/version, canonical endorsement binding, and
-  source `enrollment_id`; legacy rows remain null rather than inheriting a
-  current course version.
-- **`completion_witness_requests`** — Durable local intents for optional
-  Cardano completion witnesses, keyed to a completion claim and handed off to
-  the exact-byte submission journal.
-- **Migration 29 additions on `credentials`** — `suspended`,
-  `suspended_at`, `suspended_until`, `suspended_reason`, plus an index
-  on `supersedes`.
+- `id` TEXT PK
+- `chapter_id` TEXT NOT NULL → `course_chapters.id`
+- `title` TEXT NOT NULL
+- `element_type` TEXT NOT NULL — video|text|quiz|interactive|assessment
+- `content_cid` TEXT — content ID (BLAKE3 hash) of element content
+- `position` INTEGER NOT NULL default `0`
+- `duration_seconds` INTEGER
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `content_inline` TEXT
+- `plugin_cid` TEXT
+- `plugin_version` TEXT
+- `plugin_config_cid` TEXT
 
-### Goals (2 tables, migration 069)
+#### `course_notes`
 
-- **`goal_templates`** — Seeded maps from a goal to an ideal skill
-  graph: `id`, `kind` (`CHECK(exam|curriculum|job_role)`), `key`, `label`,
-  optional `board` / `grade`, `skill_ids` (JSON), `taxonomy_version`,
-  `dao_id`, `ratified`, `content_cid`. Installed as labelled built-in content
-  (`taxonomy_version = 'bundled'`) so day-one offline resolution works.
-- **`goal_template_versions`** — Retired version history mirroring
-  `taxonomy_versions` (`version`, `content_cid`, `ratified_by`,
-  `signature`, `taxonomy_version`, `published_at`); nothing writes it.
+- `id` TEXT PK
+- `enrollment_id` TEXT NOT NULL → `enrollments.id`
+- `chapter_id` TEXT → `course_chapters.id`
+- `element_id` TEXT → `course_elements.id`
+- `content_cid` TEXT — content ID (BLAKE3 hash) of note content
+- `preview_text` TEXT
+- `video_timestamp_seconds` INTEGER
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
 
-### Assessments (7 tables, migrations 070 + 072)
+#### `courses`
 
-- **`question_banks`** — Seeded banks: `id`, `skill_id`, `label`,
-  `difficulty_profile`, `taxonomy_version`, `dao_id`, `ratified`,
-  `content_cid`.
-- **`bank_questions`** — `id`, `bank_id`, `prompt`, `options` (JSON),
-  `correct_indices` (JSON) — the answer key, held locally and **never**
-  sent to the client or gossiped — `difficulty`, `points`, `rubric_version`.
-- **`question_bank_versions`** — Retired version history (as above); nothing writes it.
-- **`assessment_attempts`** — Per-attempt record: `id`, `subject_did`,
-  `bank_id`, `seed`, `question_ids` (JSON), `option_orders` (JSON),
-  `integrity_session_id`, `score`, `passed`, `started_at`, `graded_at`.
+- `id` TEXT PK — blake2b(author_stake_address + content_cid)
+- `title` TEXT NOT NULL
+- `description` TEXT
+- `author_address` TEXT NOT NULL — Cardano stake address of the author
+- `content_cid` TEXT — content ID (BLAKE3 hash) of course content root
+- `thumbnail_cid` TEXT
+- `tags` TEXT — JSON array
+- `skill_ids` TEXT — JSON array of skill IDs
+- `version` INTEGER NOT NULL default `1`
+- `status` TEXT NOT NULL default `'draft'` — draft|published|archived
+- `published_at` TEXT
+- `on_chain_tx` TEXT — Cardano tx hash (if registered on-chain)
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `author_name` TEXT
+- `thumbnail_svg` TEXT
+- `kind` TEXT NOT NULL default `'course'`
+- `provenance` TEXT
+- `course_document_version` INTEGER
+- `completion_policy_json` TEXT
+- `draft_completion_policy_json` TEXT
 
-### Organizations and Role Assessments (2 tables, migration 062)
+#### `element_progress`
 
-- **`organizations`** — Enterprise sponsors: `id`, `name`, `owner_address`,
-  `did`.
-- **`role_assessments`** — Sponsor role/JD assessments: `id`, `org_id`,
-  `role_title`, `job_description`, `course_id`, `skill_ids`,
-  `issuance_policy_json`, `required_assurance_level`, `status`. See
-  [`protocol-specification.md`](protocol-specification.md) §14.9.6.
+- `id` TEXT PK
+- `enrollment_id` TEXT NOT NULL → `enrollments.id`
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `status` TEXT NOT NULL default `'not_started'` — not_started|in_progress|completed
+- `score` REAL — 0.0 to 1.0 for assessments
+- `time_spent` INTEGER default `0` — seconds
+- `completed_at` TEXT
+- `updated_at` TEXT NOT NULL default `datetime('now')`
 
-## Entity Relationship Summary
+#### `element_skill_tags`
+
+- `element_id` TEXT PK → `course_elements.id`
+- `skill_id` TEXT PK → `skills.id`
+- `weight` REAL NOT NULL default `1.0`
+
+#### `enrollments`
+
+- `id` TEXT PK — blake2b(stake_address + course_id)
+- `course_id` TEXT NOT NULL → `courses.id`
+- `enrolled_at` TEXT NOT NULL default `datetime('now')`
+- `completed_at` TEXT
+- `status` TEXT NOT NULL default `'active'` — active|completed|dropped
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `course_document_cid` TEXT
+- `course_document_version` INTEGER
+- `completion_policy_json` TEXT
+
+#### `video_chapters`
+
+- `id` TEXT PK
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `title` TEXT NOT NULL
+- `start_seconds` INTEGER NOT NULL
+- `position` INTEGER NOT NULL default `0`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+### Assessments (5)
+
+#### `assessment_attempts`
+
+- `id` TEXT PK
+- `subject_did` TEXT NOT NULL
+- `bank_id` TEXT NOT NULL → `question_banks.id`
+- `skill_id` TEXT NOT NULL
+- `seed` INTEGER NOT NULL
+- `question_ids` TEXT NOT NULL — JSON array of served question ids (in served order)
+- `option_orders` TEXT NOT NULL — JSON: per-question shuffled option index order
+- `integrity_session_id` TEXT
+- `score` REAL
+- `passed` INTEGER
+- `credential_id` TEXT — issued AssessmentCredential, if passed
+- `started_at` TEXT NOT NULL default `datetime('now')`
+- `graded_at` TEXT
+- `attempt_ordinal` INTEGER
+- `ended_at` TEXT
+- `end_reason` TEXT
+- `draft_answers_json` TEXT
+
+#### `assessment_item_skills`
+
+- `item_id` TEXT PK → `assessment_items.id`
+- `skill_id` TEXT PK
+- `weight` REAL NOT NULL default `1.0`
+
+#### `assessment_items`
+
+- `id` TEXT PK
+- `item_kind` TEXT NOT NULL
+- `skill_id` TEXT NOT NULL — Plugin providing the UI and grader. NULL for `mcq`, which resolves the built-in mcq-grader at grade time (it is installed at startup, so its CID is not knowable when this migration runs).
+- `plugin_cid` TEXT — Safe to send to a client: prompt, options, kind, starter code.
+- `content_public` TEXT NOT NULL — NEVER sent to a client. Answer keys, hidden test cases. Merged into the grade envelope host-side as `content.grader_private`.
+- `grader_private` TEXT
+- `difficulty` INTEGER NOT NULL default `2` — 1 (easy) .. 5 (hard) Populated in a follow-up once BloomLevel becomes a real enum; orthogonal to difficulty (an easy "create" item is possible).
+- `bloom_level` TEXT
+- `points` REAL NOT NULL default `1.0` — Provenance: the bank this item came from, when it came from one.
+- `bank_id` TEXT → `question_banks.id`
+- `author_did` TEXT
+- `taxonomy_version` TEXT
+- `ratified` INTEGER NOT NULL default `0`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `attempt_items`
+
+- `attempt_id` TEXT PK → `assessment_attempts.id`
+- `ordinal` INTEGER PK — 0-based served order
+- `item_id` TEXT NOT NULL
+- `option_order` TEXT — JSON: served position -> original index
+- `submission_json` TEXT — what the learner submitted
+- `grader_cid` TEXT — grader that actually produced `score`
+- `content_cid` TEXT
+- `submission_cid` TEXT
+- `score` REAL — [0,1] for this item
+- `score_details` TEXT — grader `details` blob
+- `theta_after` REAL
+- `se_after` REAL
+- `graded_at` TEXT
+
+#### `question_banks`
+
+- `id` TEXT PK
+- `skill_id` TEXT NOT NULL
+- `label` TEXT NOT NULL
+- `pass_threshold` REAL NOT NULL default `0.7` — fraction correct to pass
+- `draw_count` INTEGER NOT NULL default `5` — questions per attempt
+- `taxonomy_version` TEXT
+- `dao_id` TEXT
+- `ratified` INTEGER NOT NULL default `0`
+- `content_cid` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `max_attempts` INTEGER
+- `cooldown_hours` TEXT NOT NULL default `'[0,24,72,168]'`
+- `attempt_window_days` INTEGER NOT NULL default `90`
+- `score_policy` TEXT NOT NULL default `'best'`
+- `delivery_mode` TEXT NOT NULL default `'fixed'`
+- `adaptive_se_target` REAL NOT NULL default `0.3`
+- `adaptive_min_items` INTEGER NOT NULL default `5`
+- `adaptive_max_items` INTEGER NOT NULL default `20`
+
+### Goals (2)
+
+#### `goal_template_versions`
+
+- `version` INTEGER PK
+- `content_cid` TEXT NOT NULL
+- `previous_cid` TEXT
+- `ratified_by` TEXT — DAO multisig / committee id
+- `signature` TEXT
+- `taxonomy_version` TEXT
+- `published_at` TEXT NOT NULL default `datetime('now')`
+
+#### `goal_templates`
+
+- `id` TEXT PK
+- `kind` TEXT NOT NULL
+- `key` TEXT NOT NULL — stable slug, e.g. 'cbse.grade10', 'jee_main', 'engineering_manager'
+- `label` TEXT NOT NULL — human label, e.g. 'CBSE — Grade 10'
+- `board` TEXT — curriculum only: 'CBSE' | 'ICSE' | 'IB' | ...
+- `grade` TEXT — curriculum only: '10'
+- `skill_ids` TEXT NOT NULL — JSON array of target skill ids
+- `taxonomy_version` TEXT — skill-graph version these ids were authored against
+- `dao_id` TEXT — ratifying DAO (NULL for genesis-seeded)
+- `ratified` INTEGER NOT NULL default `0`
+- `content_cid` TEXT — published version doc CID (NULL for genesis)
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+### Community plugins (7)
+
+#### `element_submissions`
+
+- `id` TEXT PK
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `enrollment_id` TEXT NOT NULL → `enrollments.id`
+- `submission_cid` TEXT NOT NULL — BLAKE3 of the submission bytes (in iroh store)
+- `grader_cid` TEXT NOT NULL — BLAKE3 of the grader.wasm
+- `content_cid` TEXT NOT NULL — BLAKE3 of the content bytes the grader saw
+- `score` REAL NOT NULL
+- `score_details_json` TEXT — plugin-defined `details` payload
+- `learner_did` TEXT NOT NULL
+- `signed_attestation` BLOB — Ed25519 signature over the bundle (NULL until signed)
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `grader_version` TEXT NOT NULL default `''`
+- `answers_json` TEXT
+- `evidence_published` INTEGER NOT NULL default `0`
+
+#### `plugin_catalog`
+
+- `plugin_cid` TEXT PK — BLAKE3 of manifest.json
+- `name` TEXT NOT NULL
+- `version` TEXT NOT NULL
+- `author_did` TEXT NOT NULL
+- `description` TEXT
+- `api_version` TEXT NOT NULL
+- `kinds_json` TEXT NOT NULL — JSON array
+- `capabilities_json` TEXT NOT NULL — JSON array
+- `subject_tags_json` TEXT NOT NULL — JSON array
+- `platforms_json` TEXT NOT NULL — JSON array
+- `has_grader` INTEGER NOT NULL default `0`
+- `grader_cid` TEXT — NULL for interactive-only
+- `source` TEXT NOT NULL — 'gossip' | 'builtin' | 'local'
+- `announced_at` TEXT NOT NULL — author-stamped time from announcement
+- `last_seen_at` TEXT NOT NULL default `datetime('now')`
+
+#### `plugin_dependencies`
+
+- `plugin_cid` TEXT PK → `plugin_installed.plugin_cid`
+- `dependency_id` TEXT PK — manifest id: did:key:<author>#<slug>
+- `dependency_cid` TEXT NOT NULL → `plugin_installed.plugin_cid`
+
+#### `plugin_element_state`
+
+- `element_id` TEXT PK
+- `plugin_cid` TEXT NOT NULL
+- `state_json` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `plugin_installed`
+
+- `plugin_cid` TEXT PK
+- `name` TEXT NOT NULL
+- `version` TEXT NOT NULL
+- `author_did` TEXT NOT NULL
+- `install_path` TEXT NOT NULL — filesystem path under app_data/plugins/
+- `source` TEXT NOT NULL — 'local_file' | 'p2p' | 'builtin'
+- `manifest_json` TEXT NOT NULL — full manifest at install time
+- `installed_at` TEXT NOT NULL default `datetime('now')`
+- `enabled` INTEGER NOT NULL default `1`
+
+#### `plugin_irl_submissions`
+
+- `id` TEXT PK
+- `plugin_cid` TEXT NOT NULL → `plugin_installed.plugin_cid`
+- `element_id` TEXT
+- `enrollment_id` TEXT
+- `learner_did` TEXT NOT NULL
+- `submission_json` TEXT NOT NULL
+- `skills_json` TEXT NOT NULL default `'[]'`
+- `status` TEXT NOT NULL default `'pending'`
+- `reviewer_did` TEXT
+- `score` REAL
+- `feedback` TEXT
+- `skill_ratings_json` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `reviewed_at` TEXT
+- `course_id` TEXT
+
+#### `plugin_permissions`
+
+- `plugin_cid` TEXT PK → `plugin_installed.plugin_cid`
+- `capability` TEXT PK
+- `scope` TEXT NOT NULL
+- `granted_at` TEXT NOT NULL default `datetime('now')`
+- `granted_until` TEXT — NULL for 'always'
+
+### Verifiable credentials (8)
+
+#### `credential_allowlist`
+
+- `credential_id` TEXT PK
+- `requestor_did` TEXT PK — or the literal 'public'
+- `granted_at` TEXT NOT NULL default `datetime('now')`
+
+#### `credential_anchors`
+
+- `credential_id` TEXT PK → `credentials.id`
+- `anchor_tx_hash` TEXT
+- `anchor_status` TEXT NOT NULL default `'pending'` — pending|submitted|confirmed|failed
+- `attempts` INTEGER NOT NULL default `0`
+- `last_error` TEXT
+- `next_attempt_at` TEXT
+- `enqueued_at` TEXT NOT NULL default `datetime('now')`
+- `confirmed_at` TEXT
+
+#### `credential_status_lists`
+
+- `list_id` TEXT PK — issuer's list identifier
+- `issuer_did` TEXT NOT NULL
+- `version` INTEGER NOT NULL default `1` — monotonic; older versions ignored
+- `status_purpose` TEXT NOT NULL default `'revocation'`
+- `bits` BLOB NOT NULL — packed little-endian bitmap
+- `bit_length` INTEGER NOT NULL default `0`
+- `signature` TEXT — issuer signature over (list_id, version, bits)
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `credentials`
+
+- `id` TEXT PK — e.g. urn:uuid:...
+- `issuer_did` TEXT NOT NULL
+- `subject_did` TEXT NOT NULL
+- `credential_type` TEXT NOT NULL — FormalCredential, etc.
+- `claim_kind` TEXT NOT NULL — skill | role | custom
+- `skill_id` TEXT — NULL for non-skill claims
+- `issuance_date` TEXT NOT NULL
+- `expiration_date` TEXT
+- `signed_vc_json` TEXT NOT NULL — full JSON-LD VC
+- `integrity_hash` TEXT NOT NULL — hex(blake3(JCS bytes))
+- `status_list_id` TEXT — FK to credential_status_lists.list_id
+- `status_list_index` INTEGER — bit position in the list
+- `revoked` INTEGER NOT NULL default `0` — cached from status list for fast queries
+- `revoked_at` TEXT
+- `revocation_reason` TEXT
+- `supersedes` TEXT — prior credential id, §11.4
+- `received_at` TEXT NOT NULL default `datetime('now')`
+- `suspended` INTEGER NOT NULL default `0`
+- `suspended_at` TEXT
+- `suspended_until` TEXT
+- `suspended_reason` TEXT
+- `witness_tx_hash` TEXT
+- `witness_validator_script_hash` TEXT
+- `witness_validator_name` TEXT
+- `auto_issued` INTEGER NOT NULL default `0`
+- `provenance` TEXT
+
+#### `credentials_pending_verification`
+
+- `id` TEXT PK
+- `issuer_did` TEXT NOT NULL
+- `subject_did` TEXT NOT NULL
+- `signed_vc_json` TEXT NOT NULL
+- `received_at` TEXT NOT NULL default `datetime('now')`
+
+#### `key_registry`
+
+- `did` TEXT PK
+- `key_id` TEXT PK — '<did>#key-N' fragment
+- `public_key_hex` TEXT NOT NULL — raw 32-byte Ed25519 pubkey, hex
+- `valid_from` TEXT NOT NULL — ISO 8601 UTC
+- `valid_until` TEXT — NULL while active
+- `rotated_by` TEXT — DID of successor, if rotated
+
+#### `pinboard_observations`
+
+- `id` TEXT PK
+- `pinner_did` TEXT NOT NULL
+- `subject_did` TEXT NOT NULL
+- `scope` TEXT NOT NULL — JSON array of strings
+- `commitment_since` TEXT NOT NULL
+- `revoked_at` TEXT
+- `signature` TEXT NOT NULL
+- `public_key` TEXT NOT NULL
+- `received_at` TEXT NOT NULL default `datetime('now')`
+
+#### `presentations_seen`
+
+- `audience` TEXT PK
+- `nonce` TEXT PK
+- `seen_at` TEXT NOT NULL default `datetime('now')`
+
+### Chain journal (2)
+
+#### `chain_submission_members`
+
+- `network` TEXT PK → `chain_submissions.network`
+- `member_kind` TEXT PK
+- `member_id` TEXT PK
+- `operation_kind` TEXT NOT NULL → `chain_submissions.operation_kind`
+- `operation_id` TEXT NOT NULL → `chain_submissions.operation_id`
+
+#### `chain_submissions`
+
+- `network` TEXT PK
+- `operation_kind` TEXT PK
+- `operation_id` TEXT PK
+- `tx_hash` TEXT NOT NULL
+- `signed_cbor` BLOB NOT NULL
+- `context_json` TEXT NOT NULL
+- `status` TEXT NOT NULL default `'outcome_unknown'`
+- `confirmed_slot` INTEGER
+- `applied_at` TEXT
+- `last_error` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+### Completion and endorsements (4)
+
+#### `completion_claims`
+
+- `id` TEXT PK
+- `subject_did` TEXT NOT NULL
+- `course_id` TEXT NOT NULL
+- `completion_root` TEXT NOT NULL
+- `credential_ids_json` TEXT NOT NULL
+- `witness_unavailable` INTEGER NOT NULL default `0`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `course_document_cid` TEXT
+- `course_document_version` INTEGER
+- `completion_binding_json` TEXT
+- `enrollment_id` TEXT → `enrollments.id`
+
+#### `completion_observations`
+
+- `policy_id` TEXT PK
+- `asset_name_hex` TEXT PK
+- `tx_hash` TEXT NOT NULL
+- `subject_pubkey` TEXT NOT NULL — hex, 64 chars (32-byte Ed25519 pubkey)
+- `course_id` TEXT NOT NULL — hex
+- `completion_root` TEXT NOT NULL — hex, 64 chars (32-byte blake2b-256)
+- `completion_time` TEXT NOT NULL — ISO 8601 from CompletionDatum.timestamp
+- `credential_id` TEXT — populated once the VC is issued
+- `observed_at` TEXT NOT NULL default `datetime('now')`
+- `issued_at` TEXT
+
+#### `completion_witness_requests`
+
+- `operation_id` TEXT PK
+- `claim_id` TEXT NOT NULL → `completion_claims.id`
+- `context_json` TEXT NOT NULL
+- `blocked` INTEGER NOT NULL default `0`
+- `attempts` INTEGER NOT NULL default `0`
+- `next_attempt_at` INTEGER NOT NULL default `0`
+- `last_error` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `course_completion_endorsements`
+
+- `id` TEXT PK
+- `claim_id` TEXT NOT NULL → `completion_claims.id`
+- `attestor_did` TEXT NOT NULL
+- `endorsement_json` TEXT NOT NULL
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+### Opinions (2)
+
+#### `opinions`
+
+- `id` TEXT PK — blake2b(author_address + video_cid)
+- `author_address` TEXT NOT NULL — Cardano stake address
+- `subject_field_id` TEXT NOT NULL → `subject_fields.id`
+- `title` TEXT NOT NULL
+- `summary` TEXT — soft limit 280 chars at app layer
+- `video_cid` TEXT NOT NULL — iroh BLAKE3 of video blob
+- `thumbnail_cid` TEXT
+- `duration_seconds` INTEGER
+- `credential_proof_ids` TEXT NOT NULL — JSON array of skill_proof IDs the author stakes
+- `signature` TEXT NOT NULL — Ed25519 over the canonical payload
+- `public_key` TEXT — Ed25519 public key (hex) for verification
+- `published_at` TEXT NOT NULL
+- `received_at` TEXT NOT NULL default `datetime('now')`
+- `withdrawn` INTEGER NOT NULL default `0`
+- `withdrawn_reason` TEXT — e.g. 'challenge_upheld'
+- `on_chain_tx` TEXT — optional: future DAO-attested anchor
+- `provenance` TEXT
+
+#### `opinions_pending_verification`
+
+- `id` TEXT PK
+- `author_address` TEXT NOT NULL
+- `subject_field_id` TEXT NOT NULL
+- `title` TEXT NOT NULL
+- `summary` TEXT
+- `video_cid` TEXT NOT NULL
+- `thumbnail_cid` TEXT
+- `duration_seconds` INTEGER
+- `credential_proof_ids` TEXT NOT NULL
+- `signature` TEXT NOT NULL
+- `public_key` TEXT
+- `published_at` TEXT NOT NULL
+- `queued_at` TEXT NOT NULL default `datetime('now')`
+
+### Reputation (5)
+
+#### `derived_skill_state_history`
+
+- `subject_did` TEXT PK
+- `skill_id` TEXT PK
+- `snapshot_date` TEXT PK
+- `raw_score` REAL NOT NULL
+- `confidence` REAL NOT NULL
+- `trust_score` REAL NOT NULL
+- `level` INTEGER NOT NULL
+- `evidence_mass` REAL NOT NULL
+- `computed_at` TEXT NOT NULL
+
+#### `derived_skill_states`
+
+- `subject_did` TEXT PK
+- `skill_id` TEXT PK
+- `calculation_version` TEXT PK
+- `raw_score` REAL NOT NULL
+- `confidence` REAL NOT NULL
+- `trust_score` REAL NOT NULL
+- `level` INTEGER NOT NULL
+- `evidence_mass` REAL NOT NULL
+- `unique_issuer_clusters` INTEGER NOT NULL
+- `active_evidence_count` INTEGER NOT NULL
+- `state_json` TEXT NOT NULL — full DerivedSkillState
+- `computed_at` TEXT NOT NULL
+- `dominant_provenance` TEXT
+- `input_fingerprint` TEXT
+
+#### `reputation_assertions`
+
+- `id` TEXT PK
+- `actor_address` TEXT NOT NULL — Cardano stake address
+- `role` TEXT NOT NULL — instructor|learner|assessor|author|mentor
+- `skill_id` TEXT → `skills.id`
+- `proficiency_level` TEXT
+- `score` REAL NOT NULL
+- `evidence_count` INTEGER NOT NULL default `0`
+- `median_impact` REAL
+- `impact_p25` REAL
+- `impact_p75` REAL
+- `learner_count` INTEGER
+- `impact_variance` REAL
+- `window_start` TEXT
+- `window_end` TEXT
+- `computation_spec` TEXT NOT NULL default `'v2'`
+- `cid` TEXT — content ID (BLAKE3 hash) of reputation proof
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `input_policy_state` TEXT NOT NULL default `'valid'`
+- `input_fingerprint` TEXT
+
+#### `reputation_snapshot_inputs`
+
+- `snapshot_id` TEXT PK → `reputation_snapshots.id`
+- `context_json` TEXT NOT NULL
+
+#### `reputation_snapshots`
+
+- `id` TEXT PK
+- `actor_address` TEXT NOT NULL
+- `subject_id` TEXT NOT NULL
+- `role` TEXT NOT NULL
+- `skill_count` INTEGER NOT NULL default `0`
+- `tx_status` TEXT NOT NULL default `'pending'` — pending|building|submitted|confirmed|failed
+- `tx_hash` TEXT
+- `error_message` TEXT
+- `snapshot_at` TEXT NOT NULL default `datetime('now')`
+- `confirmed_at` TEXT
+- `computation_spec` TEXT
+- `credential_id` TEXT → `credentials.id`
+
+### Integrity (Sentinel) (8)
+
+#### `integrity_evidence`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `integrity_sessions.id` — The flagged snapshot this evidence belongs to.
+- `snapshot_id` TEXT → `integrity_snapshots.id` — camera_frame | keystroke | mouse | gaze
+- `kind` TEXT NOT NULL — Opaque payload. Camera frames are stored encoded, not as raw RGBA. The database file is SQLCipher-encrypted at rest under the profile vault key, so this inherits that protection and nothing weaker.
+- `payload` BLOB NOT NULL
+- `captured_at` TEXT NOT NULL
+- `expires_at` TEXT NOT NULL
+
+#### `integrity_evidence_consent`
+
+- `session_id` TEXT PK → `integrity_sessions.id` — 1 = learner chose to preserve, 0 = declined. There is no default: a row exists only because a human answered.
+- `granted` INTEGER NOT NULL
+- `decided_at` TEXT NOT NULL default `datetime('now')` — NULL when declined. Absolute deadline, not a duration, so a device that is offline for a month still expires the evidence on next open.
+- `expires_at` TEXT
+
+#### `integrity_evidence_release`
+
+- `session_id` TEXT PK — The service it went to, as the learner's directory list spells it.
+- `directory_url` TEXT PK — Their identifier for the assessment, learned from that person's own export. This device does not otherwise have a name for it.
+- `run_id` TEXT PK
+- `released_at` TEXT NOT NULL default `datetime('now')`
+- `item_count` INTEGER NOT NULL default `0` — Set the moment the learner asks for it back. Cleared never; it is the record that they asked.
+- `revoke_wanted_at` TEXT — Set when the service confirmed. Until then the withdrawal is still owed.
+- `revoked_at` TEXT
+
+#### `integrity_flag_notice`
+
+- `directory_url` TEXT PK — The service's identifier for the assessment.
+- `run_id` TEXT PK — What it was for, kept so the notice can name it without another fetch.
+- `organisation` TEXT NOT NULL default `''`
+- `role_label` TEXT NOT NULL default `''`
+- `first_seen_at` TEXT NOT NULL default `datetime('now')` — When the learner was shown it. NULL means they have not been yet.
+- `told_at` TEXT
+
+#### `integrity_sessions`
+
+- `id` TEXT PK
+- `enrollment_id` TEXT → `enrollments.id`
+- `status` TEXT NOT NULL default `'active'` — active|completed|flagged|suspended
+- `integrity_score` REAL
+- `started_at` TEXT NOT NULL default `datetime('now')`
+- `ended_at` TEXT
+- `critical_count` INTEGER NOT NULL default `0`
+- `warning_count` INTEGER NOT NULL default `0`
+- `assurance_level` TEXT NOT NULL default `'local'`
+- `commitment_root` TEXT
+- `anchor_ref` TEXT
+- `purpose` TEXT NOT NULL default `'assessment'`
+
+#### `integrity_snapshots`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `integrity_sessions.id`
+- `typing_score` REAL
+- `mouse_score` REAL
+- `human_score` REAL
+- `tab_score` REAL
+- `paste_score` REAL
+- `devtools_score` REAL
+- `camera_score` REAL
+- `composite_score` REAL
+- `captured_at` TEXT NOT NULL default `datetime('now')`
+- `anomaly_flags` TEXT
+- `ai_paste_anomaly` REAL
+- `gaze_offscreen_ratio` REAL
+- `commitment_hash` TEXT
+
+#### `sentinel_holdout_refs`
+
+- `id` TEXT PK
+- `encrypted_cid` TEXT NOT NULL
+- `model_kind` TEXT NOT NULL — 'keystroke' | 'mouse'
+- `threshold` INTEGER NOT NULL
+- `key_policy` TEXT NOT NULL — JSON: sealed-share envelope
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `sentinel_user_models`
+
+- `user_address` TEXT PK
+- `device_fp_prefix` TEXT PK
+- `model_kind` TEXT PK
+- `weights_json` TEXT NOT NULL
+- `train_loss` REAL
+- `trained_epochs` INTEGER NOT NULL default `0`
+- `training_samples` INTEGER NOT NULL default `0`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+### Interviews (6)
+
+#### `interview_criteria`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `interview_sessions.id`
+- `label` TEXT NOT NULL
+- `position` INTEGER NOT NULL
+- `status` TEXT NOT NULL default `'not_covered'`
+- `notes` TEXT
+
+#### `interview_followups`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `interview_sessions.id`
+- `source_segment_id` TEXT → `interview_transcript_segments.id`
+- `criterion_id` TEXT → `interview_criteria.id`
+- `question` TEXT NOT NULL
+- `reason` TEXT NOT NULL
+- `status` TEXT NOT NULL default `'suggested'`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `interview_notes`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `interview_sessions.id`
+- `text` TEXT NOT NULL
+- `is_private` INTEGER NOT NULL default `1`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `interview_participants`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `interview_sessions.id`
+- `peer_id` TEXT
+- `display_name` TEXT NOT NULL
+- `role` TEXT NOT NULL
+- `pseudonym` TEXT NOT NULL
+- `consent_transcription` INTEGER NOT NULL default `0`
+- `consent_audio_recording` INTEGER NOT NULL default `0`
+- `consent_video_recording` INTEGER NOT NULL default `0`
+- `consent_sentinel` INTEGER NOT NULL default `0`
+- `consent_camera` INTEGER NOT NULL default `0`
+- `consented_at` TEXT
+- `revoked_at` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `interview_sessions`
+
+- `id` TEXT PK
+- `title` TEXT NOT NULL
+- `objective` TEXT
+- `role_assessment_id` TEXT → `role_assessments.id`
+- `tutoring_session_id` TEXT
+- `status` TEXT NOT NULL default `'draft'`
+- `duration_minutes` INTEGER NOT NULL default `45`
+- `retention_days` INTEGER NOT NULL default `30`
+- `record_audio` INTEGER NOT NULL default `0`
+- `record_video` INTEGER NOT NULL default `0`
+- `sentinel_enabled` INTEGER NOT NULL default `1`
+- `integrity_session_id` TEXT → `integrity_sessions.id`
+- `summary` TEXT
+- `conclusion` TEXT
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `started_at` TEXT
+- `ended_at` TEXT
+- `expires_at` TEXT NOT NULL
+
+#### `interview_transcript_segments`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `interview_sessions.id`
+- `participant_id` TEXT NOT NULL → `interview_participants.id`
+- `speaker_label` TEXT NOT NULL
+- `text` TEXT NOT NULL
+- `start_ms` INTEGER NOT NULL default `0`
+- `end_ms` INTEGER NOT NULL default `0`
+- `is_final` INTEGER NOT NULL default `1`
+- `confidence` REAL
+- `source` TEXT NOT NULL default `'manual'`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+### Organizations and role assessments (2)
+
+#### `organizations`
+
+- `id` TEXT PK — blake2b(name + owner_address)
+- `name` TEXT NOT NULL
+- `owner_address` TEXT NOT NULL — sponsor admin stake address
+- `did` TEXT — optional org issuer DID
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `role_assessments`
+
+- `id` TEXT PK
+- `org_id` TEXT NOT NULL → `organizations.id`
+- `role_title` TEXT NOT NULL — e.g. "SRE L4"
+- `job_description` TEXT — JD text
+- `course_id` TEXT → `courses.id` — backing assessment
+- `skill_ids` TEXT — JSON array of required skill ids
+- `issuance_policy_json` TEXT — serialized IssuancePolicy (P0)
+- `required_assurance_level` TEXT — local|anchored|high_assurance
+- `status` TEXT NOT NULL default `'draft'` — draft|published|archived
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+### Classrooms and tutoring (8)
+
+#### `classroom_calls`
+
+- `id` TEXT PK
+- `classroom_id` TEXT NOT NULL → `classrooms.id`
+- `channel_id` TEXT → `classroom_channels.id`
+- `title` TEXT NOT NULL
+- `ticket` TEXT
+- `started_by` TEXT NOT NULL
+- `status` TEXT NOT NULL default `'active'`
+- `started_at` TEXT NOT NULL default `datetime('now')`
+- `ended_at` TEXT
+
+#### `classroom_channels`
+
+- `id` TEXT PK — blake2b(classroom_id + name)
+- `classroom_id` TEXT NOT NULL → `classrooms.id`
+- `name` TEXT NOT NULL
+- `description` TEXT
+- `channel_type` TEXT NOT NULL default `'text'`
+- `position` INTEGER NOT NULL default `0`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `classroom_group_keys`
+
+- `classroom_id` TEXT PK
+- `group_key_enc` BLOB NOT NULL
+- `key_version` INTEGER NOT NULL default `1`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `classroom_join_requests`
+
+- `id` TEXT PK
+- `classroom_id` TEXT NOT NULL → `classrooms.id`
+- `stake_address` TEXT NOT NULL
+- `display_name` TEXT
+- `message` TEXT
+- `status` TEXT NOT NULL default `'pending'`
+- `reviewed_by` TEXT
+- `requested_at` TEXT NOT NULL default `datetime('now')`
+- `reviewed_at` TEXT
+
+#### `classroom_members`
+
+- `classroom_id` TEXT PK → `classrooms.id`
+- `stake_address` TEXT PK
+- `role` TEXT NOT NULL default `'member'`
+- `display_name` TEXT
+- `joined_at` TEXT NOT NULL default `datetime('now')`
+- `x25519_public_key` BLOB
+
+#### `classroom_messages`
+
+- `id` TEXT PK
+- `channel_id` TEXT NOT NULL → `classroom_channels.id`
+- `classroom_id` TEXT NOT NULL
+- `sender_address` TEXT NOT NULL
+- `sender_name` TEXT
+- `content` TEXT NOT NULL
+- `edited_at` TEXT
+- `deleted` INTEGER NOT NULL default `0`
+- `sent_at` TEXT NOT NULL
+- `received_at` TEXT NOT NULL default `datetime('now')`
+
+#### `classrooms`
+
+- `id` TEXT PK — blake2b(owner_address + name + created_at_ms)
+- `name` TEXT NOT NULL
+- `description` TEXT
+- `icon_emoji` TEXT
+- `owner_address` TEXT NOT NULL — Cardano stake address (bech32)
+- `invite_code` TEXT — 8-char alphanumeric join code (optional)
+- `status` TEXT NOT NULL default `'active'`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `tutoring_sessions`
+
+- `id` TEXT PK
+- `title` TEXT NOT NULL
+- `ticket` TEXT
+- `status` TEXT NOT NULL default `'active'`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `ended_at` TEXT
+
+### Genesis trust (1)
+
+#### `governance_genesis_trust_anchors`
+
+- `dao_id` TEXT PK
+- `genesis_hash` TEXT NOT NULL
+- `genesis_json` BLOB NOT NULL
+- `name` TEXT NOT NULL
+- `scope_type` TEXT NOT NULL
+- `scope_id` TEXT NOT NULL
+- `rules_hash` TEXT NOT NULL
+- `pinned_at` TEXT NOT NULL default `datetime('now')`
+
+### P2P, content and sync (12)
+
+#### `content_mappings`
+
+- `external_id` TEXT PK
+- `blake3_hash` TEXT NOT NULL
+- `size_bytes` INTEGER
+- `mapped_at` TEXT NOT NULL default `datetime('now')`
+
+#### `devices`
+
+- `id` TEXT PK — Random UUID per device
+- `device_name` TEXT — User-assigned label
+- `platform` TEXT — macos|windows|linux
+- `first_seen` TEXT NOT NULL default `datetime('now')`
+- `last_synced` TEXT
+- `is_local` INTEGER NOT NULL default `0` — 1 = this device
+- `peer_id` TEXT — libp2p PeerId (if known)
+- `stake_address` TEXT
+- `shared_key` BLOB
+- `paired` INTEGER NOT NULL default `0`
+
+#### `dht_records`
+
+- `key` BLOB PK
+- `value` BLOB NOT NULL
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `peer_profiles`
+
+- `did` TEXT PK
+- `username` TEXT
+- `display_name` TEXT
+- `bio` TEXT
+- `avatar_cid` TEXT
+- `visibility` TEXT NOT NULL default `'public'`
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
+#### `peers`
+
+- `peer_id` TEXT PK — libp2p PeerId
+- `stake_address` TEXT — Cardano stake address (if known)
+- `display_name` TEXT
+- `last_seen` TEXT NOT NULL
+- `addresses` TEXT NOT NULL — JSON array of multiaddrs
+- `roles` TEXT — JSON array: ["instructor", "learner"]
+- `reputation` REAL
+
+#### `pending_pairings`
+
+- `code_hash` TEXT PK — BLAKE2b hash of the pairing code
+- `shared_key` BLOB NOT NULL — 32-byte key offered to the acceptor
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `expires_at` TEXT NOT NULL
+
+#### `pins`
+
+- `cid` TEXT PK
+- `pin_type` TEXT NOT NULL — course|evidence|profile|taxonomy
+- `size_bytes` INTEGER
+- `last_accessed` TEXT
+- `auto_unpin` INTEGER default `0` — 1 = ok to unpin under storage pressure
+- `pinned_at` TEXT NOT NULL default `datetime('now')`
+
+#### `stake_pubkey_registry`
+
+- `stake_address` TEXT PK — Cardano stake addr (bech32)
+- `public_key_hex` TEXT PK — Ed25519 libp2p pubkey, lowercase hex
+- `valid_from` INTEGER PK — unix secs
+- `valid_until` INTEGER — unix secs, NULL = open-ended
+- `source` TEXT NOT NULL
+- `on_chain_tx` TEXT — tx hash, NULL for snapshot-only
+- `snapshot_sig` TEXT — multisig hex, NULL for chain rows
+- `last_verified` INTEGER NOT NULL default `0` — unix secs of last chain re-check
+
+#### `sync_log`
+
+- `id` INTEGER PK
+- `entity_type` TEXT NOT NULL — evidence|catalog|taxonomy|governance
+- `entity_id` TEXT NOT NULL
+- `direction` TEXT NOT NULL — sent|received
+- `peer_id` TEXT — Which peer (null = broadcast)
+- `signature` TEXT
+- `synced_at` TEXT NOT NULL default `datetime('now')`
+
+#### `sync_queue`
+
+- `id` INTEGER PK
+- `table_name` TEXT NOT NULL
+- `row_id` TEXT NOT NULL — PK of the changed row
+- `operation` TEXT NOT NULL — insert|update|delete
+- `row_data` TEXT — JSON snapshot of the row (null for delete)
+- `updated_at` TEXT NOT NULL — Timestamp of the change (LWW tiebreaker)
+- `queued_at` TEXT NOT NULL default `datetime('now')`
+- `delivered_to` TEXT default `'[]'` — JSON array of device_ids that received it
+
+#### `sync_state`
+
+- `device_id` TEXT PK → `devices.id`
+- `table_name` TEXT PK — enrollments|element_progress|course_notes|evidence_records|skill_proof_evidence
+- `last_synced_at` TEXT NOT NULL — ISO 8601 timestamp of last sync
+- `row_count` INTEGER NOT NULL default `0` — Number of rows synced
+
+#### `username_claims`
+
+- `username` TEXT PK
+- `did` TEXT NOT NULL
+- `claimed_at` INTEGER NOT NULL
+- `tier` INTEGER NOT NULL default `0` — 0 bare | 1 receipted | 2 anchored
+- `claim_json` TEXT NOT NULL — full UsernameClaim
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `anchor_verified` INTEGER NOT NULL default `0`
+
+### Settings (1)
+
+#### `app_settings`
+
+- `key` TEXT PK
+- `value` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+- `scope` TEXT NOT NULL default `'sync'`
+
+---
+
+## View and triggers
+
+**`current_reputation_assertions`**
+
+```sql
+CREATE VIEW current_reputation_assertions AS
+SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
+```
+
+Triggers: `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
+
+---
+
+## Entity relationships
+
+Every foreign key in the baseline, parent to child.
 
 ```mermaid
 erDiagram
-    subject_fields ||--o{ subjects : contains
-    subjects ||--o{ skills : contains
-    skills ||--o{ skill_prerequisites : "DAG edges"
-    skills ||--o{ skill_relations : relates
-
-    courses ||--o{ course_chapters : contains
-    course_chapters ||--o{ course_elements : contains
-    course_elements ||--o{ element_skill_tags : tagged
-    course_elements ||--o{ video_chapters : chapters
-    skills ||--o{ element_skill_tags : tagged
-
-    courses ||--o{ enrollments : has
-    enrollments ||--o{ element_progress : tracks
-    enrollments ||--o{ course_notes : has
-    enrollments ||--o{ element_submissions : graded
-
-    credentials ||--o{ credential_challenges : challenged
-    credential_challenges ||--o{ credential_challenge_votes : votes
-    completion_observations ||--o| credentials : "auto-issues"
-    enrollments ||--o{ completion_claims : "exact source"
-    completion_claims ||--o{ course_completion_endorsements : "endorsed by"
-    reputation_assertions ||--o{ reputation_snapshots : anchors
-
-    integrity_sessions ||--o{ integrity_snapshots : snapshots
-
-    interview_sessions ||--o{ interview_participants : participants
-    interview_sessions ||--o{ interview_criteria : criteria
-    interview_sessions ||--o{ interview_transcript_segments : transcript
-    interview_sessions ||--o{ interview_notes : notes
-    interview_sessions ||--o{ interview_followups : followups
-    interview_participants ||--o{ interview_transcript_segments : speaks
-
-    governance_daos ||--o{ governance_proposals : has
-    governance_daos ||--o{ governance_dao_members : members
-    governance_daos ||--o{ governance_elections : runs
-    governance_proposals ||--o{ governance_proposal_votes : votes
-    governance_elections ||--o{ governance_election_nominees : nominees
-    governance_elections ||--o{ governance_election_votes : votes
-
-    classrooms ||--o{ classroom_members : members
-    classrooms ||--o{ classroom_join_requests : requests
-    classrooms ||--o{ classroom_channels : channels
-    classrooms ||--o{ classroom_calls : calls
-    classroom_channels ||--o{ classroom_messages : messages
-    classrooms ||--o| classroom_group_keys : encryption
-
-    devices ||--o{ sync_state : tracks
-
-    credentials ||--o| credential_anchors : anchors
-    credentials ||--o{ credential_allowlist : grants
+    question_banks ||--o{ assessment_attempts : bank_id
+    assessment_items ||--o{ assessment_item_skills : item_id
+    question_banks ||--o{ assessment_items : bank_id
+    assessment_attempts ||--o{ attempt_items : attempt_id
+    chain_submissions ||--o{ chain_submission_members : network
+    chain_submissions ||--o{ chain_submission_members : operation_kind
+    chain_submissions ||--o{ chain_submission_members : operation_id
+    classroom_channels ||--o{ classroom_calls : channel_id
+    classrooms ||--o{ classroom_calls : classroom_id
+    classrooms ||--o{ classroom_channels : classroom_id
+    classrooms ||--o{ classroom_join_requests : classroom_id
+    classrooms ||--o{ classroom_members : classroom_id
+    classroom_channels ||--o{ classroom_messages : channel_id
+    enrollments ||--o{ completion_claims : enrollment_id
+    completion_claims ||--o{ completion_witness_requests : claim_id
+    courses ||--o{ course_chapters : course_id
+    completion_claims ||--o{ course_completion_endorsements : claim_id
+    course_chapters ||--o{ course_elements : chapter_id
+    course_elements ||--o{ course_notes : element_id
+    course_chapters ||--o{ course_notes : chapter_id
+    enrollments ||--o{ course_notes : enrollment_id
+    credentials ||--o{ credential_anchors : credential_id
+    course_elements ||--o{ element_progress : element_id
+    enrollments ||--o{ element_progress : enrollment_id
+    skills ||--o{ element_skill_tags : skill_id
+    course_elements ||--o{ element_skill_tags : element_id
+    enrollments ||--o{ element_submissions : enrollment_id
+    course_elements ||--o{ element_submissions : element_id
+    courses ||--o{ enrollments : course_id
+    guardian_links ||--o{ guardian_activity_rows : link_id
+    integrity_snapshots ||--o{ integrity_evidence : snapshot_id
+    integrity_sessions ||--o{ integrity_evidence : session_id
+    integrity_sessions ||--o{ integrity_evidence_consent : session_id
+    enrollments ||--o{ integrity_sessions : enrollment_id
+    integrity_sessions ||--o{ integrity_snapshots : session_id
+    interview_sessions ||--o{ interview_criteria : session_id
+    interview_criteria ||--o{ interview_followups : criterion_id
+    interview_transcript_segments ||--o{ interview_followups : source_segment_id
+    interview_sessions ||--o{ interview_followups : session_id
+    interview_sessions ||--o{ interview_notes : session_id
+    interview_sessions ||--o{ interview_participants : session_id
+    integrity_sessions ||--o{ interview_sessions : integrity_session_id
+    role_assessments ||--o{ interview_sessions : role_assessment_id
+    interview_participants ||--o{ interview_transcript_segments : participant_id
+    interview_sessions ||--o{ interview_transcript_segments : session_id
+    subject_fields ||--o{ opinions : subject_field_id
+    plugin_installed ||--o{ plugin_dependencies : dependency_cid
+    plugin_installed ||--o{ plugin_dependencies : plugin_cid
+    plugin_installed ||--o{ plugin_irl_submissions : plugin_cid
+    plugin_installed ||--o{ plugin_permissions : plugin_cid
+    skills ||--o{ reputation_assertions : skill_id
+    reputation_snapshots ||--o{ reputation_snapshot_inputs : snapshot_id
+    credentials ||--o{ reputation_snapshots : credential_id
+    courses ||--o{ role_assessments : course_id
+    organizations ||--o{ role_assessments : org_id
+    skills ||--o{ skill_prerequisites : prerequisite_id
+    skills ||--o{ skill_prerequisites : skill_id
+    skills ||--o{ skill_relations : related_skill_id
+    skills ||--o{ skill_relations : skill_id
+    subjects ||--o{ skills : subject_id
+    subject_fields ||--o{ subjects : subject_field_id
+    devices ||--o{ sync_state : device_id
+    course_elements ||--o{ video_chapters : element_id
 ```
