@@ -33,7 +33,7 @@ Updated: 2026-09-15
 | S5 — Media creation | S3, content storage | Capability-specific image/audio/video adapters, artifact provenance, accessible alternatives, provider failures, approval before attachment | Pending; text endpoints currently produce media briefs/scripts only |
 | S6 — Learner tutor | S1, S3, learner player | Signed public course policy, learner local/cloud model setup, lesson threads, assessment isolation, policy tests | Implemented for learner BYOM; native provider smoke and sponsored access remain open |
 | S7 — Sponsored access | S6, Cloud delegated auth | Server-held sponsor keys, per-course budgets/limits, learner entitlement, no key disclosure | Pending; unavailable until service exists |
-| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 slice 1 (catalog, course and lesson reads) implemented; M3 slices 2–3, M5–M8 pending; M4 foundation on the Cloud branch |
+| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 slices 1–2 (catalog, course and lesson reads; skill graph, progress, goal resolution and learning path) implemented; M3 slice 3, M5–M8 pending; M4 foundation on the Cloud branch |
 | M9+ — Further MCP writes | M2–M8 and domain services | Other reversible writes, consented disclosures, organizational actions | Pending; see Desktop plan |
 
 ### Work that can proceed asynchronously
@@ -113,6 +113,14 @@ M3 slice 1 (2026-09-16):
 - `npx vue-tsc -b --noEmit`, `npm run build`, `npm test` (77), `i18n:parity` (8 locales, 2724 keys), `i18n:no-raw-text` and the Tauri command guard (389/306/83): passed. New strings are English in other locales until translated.
 - Not yet done: browser check of the Settings section, a packaged-app run of the resolver-backed fetch against real peers, and Inspector against the new tools.
 
+M3 slice 2 (2026-09-16):
+
+- `cargo +1.91.0 test --no-fail-fast -p alexandria-studio -p alexandria-mcp`: all passed — studio 17 (graph visibility, prerequisite ordering and published-course recommendations, template versus text goal resolution, refused oversized input, progress with observed lessons), broker lifecycle 6, conformance 9 (eleven tools with a broker), stdio 3, policy 9.
+- `learners_read_their_own_graph_progress_and_goals` drives real `alexandria-mcp` processes: the owner's graph keeps a private skill flagged `public: false` with its prerequisite edge; progress reports both lessons with one completed and its score; an exam template resolves to its target skill while text returns suggestions and saves nothing; the path orders prerequisites first with the published course recommended for the unearned goal; an unknown goal kind is refused; and a drafts-only grant is refused all four tools.
+- Regression check that the extraction changed nothing: `cargo +1.91.0 test -p alexandria-node --lib` passed 1183 with 13 ignored, including the existing `commands::graph`, `p2p::graph_fetch` and `commands::goal_templates` suites that now exercise the shared implementation. One P2P test, `content_store::resolver::tests::resolve_blake3_fetches_from_peer_before_url`, failed once during that 280-second run and passed 10/10 when its module was run alone; it starts two real network nodes and touches no changed code. It was not shown to be reliable under full-suite load.
+- `cargo +1.91.0 clippy -p alexandria-node -p alexandria-studio -p alexandria-mcp --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed (existing warnings from the patched `tao` only).
+- No frontend change in this slice, so the Vue and locale checks were not rerun.
+
 Provider tests use a controlled loopback HTTP server. No paid model or actual assistant account has been tested. Fixtures use in-memory databases and supplied verifier vectors; real profiles have not been opened or modified by the tests.
 
 ## Integration and next work
@@ -130,7 +138,7 @@ Approved inline text is materialized as public content-addressed text blobs befo
 
 ### MCP contract and client configuration
 
-Without `ALEXANDRIA_MCP_CONNECTION_FILE`, the binary exposes only offline `verify_credential` and does not discover profiles. With the connection file produced by Settings → Assistant access, it additionally advertises `search_catalog`, `get_course` and `read_lesson` (`learning:read`) and `list_course_drafts`, `read_lesson_draft` and `propose_lesson_draft` (`drafts:read`, `drafts:propose`); a grant carries any combination of the three scopes. Every private call is reauthorized by the running app against scope, expiry and profile epoch. The executable itself never opens a profile database or vault. A read lease spans app authorization, database work and response writing; lock/revoke obtains the exclusive lease before invalidation. No new response/write can proceed under a stale grant after that invalidation point.
+Without `ALEXANDRIA_MCP_CONNECTION_FILE`, the binary exposes only offline `verify_credential` and does not discover profiles. With the connection file produced by Settings → Assistant access, it additionally advertises `search_catalog`, `get_course`, `read_lesson`, `get_skill_graph`, `get_learning_progress`, `resolve_goal` and `compute_learning_path` (`learning:read`) and `list_course_drafts`, `read_lesson_draft` and `propose_lesson_draft` (`drafts:read`, `drafts:propose`); a grant carries any combination of the three scopes. Every private call is reauthorized by the running app against scope, expiry and profile epoch. The executable itself never opens a profile database or vault. A read lease spans app authorization, database work and response writing; lock/revoke obtains the exclusive lease before invalidation. No new response/write can proceed under a stale grant after that invalidation point.
 
 A proposal only creates a review item under Workflows → Runs. Retry identity includes the grant, client name, request ID and target lesson; exact retries return the prior outcome even after instructor application, while changed payloads and stale target fingerprints conflict. There are no MCP apply, publish, grade or credential-issuance tools.
 
@@ -143,7 +151,18 @@ Decided with the user:
 - **Lesson content:** text (60,000 characters per call, continued with `next_start`); video chapter markers; quiz, multiple-choice and essay questions rebuilt from an allowlist of learner-visible fields (prompt, context, options, points, essay guidelines, word limits, rubric criteria), so answers, explanations and any field a new format adds are never copied. Credential-bearing assessments, interactive elements and plugins are withheld. Practice quizzes do feed completion and skill evidence; returning their questions without answers was the user's explicit choice.
 - **Network:** a lesson body not stored inline is fetched through the content resolver (device store, then peers, then a mapped URL) with a 10-second limit; `read_lesson` is marked open-world and says so. The fetch runs outside the broker lease and the request is authorized again under the lease before rendering, so a slow fetch cannot delay a profile lock or return content after it. The broker's per-request limit is now 15 s and the client's 20 s.
 
-Implementation: `crates/alexandria-studio/src/learning.rs` (queries and rendering), `broker.rs` (`learning:read`, two-phase `read_lesson`, `BrokerHost::fetch_content`), `grants.rs` (three scopes), `alexandria-mcp` tools with typed schemas, `src-tauri/src/commands/studio_mcp.rs` (resolver-backed fetch). Remaining M3: slice 2 (skill graph, progress, goal resolution, learning path) and slice 3 (credential list/detail, presentation verification).
+Implementation: `crates/alexandria-studio/src/learning.rs` (queries and rendering), `broker.rs` (`learning:read`, two-phase `read_lesson`, `BrokerHost::fetch_content`), `grants.rs` (three scopes), `alexandria-mcp` tools with typed schemas, `src-tauri/src/commands/studio_mcp.rs` (resolver-backed fetch). Remaining M3 after slice 2: slice 3 (credential list/detail, presentation verification).
+
+### Learner skills and goals (M3 slice 2, 2026-09-16)
+
+Decided with the user:
+
+- **Private skills:** the learner's own assistant, running on their own device, receives every earned skill with a `public` flag; anything that leaves the device — the P2P graph service, and later Cloud and instructors — still sends public skills only. The tool description says private skills are included and must not be republished.
+- **Goal input:** `resolve_goal` accepts a curated `exam`, `job_role` or `curriculum` template key, or job-description text supplied by the caller. It takes no URL, so no model can make this device issue an outbound request; the app's own UI keeps its link-fetching path.
+
+Shared services (the plan's "do not duplicate graph traversal" rule): `alexandria-studio::skills` now owns the skill-graph build, the learning-path computation with its course recommendations, goal-template lookup, skill entries and progress; `alexandria-studio::jd_parser` owns the on-device text matcher. The app's `p2p/graph_fetch.rs`, `commands/graph.rs`, `commands/goal_templates.rs` and `goals/jd_parser.rs` now call or re-export those, keeping their existing DTOs, public paths and behaviour. Settings the graph needs (`identity.local_did`, `instructor.graph_prefs`) are read from `app_settings` directly, so the studio crate stays free of app-only types.
+
+Bounds: at most 50 goal skills, 100,000 characters of goal text, 200 enrolments and 500 lesson progress rows per call, and up to three course recommendations per unearned skill.
 
 ### MCP 2026-07-28 conformance ledger (stdio)
 
