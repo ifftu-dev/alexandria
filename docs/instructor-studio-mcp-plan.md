@@ -33,7 +33,7 @@ Updated: 2026-09-15
 | S5 — Media creation | S3, content storage | Capability-specific image/audio/video adapters, artifact provenance, accessible alternatives, provider failures, approval before attachment | Pending; text endpoints currently produce media briefs/scripts only |
 | S6 — Learner tutor | S1, S3, learner player | Signed public course policy, learner local/cloud model setup, lesson threads, assessment isolation, policy tests | Implemented for learner BYOM; native provider smoke and sponsored access remain open |
 | S7 — Sponsored access | S6, Cloud delegated auth | Server-held sponsor keys, per-course budgets/limits, learner entitlement, no key disclosure | Pending; unavailable until service exists |
-| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 slice 1 (roles, talent search, candidate summaries, candidate-to-role comparison) implemented on the Cloud branch; M5 slices 2–3 and M6–M8 pending |
+| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 slices 1–2 (roles, talent search, candidate summaries, candidate-to-role comparison, assessment runs) implemented on the Cloud branch; M5 slice 3 and M6–M8 pending |
 | M9+ — Further MCP writes | M2–M8 and domain services | Other reversible writes, consented disclosures, organizational actions | Pending; see Desktop plan |
 
 ### Work that can proceed asynchronously
@@ -137,7 +137,13 @@ M5 slice 1 (2026-09-16, Cloud worktree):
 - `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed.
 - Cloud `docs/deployment.md` gained a tools-and-scopes section stating the three rules enforced in code; `README.md` updated to match.
 - `python3 scripts/mcp/e2e.py` against fixture Keycloak 26.7.3: passed, now exercising all five tools with a live token. It seeds a role, two listed people who both clear its bar and a candidate who is one of them, then checks that a name is shown for somebody who answered this organisation and withheld for somebody who has not, that the search is written to the organisation's log, that the candidate summary carries no contact address, that the comparison reads requirement by requirement (`skill_rust` met, `skill_sql` reachable) and reports `listed_in_index: false` for a candidate with no listing, and that a token holding only `candidates:read` is refused the comparison with a challenge naming `roles:read`. Seeded identities carry the run marker and are removed afterwards, because the talent index is not organisation-scoped.
-- Not yet done: M5 slices 2–3 — assessment runs, cohort reports and verification jobs.
+- Not yet done: M5 slice 3 — cohort reports and verification jobs.
+
+M5 slice 2 (2026-09-16, Cloud worktree):
+
+- `cargo +1.91.0 test --no-fail-fast`: 33 suites, 338 passed, 0 failed, including `a_run_summary_carries_no_integrity_scores`, which hands the mapping a full set of scores and asserts none of it appears in the result.
+- `python3 scripts/mcp/e2e.py`: passed with seven tools. It seeds a recorded, flagged run carrying `composite` and `gaze` scores, then checks that `list_assessment_runs` finds it when filtering to flagged runs, that `get_run_summary` returns its status and credential reference, that no score value appears anywhere in either response, and that reading the run wrote a `run.viewed` row to the organisation's audit trail.
+- `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed. Cloud's deployment doc and README record the new tools and the integrity rule.
 
 Provider tests use a controlled loopback HTTP server. No paid model or actual assistant account has been tested. Fixtures use in-memory databases and supplied verifier vectors; real profiles have not been opened or modified by the tests.
 
@@ -298,6 +304,14 @@ Implemented: `get_role`, `search_talent`, `get_candidate_summary` and `compare_c
 Shared services: `src/talent_index.rs` (search with its `talent_searches` log, one person's held skills, the prerequisite graph) and `src/candidates.rs` (a candidate with their runs), plus `roles::one`. The console's search handler reads through the same service, so a recruiter and their assistant see the same people under the same rules; its JSON is unchanged.
 
 Worth stating: `search_talent` writes the search log, so it is annotated as not read-only. A comparison reports `listed_in_index: false` when somebody has no current listing — absent evidence, not evidence of absence — and reports per-requirement standings (met, short on evidence, short on Bloom, reachable, or blocked with the prerequisites that come first) plus a count of assessments that would close the gaps. Never a single suitability score.
+
+### Cloud assessment runs (M5 slice 2, 2026-09-16)
+
+Decided with the user: `get_run_summary` returns the integrity **flag** and no score numbers — not even the composite the console's run list shows. An assistant can say that a run completed and that it was flagged; what a flag means is read in the console, by a named person, with the adjudication path around it. A model ranking people by an integrity number is the inference the design exists to prevent.
+
+Evidence a candidate released (`evidence_releases`: camera frames, keystroke, mouse, gaze) is not reachable through `/mcp` at all, and its existence is not reported either. That table is candidate-initiated by design: there is deliberately no endpoint an organisation can call to ask for it and no record of asking, because a request that can be refused leaks the refusal.
+
+Implemented: `list_assessment_runs` (filter by candidate, status or flagged only) and `get_run_summary`, under `runs:read`. Scores travel only when a caller asks: the console's screens do, `/mcp` does not, and `RunSummary` has no field for them, so the exclusion is structural rather than a mapping line that could be edited later. Reading a run writes the same `run.viewed` audit row the console writes, naming the person whose token was used. `src/runs.rs` is the shared service; the console's run list and detail now read through it, with paging made explicit — no limit for the screen, a page for assistants.
 
 Comparison evidence: oidc-provider 9.12.2 (MIT) passed every check, including a delegated-login authorization code flow with a resource-bound JWT and code-replay rejection. Ory Hydra v26.2.0 advertised no CIMD, no `iss` parameter and no RFC 8707 support.
 
