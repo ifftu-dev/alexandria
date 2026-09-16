@@ -28,8 +28,6 @@ export type AccountRole = 'learner' | 'instructor' | 'parent'
 export interface AccountStatus {
   /** Canonical role set; always contains 'learner'. */
   roles: AccountRole[]
-  /** First extra role, or 'learner'. Legacy single-valued view of `roles`. */
-  role: AccountRole
   /** ISO date (YYYY-MM-DD). Local-only: never published. */
   birthdate: string | null
   is_minor: boolean

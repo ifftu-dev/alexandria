@@ -17,8 +17,6 @@ const roles = computed<AccountRole[]>(() => status.value?.roles ?? ['learner'])
 const hasRole = (r: AccountRole) => roles.value.includes(r)
 const isInstructor = computed(() => hasRole('instructor'))
 const isParent = computed(() => hasRole('parent'))
-/** Legacy single-valued view: the first extra role, or 'learner'. */
-const role = computed<AccountRole>(() => status.value?.role ?? 'learner')
 const isMinor = computed(() => status.value?.is_minor ?? false)
 const activationState = computed(() => status.value?.activation_state ?? 'active')
 const isPendingGuardian = computed(() => activationState.value === 'pending_guardian')
@@ -59,7 +57,6 @@ export function useAccountStatus() {
     hasRole,
     isInstructor,
     isParent,
-    role,
     isMinor,
     activationState,
     isPendingGuardian,

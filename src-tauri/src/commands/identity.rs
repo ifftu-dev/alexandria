@@ -143,7 +143,6 @@ pub async fn get_account_status(
             .unwrap_or(false);
         let roles = crate::domain::identity::roles_from_json(&roles_json);
         AccountStatus {
-            role: crate::domain::identity::legacy_role(&roles),
             roles,
             birthdate,
             is_minor,
@@ -182,12 +181,9 @@ pub async fn set_account_roles(
 
                 db.conn()
                     .execute(
-                        "UPDATE local_identity SET account_role = ?1, account_roles = ?2, \
+                        "UPDATE local_identity SET account_roles = ?1, \
                          updated_at = datetime('now') WHERE id = 1",
-                        params![
-                            crate::domain::identity::legacy_role(&roles),
-                            crate::domain::identity::roles_to_json(&roles)
-                        ],
+                        params![crate::domain::identity::roles_to_json(&roles)],
                     )
                     .map_err(|e| e.to_string())?;
                 Ok(())

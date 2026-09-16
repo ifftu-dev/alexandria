@@ -71,23 +71,11 @@ pub fn roles_from_json(raw: &str) -> Vec<String> {
     normalize_roles(&parsed).unwrap_or_else(|_| vec!["learner".to_string()])
 }
 
-/// What the single-valued `account_role` column carries: the first extra
-/// role, or `learner`. Only there for builds that predate the set.
-pub fn legacy_role(roles: &[String]) -> String {
-    roles
-        .iter()
-        .find(|r| r.as_str() != "learner")
-        .cloned()
-        .unwrap_or_else(|| "learner".to_string())
-}
-
 /// Role + gating status surfaced to the frontend. Age is computed, never stored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountStatus {
     /// Canonical role set; always contains `learner`.
     pub roles: Vec<String>,
-    /// `legacy_role(roles)`. Kept for anything still reading one value.
-    pub role: String,
     /// ISO-8601 date (`YYYY-MM-DD`). Local-only: never published.
     pub birthdate: Option<String>,
     pub is_minor: bool,
@@ -179,15 +167,6 @@ mod tests {
         assert_eq!(roles_from_json(&roles_to_json(&r)), r);
         assert_eq!(roles_from_json("not json"), v(&["learner"]));
         assert_eq!(roles_from_json("[\"admin\"]"), v(&["learner"]));
-    }
-
-    #[test]
-    fn legacy_role_is_the_first_extra() {
-        assert_eq!(legacy_role(&v(&["learner"])), "learner");
-        assert_eq!(
-            legacy_role(&v(&["learner", "instructor", "parent"])),
-            "instructor"
-        );
     }
 
     fn d(s: &str) -> chrono::NaiveDate {

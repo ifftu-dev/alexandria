@@ -670,8 +670,8 @@ mod tests {
 
     fn seed_identity(conn: &Connection, birthdate: Option<&str>, activation: &str) {
         conn.execute(
-            "INSERT INTO local_identity (id, stake_address, payment_address, account_role, birthdate, activation_state) \
-             VALUES (1, 'stake_child', 'addr_child', 'learner', ?1, ?2)",
+            "INSERT INTO local_identity (id, stake_address, payment_address, birthdate, activation_state) \
+             VALUES (1, 'stake_child', 'addr_child', ?1, ?2)",
             rusqlite::params![birthdate, activation],
         )
         .unwrap();

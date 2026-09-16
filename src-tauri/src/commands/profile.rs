@@ -47,42 +47,34 @@ fn emit_progress(app: &AppHandle, step: &str, detail: &str) {
 }
 
 /// Validate the onboarding role/birthdate pair and derive the initial
-/// activation state. Legacy callers pass neither and get the pre-role
-/// behavior (`learner`, no birthdate, `active`). A caller that declares
-/// roles — which onboarding always does — must supply a birthdate; that is
-/// what gates minors behind guardian enrollment.
+/// activation state. Both are required: everybody is a learner, so everybody
+/// gives a birthdate, and an instructor or parent under 18 is gated exactly
+/// like any other minor.
 fn resolve_account_fields(
     roles: Option<Vec<String>>,
     birthdate: Option<String>,
 ) -> Result<AccountFields, String> {
     let today = chrono::Utc::now().date_naive();
-    let explicit = roles.is_some();
-    let roles = crate::domain::identity::normalize_roles(&roles.unwrap_or_default())?;
+    let roles = roles.ok_or_else(|| "Roles are required.".to_string())?;
+    let roles = crate::domain::identity::normalize_roles(&roles)?;
 
-    // Everybody is a learner, so everybody gives a birthdate — an instructor
-    // or a parent under 18 is gated exactly like any other minor. Only the
-    // legacy role-less call (tests, older callers) may omit it.
-    let birthdate = match birthdate {
-        Some(b) => Some(crate::domain::identity::validate_birthdate(&b, today)?),
-        None if explicit => return Err("A birthdate is required.".to_string()),
-        None => None,
-    };
+    let birthdate = birthdate.ok_or_else(|| "A birthdate is required.".to_string())?;
+    let birthdate = crate::domain::identity::validate_birthdate(&birthdate, today)?;
 
-    let activation = match &birthdate {
-        Some(b) if crate::domain::identity::is_minor(b, today) => "pending_guardian",
-        _ => "active",
+    let activation = if crate::domain::identity::is_minor(&birthdate, today) {
+        "pending_guardian"
+    } else {
+        "active"
     };
     Ok(AccountFields {
-        account_role: crate::domain::identity::legacy_role(&roles),
         account_roles: crate::domain::identity::roles_to_json(&roles),
-        birthdate,
+        birthdate: Some(birthdate),
         activation_state: activation.to_string(),
     })
 }
 
 /// What gets written to `local_identity` for a new profile.
 struct AccountFields {
-    account_role: String,
     account_roles: String,
     birthdate: Option<String>,
     activation_state: String,
@@ -181,7 +173,6 @@ pub async fn create_profile(
             }
             validate_password(&password)?;
             let AccountFields {
-                account_role,
                 account_roles,
                 birthdate,
                 activation_state,
@@ -231,14 +222,13 @@ pub async fn create_profile(
                 let db = db_guard.as_ref().ok_or("database not initialized")?;
                 db.conn()
                     .execute(
-                        "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility, account_role, account_roles, birthdate, activation_state) \
-                         VALUES (1, ?1, ?2, ?3, ?4, 'public', ?5, ?6, ?7, ?8)",
+                        "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility, account_roles, birthdate, activation_state) \
+                         VALUES (1, ?1, ?2, ?3, ?4, 'public', ?5, ?6, ?7)",
                         params![
                             w.stake_address.clone(),
                             w.payment_address.clone(),
                             username.clone(),
                             display_name.clone(),
-                            account_role,
                             account_roles,
                             birthdate,
                             activation_state
@@ -306,7 +296,6 @@ pub async fn restore_profile_with_mnemonic(
             }
             validate_password(&password)?;
             let AccountFields {
-                account_role,
                 account_roles,
                 birthdate,
                 activation_state,
@@ -353,14 +342,13 @@ pub async fn restore_profile_with_mnemonic(
                 let db = db_guard.as_ref().ok_or("database not initialized")?;
                 db.conn()
                     .execute(
-                        "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility, account_role, account_roles, birthdate, activation_state) \
-                         VALUES (1, ?1, ?2, ?3, ?4, 'public', ?5, ?6, ?7, ?8)",
+                        "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility, account_roles, birthdate, activation_state) \
+                         VALUES (1, ?1, ?2, ?3, ?4, 'public', ?5, ?6, ?7)",
                         params![
                             w.stake_address.clone(),
                             w.payment_address.clone(),
                             username.clone(),
                             display_name.clone(),
-                            account_role,
                             account_roles,
                             birthdate,
                             activation_state
