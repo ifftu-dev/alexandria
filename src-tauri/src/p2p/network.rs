@@ -810,11 +810,13 @@ async fn start_configured_node(
     // Create command channel
     let (command_tx, command_rx) = mpsc::channel::<SwarmCommand>(256);
 
-    // Create the message validator (shared via Arc for the event
-    // loop). When a DB handle is available, the event loop authorizes
-    // privileged-topic messages against `stake_pubkey_registry` through
-    // a profile-fenced executor job; otherwise the validator fails-open
-    // on the identity check.
+    // Create the message validator (shared via Arc for the event loop).
+    // It never carries the database itself: with a DB handle the event
+    // loop authorizes privileged-topic messages against
+    // `stake_pubkey_registry` through a profile-fenced executor job and
+    // only runs the validator's own pipeline for non-privileged topics.
+    // Without one, every topic falls through to the validator, whose
+    // identity check then fails open.
     //
     // Production callers MUST pass a DB. We log a `WARN` on the
     // no-DB path so a misconfigured release is loud at the very

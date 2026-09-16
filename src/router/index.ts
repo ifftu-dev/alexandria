@@ -18,13 +18,6 @@ const router = createRouter({
       meta: { layout: 'blank' },
     },
     {
-      // Legacy /unlock — redirects to picker now. Kept so any cached
-      // deep link from the pre-multi-user release still routes somewhere
-      // sane.
-      path: '/unlock',
-      redirect: '/profiles',
-    },
-    {
       // Holding screen for minor learners whose profile awaits guardian
       // activation. The global guard below funnels gated profiles here.
       path: '/guardian-gate',
@@ -118,11 +111,6 @@ const router = createRouter({
       component: () => import('@/pages/instructor/MyCourses.vue'),
       meta: { layout: 'app', requiresInstructorMode: true },
     },
-    // Legacy authoring routes — the composer supersedes them.
-    { path: '/instructor/courses/new', redirect: '/instructor/composer/new?kind=course' },
-    { path: '/instructor/courses/:id', redirect: (to) => `/instructor/composer/${to.params.id}` },
-    { path: '/instructor/tutorials/new', redirect: '/instructor/composer/new?kind=tutorial' },
-
     // Opinions (Field Commentary — credentialed video takes)
     {
       path: '/opinions',
@@ -224,7 +212,6 @@ const router = createRouter({
       component: () => import('@/pages/skills/BootstrapUpload.vue'),
       meta: { layout: 'app' },
     },
-    { path: '/skills/bootstrap', redirect: '/skills/import' },
     {
       path: '/assessment/:skillId',
       name: 'assessment',
@@ -267,7 +254,6 @@ const router = createRouter({
       component: () => import('@/pages/governance/ImportGenesis.vue'),
       meta: { layout: 'app' },
     },
-    { path: '/governance', redirect: '/community/import' },
 
     // Dashboard surfaces — flattened to plain top-level paths.
     {
@@ -312,21 +298,12 @@ const router = createRouter({
       component: () => import('@/pages/dashboard/Sync.vue'),
       meta: { layout: 'app' },
     },
-    // Legacy /dashboard/* paths — redirect so old deeplinks/bookmarks resolve.
-    { path: '/dashboard/courses', redirect: '/learning' },
-    { path: '/dashboard/credentials', redirect: '/credentials' },
-    { path: '/dashboard/credentials/:id', redirect: (to) => `/credentials/${to.params.id}` },
-    { path: '/dashboard/sponsor', redirect: '/sponsor' },
-    { path: '/dashboard/reputation', redirect: '/reputation' },
-    { path: '/dashboard/network', redirect: '/network' },
-    { path: '/dashboard/sync', redirect: '/sync' },
     {
       path: '/dashboard/sentinel',
       name: 'dashboard-sentinel',
       component: () => import('@/pages/dashboard/Sentinel.vue'),
       meta: { layout: 'app' },
     },
-    { path: '/dashboard/sentinel/propose-prior', redirect: '/dashboard/sentinel' },
     {
       path: '/dashboard/sentinel/holdout-evaluate',
       name: 'dashboard-sentinel-holdout-evaluate',

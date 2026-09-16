@@ -47,7 +47,7 @@ pub struct ItemParams {
 }
 
 impl ItemParams {
-    /// Seed parameters from the legacy 1–5 difficulty column, so every bank
+    /// Seed parameters from the bank's 1–5 difficulty column, so every bank
     /// works before any real calibration exists.
     ///
     /// Maps difficulty linearly onto the ability scale — 3 is average

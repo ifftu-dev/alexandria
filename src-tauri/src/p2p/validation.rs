@@ -89,9 +89,17 @@ pub type ValidationResult = Result<(), ValidationError>;
 /// Holds an LRU dedup cache and an optional `Database` handle. The
 /// handle is used by [`check_identity_binding`](MessageValidator::check_identity_binding)
 /// to look up `(stake_address, public_key)` bindings in
-/// `stake_pubkey_registry` for privileged topics. Validators without a
-/// DB handle (legacy `start_node` entry, unit tests) fail-open on the
-/// identity check — they're intended for non-privileged paths only.
+/// `stake_pubkey_registry` for privileged topics, and only tests
+/// construct a validator that carries one.
+///
+/// The running node never does. Its event loop must not lock the profile
+/// database, so it runs the identity binding itself as a profile-fenced
+/// executor job — `registry::check_message` between
+/// [`check_before_identity`](Self::check_before_identity) and
+/// [`check_after_identity`](Self::check_after_identity) — and reaches
+/// [`validate`](Self::validate) only for non-privileged topics. A
+/// privileged message reaching the fail-open branch below therefore means
+/// the node started without a database handle at all.
 ///
 /// Thread-safe via interior mutability (`Mutex`) so it can be shared
 /// across the async swarm event loop.
