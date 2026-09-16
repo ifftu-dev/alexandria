@@ -171,6 +171,39 @@ def main():
             check(not error and verdict.get("signature_valid") is True
                   and verdict.get("revocation_status") == "unknown",
                   "verify_credential checks a supplied credential and reports unknown revocation")
+
+            # Drafts: the owner's unpublished course, and only that.
+            error, result = server.tool("list_course_drafts")
+            listed = [(i["course_id"], i["element_id"]) for i in result.get("structuredContent", {}).get("items", [])]
+            check(not error and listed == [("course-draft", "lesson-draft")],
+                  f"list_course_drafts shows the owner's draft lesson and nothing else ({listed})")
+            error, result = server.tool("search_catalog", {"query": ""})
+            check("course-draft" not in json.dumps(result), "the draft is not in the published catalog")
+            error, result = server.tool("read_lesson_draft", {"course_id": "course-draft", "element_id": "lesson-draft"})
+            draft = result.get("structuredContent", {})
+            check(not error and draft.get("text", "").startswith("DRAFT TEXT") and len(draft.get("fingerprint", "")) == 64,
+                  "read_lesson_draft returns the owner's text with a fingerprint")
+            error, result = server.tool("read_lesson_draft", {"course_id": "course-beta", "element_id": "lesson-beta"})
+            check(error and "permission_denied" in json.dumps(result),
+                  "another author's lesson is not a draft this person can read")
+
+            proposal = {"course_id": "course-draft", "element_id": "lesson-draft",
+                        "fingerprint": draft.get("fingerprint", ""), "request_id": "fixture-check-1",
+                        "text": "DRAFT TEXT: proposed by an assistant."}
+            error, first = server.tool("propose_lesson_draft", proposal)
+            outcome = first.get("structuredContent", {})
+            check(not error and outcome.get("status") == "review" and outcome.get("requires_instructor_review") is True,
+                  "propose_lesson_draft records a proposal that waits for the owner's review")
+            error, again = server.tool("propose_lesson_draft", proposal)
+            check(not error and again.get("structuredContent") == first.get("structuredContent"),
+                  "an exact retry returns the same outcome rather than a second proposal")
+            error, stale = server.tool("propose_lesson_draft", {**proposal, "request_id": "fixture-check-2",
+                                                                "fingerprint": "0" * 64})
+            check(error and "conflict" in json.dumps(stale),
+                  f"a proposal against a stale fingerprint conflicts ({json.dumps(stale)[:200]})")
+            error, result = server.tool("read_lesson_draft", {"course_id": "course-draft", "element_id": "lesson-draft"})
+            check(result.get("structuredContent", {}).get("text", "").startswith("DRAFT TEXT: the owner"),
+                  "a proposal changes nothing until the owner applies it")
         finally:
             server.stop()
     finally:

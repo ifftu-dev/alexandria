@@ -120,6 +120,16 @@ INSERT INTO course_elements(id, chapter_id, title, element_type, content_inline,
     ('lesson-gamma', 'chapter-gamma', 'What gamma is', 'text',
      'Gamma builds on beta, which builds on alpha.', 0);
 
+-- A course the owner is writing, never published: the draft tools read it and
+-- propose changes to it, and nothing that lists published courses may show it.
+INSERT INTO courses(id, title, description, author_address, status, skill_ids) VALUES
+    ('course-draft', 'Owner draft', 'Being written.', 'stake_fixture_owner', 'draft', '["skill-beta"]');
+INSERT INTO course_chapters(id, course_id, title, position) VALUES
+    ('chapter-draft', 'course-draft', 'Chapter one', 0);
+INSERT INTO course_elements(id, chapter_id, title, element_type, content_inline, position) VALUES
+    ('lesson-draft', 'chapter-draft', 'Unpublished lesson', 'text',
+     'DRAFT TEXT: the owner is still writing this.', 0);
+
 INSERT INTO enrollments(id, course_id, status) VALUES ('enrol-beta', 'course-beta', 'active');
 INSERT INTO element_progress(id, enrollment_id, element_id, status, score, time_spent)
      VALUES ('progress-beta', 'enrol-beta', 'lesson-beta', 'completed', NULL, 240);
@@ -204,6 +214,11 @@ Things worth asking it, and what should come back:
   compute_learning_path {{"goal_skill_ids":["skill-gamma"]}}
                                            alpha earned, beta available, gamma locked
   list_my_credentials {{}}                  one summary, no signed document
+  list_course_drafts {{}}                   the owner's one unpublished lesson
+  read_lesson_draft {{"course_id":"course-draft","element_id":"lesson-draft"}}
+                                           its text and a fingerprint
+  propose_lesson_draft                     with that fingerprint: waits for review,
+                                           changes nothing until the owner applies it
   verify_credential                        caller-supplied JSON; vectors in
                                            {vectors}
 
