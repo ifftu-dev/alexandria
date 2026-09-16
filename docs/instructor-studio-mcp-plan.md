@@ -136,7 +136,8 @@ M5 slice 1 (2026-09-16, Cloud worktree):
 - `a_name_reaches_an_assistant_only_from_someone_who_answered_this_organisation` tests the mapping directly: a stranger's match carries no name, a match from somebody who answered carries theirs.
 - `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed.
 - Cloud `docs/deployment.md` gained a tools-and-scopes section stating the three rules enforced in code; `README.md` updated to match.
-- Not yet done: fixture end-to-end coverage of the four new tools (the Keycloak script still exercises `list_roles` only), and M5 slices 2–3 — assessment runs, cohort reports and verification jobs.
+- `python3 scripts/mcp/e2e.py` against fixture Keycloak 26.7.3: passed, now exercising all five tools with a live token. It seeds a role, two listed people who both clear its bar and a candidate who is one of them, then checks that a name is shown for somebody who answered this organisation and withheld for somebody who has not, that the search is written to the organisation's log, that the candidate summary carries no contact address, that the comparison reads requirement by requirement (`skill_rust` met, `skill_sql` reachable) and reports `listed_in_index: false` for a candidate with no listing, and that a token holding only `candidates:read` is refused the comparison with a challenge naming `roles:read`. Seeded identities carry the run marker and are removed afterwards, because the talent index is not organisation-scoped.
+- Not yet done: M5 slices 2–3 — assessment runs, cohort reports and verification jobs.
 
 Provider tests use a controlled loopback HTTP server. No paid model or actual assistant account has been tested. Fixtures use in-memory databases and supplied verifier vectors; real profiles have not been opened or modified by the tests.
 
