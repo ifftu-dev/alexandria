@@ -11,6 +11,8 @@ pub mod diag;
 pub mod domain;
 pub mod evidence;
 pub mod goals;
+#[cfg(test)]
+mod json_limit_boundaries;
 pub mod network_profile;
 pub mod p2p;
 pub mod plugins;

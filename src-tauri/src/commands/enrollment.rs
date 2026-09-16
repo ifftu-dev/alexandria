@@ -456,6 +456,38 @@ mod tests {
         );
     }
 
+    /// Version 2 is the only accepted course document format, and signing and
+    /// verification already refuse version 1. A course row stored before that
+    /// change still carries version 1, and enrolment reads it straight from
+    /// the row -- so that is the path that has to refuse, and it had no test.
+    #[test]
+    fn a_stored_version_one_document_is_not_enrolled() {
+        let db = test_db();
+        setup_identity(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO courses \
+                 (id, title, author_address, content_cid, course_document_version) \
+                 VALUES ('c1', 'Course', 'author', ?1, 1)",
+                ["11".repeat(32)],
+            )
+            .unwrap();
+
+        let error = enroll_db(&db, "c1".into()).unwrap_err();
+        assert!(
+            error.contains("unsupported verified course document version: 1"),
+            "got: {error}"
+        );
+        let enrolled: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM enrollments", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            enrolled, 0,
+            "a refused document must not leave an enrollment"
+        );
+    }
+
     #[test]
     fn enrollment_insert_and_read() {
         let db = test_db();

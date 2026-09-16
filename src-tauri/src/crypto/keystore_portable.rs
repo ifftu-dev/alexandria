@@ -435,7 +435,13 @@ mod tests {
         ks.lock().expect("lock failed");
 
         let result = Keystore::open(&dir, "wrongpassword");
-        assert!(result.is_err());
+        // The variant is the point. An HMAC mismatch is what a wrong password
+        // produces, and reporting it as corruption or tampering would send a
+        // user who mistyped towards believing their vault was attacked.
+        assert!(
+            matches!(result, Err(KeystoreError::IncorrectPassword)),
+            "expected IncorrectPassword"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -443,7 +449,18 @@ mod tests {
     #[test]
     fn unsupported_legacy_salt_file_is_refused() {
         let dir = tempfile::TempDir::new().expect("temporary vault");
-        let _keystore = Keystore::create(dir.path(), "testpassword").expect("create failed");
+        // `create` alone does not write the vault file; storing and locking
+        // does. Without this, `open` fails on the missing vault before it ever
+        // reads the salt, and the refusal below is never reached. That is how
+        // this test stayed wrong: it was compiled only for mobile targets, so
+        // nothing ever ran it.
+        let mut keystore = Keystore::create(dir.path(), "testpassword").expect("create failed");
+        keystore.store_mnemonic("test").expect("store failed");
+        keystore.lock().expect("lock failed");
+        assert!(
+            dir.path().join(VAULT_FILENAME).exists(),
+            "setup must produce a vault, or the salt check is never exercised"
+        );
         let salt_path = dir.path().join(SALT_FILENAME);
         let current = fs::read(&salt_path).expect("read salt");
         fs::write(&salt_path, &current[..SALT_LEN]).expect("write pre-HMAC salt");

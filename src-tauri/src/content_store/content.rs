@@ -458,6 +458,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_read_with_the_wrong_key_fails_rather_than_returning_ciphertext() {
+        // Fail-closed was previously asserted only against the low-level
+        // `decrypt` primitive. What matters is the public read: a key mismatch
+        // must surface as an error, never as ciphertext handed to a caller that
+        // will treat it as the document it asked for.
+        let (node, _tmp) = make_node().await;
+        node.set_content_key([1u8; 32]).await;
+        let data = b"a private learner document";
+        let stored = add_bytes(&node, data).await.expect("add");
+
+        // Control: the right key still reads, so the failure below is the key
+        // mismatch and not a read path that is broken for everything.
+        assert_eq!(get_bytes(&node, &stored.hash).await.expect("read"), data);
+
+        node.set_content_key([2u8; 32]).await;
+        match get_bytes(&node, &stored.hash).await {
+            Err(ContentError::Store(message)) => {
+                assert!(message.contains("decryption failed"), "{message}")
+            }
+            Err(other) => panic!("expected a decryption failure, got {other:?}"),
+            Ok(bytes) => panic!(
+                "a wrong-key read returned {} bytes instead of failing",
+                bytes.len()
+            ),
+        }
+
+        node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
     async fn encrypted_add_hides_the_plaintext_cid() {
         // Contrast: the ordinary encrypted path stores ciphertext, so its hash
         // is NOT the plaintext CID — which is exactly why it cannot be
