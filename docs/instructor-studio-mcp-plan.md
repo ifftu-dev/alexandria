@@ -33,7 +33,7 @@ Updated: 2026-09-15
 | S5 — Media creation | S3, content storage | Capability-specific image/audio/video adapters, artifact provenance, accessible alternatives, provider failures, approval before attachment | Pending; text endpoints currently produce media briefs/scripts only |
 | S6 — Learner tutor | S1, S3, learner player | Signed public course policy, learner local/cloud model setup, lesson threads, assessment isolation, policy tests | Implemented for learner BYOM; native provider smoke and sponsored access remain open |
 | S7 — Sponsored access | S6, Cloud delegated auth | Server-held sponsor keys, per-course budgets/limits, learner entitlement, no key disclosure | Pending; unavailable until service exists |
-| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 slices 1–2 (roles, talent search, candidate summaries, candidate-to-role comparison, assessment runs) implemented on the Cloud branch; M5 slice 3 and M6–M8 pending |
+| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 complete (roles, talent search, candidate summaries, candidate-to-role comparison, assessment runs, cohort reports, verification jobs) on the Cloud branch; M6–M8 pending |
 | M9+ — Further MCP writes | M2–M8 and domain services | Other reversible writes, consented disclosures, organizational actions | Pending; see Desktop plan |
 
 ### Work that can proceed asynchronously
@@ -137,7 +137,13 @@ M5 slice 1 (2026-09-16, Cloud worktree):
 - `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed.
 - Cloud `docs/deployment.md` gained a tools-and-scopes section stating the three rules enforced in code; `README.md` updated to match.
 - `python3 scripts/mcp/e2e.py` against fixture Keycloak 26.7.3: passed, now exercising all five tools with a live token. It seeds a role, two listed people who both clear its bar and a candidate who is one of them, then checks that a name is shown for somebody who answered this organisation and withheld for somebody who has not, that the search is written to the organisation's log, that the candidate summary carries no contact address, that the comparison reads requirement by requirement (`skill_rust` met, `skill_sql` reachable) and reports `listed_in_index: false` for a candidate with no listing, and that a token holding only `candidates:read` is refused the comparison with a challenge naming `roles:read`. Seeded identities carry the run marker and are removed afterwards, because the talent index is not organisation-scoped.
-- Not yet done: M5 slice 3 — cohort reports and verification jobs.
+- Not yet done: M6–M8 — reproducible fixtures for both servers, the automated acceptance matrix and CI, and real assistant clients plus the staging deployment remote connectors need.
+
+M5 slice 3 (2026-09-16, Cloud worktree):
+
+- `cargo +1.91.0 test --no-fail-fast`: 33 suites, 339 passed, 0 failed, including `a_small_cohort_is_reported_as_withheld_rather_than_left_out`, which checks that every cell is present whether reported or withheld and that a withheld one carries a reason instead of a number.
+- `python3 scripts/mcp/e2e.py`: passed with nine tools. It seeds a module of six learners and another of three, plus a bulk job with one valid and one invalid entry, then checks that the report counts the six and names nobody, that the module of three is withheld rather than omitted, that each aggregate read is logged, and that the job reports per-entry validity with no `detail` reaching the assistant.
+- `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed. Cloud's deployment doc and README record both tools and the cohort rule.
 
 M5 slice 2 (2026-09-16, Cloud worktree):
 
@@ -312,6 +318,17 @@ Decided with the user: `get_run_summary` returns the integrity **flag** and no s
 Evidence a candidate released (`evidence_releases`: camera frames, keystroke, mouse, gaze) is not reachable through `/mcp` at all, and its existence is not reported either. That table is candidate-initiated by design: there is deliberately no endpoint an organisation can call to ask for it and no record of asking, because a request that can be refused leaks the refusal.
 
 Implemented: `list_assessment_runs` (filter by candidate, status or flagged only) and `get_run_summary`, under `runs:read`. Scores travel only when a caller asks: the console's screens do, `/mcp` does not, and `RunSummary` has no field for them, so the exclusion is structural rather than a mapping line that could be edited later. Reading a run writes the same `run.viewed` audit row the console writes, naming the person whose token was used. `src/runs.rs` is the shared service; the console's run list and detail now read through it, with paging made explicit — no limit for the screen, a page for assistants.
+
+### Cloud cohorts and verification jobs (M5 slice 3, 2026-09-16)
+
+Decided with the user:
+
+- **Cohort reports are aggregate only, with no cohort filter.** Counts and the Bloom spread for a module, nobody named — even where that reader's own role would show names in the console. Dropping the filter removes the differencing problem rather than mitigating it: suppression answers a single cell, and module-minus-cohort can imply a group under the threshold while both cells clear it.
+- **Verification jobs report state, progress and per-entry validity**, never the per-result `detail`. That blob is an open-shaped record of how a verification went, so whatever it grows to later would travel with it.
+
+Cells below five are returned marked withheld, with the reason, rather than omitted — a reader cannot infer a value from which rows are missing, and an institution learns its cohort is too small to report on. Each aggregate read writes a `cohort_access_log` row, because an aggregate that included somebody is still a use of their data.
+
+`src/cohort.rs` gained the shared row query, `summarise` and the aggregate `module_report`; `src/verification.rs` is new. The console's cohort screen and job screen read through them, keeping their named lists, per-learner logs, cohort filter and result detail, so screen and assistant count a module one way.
 
 Comparison evidence: oidc-provider 9.12.2 (MIT) passed every check, including a delegated-login authorization code flow with a resource-bound JWT and code-replay rejection. Ory Hydra v26.2.0 advertised no CIMD, no `iss` parameter and no RFC 8707 support.
 
