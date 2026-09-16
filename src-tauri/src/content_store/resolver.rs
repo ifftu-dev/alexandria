@@ -73,6 +73,39 @@ pub fn url_is_publicly_routable(url: &str) -> Result<(), String> {
 }
 
 fn reject_private_url(url: &str) -> Result<(), ResolveError> {
+    let parsed = parse_fetchable_url(url)?;
+    let Some(name) = reject_private_host_without_dns(&parsed)? else {
+        return Ok(());
+    };
+
+    // Resolve and check every address. `to_socket_addrs` needs a port;
+    // the scheme's default is fine because the port does not affect
+    // which addresses a name resolves to.
+    //
+    // This lookup blocks the calling thread and cannot be cancelled by a
+    // `tokio::time::timeout`. Time-budgeted callers use
+    // [`reject_unreviewable_https_source`] instead and rely on the client's
+    // connect-time resolver, which applies the same address check.
+    use std::net::ToSocketAddrs;
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let resolved = (name, port)
+        .to_socket_addrs()
+        .map_err(|e| ResolveError::BlockedUrl(format!("could not resolve '{name}': {e}")))?;
+
+    let mut any = false;
+    for addr in resolved {
+        any = true;
+        reject_if_not_global(addr.ip())?;
+    }
+    if !any {
+        return Err(ResolveError::BlockedUrl(format!(
+            "'{name}' resolved to no addresses"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_fetchable_url(url: &str) -> Result<url::Url, ResolveError> {
     let parsed = url::Url::parse(url)
         .map_err(|e| ResolveError::BlockedUrl(format!("unparseable URL: {e}")))?;
 
@@ -92,14 +125,19 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
             "URLs with embedded credentials are refused".into(),
         ));
     }
+    Ok(parsed)
+}
 
+/// Every host check that needs no DNS. Returns the domain name that still has
+/// to be resolved, or `None` for an acceptable IP literal.
+fn reject_private_host_without_dns(parsed: &url::Url) -> Result<Option<&str>, ResolveError> {
     let host = parsed
         .host()
         .ok_or_else(|| ResolveError::BlockedUrl("URL has no host".into()))?;
 
     match host {
-        url::Host::Ipv4(v4) => reject_if_not_global(std::net::IpAddr::V4(v4)),
-        url::Host::Ipv6(v6) => reject_if_not_global(std::net::IpAddr::V6(v6)),
+        url::Host::Ipv4(v4) => reject_if_not_global(std::net::IpAddr::V4(v4)).map(|()| None),
+        url::Host::Ipv6(v6) => reject_if_not_global(std::net::IpAddr::V6(v6)).map(|()| None),
         url::Host::Domain(name) => {
             // A name that spells out loopback is refused before the resolver
             // is consulted, so a hostile DNS answer is not needed to catch it.
@@ -109,28 +147,73 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
                     "URL points to loopback address".into(),
                 ));
             }
-
-            // Resolve and check every address. `to_socket_addrs` needs a port;
-            // the scheme's default is fine because the port does not affect
-            // which addresses a name resolves to.
-            use std::net::ToSocketAddrs;
-            let port = parsed.port_or_known_default().unwrap_or(80);
-            let resolved = (name, port).to_socket_addrs().map_err(|e| {
-                ResolveError::BlockedUrl(format!("could not resolve '{name}': {e}"))
-            })?;
-
-            let mut any = false;
-            for addr in resolved {
-                any = true;
-                reject_if_not_global(addr.ip())?;
-            }
-            if !any {
-                return Err(ResolveError::BlockedUrl(format!(
-                    "'{name}' resolved to no addresses"
-                )));
-            }
-            Ok(())
+            Ok(Some(name))
         }
+    }
+}
+
+/// Names that never identify a public origin: single-label hosts and
+/// special-use or private-use suffixes (RFC 6761, 6762, 7686, 8375, 9476, and
+/// names ICANN withholds because they collide with private networks).
+pub(crate) fn is_special_use_domain(name: &str) -> bool {
+    const SPECIAL_USE_SUFFIXES: &[&str] = &[
+        "localhost",
+        "local",
+        "internal",
+        "intranet",
+        "home.arpa",
+        "arpa",
+        "onion",
+        "invalid",
+        "test",
+        "example",
+        "alt",
+        "lan",
+        "home",
+        "corp",
+    ];
+    let name = name.to_ascii_lowercase();
+    !name.contains('.')
+        || SPECIAL_USE_SUFFIXES.iter().any(|suffix| {
+            name == *suffix
+                || name
+                    .strip_suffix(suffix)
+                    .is_some_and(|prefix| prefix.ends_with('.'))
+        })
+}
+
+/// Decide, without DNS, whether `parsed` may be an explicitly reviewed
+/// content source such as a governance genesis mirror.
+///
+/// Reviewed sources must be HTTPS on the default port, carry no userinfo, and
+/// name a public DNS host: IP literals, trailing-dot hosts, and special-use
+/// names are refused so every source has one reviewable spelling. The check
+/// is synchronous but never blocks; the HTTP client's connect-time resolver
+/// rejects any non-public address the name resolves to.
+pub(crate) fn reject_unreviewable_https_source(parsed: &url::Url) -> Result<(), ResolveError> {
+    if parsed.scheme() != "https" {
+        return Err(ResolveError::BlockedUrl(
+            "reviewed sources must use HTTPS".into(),
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(ResolveError::BlockedUrl(
+            "URLs with embedded credentials are refused".into(),
+        ));
+    }
+    if parsed.port().is_some() {
+        return Err(ResolveError::BlockedUrl(
+            "reviewed sources must use the default HTTPS port".into(),
+        ));
+    }
+    match reject_private_host_without_dns(parsed)? {
+        None => Err(ResolveError::BlockedUrl(
+            "reviewed sources must name a DNS host, not an IP address".into(),
+        )),
+        Some(name) if name.ends_with('.') || is_special_use_domain(name) => Err(
+            ResolveError::BlockedUrl(format!("'{name}' is not a public DNS name")),
+        ),
+        Some(_) => Ok(()),
     }
 }
 
@@ -139,7 +222,7 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
 /// An allowlist of "is this public" rather than a blocklist of known-bad
 /// ranges: the blocklist shape is what let `2130706433` and `::ffff:127.0.0.1`
 /// through, because both are only bad once you have normalised them.
-fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
+pub(crate) fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
     // Normalise IPv4-*mapped* IPv6 down to its v4 form, so
     // `::ffff:127.0.0.1` is judged as 127.0.0.1.
     //
@@ -148,10 +231,34 @@ fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
     // reading, so loopback would normalise to the perfectly routable 0.0.0.1
     // and be allowed. The v6 predicates below judge `::1` correctly, so the
     // compatible form is left alone.
+    //
+    // Transition prefixes that a gateway translates to an embedded IPv4
+    // address are judged by that address too: on an IPv6-only network with
+    // DNS64/NAT64, `64:ff9b::c0a8:101` reaches 192.168.1.1.
     let ip = match ip {
         std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => std::net::IpAddr::V4(v4),
-            None => std::net::IpAddr::V6(v6),
+            None => {
+                let s = v6.segments();
+                let low32 = std::net::Ipv4Addr::new(
+                    (s[6] >> 8) as u8,
+                    s[6] as u8,
+                    (s[7] >> 8) as u8,
+                    s[7] as u8,
+                );
+                match s {
+                    // NAT64 well-known prefix (RFC 6052), 64:ff9b::/96.
+                    [0x64, 0xff9b, 0, 0, 0, 0, _, _] => std::net::IpAddr::V4(low32),
+                    // 6to4 (RFC 3056), 2002:AABB:CCDD::/48.
+                    [0x2002, hi, lo, ..] => std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+                        (hi >> 8) as u8,
+                        hi as u8,
+                        (lo >> 8) as u8,
+                        lo as u8,
+                    )),
+                    _ => std::net::IpAddr::V6(v6),
+                }
+            }
         },
         v4 => v4,
     };
@@ -162,9 +269,12 @@ fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
                 || v4.is_private()
                 || v4.is_link_local()
                 || v4.is_broadcast()
-                || v4.is_unspecified()
+                // "This network", 0.0.0.0/8 (not only 0.0.0.0).
+                || v4.octets()[0] == 0
                 || v4.is_multicast()
                 || v4.is_documentation()
+                // IETF protocol assignments (RFC 6890), 192.0.0.0/24.
+                || (v4.octets()[..3] == [192, 0, 0])
                 // Shared address space (RFC 6598, carrier-grade NAT).
                 || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
                 // Benchmarking (RFC 2544).
@@ -180,6 +290,20 @@ fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
                 || (v6.segments()[0] & 0xfe00) == 0xfc00
                 // Link-local unicast (fe80::/10).
                 || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // Deprecated site-local (fec0::/10).
+                || (v6.segments()[0] & 0xffc0) == 0xfec0
+                // Deprecated IPv4-compatible (::/96) and IPv4-translated
+                // (::ffff:0:0/96) forms; `::1` and `::` are caught above.
+                || matches!(v6.segments(), [0, 0, 0, 0, 0, 0, _, _] | [0, 0, 0, 0, 0xffff, 0, _, _])
+                // Local-use NAT64 (RFC 8215), 64:ff9b:1::/48.
+                || matches!(v6.segments(), [0x64, 0xff9b, 1, ..])
+                // Teredo (2001::/32) tunnels to an embedded, obfuscated IPv4
+                // client address.
+                || matches!(v6.segments(), [0x2001, 0, ..])
+                // Documentation (2001:db8::/32).
+                || matches!(v6.segments(), [0x2001, 0x0db8, ..])
+                // Discard-only (100::/64).
+                || matches!(v6.segments(), [0x0100, 0, 0, 0, ..])
         }
     };
 
@@ -273,6 +397,104 @@ impl ContentResolver {
             ContentId::Blake3Hex(hash) => self.resolve_blake3(hash).await,
             ContentId::Url(url) => self.resolve_url(url).await,
         }
+    }
+
+    /// Resolve bytes for an explicit preview without retaining newly fetched
+    /// content. Local content may be reused, but peer fetches receive no named
+    /// retention tag and URL responses are neither cached nor mapped. Every
+    /// allocation/network attempt is bounded by `max_bytes`.
+    pub async fn resolve_preview_bounded(
+        &self,
+        identifier: &str,
+        max_bytes: usize,
+    ) -> Result<ResolveResult, ResolveError> {
+        let content_id = cid::parse_content_id(identifier)
+            .map_err(|error| ResolveError::InvalidId(error.to_string()))?;
+        match content_id {
+            ContentId::Blake3Hex(hash) => {
+                self.resolve_blake3_preview_bounded(&hash, max_bytes).await
+            }
+            ContentId::Url(url) => self.fetch_url_preview_bounded(&url, max_bytes).await,
+        }
+    }
+
+    async fn resolve_blake3_preview_bounded(
+        &self,
+        hash: &str,
+        max_bytes: usize,
+    ) -> Result<ResolveResult, ResolveError> {
+        match content::get_bytes_bounded(&self.node, hash, max_bytes).await {
+            Ok(bytes) => {
+                let size = bytes.len() as u64;
+                return Ok(ResolveResult {
+                    bytes,
+                    blake3_hash: hash.to_string(),
+                    external_id: self.lookup_external_for_blake3(hash).await,
+                    source: ResolveSource::Local,
+                    size,
+                });
+            }
+            Err(content::ContentError::NotFound(_)) => {}
+            Err(error) => return Err(ResolveError::Store(error.to_string())),
+        }
+
+        if let Some(discovery) = &self.discovery {
+            if let Ok(parsed) = content::parse_hash(hash) {
+                let providers = discovery.find_providers(parsed).await;
+                if !providers.is_empty()
+                    && fetch::fetch_from_any_unretained_bounded(
+                        &self.node, &providers, parsed, max_bytes,
+                    )
+                    .await
+                    .is_ok()
+                {
+                    let bytes = content::get_bytes_bounded(&self.node, hash, max_bytes)
+                        .await
+                        .map_err(|error| ResolveError::Store(error.to_string()))?;
+                    let size = bytes.len() as u64;
+                    return Ok(ResolveResult {
+                        bytes,
+                        blake3_hash: hash.to_string(),
+                        external_id: self.lookup_external_for_blake3(hash).await,
+                        source: ResolveSource::Local,
+                        size,
+                    });
+                }
+            }
+        }
+
+        // Deliberately no mapped-URL fallback: a preview fetches only the
+        // identifiers its caller reviewed, and a mapping learned from other
+        // content is neither reviewed nor necessarily HTTPS.
+        Err(ResolveError::NotFound(format!("blake3:{hash}")))
+    }
+
+    /// Fetch one reviewed HTTPS source inside the caller's time budget.
+    ///
+    /// No synchronous DNS pre-check runs here: a blocking lookup cannot be
+    /// pre-empted by `tokio::time::timeout`. Hostnames are resolved by the
+    /// HTTP client's async resolver, which refuses non-public answers at
+    /// connect time, and redirects are not followed.
+    async fn fetch_url_preview_bounded(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> Result<ResolveResult, ResolveError> {
+        let parsed = parse_fetchable_url(url)?;
+        reject_unreviewable_https_source(&parsed)?;
+        let bytes = self
+            .http
+            .fetch_exact_url_with_limit(url, max_bytes)
+            .await
+            .map_err(|error| ResolveError::Fetch(error.to_string()))?;
+        let size = bytes.len() as u64;
+        Ok(ResolveResult {
+            blake3_hash: blake3::hash(&bytes).to_hex().to_string(),
+            external_id: Some(url.to_string()),
+            source: ResolveSource::Url,
+            bytes,
+            size,
+        })
     }
 
     /// Resolve by BLAKE3 hash: local store, then peers, then mapped URL.
@@ -481,6 +703,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preview_resolution_enforces_exact_local_byte_limit() {
+        let (resolver, _tmp) = make_resolver().await;
+        let data = b"bounded governance preview";
+        let add = content::add_bytes_unencrypted(&resolver.node, data)
+            .await
+            .expect("add");
+
+        assert!(matches!(
+            resolver
+                .resolve_preview_bounded(&add.hash, data.len() - 1)
+                .await,
+            Err(ResolveError::Store(message)) if message.contains("exceeding")
+        ));
+        assert_eq!(
+            resolver
+                .resolve_preview_bounded(&add.hash, data.len())
+                .await
+                .expect("resolve at exact limit")
+                .bytes,
+            data
+        );
+
+        resolver.node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
     async fn resolve_blake3_fetches_from_peer_before_url() {
         use crate::content_store::discovery::ContentDiscovery;
 
@@ -635,6 +883,43 @@ mod tests {
     }
 
     #[test]
+    fn transition_and_reserved_addresses_are_refused() {
+        for url in [
+            // The rest of 0.0.0.0/8 and IETF protocol assignments.
+            "http://0.1.2.3/",
+            "http://192.0.0.8/",
+            // NAT64 to a private and a metadata address; a DNS64 network
+            // translates these back to IPv4 on the way out.
+            "http://[64:ff9b::c0a8:101]/",
+            "http://[64:ff9b::a9fe:a9fe]/",
+            "http://[64:ff9b:1::1]/",
+            // 6to4 wrapping 192.168.1.1 and 127.0.0.1.
+            "http://[2002:c0a8:101::1]/",
+            "http://[2002:7f00:1::1]/",
+            // Teredo, IPv4-compatible, IPv4-translated, site-local,
+            // documentation and discard-only.
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",
+            "http://[::c0a8:101]/",
+            "http://[::ffff:0:c0a8:101]/",
+            "http://[fec0::1]/",
+            "http://[2001:db8::1]/",
+            "http://[100::1]/",
+        ] {
+            assert!(
+                reject_private_url(url).is_err(),
+                "{url} should have been refused"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_addresses_wrapping_public_ipv4_are_allowed() {
+        // NAT64 and 6to4 are judged by the IPv4 address they carry.
+        assert!(reject_private_url("http://[64:ff9b::808:808]/").is_ok());
+        assert!(reject_private_url("http://[2002:808:808::1]/").is_ok());
+    }
+
+    #[test]
     fn non_http_schemes_are_refused() {
         assert!(reject_private_url("file:///etc/passwd").is_err());
         assert!(reject_private_url("gopher://example.com/").is_err());
@@ -646,5 +931,81 @@ mod tests {
         assert!(reject_private_url("https://8.8.8.8/x").is_ok());
         assert!(reject_private_url("http://93.184.216.34/").is_ok());
         assert!(reject_private_url("https://[2001:4860:4860::8888]/").is_ok());
+    }
+
+    #[test]
+    fn reviewed_sources_are_public_https_dns_names() {
+        for url in [
+            "http://mirror.example.org/g",
+            "https://user@mirror.example.org/g",
+            "https://mirror.example.org:8443/g",
+            "https://8.8.8.8/g",
+            "https://[2001:4860:4860::8888]/g",
+            "https://127.0.0.1/g",
+            "https://2130706433/g",
+            "https://localhost/g",
+            "https://intranet/g",
+            "https://mirror.example.org./g",
+            "https://printer.local/g",
+            "https://metadata.google.internal/g",
+            "https://router.home.arpa/g",
+            "https://mirror.example/g",
+            "https://mirror.test/g",
+            "https://example/g",
+        ] {
+            let parsed = url::Url::parse(url).unwrap();
+            assert!(
+                reject_unreviewable_https_source(&parsed).is_err(),
+                "{url} should have been refused"
+            );
+        }
+        for url in [
+            "https://mirror.example.org/g",
+            "https://MIRROR.example.org:443/g",
+            "https://example.com/genesis.json?v=1",
+            "https://notlocal.dev/g",
+        ] {
+            let parsed = url::Url::parse(url).unwrap();
+            assert!(
+                reject_unreviewable_https_source(&parsed).is_ok(),
+                "{url} should have been allowed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_never_falls_back_to_an_unreviewed_mapped_url() {
+        let (resolver, _tmp) = make_resolver().await;
+        let missing = blake3::hash(b"never stored locally").to_hex().to_string();
+        resolver
+            .save_mapping("http://mapped.example.org/plain-http", &missing, 20)
+            .await;
+
+        assert!(matches!(
+            resolver.resolve_preview_bounded(&missing, 1024).await,
+            Err(ResolveError::NotFound(_))
+        ));
+
+        resolver.node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn preview_refuses_unreviewable_urls_before_any_lookup() {
+        let (resolver, _tmp) = make_resolver().await;
+        for url in [
+            "http://mirror.example.org/genesis.json",
+            "https://10.0.0.1/genesis.json",
+            "https://metadata.google.internal/genesis.json",
+        ] {
+            assert!(
+                matches!(
+                    resolver.resolve_preview_bounded(url, 1024).await,
+                    Err(ResolveError::BlockedUrl(_))
+                ),
+                "{url} should have been refused"
+            );
+        }
+
+        resolver.node.shutdown().await.expect("shutdown");
     }
 }

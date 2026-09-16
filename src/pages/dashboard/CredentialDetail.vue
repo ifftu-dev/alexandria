@@ -4,7 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { AppBadge, AppButton, AppAlert } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
-import type { VerifiableCredential, VerificationResult } from '@/types'
+import type {
+  CredentialTrust,
+  EndorsementMismatch,
+  EndorsementOutcome,
+  TrustInvalidReason,
+  VerifiableCredential,
+  VerificationPendingReason,
+  VerificationResult,
+} from '@/types'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -15,6 +23,7 @@ const credentialId = computed(() => route.params.id as string)
 
 const credential = ref<VerifiableCredential | null>(null)
 const verification = ref<VerificationResult | null>(null)
+const trust = ref<CredentialTrust | null>(null)
 const loading = ref(true)
 const verifying = ref(false)
 const revoking = ref(false)
@@ -29,6 +38,7 @@ onMounted(async () => {
   if (c) {
     // Auto-verify on load — gives the user immediate signal.
     verification.value = (await api.verify(c)) ?? null
+    await loadTrust()
   } else {
     error.value = api.error.value ?? t('credentials.detail.notFound')
   }
@@ -39,7 +49,12 @@ async function reverify() {
   if (!credential.value) return
   verifying.value = true
   verification.value = (await api.verify(credential.value)) ?? null
+  await loadTrust()
   verifying.value = false
+}
+
+async function loadTrust() {
+  trust.value = (await api.trust(credentialId.value)) ?? null
 }
 
 async function revoke() {
@@ -50,7 +65,103 @@ async function revoke() {
   showRevoke.value = false
   // Re-verify to surface the revoked flag.
   verification.value = (await api.verify(credential.value)) ?? null
+  await loadTrust()
 }
+
+function invalidReasonLabel(reason: TrustInvalidReason): string {
+  switch (reason) {
+    case 'inconsistent_verification_result': return t('credentials.detail.trustReason.inconsistent')
+    case 'issuer_unresolved': return t('credentials.detail.trustReason.issuerUnresolved')
+    case 'invalid_signature': return t('credentials.detail.trustReason.invalidSignature')
+    case 'subject_not_bound': return t('credentials.detail.trustReason.subjectNotBound')
+    case 'invalid_status_reference': return t('credentials.detail.trustReason.invalidStatusReference')
+    case 'revoked': return t('credentials.detail.trustReason.revoked')
+    case 'expired': return t('credentials.detail.trustReason.expired')
+    case 'suspended': return t('credentials.detail.trustReason.suspended')
+    case 'superseded': return t('credentials.detail.trustReason.superseded')
+    case 'integrity_anchor_missing': return t('credentials.detail.trustReason.anchorMissing')
+    case 'type_not_allowed': return t('credentials.detail.trustReason.typeNotAllowed')
+  }
+}
+
+function pendingReasonLabel(reason: VerificationPendingReason): string {
+  switch (reason) {
+    case 'issuer_key_missing': return t('credentials.detail.trustPending.issuerKeyMissing')
+    case 'issuer_key_unavailable': return t('credentials.detail.trustPending.issuerKeyUnavailable')
+    case 'status_list_missing': return t('credentials.detail.trustPending.statusListMissing')
+    case 'status_list_unavailable': return t('credentials.detail.trustPending.statusListUnavailable')
+    case 'suspension_state_unavailable': return t('credentials.detail.trustPending.suspensionUnavailable')
+    case 'supersession_state_unavailable': return t('credentials.detail.trustPending.supersessionUnavailable')
+  }
+}
+
+function mismatchLabel(reason: EndorsementMismatch): string {
+  switch (reason) {
+    case 'wrong_network': return t('credentials.detail.trustMismatch.wrongNetwork')
+    case 'subject_mismatch': return t('credentials.detail.trustMismatch.subjectMismatch')
+    case 'not_skill_claim': return t('credentials.detail.trustMismatch.notSkillClaim')
+    case 'course_document_not_claimed': return t('credentials.detail.trustMismatch.documentNotClaimed')
+    case 'completion_root_not_claimed': return t('credentials.detail.trustMismatch.rootNotClaimed')
+  }
+}
+
+function endorsementLabel(outcome: EndorsementOutcome): string {
+  switch (outcome.outcome) {
+    case 'not_supplied': return t('credentials.detail.trustDetail.notSupplied')
+    case 'not_applicable':
+      return t('credentials.detail.trustDetail.notApplicable', { reason: mismatchLabel(outcome.reason) })
+    case 'invalid_evidence': return t('credentials.detail.trustDetail.invalidEvidence')
+    case 'threshold_unmet':
+      return t('credentials.detail.trustDetail.thresholdUnmet', {
+        valid: outcome.valid_attestors,
+        required: outcome.required_attestors,
+      })
+  }
+}
+
+const trustLabel = computed((): string => {
+  switch (trust.value?.state) {
+    case 'invalid': return t('credentials.detail.trustState.invalid')
+    case 'pending': return t('credentials.detail.trustState.pending')
+    case 'verified_self_claim': return t('credentials.detail.trustState.selfClaim')
+    case 'verified_issuer_signed': return t('credentials.detail.trustState.issuerSigned')
+    case 'verified_course_endorsement': return t('credentials.detail.trustState.courseEndorsement')
+    default: return t('credentials.detail.notVerified')
+  }
+})
+
+const trustVariant = computed(() => {
+  switch (trust.value?.state) {
+    case 'invalid': return 'error'
+    case 'pending': return 'warning'
+    case 'verified_course_endorsement': return 'success'
+    case 'verified_issuer_signed': return 'primary'
+    default: return 'secondary'
+  }
+})
+
+const trustDetail = computed((): string => {
+  const value = trust.value
+  if (!value) return ''
+  switch (value.state) {
+    case 'invalid':
+      return t('credentials.detail.trustDetail.invalid', {
+        reasons: value.reasons.map(invalidReasonLabel).join(', '),
+      })
+    case 'pending':
+      return t('credentials.detail.trustDetail.pending', {
+        reasons: value.reasons.map(pendingReasonLabel).join(', '),
+      })
+    case 'verified_self_claim': return endorsementLabel(value.endorsement)
+    case 'verified_issuer_signed':
+      return t('credentials.detail.trustDetail.issuerSigned', { issuer: value.issuer })
+    case 'verified_course_endorsement':
+      return t('credentials.detail.trustDetail.courseEndorsement', {
+        count: value.attestors.length,
+        version: value.course_document_version,
+      })
+  }
+})
 
 function classOf(c: VerifiableCredential): string {
   return c.type.find((t) => t !== 'VerifiableCredential') ?? 'Credential'
@@ -60,9 +171,17 @@ function back() {
   router.push({ name: 'credentials' })
 }
 
+// A missing or unreadable status list means revocation is unknown, not "no".
+const statusEvidencePending = computed(() =>
+  (verification.value?.pendingReasons ?? []).some(
+    (reason) => reason === 'status_list_missing' || reason === 'status_list_unavailable',
+  ),
+)
+
 const decisionVariant = computed(() => {
   if (!verification.value) return 'secondary'
-  return verification.value.acceptance_decision === 'accept' ? 'success' : 'error'
+  if (verification.value.acceptanceDecision === 'accept') return 'success'
+  return verification.value.acceptanceDecision === 'pending' ? 'warning' : 'error'
 })
 </script>
 
@@ -88,7 +207,7 @@ const decisionVariant = computed(() => {
           <div class="mt-2 flex items-center gap-2">
             <AppBadge variant="primary">{{ classOf(credential) }}</AppBadge>
             <AppBadge :variant="decisionVariant">
-              {{ verification?.acceptance_decision ?? $t('credentials.detail.notVerified') }}
+              {{ verification?.acceptanceDecision ?? $t('credentials.detail.notVerified') }}
             </AppBadge>
           </div>
         </div>
@@ -100,6 +219,16 @@ const decisionVariant = computed(() => {
         </div>
       </div>
 
+      <!-- Provenance: typed trust classification, never a privilege grant -->
+      <section v-if="trust" class="mb-6 rounded-xl bg-card shadow-sm p-6">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">{{ $t('credentials.detail.trustTitle') }}</h2>
+          <AppBadge :variant="trustVariant">{{ trustLabel }}</AppBadge>
+        </div>
+        <p class="break-all text-sm text-foreground">{{ trustDetail }}</p>
+        <p class="mt-3 text-xs text-muted-foreground">{{ $t('credentials.detail.trustNote') }}</p>
+      </section>
+
       <!-- Verification result panel -->
       <section v-if="verification" class="mb-6 rounded-xl bg-card shadow-sm p-6">
         <h2 class="text-base font-semibold mb-3">{{ $t('credentials.detail.proofTitle') }}</h2>
@@ -107,31 +236,34 @@ const decisionVariant = computed(() => {
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.signature') }}</dt>
             <dd>
-              <AppBadge :variant="verification.valid_signature ? 'success' : 'error'">
-                {{ verification.valid_signature ? $t('credentials.value.signed') : $t('credentials.value.notSigned') }}
+              <AppBadge :variant="verification.validSignature ? 'success' : 'error'">
+                {{ verification.validSignature ? $t('credentials.value.signed') : $t('credentials.value.notSigned') }}
               </AppBadge>
             </dd>
           </div>
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.issuerResolved') }}</dt>
             <dd>
-              <AppBadge :variant="verification.issuer_resolved ? 'success' : 'error'">
-                {{ verification.issuer_resolved ? $t('credentials.value.yes') : $t('credentials.value.no') }}
+              <AppBadge :variant="verification.issuerResolved ? 'success' : 'error'">
+                {{ verification.issuerResolved ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.subjectBound') }}</dt>
             <dd>
-              <AppBadge :variant="verification.subject_bound ? 'success' : 'error'">
-                {{ verification.subject_bound ? $t('credentials.value.yes') : $t('credentials.value.no') }}
+              <AppBadge :variant="verification.subjectBound ? 'success' : 'error'">
+                {{ verification.subjectBound ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.revoked') }}</dt>
             <dd>
-              <AppBadge :variant="verification.revoked ? 'error' : 'success'">
+              <AppBadge v-if="statusEvidencePending && !verification.revoked" variant="warning">
+                {{ $t('credentials.value.pending') }}
+              </AppBadge>
+              <AppBadge v-else :variant="verification.revoked ? 'error' : 'success'">
                 {{ verification.revoked ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
@@ -147,14 +279,17 @@ const decisionVariant = computed(() => {
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.tamperProof') }}</dt>
             <dd>
-              <AppBadge :variant="verification.integrity_anchored ? 'success' : 'secondary'">
-                {{ verification.integrity_anchored ? $t('credentials.value.yes') : $t('credentials.value.pending') }}
+              <AppBadge :variant="verification.integrityAnchored ? 'success' : 'secondary'">
+                {{ verification.integrityAnchored ? $t('credentials.value.yes') : $t('credentials.value.pending') }}
               </AppBadge>
             </dd>
           </div>
         </dl>
         <p class="mt-3 text-xs text-muted-foreground">
-          {{ $t('credentials.detail.verifiedAt', { time: verification.verification_time }) }}
+          {{ $t('credentials.detail.verifiedAt', { time: verification.verificationTime }) }}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">
+          {{ $t('credentials.detail.statusEvidenceNote') }}
         </p>
       </section>
 

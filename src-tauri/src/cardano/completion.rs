@@ -273,7 +273,7 @@ fn format_posix_ms(ms: i64) -> String {
 
 // ----- DB helpers -----
 
-fn observation_exists(
+pub(crate) fn observation_exists(
     conn: &Connection,
     policy_id: &str,
     asset_name_hex: &str,
@@ -402,6 +402,36 @@ pub fn find_by_credential(
             observed_at, issued_at \
          FROM completion_observations WHERE credential_id = ?1",
         params![credential_id],
+        |row| {
+            Ok(CompletionObservation {
+                policy_id: row.get(0)?,
+                asset_name_hex: row.get(1)?,
+                tx_hash: row.get(2)?,
+                subject_pubkey: row.get(3)?,
+                course_id: row.get(4)?,
+                completion_root: row.get(5)?,
+                completion_time: row.get(6)?,
+                credential_id: row.get(7)?,
+                observed_at: row.get(8)?,
+                issued_at: row.get(9)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| CompletionError::Db(e.to_string()))
+}
+
+pub fn find_by_asset(
+    conn: &Connection,
+    policy_id: &str,
+    asset_name_hex: &str,
+) -> Result<Option<CompletionObservation>, CompletionError> {
+    conn.query_row(
+        "SELECT policy_id, asset_name_hex, tx_hash, subject_pubkey,
+            course_id, completion_root, completion_time, credential_id,
+            observed_at, issued_at
+         FROM completion_observations WHERE policy_id = ?1 AND asset_name_hex = ?2",
+        params![policy_id, asset_name_hex],
         |row| {
             Ok(CompletionObservation {
                 policy_id: row.get(0)?,

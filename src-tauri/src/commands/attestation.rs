@@ -1,521 +1,742 @@
-//! Completion-attestation IPC (post-VC-first rebuild).
+//! Exact course-completion endorsement acquisition and persistence.
 //!
-//! Provides CRUD for `completion_attestation_requirements` (DAO-gated)
-//! and `completion_attestations` (assessor signatures). See
-//! `domain::attestation` for the shape of the records involved.
-//!
-//! The auto-issuance pipeline (`commands::auto_issuance`) consults
-//! [`are_attestations_satisfied`] before emitting a VC for a given
-//! observation; unmet requirements keep the observation pending so
-//! the UI can nudge assessors.
+//! Policies come only from the exact author-signed course document selected by
+//! the enrollment. Stored endorsements pass the shared I/O-free verifier before
+//! insertion; database rows never create or widen authority.
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::State;
 
-use crate::crypto::did::{derive_did_key, parse_did_key};
-use crate::crypto::wallet;
-use crate::domain::attestation::{
-    CompletionAttestation, CompletionAttestationRequirement, CompletionAttestationStatus,
-    SetCompletionRequirementParams, SubmitCompletionAttestationParams,
+use alexandria_verify::course::{
+    evaluate_completion_endorsements, sign_completion_endorsement, verify_completion_endorsement,
 };
+use alexandria_verify::trust::{classify_credential, CourseEndorsementEvidence, CredentialTrust};
+
+use crate::commands::credentials::get_credential_impl;
+use crate::content_store::course as content_course;
+use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
+use crate::domain::attestation::{
+    CourseCompletionBinding, CourseCompletionEndorsement, CourseCompletionEndorsementStatus,
+    CourseCompletionPolicy,
+};
+use crate::domain::vc::{verify_credential_db, VerificationPolicy};
+use crate::network_profile::embedded_preprod;
 use crate::AppState;
 
-// ---------- pure helpers ----------
-
-/// Upsert a requirement. Returns the resulting row.
-pub fn set_requirement_impl(
-    conn: &Connection,
-    params: &SetCompletionRequirementParams,
-) -> Result<CompletionAttestationRequirement, String> {
-    if params.required_attestors <= 0 {
-        return Err("required_attestors must be positive".into());
-    }
-
-    conn.execute(
-        "INSERT INTO completion_attestation_requirements \
-         (course_id, required_attestors, dao_id, set_by_proposal) \
-         VALUES (?1, ?2, ?3, ?4) \
-         ON CONFLICT(course_id) DO UPDATE SET \
-             required_attestors = excluded.required_attestors, \
-             dao_id              = excluded.dao_id, \
-             set_by_proposal     = excluded.set_by_proposal, \
-             updated_at          = datetime('now')",
-        params![
-            params.course_id,
-            params.required_attestors,
-            params.dao_id,
-            params.set_by_proposal,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    get_requirement(conn, &params.course_id)?
-        .ok_or_else(|| "requirement not found after upsert".into())
+struct ClaimContext {
+    policy: CourseCompletionPolicy,
+    binding: CourseCompletionBinding,
 }
 
-/// Remove a requirement. Returns the number of rows removed (0 or 1).
-pub fn remove_requirement_impl(conn: &Connection, course_id: &str) -> Result<usize, String> {
-    conn.execute(
-        "DELETE FROM completion_attestation_requirements WHERE course_id = ?1",
-        params![course_id],
-    )
-    .map_err(|e| e.to_string())
-}
+type ClaimContextRow = (
+    Option<String>,
+    Option<String>,
+    String,
+    Option<i64>,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+);
 
-/// Fetch a single requirement, if any.
-pub fn get_requirement(
-    conn: &Connection,
-    course_id: &str,
-) -> Result<Option<CompletionAttestationRequirement>, String> {
-    conn.query_row(
-        "SELECT course_id, required_attestors, dao_id, set_by_proposal, \
-                created_at, updated_at \
-         FROM completion_attestation_requirements WHERE course_id = ?1",
-        params![course_id],
-        row_to_requirement,
-    )
-    .optional()
-    .map_err(|e| e.to_string())
-}
-
-/// List all requirements, newest first.
-pub fn list_requirements(
-    conn: &Connection,
-) -> Result<Vec<CompletionAttestationRequirement>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT course_id, required_attestors, dao_id, set_by_proposal, \
-                    created_at, updated_at \
-             FROM completion_attestation_requirements \
-             ORDER BY updated_at DESC",
+fn load_claim_context(conn: &Connection, claim_id: &str) -> Result<ClaimContext, String> {
+    let row: Option<ClaimContextRow> = conn
+        .query_row(
+            "SELECT e.completion_policy_json, cc.completion_binding_json, \
+                    cc.course_id, cc.course_document_version, cc.course_document_cid, \
+                    cc.subject_did, cc.completion_root, cc.enrollment_id \
+             FROM completion_claims cc \
+             JOIN enrollments e ON e.id = cc.enrollment_id \
+             WHERE cc.id = ?1",
+            [claim_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
         )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], row_to_requirement)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
-/// Persist an attestor signature over the 32-byte witness tx hash.
-/// Idempotent: a duplicate (witness_tx_hash, attestor_did) is a no-op.
-pub fn submit_attestation_impl(
-    conn: &Connection,
-    attestor_key: &SigningKey,
-    params: &SubmitCompletionAttestationParams,
-) -> Result<CompletionAttestation, String> {
-    let tx_bytes = hex::decode(&params.witness_tx_hash)
-        .map_err(|e| format!("witness_tx_hash must be hex: {e}"))?;
-    if tx_bytes.len() != 32 {
-        return Err(format!(
-            "witness_tx_hash must decode to 32 bytes, got {}",
-            tx_bytes.len()
-        ));
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((policy_json, binding_json, course_id, version, cid, subject, root, enrollment_id)) =
+        row
+    else {
+        return Err("completion has no instructor endorsement request".into());
+    };
+    let policy_json = policy_json.ok_or("completion enrollment has no exact endorsement policy")?;
+    let binding_json = binding_json.ok_or("completion has no exact endorsement binding")?;
+    let version = version.ok_or("completion has no exact course document version")?;
+    let cid = cid.ok_or("completion has no exact course document CID")?;
+    enrollment_id.ok_or("completion has no exact enrollment")?;
+    let policy: CourseCompletionPolicy = serde_json::from_str(&policy_json)
+        .map_err(|error| format!("invalid stored completion policy: {error}"))?;
+    policy
+        .validate()
+        .map_err(|error| format!("invalid stored completion policy: {error}"))?;
+    if serde_json_canonicalizer::to_string(&policy).map_err(|error| error.to_string())?
+        != policy_json
+    {
+        return Err("stored completion policy is not canonical".into());
     }
+    let binding: CourseCompletionBinding = serde_json::from_str(&binding_json)
+        .map_err(|error| format!("invalid stored completion binding: {error}"))?;
+    binding
+        .validate(&policy)
+        .map_err(|error| format!("invalid stored completion binding: {error}"))?;
+    if serde_json_canonicalizer::to_string(&binding).map_err(|error| error.to_string())?
+        != binding_json
+        || binding.course_id != course_id
+        || i64::from(binding.course_document_version) != version
+        || binding.course_document_cid != cid
+        || binding.subject_did.as_str() != subject
+        || binding.completion_root != root
+    {
+        return Err("stored completion binding does not match its claim".into());
+    }
+    Ok(ClaimContext { policy, binding })
+}
 
-    let attestor_did = derive_did_key(attestor_key);
-    let attestor_pubkey = hex::encode(attestor_key.verifying_key().as_bytes());
-    let signature_bytes = attestor_key.sign(&tx_bytes);
-    let signature_hex = hex::encode(signature_bytes.to_bytes());
+/// Import a completion endorsement from the exact JSON bytes an instructor
+/// exported. The bytes are parsed under the verifier's endorsement limits, so
+/// duplicate keys, unsafe numbers, hostile nesting and oversized documents are
+/// refused before verification or storage.
+pub fn import_completion_endorsement_json_impl(
+    conn: &Connection,
+    claim_id: &str,
+    endorsement_json: &[u8],
+) -> Result<CourseCompletionEndorsement, String> {
+    let endorsement = alexandria_verify::course::decode_completion_endorsement(endorsement_json)
+        .map_err(|error| format!("invalid completion endorsement JSON: {error}"))?;
+    import_completion_endorsement_impl(conn, claim_id, &endorsement)
+}
 
-    let id = format!(
-        "ca_{}",
-        blake3::hash(format!("{}:{}", params.witness_tx_hash, attestor_did.as_str()).as_bytes())
-            .to_hex()
-    );
-
+pub fn import_completion_endorsement_impl(
+    conn: &Connection,
+    claim_id: &str,
+    endorsement: &CourseCompletionEndorsement,
+) -> Result<CourseCompletionEndorsement, String> {
+    let context = load_claim_context(conn, claim_id)?;
+    verify_completion_endorsement(&context.policy, &context.binding, endorsement)
+        .map_err(|error| error.to_string())?;
+    let canonical = serde_json_canonicalizer::to_string(endorsement)
+        .map_err(|error| format!("canonicalize completion endorsement: {error}"))?;
+    let id = blake3::hash(canonical.as_bytes()).to_hex().to_string();
     conn.execute(
-        "INSERT OR IGNORE INTO completion_attestations \
-         (id, witness_tx_hash, attestor_did, attestor_pubkey, signature, note) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            id,
-            params.witness_tx_hash,
-            attestor_did.as_str(),
-            attestor_pubkey,
-            signature_hex,
-            params.note,
-        ],
+        "INSERT OR IGNORE INTO course_completion_endorsements \
+         (id, claim_id, attestor_did, endorsement_json) VALUES (?1, ?2, ?3, ?4)",
+        params![id, claim_id, endorsement.attestor_did.as_str(), canonical],
     )
-    .map_err(|e| e.to_string())?;
-
-    conn.query_row(
-        "SELECT id, witness_tx_hash, attestor_did, attestor_pubkey, signature, \
-                note, created_at \
-         FROM completion_attestations \
-         WHERE witness_tx_hash = ?1 AND attestor_did = ?2",
-        params![params.witness_tx_hash, attestor_did.as_str()],
-        row_to_attestation,
-    )
-    .map_err(|e| e.to_string())
-}
-
-/// List attestations on a given witness tx, newest first.
-pub fn list_attestations(
-    conn: &Connection,
-    witness_tx_hash: &str,
-) -> Result<Vec<CompletionAttestation>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, witness_tx_hash, attestor_did, attestor_pubkey, signature, \
-                    note, created_at \
-             FROM completion_attestations \
-             WHERE witness_tx_hash = ?1 \
-             ORDER BY created_at DESC",
+    .map_err(|error| error.to_string())?;
+    let stored: String = conn
+        .query_row(
+            "SELECT endorsement_json FROM course_completion_endorsements \
+             WHERE claim_id = ?1 AND attestor_did = ?2",
+            params![claim_id, endorsement.attestor_did.as_str()],
+            |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![witness_tx_hash], row_to_attestation)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
+        .map_err(|error| error.to_string())?;
+    if stored != canonical {
+        return Err("attestor already submitted a different endorsement for this claim".into());
+    }
+    serde_json::from_str(&stored).map_err(|error| error.to_string())
 }
 
-/// Verify every stored signature on `witness_tx_hash`. Rows that fail
-/// verification are filtered out.
-pub fn verify_attestations(
+fn list_completion_endorsements(
     conn: &Connection,
-    witness_tx_hash: &str,
-) -> Result<Vec<CompletionAttestation>, String> {
-    let tx_bytes =
-        hex::decode(witness_tx_hash).map_err(|e| format!("witness_tx_hash must be hex: {e}"))?;
-    let all = list_attestations(conn, witness_tx_hash)?;
-    let mut valid = Vec::new();
-    for att in all {
-        if verify_one(&tx_bytes, &att).unwrap_or(false) {
-            valid.push(att);
+    claim_id: &str,
+) -> Result<Vec<CourseCompletionEndorsement>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT endorsement_json FROM course_completion_endorsements \
+             WHERE claim_id = ?1 ORDER BY attestor_did",
+        )
+        .map_err(|error| error.to_string())?;
+    let endorsements = statement
+        .query_map([claim_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect();
+    endorsements
+}
+
+pub fn completion_endorsement_status_impl(
+    conn: &Connection,
+    claim_id: &str,
+) -> Result<CourseCompletionEndorsementStatus, String> {
+    let context = load_claim_context(conn, claim_id)?;
+    let endorsements = list_completion_endorsements(conn, claim_id)?;
+    let threshold =
+        evaluate_completion_endorsements(&context.policy, &context.binding, &endorsements)
+            .map_err(|error| error.to_string())?;
+    Ok(CourseCompletionEndorsementStatus {
+        claim_id: claim_id.to_owned(),
+        required_attestors: threshold.required_attestors,
+        valid_attestors: threshold.valid_attestors,
+        rejected_endorsements: threshold.rejected_endorsements,
+        satisfied: threshold.satisfied,
+        endorsements,
+    })
+}
+
+/// Classify a stored credential from its signed bytes and, for a completion
+/// self-claim, the exact endorsement evidence of the claim that lists it.
+///
+/// Lookup failures and corrupt or ambiguous stored completion evidence are
+/// errors: they must not collapse into a settled-looking lower trust state.
+pub fn credential_trust_impl(
+    conn: &Connection,
+    credential_id: &str,
+    verification_time: &str,
+    network_id: &str,
+) -> Result<Option<CredentialTrust>, String> {
+    let Some(credential) = get_credential_impl(conn, credential_id)? else {
+        return Ok(None);
+    };
+    let policy = VerificationPolicy::default();
+    let verification = verify_credential_db(conn, &credential, verification_time, &policy);
+    let evidence = stored_completion_evidence(conn, credential_id)?;
+    Ok(Some(classify_credential(
+        &credential,
+        &verification,
+        &policy,
+        network_id,
+        evidence.as_ref().map(StoredCompletionEvidence::as_evidence),
+    )))
+}
+
+/// Exact completion policy, binding, and stored endorsements of the single
+/// claim that lists a credential.
+pub(crate) struct StoredCompletionEvidence {
+    context: ClaimContext,
+    endorsements: Vec<CourseCompletionEndorsement>,
+}
+
+impl StoredCompletionEvidence {
+    pub(crate) fn as_evidence(&self) -> CourseEndorsementEvidence<'_> {
+        CourseEndorsementEvidence {
+            policy: &self.context.policy,
+            binding: &self.context.binding,
+            endorsements: &self.endorsements,
         }
     }
-    Ok(valid)
 }
 
-fn verify_one(tx_bytes: &[u8], att: &CompletionAttestation) -> Result<bool, String> {
-    let pub_bytes = hex::decode(&att.attestor_pubkey).map_err(|e| e.to_string())?;
-    if pub_bytes.len() != 32 {
-        return Ok(false);
-    }
-    let sig_bytes = hex::decode(&att.signature).map_err(|e| e.to_string())?;
-    if sig_bytes.len() != 64 {
-        return Ok(false);
-    }
-    let pub_arr: [u8; 32] = pub_bytes.try_into().map_err(|_| "pubkey len".to_string())?;
-    let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| "sig len".to_string())?;
-
-    let vk = match VerifyingKey::from_bytes(&pub_arr) {
-        Ok(v) => v,
-        Err(_) => return Ok(false),
-    };
-    // Optional DID consistency check: the on-file attestor_did must
-    // match the one we'd derive from the embedded pubkey.
-    if let Ok(parsed) = parse_did_key(&att.attestor_did) {
-        if parsed != crate::crypto::did::did_from_verifying_key(&vk) {
-            return Ok(false);
-        }
-    }
-    let sig = Signature::from_bytes(&sig_arr);
-    Ok(vk.verify(tx_bytes, &sig).is_ok())
-}
-
-/// Full status view: required vs. present, attested = cryptographically
-/// valid signatures.
-pub fn attestation_status(
+/// Completion evidence for a credential, if a claim with an exact policy
+/// lists it. Corrupt or ambiguous stored evidence is an error.
+pub(crate) fn stored_completion_evidence(
     conn: &Connection,
-    witness_tx_hash: &str,
-    course_id: Option<&str>,
-) -> Result<CompletionAttestationStatus, String> {
-    let valid = verify_attestations(conn, witness_tx_hash)?;
-    let required = course_id
-        .and_then(|cid| get_requirement(conn, cid).ok().flatten())
-        .map(|r| r.required_attestors)
-        .unwrap_or(0);
-
-    Ok(CompletionAttestationStatus {
-        witness_tx_hash: witness_tx_hash.to_string(),
-        course_id: course_id.map(|s| s.to_string()),
-        required_attestors: required,
-        current_attestors: valid.len() as i64,
-        is_satisfied: valid.len() as i64 >= required,
-        attestations: valid,
-    })
+    credential_id: &str,
+) -> Result<Option<StoredCompletionEvidence>, String> {
+    match completion_claims_for_credential(conn, credential_id)?.as_slice() {
+        [] | [(_, None)] => Ok(None),
+        [(claim_id, Some(_))] => Ok(Some(StoredCompletionEvidence {
+            context: load_claim_context(conn, claim_id)?,
+            endorsements: list_completion_endorsements(conn, claim_id)?,
+        })),
+        _ => Err("credential is listed by more than one completion claim".into()),
+    }
 }
 
-/// Auto-issuance gate. Returns `true` when the witness tx has
-/// gathered enough attestor signatures, OR when no requirement has
-/// been configured for the course (the observer issues immediately).
-pub fn are_attestations_satisfied(
+/// Claims listing a credential, with the frozen enrollment policy if any.
+/// At most two rows are read: more than one is already ambiguous.
+fn completion_claims_for_credential(
     conn: &Connection,
-    witness_tx_hash: &str,
-    course_id: Option<&str>,
-) -> Result<bool, String> {
-    let Some(cid) = course_id else {
-        return Ok(true);
-    };
-    let Some(req) = get_requirement(conn, cid)? else {
-        return Ok(true);
-    };
-    let valid = verify_attestations(conn, witness_tx_hash)?;
-    Ok(valid.len() as i64 >= req.required_attestors)
-}
-
-// ---------- row mappers ----------
-
-fn row_to_requirement(row: &rusqlite::Row) -> rusqlite::Result<CompletionAttestationRequirement> {
-    Ok(CompletionAttestationRequirement {
-        course_id: row.get(0)?,
-        required_attestors: row.get(1)?,
-        dao_id: row.get(2)?,
-        set_by_proposal: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
-    })
-}
-
-fn row_to_attestation(row: &rusqlite::Row) -> rusqlite::Result<CompletionAttestation> {
-    Ok(CompletionAttestation {
-        id: row.get(0)?,
-        witness_tx_hash: row.get(1)?,
-        attestor_did: row.get(2)?,
-        attestor_pubkey: row.get(3)?,
-        signature: row.get(4)?,
-        note: row.get(5)?,
-        created_at: row.get(6)?,
-    })
-}
-
-// ---------- Tauri commands ----------
-
-#[tauri::command]
-pub async fn set_completion_attestation_requirement(
-    state: State<'_, AppState>,
-    params: SetCompletionRequirementParams,
-) -> Result<CompletionAttestationRequirement, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    set_requirement_impl(db.conn(), &params)
+    credential_id: &str,
+) -> Result<Vec<(String, Option<String>)>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT cc.id, e.completion_policy_json \
+             FROM completion_claims cc \
+             LEFT JOIN enrollments e ON e.id = cc.enrollment_id \
+             WHERE EXISTS ( \
+                 SELECT 1 FROM json_each(cc.credential_ids_json) \
+                 WHERE json_each.value = ?1 \
+             ) \
+             ORDER BY cc.id LIMIT 2",
+        )
+        .map_err(|error| error.to_string())?;
+    let claims = statement
+        .query_map([credential_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string());
+    claims
 }
 
 #[tauri::command]
-pub async fn remove_completion_attestation_requirement(
+pub async fn get_credential_trust(
     state: State<'_, AppState>,
-    course_id: String,
-) -> Result<usize, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    remove_requirement_impl(db.conn(), &course_id)
+    credential_id: String,
+) -> Result<Option<CredentialTrust>, String> {
+    let network_id = embedded_preprod()
+        .map_err(|error| error.to_string())?
+        .network_id
+        .clone();
+    let verification_time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.trust",
+            move |db| {
+                credential_trust_impl(db.conn(), &credential_id, &verification_time, &network_id)
+            },
+        )
+        .await
 }
 
 #[tauri::command]
-pub async fn list_completion_attestation_requirements(
+pub async fn get_course_completion_endorsement_request(
     state: State<'_, AppState>,
-) -> Result<Vec<CompletionAttestationRequirement>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_requirements(db.conn())
+    claim_id: String,
+) -> Result<CourseCompletionBinding, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.endorsement.request",
+            move |db| Ok(load_claim_context(db.conn(), &claim_id)?.binding),
+        )
+        .await
 }
 
 #[tauri::command]
-pub async fn submit_completion_attestation(
+pub async fn sign_course_completion_endorsement(
     state: State<'_, AppState>,
-    params: SubmitCompletionAttestationParams,
-) -> Result<CompletionAttestation, String> {
-    let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    drop(ks_guard);
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    submit_attestation_impl(db.conn(), &w.signing_key, &params)
+    binding: CourseCompletionBinding,
+) -> Result<CourseCompletionEndorsement, String> {
+    let document =
+        content_course::resolve_course_document(&state.content_node, &binding.course_document_cid)
+            .await
+            .map_err(|error| format!("resolve exact course document: {error}"))?;
+    if document.course_id != binding.course_id
+        || document.version != binding.course_document_version
+    {
+        return Err("endorsement request does not match the exact course document".into());
+    }
+    let policy = document
+        .completion_policy
+        .ok_or("exact course document has no completion endorsement policy")?;
+    let keystore = state.keystore.lock().await;
+    let mnemonic = keystore
+        .as_ref()
+        .ok_or("vault is locked — unlock first")?
+        .retrieve_mnemonic()
+        .map_err(|error| error.to_string())?;
+    drop(keystore);
+    let instructor = wallet::wallet_from_mnemonic(&mnemonic).map_err(|error| error.to_string())?;
+    sign_completion_endorsement(&policy, binding, &instructor.signing_key)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub async fn get_completion_attestation_status(
+pub async fn import_course_completion_endorsement(
     state: State<'_, AppState>,
-    witness_tx_hash: String,
-    course_id: Option<String>,
-) -> Result<CompletionAttestationStatus, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    attestation_status(db.conn(), &witness_tx_hash, course_id.as_deref())
+    claim_id: String,
+    endorsement_json: String,
+) -> Result<CourseCompletionEndorsement, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.endorsement.import",
+            move |db| {
+                import_completion_endorsement_json_impl(
+                    db.conn(),
+                    &claim_id,
+                    endorsement_json.as_bytes(),
+                )
+            },
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn get_course_completion_endorsement_status(
+    state: State<'_, AppState>,
+    claim_id: String,
+) -> Result<CourseCompletionEndorsementStatus, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "completion.endorsement.status",
+            move |db| completion_endorsement_status_impl(db.conn(), &claim_id),
+        )
+        .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
+    use alexandria_verify::course::{
+        AuthorizedAttestor, CompletionEvidence, EvidenceRequirement,
+        COMPLETION_ENDORSEMENT_FORMAT_VERSION, COMPLETION_POLICY_FORMAT_VERSION,
+    };
+    use alexandria_verify::did::did_from_verifying_key;
+    use ed25519_dalek::SigningKey;
 
-    fn test_db() -> Database {
-        let db = Database::open_in_memory().expect("open");
-        db.run_migrations().expect("migrate");
-        db
-    }
-
-    #[test]
-    fn requirement_crud_roundtrip() {
-        let db = test_db();
-        set_requirement_impl(
-            db.conn(),
-            &SetCompletionRequirementParams {
-                course_id: "course_a".into(),
-                required_attestors: 2,
-                dao_id: "dao_cs".into(),
-                set_by_proposal: None,
-            },
-        )
-        .unwrap();
-
-        let fetched = get_requirement(db.conn(), "course_a").unwrap().unwrap();
-        assert_eq!(fetched.required_attestors, 2);
-
-        // Upsert bumps.
-        set_requirement_impl(
-            db.conn(),
-            &SetCompletionRequirementParams {
-                course_id: "course_a".into(),
-                required_attestors: 3,
-                dao_id: "dao_cs".into(),
-                set_by_proposal: Some("prop_1".into()),
-            },
-        )
-        .unwrap();
-        let bumped = get_requirement(db.conn(), "course_a").unwrap().unwrap();
-        assert_eq!(bumped.required_attestors, 3);
-        assert_eq!(bumped.set_by_proposal.as_deref(), Some("prop_1"));
-
-        let removed = remove_requirement_impl(db.conn(), "course_a").unwrap();
-        assert_eq!(removed, 1);
-        assert!(get_requirement(db.conn(), "course_a").unwrap().is_none());
-    }
-
-    #[test]
-    fn requirement_rejects_nonpositive_threshold() {
-        let db = test_db();
-        let err = set_requirement_impl(
-            db.conn(),
-            &SetCompletionRequirementParams {
-                course_id: "c".into(),
-                required_attestors: 0,
-                dao_id: "d".into(),
-                set_by_proposal: None,
-            },
-        )
-        .unwrap_err();
-        assert!(err.contains("required_attestors"));
-    }
-
-    #[test]
-    fn submit_attestation_is_idempotent() {
-        let db = test_db();
-        let key = SigningKey::from_bytes(&[5u8; 32]);
-        let tx_hash = "ab".repeat(32);
-
-        let p = SubmitCompletionAttestationParams {
-            witness_tx_hash: tx_hash.clone(),
-            note: Some("first-pass".into()),
+    fn fixture() -> (
+        crate::db::Database,
+        CourseCompletionPolicy,
+        CourseCompletionBinding,
+        SigningKey,
+        SigningKey,
+    ) {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let first = SigningKey::from_bytes(&[1; 32]);
+        let second = SigningKey::from_bytes(&[2; 32]);
+        let subject = SigningKey::from_bytes(&[9; 32]);
+        let mut authorized_attestors = [&first, &second]
+            .into_iter()
+            .map(|key| AuthorizedAttestor {
+                did: did_from_verifying_key(&key.verifying_key()),
+                public_key_hex: hex::encode(key.verifying_key().as_bytes()),
+            })
+            .collect::<Vec<_>>();
+        authorized_attestors.sort_by(|left, right| left.did.as_str().cmp(right.did.as_str()));
+        let policy = CourseCompletionPolicy {
+            format_version: COMPLETION_POLICY_FORMAT_VERSION,
+            required_attestors: 2,
+            authorized_attestors,
+            evidence_requirements: vec![EvidenceRequirement {
+                kind: "completion-root".into(),
+                format_version: 1,
+            }],
         };
-        let a1 = submit_attestation_impl(db.conn(), &key, &p).unwrap();
-        let a2 = submit_attestation_impl(db.conn(), &key, &p).unwrap();
-        assert_eq!(a1.id, a2.id, "same composite id on duplicate submit");
-
-        let listed = list_attestations(db.conn(), &tx_hash).unwrap();
-        assert_eq!(listed.len(), 1);
-    }
-
-    #[test]
-    fn verify_filters_tampered_signatures() {
-        let db = test_db();
-        let key = SigningKey::from_bytes(&[7u8; 32]);
-        let tx_hash = "cd".repeat(32);
-        submit_attestation_impl(
-            db.conn(),
-            &key,
-            &SubmitCompletionAttestationParams {
-                witness_tx_hash: tx_hash.clone(),
-                note: None,
-            },
-        )
-        .unwrap();
-
-        // Corrupt the signature.
+        let binding = CourseCompletionBinding {
+            format_version: COMPLETION_ENDORSEMENT_FORMAT_VERSION,
+            network_id: "preprod".into(),
+            subject_did: did_from_verifying_key(&subject.verifying_key()),
+            course_id: "course".into(),
+            course_document_cid: "11".repeat(32),
+            course_document_version: 2,
+            completion_root: "22".repeat(32),
+            evidence: vec![CompletionEvidence {
+                kind: "completion-root".into(),
+                format_version: 1,
+                id: "course-completion".into(),
+                digest: "22".repeat(32),
+            }],
+            witness_tx_hash: None,
+        };
+        let policy_json = serde_json_canonicalizer::to_string(&policy).unwrap();
+        let binding_json = serde_json_canonicalizer::to_string(&binding).unwrap();
         db.conn()
             .execute(
-                "UPDATE completion_attestations SET signature = ?1 WHERE witness_tx_hash = ?2",
-                params!["00".repeat(64), tx_hash.clone()],
+                "INSERT INTO courses (id, title, author_address) VALUES ('course', 'Course', 'author')",
+                [],
             )
             .unwrap();
-
-        assert!(verify_attestations(db.conn(), &tx_hash).unwrap().is_empty());
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments \
+                 (id, course_id, status, course_document_cid, course_document_version, completion_policy_json) \
+                 VALUES ('enrollment', 'course', 'completed', ?1, 2, ?2)",
+                params![binding.course_document_cid, policy_json],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO completion_claims \
+                 (id, subject_did, course_id, course_document_cid, course_document_version, \
+                  completion_root, completion_binding_json, credential_ids_json, enrollment_id) \
+                 VALUES ('claim', ?1, 'course', ?2, 2, ?3, ?4, '[]', 'enrollment')",
+                params![
+                    binding.subject_did.as_str(),
+                    binding.course_document_cid,
+                    binding.completion_root,
+                    binding_json,
+                ],
+            )
+            .unwrap();
+        (db, policy, binding, first, second)
     }
 
     #[test]
-    fn status_reports_satisfaction() {
-        let db = test_db();
-        set_requirement_impl(
-            db.conn(),
-            &SetCompletionRequirementParams {
-                course_id: "course_sat".into(),
+    fn only_valid_distinct_exact_binding_endorsements_are_persisted_and_counted() {
+        let (db, policy, binding, first, second) = fixture();
+        let first_endorsement =
+            sign_completion_endorsement(&policy, binding.clone(), &first).unwrap();
+        import_completion_endorsement_impl(db.conn(), "claim", &first_endorsement).unwrap();
+        import_completion_endorsement_impl(db.conn(), "claim", &first_endorsement).unwrap();
+        let partial = completion_endorsement_status_impl(db.conn(), "claim").unwrap();
+        assert!(!partial.satisfied);
+        assert_eq!(partial.valid_attestors.len(), 1);
+
+        let second_endorsement =
+            sign_completion_endorsement(&policy, binding.clone(), &second).unwrap();
+        import_completion_endorsement_impl(db.conn(), "claim", &second_endorsement).unwrap();
+        let complete = completion_endorsement_status_impl(db.conn(), "claim").unwrap();
+        assert!(complete.satisfied);
+        assert_eq!(complete.valid_attestors.len(), 2);
+
+        let mut tampered = first_endorsement;
+        tampered.binding.network_id = "other".into();
+        assert!(import_completion_endorsement_impl(db.conn(), "claim", &tampered).is_err());
+    }
+
+    /// The app consumes the verifier's exact endorsement vector bytes through
+    /// its import path and must reach the same outcome for each file.
+    #[test]
+    fn shared_endorsement_vectors_produce_the_same_outcomes_on_import() {
+        let (db, policy, binding, _, _) = fixture();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/alexandria-verify/tests/vectors/endorsements");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::from_value::<CourseCompletionPolicy>(manifest["policy"].clone()).unwrap(),
+            policy
+        );
+        assert_eq!(
+            serde_json::from_value::<CourseCompletionBinding>(manifest["expectedBinding"].clone())
+                .unwrap(),
+            binding
+        );
+
+        for case in manifest["cases"].as_array().unwrap() {
+            let file = case["file"].as_str().unwrap();
+            let expect = case["expect"].as_str().unwrap();
+            let bytes = std::fs::read(dir.join(file)).unwrap();
+            let result = import_completion_endorsement_json_impl(db.conn(), "claim", &bytes);
+            let reason = match (&result, expect) {
+                (Ok(_), "valid") => continue,
+                (Err(reason), _) if expect != "valid" => reason,
+                _ => panic!("{file}: expected {expect}, got {result:?}"),
+            };
+            let marker = match expect {
+                "binding_mismatch" => "does not match the expected completion binding",
+                "unauthorized_attestor" => "not authorized",
+                "invalid_signature" => "invalid Ed25519 signature",
+                "duplicate_key" => "duplicate JSON object key",
+                "too_large" => "exceeds",
+                "too_deep" => "nesting exceeds",
+                "unsafe_number" => "exactly representable",
+                other => panic!("{file}: unmapped outcome {other}"),
+            };
+            assert!(reason.contains(marker), "{file}: {reason}");
+        }
+
+        let status = completion_endorsement_status_impl(db.conn(), "claim").unwrap();
+        assert!(status.satisfied);
+        assert_eq!(status.valid_attestors.len(), 2);
+        assert_eq!(status.endorsements.len(), 2);
+    }
+
+    const CREDENTIAL_ID: &str = "urn:uuid:completion-self-claim";
+    const NOW: &str = "2026-09-15T00:00:00Z";
+
+    fn store_self_claim(db: &crate::db::Database, binding: &CourseCompletionBinding) {
+        use alexandria_verify::did::VerificationMethodRef;
+        use alexandria_verify::trust::{
+            completion_root_evidence_ref, course_document_evidence_ref,
+        };
+        use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
+        use alexandria_verify::vc::{Claim, Proof, SkillClaim, VerifiableCredential};
+
+        let subject = SigningKey::from_bytes(&[9; 32]);
+        let subject_did = did_from_verifying_key(&subject.verifying_key());
+        assert_eq!(subject_did, binding.subject_did);
+        let claim = Claim::Skill(SkillClaim {
+            skill_id: "skill".into(),
+            level: 3,
+            score: 0.8,
+            evidence_refs: vec![
+                course_document_evidence_ref(
+                    &binding.course_document_cid,
+                    binding.course_document_version,
+                ),
+                completion_root_evidence_ref(&binding.completion_root),
+            ],
+            rubric_version: None,
+            assessment_method: Some("course_completion".into()),
+            provenance: None,
+        });
+        let unsigned = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(CREDENTIAL_ID.into()),
+            type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
+            issuer: subject_did.clone(),
+            valid_from: "2026-01-01T00:00:00Z".into(),
+            valid_until: None,
+            credential_subject: claim.into_subject(subject_did.clone()),
+            credential_status: None,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            proof: Proof {
+                type_: "Ed25519Signature2020".into(),
+                created: "2026-01-01T00:00:00Z".into(),
+                verification_method: VerificationMethodRef(format!(
+                    "{}#key-1",
+                    subject_did.as_str()
+                )),
+                proof_purpose: "assertionMethod".into(),
+                jws: String::new(),
+            },
+        };
+        let credential = sign_credential(
+            UnsignedCredential {
+                credential: unsigned,
+            },
+            &subject,
+            &subject_did,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO credentials (id, issuer_did, subject_did, credential_type, \
+                 claim_kind, skill_id, issuance_date, signed_vc_json, integrity_hash, revoked) \
+                 VALUES (?1, ?2, ?2, 'SelfAssertion', 'skill', 'skill', \
+                         '2026-01-01T00:00:00Z', ?3, ?1, 0)",
+                params![
+                    CREDENTIAL_ID,
+                    subject_did.as_str(),
+                    serde_json::to_string(&credential).unwrap()
+                ],
+            )
+            .unwrap();
+    }
+
+    fn list_credential_on_claim(db: &crate::db::Database, claim_id: &str) {
+        db.conn()
+            .execute(
+                "UPDATE completion_claims SET credential_ids_json = json_array(?1) WHERE id = ?2",
+                params![CREDENTIAL_ID, claim_id],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn completion_self_claim_trust_follows_the_exact_endorsement_threshold() {
+        use alexandria_verify::trust::{EndorsementMismatch, EndorsementOutcome};
+
+        let (db, policy, binding, first, second) = fixture();
+        store_self_claim(&db, &binding);
+        let trust = |network: &str| {
+            credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, network)
+                .unwrap()
+                .expect("stored credential")
+        };
+        let self_claim = |endorsement| CredentialTrust::VerifiedSelfClaim { endorsement };
+
+        // Not listed by any claim: no completion evidence applies.
+        assert_eq!(
+            trust("preprod"),
+            self_claim(EndorsementOutcome::NotSupplied)
+        );
+
+        list_credential_on_claim(&db, "claim");
+        assert_eq!(
+            trust("preprod"),
+            self_claim(EndorsementOutcome::ThresholdUnmet {
                 required_attestors: 2,
-                dao_id: "d".into(),
-                set_by_proposal: None,
-            },
-        )
-        .unwrap();
+                valid_attestors: 0,
+            })
+        );
 
-        let tx_hash = "ef".repeat(32);
-        let key_a = SigningKey::from_bytes(&[9u8; 32]);
-        let key_b = SigningKey::from_bytes(&[10u8; 32]);
+        let first_endorsement =
+            sign_completion_endorsement(&policy, binding.clone(), &first).unwrap();
+        import_completion_endorsement_impl(db.conn(), "claim", &first_endorsement).unwrap();
+        assert_eq!(
+            trust("preprod"),
+            self_claim(EndorsementOutcome::ThresholdUnmet {
+                required_attestors: 2,
+                valid_attestors: 1,
+            })
+        );
 
-        submit_attestation_impl(
-            db.conn(),
-            &key_a,
-            &SubmitCompletionAttestationParams {
-                witness_tx_hash: tx_hash.clone(),
-                note: None,
-            },
-        )
-        .unwrap();
-        let partial = attestation_status(db.conn(), &tx_hash, Some("course_sat")).unwrap();
-        assert!(!partial.is_satisfied);
-        assert_eq!(partial.current_attestors, 1);
-        assert_eq!(partial.required_attestors, 2);
+        let second_endorsement =
+            sign_completion_endorsement(&policy, binding.clone(), &second).unwrap();
+        import_completion_endorsement_impl(db.conn(), "claim", &second_endorsement).unwrap();
+        match trust("preprod") {
+            CredentialTrust::VerifiedCourseEndorsement {
+                course_document_cid,
+                course_document_version,
+                attestors,
+                ..
+            } => {
+                assert_eq!(course_document_cid, binding.course_document_cid);
+                assert_eq!(course_document_version, 2);
+                assert_eq!(attestors.len(), 2);
+            }
+            other => panic!("expected an exact course endorsement, got {other:?}"),
+        }
 
-        submit_attestation_impl(
-            db.conn(),
-            &key_b,
-            &SubmitCompletionAttestationParams {
-                witness_tx_hash: tx_hash.clone(),
-                note: None,
-            },
-        )
-        .unwrap();
-        let full = attestation_status(db.conn(), &tx_hash, Some("course_sat")).unwrap();
-        assert!(full.is_satisfied);
-        assert_eq!(full.current_attestors, 2);
+        // A build for another network does not honour these endorsements.
+        assert_eq!(
+            trust("mainnet"),
+            self_claim(EndorsementOutcome::NotApplicable {
+                reason: EndorsementMismatch::WrongNetwork,
+            })
+        );
+        assert!(
+            credential_trust_impl(db.conn(), "urn:uuid:missing", NOW, "preprod")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
-    fn gate_returns_true_without_requirement() {
-        let db = test_db();
-        assert!(are_attestations_satisfied(db.conn(), &"00".repeat(32), Some("nope")).unwrap());
-        assert!(are_attestations_satisfied(db.conn(), &"00".repeat(32), None).unwrap());
+    fn corrupt_or_ambiguous_completion_evidence_is_an_error_not_a_lower_trust_state() {
+        let (db, _, binding, _, _) = fixture();
+        store_self_claim(&db, &binding);
+        list_credential_on_claim(&db, "claim");
+
+        db.conn()
+            .execute(
+                "INSERT INTO completion_claims \
+                 (id, subject_did, course_id, completion_root, credential_ids_json) \
+                 VALUES ('other-claim', ?1, 'course', ?2, json_array(?3))",
+                params![binding.subject_did.as_str(), "33".repeat(32), CREDENTIAL_ID],
+            )
+            .unwrap();
+        assert!(credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, "preprod").is_err());
+
+        db.conn()
+            .execute("DELETE FROM completion_claims WHERE id = 'other-claim'", [])
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE completion_claims SET completion_binding_json = '{}' WHERE id = 'claim'",
+                [],
+            )
+            .unwrap();
+        assert!(credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, "preprod").is_err());
+    }
+
+    #[test]
+    fn legacy_mutable_attestation_tables_are_removed() {
+        let (db, _, _, _, _) = fixture();
+        for table in [
+            "completion_attestation_requirements",
+            "completion_attestations",
+        ] {
+            let exists: bool = db
+                .conn()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!exists, "{table} should be retired");
+        }
     }
 }

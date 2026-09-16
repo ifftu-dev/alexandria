@@ -30,14 +30,8 @@
 //! matching the iOS source's behaviour of dropping stale frames rather than
 //! queueing latency when the encoder falls behind.
 
-// Every function below is a thin shim over `libcamera2ndk` / `libmediandk`, so
-// essentially each line is an FFI call. Marking each one individually with
-// `unsafe {}` inside an already-`unsafe fn` would bury the handful of places
-// where the safety obligation actually differs (pointer validity, plane bounds)
-// under uniform noise. The obligations are documented per function instead.
-#![allow(unsafe_op_in_unsafe_fn)]
-
 use std::ffi::{CStr, CString};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 
@@ -169,8 +163,10 @@ struct Session {
     _ctx: Box<FrameSlot>,
 }
 
-// The raw NDK handles are only touched from methods on `&mut self`, and the
-// frame mailbox is behind a mutex, so the source moves between threads safely.
+// SAFETY: Camera2 NDK handles have no creator-thread affinity. The raw handles
+// are only touched from methods on `&mut self`, while the independently owned
+// image callback accesses only the mutex-protected frame mailbox. Session
+// teardown joins the image-reader callback looper before its context is freed.
 unsafe impl Send for AndroidCameraSource {}
 
 impl AndroidCameraSource {
@@ -196,30 +192,34 @@ impl AndroidCameraSource {
     unsafe fn list_with_manager(
         manager: *mut sys::ACameraManager,
     ) -> Result<Vec<(CameraIndex, String)>> {
-        let mut id_list: *mut sys::ACameraIdList = ptr::null_mut();
-        let status = sys::ACameraManager_getCameraIdList(manager, &mut id_list);
-        if status != sys::camera_status_t::ACAMERA_OK || id_list.is_null() {
-            bail!("ACameraManager_getCameraIdList failed: {status:?}");
-        }
-
-        let mut cams: Vec<CameraInfo> = Vec::new();
-        let count = (*id_list).numCameras.max(0) as usize;
-        for i in 0..count {
-            let raw_id = *(*id_list).cameraIds.add(i);
-            if raw_id.is_null() {
-                continue;
+        // SAFETY: caller owns `manager`; the returned id list and metadata are
+        // freed before this function returns, and all array entries are checked.
+        unsafe {
+            let mut id_list: *mut sys::ACameraIdList = ptr::null_mut();
+            let status = sys::ACameraManager_getCameraIdList(manager, &mut id_list);
+            if status != sys::camera_status_t::ACAMERA_OK || id_list.is_null() {
+                bail!("ACameraManager_getCameraIdList failed: {status:?}");
             }
-            let id = CStr::from_ptr(raw_id).to_string_lossy().into_owned();
-            let (facing, focal_mm) = Self::characteristics(manager, raw_id);
-            cams.push(CameraInfo {
-                id,
-                facing,
-                focal_mm,
-            });
-        }
-        sys::ACameraManager_deleteCameraIdList(id_list);
 
-        Ok(label_cameras(cams))
+            let mut cams: Vec<CameraInfo> = Vec::new();
+            let count = (*id_list).numCameras.max(0) as usize;
+            for i in 0..count {
+                let raw_id = *(*id_list).cameraIds.add(i);
+                if raw_id.is_null() {
+                    continue;
+                }
+                let id = CStr::from_ptr(raw_id).to_string_lossy().into_owned();
+                let (facing, focal_mm) = Self::characteristics(manager, raw_id);
+                cams.push(CameraInfo {
+                    id,
+                    facing,
+                    focal_mm,
+                });
+            }
+            sys::ACameraManager_deleteCameraIdList(id_list);
+
+            Ok(label_cameras(cams))
+        }
     }
 
     /// Lens facing and shortest available focal length (mm) for a camera id.
@@ -231,62 +231,68 @@ impl AndroidCameraSource {
         manager: *mut sys::ACameraManager,
         raw_id: *const std::os::raw::c_char,
     ) -> (Facing, Option<f32>) {
-        let mut chars: *mut sys::ACameraMetadata = ptr::null_mut();
-        if sys::ACameraManager_getCameraCharacteristics(manager, raw_id, &mut chars)
-            != sys::camera_status_t::ACAMERA_OK
-            || chars.is_null()
-        {
-            return (Facing::Unknown, None);
-        }
-
-        let mut entry = std::mem::zeroed::<sys::ACameraMetadata_const_entry>();
-        let facing = if sys::ACameraMetadata_getConstEntry(
-            chars,
-            sys::acamera_metadata_tag::ACAMERA_LENS_FACING.0,
-            &mut entry,
-        ) == sys::camera_status_t::ACAMERA_OK
-            && entry.count > 0
-            && !entry.data.u8_.is_null()
-        {
-            let raw = *entry.data.u8_ as u32;
-            if raw == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_FRONT.0 {
-                Facing::Front
-            } else if raw
-                == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_BACK.0
+        // SAFETY: both pointers are borrowed from a live manager/id list. The
+        // metadata entry pointers stay valid until `chars` is freed below.
+        unsafe {
+            let mut chars: *mut sys::ACameraMetadata = ptr::null_mut();
+            if sys::ACameraManager_getCameraCharacteristics(manager, raw_id, &mut chars)
+                != sys::camera_status_t::ACAMERA_OK
+                || chars.is_null()
             {
-                Facing::Back
-            } else {
-                Facing::External
+                return (Facing::Unknown, None);
             }
-        } else {
-            Facing::Unknown
-        };
 
-        // Shortest focal length is what separates an ultra-wide from the main
-        // lens; devices report one entry per selectable lens.
-        let mut entry = std::mem::zeroed::<sys::ACameraMetadata_const_entry>();
-        let focal_mm = if sys::ACameraMetadata_getConstEntry(
-            chars,
-            sys::acamera_metadata_tag::ACAMERA_LENS_INFO_AVAILABLE_FOCAL_LENGTHS.0,
-            &mut entry,
-        ) == sys::camera_status_t::ACAMERA_OK
-            && entry.count > 0
-            && !entry.data.f.is_null()
-        {
-            let mut shortest = f32::MAX;
-            for i in 0..entry.count as usize {
-                let v = *entry.data.f.add(i);
-                if v > 0.0 && v < shortest {
-                    shortest = v;
+            let mut entry = std::mem::zeroed::<sys::ACameraMetadata_const_entry>();
+            let facing = if sys::ACameraMetadata_getConstEntry(
+                chars,
+                sys::acamera_metadata_tag::ACAMERA_LENS_FACING.0,
+                &mut entry,
+            ) == sys::camera_status_t::ACAMERA_OK
+                && entry.count > 0
+                && !entry.data.u8_.is_null()
+            {
+                let raw = *entry.data.u8_ as u32;
+                if raw
+                    == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_FRONT.0
+                {
+                    Facing::Front
+                } else if raw
+                    == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_BACK.0
+                {
+                    Facing::Back
+                } else {
+                    Facing::External
                 }
-            }
-            (shortest < f32::MAX).then_some(shortest)
-        } else {
-            None
-        };
+            } else {
+                Facing::Unknown
+            };
 
-        sys::ACameraMetadata_free(chars);
-        (facing, focal_mm)
+            // Shortest focal length is what separates an ultra-wide from the main
+            // lens; devices report one entry per selectable lens.
+            let mut entry = std::mem::zeroed::<sys::ACameraMetadata_const_entry>();
+            let focal_mm = if sys::ACameraMetadata_getConstEntry(
+                chars,
+                sys::acamera_metadata_tag::ACAMERA_LENS_INFO_AVAILABLE_FOCAL_LENGTHS.0,
+                &mut entry,
+            ) == sys::camera_status_t::ACAMERA_OK
+                && entry.count > 0
+                && !entry.data.f.is_null()
+            {
+                let mut shortest = f32::MAX;
+                for i in 0..entry.count as usize {
+                    let v = *entry.data.f.add(i);
+                    if v > 0.0 && v < shortest {
+                        shortest = v;
+                    }
+                }
+                (shortest < f32::MAX).then_some(shortest)
+            } else {
+                None
+            };
+
+            sys::ACameraMetadata_free(chars);
+            (facing, focal_mm)
+        }
     }
 
     /// Open the camera at `index`, or the first available one when `None`.
@@ -316,7 +322,7 @@ impl AndroidCameraSource {
                 .find(|(_, label)| label.starts_with("Front camera"))
                 .or_else(|| cameras.first())
                 .cloned()
-                .expect("camera list is non-empty"),
+                .ok_or_else(|| anyhow!("camera list changed during selection"))?,
         };
         let id = match &chosen {
             CameraIndex::String(s) => s.clone(),
@@ -346,22 +352,49 @@ unsafe extern "C" fn on_image_available(
     ctx: *mut std::os::raw::c_void,
     reader: *mut sys::AImageReader,
 ) {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: AImageReader invokes the callback with the registered context
+        // and a live reader. Session teardown deletes the reader (which stops
+        // its dedicated callback looper) before dropping the boxed context.
+        unsafe { on_image_available_inner(ctx, reader) }
+    }));
+    if result.is_err() {
+        tracing::error!("panic contained inside Android image-reader callback");
+    }
+}
+
+unsafe fn on_image_available_inner(ctx: *mut std::os::raw::c_void, reader: *mut sys::AImageReader) {
     if ctx.is_null() || reader.is_null() {
         return;
     }
-    let slot = &*(ctx as *const FrameSlot);
 
-    let mut image: *mut sys::AImage = ptr::null_mut();
-    if sys::AImageReader_acquireLatestImage(reader, &mut image) != sys::media_status_t::AMEDIA_OK
-        || image.is_null()
-    {
-        return;
+    // SAFETY: the callback contract above keeps the context, reader, and any
+    // acquired image live. `ImageGuard` returns the image on every exit path.
+    unsafe {
+        let slot = &*(ctx as *const FrameSlot);
+
+        let mut image: *mut sys::AImage = ptr::null_mut();
+        if sys::AImageReader_acquireLatestImage(reader, &mut image)
+            != sys::media_status_t::AMEDIA_OK
+            || image.is_null()
+        {
+            return;
+        }
+        let image = ImageGuard(image);
+        let frame = yuv420_to_rgba(image.0);
+
+        if let (Some(frame), Ok(mut guard)) = (frame, slot.lock()) {
+            *guard = Some(frame);
+        }
     }
-    let frame = yuv420_to_rgba(image);
-    sys::AImage_delete(image);
+}
 
-    if let (Some(frame), Ok(mut guard)) = (frame, slot.lock()) {
-        *guard = Some(frame);
+struct ImageGuard(*mut sys::AImage);
+
+impl Drop for ImageGuard {
+    fn drop(&mut self) {
+        // SAFETY: this guard owns one acquired image and deletes it once.
+        unsafe { sys::AImage_delete(self.0) };
     }
 }
 
@@ -373,78 +406,96 @@ unsafe extern "C" fn on_image_available(
 /// are therefore read per plane rather than assumed, which is what makes this
 /// work across devices instead of only the one it was written on.
 unsafe fn yuv420_to_rgba(image: *mut sys::AImage) -> Option<VideoFrame> {
-    let (mut width, mut height) = (0i32, 0i32);
-    if sys::AImage_getWidth(image, &mut width) != sys::media_status_t::AMEDIA_OK
-        || sys::AImage_getHeight(image, &mut height) != sys::media_status_t::AMEDIA_OK
-        || width <= 0
-        || height <= 0
-    {
-        return None;
-    }
-
-    let plane = |idx: i32| -> Option<(*mut u8, i32, i32, i32)> {
-        let mut data: *mut u8 = ptr::null_mut();
-        let mut len: std::os::raw::c_int = 0;
-        let mut row_stride = 0i32;
-        let mut pixel_stride = 0i32;
-        if sys::AImage_getPlaneData(image, idx, &mut data, &mut len)
-            != sys::media_status_t::AMEDIA_OK
-            || data.is_null()
-            || sys::AImage_getPlaneRowStride(image, idx, &mut row_stride)
-                != sys::media_status_t::AMEDIA_OK
-            || sys::AImage_getPlanePixelStride(image, idx, &mut pixel_stride)
-                != sys::media_status_t::AMEDIA_OK
+    // SAFETY: caller owns a live acquired AImage for this function's duration.
+    // Plane lengths and strides are converted and bounds-checked before reads.
+    unsafe {
+        let (mut width, mut height) = (0i32, 0i32);
+        if sys::AImage_getWidth(image, &mut width) != sys::media_status_t::AMEDIA_OK
+            || sys::AImage_getHeight(image, &mut height) != sys::media_status_t::AMEDIA_OK
+            || width <= 0
+            || height <= 0
         {
             return None;
         }
-        Some((data, len, row_stride, pixel_stride))
-    };
 
-    let (y_ptr, y_len, y_row, _) = plane(0)?;
-    let (u_ptr, u_len, u_row, u_pix) = plane(1)?;
-    let (v_ptr, v_len, v_row, v_pix) = plane(2)?;
-
-    let (w, h) = (width as usize, height as usize);
-    let mut rgba = vec![0u8; w * h * 4];
-
-    for row in 0..h {
-        let uv_row = row / 2;
-        for col in 0..w {
-            let y_idx = row * y_row as usize + col;
-            if y_idx >= y_len as usize {
-                continue;
+        let plane = |idx: i32| -> Option<(*mut u8, usize, usize, usize)> {
+            let mut data: *mut u8 = ptr::null_mut();
+            let mut len: std::os::raw::c_int = 0;
+            let mut row_stride = 0i32;
+            let mut pixel_stride = 0i32;
+            if sys::AImage_getPlaneData(image, idx, &mut data, &mut len)
+                != sys::media_status_t::AMEDIA_OK
+                || data.is_null()
+                || sys::AImage_getPlaneRowStride(image, idx, &mut row_stride)
+                    != sys::media_status_t::AMEDIA_OK
+                || sys::AImage_getPlanePixelStride(image, idx, &mut pixel_stride)
+                    != sys::media_status_t::AMEDIA_OK
+                || len <= 0
+                || row_stride <= 0
+                || pixel_stride <= 0
+            {
+                return None;
             }
-            let uv_idx_u = uv_row * u_row as usize + (col / 2) * u_pix as usize;
-            let uv_idx_v = uv_row * v_row as usize + (col / 2) * v_pix as usize;
-            if uv_idx_u >= u_len as usize || uv_idx_v >= v_len as usize {
-                continue;
+            Some((
+                data,
+                usize::try_from(len).ok()?,
+                usize::try_from(row_stride).ok()?,
+                usize::try_from(pixel_stride).ok()?,
+            ))
+        };
+
+        let (y_ptr, y_len, y_row, y_pix) = plane(0)?;
+        let (u_ptr, u_len, u_row, u_pix) = plane(1)?;
+        let (v_ptr, v_len, v_row, v_pix) = plane(2)?;
+
+        let w = usize::try_from(width).ok()?;
+        let h = usize::try_from(height).ok()?;
+        let output_len = w.checked_mul(h)?.checked_mul(4)?;
+        let mut rgba = vec![0u8; output_len];
+
+        for row in 0..h {
+            let uv_row = row / 2;
+            for col in 0..w {
+                let y_idx = row
+                    .checked_mul(y_row)?
+                    .checked_add(col.checked_mul(y_pix)?)?;
+                let uv_col = col / 2;
+                let uv_idx_u = uv_row
+                    .checked_mul(u_row)?
+                    .checked_add(uv_col.checked_mul(u_pix)?)?;
+                let uv_idx_v = uv_row
+                    .checked_mul(v_row)?
+                    .checked_add(uv_col.checked_mul(v_pix)?)?;
+                if y_idx >= y_len || uv_idx_u >= u_len || uv_idx_v >= v_len {
+                    return None;
+                }
+
+                let y = *y_ptr.add(y_idx) as f32;
+                let u = *u_ptr.add(uv_idx_u) as f32 - 128.0;
+                let v = *v_ptr.add(uv_idx_v) as f32 - 128.0;
+
+                // BT.601 full-range, matching what the desktop capture path feeds
+                // the encoder.
+                let r = y + 1.402 * v;
+                let g = y - 0.344_136 * u - 0.714_136 * v;
+                let b = y + 1.772 * u;
+
+                let o = row.checked_mul(w)?.checked_add(col)?.checked_mul(4)?;
+                rgba[o] = r.clamp(0.0, 255.0) as u8;
+                rgba[o + 1] = g.clamp(0.0, 255.0) as u8;
+                rgba[o + 2] = b.clamp(0.0, 255.0) as u8;
+                rgba[o + 3] = 255;
             }
-
-            let y = *y_ptr.add(y_idx) as f32;
-            let u = *u_ptr.add(uv_idx_u) as f32 - 128.0;
-            let v = *v_ptr.add(uv_idx_v) as f32 - 128.0;
-
-            // BT.601 full-range, matching what the desktop capture path feeds
-            // the encoder.
-            let r = y + 1.402 * v;
-            let g = y - 0.344_136 * u - 0.714_136 * v;
-            let b = y + 1.772 * u;
-
-            let o = (row * w + col) * 4;
-            rgba[o] = r.clamp(0.0, 255.0) as u8;
-            rgba[o + 1] = g.clamp(0.0, 255.0) as u8;
-            rgba[o + 2] = b.clamp(0.0, 255.0) as u8;
-            rgba[o + 3] = 255;
         }
-    }
 
-    Some(VideoFrame {
-        format: VideoFormat {
-            pixel_format: PixelFormat::Rgba,
-            dimensions: [width as u32, height as u32],
-        },
-        raw: bytes::Bytes::from(rgba),
-    })
+        Some(VideoFrame {
+            format: VideoFormat {
+                pixel_format: PixelFormat::Rgba,
+                dimensions: [u32::try_from(width).ok()?, u32::try_from(height).ok()?],
+            },
+            raw: bytes::Bytes::from(rgba),
+        })
+    }
 }
 
 impl VideoSource for AndroidCameraSource {
@@ -513,180 +564,262 @@ impl std::ops::Deref for OpenedSession {
 impl Session {
     /// Bring up reader → device → session → repeating request.
     unsafe fn open(camera_id: &CStr, slot: FrameSlot) -> Result<OpenedSession> {
-        let manager = sys::ACameraManager_create();
-        if manager.is_null() {
-            bail!("ACameraManager_create returned null");
-        }
+        // SAFETY: this function is the sole owner of each native handle it
+        // creates. Every failure path frees the initialized prefix in reverse
+        // order; success transfers the complete set to `Session`.
+        unsafe {
+            let manager = sys::ACameraManager_create();
+            if manager.is_null() {
+                bail!("ACameraManager_create returned null");
+            }
 
-        // Reader first: its window is the target every later object needs.
-        let mut reader: *mut sys::AImageReader = ptr::null_mut();
-        if sys::AImageReader_new(
-            REQUEST_WIDTH,
-            REQUEST_HEIGHT,
-            AIMAGE_FORMAT_YUV_420_888,
-            MAX_IMAGES,
-            &mut reader,
-        ) != sys::media_status_t::AMEDIA_OK
-            || reader.is_null()
-        {
-            sys::ACameraManager_delete(manager);
-            bail!("AImageReader_new failed");
-        }
+            // Reader first: its window is the target every later object needs.
+            let mut reader: *mut sys::AImageReader = ptr::null_mut();
+            if sys::AImageReader_new(
+                REQUEST_WIDTH,
+                REQUEST_HEIGHT,
+                AIMAGE_FORMAT_YUV_420_888,
+                MAX_IMAGES,
+                &mut reader,
+            ) != sys::media_status_t::AMEDIA_OK
+                || reader.is_null()
+            {
+                sys::ACameraManager_delete(manager);
+                bail!("AImageReader_new failed");
+            }
 
-        let mut width = REQUEST_WIDTH;
-        let mut height = REQUEST_HEIGHT;
-        let _ = sys::AImageReader_getWidth(reader, &mut width);
-        let _ = sys::AImageReader_getHeight(reader, &mut height);
+            let mut width = REQUEST_WIDTH;
+            let mut height = REQUEST_HEIGHT;
+            if sys::AImageReader_getWidth(reader, &mut width) != sys::media_status_t::AMEDIA_OK
+                || sys::AImageReader_getHeight(reader, &mut height)
+                    != sys::media_status_t::AMEDIA_OK
+                || width <= 0
+                || height <= 0
+            {
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("AImageReader returned invalid dimensions");
+            }
+            // Positive i32 dimensions are exactly representable as u32.
+            let dimensions = [width as u32, height as u32];
 
-        let ctx = Box::new(slot);
-        let mut listener = Box::new(sys::AImageReader_ImageListener {
-            context: (&*ctx as *const FrameSlot) as *mut std::os::raw::c_void,
-            onImageAvailable: Some(on_image_available),
-        });
-        if sys::AImageReader_setImageListener(reader, &mut *listener)
-            != sys::media_status_t::AMEDIA_OK
-        {
-            sys::AImageReader_delete(reader);
-            sys::ACameraManager_delete(manager);
-            bail!("AImageReader_setImageListener failed");
-        }
+            let ctx = Box::new(slot);
+            let mut listener = Box::new(sys::AImageReader_ImageListener {
+                context: (&*ctx as *const FrameSlot) as *mut std::os::raw::c_void,
+                onImageAvailable: Some(on_image_available),
+            });
+            if sys::AImageReader_setImageListener(reader, &mut *listener)
+                != sys::media_status_t::AMEDIA_OK
+            {
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("AImageReader_setImageListener failed");
+            }
 
-        let mut window: *mut sys::ANativeWindow = ptr::null_mut();
-        if sys::AImageReader_getWindow(reader, &mut window) != sys::media_status_t::AMEDIA_OK
-            || window.is_null()
-        {
-            sys::AImageReader_delete(reader);
-            sys::ACameraManager_delete(manager);
-            bail!("AImageReader_getWindow failed");
-        }
+            let mut window: *mut sys::ANativeWindow = ptr::null_mut();
+            if sys::AImageReader_getWindow(reader, &mut window) != sys::media_status_t::AMEDIA_OK
+                || window.is_null()
+            {
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("AImageReader_getWindow failed");
+            }
 
-        // Opening requires the CAMERA runtime permission; without it the NDK
-        // reports ACAMERA_ERROR_PERMISSION_DENIED rather than prompting.
-        let mut device_cbs = sys::ACameraDevice_StateCallbacks {
-            context: ptr::null_mut(),
-            onDisconnected: Some(on_device_disconnected),
-            onError: Some(on_device_error),
-        };
-        let mut device: *mut sys::ACameraDevice = ptr::null_mut();
-        let status = sys::ACameraManager_openCamera(
-            manager,
-            camera_id.as_ptr(),
-            &mut device_cbs,
-            &mut device,
-        );
-        if status != sys::camera_status_t::ACAMERA_OK || device.is_null() {
-            sys::AImageReader_delete(reader);
-            sys::ACameraManager_delete(manager);
-            bail!(
-                "ACameraManager_openCamera failed: {status:?} (is the CAMERA permission granted?)"
-            );
-        }
-
-        let mut request: *mut sys::ACaptureRequest = ptr::null_mut();
-        if sys::ACameraDevice_createCaptureRequest(
-            device,
-            sys::ACameraDevice_request_template::TEMPLATE_PREVIEW,
-            &mut request,
-        ) != sys::camera_status_t::ACAMERA_OK
-            || request.is_null()
-        {
-            sys::ACameraDevice_close(device);
-            sys::AImageReader_delete(reader);
-            sys::ACameraManager_delete(manager);
-            bail!("ACameraDevice_createCaptureRequest failed");
-        }
-
-        let mut output_target: *mut sys::ACameraOutputTarget = ptr::null_mut();
-        sys::ACameraOutputTarget_create(window, &mut output_target);
-        sys::ACaptureRequest_addTarget(request, output_target);
-
-        let mut session_output: *mut sys::ACaptureSessionOutput = ptr::null_mut();
-        sys::ACaptureSessionOutput_create(window, &mut session_output);
-        let mut output_container: *mut sys::ACaptureSessionOutputContainer = ptr::null_mut();
-        sys::ACaptureSessionOutputContainer_create(&mut output_container);
-        sys::ACaptureSessionOutputContainer_add(output_container, session_output);
-
-        let session_cbs = sys::ACameraCaptureSession_stateCallbacks {
-            context: ptr::null_mut(),
-            onClosed: Some(on_session_closed),
-            onReady: Some(on_session_ready),
-            onActive: Some(on_session_active),
-        };
-        let mut session: *mut sys::ACameraCaptureSession = ptr::null_mut();
-        if sys::ACameraDevice_createCaptureSession(
-            device,
-            output_container,
-            &session_cbs,
-            &mut session,
-        ) != sys::camera_status_t::ACAMERA_OK
-            || session.is_null()
-        {
-            sys::ACaptureSessionOutputContainer_free(output_container);
-            sys::ACaptureSessionOutput_free(session_output);
-            sys::ACameraOutputTarget_free(output_target);
-            sys::ACaptureRequest_free(request);
-            sys::ACameraDevice_close(device);
-            sys::AImageReader_delete(reader);
-            sys::ACameraManager_delete(manager);
-            bail!("ACameraDevice_createCaptureSession failed");
-        }
-
-        let mut req_ptr = request;
-        // Null capture callbacks: per-frame capture results are not needed —
-        // frames arrive through the AImageReader listener instead.
-        if sys::ACameraCaptureSession_setRepeatingRequest(
-            session,
-            ptr::null_mut(),
-            1,
-            &mut req_ptr,
-            ptr::null_mut(),
-        ) != sys::camera_status_t::ACAMERA_OK
-        {
-            sys::ACameraCaptureSession_close(session);
-            sys::ACaptureSessionOutputContainer_free(output_container);
-            sys::ACaptureSessionOutput_free(session_output);
-            sys::ACameraOutputTarget_free(output_target);
-            sys::ACaptureRequest_free(request);
-            sys::ACameraDevice_close(device);
-            sys::AImageReader_delete(reader);
-            sys::ACameraManager_delete(manager);
-            bail!("ACameraCaptureSession_setRepeatingRequest failed");
-        }
-
-        Ok(OpenedSession {
-            session: Session {
+            // Opening requires the CAMERA runtime permission; without it the NDK
+            // reports ACAMERA_ERROR_PERMISSION_DENIED rather than prompting.
+            let mut device_cbs = sys::ACameraDevice_StateCallbacks {
+                context: ptr::null_mut(),
+                onDisconnected: Some(on_device_disconnected),
+                onError: Some(on_device_error),
+            };
+            let mut device: *mut sys::ACameraDevice = ptr::null_mut();
+            let status = sys::ACameraManager_openCamera(
                 manager,
+                camera_id.as_ptr(),
+                &mut device_cbs,
+                &mut device,
+            );
+            if status != sys::camera_status_t::ACAMERA_OK || device.is_null() {
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!(
+                    "ACameraManager_openCamera failed: {status:?} (is the CAMERA permission granted?)"
+                );
+            }
+
+            let mut request: *mut sys::ACaptureRequest = ptr::null_mut();
+            if sys::ACameraDevice_createCaptureRequest(
                 device,
-                session,
-                request,
-                output_target,
-                session_output,
+                sys::ACameraDevice_request_template::TEMPLATE_PREVIEW,
+                &mut request,
+            ) != sys::camera_status_t::ACAMERA_OK
+                || request.is_null()
+            {
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACameraDevice_createCaptureRequest failed");
+            }
+
+            let mut output_target: *mut sys::ACameraOutputTarget = ptr::null_mut();
+            if sys::ACameraOutputTarget_create(window, &mut output_target)
+                != sys::camera_status_t::ACAMERA_OK
+                || output_target.is_null()
+            {
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACameraOutputTarget_create failed");
+            }
+            if sys::ACaptureRequest_addTarget(request, output_target)
+                != sys::camera_status_t::ACAMERA_OK
+            {
+                sys::ACameraOutputTarget_free(output_target);
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACaptureRequest_addTarget failed");
+            }
+
+            let mut session_output: *mut sys::ACaptureSessionOutput = ptr::null_mut();
+            if sys::ACaptureSessionOutput_create(window, &mut session_output)
+                != sys::camera_status_t::ACAMERA_OK
+                || session_output.is_null()
+            {
+                sys::ACameraOutputTarget_free(output_target);
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACaptureSessionOutput_create failed");
+            }
+            let mut output_container: *mut sys::ACaptureSessionOutputContainer = ptr::null_mut();
+            if sys::ACaptureSessionOutputContainer_create(&mut output_container)
+                != sys::camera_status_t::ACAMERA_OK
+                || output_container.is_null()
+            {
+                sys::ACaptureSessionOutput_free(session_output);
+                sys::ACameraOutputTarget_free(output_target);
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACaptureSessionOutputContainer_create failed");
+            }
+            if sys::ACaptureSessionOutputContainer_add(output_container, session_output)
+                != sys::camera_status_t::ACAMERA_OK
+            {
+                sys::ACaptureSessionOutputContainer_free(output_container);
+                sys::ACaptureSessionOutput_free(session_output);
+                sys::ACameraOutputTarget_free(output_target);
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACaptureSessionOutputContainer_add failed");
+            }
+
+            let session_cbs = sys::ACameraCaptureSession_stateCallbacks {
+                context: ptr::null_mut(),
+                onClosed: Some(on_session_closed),
+                onReady: Some(on_session_ready),
+                onActive: Some(on_session_active),
+            };
+            let mut session: *mut sys::ACameraCaptureSession = ptr::null_mut();
+            if sys::ACameraDevice_createCaptureSession(
+                device,
                 output_container,
-                reader,
-                listener,
-                _ctx: ctx,
-            },
-            dimensions: [width as u32, height as u32],
-        })
+                &session_cbs,
+                &mut session,
+            ) != sys::camera_status_t::ACAMERA_OK
+                || session.is_null()
+            {
+                sys::ACaptureSessionOutputContainer_free(output_container);
+                sys::ACaptureSessionOutput_free(session_output);
+                sys::ACameraOutputTarget_free(output_target);
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACameraDevice_createCaptureSession failed");
+            }
+
+            let mut req_ptr = request;
+            // Null capture callbacks: per-frame capture results are not needed —
+            // frames arrive through the AImageReader listener instead.
+            if sys::ACameraCaptureSession_setRepeatingRequest(
+                session,
+                ptr::null_mut(),
+                1,
+                &mut req_ptr,
+                ptr::null_mut(),
+            ) != sys::camera_status_t::ACAMERA_OK
+            {
+                sys::ACameraCaptureSession_close(session);
+                sys::ACaptureSessionOutputContainer_free(output_container);
+                sys::ACaptureSessionOutput_free(session_output);
+                sys::ACameraOutputTarget_free(output_target);
+                sys::ACaptureRequest_free(request);
+                sys::ACameraDevice_close(device);
+                sys::AImageReader_delete(reader);
+                sys::ACameraManager_delete(manager);
+                bail!("ACameraCaptureSession_setRepeatingRequest failed");
+            }
+
+            Ok(OpenedSession {
+                session: Session {
+                    manager,
+                    device,
+                    session,
+                    request,
+                    output_target,
+                    session_output,
+                    output_container,
+                    reader,
+                    listener,
+                    _ctx: ctx,
+                },
+                dimensions,
+            })
+        }
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // Reverse construction order: stop the flow, then release targets, then
-        // the device, and only then the reader whose window they referenced.
+        // Stop production and detach the listener before releasing targets.
+        // AImageReader_delete closes and joins its dedicated callback looper;
+        // `_ctx` remains alive until after this Drop body returns.
         unsafe {
-            sys::ACameraCaptureSession_stopRepeating(self.session);
+            let stop_status = sys::ACameraCaptureSession_stopRepeating(self.session);
+            if stop_status != sys::camera_status_t::ACAMERA_OK
+                && stop_status != sys::camera_status_t::ACAMERA_ERROR_SESSION_CLOSED
+            {
+                tracing::warn!("Android camera stopRepeating failed: {stop_status:?}");
+            }
+            let abort_status = sys::ACameraCaptureSession_abortCaptures(self.session);
+            if abort_status != sys::camera_status_t::ACAMERA_OK
+                && abort_status != sys::camera_status_t::ACAMERA_ERROR_SESSION_CLOSED
+            {
+                tracing::warn!("Android camera abortCaptures failed: {abort_status:?}");
+            }
+            let listener_status = sys::AImageReader_setImageListener(self.reader, ptr::null_mut());
+            if listener_status != sys::media_status_t::AMEDIA_OK {
+                tracing::warn!("Android camera listener removal failed: {listener_status:?}");
+            }
             sys::ACameraCaptureSession_close(self.session);
             sys::ACaptureSessionOutputContainer_free(self.output_container);
             sys::ACaptureSessionOutput_free(self.session_output);
             sys::ACameraOutputTarget_free(self.output_target);
             sys::ACaptureRequest_free(self.request);
             sys::ACameraDevice_close(self.device);
-            sys::AImageReader_setImageListener(self.reader, ptr::null_mut());
             sys::AImageReader_delete(self.reader);
             sys::ACameraManager_delete(self.manager);
         }
+        // The Box also records that the NDK copied this exact listener value;
+        // retaining it makes that ownership relationship explicit.
         let _ = &self.listener;
     }
 }

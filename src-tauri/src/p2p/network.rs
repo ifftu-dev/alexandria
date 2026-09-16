@@ -13,6 +13,7 @@ use libp2p::{
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinSet;
 
 use super::device_sync::{SyncRequest, SyncResponse};
 use super::graph_fetch::{GraphFetchRequest, GraphFetchResponse};
@@ -27,11 +28,15 @@ use crate::crypto::hash::blake2b_256;
 use crate::diag;
 use std::sync::Mutex as StdMutex;
 
+use super::inbound::{self, DropLog, InboundDatabase};
 use super::nat::build_autonat_config;
 use super::rate_limit::PeerRateLimiter;
+use super::registry;
 use super::scoring::{build_peer_score_params, build_peer_score_thresholds};
-use super::types::{NatState, NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS};
-use super::validation::MessageValidator;
+use super::types::{
+    NatState, NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS, MAX_GOSSIP_MESSAGE_BYTES,
+};
+use super::validation::{decode_envelope, decode_peer_exchange, MessageValidator};
 
 #[derive(Error, Debug)]
 pub enum NetworkError {
@@ -205,6 +210,10 @@ fn apple_sysctl(name: &str) -> Option<String> {
     let key = CString::new(name).ok()?;
     let mut size: usize = 0;
 
+    // SAFETY: `key` is NUL-terminated and lives across both calls. The first
+    // call requests the required length without an output pointer; the second
+    // supplies a writable allocation of exactly that length. A value that
+    // grows between calls makes `sysctlbyname` fail rather than exceed it.
     unsafe {
         if libc::sysctlbyname(
             key.as_ptr(),
@@ -302,6 +311,7 @@ pub struct P2pNode {
     peer_id: PeerId,
     /// Whether the node is running.
     running: bool,
+    task: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Commands sent to the swarm event loop from the application layer.
@@ -461,8 +471,10 @@ pub struct KnownPeer {
 
 /// Start the libp2p swarm.
 ///
-/// `db` is the active-profile database handle. Pass `Some(...)` in
-/// production so that:
+/// `db` is the active profile's inbound database handle. Every database
+/// operation the swarm performs runs through it as a Background-lane
+/// executor job fenced to the profile session the node was started for,
+/// never on the swarm task itself. Pass `Some(...)` in production so that:
 ///
 /// - the gossip validator's registry-backed identity check for
 ///   privileged topics is active (without it the check fail-opens
@@ -478,12 +490,45 @@ pub struct KnownPeer {
 /// silently dormant. The previous `start_node(...)` convenience
 /// wrapper that hard-coded `None` was deleted in 2026-05 after it
 /// shipped silently as the production path for a release window.
-pub async fn start_node_with_db(
+pub(crate) async fn start_node_with_db(
     keypair: Keypair,
     event_tx: mpsc::Sender<P2pEvent>,
     known_peers: Vec<KnownPeer>,
-    db: Option<Arc<StdMutex<Option<Database>>>>,
+    db: Option<InboundDatabase>,
     dht_server: bool,
+) -> Result<P2pNode, NetworkError> {
+    start_configured_node(keypair, event_tx, known_peers, db, dht_server, false).await
+}
+
+/// Start a loopback-only fixture using the real transport and protocol handlers.
+/// Public bootstrap and periodic discovery are disabled; callers connect peers
+/// explicitly. This does not change the production startup defaults.
+///
+/// A fixture has no profile lifecycle: its database work runs on a dedicated
+/// executor under an admission that stays open for the node's lifetime.
+pub async fn start_loopback_node_with_db(
+    keypair: Keypair,
+    event_tx: mpsc::Sender<P2pEvent>,
+    db: Option<Arc<StdMutex<Option<Database>>>>,
+) -> Result<P2pNode, NetworkError> {
+    let db = match db {
+        Some(handle) => Some(
+            InboundDatabase::detached(handle)
+                .await
+                .map_err(NetworkError::SwarmBuild)?,
+        ),
+        None => None,
+    };
+    start_configured_node(keypair, event_tx, vec![], db, false, true).await
+}
+
+async fn start_configured_node(
+    keypair: Keypair,
+    event_tx: mpsc::Sender<P2pEvent>,
+    known_peers: Vec<KnownPeer>,
+    db: Option<InboundDatabase>,
+    dht_server: bool,
+    loopback_only: bool,
 ) -> Result<P2pNode, NetworkError> {
     let peer_id = keypair.public().to_peer_id();
     diag::log(&format!("start_node: PeerId: {peer_id}"));
@@ -621,10 +666,20 @@ pub async fn start_node_with_db(
 
     diag::log("start_node: topics subscribed, binding listener...");
 
+    if loopback_only {
+        swarm
+            .listen_on(
+                "/ip4/127.0.0.1/tcp/0"
+                    .parse()
+                    .expect("valid loopback address"),
+            )
+            .map_err(|e| NetworkError::Listen(e.to_string()))?;
+    }
+
     // Listen on all interfaces, OS-assigned port.
     // Desktop: QUIC (UDP). Mobile: TCP.
     #[cfg(desktop)]
-    {
+    if !loopback_only {
         // Listen on both TCP and QUIC so desktop can connect to mobile (TCP) and other desktops (QUIC)
         let tcp_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm
@@ -647,7 +702,7 @@ pub async fn start_node_with_db(
     }
 
     #[cfg(target_os = "android")]
-    {
+    if !loopback_only {
         diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
         let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm.listen_on(listen_addr).map_err(|e| {
@@ -676,7 +731,7 @@ pub async fn start_node_with_db(
     }
 
     #[cfg(all(mobile, not(target_os = "android")))]
-    {
+    if !loopback_only {
         diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
         let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm.listen_on(listen_addr).map_err(|e| {
@@ -696,7 +751,11 @@ pub async fn start_node_with_db(
     // Dial bootstrap/relay peers for internet-wide discovery.
     // These are public relay nodes that all peers connect to first.
     // Through Kademlia DHT on the relay, peers discover each other.
-    let bootstrap_addrs = super::discovery::bootstrap_peers();
+    let bootstrap_addrs = if loopback_only {
+        vec![]
+    } else {
+        super::discovery::bootstrap_peers()
+    };
     for addr in &bootstrap_addrs {
         diag::log(&format!("start_node: dialing bootstrap {addr}"));
         match swarm.dial(addr.clone()) {
@@ -751,35 +810,40 @@ pub async fn start_node_with_db(
     // Create command channel
     let (command_tx, command_rx) = mpsc::channel::<SwarmCommand>(256);
 
-    // Create the message validator (shared via Arc for the event
-    // loop). When a DB handle is available, wire it so privileged-
-    // topic messages can be authorized against
-    // `stake_pubkey_registry`; otherwise the validator fails-open on
-    // the identity check.
+    // Create the message validator (shared via Arc for the event loop).
+    // It never carries the database itself: with a DB handle the event
+    // loop authorizes privileged-topic messages against
+    // `stake_pubkey_registry` through a profile-fenced executor job and
+    // only runs the validator's own pipeline for non-privileged topics.
+    // Without one, every topic falls through to the validator, whose
+    // identity check then fails open.
     //
     // Production callers MUST pass a DB. We log a `WARN` on the
     // no-DB path so a misconfigured release is loud at the very
     // first line of every node startup — silent dormancy is exactly
     // how a prior release shipped with the registry check
     // accidentally disabled.
-    let validator = Arc::new(match db.clone() {
-        Some(handle) => MessageValidator::with_db(handle),
-        None => {
-            log::warn!(
-                "start_node_with_db: no DB handle provided — privileged-topic identity \
-                 binding will fail-open AND inbound /alexandria/vc-fetch/1.0 requests \
-                 will all reply NotFound. Production callers must pass Some(db); \
-                 the no-DB path exists for tests / dev tooling only."
-            );
-            MessageValidator::new()
-        }
-    });
+    if db.is_none() {
+        log::warn!(
+            "start_node_with_db: no DB handle provided — privileged-topic identity \
+             binding will fail-open AND inbound /alexandria/vc-fetch/1.0 requests \
+             will all reply NotFound. Production callers must pass Some(db); \
+             the no-DB path exists for tests / dev tooling only."
+        );
+    }
+    let validator = Arc::new(MessageValidator::new());
 
     // Spawn the swarm event loop. The db handle (None for tests /
     // dev tooling, populated by every production call site) lets
-    // the loop answer inbound vc-fetch requests synchronously.
-    tokio::spawn(swarm_event_loop(
-        swarm, command_rx, event_tx, validator, db, dht_server,
+    // the loop answer inbound requests through bounded executor jobs.
+    let task = tokio::spawn(swarm_event_loop(
+        swarm,
+        command_rx,
+        event_tx,
+        validator,
+        db,
+        dht_server,
+        loopback_only,
     ));
 
     diag::log("start_node: event loop spawned, node running");
@@ -788,6 +852,7 @@ pub async fn start_node_with_db(
         command_tx,
         peer_id,
         running: true,
+        task: Some(task),
     })
 }
 
@@ -815,7 +880,7 @@ fn build_behaviour(
             let hash = blake2b_256(&msg.data);
             MessageId::from(hex::encode(hash))
         })
-        .max_transmit_size(65536) // 64KB max message size
+        .max_transmit_size(MAX_GOSSIP_MESSAGE_BYTES)
         // Mesh parameters: target 4 peers in mesh (small network),
         // allow down to 2 before grafting, up to 8 before pruning.
         .mesh_n(4)
@@ -1057,6 +1122,84 @@ fn is_circuit_listener(address: &libp2p::Multiaddr) -> bool {
     address.to_string().contains("p2p-circuit")
 }
 
+/// Inbound request/response jobs (and the DHT warm-load) awaiting the
+/// database at once. Beyond this the loop answers immediately as overloaded
+/// instead of spawning; see `p2p::inbound` for the per-protocol answer.
+const MAX_INBOUND_REQUEST_JOBS: usize = 16;
+/// Privileged-topic registry lookups awaiting the database at once. Beyond
+/// this gossip is ignored (best-effort) without penalizing the sender.
+const MAX_IDENTITY_CHECK_JOBS: usize = 16;
+/// Best-effort persistence (peer addresses, DHT record mirror) awaiting the
+/// database at once. Beyond this the write is dropped.
+const MAX_PERSISTENCE_JOBS: usize = 8;
+
+/// Forward accepted gossip without letting a stalled application consumer
+/// pause the swarm. The consumer has its own bounded ingest queue, so a full
+/// event channel is the same best-effort overload condition.
+fn try_forward_gossip(
+    event_tx: &mpsc::Sender<P2pEvent>,
+    drops: &mut DropLog,
+    topic: String,
+    message: SignedGossipMessage,
+) -> bool {
+    match event_tx.try_send(P2pEvent::GossipMessage { topic, message }) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            drops.record("application event queue is full");
+            false
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+    }
+}
+
+/// A finished inbound database job. Only the swarm loop owns the behaviours
+/// that can answer, so jobs hand their result back instead of responding.
+enum InboundCompletion {
+    /// `None` omits the response: busy work on a protocol without an error
+    /// variant.
+    VcFetch(ResponseChannel<FetchResponse>, Option<FetchResponse>),
+    DeviceSync(ResponseChannel<SyncResponse>, SyncResponse),
+    Guardian(ResponseChannel<GuardianResponse>, GuardianResponse),
+    GraphFetch(
+        ResponseChannel<GraphFetchResponse>,
+        Option<GraphFetchResponse>,
+    ),
+    ProfileFetch(
+        ResponseChannel<ProfileFetchResponse>,
+        Option<ProfileFetchResponse>,
+    ),
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    DhtRecords(Result<DhtRecordRows, String>),
+}
+
+/// Persisted `(key, value)` rows of the desktop DHT record mirror.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+type DhtRecordRows = Vec<(Vec<u8>, Vec<u8>)>;
+
+/// Registry verdict for a privileged-topic gossip message whose validation
+/// resumes on the swarm loop.
+struct IdentityVerdict {
+    message_id: MessageId,
+    propagation_source: PeerId,
+    topic: String,
+    envelope: SignedGossipMessage,
+    result: Result<Result<(), String>, String>,
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn load_dht_records(conn: &rusqlite::Connection) -> DhtRecordRows {
+    conn.prepare("SELECT key, value FROM dht_records")
+        .ok()
+        .map(|mut stmt| {
+            stmt.query_map([], |r| {
+                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
 /// The main swarm event loop.
 ///
 /// Runs as a background task, processing both swarm events and
@@ -1067,53 +1210,43 @@ async fn swarm_event_loop(
     mut command_rx: mpsc::Receiver<SwarmCommand>,
     event_tx: mpsc::Sender<P2pEvent>,
     validator: Arc<MessageValidator>,
-    db: Option<Arc<std::sync::Mutex<Option<Database>>>>,
+    db: Option<InboundDatabase>,
     dht_server: bool,
+    loopback_only: bool,
 ) {
     use libp2p::swarm::SwarmEvent;
 
     use super::types::{PeerExchangeMessage, TOPIC_PEER_EXCHANGE};
 
+    // Inbound database work never runs on this task. Each class has its own
+    // bounded job set so a gossip flood cannot starve request replies; the
+    // loop drains them in the `select!` below and never waits for capacity.
+    let mut inbound_requests: JoinSet<InboundCompletion> = JoinSet::new();
+    let mut identity_checks: JoinSet<IdentityVerdict> = JoinSet::new();
+    let mut persistence_jobs: JoinSet<()> = JoinSet::new();
+    let mut request_drops = DropLog::new("inbound P2P requests");
+    let mut gossip_drops = DropLog::new("inbound privileged gossip");
+    let mut persistence_drops = DropLog::new("P2P persistence");
+
     // Desktop DHT server (opt-in): announce server mode and warm-load
     // the persistent record mirror so this node's slice of the DHT
-    // survives restarts.
+    // survives restarts. The records arrive through `inbound_requests`.
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     if dht_server {
         swarm
             .behaviour_mut()
             .kademlia
             .set_mode(Some(kad::Mode::Server));
-        if let Some(db_arc) = db.as_ref() {
-            if let Ok(guard) = db_arc.lock() {
-                if let Some(database) = guard.as_ref() {
-                    let records: Vec<(Vec<u8>, Vec<u8>)> = database
-                        .conn()
-                        .prepare("SELECT key, value FROM dht_records")
-                        .ok()
-                        .map(|mut stmt| {
-                            stmt.query_map([], |r| {
-                                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
-                            })
-                            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                            .unwrap_or_default()
+        if let Some(inbound_db) = db.clone() {
+            inbound_requests.spawn(async move {
+                InboundCompletion::DhtRecords(
+                    inbound_db
+                        .run("p2p.dht-warm-load", |database| {
+                            Ok(load_dht_records(database.conn()))
                         })
-                        .unwrap_or_default();
-                    let n = records.len();
-                    for (key, value) in records {
-                        let record = kad::Record {
-                            key: kad::RecordKey::new(&key),
-                            value,
-                            publisher: None,
-                            expires: None,
-                        };
-                        use libp2p::kad::store::RecordStore;
-                        let _ = swarm.behaviour_mut().kademlia.store_mut().put(record);
-                    }
-                    if n > 0 {
-                        diag::log(&format!("DHT server: warm-loaded {n} records"));
-                    }
-                }
-            }
+                        .await,
+                )
+            });
         }
     }
     #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -1176,7 +1309,11 @@ async fn swarm_event_loop(
     // Track which relays we've already requested reservations from.
     // We request a reservation from each relay after the Identify
     // handshake confirms we're connected to it.
-    let relay_peer_ids = super::discovery::relay_peer_ids();
+    let relay_peer_ids = if loopback_only {
+        std::collections::HashSet::new()
+    } else {
+        super::discovery::relay_peer_ids()
+    };
     let mut relay_reservations_requested: std::collections::HashSet<libp2p::PeerId> =
         std::collections::HashSet::new();
 
@@ -1240,7 +1377,7 @@ async fn swarm_event_loop(
 
     /// Helper: handle an incoming peer exchange message.
     fn handle_peer_exchange(swarm: &mut Swarm<AlexandriaBehaviour>, data: &[u8]) {
-        let msg: PeerExchangeMessage = match serde_json::from_slice(data) {
+        let msg: PeerExchangeMessage = match decode_peer_exchange(data) {
             Ok(m) => m,
             Err(e) => {
                 log::debug!("Peer exchange: invalid message: {e}");
@@ -1274,48 +1411,186 @@ async fn swarm_event_loop(
     }
 
     /// Helper: persist a peer's addresses to the DB so we can reconnect on next startup.
+    /// Best-effort: dropped when the persistence set or the database lane is full.
     fn save_peer_to_db(
-        db: &Option<Arc<std::sync::Mutex<Option<Database>>>>,
-        peer_id: &str,
+        jobs: &mut JoinSet<()>,
+        drops: &mut DropLog,
+        db: &Option<InboundDatabase>,
+        peer_id: String,
         addresses: &[String],
     ) {
         if addresses.is_empty() {
             return;
         }
-        let Some(db_arc) = db else { return };
-        let Ok(db_guard) = db_arc.lock() else { return };
-        let Some(db_lock) = db_guard.as_ref() else {
-            return;
-        };
+        let Some(inbound_db) = db.clone() else { return };
         let addrs_json = serde_json::to_string(addresses).unwrap_or_default();
         let now = chrono::Utc::now().to_rfc3339();
-        let _ = db_lock.conn().execute(
-            "INSERT INTO peers (peer_id, addresses, last_seen)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(peer_id) DO UPDATE SET
-               addresses = ?2,
-               last_seen = ?3",
-            rusqlite::params![peer_id, addrs_json, now],
-        );
+        let spawned = inbound::try_spawn_bounded(jobs, MAX_PERSISTENCE_JOBS, async move {
+            let result = inbound_db
+                .run("p2p.save-peer", move |database| {
+                    database
+                        .conn()
+                        .execute(
+                            "INSERT INTO peers (peer_id, addresses, last_seen)
+                             VALUES (?1, ?2, ?3)
+                             ON CONFLICT(peer_id) DO UPDATE SET
+                               addresses = ?2,
+                               last_seen = ?3",
+                            rusqlite::params![peer_id, addrs_json, now],
+                        )
+                        .map(drop)
+                        .map_err(|e| e.to_string())
+                })
+                .await;
+            if let Err(error) = result {
+                log::debug!("P2P: peer address not persisted: {error}");
+            }
+        });
+        if !spawned {
+            drops.record("peer address persistence jobs are full");
+        }
     }
 
     loop {
         tokio::select! {
+            // Inbound request/response answers computed on the database executor.
+            Some(joined) = inbound_requests.join_next(), if !inbound_requests.is_empty() => {
+                match joined {
+                    Ok(InboundCompletion::VcFetch(channel, Some(response))) => {
+                        let _ = swarm.behaviour_mut().vc_fetch.send_response(channel, response);
+                    }
+                    Ok(InboundCompletion::DeviceSync(channel, response)) => {
+                        let _ = swarm.behaviour_mut().device_sync.send_response(channel, response);
+                    }
+                    Ok(InboundCompletion::Guardian(channel, response)) => {
+                        let _ = swarm.behaviour_mut().guardian.send_response(channel, response);
+                    }
+                    Ok(InboundCompletion::GraphFetch(channel, Some(response))) => {
+                        let _ = swarm.behaviour_mut().graph_fetch.send_response(channel, response);
+                    }
+                    Ok(InboundCompletion::ProfileFetch(channel, Some(response))) => {
+                        let _ = swarm.behaviour_mut().profile_fetch.send_response(channel, response);
+                    }
+                    // Dropping the channel omits the answer; the requester sees
+                    // a transient failure it may retry.
+                    Ok(InboundCompletion::VcFetch(_, None))
+                    | Ok(InboundCompletion::GraphFetch(_, None))
+                    | Ok(InboundCompletion::ProfileFetch(_, None)) => {
+                        request_drops.record("database busy");
+                    }
+                    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+                    Ok(InboundCompletion::DhtRecords(Ok(records))) => {
+                        use libp2p::kad::store::RecordStore;
+                        let mut loaded = 0usize;
+                        for (key, value) in records {
+                            let key = kad::RecordKey::new(&key);
+                            // A record received while the load was queued is newer.
+                            if swarm.behaviour_mut().kademlia.store_mut().get(&key).is_some() {
+                                continue;
+                            }
+                            let record = kad::Record {
+                                key,
+                                value,
+                                publisher: None,
+                                expires: None,
+                            };
+                            if swarm.behaviour_mut().kademlia.store_mut().put(record).is_ok() {
+                                loaded += 1;
+                            }
+                        }
+                        if loaded > 0 {
+                            diag::log(&format!("DHT server: warm-loaded {loaded} records"));
+                        }
+                    }
+                    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+                    Ok(InboundCompletion::DhtRecords(Err(error))) => {
+                        log::warn!("DHT server: record mirror not loaded: {error}");
+                    }
+                    Err(error) => {
+                        if !error.is_cancelled() {
+                            log::warn!("inbound P2P request job failed: {error}");
+                        }
+                    }
+                }
+            }
+            // Privileged-topic gossip resumes validation once the registry
+            // lookup has run on the database executor.
+            Some(joined) = identity_checks.join_next(), if !identity_checks.is_empty() => {
+                let IdentityVerdict {
+                    message_id,
+                    propagation_source,
+                    topic,
+                    envelope,
+                    result,
+                } = match joined {
+                    Ok(verdict) => verdict,
+                    Err(error) => {
+                        if !error.is_cancelled() {
+                            log::warn!("gossip identity check failed: {error}");
+                        }
+                        continue;
+                    }
+                };
+                let acceptance = match result {
+                    Ok(Ok(())) => match validator.check_after_identity(&envelope) {
+                        Ok(()) => gossipsub::MessageAcceptance::Accept,
+                        Err(e) => {
+                            log::debug!(
+                                "Dropping message on {topic} from {}: {e}",
+                                envelope.stake_address
+                            );
+                            gossipsub::MessageAcceptance::Reject
+                        }
+                    },
+                    Ok(Err(e)) => {
+                        log::warn!("registry rejection on {topic}: {e}");
+                        gossipsub::MessageAcceptance::Reject
+                    }
+                    // Our overload, not a protocol violation: Ignore leaves the
+                    // sender's score untouched, and gossip is best-effort.
+                    Err(e) if inbound::is_busy(&e) => {
+                        gossip_drops.record(&e);
+                        gossipsub::MessageAcceptance::Ignore
+                    }
+                    // No current profile registry: fail closed, as the
+                    // synchronous validator did.
+                    Err(e) => {
+                        log::debug!(
+                            "Dropping message on {topic}: stake-pubkey registry unavailable: {e}"
+                        );
+                        gossipsub::MessageAcceptance::Reject
+                    }
+                };
+                let accepted = matches!(acceptance, gossipsub::MessageAcceptance::Accept);
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .report_message_validation_result(
+                        &message_id,
+                        &propagation_source,
+                        acceptance,
+                    );
+                if accepted {
+                    try_forward_gossip(&event_tx, &mut gossip_drops, topic, envelope);
+                }
+            }
+            // Best-effort persistence results are logged by the jobs themselves.
+            Some(_) = persistence_jobs.join_next(), if !persistence_jobs.is_empty() => {}
             // Periodic Kademlia bootstrap
-            _ = kad_bootstrap_interval.tick() => {
+            _ = kad_bootstrap_interval.tick(), if !loopback_only => {
                 let _ = swarm.behaviour_mut().kademlia.bootstrap();
             }
             // Initial provider publish shortly after startup
-            _ = &mut provider_initial, if !initial_provider_done => {
+            _ = &mut provider_initial, if !loopback_only && !initial_provider_done => {
                 initial_provider_done = true;
                 refresh_provider_records(&mut swarm, &namespace_key, "initial warm-up");
             }
             // Fast provider refresh during the startup window
-            _ = provider_warmup_interval.tick(), if initial_provider_done && tokio::time::Instant::now() < provider_warmup_deadline => {
+            _ = provider_warmup_interval.tick(), if !loopback_only && initial_provider_done && tokio::time::Instant::now() < provider_warmup_deadline => {
                 refresh_provider_records(&mut swarm, &namespace_key, "warm-up interval");
             }
             // Periodic provider refresh
-            _ = provider_interval.tick(), if initial_provider_done => {
+            _ = provider_interval.tick(), if !loopback_only && initial_provider_done => {
                 refresh_provider_records(&mut swarm, &namespace_key, "steady-state interval");
                 // Advertise as a relay when contributing, and always look
                 // for relays to adopt (capped + reputation-scored).
@@ -1336,7 +1611,7 @@ async fn swarm_event_loop(
                 );
             }
             // Periodic peer exchange broadcast
-            _ = peer_exchange_interval.tick() => {
+            _ = peer_exchange_interval.tick(), if !loopback_only => {
                 publish_peer_exchange(&mut swarm);
             }
             // Process commands from the application
@@ -1608,9 +1883,7 @@ async fn swarm_event_loop(
                         // malformed envelope is a protocol violation —
                         // Reject so gossipsub scores the source down via
                         // the topic's invalid_message_deliveries weight.
-                        let envelope = match serde_json::from_slice::<SignedGossipMessage>(
-                            &message.data,
-                        ) {
+                        let envelope = match decode_envelope(&message.data) {
                             Ok(env) => env,
                             Err(e) => {
                                 log::debug!(
@@ -1629,10 +1902,64 @@ async fn swarm_event_loop(
                         };
 
                         // Step 2: Run the full validation pipeline
-                        // (signature, freshness, dedup, schema, authority).
-                        // Failure here is also a protocol violation; Reject
-                        // feeds the per-topic P4 (invalid_message_deliveries)
-                        // weight in `p2p::scoring`.
+                        // (signature, identity, freshness, dedup, schema,
+                        // authority). Failure here is also a protocol
+                        // violation; Reject feeds the per-topic P4
+                        // (invalid_message_deliveries) weight in `p2p::scoring`.
+                        //
+                        // Privileged topics consult the stake-pubkey registry.
+                        // That lookup is a profile-fenced executor job, so the
+                        // loop starts it and finishes the pipeline when the
+                        // verdict arrives (the `identity_checks` branch).
+                        if let Some(inbound_db) = db
+                            .as_ref()
+                            .filter(|_| registry::is_privileged_topic(&topic))
+                        {
+                            if let Err(e) = validator.check_before_identity(&envelope) {
+                                log::debug!(
+                                    "Dropping message on {topic} from {}: {e}",
+                                    envelope.stake_address
+                                );
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .gossipsub
+                                    .report_message_validation_result(
+                                        &message_id,
+                                        &propagation_source,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                continue;
+                            }
+                            if identity_checks.len() >= MAX_IDENTITY_CHECK_JOBS {
+                                gossip_drops.record("registry identity checks are full");
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .gossipsub
+                                    .report_message_validation_result(
+                                        &message_id,
+                                        &propagation_source,
+                                        gossipsub::MessageAcceptance::Ignore,
+                                    );
+                                continue;
+                            }
+                            let job_db = inbound_db.clone();
+                            let checked = envelope.clone();
+                            identity_checks.spawn(async move {
+                                let result = job_db
+                                    .run("p2p.gossip.identity-binding", move |database| {
+                                        Ok(registry::check_message(database.conn(), &checked))
+                                    })
+                                    .await;
+                                IdentityVerdict {
+                                    message_id,
+                                    propagation_source,
+                                    topic,
+                                    envelope,
+                                    result,
+                                }
+                            });
+                            continue;
+                        }
                         if let Err(e) = validator.validate(&envelope) {
                             log::debug!(
                                 "Dropping message on {topic} from {}: {e}",
@@ -1660,10 +1987,7 @@ async fn swarm_event_loop(
                                 &propagation_source,
                                 gossipsub::MessageAcceptance::Accept,
                             );
-                        let _ = event_tx.send(P2pEvent::GossipMessage {
-                            topic,
-                            message: envelope,
-                        }).await;
+                        try_forward_gossip(&event_tx, &mut gossip_drops, topic, envelope);
                     }
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Gossipsub(
                         gossipsub::Event::Subscribed { peer_id, topic }
@@ -1742,21 +2066,38 @@ async fn swarm_event_loop(
                                     },
                             } => {
                                 if dht_server {
-                                    if let Some(db_arc) = db.as_ref() {
-                                        if let Ok(guard) = db_arc.lock() {
-                                            if let Some(database) = guard.as_ref() {
-                                                let _ = database.conn().execute(
-                                                    "INSERT INTO dht_records (key, value, updated_at)
-                                                     VALUES (?1, ?2, datetime('now'))
-                                                     ON CONFLICT(key) DO UPDATE SET
-                                                         value = excluded.value,
-                                                         updated_at = excluded.updated_at",
-                                                    rusqlite::params![
-                                                        record.key.as_ref(),
-                                                        record.value
-                                                    ],
-                                                );
-                                            }
+                                    // Best-effort mirror; the in-memory store
+                                    // below stays authoritative for this session.
+                                    if let Some(inbound_db) = db.clone() {
+                                        let key = record.key.to_vec();
+                                        let value = record.value.clone();
+                                        let spawned = inbound::try_spawn_bounded(
+                                            &mut persistence_jobs,
+                                            MAX_PERSISTENCE_JOBS,
+                                            async move {
+                                                let result = inbound_db
+                                                    .run("p2p.dht-record-mirror", move |database| {
+                                                        database
+                                                            .conn()
+                                                            .execute(
+                                                                "INSERT INTO dht_records (key, value, updated_at)
+                                                                 VALUES (?1, ?2, datetime('now'))
+                                                                 ON CONFLICT(key) DO UPDATE SET
+                                                                     value = excluded.value,
+                                                                     updated_at = excluded.updated_at",
+                                                                rusqlite::params![key, value],
+                                                            )
+                                                            .map(drop)
+                                                            .map_err(|e| e.to_string())
+                                                    })
+                                                    .await;
+                                                if let Err(error) = result {
+                                                    log::debug!("DHT server: record not mirrored: {error}");
+                                                }
+                                            },
+                                        );
+                                        if !spawned {
+                                            persistence_drops.record("DHT record mirror jobs are full");
                                         }
                                     }
                                     use libp2p::kad::store::RecordStore;
@@ -2014,28 +2355,45 @@ async fn swarm_event_loop(
                                     "vc-fetch: inbound request from {peer} for {}",
                                     request.credential_id
                                 );
-                                // Synchronously answer using the local DB.
+                                // Answer from the local DB on the executor.
                                 // Without a DB handle we MUST respond
                                 // (the libp2p contract requires it) so
-                                // we fall back to NotFound.
-                                let response = match db.as_ref() {
-                                    Some(db_arc) => match db_arc.lock() {
-                                        Ok(guard) => match guard.as_ref() {
-                                            Some(database) => super::vc_fetch::handle_fetch_request(
-                                                database.conn(),
-                                                &request,
-                                            )
-                                            .unwrap_or(super::vc_fetch::FetchResponse::NotFound),
-                                            None => super::vc_fetch::FetchResponse::NotFound,
-                                        },
-                                        Err(_) => super::vc_fetch::FetchResponse::NotFound,
-                                    },
-                                    None => super::vc_fetch::FetchResponse::NotFound,
-                                };
-                                let _ = swarm
-                                    .behaviour_mut()
-                                    .vc_fetch
-                                    .send_response(channel, response);
+                                // we fall back to NotFound. Overload omits
+                                // the answer rather than claiming NotFound.
+                                match db.as_ref() {
+                                    Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
+                                        let job_db = inbound_db.clone();
+                                        inbound_requests.spawn(async move {
+                                            let response = match job_db
+                                                .run("p2p.vc-fetch", move |database| {
+                                                    Ok(super::vc_fetch::handle_fetch_request(
+                                                        database.conn(),
+                                                        &request,
+                                                    )
+                                                    .unwrap_or(FetchResponse::NotFound))
+                                                })
+                                                .await
+                                            {
+                                                Ok(response) => Some(response),
+                                                Err(error) => inbound::fallback_unless_busy(
+                                                    &error,
+                                                    FetchResponse::NotFound,
+                                                ),
+                                            };
+                                            InboundCompletion::VcFetch(channel, response)
+                                        });
+                                    }
+                                    Some(_) => {
+                                        request_drops.record("vc-fetch request jobs are full");
+                                        drop(channel);
+                                    }
+                                    None => {
+                                        let _ = swarm
+                                            .behaviour_mut()
+                                            .vc_fetch
+                                            .send_response(channel, FetchResponse::NotFound);
+                                    }
+                                }
                             }
                             request_response::Message::Response { request_id, response } => {
                                 if let Some(reply) = outbound_fetch_replies.remove(&request_id) {
@@ -2073,33 +2431,46 @@ async fn swarm_event_loop(
                         match message {
                             request_response::Message::Request { request, channel, .. } => {
                                 log::debug!("device-sync: inbound request from {peer}");
-                                // Answer against the local DB. Without a DB
-                                // handle we MUST still respond (libp2p
-                                // contract) — fall back to an error response.
-                                let response = match db.as_ref() {
-                                    Some(db_arc) => match db_arc.lock() {
-                                        Ok(guard) => match guard.as_ref() {
-                                            Some(database) => super::device_sync::handle_sync_request(
-                                                database.conn(),
-                                                &peer.to_string(),
-                                                &request,
-                                            ),
-                                            None => super::device_sync::SyncResponse::Error(
-                                                "no active profile".into(),
-                                            ),
-                                        },
-                                        Err(_) => super::device_sync::SyncResponse::Error(
-                                            "db lock poisoned".into(),
-                                        ),
-                                    },
-                                    None => super::device_sync::SyncResponse::Error(
-                                        "no database".into(),
-                                    ),
-                                };
-                                let _ = swarm
-                                    .behaviour_mut()
-                                    .device_sync
-                                    .send_response(channel, response);
+                                // Answer against the local DB on the executor,
+                                // applying the payload in the handler's own
+                                // transaction. Without a DB handle we MUST
+                                // still respond (libp2p contract) — fall back
+                                // to an error response. Overload answers with
+                                // the retryable busy error.
+                                match db.as_ref() {
+                                    Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
+                                        let job_db = inbound_db.clone();
+                                        let peer_id = peer.to_string();
+                                        inbound_requests.spawn(async move {
+                                            let response = job_db
+                                                .run("p2p.device-sync", move |database| {
+                                                    Ok(super::device_sync::handle_sync_request(
+                                                        database.conn(),
+                                                        &peer_id,
+                                                        &request,
+                                                    ))
+                                                })
+                                                .await
+                                                .unwrap_or_else(|error| {
+                                                    SyncResponse::Error(inbound::refusal_text(&error))
+                                                });
+                                            InboundCompletion::DeviceSync(channel, response)
+                                        });
+                                    }
+                                    Some(_) => {
+                                        request_drops.record("device-sync request jobs are full");
+                                        let _ = swarm.behaviour_mut().device_sync.send_response(
+                                            channel,
+                                            SyncResponse::Error(inbound::DATABASE_BUSY.into()),
+                                        );
+                                    }
+                                    None => {
+                                        let _ = swarm.behaviour_mut().device_sync.send_response(
+                                            channel,
+                                            SyncResponse::Error("no database".into()),
+                                        );
+                                    }
+                                }
                             }
                             request_response::Message::Response { request_id, response } => {
                                 if let Some(reply) = outbound_sync_replies.remove(&request_id) {
@@ -2135,30 +2506,43 @@ async fn swarm_event_loop(
                         match message {
                             request_response::Message::Request { request, channel, .. } => {
                                 log::debug!("guardian: inbound request from {peer}");
-                                let response = match db.as_ref() {
-                                    Some(db_arc) => match db_arc.lock() {
-                                        Ok(guard) => match guard.as_ref() {
-                                            Some(database) => super::guardian::handle_guardian_request(
-                                                database.conn(),
-                                                &peer.to_string(),
-                                                &request,
-                                            ),
-                                            None => super::guardian::GuardianResponse::Error(
-                                                "no active profile".into(),
-                                            ),
-                                        },
-                                        Err(_) => super::guardian::GuardianResponse::Error(
-                                            "db lock poisoned".into(),
-                                        ),
-                                    },
-                                    None => super::guardian::GuardianResponse::Error(
-                                        "no database".into(),
-                                    ),
-                                };
-                                let _ = swarm
-                                    .behaviour_mut()
-                                    .guardian
-                                    .send_response(channel, response);
+                                // Same policy as device-sync: one executor job
+                                // per request keeps the handler's transaction,
+                                // and overload answers with the retryable busy error.
+                                match db.as_ref() {
+                                    Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
+                                        let job_db = inbound_db.clone();
+                                        let peer_id = peer.to_string();
+                                        inbound_requests.spawn(async move {
+                                            let response = job_db
+                                                .run("p2p.guardian", move |database| {
+                                                    Ok(super::guardian::handle_guardian_request(
+                                                        database.conn(),
+                                                        &peer_id,
+                                                        &request,
+                                                    ))
+                                                })
+                                                .await
+                                                .unwrap_or_else(|error| {
+                                                    GuardianResponse::Error(inbound::refusal_text(&error))
+                                                });
+                                            InboundCompletion::Guardian(channel, response)
+                                        });
+                                    }
+                                    Some(_) => {
+                                        request_drops.record("guardian request jobs are full");
+                                        let _ = swarm.behaviour_mut().guardian.send_response(
+                                            channel,
+                                            GuardianResponse::Error(inbound::DATABASE_BUSY.into()),
+                                        );
+                                    }
+                                    None => {
+                                        let _ = swarm.behaviour_mut().guardian.send_response(
+                                            channel,
+                                            GuardianResponse::Error("no database".into()),
+                                        );
+                                    }
+                                }
                             }
                             request_response::Message::Response { request_id, response } => {
                                 if let Some(reply) = outbound_guardian_replies.remove(&request_id) {
@@ -2197,31 +2581,45 @@ async fn swarm_event_loop(
                                     "graph-fetch: inbound request from {peer} for {}",
                                     request.subject_did
                                 );
-                                // Answer against the local DB. Without a DB
-                                // handle we MUST still respond (libp2p
-                                // contract) — fall back to NotOwner.
-                                let response = match db.as_ref() {
-                                    Some(db_arc) => match db_arc.lock() {
-                                        Ok(guard) => match guard.as_ref() {
-                                            Some(database) => {
-                                                super::graph_fetch::handle_graph_fetch_request(
-                                                    database.conn(),
-                                                    &request,
-                                                )
-                                                .unwrap_or(
-                                                    super::graph_fetch::GraphFetchResponse::NotOwner,
-                                                )
-                                            }
-                                            None => super::graph_fetch::GraphFetchResponse::NotOwner,
-                                        },
-                                        Err(_) => super::graph_fetch::GraphFetchResponse::NotOwner,
-                                    },
-                                    None => super::graph_fetch::GraphFetchResponse::NotOwner,
-                                };
-                                let _ = swarm
-                                    .behaviour_mut()
-                                    .graph_fetch
-                                    .send_response(channel, response);
+                                // Answer against the local DB on the executor.
+                                // Without a DB handle we MUST still respond
+                                // (libp2p contract) — fall back to NotOwner.
+                                // Overload omits the answer rather than
+                                // claiming NotOwner.
+                                match db.as_ref() {
+                                    Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
+                                        let job_db = inbound_db.clone();
+                                        inbound_requests.spawn(async move {
+                                            let response = match job_db
+                                                .run("p2p.graph-fetch", move |database| {
+                                                    Ok(super::graph_fetch::handle_graph_fetch_request(
+                                                        database.conn(),
+                                                        &request,
+                                                    )
+                                                    .unwrap_or(GraphFetchResponse::NotOwner))
+                                                })
+                                                .await
+                                            {
+                                                Ok(response) => Some(response),
+                                                Err(error) => inbound::fallback_unless_busy(
+                                                    &error,
+                                                    GraphFetchResponse::NotOwner,
+                                                ),
+                                            };
+                                            InboundCompletion::GraphFetch(channel, response)
+                                        });
+                                    }
+                                    Some(_) => {
+                                        request_drops.record("graph-fetch request jobs are full");
+                                        drop(channel);
+                                    }
+                                    None => {
+                                        let _ = swarm
+                                            .behaviour_mut()
+                                            .graph_fetch
+                                            .send_response(channel, GraphFetchResponse::NotOwner);
+                                    }
+                                }
                             }
                             request_response::Message::Response { request_id, response } => {
                                 if let Some(reply) =
@@ -2259,28 +2657,41 @@ async fn swarm_event_loop(
                         match message {
                             request_response::Message::Request { request, channel, .. } => {
                                 log::info!("profile-fetch: inbound request from {peer}");
-                                let response = match db.as_ref() {
-                                    Some(db_arc) => match db_arc.lock() {
-                                        Ok(guard) => match guard.as_ref() {
-                                            Some(database) => {
-                                                super::profile_fetch::handle_profile_fetch_request(
-                                                    database.conn(),
-                                                    &request,
-                                                )
-                                                .unwrap_or(
-                                                    super::profile_fetch::ProfileFetchResponse::NotOwner,
-                                                )
-                                            }
-                                            None => super::profile_fetch::ProfileFetchResponse::NotOwner,
-                                        },
-                                        Err(_) => super::profile_fetch::ProfileFetchResponse::NotOwner,
-                                    },
-                                    None => super::profile_fetch::ProfileFetchResponse::NotOwner,
-                                };
-                                let _ = swarm
-                                    .behaviour_mut()
-                                    .profile_fetch
-                                    .send_response(channel, response);
+                                // Same policy as graph-fetch.
+                                match db.as_ref() {
+                                    Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
+                                        let job_db = inbound_db.clone();
+                                        inbound_requests.spawn(async move {
+                                            let response = match job_db
+                                                .run("p2p.profile-fetch", move |database| {
+                                                    Ok(super::profile_fetch::handle_profile_fetch_request(
+                                                        database.conn(),
+                                                        &request,
+                                                    )
+                                                    .unwrap_or(ProfileFetchResponse::NotOwner))
+                                                })
+                                                .await
+                                            {
+                                                Ok(response) => Some(response),
+                                                Err(error) => inbound::fallback_unless_busy(
+                                                    &error,
+                                                    ProfileFetchResponse::NotOwner,
+                                                ),
+                                            };
+                                            InboundCompletion::ProfileFetch(channel, response)
+                                        });
+                                    }
+                                    Some(_) => {
+                                        request_drops.record("profile-fetch request jobs are full");
+                                        drop(channel);
+                                    }
+                                    None => {
+                                        let _ = swarm
+                                            .behaviour_mut()
+                                            .profile_fetch
+                                            .send_response(channel, ProfileFetchResponse::NotOwner);
+                                    }
+                                }
                             }
                             request_response::Message::Response { request_id, response } => {
                                 if let Some(reply) =
@@ -2345,7 +2756,13 @@ async fn swarm_event_loop(
                         publish_peer_exchange(&mut swarm);
                         // Persist the peer's address so we reconnect on next startup.
                         let addr = endpoint.get_remote_address().to_string();
-                        save_peer_to_db(&db, &peer_id.to_string(), &[addr]);
+                        save_peer_to_db(
+                            &mut persistence_jobs,
+                            &mut persistence_drops,
+                            &db,
+                            peer_id.to_string(),
+                            &[addr],
+                        );
                         // Reward a discovered relay that connected.
                         if discovered_relays.contains(&peer_id) {
                             discovered_relays.note_success(&peer_id);
@@ -2710,7 +3127,26 @@ impl P2pNode {
     /// Shutdown the node.
     pub async fn shutdown(&mut self) {
         self.running = false;
-        let _ = self.command_tx.send(SwarmCommand::Shutdown).await;
+        if let Some(task) = self.task.as_mut() {
+            // A full event/reply channel must not prevent shutdown. Aborting
+            // drops the swarm and its DB references; joining proves that drop
+            // finished before the caller can repoint profile resources.
+            task.abort();
+            if let Err(error) = task.await {
+                if !error.is_cancelled() {
+                    log::warn!("P2P task failed during shutdown: {error}");
+                }
+            }
+            self.task = None;
+        }
+    }
+}
+
+impl Drop for P2pNode {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.as_ref() {
+            task.abort();
+        }
     }
 }
 
@@ -2719,6 +3155,98 @@ mod tests {
     use super::*;
 
     const TEST_DEVICE_ID: [u8; 32] = [0xCCu8; 32];
+
+    fn pending_node(owner: oneshot::Sender<()>) -> P2pNode {
+        let (command_tx, command_rx) = mpsc::channel(1);
+        command_tx
+            .try_send(SwarmCommand::Shutdown)
+            .expect("fill queue");
+        let task = tokio::spawn(async move {
+            let _owner = owner;
+            let _receiver = command_rx;
+            std::future::pending::<()>().await;
+        });
+        P2pNode {
+            command_tx,
+            peer_id: Keypair::generate_ed25519().public().to_peer_id(),
+            running: true,
+            task: Some(task),
+        }
+    }
+
+    fn test_gossip_message() -> SignedGossipMessage {
+        SignedGossipMessage {
+            topic: "/alexandria/test/1.0".into(),
+            payload: Vec::new(),
+            signature: vec![0; 64],
+            public_key: vec![0; 32],
+            stake_address: "stake_test1ueventqueue".into(),
+            timestamp: 0,
+            encrypted: false,
+            key_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_gossip_does_not_wait_for_a_full_application_queue() {
+        let (events, mut receiver) = mpsc::channel(1);
+        let mut drops = DropLog::new("test gossip");
+        assert!(try_forward_gossip(
+            &events,
+            &mut drops,
+            "first".into(),
+            test_gossip_message(),
+        ));
+        assert!(!try_forward_gossip(
+            &events,
+            &mut drops,
+            "second".into(),
+            test_gossip_message(),
+        ));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(P2pEvent::GossipMessage { topic, .. }) if topic == "first"
+        ));
+    }
+
+    #[tokio::test]
+    async fn shutdown_joins_swarm_even_when_command_queue_is_full() {
+        let (owner, mut released) = oneshot::channel();
+        let mut node = pending_node(owner);
+        tokio::time::timeout(Duration::from_secs(5), node.shutdown())
+            .await
+            .expect("shutdown cannot wait on a full queue");
+        assert!(node.task.is_none());
+        assert!(matches!(
+            released.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        node.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn interrupted_shutdown_retains_the_join_handle_for_retry() {
+        let (owner, released) = oneshot::channel();
+        let mut node = pending_node(owner);
+        {
+            let mut cleanup = Box::pin(node.shutdown());
+            assert!(futures::poll!(&mut cleanup).is_pending());
+        }
+        assert!(node.task.is_some());
+        node.shutdown().await;
+        assert!(released.await.is_err());
+        assert!(node.task.is_none());
+    }
+
+    #[tokio::test]
+    async fn dropping_unpublished_node_aborts_its_swarm() {
+        let (owner, released) = oneshot::channel();
+        drop(pending_node(owner));
+        assert!(tokio::time::timeout(Duration::from_secs(5), released)
+            .await
+            .expect("task drops its resources")
+            .is_err());
+    }
 
     #[test]
     fn apple_device_labels_use_retail_names_not_hardware_generations() {

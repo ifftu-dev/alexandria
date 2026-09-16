@@ -9,7 +9,18 @@ import InfoTip from '@/components/ui/InfoTip.vue'
 import LearnerTutor from '@/components/course/LearnerTutor.vue'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
-import type { Course, Chapter, Element, Enrollment, ElementProgress, UpdateProgressRequest, QuizResult } from '@/types'
+import { getProfileSessionToken } from '@/composables/profileSession'
+import type {
+  Chapter,
+  CompletionWitnessResult,
+  Course,
+  Element,
+  ElementProgress,
+  ElementSkillTag,
+  Enrollment,
+  QuizResult,
+  UpdateProgressRequest,
+} from '@/types'
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -82,6 +93,7 @@ const claiming = ref(false)
 const claimError = ref<string | null>(null)
 const claimTxHash = ref<string | null>(null)
 const claimCredentialIds = ref<string[]>([])
+const completionReceipt = ref<CompletionWitnessResult | null>(null)
 
 async function refreshCompletionStatus() {
   try {
@@ -95,12 +107,14 @@ async function claimCredential() {
   claiming.value = true
   claimError.value = null
   try {
-    const result = await invoke<{ tx_hash: string; credential_ids: string[] }>(
+    const result = await invoke<CompletionWitnessResult>(
       'claim_course_completion',
       { courseId, timestampMs: Date.now() },
     )
     claimTxHash.value = result.tx_hash
+    completionReceipt.value = result
     claimCredentialIds.value = result.credential_ids ?? []
+    return result
   } catch (e) {
     claimError.value = String(e)
   } finally {
@@ -120,11 +134,16 @@ const autoMintFired = ref(false)
 // content-only courses); on-chain anchoring is an upgrade, not required. We do
 // NOT navigate away — the modal's "View credential" / "Continue" own that.
 async function mintAndCelebrate() {
+  if (claiming.value) return
+  const session = getProfileSessionToken()
   autoMintFired.value = true
   await refreshCompletionStatus()
+  if (!session || session !== getProfileSessionToken()) return
   claimTxHash.value = null
   claimCredentialIds.value = []
-  await claimCredential().catch(() => {})
+  completionReceipt.value = null
+  const receipt = await claimCredential()
+  if (session !== getProfileSessionToken()) return
 
   courseCompletion.open({
     courseTitle: course.value?.title ?? t('learn.player.courseFallback'),
@@ -132,6 +151,10 @@ async function mintAndCelebrate() {
     skillIds: course.value?.skill_ids ?? [],
     txHash: claimTxHash.value,
     credentialIds: claimCredentialIds.value,
+    claimId: receipt?.claim_id,
+    witnessStatus: receipt?.witness_status,
+    endorsementRequest: receipt?.endorsement_request ?? null,
+    endorsementMissingEvidence: receipt?.endorsement_missing_evidence ?? [],
     isTutorial: isTutorial.value,
     unmetElements: completionStatus.value?.unmet_elements ?? [],
   })
@@ -156,6 +179,10 @@ async function finishCourse() {
 }
 
 const sentinelStarted = ref(false)
+const monitoringError = ref<string | null>(null)
+const monitoringPending = ref(false)
+const monitoringRetry = ref(0)
+let disposed = false
 const downloadingElementId = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
 
@@ -174,6 +201,7 @@ const lastFacePresent = ref<boolean | null>(null)
 let gazeLoopTimer: ReturnType<typeof setInterval> | null = null
 let faceIdLoopTimer: ReturnType<typeof setInterval> | null = null
 let gazeInFlight = false
+let cameraGeneration = 0
 
 const activeChapter = ref<string | null>(null)
 const activeElement = ref<string | null>(null)
@@ -301,10 +329,38 @@ const isLastElement = computed(() => {
   return chElems[chElems.length - 1]?.id === activeElement.value
 })
 
-// Skill tags for current element (from Element.skills if available)
-const elementSkills = computed(() => {
+const skillTagsByElementId = ref<Record<string, ElementSkillTag[]>>({})
+const skillTagRequests = new Set<string>()
+
+const elementSkills = computed<ElementSkillTag[]>(() => {
   if (!currentElement.value) return []
-  return (currentElement.value as any).skills ?? []
+  return skillTagsByElementId.value[currentElement.value.id] ?? []
+})
+
+watch(currentElement, async (element, _, onCleanup) => {
+  if (!element) return
+  if (Object.prototype.hasOwnProperty.call(skillTagsByElementId.value, element.id)) return
+  if (skillTagRequests.has(element.id)) return
+
+  let current = true
+  onCleanup(() => { current = false })
+  const session = getProfileSessionToken()
+  if (!session) return
+  skillTagRequests.add(element.id)
+  try {
+    const tags = await invoke<ElementSkillTag[]>('list_element_skill_tags', {
+      elementId: element.id,
+    })
+    if (!current || disposed || session !== getProfileSessionToken()) return
+    skillTagsByElementId.value = {
+      ...skillTagsByElementId.value,
+      [element.id]: Array.isArray(tags) ? tags : [],
+    }
+  } catch (e: unknown) {
+    console.warn('Failed to load element skill tags:', e)
+  } finally {
+    skillTagRequests.delete(element.id)
+  }
 })
 
 onMounted(async () => {
@@ -378,39 +434,51 @@ onMounted(async () => {
 // It starts when an assessment element is displayed and stops when the learner
 // leaves it, so a session's boundaries are the thing being assessed. Reading
 // pages, videos and discussion are not monitored at all.
-watch([activeChapter, activeElement], async () => {
+watch([currentElement, enrollment, monitoringRetry], async (_, __, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
   const el = currentElement.value
   const shouldMonitor = !!el && !!enrollment.value && sentinel.isAssessmentElement(el.element_type)
+  monitoringPending.value = true
+  try {
+    if (shouldMonitor) {
+      await sentinel.start(enrollment.value!.id)
+      if (!current || disposed) return
+      sentinelStarted.value = sentinel.isActive.value
+      if (el && sentinelStarted.value) sentinel.setElement(el.id, el.element_type)
+    } else {
+      sentinelStarted.value = false
+      stopCameraCapture()
+      // Stop even when startup has not returned yet. This invalidates queued
+      // startup before it can attach listeners to a non-assessment element.
+      await sentinel.stop()
+    }
+    if (current && !disposed) monitoringError.value = null
+  } catch (e) {
+    if (current && !disposed) {
+      monitoringError.value = String(e)
+      sentinelStarted.value = false
+    }
+  } finally {
+    if (current && !disposed) monitoringPending.value = false
+  }
 
-  if (shouldMonitor && !sentinelStarted.value) {
-    await sentinel.start(enrollment.value!.id)
-    sentinelStarted.value = true
-  }
-  if (el && sentinelStarted.value) {
-    sentinel.setElement(el.id, el.element_type)
-  }
-  if (!shouldMonitor && sentinelStarted.value) {
-    // Ends the session, which is what surfaces the evidence-consent prompt if
-    // it was flagged.
-    await sentinel.stop()
-    sentinelStarted.value = false
-  }
-
+  if (!current || disposed) return
   downloadError.value = null
   void markInProgress()
 }, { immediate: true })
 
-onUnmounted(async () => {
+onUnmounted(() => {
+  disposed = true
   window.removeEventListener('keydown', onGlobalKeydown)
-  stopFaceLoop()
-  releaseCameraStream()
-  if (sentinelStarted.value) {
-    await sentinel.stop()
-  }
+  stopCameraCapture()
+  void sentinel.stop().catch(e => console.warn('Course monitoring cleanup failed', e))
 })
 
 async function enableCamera() {
-  if (cameraStream.value || cameraStarting.value) return
+  if (disposed || !sentinelStarted.value || cameraStream.value || cameraStarting.value) return
+  const generation = ++cameraGeneration
+  const isCurrent = () => !disposed && generation === cameraGeneration && sentinelStarted.value
   cameraError.value = null
   cameraStarting.value = true
   try {
@@ -418,29 +486,43 @@ async function enableCamera() {
       video: { width: 320, height: 240, facingMode: 'user' },
       audio: false,
     })
+    if (!isCurrent()) {
+      for (const track of stream.getTracks()) track.stop()
+      return
+    }
     cameraStream.value = stream
     // Wait a tick so the <video> element is rendered under v-if before attach.
     await new Promise(resolve => setTimeout(resolve, 0))
+    if (!isCurrent()) return
     const video = cameraVideoRef.value
     if (video) {
       video.srcObject = stream
       video.muted = true
       await video.play().catch(() => { /* autoplay rules — loop will retry */ })
     }
+    if (!isCurrent()) return
     sentinel.setCameraOptedIn(true)
     startFaceLoop()
   } catch (e) {
-    cameraError.value = e instanceof Error ? e.message : t('learn.player.cameraUnavailable')
-    releaseCameraStream()
+    if (isCurrent()) {
+      cameraError.value = e instanceof Error ? e.message : t('learn.player.cameraUnavailable')
+      releaseCameraStream()
+    }
   } finally {
-    cameraStarting.value = false
+    if (generation === cameraGeneration) cameraStarting.value = false
   }
 }
 
 function disableCamera() {
+  stopCameraCapture()
+  sentinel.setCameraOptedIn(false)
+}
+
+function stopCameraCapture() {
+  cameraGeneration++
+  cameraStarting.value = false
   stopFaceLoop()
   releaseCameraStream()
-  sentinel.setCameraOptedIn(false)
   lastFacePresent.value = null
 }
 
@@ -454,6 +536,7 @@ function releaseCameraStream() {
 
 function startFaceLoop() {
   if (gazeLoopTimer || faceIdLoopTimer) return
+  const generation = cameraGeneration
   // Fast gaze loop — catches brief look-aways. Backend YuNet + head-pose;
   // an in-flight guard prevents pile-up if a tick is slower than the
   // interval (e.g. on mobile).
@@ -461,7 +544,9 @@ function startFaceLoop() {
     const video = cameraVideoRef.value
     if (!video || gazeInFlight) return
     gazeInFlight = true
-    void sentinel.scoreGaze(video).finally(() => { gazeInFlight = false })
+    void sentinel.scoreGaze(video).finally(() => {
+      if (generation === cameraGeneration) gazeInFlight = false
+    })
   }, GAZE_LOOP_INTERVAL_MS)
   // Slower LBP identity/presence loop (synchronous, advisory).
   faceIdLoopTimer = setInterval(() => {
@@ -509,14 +594,6 @@ async function enrollFromPlayer() {
   enrolling.value = true
   try {
     enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
-    // Whether to monitor is the element watcher's call, not enrolment's — a
-    // learner who enrols while reading is not sitting an assessment.
-    const el = currentElement.value
-    if (enrollment.value && el && !sentinelStarted.value && sentinel.isAssessmentElement(el.element_type)) {
-      await sentinel.start(enrollment.value.id)
-      sentinelStarted.value = true
-      sentinel.setElement(el.id, el.element_type)
-    }
   } catch (e) {
     console.error('Failed to enroll from player:', e)
   } finally {
@@ -639,7 +716,7 @@ function buildDownloadFileName(rawName: string | null | undefined, mimeType: str
 
 async function onDownloadClick() {
   if (!currentElement.value) return
-  const element = currentElement.value as any
+  const element = currentElement.value
   downloadError.value = null
 
   if (!element.content_cid) {
@@ -654,8 +731,9 @@ async function onDownloadClick() {
       identifier: element.content_cid,
     })
 
-    const mimeType = element.mime_type || inferMimeFromName(element.filename) || 'application/octet-stream'
-    const fileName = buildDownloadFileName(element.filename || element.title, mimeType)
+    const mimeType = inferMimeFromName(element.title)
+      ?? (element.element_type === 'pdf' ? 'application/pdf' : 'application/octet-stream')
+    const fileName = buildDownloadFileName(element.title, mimeType)
     const blob = new Blob([new Uint8Array(bytes)], { type: mimeType })
     const objectUrl = URL.createObjectURL(blob)
 
@@ -953,12 +1031,12 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <button
                 :disabled="claiming"
                 class="mt-2 w-full rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
-                @click="claimCredential"
+                @click="mintAndCelebrate"
               >
                 {{ claiming ? $t('learn.player.claiming') : $t('learn.player.claimCredential') }}
               </button>
               <p v-if="claimError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ claimError }}</p>
-              <div v-if="claimTxHash" class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+              <div v-if="claimTxHash && completionReceipt?.witness_status === 'confirmed'" class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
                 <p>{{ $t('learn.player.publicRecordSaved') }}</p>
                 <details class="mt-1">
                   <summary class="cursor-pointer">{{ $t('common.advanced.toggle') }}</summary>
@@ -1150,6 +1228,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- MAIN CONTENT AREA              -->
       <!-- ============================== -->
       <div class="flex-1 flex flex-col overflow-hidden">
+        <div v-if="monitoringError" role="alert" class="m-3 shrink-0 space-y-2 rounded-lg border border-error/40 bg-error/5 p-3 text-sm text-error">
+          <p>{{ monitoringError }}</p>
+          <AppButton variant="outline" :loading="monitoringPending" @click="monitoringRetry++">{{ $t('common.actions.retry') }}</AppButton>
+        </div>
         <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
             <!-- Element header. For full-bleed elements (plugins/video) it is
                  hidden on mobile — the compact top header already carries the
@@ -1240,11 +1322,11 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <div v-if="elementSkills.length > 0" class="mt-3 flex flex-wrap gap-1.5">
                 <router-link
                   v-for="skill in elementSkills"
-                  :key="skill.skill_id || skill.id"
-                  :to="`/skills/${skill.skill_id || skill.id}`"
+                  :key="skill.skill_id"
+                  :to="`/skills/${skill.skill_id}`"
                   class="inline-flex items-center rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15"
                 >
-                  {{ skill.skill_name || skill.name }}
+                  {{ skill.skill_name }}
                 </router-link>
               </div>
             </div>

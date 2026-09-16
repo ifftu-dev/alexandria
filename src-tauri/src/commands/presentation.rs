@@ -21,14 +21,15 @@
 //! records `(audience, nonce)` in `presentations_seen`. A second
 //! verification with the same pair returns `Replayed`.
 
+use crate::profile::scope::ProfileState as State;
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::State;
 use uuid::Uuid;
 
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -225,12 +226,15 @@ pub async fn create_presentation(
     req: CreatePresentationRequest,
 ) -> Result<PresentationEnvelope, String> {
     let (signing_key, subject_did) = load_subject_key(&state).await?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    create_presentation_impl(db.conn(), &signing_key, &subject_did, &req)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "presentation.create",
+            move |db| create_presentation_impl(db.conn(), &signing_key, &subject_did, &req),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -239,12 +243,15 @@ pub async fn verify_presentation(
     envelope: PresentationEnvelope,
     audience: String,
 ) -> Result<PresentationVerification, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    verify_presentation_impl(db.conn(), &envelope, &audience)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "presentation.verify",
+            move |db| verify_presentation_impl(db.conn(), &envelope, &audience),
+        )
+        .await
 }
 
 #[cfg(test)]

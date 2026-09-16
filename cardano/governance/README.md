@@ -2,9 +2,9 @@
 
 On-chain governance for the Alexandria learning platform, implementing Section 10 (Governance) of `docs/protocol-specification.md`. Written in [Aiken](https://aiken-lang.org) v1.1.21 targeting Plutus v3 (Conway era).
 
-> **Status: deployed + verified on preprod.** All validators are deployed as CIP-33 reference scripts (parameterized validators applied; hashes + ref UTxOs in `src-tauri/src/cardano/script_refs.rs`) and every flow has been verified on-chain.
+> **Status: retained deployment artifacts on preprod.** Eight validators are deployed as CIP-33 reference scripts (parameterized validators applied; hashes + ref UTxOs in `src-tauri/src/cardano/script_refs.rs`). Deployment and isolated transition tests do not make every flow part of the current release authority path.
 >
-> **Governance runs a lean on-chain model.** The live state machine (DAOs, elections, proposals, votes) lives in local SQLite; the lifecycle propagates as **signed P2P gossip**, and votes are tallied off-chain. Only four operator-signed facts touch Cardano: DAO create (mint), election finalize (publish UTxO), committee install (spend), and proposal resolve (a metadata anchor with the tally + a Merkle root over the signed votes). The per-transition **spend** validators below (`election`, `proposal`) and the per-user reputation validators (`reputation_minting`, `soulbound`) are deployed + verified but **not on the lean live path** — they are the upgrade path to full on-chain enforcement. See `src-tauri/src/cardano/gov_onchain.rs` and `onchain_queue.rs`.
+> **Release governance is not active.** The app can verify and explicitly pin a seven-founder genesis, and it rejects inbound governance state until committee outcome certificates are implemented. The app's local election/proposal commands and operator governance queue are deleted; the deployed validators remain reviewable upgrade artifacts. See `docs/protocol-specification.md` §10.
 
 ## Validators
 
@@ -14,9 +14,10 @@ On-chain governance for the Alexandria learning platform, implementing Section 1
 | `dao_minting` | Minting policy for DAO state tokens. One token per DAO, held at the registry |
 | `election` | Election lifecycle: nomination → voting → finalization. Enforces quorum, deadlines, and seat allocation |
 | `proposal` | Proposal lifecycle: draft → approve → vote → resolve. Supermajority and quorum enforcement |
-| `reputation_minting` | CIP-68 soulbound reputation token minting. Reference + user token pairs anchored to skill proofs |
-| `soulbound` | Spending validator for soulbound tokens. Only the platform can update; holders cannot transfer |
+| `reputation_minting` | Historical CIP-68 reputation-token minting policy; new snapshots use signed `DerivedCredential` VCs |
+| `soulbound` | Historical spending validator for CIP-68 reputation tokens |
 | `vote_minting` | Vote receipt token minting. One receipt per voter per election/proposal to prevent double-voting |
+| `completion` | Completion-witness minting policy keyed to the learner and course completion root |
 
 ## Library Modules
 
@@ -43,24 +44,24 @@ Produces `plutus.json` — the CIP-57 blueprint containing all validator scripts
 aiken check
 ```
 
-12 unit tests: 7 in `utils.ak` (quorum, majority, supermajority, and top-N selection logic) and 5 in `completion.ak` (Merkle proof construction and CIP-68 asset-name encoding).
+Run `aiken check` for the current validator test count and results.
 
 ## Architecture
 
 - **DAO hierarchy** mirrors the skill taxonomy: one DAO per Subject Field, one per Subject
-- **Elections** select council members from nominees who hold sufficient SkillProofs
+- **Elections** are designed to select council members from nominees satisfying the DAO qualification policy
 - **Proposals** require council approval before community vote
-- **Reputation tokens** are CIP-68 soulbound NFTs — the reference token holds metadata (skill, proficiency, confidence), the user token is non-transferable
+- **Reputation snapshots** are now signed `DerivedCredential` VCs with optional canonical-hash anchoring. The CIP-68 reputation validators remain historical deployment artifacts.
 - **Vote receipts** prevent double-voting without requiring on-chain voter rolls
 
 ## Deploying to Preprod
 
-A deployment script is provided to deploy all 9 validators as reference scripts on Cardano preprod testnet.
+A deployment script is provided to deploy the 8 retained validators as reference scripts on Cardano preprod testnet.
 
 ### Prerequisites
 
 - `cardano-cli` installed (Conway-era compatible)
-- A funded preprod wallet (needs ~50 tADA for 9 reference script UTxOs + fees)
+- A funded preprod wallet with enough test ADA for 8 reference-script outputs and fees
 - `BLOCKFROST_PROJECT_ID` environment variable set (get one from [blockfrost.io](https://blockfrost.io))
 
 ### Deploy
@@ -84,10 +85,10 @@ Update `src-tauri/src/cardano/script_refs.rs` with the deployment tx hashes from
 
 ```rust
 pub const DAO_REGISTRY_REF_UTXO: (&str, u64) = ("<tx_hash>", 0);
-// ... repeat for all 9 validators
+// ... repeat for all retained validators
 ```
 
-Once updated, `ref_utxos_deployed()` returns `true` and the governance on-chain queue begins submitting Plutus transactions automatically.
+Once updated, `ref_utxos_deployed()` reports that the references are populated. Release governance remains disabled until its authority certificate path is complete.
 
 ## Integration with the App
 
@@ -95,11 +96,9 @@ The Rust backend integrates with these validators through:
 
 | Module | Purpose |
 |--------|---------|
-| `cardano/gov_tx_builder.rs` | 6 governance tx builders (CreateDao, OpenElection, CastVote, ResolveProposal, FinalizeElection, InstallCommittee) |
-| `cardano/soulbound_tx_builder.rs` | CIP-68 soulbound reputation token minting |
-| `cardano/onchain_queue.rs` | Persistent queue that dispatches governance actions to tx builders |
-| `cardano/plutus_data.rs` | All datum/redeemer CBOR encoding for Plutus Data |
+| `cardano/gov_tx_builder.rs` | Shared Plutus helpers (script addresses, field injection, script-hash parsing); the governance tx builders are deleted |
+| `cardano/plutus_data.rs` | Soulbound, reputation-mint and completion datum/redeemer CBOR encoding; the governance encoders are deleted |
 | `cardano/script_refs.rs` | Script hashes and reference UTxO locations |
-| `commands/snapshot.rs` | `submit_snapshot_tx` command for soulbound minting |
+| `commands/snapshot.rs` | Creates signed `DerivedCredential` snapshots and optionally queues their canonical credential hash for anchoring |
 
 See `docs/protocol-specification.md` Section 10 (Governance) for the full governance specification.

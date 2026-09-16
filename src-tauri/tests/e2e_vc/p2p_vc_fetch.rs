@@ -7,7 +7,9 @@
 //!   B's swarm event loop synchronously consults its DB and replies,
 //!   A's outbound future resolves with the deserialized response.
 
-use super::common::{await_peers_connected, new_test_db, start_test_node, start_test_node_with_db};
+use super::common::{
+    await_peers_connected, discard_events, new_test_db, start_test_node, start_test_node_with_db,
+};
 use app_lib::p2p::vc_fetch::{
     allow_fetch, build_fetch_request, handle_fetch_request, FetchResponse,
 };
@@ -140,8 +142,7 @@ async fn two_node_round_trip_over_vc_fetch_protocol() {
     // Subject node B seeds + allowlists a credential. Requestor
     // node A connects and fires `P2pNode::fetch_credential` over
     // /alexandria/vc-fetch/1.0. The response must come back
-    // deserialized as the same VC (or SKIP if mDNS / port binding
-    // doesn't work in the test environment).
+    // deserialized as the same VC. Transport and timeout errors fail the test.
 
     // Spin up the subject node B with its DB pre-seeded.
     let db_b = new_test_db();
@@ -156,46 +157,42 @@ async fn two_node_round_trip_over_vc_fetch_protocol() {
         requestor_did(106).as_str(),
     )
     .unwrap();
-    let (mut node_b, _rx_b) = match start_test_node_with_db("vc-fetch-b", 32, db_b).await {
-        Some(t) => t,
-        None => return,
-    };
+    // This fixture tests authenticated transport/access policy, not issuer
+    // proof verification. Assert the entire stored payload survives the wire.
+    let expected_json: String = db_b
+        .conn()
+        .query_row(
+            "SELECT signed_vc_json FROM credentials WHERE id = ?1",
+            ["urn:uuid:two-node-vc"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let expected: app_lib::domain::vc::VerifiableCredential =
+        serde_json::from_str(&expected_json).unwrap();
+    let (mut node_b, rx_b) = start_test_node_with_db("vc-fetch-b", 32, db_b).await;
+    let _events_b = discard_events(rx_b);
     let peer_b = *node_b.peer_id();
 
     // Requestor node A doesn't need a DB for this flow.
-    let (mut node_a, _rx_a) = match start_test_node("vc-fetch-a", 32).await {
-        Some(t) => t,
-        None => {
-            node_b.shutdown().await;
-            return;
-        }
-    };
-    if !await_peers_connected(&node_a, &node_b, 10).await {
-        node_a.shutdown().await;
-        node_b.shutdown().await;
-        eprintln!("SKIP: mDNS discovery timed out");
-        return;
-    }
-    // Give request_response a moment to settle handshakes.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let (mut node_a, rx_a) = start_test_node("vc-fetch-a", 32).await;
+    let _events_a = discard_events(rx_a);
+    await_peers_connected(&node_a, &node_b, 10).await;
 
     let req = build_fetch_request(&requestor_key(106), "urn:uuid:two-node-vc", "n-two-node");
-    let resp = node_a.fetch_credential(peer_b, req).await;
-    let outcome = match resp {
-        Ok(r) => r,
-        Err(e) => {
-            // Accept transient transport failures as SKIP — the unit
-            // tests already pin the handler-level shape; this test
-            // is specifically about the wire path.
-            eprintln!("SKIP: fetch_credential transport error: {e:?}");
-            node_a.shutdown().await;
-            node_b.shutdown().await;
-            return;
-        }
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        node_a.fetch_credential(peer_b, req),
+    )
+    .await
+    .expect("credential fetch timed out")
+    .expect("credential fetch transport failed");
+    let FetchResponse::Ok(received) = outcome else {
+        panic!("expected Ok(vc), got {outcome:?}");
     };
-    assert!(
-        matches!(outcome, FetchResponse::Ok(_)),
-        "expected Ok(vc), got {outcome:?}"
+    assert_eq!(
+        serde_json::to_value(received).unwrap(),
+        serde_json::to_value(expected).unwrap(),
+        "credential payload changed in transit"
     );
 
     node_a.shutdown().await;

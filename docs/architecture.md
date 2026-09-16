@@ -6,15 +6,17 @@
 > SkillProof pipeline described in §5–§7 (`skill_proofs`,
 > `evidence_records`, `skill_assessments`, the NFT wrapper, the
 > aggregator) has been retired. Credentials are now W3C Verifiable
-> Credentials auto-earned via a Cardano completion validator. See
+> Credentials, including offline learner self-claims and optional
+> confirmed Cardano completion witnesses. See
 > [`vc-migration.md`](./vc-migration.md) for what replaces what.
-> The reputation/challenge/attestation subsystems have since been
-> rebuilt on the VC-first model and are live: `commands::{reputation,
-> attestation,challenge}` are registered in `lib.rs` (see §8/§9/§11).
-> Only the legacy evidence-based versions were retired.
+> Reputation and exact course-version completion endorsement were rebuilt on
+> the VC-first model. The later credential-challenge experiment and its Cardano
+> escrow path have now also been retired: no challenge commands are
+> registered and no challenge transaction builder is compiled. Their
+> schema remains only as pre-launch legacy storage pending migration D03.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-04-24 (VC-first cutover)
+**Last updated**: 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and explicit endorsement workflow, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
 
 ---
 
@@ -67,11 +69,11 @@ central API, no hosted database, and no Docker infrastructure.
 |                                                       |
 |  +----------------+         +----------------------+  |
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
-|  |   (WebView)    | ~280    |                      |  |
+|  |   (WebView)    |  IPC    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  51 pages      |         |  |   SQLite DB    |  |  |
-|  |  89 components |         |  |   ~106 tables  |  |  |
-|  |  32 composables|         |  |   83 migrations|  |  |
+|  |  Vue pages     |         |  |   SQLite DB    |  |  |
+|  |  + components |         |  |  local schema  |  |  |
+|  |  + composables|         |  |   94 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -106,11 +108,11 @@ All state lives on the user's machine, organised **per profile** so a single dev
 | Vault (mobile) | `profiles/<uuid>/vault/vault.enc` | AES-256-GCM + Argon2id encrypted wallet keys and mnemonic — per profile |
 | iroh | `profiles/<uuid>/iroh/` | Content-addressed blobs (course HTML, profiles) + per-profile node secret |
 | Plugins | `profiles/<uuid>/plugins/` | Installed plugin bundles — per profile |
-| Video cache | `profiles/<uuid>/videocache/` | Materialized video files for the asset protocol — per profile |
+| Video cache | `profiles/<uuid>/videocache/` | Transient plaintext media for the asset protocol — per profile and purged during successful lock cleanup |
 
 Default data directory: `~/Library/Application Support/org.alexandria.node/` (macOS).
 
-On first launch after upgrading from a single-vault install, the legacy top-level layout is atomically migrated into a freshly-created `profiles/<uuid>/` slot named "My Profile" (see `src-tauri/src/profile/migration.rs`).
+The pre-profile single-vault layout is unsupported: it is detected, reported and left untouched, and the app onboards a fresh profile (see `src-tauri/src/profile/legacy_layout.rs`).
 
 ---
 
@@ -160,6 +162,47 @@ Keys are stored in an encrypted vault. The implementation varies by platform:
 
 Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-derives from mnemonic. Locking the active profile also tears down its iroh node and libp2p swarm; unlocking a different profile rebuilds them rooted at the new profile's directory.
 
+### Lifecycle ownership and cleanup limits
+
+The frontend hides private content immediately when locking starts and displays
+`Locking…`. It finishes required frontend cleanup, including Sentinel's final
+session write with the original profile token, before requesting backend lock.
+A cleanup failure leaves the lock screen visible with retry; another unlock is
+not admitted until cleanup succeeds. Late activation responses cannot restore
+the hidden profile. Hiding content is not proof that backend resources have
+already stopped.
+
+Backend profile transitions are serialized. Sensitive commands and background
+passes hold generation-bound operation leases (`profile::scope`); backend lock
+closes admission and drains those leases before replacing profile resources.
+The periodic Cardano/device-sync/guardian worker opts into
+`ProfileLease::run_until_closed`: closing admission drops its cancellable pass
+future before the lease is released. This applies to the audited provider/P2P
+awaits and owned local work in that pass, not arbitrary detached native jobs or
+`spawn_blocking` tasks. Ordinary admitted IPC calls retain their leases until
+they finish. Synchronous work cannot be interrupted while it is executing.
+After tutoring releases its native media handles, backend cleanup purges the
+active profile's materialized plaintext video-cache contents. A purge failure is
+a lock failure and keeps new unlocks disabled; the cache directory itself is
+retained for reuse. The asset-protocol scope is not expanded to PDFs or images.
+
+Journal-integrated Cardano submissions persist the exact signed bytes, hash,
+operation identity, and recovery context before the POST. Cancellation or a lost
+response does not prove rejection: the durable operation remains outcome unknown
+and is reconciled as the same transaction when that profile is next available.
+A signed operation is never automatically rebuilt as a replacement. Unsigned
+completion intents keep their frozen evidence and persisted retry schedule.
+
+Verification includes a loopback provider stalled during submission, production
+lock cleanup using temporary encrypted profile databases/vaults, switching to a
+second profile before the late response, and reopening the original profile to
+reconcile the same transaction. It is not real-camera, mobile-device, live-chain,
+or end-to-end teardown latency acceptance. The approved 10-second connection and
+30-second total provider limits are not yet globally enabled; remaining raw
+submission paths and native teardown still need review. Clearing frontend private
+references is not guaranteed memory zeroization, and legacy behavioral/face
+calibration in localStorage has not been migrated to encrypted storage.
+
 ### Roles, Modes & Guardianship
 
 Every profile is a **learner**; onboarding lets a person add **instructor**
@@ -206,7 +249,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Tables**: ~106 live (116 created, 10 dropped in migration 040) across 83 migrations
+**Schema**: 94 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
 
 | Domain | Tables |
 |--------|--------|
@@ -215,15 +258,15 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
 | Credentials | `credentials`, `credential_status_lists`, `key_registry` |
-| Reputation | derived from `credentials`; `reputation_snapshots` |
+| Reputation | `reputation_assertions`, `derived_skill_states`, `derived_skill_state_history`, `reputation_snapshots`; skill states and reputation rows record input fingerprints (migrations 093, 094) |
+| Completion persistence (local-only) | `completion_claims`, `completion_witness_requests`, `course_completion_endorsements`; enrollments and claims freeze exact course-document identity/policy (migrations 086, 091) |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
-| Challenges | `credential_challenges`, `credential_challenge_votes` |
-| Attestation | `completion_attestation_requirements`, `completion_attestations` |
+| Retired challenge experiment | `credential_challenges`, `credential_challenge_votes` (legacy tables; no active command or authority path) |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
 | Governance (on-chain) | `onchain_governance_queue` |
@@ -237,7 +280,66 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 - **Content stored externally**: Course HTML and profiles live in iroh blobs, referenced by BLAKE3 hash
 - **Settings live in `app_settings`**: One unified per-profile key-value table with a `scope` discriminator (`'sync'` propagates to the user's other devices; `'device'` stays here). The Rust-side typed registry (`settings::registry::keys`) is the source of truth for valid keys + defaults — the table only stores user-overridden values. See [Settings](settings.md).
 
+### Network identity and configuration
+
+The app embeds `src-tauri/resources/networks/preprod.json` and validates it
+before opening the profile manager. The strict version-1 profile owns the
+network ID, Cardano network and magic, relay PeerIds and DNS names, public
+fallback IPs, HTTPS registry origins, receipt issuers, stake-registry founder
+keys, the signed bootstrap-registry SHA-256 identity, optional service
+identities, and the intended protocol namespace. The profile is parsed with the
+verifier's bounded strict JSON parser. Structural limits, unknown fields,
+duplicate JSON keys, unsafe numbers, placeholders, malformed trust roots, inconsistent optional-service
+settings, and a bootstrap-registry digest mismatch prevent application setup.
+
+`profiles_index.json` is format version 2 and records an immutable `network_id`
+for every profile. The manager rejects a version-1 index, a future index format,
+or any profile whose network differs from the embedded profile. New-profile and
+mnemonic-restore IPC requests must name the expected network.
+
+The profile currently supplies relay discovery, relay receipt trust, bootstrap
+founder keys, HTTPS relay-registry origins, the optional governance anchor, and
+the namespace used in DHT provider-record keys. Its
+`protocol_namespace = "/alexandria/preprod"` is the target for all wire protocol
+IDs, but GossipSub and request-response paths remain the unscoped paths below
+until the app, relay, and monitoring services migrate in lockstep.
+
 See [Database Schema](database-schema.md) for the full DDL.
+
+### Profile-fenced database executor
+
+Interactive commands already migrated from direct SQLite locking submit work to
+one bounded executor thread that owns access to the existing single connection.
+Synchronous SQL therefore does not block a Tokio runtime worker. Every production
+job carries the active profile lease: work still waiting when profile admission
+closes is rejected before it can acquire the database, while a transaction that
+has started retains its lease and finishes before lock cleanup may reuse the
+shared slot. Network, provider, and vault operations are kept outside executor
+closures. A job that panics while holding the connection is caught inside the
+guard: any transaction it left open is rolled back and the caller receives an
+error, so the shared database mutex is not poisoned and later jobs still run.
+
+The waiting queues reserve 16 learner, 8 instructor, and 8 background slots.
+Filling one lane cannot consume another lane's reservation. A full lane rejects
+new work immediately with a retryable busy error instead of allocating an
+unbounded backlog. When all lanes remain backlogged, dispatch follows an exact
+8 learner : 4 instructor : 1 background schedule; empty lanes are skipped so
+the connection does not idle. Warnings report queue time, shared-slot lock wait,
+and SQL/closure execution separately against 250 ms learner, 500 ms instructor,
+and 2 s background diagnostic thresholds.
+
+This is a staged cutover, not a claim that every database caller has migrated or
+that the thresholds are device SLAs. Lifecycle/startup code and command modules
+with more complex external-I/O boundaries still use direct exclusive access.
+The executor has no read pool, and representative mobile measurements, lock
+latency, battery cost, backlog recovery, and end-to-end user-facing overload
+handling remain release acceptance work.
+
+### Shared migrations and issuer recognition
+
+The app and CLI use `db::run_migrations_on_connection`: applied `(version, name)` records must be a supported schema prefix, and each migration's DDL/data changes and tracking record commit together. A failed migration rolls back before retry; the CLI no longer maintains an independent runner. Both app and CLI connection-opening paths install `legacy_course_authority_did`, a deterministic, side-effect-free SQL function, after encryption-key configuration and before migrations. Migration 085 calls it when the historical schema is replayed; no schema object uses it after migration 094, and it confers no issuer trust.
+
+Migration 085 once recognized reproducible legacy course-authority issuers and excluded their credentials through filtered views, triggers and a repair queue. Migration 094 retires all of it. Scoring reads `credentials` directly, re-verifies each input, and records a fingerprint of the credential, status-list, issuer-key, supersession and endorsement state behind every derived skill state and reputation row. Readers compare fingerprints before presenting a cached value, so a revoked, altered or removed input forces recomputation, and a failed recomputation rolls back without reinstating a stale score. Workload latency and memory budgets still require the planned device benchmarks.
 
 ---
 
@@ -365,7 +467,7 @@ path within the same process hangs indefinitely.
 | Topic | Path | Content |
 |-------|------|---------|
 | Catalog | `/alexandria/catalog/1.0` | Course announcements |
-| Taxonomy | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
+| Taxonomy | `/alexandria/taxonomy/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
 | Governance | `/alexandria/governance/1.0` | Proposals, elections, committee updates |
 | Profiles | `/alexandria/profiles/1.0` | User profile announcements |
 | Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, peers |
@@ -375,10 +477,12 @@ path within the same process hangs indefinitely.
 | VC Presentation | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes |
 | PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
 | Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
-| Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Plugin DAO grader attestations |
-| Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
-| Goal Templates | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates |
-| Question Banks | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
+| Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Reserved compatibility topic; subscribed and scored, but grants no authority and has no inbound persistence handler |
+| Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
+| Goal Templates | `/alexandria/goal-templates/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
+| Question Banks | `/alexandria/question-banks/1.0` | Retired; subscribed until coordinated removal, and every inbound message is rejected |
+
+The taxonomy, governance, Sentinel prior, goal-template, and question-bank topics are still subscribed and validated, but release builds reject every inbound message on them before any database read or write (no rows, sync-log entry, or UI event) until handlers consume verified committee outcome certificates. Their apply paths are deleted; the handlers only reject.
 
 Six request-response protocols (libp2p `request-response` + CBOR
 codec) run alongside the gossip mesh and are not part of the
@@ -400,11 +504,11 @@ exchanges.
 ### Validation Pipeline (6 steps)
 
 1. **Signature** — Ed25519 verify (covers all envelope fields: topic, timestamp, stake_address, payload)
-2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
+2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, goal templates, question banks, and the reserved plugin-attestation compatibility topic) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. Registry validation of the reserved topic does not grant domain authority. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
-5. **Schema** — valid JSON
-6. **Authority** — taxonomy/governance/Sentinel and content-governance (goal-template, question-bank) handlers re-check committee membership via on-chain governance tables
+5. **Schema** — strict JSON within the gossip payload limits (no duplicate keys, unsafe numbers, hostile nesting, oversized collections or trailing bytes); the envelope itself is decoded under its own limits before step 1
+6. **Authority** — the taxonomy, governance, Sentinel-prior, goal-template and question-bank handlers reject every message; their legacy apply paths and committee-membership checks against local governance tables are deleted
 
 Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature, envelope-parse, or identity-binding failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
 
@@ -460,8 +564,7 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 | Fee estimation | Linear fee model from protocol params |
 | VC integrity anchoring | Metadata-only tx (label 1697) timestamping the canonical VC hash |
 | Completion-witness minting | Merkle-root completion witness; validator deployed |
-| Challenge-stake escrow | 5 ADA locked at `challenge_escrow.ak`; lock works on preprod, settle uses the deployed escrow reference script |
-| Reputation snapshots | CIP-68 soulbound builder path with CBOR datum; mint uses the deployed reference script |
+| Reputation snapshots | Signed as-of `DerivedCredential`; optional metadata-only anchor of its canonical VC hash |
 | Governance metadata | DAO/election/proposal tx builders and queue records; validator-backed enforcement is still pending |
 | Coin selection | Greedy UTxO selection with min-ADA enforcement |
 
@@ -469,9 +572,9 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 
 1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content. (The legacy SkillProof NFT and course-registration mints were retired in migration 040.)
 2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
-3. **Reputation Snapshot** — Soulbound/CIP-68-style builder path with CBOR-encoded datum; the reference scripts are deployed
-4. **Challenge-Stake Escrow** — Locks 5 ADA at the `challenge_escrow.ak` validator; on resolution the DAO authority settles (Refund → challenger / Forfeit → treasury), using the deployed escrow reference script
-5. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
+3. **Reputation Snapshot** — Local signed `DerivedCredential` over all currently eligible evidence; optional metadata-only VC-hash anchor uses the credential queue
+
+The operator governance transaction queue (DAO creation, election finalization, committee install, proposal-outcome anchors) is deleted.
 
 ---
 
@@ -492,48 +595,47 @@ Assessment completion (plugin grader → element_submissions row:
     v
 claim_course_completion: assemble passing element submissions in
     course-template order → completion Merkle root
-    → self-issue the W3C Verifiable Credential LOCALLY at claim time
+    → atomic local receipt + learner-signed SelfAssertion per skill
+      + optional durable witness request (no instructor signature)
     (content-only courses with no gradeable elements issue at a
      baseline proficiency, no witness)
     |
     v
-Best-effort Completion-witness tx (completion.ak validator) as an
+Profile-scoped background worker → Completion-witness tx (completion.ak) as an
     on-chain ANCHOR — treasury-funded when ALEXANDRIA_TREASURY_* is
     configured (learner still signs for validator identity), else
     learner-funded; failure does not block the local credential
     |
     v
-Observer (cardano::completion::tick) ingests the witness as a
-    secondary confirmation (no longer the sole issuance trigger)
+Confirmed successful ledger receipt → matching completion observation
+    → optional witnessed completion VC, signed by the learner
     |
     v
 on_credential_accepted → distribution-based reputation
-    (median/p25/p75/variance per skill, derived from `credentials`)
+    (median/p25/p75/variance per skill, from verified credentials)
 ```
+
+The completion command performs no Cardano I/O. Migration 086 atomically persists local claims, their reusable receipt, enrollment completion, and an optional witness intent. The same learner/course/root returns the original credential IDs on retry. Only a completion requested with Cardano configured queues an intent; later configuration alone does not enqueue earlier local-only claims. Frozen evidence survives restart, and changed evidence never inherits an earlier transaction's witness.
+
+`cardano::completion_queue` uses the existing background worker's profile lease and unlocked wallet, verifies the saved wallet binding, and attempts at most one unsigned request per pass. Retry scheduling is durable (30-second increments, capped at five minutes, subject to the worker's cadence). Journal handoff removes signed requests from the dispatch index atomically. Receipt reconciliation and witnessed-VC issuance remain separate; backend locking cancels the audited worker pass before releasing its lease, rather than switching a profile underneath it. The UI queries indexed local witness status separately from local credential progress and clears private state on locking. See [Lifecycle ownership and cleanup limits](#lifecycle-ownership-and-cleanup-limits) for implemented cancellation and remaining deadline/native-device checks; this is not a measured device-latency guarantee.
+
+The optional witness transaction is durably checkpointed before submission. A timeout or lost response retains the same signed transaction for reconciliation; neither acknowledgement nor an uncertain outcome becomes a witnessed credential. A genuine instructor endorsement is separately signed by an attestor authorized in the exact author-signed course document. The backend exports, signs, verifies, imports, and counts exact-binding endorsements; the user-facing review and transport flow remains pending.
 
 ### Components
 
 | Module | Responsibility |
 |--------|---------------|
-| `evidence/reputation` | Distribution-based reputation derived from `credentials` (median/p25/p75/variance/learner_count) |
-| `evidence/taxonomy` | Bloom's level thresholds and skill graph traversal |
+| `evidence/reputation` | Distribution-based reputation from verified credentials; rows are revalidated by input fingerprint before they are read |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
 
-Completion-attestation requirements and credential challenges are now
-handled by the VC-first command modules (`commands::attestation`,
-`commands::challenge`), not a `skill_proof` aggregator. The
-`evidence/aggregator` and `evidence/attestation` modules were removed
-(`evidence/challenge` was rebuilt against the VC status-list flow and
-remains).
-
-### Challenge Mechanism
-
-- Any peer can challenge a **credential** by staking 5 ADA (5,000,000 lovelace), locked at `challenge_escrow.ak`
-- Challenge enters voting period
-- 2/3 supermajority required to uphold
-- Upheld: targeted credential **revoked** via its RevocationList2020 status list; DAO authority refunds the stake to the challenger
-- Rejected: DAO authority forfeits the stake to the DAO treasury
-- Settlement uses the deployed escrow reference script (`challenge_escrow_deployed()` returns true)
+Exact course-version endorsement policy and artifacts are handled by
+`commands::attestation`, outside the retired `skill_proof` aggregator. The
+credential-challenge command module, evidence challenge module, challenge domain
+types, escrow transaction builders, recovery worker, validator source, and
+frontend surfaces have been removed. Credential revocation, suspension, and
+reinstatement are issuer actions: the active profile must derive the same issuer
+DID named by both the credential and its status list. A subject, committee, or
+arbitrary peer cannot mutate another issuer's credential status.
 
 ---
 
@@ -542,28 +644,40 @@ remains).
 ### Structure
 
 - One DAO per subject field or subject
-- DAOs have committees (chair + members)
-- Committees gate taxonomy updates and DAO-ratified content (goal templates, question banks)
+- Each DAO identity is the domain-separated BLAKE2b-256 digest of its founding-genesis core; it identifies a DAO only once all seven founders' acceptances verify
+- A founding genesis names seven independently controlled committee members; every member accepts the same core with its identity, consensus, and governance keys, and each member ID must be the `did:key` of that member's identity key
+- Operational submission receipts and final outcomes require five of the seven committee members
+- Taxonomy, goal-template and question-bank updates have no local ratification path; the bundled taxonomy, goal templates and question banks are authoritative until a certificate-backed update path exists (see [Features](#features))
+
+### Trust bootstrap and import
+
+The canonical JSON founding-genesis envelope is the authoritative bootstrap artifact. It is limited to 256 KiB, contains no self-referential DAO ID, and is accepted only after canonical decoding, validation of all seven founders' three key-control signatures, bounded display and identifier text, a strict CometBFT chain-ID grammar, and integers no larger than 2^53−1. The DAO ID is derived from the canonical core alone, so re-signing an unchanged core cannot mint a second ID, while verification still requires every acceptance. The exact verified bytes are persisted when a learner explicitly pins that DAO; pinning is a single conflict-safe insert, and a differently signed valid envelope for an already pinned core succeeds without replacing the stored bytes (`newly_pinned: false`, `stored_envelope_differs: true`); a matching name or scope does not confer authority, and sync, discovery, Cardano, or an application update cannot create or replace the pin.
+
+Portable QR codes and deep links carry discovery metadata only. A locator is limited to 2 KiB and contains the DAO ID, the BLAKE3 content hash of the canonical JSON, and two to eight content-addressed sources on distinct origins. Sources are either `iroh://<BLAKE3>` or HTTPS URLs whose unsent `#blake3=<BLAKE3>` fragment binds the expected bytes. HTTPS sources must use the default port and a public DNS name: plain `http`, userinfo, IP literals, trailing-dot hosts, and special-use names are refused. Sources are normalized and counted per origin (the iroh network or one HTTPS host), so different paths or spellings of one host count once. Only the `alexandria://governance/genesis/<dao-id>` custom scheme and the corresponding `https://alexandria.ifftu.dev/governance/genesis/<dao-id>` app link are accepted.
+
+Import is deliberately split into three user-visible steps:
+
+1. Opening or pasting a locator parses, normalizes, and displays its identifiers without network access or state mutation. Retrieval and the QR code use the reviewed canonical encoding, not the typed text.
+2. An explicit retrieve action fetches only the reviewed sources, recomputes the BLAKE3 hash, verifies the canonical envelope and derived DAO ID, and displays every material trust fact, including the core hash and the BLAKE3 envelope hash.
+3. An explicit pin action requires the learner to enter the complete derived DAO ID and stores the exact reviewed bytes.
+
+Neither locator review nor retrieval auto-pins content. Retrieval races at most three sources, with a 10 s limit per source and 30 s overall. It performs no blocking DNS lookup inside that budget: reviewed hosts are checked without DNS, the HTTP client's connect-time resolver rejects non-public addresses, redirects are not followed, and a missing iroh blob does not fall back to any other URL mapped to the same hash.
 
 ### Features
 
 | Feature | Status |
 |---------|--------|
-| DAO creation | Implemented (operator-signed state-token mint) |
-| Committee management | Implemented |
-| Proposal lifecycle (draft → published → approved/rejected) | Implemented (off-chain; outcome anchored) |
-| Election lifecycle (nomination → voting → finalized) | Implemented (off-chain; finalized election published on-chain) |
-| 2/3 supermajority voting | Implemented (off-chain tally over signed gossiped votes) |
-| Signed-vote + full-lifecycle P2P gossip | Implemented |
-| On-chain (operator-signed): DAO create, election finalize, committee install, proposal-outcome anchor | Implemented |
-| Per-vote / per-transition on-chain Plutus spends | Not used (lean model — validators deployed as the upgrade path) |
+| Founding-genesis verification and explicit local pinning | Implemented; governance activation is not yet wired to it |
+| Locator/deep-link review, verified retrieval, and QR display | Implemented; locator publishing/export and retrieval scheduling remain open |
+| Local elections, nominations, committee install, proposals, operator DAO creation, and the operator governance transaction queue | Deleted, including their pages, commands, gossip apply paths and Cardano builders; inbound governance gossip is rejected before any database access until the topic is removed |
+| Legacy taxonomy, goal-template and question-bank ratification | Deleted, including the ungated taxonomy proposal write, the eleven commands and the gossip apply paths; inbound update and version documents are rejected before any database access until the topics are removed |
+| Per-vote / per-transition on-chain Plutus spends | Not used; the validators remain deployed upgrade artifacts |
 
-Governance runs a **lean** on-chain model: the live state machine is local
-SQLite, votes and the election lifecycle propagate as signed P2P gossip, and
-only the four operator-signed facts above are written to Cardano (the proposal
-anchor carries the tally plus a Merkle root over the signed votes, so the
-off-chain tally is auditable). The full per-transition Plutus spend validators
-are deployed + verified on preprod but are not on the live path.
+The earlier lean local/operator model is deleted: its local SQLite state
+machine, signed-vote gossip and four operator-signed Cardano facts were not the
+approved five-of-seven committee model. `/community` now opens founding-genesis
+review and pinning. Startup seeding is deleted: a new profile receives the
+bundled taxonomy, goal templates and question banks and nothing else.
 
 ---
 
@@ -586,6 +700,7 @@ are deployed + verified on preprod but are not on the live path.
 | Skills & Credentials | `/skills` | Combined surface — the user's credentials (default tab), the skill graph, and taxonomy browsing |
 | Skill Detail | `/skills/:id` | Skill info, prerequisites, proofs, and related content (courses teaching it + opinions in its field, ranked by goal alignment) |
 | Governance Index | `/governance` | Browse DAOs |
+| Governance Trust Import | `/community/import` | Review a bounded genesis locator, explicitly retrieve and verify the canonical founding document, then explicitly pin its full DAO ID |
 | DAO Detail | `/governance/:id` | DAO info, proposals, elections |
 | Classrooms Index | `/classrooms` | List joined classrooms |
 | Classroom Detail | `/classrooms/:id` | Channels, messages, active calls (voice/video desktop only; mobile stubs) |
@@ -616,41 +731,43 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via ~280 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **59 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`, `adaptive`, `graph`):
+The frontend communicates with the Rust backend through the handlers registered
+in `tauri::generate_handler!`. The `commands/` directory also contains internal
+helpers and platform-conditional tutoring variants, so source-file or attribute
+counts do not equal the command surface. The table below is a non-exhaustive
+sample of command modules; inspect `lib.rs` for the authoritative registration
+list.
 
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` |
 | tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
 | interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
-| taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
+| taxonomy | 9 | `list_skills`, `list_subjects`, `list_skill_graph_edges`, `tag_element_skill` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
 | settings | 3 | `list_settings`, `set_setting`, `reset_setting` — drives the unified per-profile settings store. See [`settings.md`](settings.md). |
 | credentials | 10 | `issue_credential`, `list_credentials`, `get_credential`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle` |
 | sync | 8 | `sync_status`, `sync_now`, `sync_set_auto`, `sync_list_devices` |
-| courses | 8 | `create_course`, `get_course`, `list_courses` |
-| attestation | 5 | `set_completion_attestation_requirement`, `submit_completion_attestation`, `get_completion_attestation_status` |
-| challenge | 8 | `submit_credential_challenge`, `vote_on_credential_challenge`, `resolve_credential_challenge`, `lock_challenge_stake`, `settle_challenge_stake` |
+| courses | 9 | `create_course`, `get_course`, `list_courses`, `set_course_completion_policy`, `publish_course` |
+| attestation | 4 | `get_course_completion_endorsement_request`, `sign_course_completion_endorsement`, `import_course_completion_endorsement`, `get_course_completion_endorsement_status` |
 | opinions | 6 | `publish_opinion`, `list_opinions`, `withdraw_own_opinion` |
 | integrity | 6 | `integrity_start_session`, `integrity_submit_snapshot`, `integrity_get_session` |
-| sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_load_dao_classifier`, `sentinel_paste_classifier_info`, `sentinel_revert_classifier_to_bundled`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
-| sentinel_priors | 9 | `sentinel_propose_prior`, `sentinel_ratify_prior`, `sentinel_priors_list`, `sentinel_priors_sync`, `sentinel_priors_load`, `sentinel_get_active_paste_classifier`, `sentinel_set_kill_switch`, `sentinel_blocklist_version`, `sentinel_unblocklist_version` |
+| sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_paste_classifier_info`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
 | content | 6 | `content_add`, `content_get`, `content_resolve` |
 | pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
 | storage | 4 | `storage_stats`, `storage_get_quota`, `storage_set_quota`, `storage_evict_now` |
-| snapshot | 5 | `snapshot_reputation`, `submit_snapshot_tx`, `list_snapshots`, `get_snapshot`, `update_snapshot_status` |
+| snapshot | 4 | `snapshot_reputation`, `submit_snapshot_tx`, `list_snapshots`, `get_snapshot` |
 | reputation | 3 | `list_reputation_rows`, `get_reputation`, `recompute_reputation_for_subject` |
 | enrollment | 4 | `enroll`, `update_progress`, `get_progress`, `list_enrollments` |
 | elements | 4 | `list_elements`, `create_element`, `update_element`, `delete_element` |
 | chapters | 4 | `list_chapters`, `create_chapter`, `update_chapter`, `delete_chapter` |
-| catalog | 4 | `search_catalog`, `get_catalog_entry`, `bootstrap_public_catalog` |
+| catalog | 3 | `search_catalog`, `get_catalog_entry` |
 | p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
 | evidence | 1 | `list_reputation` (legacy read surface; `skill_proofs`/`evidence` listings retired in migration 040 — use `list_credentials`) |
 | aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
 | presentation | 2 | `create_presentation`, `verify_presentation` |
-| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, the `irl_*` review inbox, attestation status |
+| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, and the `irl_*` review inbox. Legacy attestation ingest/status IPC is retired. |
 | health | 4 | `check_health`, `read_diag_log`, `frontend_log`, `release_secure_input` |
 
 Note: `tutoring` has platform-specific variants. Desktop and Android share the full manager (`tutoring/manager.rs`); iOS has its own AVFoundation/VideoToolbox manager (`tutoring/manager_mobile.rs`); only targets that are neither desktop, iOS, nor Android fall back to `commands/tutoring_stubs.rs`. Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
@@ -665,9 +782,9 @@ Note: `tutoring` has platform-specific variants. Desktop and Android share the f
 |--------|-----------|
 | Key theft | Per-profile encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). Compromising one profile's vault does not expose any other profile on the same device. |
 | Message forgery | Ed25519 signatures on all gossip messages |
-| Sybil attacks | IP colocation scoring, stake-based challenges |
+| Sybil attacks | IP colocation scoring, signed messages, subject-scoped aggregation, and independence penalties |
 | Taxonomy corruption | Committee authority verification, strongest peer scoring penalty |
-| Evidence inflation | Multi-party attestation, stake-based challenges, behavioral integrity |
+| Evidence inflation | Exact author-signed completion policy, allowlisted distinct-attestor thresholds, issuer/provenance weighting, anti-gaming aggregation, and behavioral integrity |
 | Replay attacks | ±5 minute freshness window, Blake2b-256 dedup cache |
 | Content tampering | BLAKE3 content addressing (iroh), Ed25519 signed documents |
 
@@ -717,20 +834,49 @@ skill-proof + NFT pipeline it replaced has been deleted (no
 5. **Aggregation** — Deterministic, explainable trust scores via
    the §14 weighted-mean + saturating-confidence pipeline
    (`aggregation::aggregate_skill_state`, PR 6) + anti-gaming
-   (cluster cap, inflation z-score, PR 7).
+   (cluster cap, inflation z-score, PR 7). App scoring inputs are
+   credentials that verify now and whose signed subject, skill and id
+   match their row.
 6. **Presentation** — Selective-disclosure envelopes signed by the
    subject (`commands::presentation`). JCS-canonical payload bound
    to (audience, nonce); replay-protected via `presentations_seen`.
    PR 11.
+
+Verification is shared by the app and CLI/bundle adapters through the I/O-free
+`alexandria-verify` crate. The same vectors are also checked by an independent
+Node implementation. The crate's
+`VerificationStore` lookups distinguish `Found`, `Missing`, and `Unavailable`.
+The result distinguishes `accept`, `pending`, and `reject`: a missing referenced
+status list or external issuer key stays pending; malformed evidence, a bad
+signature, or a failed policy check is rejected. Pending credentials do not
+count as accepted inputs.
 
 ### Survivability (§20.4)
 
 The `commands::credentials::export_credentials_bundle` IPC produces
 a JCS-canonical JSON bundle with credentials + key registry +
 status lists. `verify_bundle_offline_impl` re-loads the bundle
-into a fresh ephemeral DB and runs the full §13.2 verification
-pipeline — proving the bundle is self-contained and survives
-Alexandria shutdown. PR 12.
+through an in-memory `VerificationStore` adapter and runs the shared §13.2
+verification pipeline without opening a database. A bare status-bearing
+credential can prove its signature but remains pending without the referenced
+list; the bundle supplies that missing evidence. PR 12 plus remediation T02.
+
+Imported and verified payloads are parsed before typed decoding. The parser
+enforces explicit structural limits and refuses duplicate keys, unsafe
+numbers and trailing bytes. Limits by boundary:
+
+| Boundary | Bytes | Nesting | Array elements | Object entries | String bytes |
+| --- | --- | --- | --- | --- | --- |
+| Credential payload (bundle, list or single credential) | 16 MiB | 32 | 4096 | 256 | 1,398,104 (base64 of the 1 MiB status bitmap) |
+| Each credential in a payload | 256 KiB | 32 | 4096 | 256 | 64 KiB |
+| Signed course document | 1 MiB | 16 | 4096 | 64 | 64 KiB |
+| Signed profile document | 64 KiB | 2 | 16 | 16 | 16 KiB |
+
+The per-credential limit applies wherever a credential arrives: file import,
+offline verification, a guardian link, and peer import. Peer import also stops
+the transfer at 256 KiB and does not retain the fetched blob. Publishing a
+course or profile document applies the same limits peers enforce on
+resolution, so an author cannot publish a document other nodes would refuse.
 
 ### P2P propagation
 
@@ -763,7 +909,7 @@ this on every test run.
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
 | §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
-| §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented |
+| §13 (verification algorithm + acceptance predicate) | PR 4–5 + T02 | Implemented with typed accept/pending/reject results and missing/unavailable store evidence |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
 | §16 (derived skill state output) | PR 6 + PR 13 | Implemented + cached |

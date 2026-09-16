@@ -146,9 +146,7 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 - `commands/evidence.rs` -- `list_reputation` (no LIMIT) — the only list command remaining in this file after the VC migration removed `list_skill_proofs` and `list_evidence`
 - `commands/enrollment.rs:28,35` -- `list_enrollments` (no LIMIT)
 - `commands/courses.rs:22` -- `list_courses` (no LIMIT)
-- `commands/governance.rs:70` -- `list_daos` (no LIMIT)
-- `commands/governance.rs:256` -- `list_elections` (no LIMIT)
-- `commands/governance.rs:723` -- `list_proposals` (no LIMIT)
+- ~~`commands/governance.rs` -- `list_daos`, `list_elections`, `list_proposals`~~ -- removed with the legacy governance surface
 - `commands/snapshot.rs:143` -- `list_snapshots` (no LIMIT)
 
 None of these queries have `LIMIT` clauses. They return all matching rows.
@@ -335,11 +333,11 @@ Stronghold vault operations use `spawn_blocking`, avoiding blocking the async ru
 
 ---
 
-### I-3: `seed_content` properly scopes DB lock
+### I-3: `seed_content` properly scoped its DB lock
 
-**File**: `src-tauri/src/db/seed_content.rs`
+**File**: deleted with the startup seed.
 
-The content seeding function acquires the DB lock, reads what is needed, drops the lock, then does iroh blob operations without holding the DB mutex. This is the correct pattern that other commands should follow.
+The content seeding function acquired the DB lock, read what it needed, dropped the lock, then did iroh blob operations without holding the DB mutex. That remains the pattern other commands should follow.
 
 ---
 

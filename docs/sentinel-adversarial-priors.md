@@ -1,5 +1,7 @@
 # Sentinel Adversarial Priors — Implementation Plan (Option B)
 
+> **Status: retired.** The community prior library described here is deleted: Sentinel DAO proposals, approved-status ratification, placeholder signatures, the prior gossip mirror, runtime classifier-weights replacement, the kill switch and the version blocklist. Future governance is limited to yes/no proposals with verified outcome certificates. This plan remains for the labeled-blob schema, which the `synth-sentinel` generator and the encrypted holdout set still use. The bundled classifier ships only through app releases; see [sentinel-runbook.md](sentinel-runbook.md).
+
 > **Scope:** ship the first federated-learning capability for Sentinel without federating any per-user data. The Sentinel DAO curates labeled attack patterns; each client pulls them and trains locally. See [sentinel-federation.md](sentinel-federation.md) for the design rationale.
 >
 > **Target timeline:** 3–4 focused weeks. Pre-req: Sentinel DAO scaffolding (phase 1).

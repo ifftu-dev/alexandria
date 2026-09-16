@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import { AppButton, AppInput, AppTextarea, AppAlert, AppBadge } from '@/components/ui'
 import {
   extractSkillClaim,
@@ -12,6 +12,8 @@ import {
   type PublishOpinionRequest,
   type VerifiableCredential,
 } from '@/types'
+
+const { invoke } = useLocalApi()
 
 const { t } = useI18n()
 const router = useRouter()

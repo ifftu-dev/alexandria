@@ -7,6 +7,7 @@
 //! Pin tracking is stored in SQLite (`pins` table) to survive restarts
 //! and support storage management (LRU eviction under pressure).
 
+use iroh_blobs::api::blobs::BlobStatus;
 use iroh_blobs::Hash;
 use thiserror::Error;
 
@@ -22,6 +23,8 @@ pub enum ContentError {
     Store(String),
     #[error("invalid hash: {0}")]
     InvalidHash(String),
+    #[error("content is {size} bytes, exceeding the {max_bytes}-byte limit")]
+    TooLarge { size: u64, max_bytes: usize },
 }
 
 /// Result of adding content to the store.
@@ -139,22 +142,50 @@ pub async fn add_bytes_unencrypted(
 /// Returns the raw bytes. Returns `ContentError::NotFound` if the
 /// content is not available locally.
 ///
-/// If content is encrypted (version byte prefix), decrypts transparently.
-/// Legacy unencrypted content is returned as-is.
+/// Content stored with a version byte prefix is decrypted transparently.
+/// Content stored without one was published in the clear on purpose (see
+/// [`add_bytes_unencrypted`]) and is returned as stored. A decryption that
+/// fails is an error: the bytes are not silently returned undecrypted.
 pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, ContentError> {
+    get_bytes_inner(node, hash_hex, None).await
+}
+
+/// Fetch content from the local store without allocating it when its stored
+/// representation exceeds `max_bytes`.
+pub async fn get_bytes_bounded(
+    node: &ContentNode,
+    hash_hex: &str,
+    max_bytes: usize,
+) -> Result<Vec<u8>, ContentError> {
+    get_bytes_inner(node, hash_hex, Some(max_bytes)).await
+}
+
+async fn get_bytes_inner(
+    node: &ContentNode,
+    hash_hex: &str,
+    max_bytes: Option<usize>,
+) -> Result<Vec<u8>, ContentError> {
     let store = node
         .store()
         .await
         .map_err(|_| ContentError::NodeNotRunning)?;
     let hash = parse_hash(hash_hex)?;
 
-    let exists = store
-        .has(hash)
+    let status = store
+        .status(hash)
         .await
         .map_err(|e| ContentError::Store(e.to_string()))?;
-
-    if !exists {
-        return Err(ContentError::NotFound(hash_hex.to_string()));
+    let size = match status {
+        BlobStatus::Complete { size } => size,
+        BlobStatus::NotFound | BlobStatus::Partial { .. } => {
+            return Err(ContentError::NotFound(hash_hex.to_string()));
+        }
+    };
+    if max_bytes.is_some_and(|limit| size > limit as u64) {
+        return Err(ContentError::TooLarge {
+            size,
+            max_bytes: max_bytes.expect("checked as some"),
+        });
     }
 
     let bytes = store
@@ -163,18 +194,25 @@ pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, Co
         .map_err(|e| ContentError::Store(e.to_string()))?;
 
     let raw = bytes.to_vec();
+    if max_bytes.is_some_and(|limit| raw.len() > limit) {
+        return Err(ContentError::TooLarge {
+            size: raw.len() as u64,
+            max_bytes: max_bytes.expect("checked as some"),
+        });
+    }
 
     // Attempt decryption if a content key is available
     if let Some(key) = node.content_key().await {
         match crate::crypto::content_crypto::decrypt(&key, &raw) {
             Ok(Some(plaintext)) => return Ok(plaintext),
             Ok(None) => {
-                // Not encrypted (legacy content) — return raw bytes
+                // Stored unencrypted on purpose (published evidence).
                 return Ok(raw);
             }
             Err(e) => {
-                log::warn!("content decryption failed for {hash_hex}: {e}, returning raw");
-                return Ok(raw);
+                return Err(ContentError::Store(format!(
+                    "content decryption failed for {hash_hex}: {e}"
+                )));
             }
         }
     }
@@ -274,6 +312,27 @@ mod tests {
         let fake_hash = "0".repeat(64);
         let result = get_bytes(&node, &fake_hash).await;
         assert!(matches!(result, Err(ContentError::NotFound(_))));
+
+        node.shutdown().await.expect("shutdown failed");
+    }
+
+    #[tokio::test]
+    async fn bounded_get_rejects_from_metadata_before_returning_bytes() {
+        let (node, _tmp) = make_node().await;
+        let data = b"seventeen bytes!!";
+        let result = add_bytes(&node, data).await.expect("add failed");
+
+        assert!(matches!(
+            get_bytes_bounded(&node, &result.hash, data.len() - 1).await,
+            Err(ContentError::TooLarge { size, max_bytes })
+                if size == data.len() as u64 && max_bytes == data.len() - 1
+        ));
+        assert_eq!(
+            get_bytes_bounded(&node, &result.hash, data.len())
+                .await
+                .expect("exact limit should pass"),
+            data
+        );
 
         node.shutdown().await.expect("shutdown failed");
     }
@@ -394,6 +453,36 @@ mod tests {
             fetched, evidence,
             "published evidence must be readable as-is"
         );
+
+        node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn a_read_with_the_wrong_key_fails_rather_than_returning_ciphertext() {
+        // Fail-closed was previously asserted only against the low-level
+        // `decrypt` primitive. What matters is the public read: a key mismatch
+        // must surface as an error, never as ciphertext handed to a caller that
+        // will treat it as the document it asked for.
+        let (node, _tmp) = make_node().await;
+        node.set_content_key([1u8; 32]).await;
+        let data = b"a private learner document";
+        let stored = add_bytes(&node, data).await.expect("add");
+
+        // Control: the right key still reads, so the failure below is the key
+        // mismatch and not a read path that is broken for everything.
+        assert_eq!(get_bytes(&node, &stored.hash).await.expect("read"), data);
+
+        node.set_content_key([2u8; 32]).await;
+        match get_bytes(&node, &stored.hash).await {
+            Err(ContentError::Store(message)) => {
+                assert!(message.contains("decryption failed"), "{message}")
+            }
+            Err(other) => panic!("expected a decryption failure, got {other:?}"),
+            Ok(bytes) => panic!(
+                "a wrong-key read returned {} bytes instead of failing",
+                bytes.len()
+            ),
+        }
 
         node.shutdown().await.expect("shutdown");
     }

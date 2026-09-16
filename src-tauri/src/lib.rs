@@ -11,6 +11,9 @@ pub mod diag;
 pub mod domain;
 pub mod evidence;
 pub mod goals;
+#[cfg(test)]
+mod json_limit_boundaries;
+pub mod network_profile;
 pub mod p2p;
 pub mod plugins;
 pub mod profile;
@@ -62,19 +65,18 @@ pub struct ActiveProfile {
 ///   are populated only while a profile is active.
 ///
 /// The database uses `std::sync::Mutex` (not `tokio::sync::Mutex`)
-/// because rusqlite's `Connection` is `!Sync`.  A blocking mutex
-/// ensures that the OS thread holding the lock is the *only* thread
-/// touching the `Connection`'s internal `RefCell`.  With tokio's async
-/// mutex, a `MutexGuard` can migrate between OS threads across
-/// `.await` points, and two concurrent tasks could end up calling into
-/// the `RefCell` from different OS threads — causing a SIGSEGV on iOS
-/// where the tokio thread pool is more aggressive about work-stealing.
+/// for short synchronous critical sections. rusqlite's `Connection` is
+/// `Send` but not `Sync`, so all access must remain exclusive. Both mutex
+/// types provide exclusivity; migration of an async guard between threads
+/// does not by itself permit concurrent access. Blocking SQL on runtime
+/// workers is a separate responsiveness concern to measure and address.
 pub struct AppState {
     pub studio: Arc<commands::studio::StudioRuntime>,
     // ─── per-device singletons ──────────────────────────────────────
     pub app_data_dir: PathBuf,
     pub profile_manager: Arc<ProfileManager>,
     pub active: Arc<std::sync::RwLock<Option<ActiveProfile>>>,
+    pub(crate) profile_operations: profile::operations::ProfileOperations,
     pub tutoring: Arc<TutoringManager>,
     pub classroom: Arc<ClassroomManager>,
     /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
@@ -96,6 +98,7 @@ pub struct AppState {
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
+    pub(crate) db_executor: db::executor::DatabaseExecutor,
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     /// Singleton iroh node — repointed at the active profile's blob
     /// directory on each unlock. Never replaced, so existing call sites
@@ -179,6 +182,7 @@ impl AppState {
             if let Some(current) = guard.as_ref() {
                 if current.id == paths.id {
                     log::debug!("profile {} already active", paths.id);
+                    return Ok(());
                 } else {
                     return Err(format!(
                         "profile {} is already active — lock it first",
@@ -189,7 +193,7 @@ impl AppState {
         }
 
         // 1. Open the encrypted DB and run migrations.
-        let db_key = keystore.derive_db_key();
+        let db_key = zeroize::Zeroizing::new(keystore.derive_db_key());
         self.open_database(&paths, &db_key)?;
 
         // 2. Stash keystore in shared state so background workers see it.
@@ -199,11 +203,17 @@ impl AppState {
         }
 
         // 3. Repoint and start the singleton iroh content node.
-        self.content_node.set_data_dir(paths.iroh_dir.clone()).await;
+        self.content_node
+            .set_data_dir(paths.iroh_dir.clone())
+            .await
+            .map_err(|e| e.to_string())?;
         let (node_enc_key, content_key) = {
             let ks = self.keystore.lock().await;
             let k = ks.as_ref().ok_or("keystore vanished mid-start")?;
-            (k.derive_node_key(), k.derive_content_key())
+            (
+                zeroize::Zeroizing::new(k.derive_node_key()),
+                k.derive_content_key(),
+            )
         };
         self.content_node.set_content_key(content_key).await;
         self.content_node
@@ -266,24 +276,7 @@ impl AppState {
             }
         }
 
-        // 7. Seed iroh content blobs (demo video/pdf media) in the background on
-        // every platform. Downloads the public seed-asset URLs once into iroh and
-        // fills in each element's content_cid so the demo videos actually play.
-        // Best-effort + non-blocking — a network-less first launch just leaves the
-        // media unresolved until a later boot with connectivity.
-        {
-            let db_handle = Arc::clone(&self.db);
-            let node_handle = self.content_node.clone();
-            tokio::spawn(async move {
-                match crate::db::seed_content::seed_content_if_needed(&db_handle, &node_handle)
-                    .await
-                {
-                    Ok(0) => {}
-                    Ok(n) => log::info!("seeded iroh content for {n} elements"),
-                    Err(e) => log::warn!("iroh content seed failed (non-fatal): {e}"),
-                }
-            });
-        }
+        self.start_registry_refresh().await;
 
         // 8. Publish active profile metadata.
         {
@@ -302,6 +295,30 @@ impl AppState {
         Ok(())
     }
 
+    async fn start_registry_refresh(&self) {
+        // This job starts during profile startup, before admission opens, so
+        // its database work is fenced to the first session it is admitted
+        // under; profile cleanup joins it before any later session exists.
+        let registry_db = p2p::inbound::InboundDatabase::pin_on_first_use(
+            self.db_executor.clone(),
+            self.profile_operations.clone(),
+        );
+        let fetcher_factory = |settings: &p2p::registry_chain::RefreshSettings| -> Option<Arc<dyn p2p::registry_chain::ChainFetcher>> {
+            let project_id = settings.project_id.clone()?;
+            let bf = cardano::blockfrost::BlockfrostClient::new(project_id).ok()?;
+            Some(Arc::new(p2p::registry_chain::BlockfrostFetcher::new(
+                Arc::new(bf),
+                cardano::stake_pubkey::Network::Preprod,
+            )))
+        };
+        self.profile_operations
+            .spawn_job(p2p::registry_chain::refresh_loop(
+                registry_db,
+                fetcher_factory,
+            ))
+            .await;
+    }
+
     /// Tear down the active profile's resources. Safe to call when no
     /// profile is active (becomes a no-op).
     pub async fn stop_active_profile(&self) -> Result<(), String> {
@@ -312,10 +329,34 @@ impl AppState {
         }
         #[cfg(all(desktop, unix))]
         commands::studio_mcp::remove_connection_files(&self.app_data_dir);
+        // Revoke active-profile access immediately, but retain the path needed
+        // to purge plaintext asset-protocol material after native media users
+        // have stopped.
+        let active_paths = self
+            .active
+            .write()
+            .map_err(|e| e.to_string())?
+            .take()
+            .map(|profile| profile.paths);
+        let mut errors = Vec::new();
         // 0. Drop any Sentinel evidence staged but never consented to. It has
         // not been written anywhere, and it must not survive into the next
         // profile's session — see `sentinel::evidence`.
         self.evidence_staging.clear_all();
+
+        // Seeding can write through the shared DB/content handles. Join it
+        // before either resource can be closed or repointed at another user.
+        self.profile_operations.stop_jobs().await;
+
+        if let Err(error) = self.tutoring.shutdown().await {
+            errors.push(format!("tutoring shutdown failed: {error}"));
+        }
+
+        if let Some(paths) = active_paths {
+            if let Err(error) = paths.clear_video_cache() {
+                errors.push(format!("media cache cleanup failed: {error}"));
+            }
+        }
 
         // 1. Stop p2p first so its sync workers do not race the DB close.
         {
@@ -325,12 +366,14 @@ impl AppState {
             }
         }
 
+        self.discovery.stop().await;
+        self.classroom.clear_subscriptions().await;
+
         // 2. Stop iroh + clear its content key. The singleton instance
         // is preserved; `set_data_dir` repoints it on the next unlock.
-        if self.content_node.is_running().await {
-            if let Err(e) = self.content_node.shutdown().await {
-                log::warn!("iroh shutdown error (continuing): {e}");
-            }
+        match self.content_node.shutdown().await {
+            Ok(()) | Err(content_store::node::NodeError::NotRunning) => {}
+            Err(e) => errors.push(format!("iroh shutdown failed: {e}")),
         }
         self.content_node.clear_content_key().await;
 
@@ -343,9 +386,10 @@ impl AppState {
         // 4. Lock keystore — zeroizes the in-memory password.
         {
             let mut guard = self.keystore.lock().await;
-            if let Some(ks) = guard.take() {
-                if let Err(e) = ks.lock() {
-                    log::warn!("keystore lock error: {e}");
+            if let Some(ks) = guard.as_mut() {
+                match ks.clear_secrets() {
+                    Ok(()) => *guard = None,
+                    Err(e) => errors.push(format!("keystore lock failed: {e}")),
                 }
             }
         }
@@ -356,14 +400,12 @@ impl AppState {
             *guard = None;
         }
 
-        // 6. Clear active profile metadata last.
-        {
-            let mut guard = self.active.write().map_err(|e| e.to_string())?;
-            *guard = None;
+        if errors.is_empty() {
+            log::info!("active profile stopped");
+            Ok(())
+        } else {
+            Err(errors.join("; "))
         }
-
-        log::info!("active profile stopped");
-        Ok(())
     }
 
     /// Open the encrypted database for the given profile.
@@ -373,7 +415,9 @@ impl AppState {
         {
             let guard = self.db.lock().map_err(|e| e.to_string())?;
             if guard.is_some() {
-                return Ok(());
+                return Err(
+                    "profile database is already open — finish locking before retrying".to_string(),
+                );
             }
         }
 
@@ -410,24 +454,19 @@ impl AppState {
             }
         }
 
-        // Seed `stake_pubkey_registry` from the bundled
-        // bootstrap snapshot. No-op when the placeholder file is still
-        // empty (pre-launch). See `docs/stake-pubkey-registry.md`.
-        match crate::p2p::registry::load_embedded_bootstrap(database.conn()) {
-            Ok(n) if n > 0 => log::info!("stake-pubkey registry: seeded {n} rows from bootstrap"),
-            Ok(_) => {}
-            Err(e) => log::warn!("stake-pubkey registry: bootstrap seed failed: {e}"),
+        // A profile must not activate under a bootstrap trust document that
+        // fails the network profile's pinned verifier configuration.
+        let seeded = crate::p2p::registry::load_embedded_bootstrap(database.conn())
+            .map_err(|e| format!("stake-pubkey registry bootstrap is invalid: {e}"))?;
+        if seeded > 0 {
+            log::info!("stake-pubkey registry: seeded {seeded} rows from bootstrap");
         }
 
-        // Seed the skill taxonomy, goal templates, and browsable demo courses
-        // on every platform (mobile/release included) — these are product data
-        // the goals + skill-graph features need, not dev-only fixtures. The
-        // heavy iroh content-blob seeding stays behind `dev-seed` above. Fresh
-        // profiles are NOT auto-enrolled (see BACKFILL_SQL) and course plugins
-        // install through the enrollment pre-flight (see builtins::install_all).
-        if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
-            log::warn!("seed failed (non-fatal): {e}");
-        }
+        // Install the labelled built-in taxonomy, goal templates and question
+        // banks. No personas, credentials, courses or governance rows are
+        // created, and nothing is downloaded.
+        crate::db::bundled::install_bundled_data(database.conn())
+            .map_err(|e| format!("bundled data install failed: {e}"))?;
 
         {
             let mut guard = self.db.lock().map_err(|e| e.to_string())?;
@@ -444,13 +483,6 @@ impl AppState {
                     stats.installed,
                     stats.failed
                 );
-
-                // Demo course exercising both first-party plugins.
-                // Idempotent and silent if the builtins haven't landed yet
-                // (e.g. a corrupt embedded bundle); see seed_plugin_demo.
-                if let Err(e) = crate::db::seed_plugin_demo::seed_plugin_demo_course(db.conn()) {
-                    log::warn!("plugin demo course seed failed: {e}");
-                }
 
                 // Clean up any sessions stuck as 'active' from a previous crash.
                 match db.conn().execute(
@@ -495,9 +527,9 @@ impl AppState {
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "C" fn JNI_OnLoad(vm: jni::JavaVM, _reserved: *mut std::ffi::c_void) -> jni::sys::jint {
-    let vm_ptr = vm.get_java_vm_pointer() as *mut std::ffi::c_void;
-
-    if let Ok(mut env) = vm.attach_current_thread() {
+    let initialized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let vm_ptr = vm.get_java_vm_pointer() as *mut std::ffi::c_void;
+        let mut env = vm.attach_current_thread().map_err(|_| ())?;
         let app = env
             .call_static_method(
                 "android/app/ActivityThread",
@@ -505,22 +537,26 @@ pub extern "C" fn JNI_OnLoad(vm: jni::JavaVM, _reserved: *mut std::ffi::c_void) 
                 "()Landroid/app/Application;",
                 &[],
             )
-            .and_then(|v| v.l());
-        if let Ok(app) = app {
-            if !app.is_null() {
-                if let Ok(global) = env.new_global_ref(&app) {
-                    let ctx_ptr = global.as_raw() as *mut std::ffi::c_void;
-                    // SAFETY: `vm_ptr` is the process JavaVM (valid for the
-                    // process lifetime) and `ctx_ptr` refers to a global ref we
-                    // deliberately leak below so it outlives this scope.
-                    unsafe { ndk_context::initialize_android_context(vm_ptr, ctx_ptr) };
-                    std::mem::forget(global);
-                }
-            }
+            .and_then(|v| v.l())
+            .map_err(|_| ())?;
+        if app.is_null() {
+            return Err(());
         }
-    }
+        let global = env.new_global_ref(&app).map_err(|_| ())?;
+        let ctx_ptr = global.as_raw() as *mut std::ffi::c_void;
+        // SAFETY: `vm_ptr` is the process JavaVM (valid for the process
+        // lifetime) and `ctx_ptr` refers to a global ref deliberately leaked
+        // below. JNI invokes JNI_OnLoad once; a duplicate initialization panic
+        // is contained by the outer FFI boundary and reported as JNI_ERR.
+        unsafe { ndk_context::initialize_android_context(vm_ptr, ctx_ptr) };
+        std::mem::forget(global);
+        Ok(())
+    }));
 
-    jni::sys::JNI_VERSION_1_6
+    match initialized {
+        Ok(Ok(())) => jni::sys::JNI_VERSION_1_6,
+        Ok(Err(())) | Err(_) => jni::sys::JNI_ERR,
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -633,31 +669,9 @@ pub fn run() {
             }
         }))
         .menu(|handle| {
-            // Standard menus plus a Developer submenu available in ALL builds:
-            // "Reload Webviews" (reload without restarting), "Open DevTools"
-            // (web inspector), and "Sentinel Live View" (toggle the debug PiP).
+            // Diagnostics are entered explicitly in-app and are deliberately
+            // absent from the normal release menu.
             let menu = tauri::menu::Menu::default(handle)?;
-            let reload =
-                tauri::menu::MenuItemBuilder::with_id("reload_webviews", "Reload Webviews")
-                    .accelerator("CmdOrCtrl+Shift+R")
-                    .build(handle)?;
-            let devtools = tauri::menu::MenuItemBuilder::with_id("open_devtools", "Open DevTools")
-                .accelerator("CmdOrCtrl+Alt+I")
-                .build(handle)?;
-            let pip =
-                tauri::menu::MenuItemBuilder::with_id("toggle_sentinel_pip", "Sentinel Live View")
-                    .accelerator("CmdOrCtrl+Shift+S")
-                    .build(handle)?;
-            let install_cli = tauri::menu::MenuItemBuilder::with_id("install_cli", "Install CLI…")
-                .build(handle)?;
-            let develop = tauri::menu::SubmenuBuilder::new(handle, "Developer")
-                .item(&reload)
-                .item(&devtools)
-                .item(&pip)
-                .separator()
-                .item(&install_cli)
-                .build()?;
-            menu.append(&develop)?;
 
             // Drop the empty Help submenu on macOS.
             //
@@ -678,28 +692,6 @@ pub fn run() {
             }
 
             Ok(menu)
-        })
-        .on_menu_event(|app, event| {
-            use tauri::{Emitter, Manager};
-            match event.id().0.as_str() {
-                "reload_webviews" => {
-                    for (_, w) in app.webview_windows() {
-                        let _ = w.eval("window.location.reload()");
-                    }
-                }
-                "open_devtools" => {
-                    for (_, w) in app.webview_windows() {
-                        w.open_devtools();
-                    }
-                }
-                "toggle_sentinel_pip" => {
-                    let _ = app.emit("develop://toggle-sentinel", ());
-                }
-                "install_cli" => {
-                    let _ = app.emit("develop://install-cli", ());
-                }
-                _ => {}
-            }
         });
 
     builder
@@ -772,191 +764,225 @@ pub fn run() {
                     .app_data_dir()
                     .expect("failed to resolve app data directory"),
             };
-            std::fs::create_dir_all(&app_dir)
-                .expect("failed to create app data directory");
+            std::fs::create_dir_all(&app_dir).expect("failed to create app data directory");
 
             diag::init(&app_dir);
             diag::install_panic_hook();
             diag::log("app setup started");
-            diag::log(&format!("app_dir={}", app_dir.display()));
+            diag::log("app data directory resolved");
 
-            // Migrate any legacy single-vault layout into the new
-            // per-profile layout. Runs at most once; no-op if a
-            // profiles/ dir already exists.
+            let network_profile = network_profile::embedded_preprod()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            network_profile
+                .verify_embedded_resources()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            diag::log(&format!(
+                "network profile validated: {} revision {}",
+                network_profile.network_id, network_profile.profile_revision
+            ));
+
+            // The pre-profile single-vault layout is unsupported. It is never
+            // migrated, converted or deleted: report it and continue into
+            // onboarding, leaving the old files available to copy out by hand.
             let profile_manager = Arc::new(
-                profile::ProfileManager::open(&app_dir)
-                    .expect("failed to open profile manager"),
+                profile::ProfileManager::open(&app_dir).expect("failed to open profile manager"),
             );
-            let legacy = profile::migration::LegacyLayout::at(&app_dir);
-            match profile::migration::migrate_if_needed(&profile_manager, &legacy) {
-                Ok(profile::migration::MigrationReport::Migrated { id, .. }) => {
-                    log::info!("migrated legacy single-vault layout into profile {id}");
-                    diag::log(&format!("legacy migration: created profile {id}"));
-                }
-                Ok(profile::migration::MigrationReport::Failed { error, moved }) => {
-                    log::error!("legacy migration failed: {error}");
-                    diag::log(&format!("legacy migration FAILED: {error}"));
-                    if let Err(e) = profile::migration::rollback(&moved) {
-                        log::error!("legacy migration rollback also failed: {e}");
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => log::error!("legacy migration error: {e}"),
+            let legacy_entries = profile::legacy_layout::detect(&app_dir);
+            if !legacy_entries.is_empty() {
+                let report = profile::legacy_layout::report(&legacy_entries);
+                log::error!("{report}");
+                diag::log(&report);
             }
 
             // Per-profile resources start empty — populated when a
             // profile is unlocked via `start_active_profile`.
-            let db: Arc<std::sync::Mutex<Option<Database>>> =
-                Arc::new(std::sync::Mutex::new(None));
+            let db: Arc<std::sync::Mutex<Option<Database>>> = Arc::new(std::sync::Mutex::new(None));
+            let db_executor = db::executor::DatabaseExecutor::new(db.clone());
             let keystore: Arc<Mutex<Option<Keystore>>> = Arc::new(Mutex::new(None));
             // Singleton iroh node — initialized to a sentinel path inside
             // app_dir/iroh-staging. The real per-profile blob directory is
             // installed by `start_active_profile` before the first start.
             let content_node = Arc::new(ContentNode::new(&app_dir.join("iroh-staging")));
-            let resolver: Arc<Mutex<Option<ContentResolver>>> =
-                Arc::new(Mutex::new(None));
+            let resolver: Arc<Mutex<Option<ContentResolver>>> = Arc::new(Mutex::new(None));
             let discovery = Arc::new(content_store::discovery::ContentDiscovery::new());
             let p2p_node: Arc<Mutex<Option<P2pNode>>> = Arc::new(Mutex::new(None));
             let active: Arc<std::sync::RwLock<Option<ActiveProfile>>> =
                 Arc::new(std::sync::RwLock::new(None));
+            let profile_operations = profile::operations::ProfileOperations::default();
 
-            // Spawn on-chain queue processor (runs every 60s).
-            // Processes both the governance tx queue and the credential
-            // anchor queue. Both silently skip when BLOCKFROST_PROJECT_ID
-            // is unset or the vault isn't unlocked yet.
+            // Spawn on-chain queue processor (runs every 60s). Its passes
+            // silently skip when BLOCKFROST_PROJECT_ID is unset or the vault
+            // isn't unlocked yet.
             {
                 let db_for_queue = db.clone();
+                let db_executor_for_queue = db_executor.clone();
                 let ks_for_queue = keystore.clone();
                 let node_for_sync = p2p_node.clone();
-                diag::log("spawning on-chain queue processor (governance + credential anchors)");
+                let operations_for_queue = profile_operations.clone();
+                diag::log("spawning on-chain queue processor");
                 tauri::async_runtime::spawn(async move {
                     // Wait for app to fully initialize before processing
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
                     loop {
-                        // Try to create a Blockfrost client from the
-                        // active profile's `cardano.blockfrost_project_id`
-                        // setting (read fresh each tick so the queue
-                        // picks up changes without restart). Falls
-                        // back to the `BLOCKFROST_PROJECT_ID` env var.
-                        let project_id = {
-                            let guard = db_for_queue.lock().ok();
-                            let conn = guard
-                                .as_deref()
-                                .and_then(|opt| opt.as_ref())
-                                .map(|db| db.conn());
-                            cardano::blockfrost::resolve_project_id(conn)
+                        let lease = operations_for_queue
+                            .session()
+                            .and_then(|session| operations_for_queue.admit(&session).ok());
+                        let Some(lease) = lease else {
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                            continue;
                         };
-                        let bf = project_id
-                            .and_then(|id| cardano::blockfrost::BlockfrostClient::new(id).ok());
+                        let guardian_lease = lease.clone();
+                        let chain_lease = lease.clone();
+                        // This pass contains cancellation-safe provider/P2P
+                        // awaits and synchronous local transactions, not detached
+                        // blocking jobs. Stop on lock before releasing its lease;
+                        // signed transactions already have durable checkpoints.
+                        let completed = lease
+                            .run_until_closed(async {
+                                // Try to create a Blockfrost client from the
+                                // active profile's `cardano.blockfrost_project_id`
+                                // setting (read fresh each tick so the queue
+                                // picks up changes without restart). Falls
+                                // back to the `BLOCKFROST_PROJECT_ID` env var.
+                                let project_id = {
+                                    let guard = db_for_queue.lock().ok();
+                                    let conn = guard
+                                        .as_deref()
+                                        .and_then(|opt| opt.as_ref())
+                                        .map(|db| db.conn());
+                                    cardano::blockfrost::resolve_project_id(conn)
+                                };
+                                let bf = project_id.and_then(|id| {
+                                    cardano::blockfrost::BlockfrostClient::new(id).ok()
+                                });
 
-                        // Derive wallet from the unlocked keystore. If the vault
-                        // is still locked (keystore is None), wallet will be None
-                        // and both queues skip silently.
-                        let wallet: Option<crypto::wallet::Wallet> = {
-                            let guard = ks_for_queue.lock().await;
-                            guard.as_ref().and_then(|ks| {
-                                ks.retrieve_mnemonic()
-                                    .ok()
-                                    .and_then(|m| crypto::wallet::wallet_from_mnemonic(&m).ok())
-                            })
-                        };
+                                // Derive wallet from the unlocked keystore. If the vault
+                                // is still locked (keystore is None), wallet will be None
+                                // and both queues skip silently.
+                                let wallet: Option<crypto::wallet::Wallet> = {
+                                    let guard = ks_for_queue.lock().await;
+                                    guard.as_ref().and_then(|ks| {
+                                        ks.retrieve_mnemonic().ok().and_then(|m| {
+                                            crypto::wallet::wallet_from_mnemonic(&m).ok()
+                                        })
+                                    })
+                                };
 
-                        // Governance tx queue (elections, proposals, soulbound)
-                        match cardano::onchain_queue::process_queue(&db_for_queue, &bf, &wallet).await
-                        {
-                            Ok(n) if n > 0 => {
-                                log::info!("governance queue: processed {n} items");
-                            }
-                            Err(e) => {
-                                log::debug!("governance queue: {e}");
-                            }
-                            _ => {}
-                        }
-
-                        // Credential anchor queue (VC integrity hashes → Cardano metadata-only txs)
-                        match cardano::anchor_queue::tick(&db_for_queue, &bf, &wallet).await
-                        {
-                            Ok(n) if n > 0 => {
-                                log::info!("anchor queue: processed {n} items");
-                            }
-                            Err(e) => {
-                                log::debug!("anchor queue: {e}");
-                            }
-                            _ => {}
-                        }
-
-                        // Username claim batch anchoring (registry phase 3):
-                        // one metadata tx (label 1698) anchors up to 80
-                        // unanchored claims. Silent no-op without chain creds.
-                        match cardano::username_anchor::tick(&db_for_queue, &bf, &wallet).await {
-                            Ok(anchored) if !anchored.is_empty() => {
-                                log::info!(
-                                    "username anchors: {} claims anchored",
-                                    anchored.len()
+                                // Chain submission/recovery database phases run as
+                                // background-lane executor jobs. The journal owns a
+                                // lease clone that is released with this pass.
+                                let chain_journal = cardano::submission::Journal::new(
+                                    db_executor_for_queue.clone(),
+                                    chain_lease,
+                                    db::executor::DatabaseWorkload::Background,
                                 );
-                                // Republish enriched (tier 2) claims to the DHT.
-                                let node_guard = node_for_sync.lock().await;
-                                if let Some(node) = node_guard.as_ref() {
-                                    for claim in anchored {
-                                        if let Ok(payload) = serde_json::to_vec(&claim) {
-                                            let key = crate::domain::username_claim::dht_key(
-                                                &claim.username,
-                                            );
-                                            let _ = node.put_dht_record(key, payload).await;
+                                if let Some(client) = bf.as_ref() {
+                                    if let Some(wallet) = wallet.as_ref() {
+                                        if let Err(error) = cardano::completion_queue::tick(
+                                            &chain_journal,
+                                            client,
+                                            wallet,
+                                        )
+                                        .await
+                                        {
+                                            log::debug!("completion queue: {error}");
                                         }
                                     }
-                                }
-                            }
-                            Err(e) => {
-                                log::debug!("username anchors: {e}");
-                            }
-                            _ => {}
-                        }
-
-                        // Completion-witness observer + auto-issuance pipeline.
-                        // Gated on ALEXANDRIA_COMPLETION_POLICY_ID + the vault
-                        // being unlocked (wallet present). Silent no-op otherwise.
-                        if let (Some(bf_client), Some(w)) = (bf.as_ref(), wallet.as_ref()) {
-                            if let Ok(policy_id_raw) =
-                                std::env::var("ALEXANDRIA_COMPLETION_POLICY_ID")
-                            {
-                                let policy_id = policy_id_raw.trim().to_string();
-                                if !policy_id.is_empty() {
-                                    // Observer: takes the shared DB handle
-                                    // so locks stay short across awaits.
-                                    match cardano::completion::tick(
-                                        &db_for_queue,
-                                        bf_client,
-                                        &policy_id,
-                                    )
-                                    .await
+                                    if let Err(error) =
+                                        cardano::completion_recovery::tick(&chain_journal, client)
+                                            .await
                                     {
-                                        Ok(n) if n > 0 => log::info!(
-                                            "completion observer: ingested {n} new mint(s)"
-                                        ),
-                                        Err(e) => log::debug!("completion observer: {e}"),
-                                        _ => {}
+                                        log::debug!("completion recovery: {error}");
+                                    }
+                                }
+
+                                // Credential anchor queue (VC integrity hashes → Cardano metadata-only txs)
+                                match cardano::anchor_queue::tick(&chain_journal, &bf, &wallet)
+                                    .await
+                                {
+                                    Ok(n) if n > 0 => {
+                                        log::info!("anchor queue: processed {n} items");
+                                    }
+                                    Err(e) => {
+                                        log::debug!("anchor queue: {e}");
+                                    }
+                                    _ => {}
+                                }
+
+                                // Username claim batch anchoring (registry phase 3):
+                                // one metadata tx (label 1698) anchors up to 80
+                                // unanchored claims. Silent no-op without chain creds.
+                                match cardano::username_anchor::tick(&chain_journal, &bf, &wallet)
+                                    .await
+                                {
+                                    Ok(anchored) if !anchored.is_empty() => {
+                                        log::info!(
+                                            "username anchors: {} claims anchored",
+                                            anchored.len()
+                                        );
+                                        // Republish enriched (tier 2) claims to the DHT.
+                                        let node_guard = node_for_sync.lock().await;
+                                        if let Some(node) = node_guard.as_ref() {
+                                            for claim in anchored {
+                                                if let Ok(payload) = serde_json::to_vec(&claim) {
+                                                    let key =
+                                                        crate::domain::username_claim::dht_key(
+                                                            &claim.username,
+                                                        );
+                                                    let _ = node.put_dht_record(key, payload).await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::debug!("username anchors: {e}");
+                                    }
+                                    _ => {}
+                                }
+
+                                // Completion-witness observer + auto-issuance pipeline.
+                                // Gated on ALEXANDRIA_COMPLETION_POLICY_ID + the vault
+                                // being unlocked (wallet present). Silent no-op otherwise.
+                                if let (Some(bf_client), Some(w)) = (bf.as_ref(), wallet.as_ref()) {
+                                    if let Ok(policy_id_raw) =
+                                        std::env::var("ALEXANDRIA_COMPLETION_POLICY_ID")
+                                    {
+                                        let policy_id = policy_id_raw.trim().to_string();
+                                        if !policy_id.is_empty() {
+                                            // Observer: takes the shared DB handle
+                                            // so locks stay short across awaits.
+                                            match cardano::completion::tick(
+                                                &db_for_queue,
+                                                bf_client,
+                                                &policy_id,
+                                            )
+                                            .await
+                                            {
+                                                Ok(n) if n > 0 => log::info!(
+                                                    "completion observer: ingested {n} new mint(s)"
+                                                ),
+                                                Err(e) => log::debug!("completion observer: {e}"),
+                                                _ => {}
+                                            }
+                                        }
                                     }
 
                                     // Auto-issuance over the ingested rows.
                                     let issuance = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => Some(
-                                                commands::auto_issuance::tick(
-                                                    db.conn(),
-                                                    &w.signing_key,
-                                                ),
-                                            ),
+                                            Ok(Some(db)) => Some(commands::auto_issuance::tick(
+                                                db.conn(),
+                                                &w.signing_key,
+                                            )),
                                             _ => None,
                                         }
                                     };
                                     match issuance {
                                         Some(Ok(report)) if report.issued > 0 => log::info!(
-                                            "auto-issuance: issued {} VC(s), {} waiting on attestation",
+                                            "auto-issuance: issued {} VC(s)",
                                             report.issued,
-                                            report.waiting_on_attestations,
                                         ),
                                         Some(Ok(report)) if !report.errors.is_empty() => {
                                             log::warn!(
@@ -969,115 +995,54 @@ pub fn run() {
                                         _ => {}
                                     }
                                 }
-                            }
-                        }
 
-                        // Cross-device sync: when auto-sync is enabled,
-                        // reconcile with every paired device. No-op if the
-                        // toggle is off, no profile is unlocked, or the
-                        // node isn't running.
-                        let merged =
-                            commands::sync::auto_sync_all(&db_for_queue, &node_for_sync).await;
-                        if merged > 0 {
-                            log::info!("auto-sync: merged {merged} row(s) from paired devices");
-                        }
+                                // Cross-device sync: when auto-sync is enabled,
+                                // reconcile with every paired device. No-op if the
+                                // toggle is off, no profile is unlocked, or the
+                                // node isn't running.
+                                let merged = commands::sync::auto_sync_all(
+                                    &db_executor_for_queue,
+                                    &guardian_lease,
+                                    &node_for_sync,
+                                )
+                                .await;
+                                if merged > 0 {
+                                    log::info!(
+                                        "auto-sync: merged {merged} row(s) from paired devices"
+                                    );
+                                }
 
-                        // Guardian oversight: wards push activity to
-                        // their guardians, guardians pull from wards,
-                        // and pending link exchanges retry. No-op
-                        // without guardian links.
-                        match commands::guardian::guardian_sync_all(&db_for_queue, &node_for_sync)
-                            .await
-                        {
-                            Ok(rows) if rows > 0 => {
-                                log::info!("guardian-sync: exchanged {rows} row(s)");
-                            }
-                            Ok(_) => {}
-                            Err(e) => log::debug!("guardian-sync: {e}"),
-                        }
+                                // Guardian oversight: wards push activity to
+                                // their guardians, guardians pull from wards,
+                                // and pending link exchanges retry. No-op
+                                // without guardian links.
+                                match commands::guardian::guardian_sync_all(
+                                    &db_executor_for_queue,
+                                    &guardian_lease,
+                                    db::executor::DatabaseWorkload::Background,
+                                    &node_for_sync,
+                                )
+                                .await
+                                {
+                                    Ok(rows) if rows > 0 => {
+                                        log::info!("guardian-sync: exchanged {rows} row(s)");
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => log::debug!("guardian-sync: {e}"),
+                                }
 
+                                drop(wallet);
+                                drop(bf);
+                            })
+                            .await;
+                        // Release every lease clone before sleeping, so a lock
+                        // can drain this pass without waiting for the next tick.
+                        drop(guardian_lease);
+                        if completed.is_none() {
+                            log::debug!("profile background pass stopped for locking");
+                        }
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     }
-                });
-            }
-
-            // Stake-address → pubkey registry refresh.
-            //
-            // Polls the on-chain `stake_pubkey_registration` script
-            // address every `registry.refresh_secs` (default 3600) and
-            // reconciles entries into the per-profile
-            // `stake_pubkey_registry` table.
-            //
-            // Both the Blockfrost project id and the refresh
-            // interval are resolved **fresh on every tick** via the
-            // factory closures handed to `spawn_refresh_task`. That
-            // means:
-            //   - the refresh task starts immediately at app boot
-            //     even if no profile has been unlocked yet;
-            //   - once the operator unlocks a profile and sets
-            //     `cardano.blockfrost_project_id`, the next tick
-            //     picks it up without an app restart;
-            //   - tuning `registry.refresh_secs` is live.
-            // Previous shape returned `forever` at app start if the
-            // env var was unset, permanently disabling the chain
-            // refresh for the session.
-            {
-                let db_for_registry = db.clone();
-                diag::log("spawning stake-pubkey registry refresh task");
-                tauri::async_runtime::spawn(async move {
-                    // Tiny startup-grace delay so this task doesn't
-                    // race the profile bootstrap path for the DB
-                    // mutex on first launch. After this, the inner
-                    // loop's `BOOTSTRAP_REFRESH_SECS` cadence handles
-                    // a still-locked profile — first useful tick
-                    // fires within ~30 s of unlock.
-                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-
-                    let db_for_resolve = db_for_registry.clone();
-                    let fetcher_factory = move || -> Option<Arc<dyn p2p::registry_chain::ChainFetcher>> {
-                        let project_id = {
-                            let guard = db_for_resolve.lock().ok();
-                            let conn = guard
-                                .as_deref()
-                                .and_then(|opt| opt.as_ref())
-                                .map(|db| db.conn());
-                            cardano::blockfrost::resolve_project_id(conn)
-                        }?;
-                        let bf = cardano::blockfrost::BlockfrostClient::new(project_id).ok()?;
-                        Some(Arc::new(p2p::registry_chain::BlockfrostFetcher::new(
-                            Arc::new(bf),
-                            // Preprod for the launch window; revisit
-                            // when mainnet config selection lands.
-                            cardano::stake_pubkey::Network::Preprod,
-                        )))
-                    };
-
-                    let db_for_interval = db_for_registry.clone();
-                    let interval_factory = move || -> u64 {
-                        let guard = db_for_interval.lock().ok();
-                        let conn = guard
-                            .as_deref()
-                            .and_then(|opt| opt.as_ref())
-                            .map(|db| db.conn());
-                        match conn {
-                            Some(c) => settings::store::SettingsStore::get(
-                                c,
-                                settings::registry::keys::REGISTRY_REFRESH_SECS,
-                            ),
-                            None => p2p::registry_chain::DEFAULT_REFRESH_SECS,
-                        }
-                    };
-
-                    // Refresh task owns itself for the app lifetime; we
-                    // don't hold the JoinHandle because the runtime
-                    // tears it down on shutdown anyway. The interior
-                    // loop in spawn_refresh_task swallows transient
-                    // Blockfrost errors.
-                    let _handle = p2p::registry_chain::spawn_refresh_task(
-                        db_for_registry,
-                        fetcher_factory,
-                        interval_factory,
-                    );
                 });
             }
 
@@ -1103,6 +1068,7 @@ pub fn run() {
                 app_data_dir: app_dir.clone(),
                 profile_manager,
                 active,
+                profile_operations,
                 tutoring,
                 classroom,
                 #[cfg(grader)]
@@ -1113,6 +1079,7 @@ pub fn run() {
                 )),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 db,
+                db_executor,
                 keystore,
                 content_node,
                 resolver,
@@ -1143,12 +1110,16 @@ pub fn run() {
                         use objc2::runtime::AnyObject;
 
                         let wk_webview = platform_wv.inner();
+                        // SAFETY: WRY owns a live WKWebView for the duration of
+                        // this callback. The selectors used below are standard
+                        // WebKit/Foundation accessors or guarded KVC writes;
+                        // Objective-C objects returned as `Retained` remain
+                        // alive through the calls that consume them.
                         unsafe {
                             let wk: &AnyObject = &*(wk_webview as *const AnyObject);
 
                             // WKWebViewConfiguration *config = [wkWebView configuration];
-                            let config: Retained<AnyObject> =
-                                objc2::msg_send![wk, configuration];
+                            let config: Retained<AnyObject> = objc2::msg_send![wk, configuration];
                             // WKPreferences *prefs = [config preferences];
                             let prefs: Retained<AnyObject> =
                                 objc2::msg_send![&*config, preferences];
@@ -1228,8 +1199,7 @@ pub fn run() {
                             let wk: &AnyObject = &*(wk_webview as *const AnyObject);
 
                             // UIScrollView *scrollView = [wkWebView scrollView];
-                            let scroll_view: Retained<AnyObject> =
-                                objc2::msg_send![wk, scrollView];
+                            let scroll_view: Retained<AnyObject> = objc2::msg_send![wk, scrollView];
 
                             // UIScrollViewContentInsetAdjustmentNever = 2
                             let never: isize = 2;
@@ -1259,14 +1229,9 @@ pub fn run() {
         // Community plugin asset protocol — serves files out of
         // `app_data_dir/plugins/<cid>/` with a per-plugin CSP and the
         // alex bootstrap injected into HTML responses. See
-        // `src/plugins/asset_protocol.rs` and
-        // `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
+        // `src/plugins/asset_protocol.rs` and `docs/plugins.md`.
         .register_uri_scheme_protocol("plugin", |ctx, request| {
-            let plugins_dir = match ctx
-                .app_handle()
-                .state::<AppState>()
-                .plugins_dir()
-            {
+            let plugins_dir = match ctx.app_handle().state::<AppState>().plugins_dir() {
                 Ok(p) => p,
                 Err(_) => {
                     // No profile unlocked — refuse the asset request so the
@@ -1295,6 +1260,8 @@ pub fn run() {
             // Profile lifecycle (multi-user)
             commands::profile::list_profiles,
             commands::profile::get_active_profile_id,
+            commands::profile::get_profile_cleanup_required,
+            commands::profile::get_profile_session_token,
             commands::profile::create_profile,
             commands::profile::restore_profile_with_mnemonic,
             commands::profile::unlock_profile,
@@ -1336,11 +1303,12 @@ pub fn run() {
             commands::enrollment::get_element_submission,
             // Content (iroh blob store)
             commands::content::content_add,
-            commands::content::content_get,
+            commands::content::content_get_text,
             commands::content::content_has,
             commands::content::content_node_status,
             commands::content::content_resolve,
             commands::content::content_resolve_bytes,
+            commands::content::content_resolve_text,
             commands::content::content_cache_file,
             // Chapters & Elements
             commands::chapters::list_chapters,
@@ -1393,6 +1361,8 @@ pub fn run() {
             commands::instructor::instructor_inbox,
             // Course publishing (iroh)
             commands::courses::publish_course,
+            commands::courses::get_course_completion_policy,
+            commands::courses::set_course_completion_policy,
             // Opinions (Field Commentary)
             commands::opinions::publish_opinion,
             commands::opinions::list_opinions,
@@ -1413,29 +1383,13 @@ pub fn run() {
             // Catalog
             commands::catalog::search_catalog,
             commands::catalog::get_catalog_entry,
-            commands::catalog::bootstrap_public_catalog,
             commands::catalog::hydrate_catalog_courses,
-            // Governance
-            commands::governance::list_daos,
-            commands::governance::get_dao,
-            commands::governance::create_dao,
-            commands::governance::open_election,
-            commands::governance::list_elections,
-            commands::governance::get_election,
-            commands::governance::nominate,
-            commands::governance::accept_nomination,
-            commands::governance::start_election_voting,
-            commands::governance::cast_election_vote,
-            commands::governance::finalize_election,
-            commands::governance::install_committee,
-            commands::governance::submit_proposal,
-            commands::governance::list_proposals,
-            commands::governance::approve_proposal,
-            commands::governance::cancel_proposal,
-            commands::governance::cast_proposal_vote,
-            commands::governance::resolve_proposal,
-            commands::governance::get_onchain_queue_status,
-            commands::governance::retry_onchain_submission,
+            // Governance genesis review and trust-anchor pinning
+            commands::governance_genesis::governance_preview_genesis,
+            commands::governance_genesis::governance_preview_genesis_locator,
+            commands::governance_genesis::governance_retrieve_genesis,
+            commands::governance_genesis::governance_pin_genesis,
+            commands::governance_genesis::governance_get_pinned_genesis,
             // Reputation (VC-sourced engine — see commands::reputation).
             commands::reputation::list_reputation_rows,
             commands::reputation::get_reputation,
@@ -1454,31 +1408,22 @@ pub fn run() {
             commands::skill_bootstrap::bootstrap_extract_text,
             // Dynamic assessments
             commands::assessment::assessment_start_attempt,
+            commands::assessment::assessment_save_draft,
             commands::assessment::assessment_grade,
             commands::assessment::assessment_plan_goal,
+            commands::diagnostics::diagnostics_status,
+            commands::diagnostics::diagnostics_enter,
+            commands::diagnostics::diagnostics_exit,
+            commands::diagnostics::diagnostics_run_action,
             commands::adaptive::assessment_start_adaptive,
             commands::adaptive::assessment_submit_adaptive_item,
             commands::adaptive::assessment_finalize_adaptive,
-            // Community-content DAO ratification (propose→publish→apply)
-            commands::content_governance::propose_goal_template_change,
-            commands::content_governance::publish_goal_template_ratification,
-            commands::content_governance::propose_question_bank_change,
-            commands::content_governance::publish_question_bank_ratification,
-            commands::content_governance::apply_content_version,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::submit_snapshot_tx,
             commands::snapshot::list_snapshots,
             commands::snapshot::get_snapshot,
-            commands::snapshot::update_snapshot_status,
             // Taxonomy
-            commands::taxonomy::propose_taxonomy_change,
-            commands::taxonomy::preview_taxonomy_change,
-            commands::taxonomy::publish_taxonomy_ratification,
-            commands::taxonomy::get_taxonomy_version,
-            commands::taxonomy::list_taxonomy_versions,
-            commands::taxonomy::validate_taxonomy_changes,
-            commands::taxonomy::bootstrap_public_taxonomy,
             commands::taxonomy::list_subject_fields,
             commands::taxonomy::list_subjects,
             commands::taxonomy::list_skills,
@@ -1499,26 +1444,17 @@ pub fn run() {
             // Device pairing (bootstraps cross-device sync).
             commands::pairing::pairing_generate_code,
             commands::pairing::pairing_accept_code,
-            // Completion attestation (VC-first gate).
-            commands::attestation::set_completion_attestation_requirement,
-            commands::attestation::remove_completion_attestation_requirement,
-            commands::attestation::list_completion_attestation_requirements,
-            commands::attestation::submit_completion_attestation,
-            commands::attestation::get_completion_attestation_status,
-            // Credential challenges (VC-first rebuild).
-            commands::challenge::submit_credential_challenge,
-            commands::challenge::vote_on_credential_challenge,
-            commands::challenge::resolve_credential_challenge,
-            commands::challenge::list_credential_challenges,
-            commands::challenge::get_credential_challenge,
-            commands::challenge::expire_overdue_credential_challenges,
-            commands::challenge::lock_challenge_stake,
-            commands::challenge::settle_challenge_stake,
+            // Exact course-completion endorsement flow.
+            commands::attestation::get_course_completion_endorsement_request,
+            commands::attestation::sign_course_completion_endorsement,
+            commands::attestation::import_course_completion_endorsement,
+            commands::attestation::get_course_completion_endorsement_status,
+            commands::attestation::get_credential_trust,
             // Completion-witness flow (Merkle root + tx submission).
             commands::completion::preview_completion_root,
-            commands::completion::submit_completion_witness,
             commands::completion::get_course_completion_status,
             commands::completion::claim_course_completion,
+            commands::completion::get_completion_witness_status,
             // Integrity
             commands::integrity::integrity_start_session,
             commands::integrity::integrity_submit_snapshot,
@@ -1526,9 +1462,6 @@ pub fn run() {
             commands::integrity::integrity_get_session,
             commands::integrity::integrity_list_sessions,
             commands::integrity::integrity_list_snapshots,
-            commands::integrity::integrity_record_attestation,
-            commands::integrity::integrity_set_anchor,
-            commands::integrity::integrity_get_assurance,
             commands::role_assessment::create_organization,
             commands::role_assessment::list_organizations,
             commands::role_assessment::create_role_assessment,
@@ -1551,29 +1484,16 @@ pub fn run() {
             commands::interview::interview_save_review,
             commands::interview::interview_delete,
             commands::interview::interview_purge_expired,
-            // Sentinel DAO (adversarial-prior governance)
-            commands::sentinel_dao::sentinel_dao_get_info,
-            // Sentinel adversarial priors (propose / ratify / list / sync / load)
-            commands::sentinel_priors::sentinel_propose_prior,
-            commands::sentinel_priors::sentinel_ratify_prior,
-            commands::sentinel_priors::sentinel_priors_list,
-            commands::sentinel_priors::sentinel_priors_sync,
-            commands::sentinel_priors::sentinel_priors_load,
-            commands::sentinel_priors::sentinel_get_active_paste_classifier,
-            commands::sentinel_priors::sentinel_set_kill_switch,
-            commands::sentinel_priors::sentinel_get_kill_switch,
-            commands::sentinel_priors::sentinel_blocklist_version,
-            commands::sentinel_priors::sentinel_unblocklist_version,
             // Sentinel ML — paste classifier (tract) + per-user models (candle)
             commands::sentinel_ml::sentinel_score_paste,
             commands::sentinel_ml::sentinel_paste_classifier_info,
-            commands::sentinel_ml::sentinel_load_dao_classifier,
-            commands::sentinel_ml::sentinel_revert_classifier_to_bundled,
             commands::sentinel_ml::sentinel_train_keystroke_ae,
             commands::sentinel_ml::sentinel_score_keystroke_ae,
             commands::sentinel_ml::sentinel_extract_digraphs,
             commands::sentinel_ml::sentinel_train_mouse_cnn,
             commands::sentinel_ml::sentinel_score_mouse_cnn,
+            commands::sentinel_ml::sentinel_load_behavioral_profile,
+            commands::sentinel_ml::sentinel_save_behavioral_profile,
             commands::sentinel_ml::sentinel_user_models_status,
             commands::sentinel_ml::sentinel_reset_user_models,
             // Sentinel gaze / second-device detection
@@ -1720,10 +1640,9 @@ pub fn run() {
             // marker remains only as a fallback for any future target that
             // cannot run Pulley.
             commands::plugins::plugin_submit_and_grade,
-            // Phase 3 — P2P discovery + Plugin DAO attestation
+            // P2P plugin discovery. Committee attestation remains disabled
+            // until the replacement certificate protocol lands.
             commands::plugins::plugin_browse_catalog,
-            commands::plugins::plugin_attestation_status,
-            commands::plugins::plugin_ingest_attestation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

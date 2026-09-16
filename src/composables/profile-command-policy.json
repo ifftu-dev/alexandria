@@ -1,0 +1,26 @@
+{
+  "unscoped_commands": {
+    "check_health": "Device readiness, including whether a database is open.",
+    "read_diag_log": "Device diagnostics; diagnostics policy is handled separately.",
+    "frontend_log": "Device logging bridge.",
+    "release_secure_input": "Recover device input when no profile is available.",
+    "cli_install_status": "Device CLI installation state.",
+    "cli_install": "Device CLI installation.",
+    "cli_uninstall": "Device CLI removal.",
+    "fetch_update_manifest": "Application updates must work while locked.",
+    "list_profiles": "Public profile picker metadata.",
+    "get_active_profile_id": "Profile lifecycle bootstrap.",
+    "get_profile_cleanup_required": "Profile cleanup recovery.",
+    "get_profile_session_token": "Profile session bootstrap; not a credential.",
+    "create_profile": "Serialized activation owner.",
+    "restore_profile_with_mnemonic": "Serialized activation owner.",
+    "unlock_profile": "Serialized activation owner.",
+    "lock_profile": "Serialized teardown owner.",
+    "rename_profile": "Public profile picker metadata.",
+    "set_profile_avatar": "Public profile picker metadata.",
+    "delete_profile": "Serialized, password-checked profile removal.",
+    "is_biometric_available": "Unlock-screen device capability check.",
+    "tutoring_check_devices": "Device capability enumeration.",
+    "tutoring_list_devices": "Device capability enumeration."
+  }
+}

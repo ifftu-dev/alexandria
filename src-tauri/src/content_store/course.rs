@@ -6,13 +6,15 @@
 //! 3. Store the signed JSON as an iroh blob
 //! 4. Resolve (fetch + verify) course documents by BLAKE3 hash
 
+use alexandria_verify::did::did_from_verifying_key;
+use alexandria_verify::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
 
 use crate::content_store::content;
 use crate::content_store::node::ContentNode;
 use crate::domain::course_document::{
-    CourseDocumentPayload, PublishCourseResult, SignedCourseDocument,
+    CourseDocumentPayload, PublishCourseResult, SignedCourseDocument, COURSE_DOCUMENT_VERSION,
 };
 
 #[derive(Error, Debug)]
@@ -31,6 +33,33 @@ pub enum CourseDocError {
     InvalidPublicKey(String),
     #[error("deserialization failed: {0}")]
     Deserialization(String),
+    #[error("unsupported course document version: {0}")]
+    UnsupportedVersion(u32),
+    #[error("invalid completion policy: {0}")]
+    InvalidCompletionPolicy(String),
+    #[error("course document JSON rejected: {0}")]
+    UntrustedJson(UntrustedJsonError),
+}
+
+/// Structural limits for an untrusted signed course document, checked before
+/// typed decoding and signature verification. Publication applies the same
+/// limits, so an author cannot publish a document peers would refuse. Element
+/// content is referenced by hash, so strings carry titles and descriptions.
+pub const COURSE_DOCUMENT_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: 1024 * 1024,
+    max_depth: 16,
+    max_array_len: 4096,
+    max_object_entries: 64,
+    max_string_bytes: 64 * 1024,
+};
+
+/// Decode an untrusted signed course document under
+/// [`COURSE_DOCUMENT_JSON_LIMITS`]. The result is not yet verified.
+pub fn decode_course_document(bytes: &[u8]) -> Result<SignedCourseDocument, CourseDocError> {
+    decode_untrusted(bytes, &COURSE_DOCUMENT_JSON_LIMITS).map_err(|error| match error {
+        UntrustedJsonError::Invalid(message) => CourseDocError::Deserialization(message),
+        rejected => CourseDocError::UntrustedJson(rejected),
+    })
 }
 
 /// Sign a course document payload with the given Ed25519 signing key.
@@ -40,8 +69,15 @@ pub fn sign_course_document(
     payload: &CourseDocumentPayload,
     key: &SigningKey,
 ) -> Result<SignedCourseDocument, CourseDocError> {
-    let payload_json =
-        serde_json::to_vec(payload).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    validate_payload(payload)?;
+    if payload.version == COURSE_DOCUMENT_VERSION
+        && payload.author_did.as_ref() != Some(&did_from_verifying_key(&key.verifying_key()))
+    {
+        return Err(CourseDocError::InvalidPublicKey(
+            "v2 author DID does not match the signing key".into(),
+        ));
+    }
+    let payload_json = signing_bytes(payload)?;
 
     let signature = key.sign(&payload_json);
     let public_key = key.verifying_key();
@@ -50,6 +86,7 @@ pub fn sign_course_document(
         version: payload.version,
         course_id: payload.course_id.clone(),
         author_address: payload.author_address.clone(),
+        author_did: payload.author_did.clone(),
         title: payload.title.clone(),
         description: payload.description.clone(),
         thumbnail_hash: payload.thumbnail_hash.clone(),
@@ -59,6 +96,7 @@ pub fn sign_course_document(
         created_at: payload.created_at,
         updated_at: payload.updated_at,
         kind: payload.kind.clone(),
+        completion_policy: payload.completion_policy.clone(),
         tutor_policy: payload.tutor_policy.clone(),
         signature: hex::encode(signature.to_bytes()),
         public_key: hex::encode(public_key.to_bytes()),
@@ -71,8 +109,8 @@ pub fn sign_course_document(
 /// the included public key.
 pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), CourseDocError> {
     let payload = signed.payload();
-    let payload_json =
-        serde_json::to_vec(&payload).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    validate_payload(&payload)?;
+    let payload_json = signing_bytes(&payload)?;
 
     let sig_bytes: [u8; 64] = hex::decode(&signed.signature)
         .map_err(|e| CourseDocError::InvalidPublicKey(format!("bad signature hex: {e}")))?
@@ -86,11 +124,37 @@ pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), Cours
 
     let verifying_key = VerifyingKey::from_bytes(&pub_bytes)
         .map_err(|e| CourseDocError::InvalidPublicKey(e.to_string()))?;
+    if signed.version == COURSE_DOCUMENT_VERSION
+        && signed.author_did.as_ref() != Some(&did_from_verifying_key(&verifying_key))
+    {
+        return Err(CourseDocError::InvalidPublicKey(
+            "v2 author DID does not match the document key".into(),
+        ));
+    }
 
     let signature = Signature::from_bytes(&sig_bytes);
     verifying_key
         .verify(&payload_json, &signature)
         .map_err(|_| CourseDocError::InvalidSignature)
+}
+
+fn validate_payload(payload: &CourseDocumentPayload) -> Result<(), CourseDocError> {
+    match payload.version {
+        COURSE_DOCUMENT_VERSION => {
+            if payload.author_did.is_none() {
+                return Err(CourseDocError::InvalidPublicKey(
+                    "version 2 requires an author DID".into(),
+                ));
+            }
+            if let Some(policy) = &payload.completion_policy {
+                policy
+                    .validate()
+                    .map_err(|error| CourseDocError::InvalidCompletionPolicy(error.to_string()))?;
+            }
+        }
+        version => return Err(CourseDocError::UnsupportedVersion(version)),
+    }
+    Ok(())
 }
 
 pub async fn materialize_text_lessons(
@@ -115,6 +179,11 @@ pub async fn materialize_text_lessons(
     Ok(())
 }
 
+fn signing_bytes(payload: &CourseDocumentPayload) -> Result<Vec<u8>, CourseDocError> {
+    serde_json_canonicalizer::to_vec(payload)
+        .map_err(|error| CourseDocError::Serialization(error.to_string()))
+}
+
 /// Publish a signed course document to the iroh blob store.
 ///
 /// Serializes the signed document to JSON and stores it. Returns the
@@ -125,6 +194,7 @@ pub async fn publish_course_document(
 ) -> Result<PublishCourseResult, CourseDocError> {
     let doc_json =
         serde_json::to_vec(signed).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    decode_course_document(&doc_json)?;
 
     let result = content::add_bytes_unencrypted(node, &doc_json)
         .await
@@ -158,8 +228,7 @@ pub async fn resolve_course_document(
             other => CourseDocError::Store(other.to_string()),
         })?;
 
-    let signed: SignedCourseDocument = serde_json::from_slice(&bytes)
-        .map_err(|e| CourseDocError::Deserialization(e.to_string()))?;
+    let signed = decode_course_document(&bytes)?;
 
     verify_course_document(&signed)?;
 
@@ -176,6 +245,11 @@ pub async fn resolve_course_document(
 mod tests {
     use super::*;
     use crate::domain::course_document::{DocumentChapter, DocumentElement};
+    use alexandria_verify::course::{
+        AuthorizedAttestor, CourseCompletionPolicy, EvidenceRequirement,
+        COMPLETION_POLICY_FORMAT_VERSION,
+    };
+    use alexandria_verify::did::did_from_verifying_key;
     use ed25519_dalek::SigningKey;
     use tempfile::TempDir;
 
@@ -186,18 +260,20 @@ mod tests {
         SigningKey::from_bytes(&bytes)
     }
 
-    fn make_payload() -> CourseDocumentPayload {
+    fn make_payload(key: &SigningKey) -> CourseDocumentPayload {
         CourseDocumentPayload {
-            version: 1,
+            version: COURSE_DOCUMENT_VERSION,
             course_id: "test_course_001".to_string(),
             author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy"
                 .to_string(),
+            author_did: Some(did_from_verifying_key(&key.verifying_key())),
             title: "Algorithm Design and Analysis".to_string(),
             description: Some("A comprehensive course on algorithms".to_string()),
             thumbnail_hash: None,
             tags: vec!["algorithms".to_string(), "cs".to_string()],
             skill_ids: vec!["skill_001".to_string()],
             kind: "course".to_string(),
+            completion_policy: None,
             chapters: vec![DocumentChapter {
                 id: "ch_001".to_string(),
                 position: 0,
@@ -230,10 +306,25 @@ mod tests {
         }
     }
 
+    fn completion_policy(key: &SigningKey) -> CourseCompletionPolicy {
+        CourseCompletionPolicy {
+            format_version: COMPLETION_POLICY_FORMAT_VERSION,
+            required_attestors: 1,
+            authorized_attestors: vec![AuthorizedAttestor {
+                did: did_from_verifying_key(&key.verifying_key()),
+                public_key_hex: hex::encode(key.verifying_key().as_bytes()),
+            }],
+            evidence_requirements: vec![EvidenceRequirement {
+                kind: "graded-submissions".into(),
+                format_version: 1,
+            }],
+        }
+    }
+
     #[test]
     fn sign_and_verify_roundtrip() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let signed = sign_course_document(&payload, &key).unwrap();
         assert_eq!(signed.title, payload.title);
@@ -244,9 +335,67 @@ mod tests {
     }
 
     #[test]
+    fn version_two_signs_immutable_completion_policy() {
+        let author_key = make_signing_key();
+        let attestor_key = make_signing_key();
+        let mut payload = make_payload(&author_key);
+        payload.completion_policy = Some(completion_policy(&attestor_key));
+
+        let mut signed = sign_course_document(&payload, &author_key).unwrap();
+        verify_course_document(&signed).unwrap();
+
+        signed
+            .completion_policy
+            .as_mut()
+            .unwrap()
+            .required_attestors = 2;
+        assert!(matches!(
+            verify_course_document(&signed),
+            Err(CourseDocError::InvalidCompletionPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn version_one_documents_are_refused() {
+        let key = make_signing_key();
+        let mut payload = make_payload(&key);
+        payload.version = 1;
+
+        assert!(matches!(
+            sign_course_document(&payload, &key),
+            Err(CourseDocError::UnsupportedVersion(1))
+        ));
+
+        // A document that claims version 1 on the wire is refused on the way
+        // in too, so an old signed document cannot be imported.
+        let mut signed = sign_course_document(&make_payload(&key), &key).unwrap();
+        signed.version = 1;
+        assert!(matches!(
+            verify_course_document(&signed),
+            Err(CourseDocError::UnsupportedVersion(1))
+        ));
+    }
+
+    #[test]
+    fn version_one_with_a_completion_policy_is_refused_as_unsupported() {
+        let author_key = make_signing_key();
+        let attestor_key = make_signing_key();
+        let mut payload = make_payload(&author_key);
+        payload.version = 1;
+        payload.completion_policy = Some(completion_policy(&attestor_key));
+
+        // The version is refused before the policy is even looked at, so a
+        // version 1 document cannot be signed whatever it carries.
+        assert!(matches!(
+            sign_course_document(&payload, &author_key),
+            Err(CourseDocError::UnsupportedVersion(1))
+        ));
+    }
+
+    #[test]
     fn verify_rejects_tampered_title() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let mut signed = sign_course_document(&payload, &key).unwrap();
         signed.title = "Tampered Title".to_string();
@@ -260,7 +409,7 @@ mod tests {
     #[test]
     fn verify_rejects_tampered_chapter() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let mut signed = sign_course_document(&payload, &key).unwrap();
         signed.chapters[0].title = "Tampered Chapter".to_string();
@@ -274,7 +423,7 @@ mod tests {
     #[test]
     fn enabled_tutor_policy_is_signed_and_tamper_evident() {
         let key = make_signing_key();
-        let mut payload = make_payload();
+        let mut payload = make_payload(&key);
         payload.tutor_policy = alexandria_studio::model::TutorPolicy {
             enabled: true,
             guidance: "balanced".into(),
@@ -295,22 +444,24 @@ mod tests {
     fn verify_rejects_wrong_key() {
         let key1 = make_signing_key();
         let key2 = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key1);
 
         let mut signed = sign_course_document(&payload, &key1).unwrap();
-        // Replace public key with key2's
+        // Replace public key with key2's. A v2 document binds its author DID
+        // to the signing key, so the swap is caught before the signature is
+        // even checked.
         signed.public_key = hex::encode(key2.verifying_key().to_bytes());
 
         assert!(matches!(
             verify_course_document(&signed),
-            Err(CourseDocError::InvalidSignature)
+            Err(CourseDocError::InvalidPublicKey(_))
         ));
     }
 
     #[test]
     fn payload_extraction_matches_original() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let signed = sign_course_document(&payload, &key).unwrap();
         let extracted = signed.payload();
@@ -327,7 +478,7 @@ mod tests {
     #[test]
     fn signed_document_serializes_to_json() {
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
 
         let signed = sign_course_document(&payload, &key).unwrap();
         let json = serde_json::to_string_pretty(&signed).unwrap();
@@ -339,13 +490,63 @@ mod tests {
         verify_course_document(&deserialized).unwrap();
     }
 
+    #[test]
+    fn course_documents_are_bounded_before_verification() {
+        let key = make_signing_key();
+        let signed = sign_course_document(&make_payload(&key), &key).unwrap();
+        let bytes = serde_json::to_vec(&signed).unwrap();
+        let max = COURSE_DOCUMENT_JSON_LIMITS.max_bytes;
+
+        let mut exact = bytes.clone();
+        exact.resize(max, b' ');
+        verify_course_document(&decode_course_document(&exact).unwrap()).unwrap();
+        exact.push(b' ');
+        assert!(matches!(
+            decode_course_document(&exact),
+            Err(CourseDocError::UntrustedJson(UntrustedJsonError::TooLarge { max: limit }))
+                if limit == max
+        ));
+
+        let rest = std::str::from_utf8(&bytes)
+            .unwrap()
+            .strip_prefix('{')
+            .unwrap();
+        let duplicated = format!("{{\"title\":\"Forged\",{rest}");
+        assert!(matches!(
+            decode_course_document(duplicated.as_bytes()),
+            Err(CourseDocError::UntrustedJson(UntrustedJsonError::DuplicateKey(field)))
+                if field == "title"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_document_over_the_limits_is_not_published() {
+        let tmp = TempDir::new().unwrap();
+        let node = ContentNode::new(tmp.path());
+        node.start(None).await.unwrap();
+
+        let key = make_signing_key();
+        let mut payload = make_payload(&key);
+        payload.description = Some("a".repeat(COURSE_DOCUMENT_JSON_LIMITS.max_string_bytes + 1));
+        let signed = sign_course_document(&payload, &key).unwrap();
+        assert!(matches!(
+            publish_course_document(&node, &signed).await,
+            Err(CourseDocError::UntrustedJson(
+                UntrustedJsonError::StringTooLong { .. }
+            ))
+        ));
+
+        node.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn published_text_release_is_readable_without_author_profile_key() {
         let tmp = TempDir::new().unwrap();
         let node = ContentNode::new(tmp.path());
         node.start(None).await.unwrap();
         node.set_content_key([17; 32]).await;
-        let mut payload = make_payload();
+        let key = make_signing_key();
+        let mut payload = make_payload(&key);
         payload.chapters[0].elements[0].element_type = "text".into();
         materialize_text_lessons(
             &node,
@@ -358,7 +559,7 @@ mod tests {
             .content_hash
             .clone()
             .unwrap();
-        let signed = sign_course_document(&payload, &make_signing_key()).unwrap();
+        let signed = sign_course_document(&payload, &key).unwrap();
         let published = publish_course_document(&node, &signed).await.unwrap();
         node.clear_content_key().await;
         let release = resolve_course_document(&node, &published.content_hash)
@@ -389,7 +590,7 @@ mod tests {
         node.start(None).await.unwrap();
 
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
         let signed = sign_course_document(&payload, &key).unwrap();
 
         // Publish
@@ -416,7 +617,7 @@ mod tests {
         node.start(None).await.unwrap();
 
         let key = make_signing_key();
-        let payload = make_payload();
+        let payload = make_payload(&key);
         let signed = sign_course_document(&payload, &key).unwrap();
 
         let r1 = publish_course_document(&node, &signed).await.unwrap();

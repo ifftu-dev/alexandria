@@ -5,12 +5,13 @@
 //! commands (create / unlock / lock / delete) live in
 //! [`commands::profile`].
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use tauri::State;
 
 use crate::content_store::profile as content_profile;
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::identity::{AccountStatus, Identity, ProfileUpdate, WalletInfo};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
 use crate::AppState;
@@ -70,7 +71,7 @@ pub async fn export_mnemonic(
 /// happens in the frontend via `tauri-plugin-biometry`; this lets the
 /// frontend know whether biometric enrollment is currently meaningful.
 #[tauri::command]
-pub async fn is_biometric_available(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn is_biometric_available(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let keystore = state.keystore.lock().await;
     Ok(keystore.is_some())
 }
@@ -78,31 +79,29 @@ pub async fn is_biometric_available(state: State<'_, AppState>) -> Result<bool, 
 /// Get the active profile's wallet info (no secrets).
 #[tauri::command]
 pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<WalletInfo>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let Some(db) = db_guard.as_ref() else {
-        return Ok(None);
-    };
-
-    let result = db.conn().query_row(
-        "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
-        [],
-        |row| {
-            Ok(WalletInfo {
-                stake_address: row.get(0)?,
-                payment_address: row.get(1)?,
-                has_mnemonic_backup: true,
-            })
-        },
-    );
-
-    match result {
-        Ok(info) => Ok(Some(info)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.wallet-info",
+            |db| match db.conn().query_row(
+                "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
+                [],
+                |row| {
+                    Ok(WalletInfo {
+                        stake_address: row.get(0)?,
+                        payment_address: row.get(1)?,
+                        has_mnemonic_backup: true,
+                    })
+                },
+            ) {
+                Ok(info) => Ok(Some(info)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.to_string()),
+            },
+        )
+        .await
 }
 
 /// Role + gating status for the active profile. `is_minor` is computed
@@ -112,45 +111,44 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
 pub async fn get_account_status(
     state: State<'_, AppState>,
 ) -> Result<Option<AccountStatus>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let Some(db) = db_guard.as_ref() else {
-        return Ok(None);
-    };
-
-    let result = db.conn().query_row(
-        "SELECT account_roles, birthdate, activation_state FROM local_identity WHERE id = 1",
-        [],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        },
-    );
-
-    match result {
-        Ok((roles_json, birthdate, activation_state)) => {
-            let today = chrono::Utc::now().date_naive();
-            let is_minor = birthdate
-                .as_deref()
-                .map(|b| crate::domain::identity::is_minor(b, today))
-                .unwrap_or(false);
-            let roles = crate::domain::identity::roles_from_json(&roles_json);
-            Ok(Some(AccountStatus {
-                role: crate::domain::identity::legacy_role(&roles),
-                roles,
-                birthdate,
-                is_minor,
-                activation_state,
-            }))
+    let row = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.account-status",
+            |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT account_roles, birthdate, activation_state FROM local_identity WHERE id = 1",
+                        [],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .await?;
+    Ok(row.map(|(roles_json, birthdate, activation_state)| {
+        let today = chrono::Utc::now().date_naive();
+        let is_minor = birthdate
+            .as_deref()
+            .map(|birthdate| crate::domain::identity::is_minor(birthdate, today))
+            .unwrap_or(false);
+        let roles = crate::domain::identity::roles_from_json(&roles_json);
+        AccountStatus {
+            roles,
+            birthdate,
+            is_minor,
+            activation_state,
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+    }))
 }
 
 /// Replace the role set. Learner cannot be removed — `normalize_roles`
@@ -162,35 +160,36 @@ pub async fn set_account_roles(
     roles: Vec<String>,
 ) -> Result<(), String> {
     let roles = crate::domain::identity::normalize_roles(&roles)?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    let activation_state: String = db
-        .conn()
-        .query_row(
-            "SELECT activation_state FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if activation_state == "pending_guardian" {
-        return Err("profile is awaiting guardian activation".to_string());
-    }
-
-    db.conn()
+    state
+        .db_executor
         .execute(
-            "UPDATE local_identity SET account_role = ?1, account_roles = ?2, \
-             updated_at = datetime('now') WHERE id = 1",
-            params![
-                crate::domain::identity::legacy_role(&roles),
-                crate::domain::identity::roles_to_json(&roles)
-            ],
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.set-account-roles",
+            move |db| {
+                let activation_state: String = db
+                    .conn()
+                    .query_row(
+                        "SELECT activation_state FROM local_identity WHERE id = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if activation_state == "pending_guardian" {
+                    return Err("profile is awaiting guardian activation".to_string());
+                }
+
+                db.conn()
+                    .execute(
+                        "UPDATE local_identity SET account_roles = ?1, \
+                         updated_at = datetime('now') WHERE id = 1",
+                        params![crate::domain::identity::roles_to_json(&roles)],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
         )
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .await
 }
 
 /// Derive the active profile's `did:key`. Returns `None` when the
@@ -207,22 +206,29 @@ pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>,
     };
     drop(ks_guard);
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-    log::info!("[diag] learner payment address: {}", w.payment_address);
     let did = crate::crypto::did::derive_did_key(&w.signing_key);
     let did_str = did.as_str().to_string();
 
     // Cache the DID (device scope) so the swarm event loop — which has
     // no keystore access — can answer graph-fetch requests for its own
     // owner. Best-effort: a failure here must not break DID resolution.
-    if let Ok(guard) = state.db.lock() {
-        if let Some(db) = guard.as_ref() {
-            let _ = crate::settings::SettingsStore::set(
-                db.conn(),
-                crate::settings::registry::keys::IDENTITY_LOCAL_DID,
-                did_str.clone(),
-            );
-        }
-    }
+    let cached_did = did_str.clone();
+    let _ = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.cache-local-did",
+            move |db| {
+                crate::settings::SettingsStore::set(
+                    db.conn(),
+                    crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+                    cached_did,
+                )
+                .map_err(|e| e.to_string())
+            },
+        )
+        .await;
 
     Ok(Some(did_str))
 }
@@ -242,13 +248,9 @@ pub async fn resolve_display_names(
     state: State<'_, AppState>,
     dids: Vec<String>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-    use std::collections::{HashMap, HashSet};
-
-    let mut out: HashMap<String, String> = HashMap::new();
     if dids.is_empty() {
-        return Ok(out);
+        return Ok(std::collections::HashMap::new());
     }
-    let requested: HashSet<&str> = dids.iter().map(|s| s.as_str()).collect();
 
     // Own DID → own display name (best-effort; needs the vault unlocked).
     let local_did: Option<String> = {
@@ -266,15 +268,30 @@ pub async fn resolve_display_names(
         }
     };
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.resolve-display-names",
+            move |db| resolve_display_names_db(db.conn(), dids, local_did),
+        )
+        .await
+}
+
+fn resolve_display_names_db(
+    conn: &rusqlite::Connection,
+    dids: Vec<String>,
+    local_did: Option<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut out = HashMap::new();
+    let requested: HashSet<&str> = dids.iter().map(String::as_str).collect();
 
     if let Some(did) = local_did {
         if requested.contains(did.as_str()) {
-            if let Some(profile) = read_profile(db.conn()) {
+            if let Some(profile) = read_profile(conn) {
                 if let Some(name) = profile.display_name {
                     if !name.trim().is_empty() {
                         out.insert(did, name);
@@ -286,8 +303,7 @@ pub async fn resolve_display_names(
 
     // Built-in plugin authors → first-party label.
     {
-        let mut stmt = db
-            .conn()
+        let mut stmt = conn
             .prepare("SELECT DISTINCT author_did FROM plugin_installed WHERE source = 'builtin'")
             .map_err(|e| e.to_string())?;
         let authors = stmt
@@ -305,8 +321,7 @@ pub async fn resolve_display_names(
     // Cached peer profiles (filled by /alexandria/profile-fetch/1.0).
     // Display name preferred, @username as fallback.
     {
-        let mut stmt = db
-            .conn()
+        let mut stmt = conn
             .prepare("SELECT did, username, display_name FROM peer_profiles")
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -332,59 +347,21 @@ pub async fn resolve_display_names(
         }
     }
 
-    // Course-authority DIDs → "Instructor" label. The instructor attestation
-    // issued on course completion is signed by a key deterministically
-    // derived from the course's `author_address` (see commands::completion),
-    // so derive that DID for every course author and label any that were
-    // requested. Disambiguated by a short author tag when several exist.
-    {
-        let mut stmt = db
-            .conn()
-            .prepare("SELECT DISTINCT author_address FROM courses WHERE author_address <> ''")
-            .map_err(|e| e.to_string())?;
-        let authors = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>();
-        for author in authors {
-            let did = crate::crypto::did::course_authority_did(&author)
-                .as_str()
-                .to_string();
-            if requested.contains(did.as_str()) && !out.contains_key(&did) {
-                let short = if author.chars().count() > 16 {
-                    let head: String = author.chars().take(10).collect();
-                    let tail: String = author
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<String>()
-                        .chars()
-                        .rev()
-                        .collect();
-                    format!("{head}…{tail}")
-                } else {
-                    author.clone()
-                };
-                out.insert(did, format!("Instructor · {short}"));
-            }
-        }
-    }
-
     Ok(out)
 }
 
 /// Get the active profile's Identity row from the local DB.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let Some(db) = db_guard.as_ref() else {
-        return Ok(None);
-    };
-    Ok(read_profile(db.conn()))
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.get-profile",
+            |db| Ok(read_profile(db.conn())),
+        )
+        .await
 }
 
 fn read_profile(conn: &rusqlite::Connection) -> Option<Identity> {
@@ -416,12 +393,21 @@ pub async fn update_profile(
     state: State<'_, AppState>,
     update: ProfileUpdate,
 ) -> Result<Identity, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.update-profile",
+            move |db| update_profile_db(db.conn(), update),
+        )
+        .await
+}
 
+fn update_profile_db(
+    conn: &rusqlite::Connection,
+    update: ProfileUpdate,
+) -> Result<Identity, String> {
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -462,11 +448,10 @@ pub async fn update_profile(
 
     let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
 
-    db.conn()
-        .execute(&sql, params.as_slice())
+    conn.execute(&sql, params.as_slice())
         .map_err(|e| e.to_string())?;
 
-    db.conn()
+    conn
         .query_row(
             "SELECT stake_address, payment_address, username, display_name, bio, avatar_cid, visibility, profile_hash, created_at, updated_at
              FROM local_identity WHERE id = 1",
@@ -499,35 +484,32 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
 
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    let (stake_address, display_name, bio, avatar_cid, created_at_str): (
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-    ) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .query_row(
-                "SELECT stake_address, display_name, bio, avatar_cid, created_at
-                 FROM local_identity WHERE id = 1",
-                [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .map_err(|e| e.to_string())?
-    };
+    let (stake_address, display_name, bio, avatar_cid, created_at_str) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.publish-profile.load",
+            |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT stake_address, display_name, bio, avatar_cid, created_at
+                         FROM local_identity WHERE id = 1",
+                        [],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                                row.get::<_, String>(4)?,
+                            ))
+                        },
+                    )
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .await?;
 
     let created_at = parse_datetime_to_unix(&created_at_str);
     let updated_at = chrono::Utc::now().timestamp();
@@ -550,17 +532,24 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         .await
         .map_err(|e| e.to_string())?;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
+    let profile_hash = result.profile_hash.clone();
+    state
+        .db_executor
         .execute(
-            "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",
-            params![result.profile_hash],
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "identity.publish-profile.save",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",
+                        params![profile_hash],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
         )
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     Ok(result)
 }
@@ -581,4 +570,90 @@ fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
     chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%d %H:%M:%S")
         .map(|dt| dt.and_utc().timestamp())
         .unwrap_or_else(|_| chrono::Utc::now().timestamp())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn database() -> crate::db::Database {
+        let db = crate::db::Database::open_in_memory().expect("in-memory database");
+        db.run_migrations().expect("migrations");
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity \
+                 (id, stake_address, payment_address, username, display_name, visibility) \
+                 VALUES (1, 'stake_test_alice', 'addr_test_alice', 'alice', 'Alice', 'public')",
+                [],
+            )
+            .expect("local identity");
+        db
+    }
+
+    #[test]
+    fn profile_update_validates_before_mutating_identity() {
+        let db = database();
+        let updated = update_profile_db(
+            db.conn(),
+            ProfileUpdate {
+                display_name: Some("  Ada  ".into()),
+                bio: Some("Mathematician".into()),
+                avatar_cid: None,
+                visibility: Some("private".into()),
+            },
+        )
+        .expect("valid update");
+        assert_eq!(updated.display_name.as_deref(), Some("Ada"));
+        assert_eq!(updated.bio.as_deref(), Some("Mathematician"));
+        assert_eq!(updated.visibility.as_deref(), Some("private"));
+
+        let error = update_profile_db(
+            db.conn(),
+            ProfileUpdate {
+                display_name: Some("Changed".into()),
+                bio: None,
+                avatar_cid: None,
+                visibility: Some("friends".into()),
+            },
+        )
+        .expect_err("invalid visibility");
+        assert!(error.contains("Visibility"));
+        assert_eq!(
+            read_profile(db.conn())
+                .expect("profile")
+                .display_name
+                .as_deref(),
+            Some("Ada")
+        );
+    }
+
+    #[test]
+    fn display_name_resolution_names_only_known_profiles() {
+        let db = database();
+        db.conn()
+            .execute(
+                "INSERT INTO peer_profiles (did, username, display_name) \
+                 VALUES ('did:key:bob', 'bob', NULL)",
+                [],
+            )
+            .expect("peer profile");
+
+        let names = resolve_display_names_db(
+            db.conn(),
+            vec![
+                "did:key:alice".into(),
+                "did:key:bob".into(),
+                "did:key:unknown".into(),
+            ],
+            Some("did:key:alice".into()),
+        )
+        .expect("resolved names");
+
+        assert_eq!(
+            names.get("did:key:alice").map(String::as_str),
+            Some("Alice")
+        );
+        assert_eq!(names.get("did:key:bob").map(String::as_str), Some("@bob"));
+        assert!(!names.contains_key("did:key:unknown"));
+    }
 }

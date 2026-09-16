@@ -40,7 +40,11 @@ expands or dereferences it. See §14.12a of the protocol specification.
    A verifier that assumes ordinary JWS will base64url the canonical bytes,
    produce a different signing input, and reject every credential ever issued —
    with no clue as to why, because every other check passes.
-6. Apply the remaining checks: expiry, subject binding, status list.
+6. Apply the remaining checks: expiry, subject binding, status list, local
+   suspension, supersession, and the supplied verification policy.
+7. Return `accept`, `pending`, or `reject`. Missing issuer-key or referenced
+   status-list evidence is pending. A failed cryptographic/policy check or an
+   invalid status reference is rejected.
 
 ## Resolving the issuer key
 
@@ -79,8 +83,11 @@ within the byte** — so index 9 is byte 1, mask `0x02`. Getting this backwards 
 the single most common interoperability bug, which is why
 `07-revoked.json` exists.
 
-A status list the verifier does not have is not evidence of revocation. Absence
-means "not known to be revoked", never "revoked".
+A status list the verifier does not have is not evidence of revocation or active
+status. The verifier returns `pending` with `status_list_missing`; it does not
+accept the credential or label it revoked. A storage failure is separately
+reported as `status_list_unavailable`. A malformed or out-of-range bit index
+sets `statusValid` to false and rejects the credential.
 
 ## File format
 
@@ -100,10 +107,11 @@ means "not known to be revoked", never "revoked".
 }
 ```
 
-Compare at least `validSignature`, `issuerResolved`, `expired`, `revoked`,
-`subjectBound` and `acceptanceDecision`. The booleans matter independently of
-the decision: policy changes the decision, never the facts. `09` and `05` are
-the same expired credential, and differ only in what the policy does about it.
+Compare at least `validSignature`, `issuerResolved`, `statusValid`, `expired`,
+`revoked`, `subjectBound`, `pendingReasons`, and `acceptanceDecision`. The
+booleans matter independently of the decision: policy changes the decision,
+never the facts. `09` and `05` are the same expired credential, and differ only
+in what the policy does about it.
 
 ## The suite
 
@@ -119,15 +127,85 @@ the same expired credential, and differ only in what the policy does about it.
 | `08-rotated-issuer-key` | Signed with a rotated key; only the registry resolves it |
 | `09-expired-permissive-policy` | Same expired credential, policy does not reject. `expired` stays true |
 | `10-type-not-allowed` | Every cryptographic check passes; policy still rejects |
+| `11-missing-status-list` | Signature verifies, but the referenced status list is absent; decision is pending |
+| `12-missing-issuer-key` | A non-self-resolving issuer has no supplied key binding; decision is pending |
 
-Every column of that matrix has both outcomes present, so an implementation
-cannot pass by hardcoding any single check.
+The suite contains accepted, rejected, and pending cases, including independent
+signature, expiry, subject-binding, revocation, type-policy, key-registry, and
+missing-evidence outcomes.
+
+## Untrusted input limits
+
+Before typed decoding or any signature work, a credential document is parsed
+as strict JSON under these limits:
+
+| Limit | Value |
+|---|---|
+| Document bytes (checked before parsing) | 262,144 |
+| Nesting depth (the credential object is 1) | 32 |
+| Elements in one array | 4,096 |
+| Entries in one object | 256 |
+| UTF-8 bytes in one decoded string or key | 65,536 |
+
+A verifier refuses a document as the first of these that applies:
+
+| Outcome | Refused when |
+|---|---|
+| `too_large` | The document exceeds the byte limit |
+| `too_deep` | An array or object would open beyond the depth limit. This is checked on entering it, even when empty |
+| `too_many_elements` | An array receives one element more than the limit |
+| `too_many_entries` | An object receives one entry more than the limit |
+| `string_too_long` | A decoded string or key exceeds the string limit |
+| `duplicate_key` | An object repeats a key at any depth |
+| `unsafe_number` | An integer literal is outside ±(2^53−1), or a fractional/exponent literal's magnitude exceeds 2^53−1 |
+| `invalid` | Malformed JSON, including invalid UTF-8, a byte-order mark, a lone surrogate escape, a literal that overflows a double, or trailing bytes |
+
+Checks happen in document order. An array element is parsed before the count is
+checked. An object key is length-checked, then duplicate-checked, then counted,
+and only then is its value parsed.
+
+`limits/manifest.json` lists the exact byte files in `limits/` and the outcome
+each must produce. Every case starts from the credential in `01-valid.json` and
+changes one structural property, so a failure names exactly one limit. `accept`
+means the bytes pass these limits; it says nothing about the signature.
+
+## Course completion endorsements
+
+An instructor endorses a learner's course completion by signing its completion
+binding. `endorsements/manifest.json` supplies:
+- the signing `domain`;
+- the endorsement's structural `limits`;
+- the signed course `policy`;
+- the `expectedBinding` for the completion;
+- the outcome of each byte file in `endorsements/`;
+- `thresholds` evaluated over sets of those files.
+
+To verify one endorsement against the policy and expected binding:
+
+1. Parse the exact bytes as strict JSON under the manifest limits (see the
+   previous section). A structural refusal is the outcome.
+2. Its `binding` must equal the expected binding, compared as JCS. If not:
+   `binding_mismatch`.
+3. `attestor_did` must name an entry in `policy.authorized_attestors`, and
+   `attestor_public_key_hex` must equal that entry's key exactly. If not:
+   `unauthorized_attestor`.
+4. The key must be 64 lowercase hex digits (else `invalid_public_key`). Its
+   `did:key` must equal `attestor_did` (else `identity_mismatch`). A
+   `did:key` is `z` plus base58btc of `0xed 0x01` plus the 32 key bytes.
+5. `signature_hex` must be 128 lowercase hex digits. It must be a valid
+   Ed25519 signature over `domain || 0x00 || JCS(expected binding)`. If
+   either check fails: `invalid_signature`.
+6. Otherwise the outcome is `valid`.
+
+For a threshold, count each attestor DID at most once, and only for a `valid`
+endorsement. Every other endorsement in the set is rejected. The policy is
+satisfied when the count reaches `required_attestors`.
 
 ## A worked implementation
 
 `independent-verifier.mjs` in this directory is a complete verifier written from
 this document alone — no Alexandria library, nothing but Node's standard crypto,
-JCS implemented by hand. It passes all ten vectors.
+JCS implemented by hand. It passes all twelve vectors.
 
 ```sh
 node independent-verifier.mjs

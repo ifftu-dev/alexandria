@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use reqwest::Client;
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -107,6 +109,11 @@ pub enum BlockfrostError {
     Deserialize(String),
     #[error("missing Blockfrost project ID")]
     MissingProjectId,
+    #[error("Blockfrost pagination limit reached for {endpoint} after {max_pages} pages")]
+    PaginationLimit {
+        endpoint: &'static str,
+        max_pages: u32,
+    },
 }
 
 /// Blockfrost REST API client for Cardano preprod testnet.
@@ -121,39 +128,96 @@ pub struct BlockfrostClient {
     client: Client,
     base_url: String,
     project_id: String,
+    limits: RequestLimits,
+}
+
+/// Per-request deadlines for every chain-provider call, submissions and
+/// queries alike. A timed-out submission is never treated as a rejection:
+/// callers journal the signed bytes first and reconcile the same
+/// transaction afterwards (D13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestLimits {
+    /// Deadline for establishing the TCP/TLS connection.
+    pub connect: Duration,
+    /// Deadline for the whole request, from sending until the response
+    /// body has been read.
+    pub total: Duration,
+}
+
+impl RequestLimits {
+    /// Approved production limits: 10-second connection, 30-second request.
+    pub const PRODUCTION: Self = Self {
+        connect: Duration::from_secs(10),
+        total: Duration::from_secs(30),
+    };
+}
+
+/// Minimal ledger receipt from GET /txs/{hash}; inclusion is not synonymous
+/// with successful Plutus execution. See Blockfrost's `tx_content` schema.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TransactionReceipt {
+    pub hash: String,
+    pub slot: u64,
+    pub valid_contract: bool,
 }
 
 /// Preprod base URL.
 const PREPROD_BASE_URL: &str = "https://cardano-preprod.blockfrost.io/api/v0";
+const MAX_POLICY_ASSET_PAGES: u32 = 100;
 
 impl BlockfrostClient {
-    /// Create a new client for preprod testnet.
+    /// Create a new client for preprod testnet with the production
+    /// [`RequestLimits`].
     pub fn new(project_id: String) -> Result<Self, BlockfrostError> {
-        if project_id.is_empty() {
-            return Err(BlockfrostError::MissingProjectId);
-        }
-        let client = Client::builder().build().map_err(BlockfrostError::Http)?;
-
-        Ok(Self {
-            client,
-            base_url: PREPROD_BASE_URL.to_string(),
+        Self::build(
             project_id,
-        })
+            PREPROD_BASE_URL.to_string(),
+            RequestLimits::PRODUCTION,
+        )
     }
 
     /// Create a client with a custom base URL (for testing).
     #[cfg(test)]
     pub fn with_base_url(project_id: String, base_url: String) -> Result<Self, BlockfrostError> {
+        Self::build(project_id, base_url, RequestLimits::PRODUCTION)
+    }
+
+    /// Create a client with a custom base URL and shorter deadlines (for testing).
+    #[cfg(test)]
+    pub fn with_limits(
+        project_id: String,
+        base_url: String,
+        limits: RequestLimits,
+    ) -> Result<Self, BlockfrostError> {
+        Self::build(project_id, base_url, limits)
+    }
+
+    fn build(
+        project_id: String,
+        base_url: String,
+        limits: RequestLimits,
+    ) -> Result<Self, BlockfrostError> {
         if project_id.is_empty() {
             return Err(BlockfrostError::MissingProjectId);
         }
-        let client = Client::builder().build().map_err(BlockfrostError::Http)?;
+        // Every request made through this client inherits both deadlines.
+        let client = Client::builder()
+            .connect_timeout(limits.connect)
+            .timeout(limits.total)
+            .build()
+            .map_err(BlockfrostError::Http)?;
 
         Ok(Self {
             client,
             base_url,
             project_id,
+            limits,
         })
+    }
+
+    /// Deadlines applied to every request made through this client.
+    pub fn request_limits(&self) -> RequestLimits {
+        self.limits
     }
 
     /// Fetch all UTxOs at the given bech32 address.
@@ -372,6 +436,21 @@ impl BlockfrostClient {
         &self,
         policy_id: &str,
     ) -> Result<Vec<PolicyAsset>, BlockfrostError> {
+        self.list_policy_assets_with_page_limit(policy_id, MAX_POLICY_ASSET_PAGES)
+            .await
+    }
+
+    async fn list_policy_assets_with_page_limit(
+        &self,
+        policy_id: &str,
+        max_pages: u32,
+    ) -> Result<Vec<PolicyAsset>, BlockfrostError> {
+        if max_pages == 0 {
+            return Err(BlockfrostError::PaginationLimit {
+                endpoint: "policy assets",
+                max_pages,
+            });
+        }
         let mut out: Vec<PolicyAsset> = Vec::new();
         let mut page: u32 = 1;
         loop {
@@ -407,6 +486,12 @@ impl BlockfrostClient {
             out.extend(batch);
             if done {
                 return Ok(out);
+            }
+            if page == max_pages {
+                return Err(BlockfrostError::PaginationLimit {
+                    endpoint: "policy assets",
+                    max_pages,
+                });
             }
             page += 1;
         }
@@ -538,6 +623,16 @@ impl BlockfrostClient {
     /// Queries `GET /txs/{hash}`. Returns `true` if Blockfrost returns 200
     /// (transaction exists on-chain), `false` for 404 (not yet confirmed).
     pub async fn is_tx_confirmed(&self, tx_hash: &str) -> Result<bool, BlockfrostError> {
+        Ok(self
+            .get_transaction_receipt(tx_hash)
+            .await?
+            .is_some_and(|r| r.valid_contract))
+    }
+
+    pub async fn get_transaction_receipt(
+        &self,
+        tx_hash: &str,
+    ) -> Result<Option<TransactionReceipt>, BlockfrostError> {
         let url = format!("{}/txs/{}", self.base_url, tx_hash);
         let resp = self
             .client
@@ -547,8 +642,19 @@ impl BlockfrostClient {
             .await?;
 
         match resp.status().as_u16() {
-            200 => Ok(true),
-            404 => Ok(false),
+            200 => {
+                let receipt: TransactionReceipt = resp
+                    .json()
+                    .await
+                    .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+                if receipt.hash != tx_hash {
+                    return Err(BlockfrostError::Deserialize(
+                        "transaction receipt hash mismatch".into(),
+                    ));
+                }
+                Ok(Some(receipt))
+            }
+            404 => Ok(None),
             status => {
                 let body = resp.text().await.unwrap_or_default();
                 Err(BlockfrostError::Api { status, body })
@@ -575,6 +681,94 @@ mod tests {
     fn valid_client_creation() {
         let result = BlockfrostClient::new("preprodABCDEF123456".to_string());
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn production_client_uses_approved_connect_and_request_limits() {
+        assert_eq!(
+            RequestLimits::PRODUCTION,
+            RequestLimits {
+                connect: Duration::from_secs(10),
+                total: Duration::from_secs(30),
+            }
+        );
+        let client = BlockfrostClient::new("preprodABCDEF123456".to_string()).unwrap();
+        assert_eq!(client.request_limits(), RequestLimits::PRODUCTION);
+        let test_client =
+            BlockfrostClient::with_base_url("test".into(), "http://127.0.0.1:1".into()).unwrap();
+        assert_eq!(test_client.request_limits(), RequestLimits::PRODUCTION);
+    }
+
+    #[tokio::test]
+    async fn total_request_limit_applies_to_submit_and_query() {
+        let chain = crate::cardano::test_chain::FakeChain::start(|_, _, _| {
+            crate::cardano::test_chain::Reply::Stall
+        })
+        .await;
+        let limits = RequestLimits {
+            connect: Duration::from_secs(2),
+            total: Duration::from_millis(200),
+        };
+        let client = chain.client(limits);
+        assert_eq!(client.request_limits(), limits);
+        let started = std::time::Instant::now();
+        let submit = client.submit_tx(&[0x84]).await.unwrap_err();
+        assert!(
+            matches!(&submit, BlockfrostError::Http(error) if error.is_timeout()),
+            "{submit}"
+        );
+        let query = client
+            .get_transaction_receipt(&"a".repeat(64))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&query, BlockfrostError::Http(error) if error.is_timeout()),
+            "{query}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(
+            chain.requests(),
+            vec![
+                "POST /tx/submit".to_string(),
+                format!("GET /txs/{}", "a".repeat(64))
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_asset_scan_stops_at_its_page_limit() {
+        let page = serde_json::to_string(
+            &(0..100)
+                .map(|index| {
+                    serde_json::json!({
+                        "asset": format!("policy{index:02}"),
+                        "quantity": "1"
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let chain = crate::cardano::test_chain::FakeChain::start(move |method, path, _| {
+            assert_eq!(method, "GET");
+            assert!(path.starts_with("/assets/policy/policy?count=100&page="));
+            crate::cardano::test_chain::Reply::Json(200, page.clone())
+        })
+        .await;
+        let client = chain.client(crate::cardano::test_chain::SHORT_LIMITS);
+
+        let error = client
+            .list_policy_assets_with_page_limit("policy", 2)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            BlockfrostError::PaginationLimit {
+                endpoint: "policy assets",
+                max_pages: 2
+            }
+        ));
+        assert_eq!(chain.requests().len(), 2);
     }
 
     #[test]

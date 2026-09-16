@@ -389,7 +389,9 @@ pub fn handle_guardian_request(
                 Ok(p) => p,
                 Err(e) => return GuardianResponse::Error(format!("open push: {e}")),
             };
-            match apply_activity_snapshot(conn, link_id, &payload) {
+            match crate::db::with_transaction(conn, || {
+                apply_activity_snapshot(conn, link_id, &payload)
+            }) {
                 Ok(rows) => GuardianResponse::Merged { rows },
                 Err(e) => GuardianResponse::Error(format!("apply push: {e}")),
             }
@@ -449,21 +451,58 @@ fn handle_link(
     guardian_display_name: Option<&str>,
     guardian_vc_json: &str,
 ) -> GuardianResponse {
-    // (2) Single-use invite: only honour a code this profile generated.
-    let key = match take_pending_invite(conn, code_hash) {
-        Ok(Some(k)) => k,
-        Ok(None) => return GuardianResponse::Unauthorized,
-        Err(e) => return GuardianResponse::Error(e),
-    };
+    let invite_exists = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM guardian_pending_invites \
+         WHERE code_hash = ?1 AND expires_at >= datetime('now'))",
+        rusqlite::params![code_hash],
+        |row| row.get::<_, bool>(0),
+    );
+    match invite_exists {
+        Ok(true) => {}
+        Ok(false) => return GuardianResponse::Unauthorized,
+        Err(error) => return GuardianResponse::Error(error.to_string()),
+    }
+
+    match crate::db::with_transaction(conn, || {
+        complete_guardian_link(
+            conn,
+            peer_id,
+            code_hash,
+            link_id,
+            guardian_did,
+            guardian_stake_address,
+            guardian_display_name,
+            guardian_vc_json,
+        )
+    }) {
+        Ok(sealed_snapshot) => GuardianResponse::Linked { sealed_snapshot },
+        Err(error) => GuardianResponse::Error(error),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_guardian_link(
+    conn: &Connection,
+    peer_id: &str,
+    code_hash: &str,
+    link_id: &str,
+    guardian_did: &str,
+    guardian_stake_address: &str,
+    guardian_display_name: Option<&str>,
+    guardian_vc_json: &str,
+) -> Result<Vec<u8>, String> {
+    // Consume the invite inside the same transaction as credential verification,
+    // link persistence, profile activation, and initial snapshot construction.
+    let key = take_pending_invite(conn, code_hash)?
+        .ok_or_else(|| "guardian invite expired or was already used".to_string())?;
 
     // Verify the guardianship credential: signature must check out,
     // issuer must be the claimed guardian, subject must be us.
-    let vc: VerifiableCredential = match serde_json::from_str(guardian_vc_json) {
-        Ok(v) => v,
-        Err(e) => return GuardianResponse::Error(format!("bad guardian VC: {e}")),
-    };
+    let vc: VerifiableCredential =
+        alexandria_verify::vc::decode_credential(guardian_vc_json.as_bytes())
+            .map_err(|error| format!("bad guardian VC: {error}"))?;
     if vc.issuer.as_str() != guardian_did {
-        return GuardianResponse::Error("guardian VC issuer mismatch".into());
+        return Err("guardian VC issuer mismatch".into());
     }
     let local_did: String = conn
         .query_row(
@@ -472,10 +511,10 @@ fn handle_link(
             |r| r.get(0),
         )
         .optional()
-        .unwrap_or_default()
+        .map_err(|error| error.to_string())?
         .unwrap_or_default();
     if !local_did.is_empty() && vc.credential_subject.id.as_str() != local_did {
-        return GuardianResponse::Error("guardian VC subject is not this profile".into());
+        return Err("guardian VC subject is not this profile".into());
     }
     let now = chrono::Utc::now().to_rfc3339();
     let policy = VerificationPolicy {
@@ -489,7 +528,7 @@ fn handle_link(
     };
     let result = verify_credential_db(conn, &vc, &now, &policy);
     if !result.valid_signature || !result.issuer_resolved {
-        return GuardianResponse::Error("guardian VC signature verification failed".into());
+        return Err("guardian VC signature verification failed".into());
     }
 
     // Store the credential locally (private by default — the VC-fetch
@@ -501,7 +540,7 @@ fn handle_link(
     let integrity_hash = hex::encode(crate::crypto::hash::blake2b_256(
         guardian_vc_json.as_bytes(),
     ));
-    if let Err(e) = conn.execute(
+    conn.execute(
         "INSERT OR REPLACE INTO credentials \
          (id, issuer_did, subject_did, credential_type, claim_kind, \
           issuance_date, signed_vc_json, integrity_hash) \
@@ -514,12 +553,11 @@ fn handle_link(
             guardian_vc_json,
             integrity_hash
         ],
-    ) {
-        return GuardianResponse::Error(format!("store guardian VC: {e}"));
-    }
+    )
+    .map_err(|error| format!("store guardian VC: {error}"))?;
 
     // Record the ward-side link and unlock the profile.
-    if let Err(e) = conn.execute(
+    conn.execute(
         "INSERT OR REPLACE INTO guardian_links \
          (id, side, peer_did, peer_stake_address, peer_peer_id, peer_display_name, \
           shared_key, status, guardian_vc_id) \
@@ -533,26 +571,18 @@ fn handle_link(
             &key[..],
             vc_id
         ],
-    ) {
-        return GuardianResponse::Error(format!("store link: {e}"));
-    }
-    if let Err(e) = conn.execute(
+    )
+    .map_err(|error| format!("store link: {error}"))?;
+    conn.execute(
         "UPDATE local_identity SET activation_state = 'active', updated_at = datetime('now') \
          WHERE id = 1 AND activation_state = 'pending_guardian'",
         [],
-    ) {
-        return GuardianResponse::Error(format!("activate profile: {e}"));
-    }
+    )
+    .map_err(|error| format!("activate profile: {error}"))?;
 
     // Reply with the initial sealed snapshot.
-    let snapshot = match build_activity_snapshot(conn) {
-        Ok(s) => s,
-        Err(e) => return GuardianResponse::Error(format!("snapshot: {e}")),
-    };
-    match seal(&key, &snapshot) {
-        Ok(sealed_snapshot) => GuardianResponse::Linked { sealed_snapshot },
-        Err(e) => GuardianResponse::Error(format!("seal: {e}")),
-    }
+    let snapshot = build_activity_snapshot(conn).map_err(|error| format!("snapshot: {error}"))?;
+    seal(&key, &snapshot)
 }
 
 fn handle_revoke(conn: &Connection, link_id: &str, sealed_marker: &[u8]) -> GuardianResponse {
@@ -573,53 +603,58 @@ fn handle_revoke(conn: &Connection, link_id: &str, sealed_marker: &[u8]) -> Guar
         return GuardianResponse::Unauthorized;
     }
 
-    let side: Option<String> = conn
-        .query_row(
-            "SELECT side FROM guardian_links WHERE id = ?1",
-            rusqlite::params![link_id],
-            |r| r.get(0),
-        )
-        .optional()
-        .unwrap_or(None);
-    if let Err(e) = conn.execute(
-        "UPDATE guardian_links SET status = 'revoked', updated_at = datetime('now') WHERE id = ?1",
-        rusqlite::params![link_id],
-    ) {
-        return GuardianResponse::Error(format!("revoke link: {e}"));
-    }
-
-    // Guardian revoked a still-minor ward → the gate comes back.
-    if side.as_deref() == Some("ward") {
-        let birthdate: Option<String> = conn
+    match crate::db::with_transaction(conn, || {
+        let side: Option<String> = conn
             .query_row(
-                "SELECT birthdate FROM local_identity WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()
-            .unwrap_or(None)
-            .flatten();
-        let still_minor = birthdate
-            .as_deref()
-            .map(|b| crate::domain::identity::is_minor(b, chrono::Utc::now().date_naive()))
-            .unwrap_or(false);
-        let has_other_active: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM guardian_links \
-                 WHERE side = 'ward' AND status = 'active' AND id != ?1",
+                "SELECT side FROM guardian_links WHERE id = ?1",
                 rusqlite::params![link_id],
                 |r| r.get(0),
             )
-            .unwrap_or(false);
-        if still_minor && !has_other_active {
-            let _ = conn.execute(
-                "UPDATE local_identity SET activation_state = 'pending_guardian', \
-                 updated_at = datetime('now') WHERE id = 1",
-                [],
-            );
+            .optional()
+            .map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE guardian_links SET status = 'revoked', updated_at = datetime('now') WHERE id = ?1",
+            rusqlite::params![link_id],
+        )
+        .map_err(|error| format!("revoke link: {error}"))?;
+
+        // Guardian revoked a still-minor ward → the gate comes back.
+        if side.as_deref() == Some("ward") {
+            let birthdate: Option<String> = conn
+                .query_row(
+                    "SELECT birthdate FROM local_identity WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+                .flatten();
+            let still_minor = birthdate
+                .as_deref()
+                .map(|b| crate::domain::identity::is_minor(b, chrono::Utc::now().date_naive()))
+                .unwrap_or(false);
+            let has_other_active: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM guardian_links \
+                     WHERE side = 'ward' AND status = 'active' AND id != ?1",
+                    rusqlite::params![link_id],
+                    |r| r.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            if still_minor && !has_other_active {
+                conn.execute(
+                    "UPDATE local_identity SET activation_state = 'pending_guardian', \
+                     updated_at = datetime('now') WHERE id = 1",
+                    [],
+                )
+                .map_err(|error| format!("re-gate ward: {error}"))?;
+            }
         }
+        Ok(())
+    }) {
+        Ok(()) => GuardianResponse::Merged { rows: 0 },
+        Err(error) => GuardianResponse::Error(error),
     }
-    GuardianResponse::Merged { rows: 0 }
 }
 
 #[cfg(test)]
@@ -635,8 +670,8 @@ mod tests {
 
     fn seed_identity(conn: &Connection, birthdate: Option<&str>, activation: &str) {
         conn.execute(
-            "INSERT INTO local_identity (id, stake_address, payment_address, account_role, birthdate, activation_state) \
-             VALUES (1, 'stake_child', 'addr_child', 'learner', ?1, ?2)",
+            "INSERT INTO local_identity (id, stake_address, payment_address, birthdate, activation_state) \
+             VALUES (1, 'stake_child', 'addr_child', ?1, ?2)",
             rusqlite::params![birthdate, activation],
         )
         .unwrap();
@@ -706,6 +741,67 @@ mod tests {
         seed_identity(db.conn(), Some("2012-01-01"), "pending_guardian");
         record_pending_invite(db.conn(), "hash2", &[7u8; 32], -10).unwrap();
         assert_eq!(take_pending_invite(db.conn(), "hash2").unwrap(), None);
+    }
+
+    #[test]
+    fn invalid_link_credential_does_not_consume_invite() {
+        let db = test_db();
+        seed_identity(db.conn(), Some("2012-01-01"), "pending_guardian");
+        record_pending_invite(db.conn(), "hash-invalid", &[7u8; 32], 300).unwrap();
+
+        let response = handle_guardian_request(
+            db.conn(),
+            "12D3KooWParent",
+            &GuardianRequest::Link {
+                code_hash: "hash-invalid".into(),
+                link_id: "l-invalid".into(),
+                guardian_did: "did:key:zParent".into(),
+                guardian_stake_address: "stake_parent".into(),
+                guardian_display_name: None,
+                guardian_vc_json: "not-json".into(),
+            },
+        );
+
+        assert!(matches!(response, GuardianResponse::Error(_)));
+        assert_eq!(
+            take_pending_invite(db.conn(), "hash-invalid").unwrap(),
+            Some([7u8; 32]),
+            "failed verification must roll back single-use invite consumption"
+        );
+    }
+
+    #[test]
+    fn hostile_link_credential_json_is_refused_without_consuming_invite() {
+        let db = test_db();
+        seed_identity(db.conn(), Some("2012-01-01"), "pending_guardian");
+        record_pending_invite(db.conn(), "hash-hostile", &[7u8; 32], 300).unwrap();
+        let depth = alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_depth + 1;
+
+        for hostile in [
+            format!("{}{}", "[".repeat(depth), "]".repeat(depth)),
+            "{\"issuer\":\"did:key:zParent\",\"issuer\":\"did:key:zOther\"}".to_string(),
+        ] {
+            let response = handle_guardian_request(
+                db.conn(),
+                "12D3KooWParent",
+                &GuardianRequest::Link {
+                    code_hash: "hash-hostile".into(),
+                    link_id: "l-hostile".into(),
+                    guardian_did: "did:key:zParent".into(),
+                    guardian_stake_address: "stake_parent".into(),
+                    guardian_display_name: None,
+                    guardian_vc_json: hostile,
+                },
+            );
+            assert!(
+                matches!(&response, GuardianResponse::Error(message) if message.starts_with("bad guardian VC")),
+                "unexpected response: {response:?}"
+            );
+        }
+        assert_eq!(
+            take_pending_invite(db.conn(), "hash-hostile").unwrap(),
+            Some([7u8; 32])
+        );
     }
 
     #[test]
@@ -812,6 +908,53 @@ mod tests {
     }
 
     #[test]
+    fn failed_push_rolls_back_all_activity_rows() {
+        let db = test_db();
+        seed_identity(db.conn(), None, "active");
+        let key = [4u8; 32];
+        seed_guardian_link(db.conn(), "l1", "guardian", key);
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_second_guardian_row \
+                 BEFORE INSERT ON guardian_activity_rows \
+                 WHEN NEW.entity_id = 'en2' \
+                 BEGIN SELECT RAISE(FAIL, 'injected guardian row failure'); END;",
+            )
+            .unwrap();
+
+        let row = |id: &str| ActivityRow {
+            entity_id: id.into(),
+            data: serde_json::json!({"id": id, "status": "active"}),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        };
+        let payload = GuardianActivityPayload {
+            child_did: "did:key:zChild".into(),
+            display_name: Some("Ada".into()),
+            birthdate: None,
+            tables: vec![("enrollments".into(), vec![row("en1"), row("en2")])],
+        };
+        let response = handle_guardian_request(
+            db.conn(),
+            "12D3KooWChild",
+            &GuardianRequest::ActivityPush {
+                link_id: "l1".into(),
+                sealed: seal(&key, &payload).unwrap(),
+            },
+        );
+
+        assert!(matches!(response, GuardianResponse::Error(_)));
+        let stored: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM guardian_activity_rows WHERE link_id = 'l1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 0, "a partially applied snapshot must roll back");
+    }
+
+    #[test]
     fn pull_returns_sealed_snapshot_openable_with_link_key() {
         let db = test_db();
         seed_identity(db.conn(), Some("2012-01-01"), "active");
@@ -898,6 +1041,42 @@ mod tests {
             .unwrap();
         assert_eq!(status, "revoked");
         assert_eq!(activation, "pending_guardian");
+    }
+
+    #[test]
+    fn failed_minor_regating_rolls_back_link_revocation() {
+        let db = test_db();
+        seed_identity(db.conn(), Some("2012-01-01"), "active");
+        let key = [6u8; 32];
+        seed_guardian_link(db.conn(), "l1", "ward", key);
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_guardian_regating \
+                 BEFORE UPDATE OF activation_state ON local_identity \
+                 WHEN NEW.activation_state = 'pending_guardian' \
+                 BEGIN SELECT RAISE(FAIL, 'injected guardian regating failure'); END;",
+            )
+            .unwrap();
+
+        let response = handle_guardian_request(
+            db.conn(),
+            "12D3KooWParent",
+            &GuardianRequest::Revoke {
+                link_id: "l1".into(),
+                sealed_marker: seal(&key, &"revoke:l1".to_string()).unwrap(),
+            },
+        );
+
+        assert!(matches!(response, GuardianResponse::Error(_)));
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM guardian_links WHERE id = 'l1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "active", "failed re-gating must preserve the link");
     }
 
     #[test]

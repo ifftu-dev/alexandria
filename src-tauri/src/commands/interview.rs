@@ -8,9 +8,10 @@
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
+use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -717,136 +718,148 @@ pub fn generate_summary_impl(conn: &Connection, session_id: &str) -> Result<Stri
     Ok(summary)
 }
 
+/// Run interview SQL on the bounded executor under the caller's profile lease.
+async fn run_interview_job<T, F>(
+    state: &State<'_, AppState>,
+    label: &'static str,
+    operation: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+{
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            label,
+            move |db| operation(db.conn()),
+        )
+        .await
+}
+
 #[tauri::command]
-pub fn interview_create(
+pub async fn interview_create(
     state: State<'_, AppState>,
     req: CreateInterviewRequest,
 ) -> Result<InterviewBundle, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    create_interview_impl(db.conn(), &req, &now())
+    run_interview_job(&state, "interview.create", move |conn| {
+        create_interview_impl(conn, &req, &now())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_list(state: State<'_, AppState>) -> Result<Vec<InterviewSession>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_interviews_impl(db.conn())
+pub async fn interview_list(state: State<'_, AppState>) -> Result<Vec<InterviewSession>, String> {
+    run_interview_job(&state, "interview.list", list_interviews_impl).await
 }
 
 #[tauri::command]
-pub fn interview_get(
+pub async fn interview_get(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Option<InterviewBundle>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    get_interview_impl(db.conn(), &id)
+    run_interview_job(&state, "interview.get", move |conn| {
+        get_interview_impl(conn, &id)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_record_consent(
+pub async fn interview_record_consent(
     state: State<'_, AppState>,
     participant_id: String,
     consent: InterviewConsentRequest,
 ) -> Result<InterviewParticipant, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let timestamp = now();
+    run_interview_job(&state, "interview.record-consent", move |conn| {
+        record_consent_impl(conn, &participant_id, &consent, &now())
+    })
+    .await
+}
+
+fn record_consent_impl(
+    conn: &Connection,
+    participant_id: &str,
+    consent: &InterviewConsentRequest,
+    timestamp: &str,
+) -> Result<InterviewParticipant, String> {
     let all_revoked = !consent.consent_transcription
         && !consent.consent_audio_recording
         && !consent.consent_video_recording
         && !consent.consent_sentinel
         && !consent.consent_camera;
-    db.conn()
-        .execute(
-            "UPDATE interview_participants SET
+    conn.execute(
+        "UPDATE interview_participants SET
              consent_transcription = ?2, consent_audio_recording = ?3,
              consent_video_recording = ?4, consent_sentinel = ?5, consent_camera = ?6,
              consented_at = ?8,
              revoked_at = CASE WHEN ?7 = 1 THEN ?8 ELSE NULL END
              WHERE id = ?1",
-            params![
-                participant_id,
-                consent.consent_transcription,
-                consent.consent_audio_recording,
-                consent.consent_video_recording,
-                consent.consent_sentinel,
-                consent.consent_camera,
-                all_revoked,
-                timestamp,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-    db.conn()
-        .query_row(
-            "SELECT id, session_id, peer_id, display_name, role, pseudonym,
+        params![
+            participant_id,
+            consent.consent_transcription,
+            consent.consent_audio_recording,
+            consent.consent_video_recording,
+            consent.consent_sentinel,
+            consent.consent_camera,
+            all_revoked,
+            timestamp,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id, session_id, peer_id, display_name, role, pseudonym,
              consent_transcription, consent_audio_recording, consent_video_recording,
              consent_sentinel, consent_camera, consented_at, revoked_at
              FROM interview_participants WHERE id = ?1",
-            params![participant_id],
-            |row| {
-                Ok(InterviewParticipant {
-                    id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    peer_id: row.get(2)?,
-                    display_name: row.get(3)?,
-                    role: row.get(4)?,
-                    pseudonym: row.get(5)?,
-                    consent_transcription: bool_col(row, 6)?,
-                    consent_audio_recording: bool_col(row, 7)?,
-                    consent_video_recording: bool_col(row, 8)?,
-                    consent_sentinel: bool_col(row, 9)?,
-                    consent_camera: bool_col(row, 10)?,
-                    consented_at: row.get(11)?,
-                    revoked_at: row.get(12)?,
-                })
-            },
-        )
-        .map_err(|e| e.to_string())
+        params![participant_id],
+        |row| {
+            Ok(InterviewParticipant {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                peer_id: row.get(2)?,
+                display_name: row.get(3)?,
+                role: row.get(4)?,
+                pseudonym: row.get(5)?,
+                consent_transcription: bool_col(row, 6)?,
+                consent_audio_recording: bool_col(row, 7)?,
+                consent_video_recording: bool_col(row, 8)?,
+                consent_sentinel: bool_col(row, 9)?,
+                consent_camera: bool_col(row, 10)?,
+                consented_at: row.get(11)?,
+                revoked_at: row.get(12)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn interview_append_transcript(
+pub async fn interview_append_transcript(
     state: State<'_, AppState>,
     req: AppendTranscriptRequest,
 ) -> Result<InterviewTranscriptSegment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    append_transcript_impl(db.conn(), &req, &now())
+    run_interview_job(&state, "interview.append-transcript", move |conn| {
+        append_transcript_impl(conn, &req, &now())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_recommend_followups(
+pub async fn interview_recommend_followups(
     state: State<'_, AppState>,
     session_id: String,
     source_segment_id: Option<String>,
 ) -> Result<Vec<InterviewFollowup>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    recommend_followups_impl(db.conn(), &session_id, source_segment_id.as_deref(), &now())
+    run_interview_job(&state, "interview.recommend-followups", move |conn| {
+        recommend_followups_impl(conn, &session_id, source_segment_id.as_deref(), &now())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_set_followup_status(
+pub async fn interview_set_followup_status(
     state: State<'_, AppState>,
     id: String,
     status: String,
@@ -854,22 +867,19 @@ pub fn interview_set_followup_status(
     if !matches!(status.as_str(), "suggested" | "asked" | "dismissed") {
         return Err(format!("invalid follow-up status: {status}"));
     }
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
-        .execute(
+    run_interview_job(&state, "interview.set-followup-status", move |conn| {
+        conn.execute(
             "UPDATE interview_followups SET status = ?2 WHERE id = ?1",
             params![id, status],
         )
         .map_err(|e| e.to_string())?;
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_set_criterion(
+pub async fn interview_set_criterion(
     state: State<'_, AppState>,
     id: String,
     status: String,
@@ -878,54 +888,48 @@ pub fn interview_set_criterion(
     if !matches!(status.as_str(), "not_covered" | "partial" | "covered") {
         return Err(format!("invalid criterion status: {status}"));
     }
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
-        .execute(
+    run_interview_job(&state, "interview.set-criterion", move |conn| {
+        conn.execute(
             "UPDATE interview_criteria SET status = ?2, notes = ?3 WHERE id = ?1",
             params![id, status, notes],
         )
         .map_err(|e| e.to_string())?;
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_save_note(
+pub async fn interview_save_note(
     state: State<'_, AppState>,
     session_id: String,
     id: Option<String>,
     text: String,
 ) -> Result<InterviewNote, String> {
-    let trimmed = text.trim();
+    let trimmed = text.trim().to_owned();
     if trimmed.is_empty() {
         return Err("note text is required".into());
     }
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let timestamp = now();
-    let note_id = id.unwrap_or_else(|| entity_id(&[&session_id, &timestamp, trimmed]));
-    db.conn()
-        .execute(
+    run_interview_job(&state, "interview.save-note", move |conn| {
+        let timestamp = now();
+        let note_id = id.unwrap_or_else(|| entity_id(&[&session_id, &timestamp, &trimmed]));
+        conn.execute(
             "INSERT INTO interview_notes (id, session_id, text, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?4)
              ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
             params![note_id, session_id, trimmed, timestamp],
         )
         .map_err(|e| e.to_string())?;
-    list_notes(db.conn(), &session_id)?
-        .into_iter()
-        .find(|note| note.id == note_id)
-        .ok_or_else(|| "failed to save note".into())
+        list_notes(conn, &session_id)?
+            .into_iter()
+            .find(|note| note.id == note_id)
+            .ok_or_else(|| "failed to save note".into())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_set_status(
+pub async fn interview_set_status(
     state: State<'_, AppState>,
     id: String,
     status: String,
@@ -935,14 +939,9 @@ pub fn interview_set_status(
     if !matches!(status.as_str(), "draft" | "ready" | "live" | "completed") {
         return Err(format!("invalid interview status: {status}"));
     }
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let timestamp = now();
-    db.conn()
-        .execute(
+    run_interview_job(&state, "interview.set-status", move |conn| {
+        let timestamp = now();
+        conn.execute(
             "UPDATE interview_sessions SET status = ?2,
              tutoring_session_id = COALESCE(?3, tutoring_session_id),
              integrity_session_id = COALESCE(?4, integrity_session_id),
@@ -958,71 +957,62 @@ pub fn interview_set_status(
             ],
         )
         .map_err(|e| e.to_string())?;
-    get_interview_impl(db.conn(), &id)?.ok_or_else(|| "interview not found".into())
+        get_interview_impl(conn, &id)?.ok_or_else(|| "interview not found".into())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_generate_summary(
+pub async fn interview_generate_summary(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<String, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    generate_summary_impl(db.conn(), &session_id)
+    run_interview_job(&state, "interview.generate-summary", move |conn| {
+        generate_summary_impl(conn, &session_id)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_save_review(
+pub async fn interview_save_review(
     state: State<'_, AppState>,
     session_id: String,
     summary: String,
     conclusion: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
-        .execute(
+    run_interview_job(&state, "interview.save-review", move |conn| {
+        conn.execute(
             "UPDATE interview_sessions SET summary = ?2, conclusion = ?3 WHERE id = ?1",
             params![session_id, summary.trim(), conclusion.trim()],
         )
         .map_err(|e| e.to_string())?;
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
-        .execute("DELETE FROM interview_sessions WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn interview_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    run_interview_job(&state, "interview.delete", move |conn| {
+        conn.execute("DELETE FROM interview_sessions WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn interview_purge_expired(state: State<'_, AppState>) -> Result<u64, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let count = db
-        .conn()
-        .execute(
-            "DELETE FROM interview_sessions WHERE julianday(expires_at) <= julianday('now')",
-            [],
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(count as u64)
+pub async fn interview_purge_expired(state: State<'_, AppState>) -> Result<u64, String> {
+    run_interview_job(&state, "interview.purge-expired", |conn| {
+        let count = conn
+            .execute(
+                "DELETE FROM interview_sessions WHERE julianday(expires_at) <= julianday('now')",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(count as u64)
+    })
+    .await
 }
 
 #[cfg(test)]

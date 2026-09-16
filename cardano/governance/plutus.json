@@ -12,31 +12,6 @@
   },
   "validators": [
     {
-      "title": "challenge_escrow.challenge_escrow.spend",
-      "datum": {
-        "title": "datum",
-        "schema": {
-          "$ref": "#/definitions/challenge_escrow~1ChallengeEscrowDatum"
-        }
-      },
-      "redeemer": {
-        "title": "redeemer",
-        "schema": {
-          "$ref": "#/definitions/challenge_escrow~1EscrowRedeemer"
-        }
-      },
-      "compiledCode": "5902c001010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cc0200092225980099b8748008c01cdd500144ca60026018003300c300d0019b87480012223322598009801800c566002601c6ea802600516403d15980099b87480080062b3001300e37540130028b201e8b201840302b30013001300b375400519800980798061baa0029180818089808800c8c8cc88cc008008004896600200300389919912cc004cdc8a45000028acc004cdc7a441000028800c01901144cc014014c05c0110111bae3010001375a602200260260028088c8c8cc004004010896600200300389919912cc004cdc8a441000028acc004cdc7a441000028800c01901244cc014014c0600110121bae3011001375660240026028002809052f5bded8c02900048c040c0440052222980099199119801001000912cc00400629422b30013371e6eb8c05800400e2946266004004602e00280890141bac301430153015301530153015301530153015301137540146eb8c00cc040dd50024c966002600c60206ea8006260066eacc008c044dd5180118089baa30143011375400316403c64660020026eb0c050c044dd5005112cc004006298103d87a80008992cc004cdd7980b18099baa00100a899ba548000cc0540052f5c113300300330170024044602a002809a44464660020026eb0c01cc050dd5002112cc00400629422b30013232598009806180b1baa0018acc004cdc79bae301a3017375400200d13371200a60126eacc020c05cdd50014528202a8a5040546032602c6ea8c064c058dd5000980c000c528c4cc008008c064005013202c488966002601060246ea803a2b30010038cc0040326eb8c058c04cdd5003c009001452820228acc00400e3300100c9bae30043013375400f002400514a08089011116402860166ea801c60106ea800a2c8030601000260066ea802229344d95900101",
-      "hash": "2f499b735479ab78674a7e0f2c7e12d690ce2ba579ba3460a9d16228"
-    },
-    {
-      "title": "challenge_escrow.challenge_escrow.else",
-      "redeemer": {
-        "schema": {}
-      },
-      "compiledCode": "5902c001010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cc0200092225980099b8748008c01cdd500144ca60026018003300c300d0019b87480012223322598009801800c566002601c6ea802600516403d15980099b87480080062b3001300e37540130028b201e8b201840302b30013001300b375400519800980798061baa0029180818089808800c8c8cc88cc008008004896600200300389919912cc004cdc8a45000028acc004cdc7a441000028800c01901144cc014014c05c0110111bae3010001375a602200260260028088c8c8cc004004010896600200300389919912cc004cdc8a441000028acc004cdc7a441000028800c01901244cc014014c0600110121bae3011001375660240026028002809052f5bded8c02900048c040c0440052222980099199119801001000912cc00400629422b30013371e6eb8c05800400e2946266004004602e00280890141bac301430153015301530153015301530153015301137540146eb8c00cc040dd50024c966002600c60206ea8006260066eacc008c044dd5180118089baa30143011375400316403c64660020026eb0c050c044dd5005112cc004006298103d87a80008992cc004cdd7980b18099baa00100a899ba548000cc0540052f5c113300300330170024044602a002809a44464660020026eb0c01cc050dd5002112cc00400629422b30013232598009806180b1baa0018acc004cdc79bae301a3017375400200d13371200a60126eacc020c05cdd50014528202a8a5040546032602c6ea8c064c058dd5000980c000c528c4cc008008c064005013202c488966002601060246ea803a2b30010038cc0040326eb8c058c04cdd5003c009001452820228acc00400e3300100c9bae30043013375400f002400514a08089011116402860166ea801c60106ea800a2c8030601000260066ea802229344d95900101",
-      "hash": "2f499b735479ab78674a7e0f2c7e12d690ce2ba579ba3460a9d16228"
-    },
-    {
       "title": "completion.completion_minting.mint",
       "redeemer": {
         "title": "redeemer",
@@ -1209,57 +1184,6 @@
               "$ref": "#/definitions/Int"
             }
           ]
-        }
-      ]
-    },
-    "challenge_escrow/ChallengeEscrowDatum": {
-      "title": "ChallengeEscrowDatum",
-      "description": "Inline datum locked alongside the staked ADA.",
-      "anyOf": [
-        {
-          "title": "ChallengeEscrowDatum",
-          "dataType": "constructor",
-          "index": 0,
-          "fields": [
-            {
-              "title": "challenger",
-              "description": "Challenger's payment key hash \u2014 recipient on `Refund`.",
-              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
-            },
-            {
-              "title": "treasury",
-              "description": "DAO treasury payment key hash \u2014 recipient on `Forfeit`.",
-              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
-            },
-            {
-              "title": "dao_authority",
-              "description": "DAO committee key authorised to settle this escrow.",
-              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
-            },
-            {
-              "title": "challenge_id",
-              "description": "Hash of the challenge id this stake backs (binds the UTxO to one\n challenge so it can't be replayed against another).",
-              "$ref": "#/definitions/ByteArray"
-            }
-          ]
-        }
-      ]
-    },
-    "challenge_escrow/EscrowRedeemer": {
-      "title": "EscrowRedeemer",
-      "description": "Settlement direction.",
-      "anyOf": [
-        {
-          "title": "Refund",
-          "dataType": "constructor",
-          "index": 0,
-          "fields": []
-        },
-        {
-          "title": "Forfeit",
-          "dataType": "constructor",
-          "index": 1,
-          "fields": []
         }
       ]
     }

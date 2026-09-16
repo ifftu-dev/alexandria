@@ -46,6 +46,9 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Explicit diagnostics entry/exit surface. English fallback is temporary
+  // pending the next catalog translation and native-speaker review pass.
+  'common.diagnostics.',
   // Talent-index consent surface (EE Phase 2). Shipped English-only pending a
   // `npm run i18n:translate` pass; renders in English via the i18n fallback.
   'profile.talentIndex.',
@@ -63,11 +66,25 @@ const PENDING_TRANSLATION = [
   // Credential import surface. English-only pending a translate pass.
   'credentials.import.',
   'credentials.page.import',
+  // Credential provenance classification. English-only pending a translate pass.
+  'credentials.detail.trust',
+  // Local status-evidence limitation note. English-only pending a translate pass.
+  'credentials.detail.statusEvidence',
+  // Exact course-completion policy and manual endorsement exchange. English
+  // fallback is temporary pending the next instructor/learner translation pass.
+  'instructor.compose.policy',
+  'instructor.compose.blockerPolicyUnsaved',
+  'instructor.inbox.endorsement',
+  'courses.completion.endorsement',
   // Interview assistant and participant caption consent. English-only until
   // the next translation pass; consent copy should be prioritised in that pass.
   'interviews.',
   'tutoring.captions.',
   'nav.primary.interviews',
+  // Not-found page for stale deep links, added when retired route redirects
+  // were deleted. English-only pending a translate pass; renders in English
+  // via the i18n fallback.
+  'common.notFound.',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

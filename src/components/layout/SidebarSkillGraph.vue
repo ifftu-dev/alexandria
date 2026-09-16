@@ -26,14 +26,20 @@ import type {
 import SkillGraphModal from '@/components/layout/SkillGraphModal.vue'
 import { bloomRadius, BLOOM_ORDER } from '@/utils/bloom'
 import { useCredentials } from '@/composables/useCredentials'
+import {
+  createForceGraph,
+  type ForceGraphInstance,
+  type SkillGraphLink,
+  type SkillGraphNode,
+} from '@/utils/forceGraph'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
 const { vaultUnlocked } = useAuth()
 
 const containerRef = ref<HTMLElement | null>(null)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const graphInstance = ref<any>(null)
+let graphInstance: ForceGraphInstance | null = null
+let graphGeneration = 0
 const loadError = ref(false)
 
 const {
@@ -61,7 +67,7 @@ const prereqMap = computed(() => {
   return map
 })
 
-const miniGraphNodes = computed(() => {
+const miniGraphNodes = computed<SkillGraphNode[]>(() => {
   const earned = earnedSkillIds.value
   return skills.value.map((skill) => {
     const prereqs = prereqMap.value.get(skill.id) ?? []
@@ -99,8 +105,6 @@ async function loadData() {
   if (loaded.value) return
 
   try {
-    await invoke<number>('bootstrap_public_taxonomy').catch(() => 0)
-
     // Local DID may be null when the vault is locked — in that case
     // we still render the skill graph, just without earned-state
     // colouring (every skill becomes available/locked by prereqs).
@@ -211,27 +215,26 @@ watch(vaultUnlocked, (unlocked) => {
 
 // If data was already loaded (e.g. navigated away and back), re-init the canvas
 watch(loaded, (val) => {
-  if (val && containerRef.value && !graphInstance.value) {
+  if (val && containerRef.value && !graphInstance) {
     nextTick(() => initGraph())
   }
 })
 
 async function initGraph() {
-  if (!containerRef.value || !skills.value.length) return
+  const container = containerRef.value
+  if (!container || !skills.value.length) return
 
   // Clean up existing instance
-  if (graphInstance.value) {
-    graphInstance.value._destructor?.()
-    graphInstance.value = null
+  graphGeneration++
+  const generation = graphGeneration
+  if (graphInstance) {
+    graphInstance._destructor()
+    graphInstance = null
   }
-
-  // force-graph exports a class but is callable as a factory at runtime
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ForceGraph = (await import('force-graph')).default as any
 
   const nodes = miniGraphNodes.value
 
-  const links: Array<{ source: string; target: string }> = []
+  const links: SkillGraphLink[] = []
   const nodeIds = new Set(skills.value.map(s => s.id))
   for (const edge of edges.value) {
     if (nodeIds.has(edge.skill_id) && nodeIds.has(edge.prerequisite_id)) {
@@ -239,10 +242,15 @@ async function initGraph() {
     }
   }
 
-  const width = containerRef.value.clientWidth
-  const height = containerRef.value.clientHeight
+  const width = container.clientWidth
+  const height = container.clientHeight
 
-  const graph = ForceGraph()(containerRef.value)
+  const graph = await createForceGraph(container)
+  if (generation !== graphGeneration || container !== containerRef.value) {
+    graph._destructor()
+    return
+  }
+  graph
     .width(width)
     .height(height)
     .graphData({ nodes, links })
@@ -303,13 +311,14 @@ async function initGraph() {
   graph.d3Force('charge')?.strength(-12)
   graph.d3Force('link')?.distance(15)
 
-  graphInstance.value = graph
+  graphInstance = graph
 }
 
 onBeforeUnmount(() => {
-  if (graphInstance.value) {
-    graphInstance.value._destructor?.()
-    graphInstance.value = null
+  graphGeneration++
+  if (graphInstance) {
+    graphInstance._destructor()
+    graphInstance = null
   }
 })
 </script>

@@ -20,12 +20,13 @@
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 use crate::crypto::hash::blake2b_256;
 
 /// Everything the accepting device needs to pair with and dial the
 /// initiating device. Serialised into the pairing code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairingCode {
     /// Initiator's libp2p PeerId (base58).
     pub peer_id: String,
@@ -42,6 +43,22 @@ pub struct PairingCode {
     pub device_name: Option<String>,
     /// Initiator's platform (`macos` / `windows` / ...).
     pub platform: String,
+}
+
+impl std::fmt::Debug for PairingCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PairingCode")
+            .field("identity", &"<redacted>")
+            .field("routing", &"<redacted>")
+            .field("shared_key", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for PairingCode {
+    fn drop(&mut self) {
+        self.shared_key.zeroize();
+    }
 }
 
 /// Generate a fresh 32-byte pairing/sync key from the OS CSPRNG.
@@ -114,5 +131,19 @@ mod tests {
     fn decode_rejects_garbage() {
         assert!(decode("!!!not-base64!!!").is_err());
         assert!(decode("YWJj").is_err()); // valid base64, not a PairingCode
+    }
+
+    #[test]
+    fn debug_output_redacts_pairing_identity_and_key() {
+        let code = sample();
+        let debug = format!("{code:?}");
+
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("12D3KooWExample"));
+        assert!(!debug.contains("192.168.1.2"));
+        assert!(!debug.contains("stake_test1uxyz"));
+        assert!(!debug.contains("dev-123"));
+        assert!(!debug.contains("My Mac"));
+        assert!(!debug.contains("7, 7, 7"));
     }
 }

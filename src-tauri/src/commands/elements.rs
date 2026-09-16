@@ -3,10 +3,11 @@
 //! Elements are the atomic learning items within chapters: videos,
 //! text lessons, quizzes, assessments, etc. Ordered by `position`.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
-use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::course::{CreateElementRequest, Element, UpdateElementRequest};
 use crate::AppState;
 
@@ -16,12 +17,18 @@ pub async fn list_elements(
     state: State<'_, AppState>,
     chapter_id: String,
 ) -> Result<Vec<Element>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "elements.list",
+            move |db| list_elements_db(db, &chapter_id),
+        )
+        .await
+}
 
+fn list_elements_db(db: &crate::db::Database, chapter_id: &str) -> Result<Vec<Element>, String> {
     let mut stmt = db
         .conn()
         .prepare(
@@ -63,12 +70,22 @@ pub async fn create_element(
     chapter_id: String,
     req: CreateElementRequest,
 ) -> Result<Element, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "elements.create",
+            move |db| create_element_db(db, chapter_id, req),
+        )
+        .await
+}
 
+fn create_element_db(
+    db: &crate::db::Database,
+    chapter_id: String,
+    req: CreateElementRequest,
+) -> Result<Element, String> {
     // Get the next position
     let next_pos: i64 = db
         .conn()
@@ -128,12 +145,22 @@ pub async fn update_element(
     element_id: String,
     req: UpdateElementRequest,
 ) -> Result<Element, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "elements.update",
+            move |db| update_element_db(db, &element_id, req),
+        )
+        .await
+}
 
+fn update_element_db(
+    db: &crate::db::Database,
+    element_id: &str,
+    req: UpdateElementRequest,
+) -> Result<Element, String> {
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -178,7 +205,7 @@ pub async fn update_element(
         return Err("no fields to update".into());
     }
 
-    values.push(Box::new(element_id.clone()));
+    values.push(Box::new(element_id.to_owned()));
 
     let sql = format!(
         "UPDATE course_elements SET {} WHERE id = ?",
@@ -504,12 +531,15 @@ pub async fn reorder_elements(
     chapter_id: String,
     ordered_ids: Vec<String>,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    reorder_elements_impl(db.conn(), &chapter_id, &ordered_ids)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "elements.reorder",
+            move |db| reorder_elements_impl(db.conn(), &chapter_id, &ordered_ids),
+        )
+        .await
 }
 
 /// Move an element into another chapter of the same course at `position`.
@@ -590,12 +620,15 @@ pub async fn move_element(
     target_chapter_id: String,
     position: i64,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    move_element_impl(db.conn(), &element_id, &target_chapter_id, position)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "elements.move",
+            move |db| move_element_impl(db.conn(), &element_id, &target_chapter_id, position),
+        )
+        .await
 }
 
 /// Replace a video element's chapter markers wholesale — the composer
@@ -606,13 +639,23 @@ pub async fn set_video_chapters(
     element_id: String,
     chapters: Vec<crate::domain::course::VideoChapterInput>,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "elements.set_video_chapters",
+            move |db| set_video_chapters_db(db, &element_id, &chapters),
+        )
+        .await
+}
 
+fn set_video_chapters_db(
+    db: &crate::db::Database,
+    element_id: &str,
+    chapters: &[crate::domain::course::VideoChapterInput],
+) -> Result<(), String> {
+    let conn = db.conn();
     let exists: bool = conn
         .query_row(
             "SELECT COUNT(*) > 0 FROM course_elements WHERE id = ?1",
@@ -635,7 +678,7 @@ pub async fn set_video_chapters(
             return Err("chapter start_seconds cannot be negative".into());
         }
         let id = entity_id(&[
-            &element_id,
+            element_id,
             &ch.title,
             &ch.start_seconds.to_string(),
             &pos.to_string(),
@@ -656,12 +699,21 @@ pub async fn list_video_chapters(
     state: State<'_, AppState>,
     element_id: String,
 ) -> Result<Vec<crate::domain::course::VideoChapterInput>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "elements.list_video_chapters",
+            move |db| list_video_chapters_db(db, &element_id),
+        )
+        .await
+}
 
+fn list_video_chapters_db(
+    db: &crate::db::Database,
+    element_id: &str,
+) -> Result<Vec<crate::domain::course::VideoChapterInput>, String> {
     let mut stmt = db
         .conn()
         .prepare(
@@ -685,12 +737,18 @@ pub async fn list_video_chapters(
 /// Delete an element.
 #[tauri::command]
 pub async fn delete_element(state: State<'_, AppState>, element_id: String) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "elements.delete",
+            move |db| delete_element_db(db, &element_id),
+        )
+        .await
+}
 
+fn delete_element_db(db: &crate::db::Database, element_id: &str) -> Result<(), String> {
     let rows = db
         .conn()
         .execute(

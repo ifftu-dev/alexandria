@@ -4,10 +4,7 @@
  *
  * Lists every plugin known to this node — built-ins seeded at startup,
  * locally-installed plugins, and anything seen on the
- * `/alexandria/plugins/1.0` gossip topic. Each row shows the DAO
- * attestation badge so users can tell at a glance whether a plugin's
- * graded submissions are credential-eligible under the default
- * verifier policy.
+ * `/alexandria/plugins/1.0` gossip topic.
  */
 
 import { ref, onMounted, computed } from 'vue'
@@ -15,10 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useDisplayNames } from '@/composables/useDisplayNames'
 import { AppSpinner, AppAlert, AppBadge, EmptyState } from '@/components/ui'
-import type {
-  PluginCatalogEntry,
-  PluginAttestationStatus,
-} from '@/types'
+import type { PluginCatalogEntry } from '@/types'
 
 const { t } = useI18n()
 const { invoke } = useLocalApi()
@@ -28,27 +22,10 @@ const entries = ref<PluginCatalogEntry[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 
-/** Per-plugin attestation status, keyed by plugin_cid. */
-const status = ref<Record<string, PluginAttestationStatus>>({})
-
 onMounted(async () => {
   try {
     entries.value = await invoke<PluginCatalogEntry[]>('plugin_browse_catalog')
     void ensureNames(entries.value.map((e) => e.author_did))
-    // Fan out attestation lookups in parallel.
-    const lookups = await Promise.all(
-      entries.value.map((e) =>
-        invoke<PluginAttestationStatus>('plugin_attestation_status', {
-          pluginCid: e.plugin_cid,
-        }).catch(() => null),
-      ),
-    )
-    const next: Record<string, PluginAttestationStatus> = {}
-    entries.value.forEach((e, i) => {
-      const s = lookups[i]
-      if (s) next[e.plugin_cid] = s
-    })
-    status.value = next
   } catch (e) {
     loadError.value = t('plugins.browse.loadFailed', { error: String(e) })
   } finally {
@@ -65,16 +42,6 @@ const grouped = computed(() => {
   }
   return { builtins, community }
 })
-
-function attestationBadge(cid: string): { label: string; variant: 'success' | 'warning' | 'secondary' } {
-  const s = status.value[cid]
-  if (!s) return { label: t('plugins.badge.unknown'), variant: 'secondary' }
-  if (s.advisories.some((a) => a.kind === 'known_flawed')) {
-    return { label: t('plugins.badge.knownFlawed'), variant: 'warning' }
-  }
-  if (s.attested) return { label: t('plugins.badge.attested'), variant: 'success' }
-  return { label: t('plugins.badge.unattested'), variant: 'secondary' }
-}
 
 function shortCid(cid: string): string {
   return cid.length > 16 ? `${cid.slice(0, 12)}…${cid.slice(-4)}` : cid
@@ -112,9 +79,6 @@ function shortCid(cid: string): string {
                 <h3 class="text-sm font-semibold text-foreground">{{ e.name }}</h3>
                 <AppBadge variant="secondary">v{{ e.version }}</AppBadge>
                 <AppBadge variant="secondary">{{ $t('plugins.badge.builtin') }}</AppBadge>
-                <AppBadge :variant="attestationBadge(e.plugin_cid).variant">
-                  {{ attestationBadge(e.plugin_cid).label }}
-                </AppBadge>
               </div>
               <p v-if="e.description" class="mt-1 text-xs text-muted-foreground">
                 {{ e.description }}
@@ -152,9 +116,6 @@ function shortCid(cid: string): string {
                 <h3 class="text-sm font-semibold text-foreground">{{ e.name }}</h3>
                 <AppBadge variant="secondary">v{{ e.version }}</AppBadge>
                 <AppBadge variant="secondary">{{ e.source }}</AppBadge>
-                <AppBadge :variant="attestationBadge(e.plugin_cid).variant">
-                  {{ attestationBadge(e.plugin_cid).label }}
-                </AppBadge>
               </div>
               <p v-if="e.description" class="mt-1 text-xs text-muted-foreground">
                 {{ e.description }}

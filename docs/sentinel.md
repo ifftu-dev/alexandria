@@ -7,7 +7,7 @@
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored in the local database.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals in assessment-purpose sessions. Interview-purpose findings do not suspend or end the live interview workflow.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
-4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!` or hot-swapped from a DAO-ratified CID. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
+4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!`; no command loads replacement weights. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
 5. **Incremental trust** — Behavioral profiles build over time. New users start with generous defaults; consistency scoring activates after 10+ samples.
 6. **Evidence is the learner's to release, and to take back** — A flag may travel; the evidence behind it may not, unless the learner releases it themselves. Release is learner-initiated: a review console may not offer a control that asks for it, because a request that can be refused leaks the refusal. What is released stays theirs to withdraw, and deleting it on their own device destroys the copy they sent. See [Review and adjudication](#review-and-adjudication).
 
@@ -31,7 +31,6 @@
 │        │                                                           │
 │        ├─► sentinel::paste_classifier (tract, ONNX inference)      │
 │        │     - bundled paste-v1.onnx via include_bytes!            │
-│        │     - hot-swap to DAO-ratified weights at session start   │
 │        │                                                           │
 │        ├─► sentinel::keystroke_ae (candle, autograd)               │
 │        │     - per-user 4→8→4→8→4 autoencoder, contrastive train   │
@@ -42,14 +41,10 @@
 │        └─► sentinel::features (12-dim windowed feature extractor)  │
 │                                                                    │
 │   commands/integrity ◄── integrity_sessions + integrity_snapshots  │
-│   commands/sentinel_priors ◄── DAO model distribution + safety     │
-│        valves (kill switch, version blocklist, three-layer verify) │
+│   commands/sentinel_holdout ◄── encrypted evaluation holdout set   │
 │                                                                    │
 │   SQLite (sqlcipher):                                              │
 │     sentinel_user_models      — per-user AE + CNN weights (JSON)   │
-│     sentinel_priors           — labeled attack data + DAO weights  │
-│     sentinel_kill_switch      — operator override                  │
-│     sentinel_weights_blocklist— per-version rollback set           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,7 +60,6 @@ All processing happens client-side. There is no server-side component in the app
 | `tab_switches` | Rule | count | 0.15 | Tab focus changes during assessment (webview) |
 | `app_switch` | Native | event | advisory | OS frontmost-app change (NSWorkspace / GetForegroundWindow / X11); emitted on `sentinel://focus` |
 | `paste_events` / `pasted_chars` | Rule | count | 0.10 | Clipboard paste activity |
-| `devtools_detected` | Rule | bool | 0.10 | DevTools heuristic |
 | `face_present` / `face_count` | Rule | bool/int | 0.15* | Face verification every 3s while camera opted in (* opt-in only; loop driven by the course player) |
 | `ai_keystroke_anomaly` | AI | 0-1 | 0.05† | Autoencoder reconstruction error |
 | `ai_mouse_human_prob` | AI | 0-1 | 0.05† | CNN human vs bot classification |
@@ -76,6 +70,14 @@ All processing happens client-side. There is no server-side component in the app
 
 † Only applied when advisory AI scoring is toggled on (see §Runtime Toggle).
 
+The weights are relative coefficients, not fixed percentages of the final score.
+The client divides the weighted sum by the sum of coefficients actually included,
+then clamps the result to [0, 1]. The five base rule terms sum to 0.75; available,
+opted-in camera presence adds 0.15. Available enabled AI terms add 0.05 each.
+Missing optional signals contribute neither a score nor a denominator term.
+There is no developer-tools term or reserved 0.10 share: removing it does not
+cap an otherwise perfect score at 0.90.
+
 ## Rule-Based System (Active)
 
 ### Client-Side (`useSentinel.ts`)
@@ -85,7 +87,7 @@ All processing happens client-side. There is no server-side component in the app
 - **Profile storage**: localStorage keyed by `sentinel_profile_{userId}_{deviceFp[0:16]}`
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
 - **Consistency scoring**: Activates after `sampleCount > 10`
-- **Integrity score**: Weighted average of all signals (see weights above)
+- **Integrity score**: Normalized weighted average of the included signals (see above)
 
 ### Flagging Logic
 
@@ -94,21 +96,51 @@ Per-snapshot checks:
 2. Low consistency score (< 0.35) → `behavior_shift` warning
 3. Excessive tab switching (> 10) → `tab_switching` info
 4. Excessive pasting (> 500 chars) → `paste_detected` warning
-5. DevTools detected → `devtools_detected` critical
-6. Bot-like mouse variance → `bot_suspected` critical
-7. Face absent (camera opted in) → `no_face` info
-8. Multiple faces → `multiple_faces` warning
-9. Face identity mismatch (enrolled) → `face_mismatch` critical
-10. Prolonged absence (5+ consecutive checks ~15s) → `prolonged_absence` warning
-11. Frequent absence (>50% of checks in snapshot window) → `frequent_absence` info
-12. Paste classifier ≥ 0.95 → `paste_classifier_anomaly` warning
-13. Paste classifier ≥ 0.99 → `paste_classifier_critical` critical
-14. Gaze off-screen ratio > 0.30 (camera opted in) → `gaze_wander` warning
-15. ≥ 3 downward off-screen glances in the window → `device_glance` critical
-16. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
-17. Native OS focus moved to another application → `app_switch` warning (distinct from the webview-only `tab_switching`; detected natively via NSWorkspace / GetForegroundWindow / X11, emitted on `sentinel://focus`)
+5. Bot-like mouse variance → `bot_suspected` critical
+6. Face absent (camera opted in) → `no_face` info
+7. Multiple faces → `multiple_faces` warning
+8. Face identity mismatch (enrolled) → `face_mismatch` critical
+9. Prolonged absence (5+ consecutive checks ~15s) → `prolonged_absence` warning
+10. Frequent absence (>50% of checks in snapshot window) → `frequent_absence` info
+11. Paste classifier ≥ 0.95 → `paste_classifier_anomaly` warning
+12. Paste classifier ≥ 0.99 → `paste_classifier_critical` critical
+13. Gaze off-screen ratio > 0.30 (camera opted in) → `gaze_wander` warning
+14. ≥ 3 downward off-screen glances in the window → `device_glance` critical
+15. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
+16. Native OS focus moved to another application → `app_switch` warning (distinct from the webview-only `tab_switching`; detected natively via NSWorkspace / GetForegroundWindow / X11, emitted on `sentinel://focus`)
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
+
+Developer-tools detection is retired as both a score input and a misconduct rule.
+Window resizing does not generate a developer-tools flag. The backend rejects a
+new snapshot containing a non-null `devtools_score` or `devtools_detected` flag
+before persisting scores or counters; it cannot safely reconstruct a composite
+from an older client that included the retired term. Historical snapshots and
+their stored outcomes are preserved, not silently rescored.
+
+### Diagnostics transition
+
+The release workflow uses explicit diagnostics entry/exit from the profile menu;
+the normal desktop menu contains no always-visible developer submenu. Entry
+during an active assessment saves fixed-form selections (adaptive answers are
+already persisted per turn), ends Sentinel, and only then asks the backend to
+end the attempt and enable diagnostics. A save or cleanup error leaves
+diagnostics disabled and presents retryable feedback.
+Diagnostics itself adds no misconduct flag or penalty and does not assign a
+failing grade to the unfinished attempt. That attempt still counts toward the
+assessment's normal attempt limit and cooldown because its questions were shown.
+
+The backend refuses entry while a linked integrity session is unfinished, marks
+open attempts with a distinct `ended_at` / `end_reason = diagnostics` state, and
+rejects later answer, grading, or finalization calls for those attempts. While
+the process-local mode is active, a persistent banner exposes the supported
+reload, web-inspector, Sentinel live-view, and CLI-install actions. Exit, profile
+lock, or application restart disables the mode; exit unmounts diagnostic views
+and closes open web inspectors. CLI-management commands also enforce the mode.
+
+Neither hiding developer tools nor offering diagnostics makes a user-controlled
+device tamper-proof. Existing backend authorization and IPC capability checks
+remain required in either mode.
 
 Session outcome determination:
 - **Clean**: Default
@@ -210,7 +242,7 @@ The trust signal is the session itself. When a session ends `flagged` or `suspen
 
 The Rust extractor in `sentinel::features` and the Python featurizer in `tools/sentinel-train/featurize.py` are **bit-identical**. If you change one, change the other in the same commit or the trained model will silently mispredict. There is no third copy on the frontend any more — the JS side only buffers raw events and forwards them via IPC.
 
-**Inference runtime**: `tract-onnx` 0.21 in the Rust backend. Pure Rust, no WASM, no CDN. The ONNX bytes are embedded at compile time via `include_bytes!("../../resources/sentinel/paste-v1.onnx")` so there is no filesystem race or asset-protocol handshake. DAO-supplied weights from `sentinel_load_dao_classifier` go through the same tract parse/optimize/runnable path.
+**Inference runtime**: `tract-onnx` 0.21 in the Rust backend. Pure Rust, no WASM, no CDN. The ONNX bytes are embedded at compile time via `include_bytes!("../../resources/sentinel/paste-v1.onnx")` so there is no filesystem race or asset-protocol handshake. No command accepts replacement model bytes, so the parser only sees this embedded artifact.
 
 **Platform support**: every Tauri target the Rust crate compiles for — macOS, Linux, Windows, iOS, Android. The previous WKWebView / Android-WebView gate is **gone** because nothing about ML runs in the WebView anymore.
 
@@ -218,18 +250,13 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 - 0.95: emits `paste_classifier_anomaly` (severity: warning)
 - 0.99: emits `paste_classifier_critical` (severity: critical) — combined with one other warning, triggers session suspension per the existing flag-severity rule
 
-**Model artifact**: `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB, weights inline; PyTorch `dynamo=False` export so tract can parse without sidecar `.data` files). Pinned via `src-tauri/resources/sentinel/paste-v1.onnx.sha256` lockfile (CI verifies on every push). The DAO-update path (see §Runtime Model Updates) can replace the active session at runtime without an app upgrade.
+**Model artifact**: `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB, weights inline; PyTorch `dynamo=False` export so tract can parse without sidecar `.data` files). Pinned via `src-tauri/resources/sentinel/paste-v1.onnx.sha256` lockfile (CI verifies on every push). A retrained model ships by replacing this artifact and its lockfile in an app release (see §Model Updates).
 
 **Storage**: No per-user state. The classifier is a global attack detector — calibration is done via the existing `KeystrokeAutoencoder` for per-user personalization. There is no blend between the two: `sentinel_score_paste` returns the raw ONNX score, and `ai_paste_anomaly` and `ai_keystroke_anomaly` fold into the integrity score as **independent** advisory signals, each weighted `AI_ADVISORY_WEIGHT = 0.05` (`useSentinel.ts`).
 
 **Training**: `tools/sentinel-train/{featurize,train,eval}.py`. Outputs ONNX opset 17. Default 30 epochs, AdamW lr=3e-4, batch=128, label smoothing 0.05, 2× class weight on the `llm_paste_edit` class.
 
-**Holdout gate**: A trained model only ratifies if `macro_tpr >= 0.92`, `macro_fpr <= 0.03`, `paste_macro` TPR ≥ 0.98, and `llm_paste_edit` TPR ≥ 0.85. The synthetic-only v1 release achieves macro TPR=1.0 / macro FPR=0.0; expect lower numbers when real-world holdout data joins (Phase 5).
-
-**Bytes caps**: Defense in depth against malicious envelopes pointing at huge CIDs:
-- Envelope + eval JSON: 1 MiB max (`MAX_WEIGHTS_BLOB_BYTES`, Rust side)
-- ONNX weights: 50 MiB max (`MAX_WEIGHTS_BYTES` in `sentinel_priors.rs`, also enforced in `sentinel_ml::sentinel_load_dao_classifier`)
-- Resolver round trips: 5 s timeout (`WEIGHTS_RESOLVE_TIMEOUT`) per CID fetch
+**Holdout gate**: A trained model only ships if `macro_tpr >= 0.92`, `macro_fpr <= 0.03`, `paste_macro` TPR ≥ 0.98, and `llm_paste_edit` TPR ≥ 0.85. The synthetic-only v1 release achieves macro TPR=1.0 / macro FPR=0.0; expect lower numbers when real-world holdout data joins (Phase 5).
 
 ### 5. Gaze / Second-Device Detector
 
@@ -268,91 +295,30 @@ AI signals are advisory by default and do not contribute to the integrity score.
 - `ai_face_similarity` × 0.05 (only if camera opted in)
 - `(1 − ai_paste_anomaly)` × 0.05 (only if both the master AI toggle AND the per-signal `sentinel_paste_classifier_enabled` toggle are on)
 
-Total advisory contribution is capped at 0.20 (all four signals at once), well under any single rule-based weight. Toggle off if false-positive rate spikes.
+The four advisory coefficients sum to at most 0.20 before normalization. Their
+final share depends on the other included coefficients; they are not four fixed
+five-percentage-point additions to the final score. Toggle off if false-positive
+rate spikes.
 
 **Per-signal opt-out**: the paste classifier has its own toggle in the Sentinel dashboard ("Paste Classifier (ONNX)") backed by `setSetting('sentinel.paste_classifier_enabled')` in the profile-scoped settings DB. Defaults to `on`; flipping it off keeps the other AI signals contributing. Useful if the paste classifier specifically generates FPs.
 
-## Runtime Model Updates
+## Model Updates
 
-The paste classifier supports two model sources at runtime:
+The paste classifier has one model source: `src-tauri/resources/sentinel/paste-v1.onnx`, embedded into the Rust binary at compile time and loaded once by the `sentinel::paste_classifier` `OnceLock`. `sentinel_paste_classifier_info` always reports `bundled`. A retrained model ships by replacing the artifact and its SHA-256 lockfile in an app release; see [sentinel-runbook.md](sentinel-runbook.md).
 
-1. **Bundled** — `src-tauri/resources/sentinel/paste-v1.onnx`, embedded into the Rust binary at compile time via `include_bytes!`. Always available; loaded once at process start by the `sentinel::paste_classifier` `OnceLock`.
-2. **DAO-ratified** — A `paste_classifier_weights` row in `sentinel_priors`, signed by the Sentinel DAO. Discovered at session start via `sentinel_get_active_paste_classifier`; bytes fetched via `content_resolve_bytes(weights_cid)` and swapped into the active `InferenceSession`.
+The earlier community prior library and runtime weights replacement are deleted: Sentinel DAO proposals, approved-status ratification, placeholder signatures, the prior gossip mirror, and the kill switch and version blocklist that guarded replacement weights. Their tables stay in the schema until the baseline squash, and nothing reads or writes them. Inbound `/alexandria/sentinel-priors/1.0` messages are rejected before any database access until the topic is removed.
 
-### Selection + verification
+## Integrity Assurance
 
-The IPC returns the **newest gate-passing** weights row that survives a three-layer content-addressed re-verification:
-
-1. **Operator overrides** — short-circuit before any DB scan:
-   - If `sentinel_kill_switch` row for `paste_classifier_weights` is `active=1`, return `None`.
-   - `sentinel_weights_blocklist` rows filter the candidate set by `(model_kind, version)`.
-2. **DB filter** — `eval_tpr >= 0.92 AND eval_fpr <= 0.03 AND model_kind = 'paste_classifier_weights' AND weights_cid IS NOT NULL`. Ordered by `(ratified_at DESC, version DESC)`.
-3. **Layer 1 ↔ 2 (envelope re-verify)** — re-fetch the envelope blob at `cid` (5 s timeout, 1 MiB cap), parse, confirm `WeightsBlobMeta` matches DB columns within `1e-6` epsilon, and the envelope-reported gate still passes. Defense against a locally tampered DB.
-4. **Layer 2 ↔ 3 (eval re-verify)** — re-fetch the eval JSON at `meta.eval_cid` (same timeout + size cap), parse, confirm `macro_tpr` / `macro_fpr` match the envelope's claims and pass the gate. Defense against a DAO-published envelope with cooked claimed metrics.
-5. **First survivor wins.** If nothing passes, the IPC returns `None` and the client uses the bundled artifact.
-
-Failure modes — all fall back to bundled, never crash monitoring:
-- Kill switch active → `None`, log a warning naming the model_kind
-- Resolver unavailable (early boot, no peers) → return the gate-only top candidate; client side validates the bytes (size cap still applies on `loadFromDaoBytes`)
-- Envelope missing / timeout / parse error → skip, try next
-- DB column / envelope `weights_cid` mismatch → skip, try next
-- Eval JSON missing / mismatch → skip, try next
-- Bytes don't form a valid ONNX session → `loadFromDaoBytes` returns false, bundled stays active
-
-### Signature
-
-`signature` on a weights row is currently the `compute_prior_signature` Blake2b digest over `(cid|label|model_kind|schema_version)`. **This is not an authenticated signature — anyone can compute it.** It binds metadata to the row but doesn't certify DAO ratification. Until the real threshold-sig infrastructure lands ([sentinel-federation.md](sentinel-federation.md) §12), the safeguards are:
-
-- `sentinel.ai_scoring_enabled` (profile-scoped settings DB) defaults to `false` on every device.
-- Kill switch (`sentinel_set_kill_switch`) globally disables the classifier without an app update.
-- Version blocklist (`sentinel_blocklist_version`) rolls back a single faulty version.
-- Server-side re-verify in `verify_weights_candidate` re-fetches envelope + eval JSON, rejects mismatches.
-
-See [sentinel-runbook.md](sentinel-runbook.md) for operator procedures.
-
-## Operator IPCs
-
-| Command | Description |
-|---------|-------------|
-| `sentinel_set_kill_switch` | Toggle kill switch by `model_kind`. Active=true forces `sentinel_get_active_paste_classifier` to return `null`. |
-| `sentinel_get_kill_switch` | Read current kill-switch state. |
-| `sentinel_blocklist_version` | Block a specific `(model_kind, version)` from selection. Idempotent. |
-| `sentinel_unblocklist_version` | Remove a block. |
-
-## Automated Attestation (High-Assurance)
-
-Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. High-assurance mode makes integrity **independently verifiable without any human in the loop**, layered into an assurance ladder embedded in the issued credential (see [protocol-specification.md](protocol-specification.md) §14.9.5):
-
-| Level | Meaning | How |
-|-------|---------|-----|
-| `local` | Device-reported only (default). | No attestation. |
-| `anchored` | Snapshot stream is timestamped + immutable. | Commitment root anchored (DHT/chain). |
-| `high_assurance` | An independent party witnessed the session. | ≥2/3 of the Sentinel DAO committee co-signed. |
+Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. Every credential Alexandria issues carries `assuranceLevel: "local"` in its signed `integrity` block (see [protocol-specification.md](protocol-specification.md) §14.9.5). `"anchored"` and `"high_assurance"` remain reserved ladder values with no verified production path: a sponsor role cannot require them, and an `IssuancePolicy.requiredAssuranceLevel` naming either refuses issuance.
 
 ### Commitment chain
 
-Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_attestation`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`; the running root on `integrity_sessions.commitment_root`.
+Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_commitment`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`, the running root on `integrity_sessions.commitment_root`, and the signed `integrity` block carries it as `commitmentRoot`. It is local tamper evidence, not an independent witness.
 
-### Attestation (no manual signing)
+### Deleted attestation paths
 
-- **Anchor (baseline)** — the terminal `commitment_root` is anchored; `integrity_set_anchor` records the reference and promotes the session to `anchored`. Proves timing + immutability (the data existed before the learner saw the result).
-- **Committee co-sign (upgrade)** — committee-operated **attestor nodes auto-counter-sign** the terminal attestation payload (`attestation_payload`, binding session_id/status/score/counts/commitment_root/ended_at). Signatures are plain ed25519 collected M-of-N (no aggregate threshold crypto); a 2/3 supermajority of valid committee co-signatures promotes the session to `high_assurance`. No person ever hand-signs — committee keys sign programmatically.
-
-`record_attestation_impl` is the shared ingest core (behind the `integrity_record_attestation` IPC and the P2P handler). It rejects non-committee signers, **unregistered key bindings** (`stake_pubkey_registry` — blocks pairing a real member's stake address with an attacker pubkey), and signatures that don't verify over the terminal payload, then re-resolves the ladder (`recompute_assurance` → `resolve_assurance`). `integrity_get_assurance` reads the current level + valid co-sign count.
-
-### Propagation
-
-Co-signatures travel on `/alexandria/integrity-attestation/1.0`. `p2p::integrity_attest::handle_integrity_cosign_message` is the learner-side inbound handler (mirrors `p2p::sentinel`): it binds the gossip broadcaster to the claimed attestor, then feeds the announcement through `record_attestation_impl` so every trust check re-runs on receipt. The committee attestor-node daemon (which auto-produces co-signatures after independently witnessing the live snapshot-commitment stream) and the network-layer topic dispatch are the remaining integration work — see the productization roadmap.
-
-The issued credential carries the resolved `assuranceLevel` plus `commitmentRoot` / `anchorRef` in its signed `integrity` block, and `IssuancePolicy.requiredAssuranceLevel` can gate issuance on it.
-
-### Operator / committee IPCs
-
-| Command | Description |
-|---------|-------------|
-| `integrity_record_attestation` | Ingest + verify a committee co-signature; re-resolve assurance. |
-| `integrity_set_anchor` | Record the commitment-root anchor reference; promote to `anchored`. |
-| `integrity_get_assurance` | Read assurance level + valid attestation count for a session. |
+The unverified anchor setter (`integrity_set_anchor`), which let any caller mark a session `anchored`, and the local committee co-sign path (`integrity_record_attestation`, `integrity_get_assurance`, the Sentinel DAO committee check and the unwired co-sign gossip handler) are deleted with the `legacy-integrity-attestation` feature. Issuance ignores the stored `assurance_level` and `anchor_ref` columns until the baseline schema squash removes them. An independent witness must return through verified committee outcome certificates.
 
 ## Database Schema
 
@@ -364,12 +330,8 @@ integrity_sessions       -- One per monitored session; assurance_level +
                          --   gaze_offscreen_ratio REAL (migration 060), commitment_hash (migration 061)
 integrity_attestations   -- Committee co-signatures per session (migration 061)
 sentinel_user_models     -- Per-user candle weights: keystroke_ae, mouse_cnn, gaze_calib (JSON blobs)
-sentinel_priors          -- DAO-ratified attack patterns AND classifier weights
-                         --   keystroke / mouse: labeled-samples blobs
-                         --   paste_classifier_weights: model bundle (migration 045 adds
-                         --   weights_cid, eval_cid, eval_tpr, eval_fpr, version columns)
-sentinel_kill_switch     -- Operator-controlled disable per model_kind (migration 046)
-sentinel_weights_blocklist -- (model_kind, version) pairs the selector must skip (migration 046)
+sentinel_priors, sentinel_kill_switch, sentinel_weights_blocklist
+                         -- Retired prior-library tables; nothing reads or writes them
 ```
 
 Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
@@ -384,16 +346,8 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 | `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`) |
 | `integrity_list_sessions` | List all sessions |
 | `integrity_list_snapshots` | List snapshots for a session |
-| `sentinel_propose_prior` | Propose a labeled-samples or weights blob to the Sentinel DAO |
-| `sentinel_ratify_prior` | Finalize an approved proposal into `sentinel_priors` |
-| `sentinel_priors_list` | List ratified priors (optionally filtered by `model_kind`) |
-| `sentinel_priors_load` | Fetch + re-validate a prior's blob |
-| `sentinel_priors_sync` | Pull newly-ratified priors from peers |
-| `sentinel_get_active_paste_classifier` | Return the newest gate-passing, re-verified weights row, or null |
 | `sentinel_score_paste` | Extract 12-dim features + score via tract. Single round-trip per snapshot. |
-| `sentinel_paste_classifier_info` | Loaded model source + version (`bundled` / `dao`) |
-| `sentinel_load_dao_classifier` | Replace the active tract session with DAO-supplied ONNX bytes |
-| `sentinel_revert_classifier_to_bundled` | Drop the DAO session, fall back to embedded weights |
+| `sentinel_paste_classifier_info` | Loaded model source + version (always `bundled`) |
 | `sentinel_train_keystroke_ae` | Train (or fine-tune) the per-user keystroke autoencoder via candle |
 | `sentinel_score_keystroke_ae` | Score keystrokes against the user's AE; `-1.0` if not yet trained |
 | `sentinel_extract_digraphs` | Pull `DigraphFeatures` from raw keystroke events |
@@ -464,9 +418,13 @@ is a design decision with real consequences for the person flagged.
 
 A flag that leaves the device carries the derived scores and nothing else: the
 per-signal values (`typing_score`, `mouse_score`, `human_score`, `tab_score`,
-`paste_score`, `devtools_score`, `camera_score`), the `composite_score`, and
+`paste_score`, `camera_score`), the `composite_score`, and
 timestamps. These are already what `integrity_snapshots` holds locally, so no new
 class of data is created by sending them.
+
+The legacy nullable `devtools_score` storage/serialization field remains for
+historical compatibility; new submissions must leave it null. Its presence in
+an old record does not authorize a new developer-tools misconduct rule.
 
 It may **not** carry keystroke timings, mouse traces, face embeddings, gaze
 estimates, or anything else from which behaviour could be reconstructed. Those are
@@ -634,9 +592,9 @@ These guarantees are architectural — they are enforced by the code structure, 
    This exists because [Review and adjudication](#review-and-adjudication) gives a learner the right to release evidence contesting a flag, and that right is nominal if nothing was kept. It is bounded to flagged sessions, to the flagged snapshots rather than the whole session, and to an absolute deadline enforced on unlock so evidence expires on time even if the app was closed throughout. The learner can delete it earlier at any point, and deleting it can never count against them — an adjudication rests on the scores, and absent evidence may not be held against a learner.
 
    Frames are captured at 224px on the longest side and stored JPEG-encoded, so this is low-resolution imagery, roughly 15 KB per flagged snapshot. That reduces the exposure; it does not make it nothing, which is why it is opt-in.
-4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images. Published *adversarial priors* (labeled cheat patterns and DAO-ratified classifier weights, curated by the Sentinel DAO — see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md)) contain no individual user data; they are catalog content, not per-user telemetry.
+4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images.
 5. **Profile keyed to device**: `sentinel_profile_{userId}_{deviceFingerprint[0:16]}` — profiles are device-specific.
-6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern. The single path by which anything derived from a session reaches a server is a learner-initiated evidence release during an appeal — see [Review and adjudication](#review-and-adjudication). There is no automatic one, and no operator-initiated one.
+6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The single path by which anything derived from a session reaches a server is a learner-initiated evidence release during an appeal — see [Review and adjudication](#review-and-adjudication). There is no automatic one, and no operator-initiated one.
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
-8. **DAO weights are bounded**: Incoming weights blobs are capped at 1 MiB (envelope/eval JSON) and 50 MiB (ONNX bytes); resolver round trips time out at 5 s. A malicious envelope cannot trigger unbounded download or memory allocation.
+8. **No remote models**: No command accepts classifier weights. The only ONNX models the backend parses are embedded in the binary, so no peer or envelope can supply model bytes.
 9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.

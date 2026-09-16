@@ -1,144 +1,310 @@
-//! IPC commands for reputation snapshot anchoring.
+//! IPC commands for signed, as-of reputation snapshots.
 //!
-//! Manages CIP-68 soulbound reputation token lifecycle:
-//!   - Create a snapshot from current reputation state
-//!   - List snapshots with status tracking
-//!   - Get snapshot details
-//!   - Retry failed snapshots
+//! New snapshots are self-issued `DerivedCredential` VCs. Their signed payload
+//! freezes every score and contributing eligible credential, and the existing
+//! credential-hash queue optionally anchors the VC integrity hash. Historical
+//! CIP-68 rows are retained only to reconcile an already-signed transaction.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
-use tauri::State;
 
-use crate::cardano::snapshot;
+use crate::cardano::{anchor_queue, snapshot_recovery};
 use crate::crypto::hash::entity_id;
-use crate::domain::reputation::{
-    cip68, CreateSnapshotParams, OnChainSkillScore, ReputationRole, SnapshotRecord, SnapshotStatus,
-};
+use crate::db::executor::DatabaseWorkload;
+use crate::domain::reputation::{CreateSnapshotParams, ReputationRole, SnapshotRecord};
+use crate::domain::vc::{Claim, CredentialType, CustomClaim};
 use crate::AppState;
+
+const SNAPSHOT_SCOPE: &str = "as_of_all_eligible_evidence";
+const SCORE_SCALE: i64 = 1_000_000;
+const CONFIDENCE_SCALE: i64 = 10_000;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SnapshotEvidenceRef {
+    credential_id: String,
+    integrity_hash: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SnapshotSkill {
+    skill_id: String,
+    proficiency_level: String,
+    impact_score_ppm: i64,
+    confidence_bps: i64,
+    confidence_method: String,
+    evidence_count: i64,
+    computation_spec: String,
+    evidence: Vec<SnapshotEvidenceRef>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReputationSnapshotClaim {
+    snapshot_kind: String,
+    version: u32,
+    snapshot_id: String,
+    scope: String,
+    as_of: String,
+    subject_id: String,
+    role: String,
+    score_scale: i64,
+    confidence_scale: i64,
+    skills: Vec<SnapshotSkill>,
+}
 
 /// Create a reputation snapshot for on-chain anchoring.
 ///
-/// Gathers all reputation assertions for the specified subject+role,
-/// converts them to on-chain format, creates a snapshot record,
-/// and prepares it for transaction building.
+/// Gathers the current reputation assertions and their complete eligible VC
+/// inputs, signs that immutable claim, and queues its hash without waiting for
+/// a chain provider.
 #[tauri::command]
 pub async fn snapshot_reputation(
     state: State<'_, AppState>,
     params: CreateSnapshotParams,
 ) -> Result<SnapshotRecord, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    // Validate role
-    let role = ReputationRole::from_str(&params.role)
-        .ok_or_else(|| format!("invalid role: {}", params.role))?;
-
-    // Get the local identity
-    let actor_address: String = conn
-        .query_row(
-            "SELECT stake_address FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
+    let wallet = {
+        let guard = state.keystore.lock().await;
+        let keystore = guard.as_ref().ok_or("vault is locked — unlock first")?;
+        let mnemonic = keystore.retrieve_mnemonic().map_err(|e| e.to_string())?;
+        crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?
+    };
+    let workload = if params.role == ReputationRole::Instructor.as_str() {
+        DatabaseWorkload::Instructor
+    } else {
+        DatabaseWorkload::Learner
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    state
+        .db_executor
+        .execute(
+            workload,
+            state.profile_lease(),
+            "snapshot.create",
+            move |db| create_snapshot(db.conn(), &wallet, &params, now_ms),
         )
-        .map_err(|e| format!("no local identity: {e}"))?;
+        .await
+}
 
-    // Query all reputation assertions for this subject + role
+fn create_snapshot(
+    conn: &rusqlite::Connection,
+    wallet: &crate::crypto::wallet::Wallet,
+    request: &CreateSnapshotParams,
+    now_ms: i64,
+) -> Result<SnapshotRecord, String> {
+    let role = ReputationRole::from_str(&request.role)
+        .filter(|role| matches!(role, ReputationRole::Instructor | ReputationRole::Learner))
+        .ok_or("only learner and instructor snapshot roles are supported")?;
+    let actor_did = crate::crypto::did::did_from_verifying_key(&wallet.signing_key.verifying_key());
+    let now = chrono::DateTime::from_timestamp_millis(now_ms)
+        .ok_or("invalid snapshot time")?
+        .to_rfc3339();
+    let snapshot_id = entity_id(&[actor_did.as_str(), &request.subject_id, &request.role, &now]);
+    crate::db::with_transaction(conn, || {
+        crate::evidence::reputation::revalidate_rows(conn, Some(actor_did.as_str()))?;
+        let skills = collect_scores(conn, actor_did.as_str(), &request.subject_id, role)?;
+        let computation_specs = skills
+            .iter()
+            .map(|skill| skill.computation_spec.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let computation_spec = if computation_specs.is_empty() {
+            "v4-verified-vc".to_string()
+        } else {
+            computation_specs.into_iter().collect::<Vec<_>>().join("+")
+        };
+        let claim = ReputationSnapshotClaim {
+            snapshot_kind: "reputation_snapshot".into(),
+            version: 2,
+            snapshot_id: snapshot_id.clone(),
+            scope: SNAPSHOT_SCOPE.into(),
+            as_of: now.clone(),
+            subject_id: request.subject_id.clone(),
+            role: role.as_str().into(),
+            score_scale: SCORE_SCALE,
+            confidence_scale: CONFIDENCE_SCALE,
+            skills,
+        };
+        let properties = serde_json::to_value(&claim)
+            .map_err(|error| error.to_string())?
+            .as_object()
+            .cloned()
+            .ok_or("snapshot claim must serialize as an object")?;
+        let credential = crate::commands::credentials::issue_credential_impl(
+            conn,
+            &wallet.signing_key,
+            &actor_did,
+            &crate::commands::credentials::IssueCredentialRequest {
+                credential_type: CredentialType::DerivedCredential,
+                subject: actor_did.clone(),
+                claim: Claim::Custom(CustomClaim { properties }),
+                evidence_refs: Vec::new(),
+                expiration_date: None,
+                supersedes: None,
+                integrity_session_id: None,
+                integrity_policy: None,
+            },
+            &now,
+        )?;
+        let credential_id = credential.id.ok_or("snapshot credential has no id")?;
+        // The common issuance path currently treats queue insertion as a soft
+        // convenience. A snapshot explicitly promises this optional path, so
+        // require the local durable queue row in the same transaction.
+        anchor_queue::enqueue(conn, &credential_id)?;
+        conn.execute(
+            "INSERT INTO reputation_snapshots
+             (id, actor_address, subject_id, role, skill_count, tx_status,
+              snapshot_at, computation_spec, credential_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8)",
+            params![
+                snapshot_id,
+                wallet.stake_address,
+                request.subject_id,
+                role.as_str(),
+                claim.skills.len() as i64,
+                now,
+                computation_spec,
+                credential_id,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        conn.execute(
+            "INSERT INTO reputation_snapshot_inputs (snapshot_id, context_json)
+             VALUES (?1, ?2)",
+            params![
+                snapshot_id,
+                serde_json::to_string(&claim).map_err(|error| error.to_string())?
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        snapshot_recovery::record(conn, &snapshot_id)
+    })
+}
+
+fn collect_scores(
+    conn: &rusqlite::Connection,
+    actor_did: &str,
+    subject_id: &str,
+    role: ReputationRole,
+) -> Result<Vec<SnapshotSkill>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT ra.skill_id, ra.proficiency_level, ra.score, ra.evidence_count \
-             FROM reputation_assertions ra \
-             JOIN skills s ON s.id = ra.skill_id \
-             JOIN subjects sub ON sub.id = s.subject_id \
-             WHERE ra.actor_address = ?1 AND ra.role = ?2 AND sub.id = ?3 \
-             ORDER BY ra.skill_id",
+            "SELECT ra.skill_id, ra.proficiency_level, ra.score, ra.evidence_count,
+                    ra.computation_spec
+         FROM current_reputation_assertions ra JOIN skills s ON s.id = ra.skill_id
+         WHERE ra.actor_address = ?1 AND ra.role = ?2 AND s.subject_id = ?3
+         ORDER BY ra.skill_id, ra.proficiency_level",
         )
         .map_err(|e| e.to_string())?;
-
-    let skills: Vec<OnChainSkillScore> = stmt
-        .query_map(
-            params![actor_address, params.role, params.subject_id],
-            |row| {
-                let skill_id: String = row.get(0)?;
-                let prof_level: String = row.get(1)?;
-                let score: f64 = row.get(2)?;
-                let evidence_count: i64 = row.get(3)?;
-
-                // Compute confidence (smoothed for instructors, direct for learners)
-                let confidence = if params.role == "instructor" {
-                    evidence_count as f64 / (evidence_count as f64 + 5.0)
-                } else {
-                    score
-                };
-
-                Ok(OnChainSkillScore {
-                    skill_id_bytes: hex::encode(
-                        skill_id
-                            .as_bytes()
-                            .iter()
-                            .take(16)
-                            .copied()
-                            .collect::<Vec<u8>>(),
-                    ),
-                    proficiency: snapshot::proficiency_to_index(&prof_level),
-                    impact_score: (score * cip68::IMPACT_SCALE as f64) as i64,
-                    confidence: (confidence * cip68::CONFIDENCE_SCALE as f64) as i64,
-                    evidence_count,
-                })
-            },
-        )
+    let rows = stmt
+        .query_map(params![actor_did, role.as_str(), subject_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    rows.into_iter()
+        .map(|(skill_id, level, score, count, computation_spec)| {
+            if !score.is_finite()
+                || !(0.0..=1.0).contains(&score)
+                || count < 0
+                || computation_spec.is_empty()
+                || ![
+                    "remember",
+                    "understand",
+                    "apply",
+                    "analyze",
+                    "evaluate",
+                    "create",
+                ]
+                .contains(&level.as_str())
+            {
+                return Err("invalid reputation score in snapshot input".into());
+            }
+            let evidence = collect_evidence(conn, actor_did, role, &skill_id, &level)?;
+            if i64::try_from(evidence.len()).ok() != Some(count) {
+                return Err(format!(
+                    "reputation input count changed for {skill_id}/{level}; recompute before snapshotting"
+                ));
+            }
+            let confidence = if role == ReputationRole::Instructor {
+                count as f64 / (count as f64 + 5.0)
+            } else {
+                score
+            };
+            Ok(SnapshotSkill {
+                skill_id,
+                proficiency_level: level,
+                impact_score_ppm: (score * SCORE_SCALE as f64).round() as i64,
+                confidence_bps: (confidence * CONFIDENCE_SCALE as f64).round() as i64,
+                confidence_method: if role == ReputationRole::Instructor {
+                    "sample_count_over_sample_count_plus_5".into()
+                } else {
+                    "headline_score".into()
+                },
+                evidence_count: count,
+                computation_spec,
+                evidence,
+            })
+        })
+        .collect()
+}
 
-    let skill_count = skills.len() as i64;
+/// Proficiency level string to reputation enum index (0-5).
+fn proficiency_to_index(level: &str) -> u8 {
+    match level {
+        "remember" => 0,
+        "understand" => 1,
+        "apply" => 2,
+        "analyze" => 3,
+        "evaluate" => 4,
+        "create" => 5,
+        _ => 2, // default to apply
+    }
+}
 
-    // Generate snapshot ID
-    let now = chrono::Utc::now().to_rfc3339();
-    let snapshot_id = entity_id(&[&actor_address, &params.subject_id, &params.role, &now]);
-
-    // Build asset names
-    let base_name = snapshot::reputation_base_name(&params.subject_id, &role);
-    let ref_name = snapshot::reference_asset_name(&base_name);
-    let usr_name = snapshot::user_asset_name(&base_name);
-
-    // Insert snapshot record
-    conn.execute(
-        "INSERT INTO reputation_snapshots \
-         (id, actor_address, subject_id, role, skill_count, tx_status, \
-          ref_asset_name, user_asset_name, snapshot_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))",
-        params![
-            snapshot_id,
-            actor_address,
-            params.subject_id,
-            params.role,
-            skill_count,
-            SnapshotStatus::Pending.as_str(),
-            hex::encode(&ref_name),
-            hex::encode(&usr_name),
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(SnapshotRecord {
-        id: snapshot_id,
-        actor_address,
-        subject_id: params.subject_id,
-        role: params.role,
-        skill_count,
-        tx_status: SnapshotStatus::Pending.as_str().into(),
-        tx_hash: None,
-        policy_id: None,
-        ref_asset_name: Some(hex::encode(&ref_name)),
-        user_asset_name: Some(hex::encode(&usr_name)),
-        error_message: None,
-        snapshot_at: now,
-        confirmed_at: None,
+fn collect_evidence(
+    conn: &rusqlite::Connection,
+    actor_did: &str,
+    role: ReputationRole,
+    skill_id: &str,
+    level: &str,
+) -> Result<Vec<SnapshotEvidenceRef>, String> {
+    let role_name = match role {
+        ReputationRole::Learner => "learner",
+        ReputationRole::Instructor => "instructor",
+        _ => return Err("unsupported reputation snapshot role".into()),
+    };
+    let level = proficiency_to_index(level) as i64;
+    // Freeze exactly the verified set that produced the reputation row, so a
+    // snapshot can never cite an unverified or self-issued instructor input.
+    let evidence = crate::evidence::reputation::verified_reputation_inputs(
+        conn, role_name, actor_did, skill_id, level,
+    )?
+    .into_iter()
+    .map(|input| SnapshotEvidenceRef {
+        credential_id: input.credential_id,
+        integrity_hash: input.integrity_hash,
     })
+    .collect::<Vec<_>>();
+    for item in &evidence {
+        if hex::decode(&item.integrity_hash)
+            .ok()
+            .is_none_or(|bytes| bytes.len() != 32)
+        {
+            return Err(format!(
+                "credential {} has an invalid integrity hash",
+                item.credential_id
+            ));
+        }
+    }
+    Ok(evidence)
 }
 
 /// List reputation snapshots with optional status filter.
@@ -148,32 +314,54 @@ pub async fn list_snapshots(
     status: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<SnapshotRecord>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "snapshot.list",
+            move |db| list_snapshots_db(db.conn(), status, limit),
+        )
+        .await
+}
+
+fn list_snapshots_db(
+    conn: &rusqlite::Connection,
+    status: Option<String>,
+    limit: Option<i64>,
+) -> Result<Vec<SnapshotRecord>, String> {
     let max = limit.unwrap_or(50);
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
             (
-                "SELECT id, actor_address, subject_id, role, skill_count, tx_status, \
-                 tx_hash, policy_id, ref_asset_name, user_asset_name, error_message, \
-                 snapshot_at, confirmed_at \
-                 FROM reputation_snapshots WHERE tx_status = ?1 \
-                 ORDER BY snapshot_at DESC LIMIT ?2"
+                "SELECT rs.id, rs.actor_address, rs.subject_id, rs.role, rs.skill_count,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.tx_status ELSE ca.anchor_status END,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.tx_hash ELSE ca.anchor_tx_hash END,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.error_message ELSE ca.last_error END,
+                 rs.snapshot_at,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.confirmed_at ELSE ca.confirmed_at END,
+                 rs.computation_spec, rs.credential_id
+                 FROM reputation_snapshots rs
+                 LEFT JOIN credential_anchors ca ON ca.credential_id = rs.credential_id
+                 WHERE CASE WHEN rs.credential_id IS NULL THEN rs.tx_status
+                            ELSE ca.anchor_status END = ?1
+                 ORDER BY rs.snapshot_at DESC LIMIT ?2"
                     .into(),
                 vec![Box::new(s.clone()), Box::new(max)],
             )
         } else {
             (
-                "SELECT id, actor_address, subject_id, role, skill_count, tx_status, \
-                 tx_hash, policy_id, ref_asset_name, user_asset_name, error_message, \
-                 snapshot_at, confirmed_at \
-                 FROM reputation_snapshots \
-                 ORDER BY snapshot_at DESC LIMIT ?1"
+                "SELECT rs.id, rs.actor_address, rs.subject_id, rs.role, rs.skill_count,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.tx_status ELSE ca.anchor_status END,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.tx_hash ELSE ca.anchor_tx_hash END,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.error_message ELSE ca.last_error END,
+                 rs.snapshot_at,
+                 CASE WHEN rs.credential_id IS NULL THEN rs.confirmed_at ELSE ca.confirmed_at END,
+                 rs.computation_spec, rs.credential_id
+                 FROM reputation_snapshots rs
+                 LEFT JOIN credential_anchors ca ON ca.credential_id = rs.credential_id
+                 ORDER BY rs.snapshot_at DESC LIMIT ?1"
                     .into(),
                 vec![Box::new(max)],
             )
@@ -185,23 +373,7 @@ pub async fn list_snapshots(
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let snapshots = stmt
-        .query_map(params_ref.as_slice(), |row| {
-            Ok(SnapshotRecord {
-                id: row.get(0)?,
-                actor_address: row.get(1)?,
-                subject_id: row.get(2)?,
-                role: row.get(3)?,
-                skill_count: row.get(4)?,
-                tx_status: row.get(5)?,
-                tx_hash: row.get(6)?,
-                policy_id: row.get(7)?,
-                ref_asset_name: row.get(8)?,
-                user_asset_name: row.get(9)?,
-                error_message: row.get(10)?,
-                snapshot_at: row.get(11)?,
-                confirmed_at: row.get(12)?,
-            })
-        })
+        .query_map(params_ref.as_slice(), snapshot_recovery::record_from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -215,302 +387,60 @@ pub async fn get_snapshot(
     state: State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<SnapshotRecord, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    conn.query_row(
-        "SELECT id, actor_address, subject_id, role, skill_count, tx_status, \
-         tx_hash, policy_id, ref_asset_name, user_asset_name, error_message, \
-         snapshot_at, confirmed_at \
-         FROM reputation_snapshots WHERE id = ?1",
-        params![snapshot_id],
-        |row| {
-            Ok(SnapshotRecord {
-                id: row.get(0)?,
-                actor_address: row.get(1)?,
-                subject_id: row.get(2)?,
-                role: row.get(3)?,
-                skill_count: row.get(4)?,
-                tx_status: row.get(5)?,
-                tx_hash: row.get(6)?,
-                policy_id: row.get(7)?,
-                ref_asset_name: row.get(8)?,
-                user_asset_name: row.get(9)?,
-                error_message: row.get(10)?,
-                snapshot_at: row.get(11)?,
-                confirmed_at: row.get(12)?,
-            })
-        },
-    )
-    .map_err(|e| format!("snapshot not found: {e}"))
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "snapshot.get",
+            move |db| snapshot_recovery::record(db.conn(), &snapshot_id),
+        )
+        .await
 }
 
-/// Update snapshot status (used internally during tx building/submission).
-#[tauri::command]
-pub async fn update_snapshot_status(
-    state: State<'_, AppState>,
-    snapshot_id: String,
-    status: String,
-    tx_hash: Option<String>,
-    policy_id: Option<String>,
-    error_message: Option<String>,
-) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    // Validate status
-    let _status_enum =
-        SnapshotStatus::from_str(&status).ok_or_else(|| format!("invalid status: {status}"))?;
-
-    let confirmed_at = if status == "confirmed" {
-        Some(chrono::Utc::now().to_rfc3339())
-    } else {
-        None
-    };
-
-    conn.execute(
-        "UPDATE reputation_snapshots SET \
-         tx_status = ?1, tx_hash = ?2, policy_id = ?3, \
-         error_message = ?4, confirmed_at = ?5 \
-         WHERE id = ?6",
-        params![
-            status,
-            tx_hash,
-            policy_id,
-            error_message,
-            confirmed_at,
-            snapshot_id
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Build and submit a soulbound reputation token minting transaction.
+/// Request background anchoring for a credential-backed snapshot.
 ///
-/// Takes a pending snapshot record, builds the CIP-68 minting transaction,
-/// submits it via Blockfrost, and updates the snapshot status.
+/// This command never contacts a chain provider. It makes an unsigned failed
+/// anchor retryable. A snapshot written before the credential-hash format has
+/// no credential to anchor and is refused: the retired CIP-68 minting path
+/// cannot be resumed.
 #[tauri::command]
 pub async fn submit_snapshot_tx(
     state: State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<SnapshotRecord, String> {
-    // 1. Read snapshot record
-    let (record, skills) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-
-        let record: SnapshotRecord = conn
-            .query_row(
-                "SELECT id, actor_address, subject_id, role, skill_count, tx_status, \
-                 tx_hash, policy_id, ref_asset_name, user_asset_name, error_message, \
-                 snapshot_at, confirmed_at \
-                 FROM reputation_snapshots WHERE id = ?1",
-                params![snapshot_id],
-                |row| {
-                    Ok(SnapshotRecord {
-                        id: row.get(0)?,
-                        actor_address: row.get(1)?,
-                        subject_id: row.get(2)?,
-                        role: row.get(3)?,
-                        skill_count: row.get(4)?,
-                        tx_status: row.get(5)?,
-                        tx_hash: row.get(6)?,
-                        policy_id: row.get(7)?,
-                        ref_asset_name: row.get(8)?,
-                        user_asset_name: row.get(9)?,
-                        error_message: row.get(10)?,
-                        snapshot_at: row.get(11)?,
-                        confirmed_at: row.get(12)?,
-                    })
-                },
-            )
-            .map_err(|e| format!("snapshot not found: {e}"))?;
-
-        if record.tx_status != "pending" && record.tx_status != "failed" {
-            return Err(format!(
-                "snapshot {} is already {}, cannot resubmit",
-                snapshot_id, record.tx_status
-            ));
-        }
-
-        // Gather skills
-        let mut stmt = conn
-            .prepare(
-                "SELECT ra.skill_id, ra.proficiency_level, ra.score, ra.evidence_count \
-                 FROM reputation_assertions ra \
-                 JOIN skills s ON s.id = ra.skill_id \
-                 JOIN subjects sub ON sub.id = s.subject_id \
-                 WHERE ra.actor_address = ?1 AND ra.role = ?2 AND sub.id = ?3 \
-                 ORDER BY ra.skill_id",
-            )
-            .map_err(|e| e.to_string())?;
-
-        let skills: Vec<OnChainSkillScore> = stmt
-            .query_map(
-                params![record.actor_address, record.role, record.subject_id],
-                |row| {
-                    let skill_id: String = row.get(0)?;
-                    let prof_level: String = row.get(1)?;
-                    let score: f64 = row.get(2)?;
-                    let evidence_count: i64 = row.get(3)?;
-                    let confidence = if record.role == "instructor" {
-                        evidence_count as f64 / (evidence_count as f64 + 5.0)
-                    } else {
-                        score
-                    };
-                    Ok(OnChainSkillScore {
-                        skill_id_bytes: hex::encode(
-                            skill_id
-                                .as_bytes()
-                                .iter()
-                                .take(16)
-                                .copied()
-                                .collect::<Vec<u8>>(),
-                        ),
-                        proficiency: snapshot::proficiency_to_index(&prof_level),
-                        impact_score: (score * cip68::IMPACT_SCALE as f64) as i64,
-                        confidence: (confidence * cip68::CONFIDENCE_SCALE as f64) as i64,
-                        evidence_count,
-                    })
-                },
-            )
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-
-        // Update status to building
-        conn.execute(
-            "UPDATE reputation_snapshots SET tx_status = 'building' WHERE id = ?1",
-            params![snapshot_id],
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "snapshot.request_anchor",
+            move |db| request_snapshot_anchor(db.conn(), &snapshot_id),
         )
-        .map_err(|e| e.to_string())?;
+        .await
+}
 
-        (record, skills)
+fn request_snapshot_anchor(
+    conn: &rusqlite::Connection,
+    snapshot_id: &str,
+) -> Result<SnapshotRecord, String> {
+    let record = snapshot_recovery::record(conn, snapshot_id)?;
+    let Some(credential_id) = &record.credential_id else {
+        return Err(
+            "snapshot has no signed credential to anchor: the retired CIP-68 \
+                    minting path cannot be resumed"
+                .into(),
+        );
     };
-
-    // 2. Get wallet from unlocked vault
-    let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    let wallet =
-        crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-    drop(ks_guard);
-
-    // 3. Build Blockfrost client. Prefers the per-device
-    //    `cardano.blockfrost_project_id` setting; falls back to env.
-    let project_id = {
-        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-        let conn = db_guard.as_ref().map(|db| db.conn());
-        crate::cardano::blockfrost::resolve_project_id(conn)
-    }
-    .ok_or(
-        "Blockfrost project id not configured \
-         (set in Settings → Cardano, or export BLOCKFROST_PROJECT_ID)",
-    )?;
-    let blockfrost =
-        crate::cardano::blockfrost::BlockfrostClient::new(project_id).map_err(|e| e.to_string())?;
-
-    let role = ReputationRole::from_str(&record.role)
-        .ok_or_else(|| format!("invalid role: {}", record.role))?;
-
-    let now_ms = chrono::Utc::now().timestamp_millis();
-
-    // 4. Build and submit transaction
-    match crate::cardano::soulbound_tx_builder::build_soulbound_mint_tx(
-        &blockfrost,
-        &wallet.payment_address,
-        &wallet.payment_key_hash,
-        &wallet.payment_key_extended,
-        &wallet.payment_key_hash, // owner = self
-        &record.subject_id,
-        &role,
-        &skills,
-        now_ms - 30 * 24 * 3600 * 1000, // 30 days window
-        now_ms,
-    )
-    .await
-    {
-        Ok(gov_result) => {
-            // Submit to Blockfrost
-            match blockfrost.submit_tx(&gov_result.tx_cbor).await {
-                Ok(tx_hash) => {
-                    let policy_id =
-                        crate::cardano::script_refs::REPUTATION_MINTING_SCRIPT_HASH.to_string();
-
-                    let db_guard = state
-                        .db
-                        .lock()
-                        .map_err(|_| "database lock poisoned".to_string())?;
-                    let db = db_guard.as_ref().ok_or("database not initialized")?;
-                    db.conn()
-                        .execute(
-                            "UPDATE reputation_snapshots SET \
-                             tx_status = 'submitted', tx_hash = ?1, policy_id = ?2 \
-                             WHERE id = ?3",
-                            params![tx_hash, policy_id, snapshot_id],
-                        )
-                        .map_err(|e| e.to_string())?;
-
-                    Ok(SnapshotRecord {
-                        tx_status: "submitted".into(),
-                        tx_hash: Some(tx_hash),
-                        policy_id: Some(policy_id),
-                        ..record
-                    })
-                }
-                Err(e) => {
-                    let db_guard = state
-                        .db
-                        .lock()
-                        .map_err(|_| "database lock poisoned".to_string())?;
-                    let db = db_guard.as_ref().ok_or("database not initialized")?;
-                    db.conn()
-                        .execute(
-                            "UPDATE reputation_snapshots SET \
-                             tx_status = 'failed', error_message = ?1 WHERE id = ?2",
-                            params![e.to_string(), snapshot_id],
-                        )
-                        .ok();
-                    Err(format!("tx submission failed: {e}"))
-                }
-            }
-        }
-        Err(e) => {
-            let db_guard = state
-                .db
-                .lock()
-                .map_err(|_| "database lock poisoned".to_string())?;
-            let db = db_guard.as_ref().ok_or("database not initialized")?;
-            db.conn()
-                .execute(
-                    "UPDATE reputation_snapshots SET \
-                     tx_status = 'failed', error_message = ?1 WHERE id = ?2",
-                    params![e.to_string(), snapshot_id],
-                )
-                .ok();
-            Err(format!("tx build failed: {e}"))
-        }
-    }
+    anchor_queue::enqueue_or_retry(conn, credential_id)?;
+    snapshot_recovery::record(conn, snapshot_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Database;
+    use crate::domain::reputation::SnapshotStatus;
 
     fn test_db() -> Database {
         let db = Database::open_in_memory().expect("in-memory db");
@@ -518,8 +448,114 @@ mod tests {
         db
     }
 
-    fn setup_reputation_data(db: &Database) {
+    #[test]
+    fn snapshot_uses_wallet_did_and_freezes_original_scores() {
+        let db = test_db();
+        let wallet = crate::crypto::wallet::wallet_from_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        ).unwrap();
+        let did = crate::crypto::did::did_from_verifying_key(&wallet.signing_key.verifying_key());
+        setup_reputation_data(&db, &wallet.signing_key);
+        let request = CreateSnapshotParams {
+            subject_id: "sub1".into(),
+            role: "instructor".into(),
+        };
+        let record = create_snapshot(db.conn(), &wallet, &request, 1_714_000_000_000).unwrap();
+        assert_eq!(record.actor_address, wallet.stake_address);
+        assert_eq!(
+            record.skill_count, 1,
+            "DID-backed reputation must not be queried by stake address"
+        );
+        // The seeded row predates its verified inputs, so snapshotting
+        // recomputes it under the current spec before freezing it.
+        assert_eq!(record.computation_spec.as_deref(), Some("v4-verified-vc"));
+        let credential_id = record.credential_id.as_deref().unwrap();
+        let original_json: String = db
+            .conn()
+            .query_row(
+                "SELECT context_json FROM reputation_snapshot_inputs WHERE snapshot_id = ?1",
+                [&record.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let original: ReputationSnapshotClaim = serde_json::from_str(&original_json).unwrap();
+        assert_eq!(original.scope, SNAPSHOT_SCOPE);
+        assert_eq!(original.as_of, "2024-04-24T23:06:40+00:00");
+        assert_eq!(original.skills[0].impact_score_ppm, 850_000);
+        assert_eq!(original.skills[0].computation_spec, "v4-verified-vc");
+        let source_hash: String = db
+            .conn()
+            .query_row(
+                "SELECT integrity_hash FROM credentials WHERE id = 'source-credential'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            original.skills[0].evidence,
+            vec![SnapshotEvidenceRef {
+                credential_id: "source-credential".into(),
+                integrity_hash: source_hash,
+            }]
+        );
+        let (signed_json, integrity_hash, queued): (String, String, bool) = db
+            .conn()
+            .query_row(
+                "SELECT c.signed_vc_json, c.integrity_hash, EXISTS(
+                    SELECT 1 FROM credential_anchors a WHERE a.credential_id = c.id
+                 ) FROM credentials c WHERE c.id = ?1",
+                [credential_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let signed: crate::domain::vc::VerifiableCredential =
+            serde_json::from_str(&signed_json).unwrap();
+        assert_eq!(
+            signed
+                .credential_subject
+                .properties
+                .get("scope")
+                .and_then(|value| value.as_str()),
+            Some(SNAPSHOT_SCOPE)
+        );
+        assert_eq!(signed.issuer, did);
+        assert_eq!(signed.credential_subject.id, did);
+        assert!(signed.type_.iter().any(|kind| kind == "DerivedCredential"));
+        assert_eq!(
+            crate::commands::credentials::integrity_hash_of(&signed).unwrap(),
+            integrity_hash
+        );
+        let signed_value: serde_json::Value = serde_json::from_str(&signed_json).unwrap();
+        assert_eq!(
+            signed_value
+                .pointer("/credentialSubject/scope")
+                .and_then(|value| value.as_str()),
+            Some(SNAPSHOT_SCOPE)
+        );
+        assert!(queued);
+        db.conn()
+            .execute("UPDATE reputation_assertions SET score = 0.1", [])
+            .unwrap();
+        let frozen: String = db
+            .conn()
+            .query_row(
+                "SELECT context_json FROM reputation_snapshot_inputs WHERE snapshot_id = ?1",
+                [&record.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(original_json, frozen);
+        assert_eq!(
+            collect_scores(db.conn(), did.as_str(), "sub1", ReputationRole::Instructor).unwrap()[0]
+                .impact_score_ppm,
+            100_000
+        );
+    }
+
+    fn setup_reputation_data(db: &Database, actor_key: &ed25519_dalek::SigningKey) {
         let conn = db.conn();
+        let actor = crate::crypto::did::did_from_verifying_key(&actor_key.verifying_key());
+        let actor_did = actor.as_str();
 
         // Identity
         conn.execute(
@@ -546,34 +582,42 @@ mod tests {
         )
         .unwrap();
 
-        // Reputation assertion
         conn.execute(
             "INSERT INTO reputation_assertions \
              (id, actor_address, role, skill_id, proficiency_level, score, evidence_count, \
               computation_spec) \
-             VALUES ('ra1', 'stake_test1ulearner', 'instructor', 'sk1', 'apply', 0.85, 5, 'v2')",
-            [],
+             VALUES ('ra1', ?1, 'instructor', 'sk1', 'apply', 0.85, 1, 'v3-vc')",
+            [actor_did],
         )
         .unwrap();
+        // A genuinely signed credential the actor issued to another learner:
+        // snapshot evidence is re-verified, so an unsigned row would not count.
+        let learner =
+            crate::crypto::did::derive_did_key(&ed25519_dalek::SigningKey::from_bytes(&[5; 32]));
+        crate::db::opinion_eligibility::test_support::store_scored_credential(
+            db,
+            "source-credential",
+            actor_key,
+            &learner,
+            "sk1",
+            2,
+            0.85,
+            None,
+        );
     }
 
     #[test]
     fn snapshot_record_created() {
         let db = test_db();
-        setup_reputation_data(&db);
         let conn = db.conn();
 
         let now = chrono::Utc::now().to_rfc3339();
         let snapshot_id = entity_id(&["stake_test1ulearner", "sub1", "instructor", &now]);
-        let base_name = snapshot::reputation_base_name("sub1", &ReputationRole::Instructor);
-        let ref_name = snapshot::reference_asset_name(&base_name);
-        let usr_name = snapshot::user_asset_name(&base_name);
 
         conn.execute(
             "INSERT INTO reputation_snapshots \
-             (id, actor_address, subject_id, role, skill_count, tx_status, \
-              ref_asset_name, user_asset_name) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (id, actor_address, subject_id, role, skill_count, tx_status) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 snapshot_id,
                 "stake_test1ulearner",
@@ -581,8 +625,6 @@ mod tests {
                 "instructor",
                 1,
                 "pending",
-                hex::encode(&ref_name),
-                hex::encode(&usr_name),
             ],
         )
         .unwrap();
@@ -643,52 +685,91 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_with_skills_from_reputation() {
+    fn snapshot_rejects_a_stale_evidence_count() {
         let db = test_db();
-        setup_reputation_data(&db);
-        let conn = db.conn();
+        let instructor = ed25519_dalek::SigningKey::from_bytes(&[21; 32]);
+        let instructor_did =
+            crate::crypto::did::did_from_verifying_key(&instructor.verifying_key());
+        setup_reputation_data(&db, &instructor);
+        db.conn()
+            .execute(
+                "UPDATE reputation_assertions SET evidence_count = 2 WHERE id = 'ra1'",
+                [],
+            )
+            .unwrap();
+        let error = collect_scores(
+            db.conn(),
+            instructor_did.as_str(),
+            "sub1",
+            ReputationRole::Instructor,
+        )
+        .unwrap_err();
+        assert!(error.contains("recompute before snapshotting"));
+    }
 
-        // Query skills for the snapshot
-        let mut stmt = conn
-            .prepare(
-                "SELECT ra.skill_id, ra.proficiency_level, ra.score, ra.evidence_count \
-                 FROM reputation_assertions ra \
-                 JOIN skills s ON s.id = ra.skill_id \
-                 JOIN subjects sub ON sub.id = s.subject_id \
-                 WHERE ra.actor_address = 'stake_test1ulearner' \
-                 AND ra.role = 'instructor' AND sub.id = 'sub1'",
+    #[test]
+    fn preserved_legacy_snapshot_still_reads_but_cannot_be_anchored() {
+        let db = test_db();
+        db.conn()
+            .execute(
+                "INSERT INTO reputation_snapshots
+                 (id, actor_address, subject_id, role, skill_count, tx_status, tx_hash)
+                 VALUES ('legacy', 'stake', 'subject', 'learner', 0, 'pending', 'original')",
+                [],
             )
             .unwrap();
 
-        let skills: Vec<OnChainSkillScore> = stmt
-            .query_map([], |row| {
-                let skill_id: String = row.get(0)?;
-                let prof_level: String = row.get(1)?;
-                let score: f64 = row.get(2)?;
-                let evidence_count: i64 = row.get(3)?;
+        let preserved = snapshot_recovery::record(db.conn(), "legacy").unwrap();
+        assert_eq!(preserved.tx_hash.as_deref(), Some("original"));
+        assert_eq!(preserved.tx_status, "pending");
 
-                Ok(OnChainSkillScore {
-                    skill_id_bytes: hex::encode(
-                        skill_id
-                            .as_bytes()
-                            .iter()
-                            .take(16)
-                            .copied()
-                            .collect::<Vec<u8>>(),
-                    ),
-                    proficiency: snapshot::proficiency_to_index(&prof_level),
-                    impact_score: (score * cip68::IMPACT_SCALE as f64) as i64,
-                    confidence: (evidence_count as f64 / (evidence_count as f64 + 5.0)
-                        * cip68::CONFIDENCE_SCALE as f64) as i64,
-                    evidence_count,
-                })
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
+        let error = request_snapshot_anchor(db.conn(), "legacy").unwrap_err();
+        assert!(error.contains("cannot be resumed"), "{error}");
+    }
+
+    #[test]
+    fn proficiency_to_index_all_levels() {
+        assert_eq!(proficiency_to_index("remember"), 0);
+        assert_eq!(proficiency_to_index("understand"), 1);
+        assert_eq!(proficiency_to_index("apply"), 2);
+        assert_eq!(proficiency_to_index("analyze"), 3);
+        assert_eq!(proficiency_to_index("evaluate"), 4);
+        assert_eq!(proficiency_to_index("create"), 5);
+        assert_eq!(proficiency_to_index("unknown"), 2); // default
+    }
+
+    #[test]
+    fn duplicate_snapshot_rolls_back_credential_and_anchor() {
+        let db = test_db();
+        let wallet = crate::crypto::wallet::wallet_from_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap();
+        setup_reputation_data(&db, &wallet.signing_key);
+        let request = CreateSnapshotParams {
+            subject_id: "sub1".into(),
+            role: "instructor".into(),
+        };
+        create_snapshot(db.conn(), &wallet, &request, 1_714_000_000_000).unwrap();
+        let before: (i64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM credentials),
+                        (SELECT COUNT(*) FROM credential_anchors)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .unwrap();
-
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].impact_score, 850_000);
-        assert_eq!(skills[0].evidence_count, 5);
+        assert!(create_snapshot(db.conn(), &wallet, &request, 1_714_000_000_000).is_err());
+        let after: (i64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM credentials),
+                        (SELECT COUNT(*) FROM credential_anchors)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(before, after);
     }
 }

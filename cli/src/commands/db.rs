@@ -8,22 +8,11 @@ use crate::context::ProjectContext;
 use crate::output;
 
 // ── Shared SQL from src-tauri ───────────────────────────────────────
-// Include the schema and seed modules directly from the Tauri crate so
-// there is a single source of truth for migrations and seed data.
+// The migrations come from app_lib itself, so the CLI and the app apply one
+// schema. This used to `#[path]`-include schema.rs into this crate, which
+// broke as soon as a migration referenced a crate the CLI did not depend on.
 
-#[path = "../../../src-tauri/src/db/schema.rs"]
-mod schema;
-
-#[path = "../../../src-tauri/src/db/seed.rs"]
-mod seed;
-
-// Provide the SEED_CONTENT constant that seed.rs references via
-// `super::seed_content::SEED_CONTENT`. In the main Tauri crate this
-// lives in `db::seed_content`; for the CLI we include only the
-// dependency-free data constant (the iroh seeding function is not
-// needed here).
-#[path = "../../../src-tauri/src/db/seed_content_data.rs"]
-mod seed_content;
+use app_lib::db::schema;
 
 // ── CLI subcommands ─────────────────────────────────────────────────
 
@@ -34,13 +23,6 @@ pub enum DbCommand {
 
     /// Run pending database schema migrations
     Migrate,
-
-    /// Seed demo data (taxonomy, courses, governance)
-    Seed {
-        /// Force re-seed even if data already exists (clears seed tables first)
-        #[arg(long)]
-        force: bool,
-    },
 
     /// Reset all app data (database + vault + iroh). Requires --force.
     Reset {
@@ -58,24 +40,18 @@ pub fn execute(
     match cmd {
         DbCommand::Status => show_status(ctx, password_file),
         DbCommand::Migrate => run_migrate(ctx, password_file),
-        DbCommand::Seed { force } => run_seed(ctx, *force, password_file),
         DbCommand::Reset { force } => reset_data(ctx, *force),
     }
 }
 
 // ── Migration runner ────────────────────────────────────────────────
-// Mirrors the logic in src-tauri/src/db/mod.rs — small enough to
-// duplicate rather than pulling in the full app_lib crate.
+// The CLI already links app_lib; use its atomic runner and schema extensions.
 
+/// Delegates to the app's definition rather than keeping a second copy of the
+/// DDL: two independently maintained `CREATE TABLE` strings for the same table
+/// are exactly the drift the schema parity work exists to prevent.
 pub(crate) fn ensure_migration_table(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS _migrations (
-            version    INTEGER PRIMARY KEY,
-            name       TEXT NOT NULL,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );",
-    )
-    .context("Failed to create _migrations table")?;
+    app_lib::db::ensure_migration_table(conn).context("Failed to create _migrations table")?;
     Ok(())
 }
 
@@ -93,33 +69,7 @@ pub(crate) fn latest_version() -> i64 {
 }
 
 pub(crate) fn apply_migrations(conn: &Connection) -> Result<usize> {
-    ensure_migration_table(conn)?;
-
-    let current = current_version(conn);
-    let mut applied = 0;
-
-    for (version, name, sql) in schema::MIGRATIONS {
-        if *version > current {
-            output::info(&format!("Applying migration {}: {}", version, name));
-            conn.execute_batch(sql)
-                .with_context(|| format!("Migration {} ({}) failed", version, name))?;
-            conn.execute(
-                "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
-                rusqlite::params![version, name],
-            )?;
-            applied += 1;
-        }
-    }
-
-    Ok(applied)
-}
-
-/// Insert the demo taxonomy/courses/governance rows if the database is empty.
-///
-/// Returns whether anything was inserted. Shared with the TUI so both drive
-/// the same `seed::seed_if_empty` rather than diverging.
-pub(crate) fn seed_if_empty(conn: &Connection) -> Result<bool> {
-    seed::seed_if_empty(conn).map_err(|e| anyhow::anyhow!("Seed failed: {e}"))
+    app_lib::db::run_migrations_on_connection(conn).context("Database migration failed")
 }
 
 // ── Open DB helper ──────────────────────────────────────────────────
@@ -206,149 +156,6 @@ fn run_migrate(ctx: &ProjectContext, password_file: Option<&std::path::Path>) ->
         before,
         current_version(&conn)
     ));
-
-    Ok(())
-}
-
-// ── Subcommand: seed ────────────────────────────────────────────────
-
-fn run_seed(
-    ctx: &ProjectContext,
-    force: bool,
-    password_file: Option<&std::path::Path>,
-) -> Result<()> {
-    output::header("Database seed");
-    output::kv("Database", &ctx.db_path().display().to_string());
-
-    let conn = open_db(ctx, password_file)?;
-
-    // Ensure migrations are current first
-    let applied = apply_migrations(&conn)?;
-    if applied > 0 {
-        output::info(&format!("Applied {} pending migration(s) first", applied));
-    }
-
-    if force {
-        output::blank();
-        output::warning("Force mode: clearing existing seed data...");
-
-        // Delete in dependency order (leaf tables first).
-        // Use PRAGMA foreign_keys = OFF to avoid ordering headaches on
-        // interconnected tables (evidence → proofs → skills, etc.).
-        conn.execute_batch(
-            "PRAGMA foreign_keys = OFF;
-
-             -- Classrooms & messaging
-             DELETE FROM classroom_messages;
-             DELETE FROM classroom_calls;
-             DELETE FROM classroom_channels;
-             DELETE FROM classroom_join_requests;
-             DELETE FROM classroom_members;
-             DELETE FROM classroom_group_keys;
-             DELETE FROM classrooms;
-
-             -- Tutoring & integrity
-             DELETE FROM tutoring_sessions;
-             DELETE FROM integrity_snapshots;
-             DELETE FROM integrity_sessions;
-
-             -- Governance lifecycle
-             DELETE FROM governance_proposal_votes;
-             DELETE FROM governance_election_votes;
-             DELETE FROM governance_election_nominees;
-             DELETE FROM governance_elections;
-             DELETE FROM governance_proposals;
-             DELETE FROM governance_dao_members;
-             DELETE FROM governance_daos;
-
-             -- Reputation
-             DELETE FROM reputation_impact_deltas;
-             DELETE FROM reputation_evidence;
-             DELETE FROM reputation_snapshots;
-             DELETE FROM reputation_assertions;
-
-             -- Verifiable Credentials & DID registry (added in seed expansion)
-             DELETE FROM credential_allowlist;
-             DELETE FROM credentials_pending_verification;
-             DELETE FROM credential_anchors;
-             DELETE FROM credentials;
-             DELETE FROM credential_status_lists;
-             DELETE FROM key_registry;
-             DELETE FROM derived_skill_states;
-             DELETE FROM presentations_seen;
-             DELETE FROM pinboard_observations;
-
-             -- Multi-device sync state
-             DELETE FROM sync_queue;
-             DELETE FROM sync_state;
-             DELETE FROM sync_log;
-             DELETE FROM devices;
-
-             -- (Legacy attestation / challenge / evidence-record /
-             --  skill-proof tables were dropped by migration 040.)
-
-             -- Opinions (Field Commentary)
-             DELETE FROM opinions;
-
-             -- Progress & notes
-             DELETE FROM element_progress;
-             DELETE FROM course_notes;
-             DELETE FROM enrollments;
-
-             -- Tutorials video chapters (must come before course_elements)
-             DELETE FROM video_chapters;
-
-             -- Courses & taxonomy
-             DELETE FROM element_skill_tags;
-             DELETE FROM course_elements;
-             DELETE FROM course_chapters;
-             DELETE FROM courses;
-             DELETE FROM skill_prerequisites;
-             DELETE FROM skill_relations;
-             DELETE FROM skills;
-             DELETE FROM subjects;
-             DELETE FROM subject_fields;
-
-             -- App settings (seed-managed keys only)
-             DELETE FROM app_settings WHERE key IN (
-                 'theme','language','notifications_enabled','auto_sync',
-                 'sentinel_camera_enabled','sentinel_keyboard_enabled'
-             );
-
-             PRAGMA foreign_keys = ON;",
-        )
-        .context("Failed to clear seed data")?;
-        output::success("Existing data cleared.");
-
-        // Wipe the iroh content store too — seeded blobs (videos, PDFs,
-        // downloadables) are content-addressed by their hash, and those
-        // hashes were just nulled out of the DB. Leaving the blobs behind
-        // just wastes disk and creates orphans; the next seed will re-fetch.
-        let iroh_dir = ctx.iroh_dir();
-        if iroh_dir.exists() {
-            fs::remove_dir_all(&iroh_dir)
-                .with_context(|| format!("Failed to remove iroh dir {}", iroh_dir.display()))?;
-            output::info(&format!(
-                "Cleared iroh content store ({})",
-                iroh_dir.display()
-            ));
-        }
-    }
-
-    output::blank();
-
-    match seed::seed_if_empty(&conn) {
-        Ok(true) => {
-            output::success("Seed data inserted (taxonomy, courses, governance).");
-        }
-        Ok(false) => {
-            output::info("Database already has data — seed skipped.");
-            output::faint("Use --force to wipe and re-seed.");
-        }
-        Err(e) => {
-            bail!("Seed failed: {}", e);
-        }
-    }
 
     Ok(())
 }
@@ -520,4 +327,113 @@ fn dir_size(path: &std::path::Path) -> u64 {
         }
     }
     total
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn cli_migrations_replay_the_app_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert_eq!(apply_migrations(&conn).unwrap(), schema::MIGRATIONS.len());
+        assert_eq!(apply_migrations(&conn).unwrap(), 0);
+        conn.execute(
+            "INSERT INTO courses (id, title, author_address) VALUES ('course', 'Course', 'public-author')",
+            [],
+        ).unwrap();
+        // The scoring-recognition objects the old chain built and then retired
+        // are simply not in the baseline.
+        let recognition: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN \
+                 ('public_derived_issuers', 'derived_skill_refresh_queue', 'scoring_credentials')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recognition, 0);
+    }
+
+    /// The CLI opens its own connection rather than going through
+    /// `Database`, so "both use the same runner" is a claim about code paths
+    /// that can quietly stop being true. Compare the schemas themselves.
+    #[test]
+    fn the_cli_and_the_app_build_the_same_schema() {
+        let cli_conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&cli_conn).unwrap();
+
+        let app_db = app_lib::db::Database::open_in_memory().unwrap();
+        app_db.run_migrations().unwrap();
+
+        fn schema(conn: &Connection) -> Vec<(String, String, String)> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT type, name, COALESCE(sql, '') FROM sqlite_master \
+                     WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        }
+
+        assert_eq!(schema(&cli_conn), schema(app_db.conn()));
+
+        // Including the identity stamp: a database the CLI created must be one
+        // the app accepts, and vice versa.
+        for conn in [&cli_conn, app_db.conn()] {
+            let id: i32 = conn
+                .query_row("PRAGMA application_id", [], |row| row.get(0))
+                .unwrap();
+            let epoch: i32 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(id, app_lib::db::SCHEMA_APPLICATION_ID);
+            assert_eq!(epoch, app_lib::db::SCHEMA_EPOCH);
+        }
+    }
+
+    #[test]
+    fn cli_migration_record_failure_rolls_back_schema_and_allows_retry() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_migration_table(&conn).unwrap();
+        // Fail the bookkeeping insert rather than the DDL. The baseline's
+        // tables and its `_migrations` row commit in one transaction, so a
+        // failure recording it has to take the whole schema back with it --
+        // which matters more for one large baseline than it did for 94 small
+        // steps, because a partial apply would leave a half-built database.
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail_record BEFORE INSERT ON _migrations
+            WHEN NEW.version = 1 BEGIN SELECT RAISE(ABORT, 'injected record failure'); END;",
+        )
+        .unwrap();
+        assert!(apply_migrations(&conn).is_err());
+        assert_eq!(current_version(&conn), 0);
+        // `_migrations` and `_schema_identity` are bookkeeping the runner owns;
+        // what must not survive a failed baseline is any schema table.
+        let partial: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+                 AND name NOT IN ('_migrations', '_schema_identity')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(partial, 0, "a failed baseline must leave no tables behind");
+
+        conn.execute_batch("DROP TRIGGER fail_record").unwrap();
+        assert_eq!(apply_migrations(&conn).unwrap(), schema::MIGRATIONS.len());
+
+        conn.execute(
+            "UPDATE _migrations SET name = 'unsupported' WHERE version = 1",
+            [],
+        )
+        .unwrap();
+        assert!(
+            apply_migrations(&conn).is_err(),
+            "the CLI must reject incompatible migration history"
+        );
+    }
 }

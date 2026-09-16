@@ -8,6 +8,8 @@ import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
+import { getProfileSessionToken } from '@/composables/profileSession'
+import type { BehavioralProfile } from '@/types'
 
 const emit = defineEmits<{
   complete: []
@@ -15,6 +17,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const profileToken = getProfileSessionToken()
+let disposed = false
+let generation = 0
+let stepController = new AbortController()
+const isCurrent = (owner: number) => !disposed && owner === generation
+  && profileToken === getProfileSessionToken()
 
 const {
   startTrainingKeystrokes,
@@ -82,6 +90,7 @@ let mousePollTimer: ReturnType<typeof setInterval> | null = null
 
 // Camera state
 const cameraEnabled = ref(false)
+const cameraStarting = ref(false)
 const cameraError = ref<string | null>(null)
 const faceDetected = ref(false)
 const cameraSkipped = ref(false)
@@ -115,11 +124,14 @@ const activeGazeDot = computed(() =>
 )
 
 // Review state
-const savedProfile = ref<Record<string, unknown> | null>(null)
+const savedProfile = ref<BehavioralProfile | null>(null)
 const saving = ref(false)
+const actionError = ref<string | null>(null)
+let retryAction: (() => Promise<void>) | null = null
+const retryStepAction = () => retryAction?.()
 const aiTrainingResults = ref<{
-  keystrokeAE: { trained: boolean; loss: number; samples: number; priorDigraphs: number }
-  mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
+  keystrokeAE: { trained: boolean; loss: number; samples: number }
+  mouseCNN: { trained: boolean; loss: number; samples: number }
   faceEmbedder: { enrolled: boolean; progress: number }
 } | null>(null)
 
@@ -127,9 +139,11 @@ const aiTrainingResults = ref<{
 // Step navigation
 // =========================================================================
 const goToStep = (step: Step) => {
+  if (disposed || profileToken !== getProfileSessionToken()) return
   cleanupCurrentStep()
   currentStep.value = step
-  nextTick(() => initStep(step))
+  const owner = generation
+  void nextTick(() => { if (isCurrent(owner)) initStep(step) })
 }
 
 const nextStep = () => {
@@ -191,11 +205,17 @@ const initStep = (step: Step) => {
     gazeSamples = []
   }
   else if (step === 'review') {
-    loadReviewData()
+    void loadReviewData()
   }
 }
 
 const cleanupCurrentStep = () => {
+  stepController.abort()
+  stepController = new AbortController()
+  generation++
+  saving.value = false
+  actionError.value = null
+  retryAction = null
   if (typingCleanup) { typingCleanup(); typingCleanup = null }
   if (typingPollTimer) { clearInterval(typingPollTimer); typingPollTimer = null }
   if (mouseCleanup) { mouseCleanup(); mouseCleanup = null }
@@ -203,6 +223,27 @@ const cleanupCurrentStep = () => {
   stopCamera()
   gazeRunning.value = false
   stopGazeCamera()
+  gazeSamples = []
+}
+
+async function runStepAction<T>(operation: () => Promise<T>, accept: (value: T) => void): Promise<void> {
+  const owner = generation
+  if (saving.value || !isCurrent(owner)) return
+  saving.value = true
+  try {
+    const value = await operation()
+    if (!isCurrent(owner)) return
+    actionError.value = null
+    retryAction = null
+    accept(value)
+  } catch (error) {
+    if (isCurrent(owner)) {
+      actionError.value = String(error)
+      retryAction = () => runStepAction(operation, accept)
+    }
+  } finally {
+    if (isCurrent(owner)) saving.value = false
+  }
 }
 
 // =========================================================================
@@ -216,9 +257,9 @@ const onTypingInput = (e: Event) => {
   }
 }
 
-const finishTyping = async () => {
-  await saveTrainingProfile()
-  nextStep()
+const finishTyping = () => {
+  const signal = stepController.signal
+  return runStepAction(() => saveTrainingProfile(signal), nextStep)
 }
 
 // =========================================================================
@@ -245,30 +286,42 @@ const hitTarget = (id: number) => {
   }
 }
 
-const finishMouse = async () => {
-  await saveTrainingProfile()
-  nextStep()
+const finishMouse = () => {
+  const signal = stepController.signal
+  return runStepAction(() => saveTrainingProfile(signal), nextStep)
 }
 
 // =========================================================================
 // Camera step
 // =========================================================================
 const enableCamera = async () => {
+  const owner = generation
+  if (!isCurrent(owner) || cameraStarting.value || cameraStream || currentStep.value !== 'camera') return
+  cameraStarting.value = true
   cameraError.value = null
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 320, height: 240, facingMode: 'user' },
       audio: false,
     })
+    if (!isCurrent(owner)) {
+      stream.getTracks().forEach(track => track.stop())
+      return
+    }
+    cameraStream = stream
     cameraEnabled.value = true
     await nextTick()
+    if (!isCurrent(owner)) return
     if (videoRef.value) {
       videoRef.value.srcObject = cameraStream
       await videoRef.value.play()
     }
+    if (!isCurrent(owner)) return
     startFaceDetection()
   }
   catch (err) {
+    if (!isCurrent(owner)) return
+    stopCamera()
     const error = err as Error
     if (error.name === 'NotAllowedError') {
       cameraError.value = t('sentinel.wizard.cameraDenied')
@@ -279,10 +332,16 @@ const enableCamera = async () => {
     else {
       cameraError.value = t('sentinel.wizard.cameraFailed')
     }
+  } finally {
+    if (owner === generation) {
+      cameraStarting.value = false
+      if (!isCurrent(owner)) stopCamera()
+    }
   }
 }
 
 const startFaceDetection = () => {
+  const owner = generation
   if (faceDetectionInterval) clearInterval(faceDetectionInterval)
   const canvas = document.createElement('canvas')
   canvas.width = 320
@@ -290,6 +349,7 @@ const startFaceDetection = () => {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
 
   faceDetectionInterval = setInterval(() => {
+    if (!isCurrent(owner)) return
     if (!videoRef.value || !ctx || videoRef.value.readyState < 2) return
     ctx.drawImage(videoRef.value, 0, 0, 320, 240)
     const imageData = ctx.getImageData(0, 0, 320, 240)
@@ -321,7 +381,9 @@ const stopCamera = () => {
   if (faceDetectionInterval) { clearInterval(faceDetectionInterval); faceDetectionInterval = null }
   if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null }
   cameraEnabled.value = false
+  cameraStarting.value = false
   faceDetected.value = false
+  if (videoRef.value) videoRef.value.srcObject = null
 }
 
 const skipCamera = () => {
@@ -333,68 +395,103 @@ const skipCamera = () => {
 // =========================================================================
 // Gaze calibration step
 // =========================================================================
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+let cancelGazeWait: (() => void) | null = null
+const waitForGaze = (ms: number, owner: number) => new Promise<boolean>(resolve => {
+  const timer = setTimeout(() => { cancelGazeWait = null; resolve(isCurrent(owner)) }, ms)
+  cancelGazeWait = () => { clearTimeout(timer); cancelGazeWait = null; resolve(false) }
+})
 
 const startGazeCalibration = async () => {
+  const owner = generation
+  const signal = stepController.signal
+  if (!isCurrent(owner) || gazeRunning.value || currentStep.value !== 'gaze') return
+  gazeRunning.value = true
   gazeError.value = null
   gazeResult.value = null
   gazeSamples = []
   try {
-    gazeStream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, facingMode: 'user' },
       audio: false,
     })
+    if (!isCurrent(owner)) {
+      stream.getTracks().forEach(track => track.stop())
+      return
+    }
+    gazeStream = stream
     await nextTick()
+    if (!isCurrent(owner)) return
     if (gazeVideoRef.value) {
       gazeVideoRef.value.srcObject = gazeStream
       await gazeVideoRef.value.play()
     }
+    if (!isCurrent(owner)) return
   }
   catch {
-    gazeError.value = t('sentinel.wizard.gazeCameraFailed')
+    if (isCurrent(owner)) {
+      gazeError.value = t('sentinel.wizard.gazeCameraFailed')
+      stopGazeCamera()
+      gazeRunning.value = false
+    }
     return
+  } finally {
+    if (owner === generation && !isCurrent(owner)) {
+      stopGazeCamera()
+      gazeRunning.value = false
+    }
   }
 
-  gazeRunning.value = true
-  // Walk each dot: settle, then capture a handful of framed samples.
-  for (let d = 0; d < GAZE_DOTS.length; d++) {
-    if (!gazeRunning.value) break
-    gazeDotIndex.value = d
-    const dot = GAZE_DOTS[d]!
-    await sleep(700) // let the eyes settle on the dot
-    for (let s = 0; s < 5; s++) {
-      if (!gazeRunning.value) break
-      const video = gazeVideoRef.value
-      if (!video) break
-      const f = await extractGazeFeatures(video)
-      if (f) {
-        gazeSamples.push({
-          yaw: f.yaw, pitch: f.pitch, roll: f.roll,
-          irisDx: f.irisDx, irisDy: f.irisDy,
-          targetX: dot.x, targetY: dot.y,
-        })
+  try {
+    // Walk each dot: settle, then capture a handful of framed samples.
+    for (let d = 0; d < GAZE_DOTS.length; d++) {
+      if (!isCurrent(owner) || !gazeRunning.value) return
+      gazeDotIndex.value = d
+      const dot = GAZE_DOTS[d]!
+      if (!await waitForGaze(700, owner)) return // let the eyes settle on the dot
+      for (let s = 0; s < 5; s++) {
+        if (!isCurrent(owner) || !gazeRunning.value) return
+        const video = gazeVideoRef.value
+        if (!video) break
+        const f = await extractGazeFeatures(video, signal)
+        if (!isCurrent(owner)) return
+        if (f) {
+          gazeSamples.push({
+            yaw: f.yaw, pitch: f.pitch, roll: f.roll,
+            irisDx: f.irisDx, irisDy: f.irisDy,
+            targetX: dot.x, targetY: dot.y,
+          })
+        }
+        if (!await waitForGaze(150, owner)) return
       }
-      await sleep(150)
     }
-  }
-  gazeDotIndex.value = GAZE_DOTS.length
+    gazeDotIndex.value = GAZE_DOTS.length
 
-  if (gazeSamples.length >= 9) {
-    const resp = await trainGazeCalibration(gazeSamples)
-    if (resp) {
-      gazeResult.value = { samples: resp.training_samples, loss: resp.train_loss }
+    if (gazeSamples.length >= 9) {
+      const resp = await trainGazeCalibration(gazeSamples, signal)
+      if (!isCurrent(owner)) return
+      if (resp) {
+        gazeResult.value = { samples: resp.training_samples, loss: resp.train_loss }
+      } else {
+        gazeError.value = t('sentinel.wizard.gazeTrainFailed')
+      }
     } else {
-      gazeError.value = t('sentinel.wizard.gazeTrainFailed')
+      gazeError.value = t('sentinel.wizard.gazeNotEnough', { count: gazeSamples.length })
     }
-  } else {
-    gazeError.value = t('sentinel.wizard.gazeNotEnough', { count: gazeSamples.length })
+  } catch {
+    if (isCurrent(owner)) gazeError.value = t('sentinel.wizard.gazeTrainFailed')
+  } finally {
+    if (owner === generation) {
+      stopGazeCamera()
+      gazeRunning.value = false
+      if (gazeError.value) gazeDotIndex.value = -1
+    }
   }
-  stopGazeCamera()
-  gazeRunning.value = false
 }
 
 const stopGazeCamera = () => {
+  cancelGazeWait?.()
   if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null }
+  if (gazeVideoRef.value) gazeVideoRef.value.srcObject = null
 }
 
 const skipGaze = () => {
@@ -407,44 +504,57 @@ const skipGaze = () => {
 // =========================================================================
 // Review step
 // =========================================================================
-const loadReviewData = async () => {
-  aiTrainingResults.value = await trainAIModels()
-  savedProfile.value = getProfile() as unknown as Record<string, unknown>
+const loadReviewData = () => {
+  const signal = stepController.signal
+  return runStepAction(() => trainAIModels(signal), result => {
+    aiTrainingResults.value = result
+    savedProfile.value = getProfile()
+  })
 }
 
-const finishWizard = async () => {
-  saving.value = true
-  await saveTrainingProfile()
-  saving.value = false
-  emit('complete')
+const finishWizard = () => {
+  const signal = stepController.signal
+  return runStepAction(() => saveTrainingProfile(signal), () => {
+    disposed = true
+    cleanupCurrentStep()
+    emit('complete')
+  })
 }
 
-const restartWizard = async () => {
-  await resetProfile()
-  typedText.value = ''
-  typingComplete.value = false
-  typingMetrics.value = null
-  mouseComplete.value = false
-  mouseMetrics.value = null
-  cameraEnabled.value = false
-  cameraSkipped.value = false
-  savedProfile.value = null
-  aiTrainingResults.value = null
-  goToStep('welcome')
+const restartWizard = () => {
+  const signal = stepController.signal
+  return runStepAction(() => resetProfile(signal), () => {
+    typedText.value = ''
+    typingComplete.value = false
+    typingMetrics.value = null
+    mouseComplete.value = false
+    mouseMetrics.value = null
+    cameraEnabled.value = false
+    cameraSkipped.value = false
+    savedProfile.value = null
+    aiTrainingResults.value = null
+    goToStep('welcome')
+  })
 }
 
 onMounted(async () => {
-  await refreshUserModelsStatus()
+  await refreshUserModelsStatus(stepController.signal)
+  if (disposed || profileToken !== getProfileSessionToken()) return
   initialStatus.value = getAIModelStatus()
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   cleanupCurrentStep()
 })
 </script>
 
 <template>
   <div class="card">
+    <div v-if="actionError" role="alert" class="m-4 space-y-2 rounded-lg border border-error/40 bg-error/5 p-3 text-sm text-error">
+      <p>{{ actionError }}</p>
+      <AppButton variant="outline" :loading="saving" @click="retryStepAction">{{ $t('common.actions.retry') }}</AppButton>
+    </div>
     <!-- Progress bar -->
     <div class="h-1 overflow-hidden rounded-t-xl bg-muted">
       <div
@@ -621,7 +731,8 @@ onBeforeUnmount(() => {
             <AppButton
               variant="primary"
               size="sm"
-              :disabled="!typingComplete"
+              :disabled="!typingComplete || saving"
+              :loading="saving"
               @click="finishTyping"
             >
               {{ $t('common.actions.continue') }}
@@ -720,7 +831,8 @@ onBeforeUnmount(() => {
             <AppButton
               variant="primary"
               size="sm"
-              :disabled="!mouseComplete"
+              :disabled="!mouseComplete || saving"
+              :loading="saving"
               @click="finishMouse"
             >
               {{ $t('common.actions.continue') }}
@@ -768,20 +880,6 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex gap-3 rounded-lg border border-border bg-card p-4">
-            <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
-              <svg class="h-4 w-4 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
-              </svg>
-            </div>
-            <div>
-              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessDevtoolsTitle') }}</p>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('sentinel.wizard.awarenessDevtoolsBody') }}
-              </p>
-            </div>
-          </div>
-
-          <div class="flex gap-3 rounded-lg border border-border bg-card p-4">
             <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-rose-100 dark:bg-rose-900/30">
               <svg class="h-4 w-4 text-rose-600 dark:text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33" />
@@ -822,7 +920,7 @@ onBeforeUnmount(() => {
               </svg>
             </div>
             <div class="flex justify-center gap-3">
-              <AppButton variant="primary" size="sm" @click="enableCamera">
+              <AppButton variant="primary" size="sm" :loading="cameraStarting" @click="enableCamera">
                 {{ $t('sentinel.wizard.enableCamera') }}
               </AppButton>
               <AppButton variant="ghost" size="sm" @click="skipCamera">
@@ -952,19 +1050,19 @@ onBeforeUnmount(() => {
             <div class="grid grid-cols-3 gap-3 text-center">
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
-                  {{ ((savedProfile as any)?.typingPattern?.avgDwellTime ?? 0).toFixed(0) }}
+                  {{ savedProfile.typingPattern.avgDwellTime.toFixed(0) }}
                 </p>
                 <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.msHold') }}</p>
               </div>
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
-                  {{ ((savedProfile as any)?.typingPattern?.avgFlightMs ?? (savedProfile as any)?.typingPattern?.avgFlightTime ?? 0).toFixed(0) }}
+                  {{ savedProfile.typingPattern.avgFlightTime.toFixed(0) }}
                 </p>
                 <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.msGap') }}</p>
               </div>
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
-                  {{ ((savedProfile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }}
+                  {{ savedProfile.typingPattern.speedWpm.toFixed(0) }}
                 </p>
                 <p class="text-xs text-muted-foreground">{{ $t('sentinel.engine.wpm') }}</p>
               </div>
@@ -977,13 +1075,13 @@ onBeforeUnmount(() => {
             <div class="grid grid-cols-2 gap-3 text-center">
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
-                  {{ ((savedProfile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(2) }}
+                  {{ savedProfile.mousePattern.avgVelocity.toFixed(2) }}
                 </p>
                 <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.pxVelocity') }}</p>
               </div>
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
-                  {{ (savedProfile as any)?.mousePattern?.sampleCount ?? 0 }}
+                  {{ savedProfile.mousePattern.sampleCount }}
                 </p>
                 <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.reviewSamples') }}</p>
               </div>
@@ -1059,7 +1157,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="mt-6 flex items-center justify-between">
-          <AppButton variant="ghost" size="sm" @click="restartWizard">
+          <AppButton variant="ghost" size="sm" :disabled="saving" @click="restartWizard">
             {{ $t('sentinel.wizard.recalibrate') }}
           </AppButton>
           <AppButton

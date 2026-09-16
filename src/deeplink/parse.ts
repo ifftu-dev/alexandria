@@ -16,6 +16,9 @@ const APP_LINK_HOSTS = new Set(['alexandria.ifftu.dev'])
 export type DeepLinkTarget =
   /** Guardian invite acceptance — handled specially (runs a backend command). */
   | { kind: 'guardian-accept'; code: string }
+  /** Bounded founding-genesis locator. Opening it only navigates to the
+   *  review screen; retrieval and trust pinning remain explicit actions. */
+  | { kind: 'governance-genesis-locator'; locator: string }
   /** A concrete in-app router path. The caller still validates it against the
    *  router's registered routes before navigating (defense in depth). */
   | { kind: 'route'; path: string }
@@ -66,6 +69,12 @@ export function parseDeepLink(raw: string): DeepLinkTarget | null {
       // alexandria://classroom/<id>  →  /classrooms/:id
       const id = segments[0]
       return id ? { kind: 'route', path: `/classrooms/${id}` } : null
+    }
+    case 'governance': {
+      if (segments[0] !== 'genesis' || !segments[1] || raw.trim().length > 2048) {
+        return null
+      }
+      return { kind: 'governance-genesis-locator', locator: url.href }
     }
     case 'open': {
       // alexandria://open?route=/any/in-app/path  (generic fallback)

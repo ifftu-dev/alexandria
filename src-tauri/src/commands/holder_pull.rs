@@ -30,11 +30,12 @@
 //! resolves out of the `did:key` itself, so a directory needs to store nothing
 //! about the holder in order to authenticate them.
 
+use crate::profile::scope::ProfileState as State;
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::settings::registry::{keys, JsonSetting};
 use crate::settings::SettingsStore;
 use crate::AppState;
@@ -97,13 +98,20 @@ pub struct Problem {
     pub detail: String,
 }
 
-pub(crate) fn directories(state: &State<'_, AppState>) -> Result<Vec<Directory>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let JsonSetting(raw) = SettingsStore::get(db.conn(), keys::HOLDER_DIRECTORIES);
+pub(crate) async fn directories(state: &State<'_, AppState>) -> Result<Vec<Directory>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.directories.list",
+            |db| directories_db(db.conn()),
+        )
+        .await
+}
+
+fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
+    let JsonSetting(raw) = SettingsStore::get(conn, keys::HOLDER_DIRECTORIES);
     serde_json::from_value(raw).map_err(|e| format!("the directory list is unreadable: {e}"))
 }
 
@@ -197,7 +205,7 @@ pub(crate) fn is_loopback(url: &str) -> bool {
 
 #[tauri::command]
 pub async fn list_directories(state: State<'_, AppState>) -> Result<Vec<Directory>, String> {
-    directories(&state)
+    directories(&state).await
 }
 
 #[tauri::command]
@@ -211,17 +219,19 @@ pub async fn set_directories(
         }
     }
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    SettingsStore::set(
-        db.conn(),
-        keys::HOLDER_DIRECTORIES,
-        JsonSetting(serde_json::to_value(&directories).map_err(|e| e.to_string())?),
-    )
-    .map_err(|e| e.to_string())
+    let setting = JsonSetting(serde_json::to_value(&directories).map_err(|e| e.to_string())?);
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.directories.set",
+            move |db| {
+                SettingsStore::set(db.conn(), keys::HOLDER_DIRECTORIES, setting)
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .await
 }
 
 /// Who is asking for a disclosure, across every configured directory.
@@ -229,7 +239,7 @@ pub async fn set_directories(
 pub async fn fetch_disclosure_requests(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DisclosureRequest>, String> {
-    let dirs = directories(&state)?;
+    let dirs = directories(&state).await?;
     let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
     let client = reqwest::Client::new();
 
@@ -271,7 +281,7 @@ pub async fn fetch_disclosure_requests(
 pub async fn fetch_access_log(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessEntry>, String> {
-    let dirs = directories(&state)?;
+    let dirs = directories(&state).await?;
     let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
     let client = reqwest::Client::new();
 
@@ -333,7 +343,7 @@ pub struct Grant {
 /// What this person has granted, per institution, across every directory.
 #[tauri::command]
 pub async fn fetch_visibility(state: State<'_, AppState>) -> Result<PullResult<Grant>, String> {
-    let dirs = directories(&state)?;
+    let dirs = directories(&state).await?;
     let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
     let client = reqwest::Client::new();
 
@@ -521,6 +531,7 @@ pub async fn share_disclosure(
 mod tests {
     use super::*;
     use crate::crypto::did::derive_did_key;
+    use crate::db::Database;
 
     fn key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; 32])
@@ -652,5 +663,26 @@ mod tests {
         assert!(is_loopback("http://localhost:8787"));
         assert!(!is_loopback("http://registry.example.com"));
         assert!(!is_loopback("http://127.0.0.1.example.com"));
+    }
+
+    #[test]
+    fn configured_directories_round_trip_through_the_profile_store() {
+        let db = Database::open_in_memory().expect("database");
+        db.run_migrations().expect("migrations");
+        let expected = vec![Directory {
+            name: "University".into(),
+            url: "https://directory.example".into(),
+        }];
+        SettingsStore::set(
+            db.conn(),
+            keys::HOLDER_DIRECTORIES,
+            JsonSetting(serde_json::to_value(&expected).expect("directory JSON")),
+        )
+        .expect("directory setting");
+
+        let actual = directories_db(db.conn()).expect("directories");
+        assert_eq!(actual.len(), 1);
+        assert_eq!(actual[0].name, expected[0].name);
+        assert_eq!(actual[0].url, expected[0].url);
     }
 }

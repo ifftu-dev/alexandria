@@ -72,7 +72,7 @@ impl Default for AggregationConfig {
         provenance_quality.insert(ProvenanceTier::IssuerSigned, (1.00, 1.00, 1.00));
 
         Self {
-            version: "1.1".into(),
+            version: "1.2".into(),
             type_weights,
             provenance_quality,
             skill_decay: HashMap::new(),

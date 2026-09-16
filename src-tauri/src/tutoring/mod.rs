@@ -19,6 +19,8 @@
 #[cfg(any(desktop, target_os = "android"))]
 pub mod manager;
 
+mod tasks;
+
 #[cfg(target_os = "ios")]
 pub mod manager_mobile;
 

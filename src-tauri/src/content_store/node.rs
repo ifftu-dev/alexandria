@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iroh::endpoint::QuicTransportConfig;
-use iroh::protocol::Router;
+use iroh::protocol::{AcceptError, ProtocolHandler, Router};
 use iroh::{Endpoint, SecretKey};
 use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::BlobsProtocol;
@@ -28,6 +28,7 @@ use iroh_gossip::Gossip;
 use live::Live;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use zeroize::Zeroize;
 
 /// Name of the file where the node's Ed25519 secret key is persisted.
 const SECRET_KEY_FILE: &str = "node_secret.key";
@@ -57,6 +58,58 @@ struct RunningNode {
     store: FsStore,
     gossip: Gossip,
     live: Live,
+    closing: bool,
+    store_shutdown: ShutdownStatus,
+    /// Test seam: make every retried store close fail.
+    #[cfg(test)]
+    fail_close_retry: bool,
+}
+
+type ShutdownStatus = Arc<std::sync::Mutex<Option<Result<(), String>>>>;
+
+#[derive(Debug)]
+struct TrackedBlobsProtocol {
+    blobs: BlobsProtocol,
+    shutdown_status: ShutdownStatus,
+}
+
+impl ProtocolHandler for TrackedBlobsProtocol {
+    async fn accept(&self, connection: iroh::endpoint::Connection) -> Result<(), AcceptError> {
+        self.blobs.accept(connection).await
+    }
+
+    async fn shutdown(&self) {
+        // The stock handler logs and discards this result. Keep evidence of
+        // the store shutdown requested by the router so the node can tell a
+        // confirmed close from one that has to be retried.
+        let result = store_close_result(self.blobs.store().shutdown().await);
+        *self
+            .shutdown_status
+            .lock()
+            .expect("shutdown status poisoned") = Some(result);
+    }
+}
+
+/// Interpret the blob store's reply to a shutdown request.
+///
+/// The store's metadata actor drops its redb database before acknowledging a
+/// shutdown, and drops it on every other exit path too. A request that can no
+/// longer reach the store's actors therefore proves the database is closed,
+/// just as an acknowledgement does. Any other failure leaves the close
+/// unconfirmed.
+fn store_close_result(result: irpc::Result<()>) -> Result<(), String> {
+    match result {
+        Ok(())
+        | Err(irpc::Error::Send {
+            source: irpc::channel::SendError::ReceiverClosed { .. },
+            ..
+        })
+        | Err(irpc::Error::OneshotRecv {
+            source: irpc::channel::oneshot::RecvError::SenderClosed { .. },
+            ..
+        }) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// The embedded iroh content node.
@@ -90,16 +143,35 @@ impl ContentNode {
     ///
     /// MUST be called while the node is not running (i.e. after
     /// `shutdown()`). Used to reroute the singleton ContentNode at a
-    /// freshly-unlocked profile's blob directory.
-    pub async fn set_data_dir(&self, new_dir: PathBuf) {
+    /// freshly-unlocked profile's blob directory. A close that failed at lock
+    /// time is retried first, and the directory changes only once it succeeds.
+    pub async fn set_data_dir(&self, new_dir: PathBuf) -> Result<(), NodeError> {
+        let mut inner = self.inner.lock().await;
+        Self::finish_pending_close(&mut inner).await?;
         *self.data_dir.lock().await = new_dir;
+        Ok(())
+    }
+
+    /// Refuse to replace a live node, but retry a close that failed or went
+    /// unconfirmed earlier. Only a confirmed close frees the slot.
+    async fn finish_pending_close(inner: &mut Option<RunningNode>) -> Result<(), NodeError> {
+        match inner.as_mut() {
+            None => Ok(()),
+            Some(node) if !node.closing => Err(NodeError::AlreadyRunning),
+            Some(node) => {
+                Self::close(node).await?;
+                *inner = None;
+                log::info!("iroh node shut down after retrying cleanup");
+                Ok(())
+            }
+        }
     }
 
     /// Clear the in-memory content key (called when the active profile
     /// is locked). Subsequent encrypt calls will fail until a new key
     /// is supplied via [`Self::set_content_key`].
     pub async fn clear_content_key(&self) {
-        *self.content_key.lock().await = None;
+        self.content_key.lock().await.zeroize();
     }
 
     /// Set the content encryption key (derived from vault password).
@@ -119,28 +191,17 @@ impl ContentNode {
     /// accept loop.
     ///
     /// If `node_enc_key` is provided, the node's Ed25519 secret key is
-    /// encrypted at rest using AES-256-GCM. Legacy plaintext keys are
-    /// auto-migrated on first start with an encryption key.
+    /// persisted encrypted at rest using AES-256-GCM. Without one the node
+    /// runs under an ephemeral identity that is never written to disk.
     pub async fn start(&self, node_enc_key: Option<&[u8; 32]>) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
-        if inner.is_some() {
-            return Err(NodeError::AlreadyRunning);
-        }
+        Self::finish_pending_close(&mut inner).await?;
 
-        // Create persistent blob store
         let data_dir = self.data_dir.lock().await.clone();
-        crate::diag::log(&format!(
-            "node.start: FsStore::load at {}...",
-            data_dir.display()
-        ));
-        let store = FsStore::load(&data_dir)
-            .await
-            .map_err(|e| NodeError::StoreInit(e.to_string()))?;
-        crate::diag::log("node.start: FsStore loaded OK");
-
-        log::info!("iroh blob store loaded at {}", data_dir.display());
-
-        // Load or generate the node's persistent identity key
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| NodeError::KeyPersistence(format!("create node directory: {e}")))?;
+        // Validate the key before opening a store actor that would otherwise
+        // survive a key error. Profile startup runs as an owned operation.
         let secret_key = load_or_generate_secret_key(&data_dir, node_enc_key)?;
 
         // QUIC transport: aggressive timeouts for real-time media.
@@ -190,11 +251,25 @@ impl ContentNode {
         ));
         log::info!("iroh endpoint bound, node ID: {node_id}");
 
+        // Binding can fail too. Open the store only once the key and endpoint
+        // are ready, and close the endpoint if loading the store fails.
+        let store = match FsStore::load(&data_dir).await {
+            Ok(store) => store,
+            Err(error) => {
+                endpoint.close().await;
+                return Err(NodeError::StoreInit(error.to_string()));
+            }
+        };
+
         // Register protocols on the shared router.
         // All platforms: blobs + gossip (room peer discovery) + MoQ (media streaming)
         // Desktop: full video + audio via the live crate with ffmpeg
         // Mobile: audio-only via the live crate without ffmpeg (pure Opus codec)
-        let blobs = BlobsProtocol::new(&store, None);
+        let store_shutdown = Arc::new(std::sync::Mutex::new(None));
+        let blobs = TrackedBlobsProtocol {
+            blobs: BlobsProtocol::new(&store, None),
+            shutdown_status: store_shutdown.clone(),
+        };
         let gossip = Gossip::builder().spawn(endpoint.clone());
         let live = Live::new(endpoint.clone());
 
@@ -213,6 +288,10 @@ impl ContentNode {
             store,
             gossip,
             live,
+            closing: false,
+            store_shutdown,
+            #[cfg(test)]
+            fail_close_retry: false,
         });
         Ok(())
     }
@@ -224,39 +303,71 @@ impl ContentNode {
     /// `start()` on the same data directory within this process
     /// (e.g. after a profile switch) succeeds.
     ///
-    /// `Router::shutdown` alone is NOT enough: iroh-blobs spawns the
-    /// blob store on its own tokio runtime which only terminates when
-    /// `Store::shutdown` is called. Without that explicit shutdown,
-    /// the redb `blobs.db` lock persists and a follow-up `FsStore::load`
-    /// on the same path hangs indefinitely.
+    /// The router's blobs handler requests store shutdown and records its
+    /// result. Failed or unconfirmed cleanup retains the handles, refuses
+    /// content operations, and prevents restart or directory changes. The
+    /// next call here, `set_data_dir`, or `start` retries the close, and only
+    /// a confirmed close lets it continue.
     pub async fn shutdown(&self) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
-        let node = inner.take().ok_or(NodeError::NotRunning)?;
+        let node = inner.as_mut().ok_or(NodeError::NotRunning)?;
 
         crate::diag::log("node.shutdown: router.shutdown()...");
         log::info!("shutting down iroh node...");
-        node.router
-            .shutdown()
-            .await
-            .map_err(|e| NodeError::Shutdown(e.to_string()))?;
-
-        // Explicitly terminate the blob store actor so its tokio
-        // runtime drops and releases the redb file lock.
-        crate::diag::log("node.shutdown: store.shutdown()...");
-        if let Err(e) = node.store.shutdown().await {
-            log::warn!("iroh blob store shutdown error (continuing): {e}");
-            crate::diag::log(&format!("node.shutdown: store shutdown error: {e}"));
-        }
+        Self::close(node).await?;
+        *inner = None;
 
         crate::diag::log("node.shutdown: complete");
         log::info!("iroh node shut down");
         Ok(())
     }
 
+    async fn close(node: &mut RunningNode) -> Result<(), NodeError> {
+        let retry = node.closing;
+        node.closing = true;
+
+        // Idempotent: a router that has already shut down returns Ok without
+        // running its protocol handlers a second time.
+        node.router
+            .shutdown()
+            .await
+            .map_err(|e| NodeError::Shutdown(e.to_string()))?;
+
+        let recorded = node
+            .store_shutdown
+            .lock()
+            .expect("shutdown status poisoned")
+            .clone();
+        let result = match recorded {
+            Some(Ok(())) => Ok(()),
+            // The router's handler asks the store to stop only once, so a
+            // retry sends the request itself rather than repeating the
+            // recorded failure.
+            _ if retry => {
+                #[cfg(test)]
+                let result = if node.fail_close_retry {
+                    Err("store close retry fixture".to_string())
+                } else {
+                    store_close_result(node.store.shutdown().await)
+                };
+                #[cfg(not(test))]
+                let result = store_close_result(node.store.shutdown().await);
+                *node
+                    .store_shutdown
+                    .lock()
+                    .expect("shutdown status poisoned") = Some(result.clone());
+                result
+            }
+            Some(Err(error)) => Err(error),
+            None => Err("store shutdown was not confirmed".to_string()),
+        };
+        result.map_err(NodeError::Shutdown)
+    }
+
     /// Check if the node is currently running.
     pub async fn is_running(&self) -> bool {
         let inner = self.inner.lock().await;
-        inner.is_some()
+        inner.as_ref().is_some_and(|node| !node.closing)
     }
 
     /// Get the node's public key (peer ID) as a hex string.
@@ -264,7 +375,10 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn node_id(&self) -> Option<String> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.router.endpoint().id().to_string())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.router.endpoint().id().to_string())
     }
 
     /// Get this node's dialable address (endpoint id + relay + direct addrs).
@@ -273,7 +387,10 @@ impl ContentNode {
     /// content over iroh. Returns `None` if the node is not running.
     pub async fn endpoint_addr(&self) -> Option<iroh::EndpointAddr> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.router.endpoint().addr())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.router.endpoint().addr())
     }
 
     /// Get a clone of the running Endpoint for use by other protocols.
@@ -281,7 +398,10 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn endpoint(&self) -> Option<Endpoint> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.router.endpoint().clone())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.router.endpoint().clone())
     }
 
     /// Get a clone of the Gossip instance for tutoring room peer discovery.
@@ -292,7 +412,10 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn gossip(&self) -> Option<Gossip> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.gossip.clone())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.gossip.clone())
     }
 
     /// Get a clone of the Live instance for MoQ media streaming.
@@ -301,7 +424,10 @@ impl ContentNode {
     /// Desktop: full video + audio; Mobile: audio-only (no ffmpeg).
     pub async fn live(&self) -> Option<Live> {
         let inner = self.inner.lock().await;
-        inner.as_ref().map(|n| n.live.clone())
+        inner
+            .as_ref()
+            .filter(|n| !n.closing)
+            .map(|n| n.live.clone())
     }
 
     /// Access the blob store for content operations.
@@ -313,7 +439,7 @@ impl ContentNode {
         &self,
     ) -> Result<impl std::ops::Deref<Target = FsStore> + '_, NodeError> {
         let guard = self.inner.lock().await;
-        if guard.is_none() {
+        if guard.as_ref().is_none_or(|node| node.closing) {
             return Err(NodeError::NotRunning);
         }
         Ok(StoreGuard(guard))
@@ -337,13 +463,14 @@ const KEY_VERSION_AES_GCM: u8 = 0x01;
 
 /// Load the node's secret key from disk, or generate a new one.
 ///
-/// When `enc_key` is provided, the key file is encrypted at rest using
-/// AES-256-GCM. The file format is:
-///   `version(1) || nonce(12) || ciphertext(32 + 16 auth tag)`
+/// The key is only ever persisted encrypted, as
+/// `version(1) || nonce(12) || ciphertext(32 + 16 auth tag)`. Without an
+/// encryption key the generated identity stays in memory and no file is
+/// written, so a secret key never lands on disk in the clear.
 ///
-/// Legacy plaintext files (32 raw bytes with no version prefix) are
-/// auto-migrated to encrypted format on first read when an encryption key
-/// is available.
+/// A pre-encryption 32-byte plaintext key file is refused rather than read
+/// or converted: it is unsupported data, and the operator decides whether to
+/// keep or remove it.
 fn load_or_generate_secret_key(
     data_dir: &Path,
     enc_key: Option<&[u8; 32]>,
@@ -354,37 +481,25 @@ fn load_or_generate_secret_key(
         let bytes = std::fs::read(&key_path)
             .map_err(|e| NodeError::KeyPersistence(format!("read key: {e}")))?;
 
-        let key_bytes = if bytes.len() == 32 {
-            // Legacy plaintext format (version 0x00 implicit)
-            let mut kb = [0u8; 32];
-            kb.copy_from_slice(&bytes);
-
-            // Auto-migrate to encrypted if we have an encryption key
-            if let Some(ek) = enc_key {
-                let encrypted = encrypt_node_key(&kb, ek)?;
-                std::fs::write(&key_path, &encrypted)
-                    .map_err(|e| NodeError::KeyPersistence(format!("migrate key: {e}")))?;
-                log::info!("migrated node key to encrypted format");
-            }
-
-            kb
-        } else if bytes.first() == Some(&KEY_VERSION_AES_GCM) && bytes.len() == 1 + 12 + 32 + 16 {
-            // Encrypted format: version(1) || nonce(12) || ciphertext(48)
-            let ek = enc_key.ok_or_else(|| {
-                NodeError::KeyPersistence(
-                    "node key is encrypted but no decryption key provided".into(),
-                )
-            })?;
-            decrypt_node_key(&bytes[1..], ek)?
-        } else {
-            return Err(NodeError::KeyPersistence(format!(
-                "key file has unexpected length: {} bytes",
-                bytes.len()
-            )));
-        };
+        let key_bytes =
+            if bytes.first() == Some(&KEY_VERSION_AES_GCM) && bytes.len() == 1 + 12 + 32 + 16 {
+                // Encrypted format: version(1) || nonce(12) || ciphertext(48)
+                let ek = enc_key.ok_or_else(|| {
+                    NodeError::KeyPersistence(
+                        "node key is encrypted but no decryption key provided".into(),
+                    )
+                })?;
+                decrypt_node_key(&bytes[1..], ek)?
+            } else {
+                return Err(NodeError::KeyPersistence(format!(
+                    "unsupported node key file: {} bytes; expected an encrypted key of {} bytes",
+                    bytes.len(),
+                    1 + 12 + 32 + 16
+                )));
+            };
 
         let key = SecretKey::from_bytes(&key_bytes);
-        log::info!("loaded existing iroh node key from {}", key_path.display());
+        log::info!("loaded existing encrypted iroh node key");
         Ok(key)
     } else {
         // Generate 32 random bytes for the Ed25519 secret key.
@@ -393,14 +508,14 @@ fn load_or_generate_secret_key(
         rand::rngs::OsRng.fill_bytes(&mut key_bytes);
         let key = SecretKey::from_bytes(&key_bytes);
 
-        // Write encrypted if we have an encryption key, plaintext otherwise
+        // Persist only when the key can be encrypted. Without an encryption
+        // key the identity stays in memory for this run.
         if let Some(ek) = enc_key {
             let encrypted = encrypt_node_key(&key_bytes, ek)?;
             std::fs::write(&key_path, &encrypted)
                 .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
         } else {
-            std::fs::write(&key_path, key.to_bytes())
-                .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
+            log::debug!("no node encryption key: using an ephemeral node identity");
         }
 
         log::info!(
@@ -495,38 +610,147 @@ mod tests {
     async fn node_id_is_stable_across_restart() {
         let tmp = TempDir::new().expect("create temp dir");
         let node = ContentNode::new(tmp.path());
+        let enc_key = [7u8; 32];
 
-        // The secret key is persisted to disk, so the node ID should be
-        // stable across restarts from the same data directory.
-        node.start(None).await.expect("start failed");
+        // With an encryption key the secret key is persisted encrypted, so
+        // the node ID is stable across restarts from the same directory.
+        node.start(Some(&enc_key)).await.expect("start failed");
         let id1 = node.node_id().await.unwrap();
         node.shutdown().await.expect("shutdown failed");
 
-        node.start(None).await.expect("restart failed");
+        node.start(Some(&enc_key)).await.expect("restart failed");
         let id2 = node.node_id().await.unwrap();
         node.shutdown().await.expect("shutdown failed");
 
         assert_eq!(id1, id2, "node ID should be stable across restarts");
     }
 
+    #[tokio::test]
+    async fn invalid_key_does_not_open_a_blob_store() {
+        let directory = TempDir::new().expect("temporary content directory");
+        std::fs::write(directory.path().join(SECRET_KEY_FILE), b"invalid")
+            .expect("write invalid key fixture");
+        let node = ContentNode::new(directory.path());
+        assert!(matches!(
+            node.start(None).await,
+            Err(NodeError::KeyPersistence(_))
+        ));
+        assert!(!node.is_running().await);
+        assert!(!directory.path().join("blobs.db").exists());
+    }
+
+    /// Start a node, stop its router (which really closes the store), then
+    /// record a failed close so the node looks stranded by a transient error.
+    async fn node_with_failed_close(
+        directory: &Path,
+        fail_retry: bool,
+    ) -> (ContentNode, ShutdownStatus) {
+        let node = ContentNode::new(directory);
+        node.start(None).await.expect("start node");
+        let status = {
+            let mut inner = node.inner.lock().await;
+            let running = inner.as_mut().expect("running node");
+            running
+                .router
+                .shutdown()
+                .await
+                .expect("shutdown fixture router");
+            running.fail_close_retry = fail_retry;
+            running.store_shutdown.clone()
+        };
+        assert!(matches!(*status.lock().expect("status"), Some(Ok(()))));
+        *status.lock().expect("status") = Some(Err("store failure fixture".to_string()));
+        assert!(matches!(node.shutdown().await, Err(NodeError::Shutdown(_))));
+        assert!(!node.is_running().await);
+        assert!(node.endpoint().await.is_none());
+        assert!(node.store().await.is_err());
+        assert!(node.inner.lock().await.is_some());
+        (node, status)
+    }
+
+    #[tokio::test]
+    async fn a_close_that_keeps_failing_refuses_reuse() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let next_directory = TempDir::new().expect("next content directory");
+        let (node, _status) = node_with_failed_close(directory.path(), true).await;
+
+        assert!(matches!(node.shutdown().await, Err(NodeError::Shutdown(_))));
+        assert!(matches!(
+            node.start(None).await,
+            Err(NodeError::Shutdown(_))
+        ));
+        assert!(matches!(
+            node.set_data_dir(next_directory.path().to_path_buf()).await,
+            Err(NodeError::Shutdown(_))
+        ));
+        assert!(!node.is_running().await);
+        assert!(node.inner.lock().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn unlock_retries_a_failed_close_and_continues_once_confirmed() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let next_directory = TempDir::new().expect("next content directory");
+        let (node, status) = node_with_failed_close(directory.path(), false).await;
+
+        node.set_data_dir(next_directory.path().to_path_buf())
+            .await
+            .expect("the retried close is confirmed");
+        assert!(node.inner.lock().await.is_none());
+        assert!(matches!(*status.lock().expect("status"), Some(Ok(()))));
+
+        node.start(None).await.expect("start in the next directory");
+        node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn lock_retry_confirms_the_close_and_releases_the_store() {
+        let directory = TempDir::new().expect("temporary content directory");
+        let (node, _status) = node_with_failed_close(directory.path(), false).await;
+
+        node.shutdown()
+            .await
+            .expect("the retried close is confirmed");
+        assert!(matches!(node.shutdown().await, Err(NodeError::NotRunning)));
+        // Reopening the same directory proves the store released its files.
+        node.start(None)
+            .await
+            .expect("restart in the same directory");
+        node.shutdown().await.expect("shutdown");
+    }
+
     #[test]
-    fn secret_key_persists_to_disk() {
+    fn secret_key_persists_only_when_it_can_be_encrypted() {
         let tmp = TempDir::new().expect("create temp dir");
+        let enc_key = [7u8; 32];
 
-        // First call generates and saves (plaintext, no encryption key)
-        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
-
-        // Second call loads from file
-        let key2 = load_or_generate_secret_key(tmp.path(), None).expect("load key");
+        let key1 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("gen key");
+        let key2 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("load key");
 
         assert_eq!(
             key1.to_bytes(),
             key2.to_bytes(),
             "key should persist across loads"
         );
-
-        // File should exist
         assert!(tmp.path().join(SECRET_KEY_FILE).exists());
+    }
+
+    #[test]
+    fn without_an_encryption_key_nothing_is_written_to_disk() {
+        let tmp = TempDir::new().expect("create temp dir");
+
+        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
+        let key2 = load_or_generate_secret_key(tmp.path(), None).expect("gen key again");
+
+        assert!(
+            !tmp.path().join(SECRET_KEY_FILE).exists(),
+            "a secret key must never be written in the clear"
+        );
+        assert_ne!(
+            key1.to_bytes(),
+            key2.to_bytes(),
+            "each run gets its own ephemeral identity"
+        );
     }
 
     #[test]
@@ -552,21 +776,23 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_key_auto_migrates_to_encrypted() {
+    fn plaintext_key_file_is_refused_and_left_untouched() {
         let tmp = TempDir::new().expect("create temp dir");
-
-        // Create plaintext key
-        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
-        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read");
-        assert_eq!(file.len(), 32, "should be plaintext");
-
-        // Load with encryption key — should auto-migrate
+        let key_path = tmp.path().join(SECRET_KEY_FILE);
+        std::fs::write(&key_path, [3u8; 32]).expect("write plaintext key");
         let enc_key = [42u8; 32];
-        let key2 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("migrate");
-        assert_eq!(key1.to_bytes(), key2.to_bytes());
 
-        // File should now be encrypted
-        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read");
-        assert_eq!(file.len(), 61, "should be encrypted after migration");
+        let error = load_or_generate_secret_key(tmp.path(), Some(&enc_key))
+            .expect_err("a plaintext key file must be refused");
+
+        assert!(
+            format!("{error}").contains("unsupported node key file"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read(&key_path).expect("key file still readable"),
+            [3u8; 32],
+            "the refused file must be left as it was"
+        );
     }
 }

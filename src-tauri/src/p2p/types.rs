@@ -1,9 +1,45 @@
+use alexandria_verify::json::JsonLimits;
 use serde::{Deserialize, Serialize};
+
+/// Largest gossip message the node publishes or accepts, in bytes.
+pub const MAX_GOSSIP_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// Structural limits for a signed gossip envelope. The payload, signature and
+/// public key encode as JSON arrays of bytes, so an array may hold a whole
+/// message's worth of elements while nesting stays two levels deep.
+pub const GOSSIP_ENVELOPE_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_GOSSIP_MESSAGE_BYTES,
+    max_depth: 2,
+    max_array_len: MAX_GOSSIP_MESSAGE_BYTES,
+    max_object_entries: 16,
+    max_string_bytes: 1024,
+};
+
+/// Structural limits for the topic payload inside a gossip envelope, checked
+/// before any topic handler decodes it.
+pub const GOSSIP_PAYLOAD_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_GOSSIP_MESSAGE_BYTES,
+    max_depth: 32,
+    max_array_len: 4096,
+    max_object_entries: 256,
+    max_string_bytes: 64 * 1024,
+};
+
+/// Structural limits for an unsigned peer exchange announcement.
+pub const PEER_EXCHANGE_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_GOSSIP_MESSAGE_BYTES,
+    max_depth: 2,
+    max_array_len: 64,
+    max_object_entries: 8,
+    max_string_bytes: 1024,
+};
 
 /// Gossip topic identifiers for the Alexandria P2P protocol.
 ///
 /// Each topic uses a versioned path to allow protocol upgrades.
 pub const TOPIC_CATALOG: &str = "/alexandria/catalog/1.0";
+/// Retired taxonomy update topic; every inbound message is rejected before
+/// any database access.
 pub const TOPIC_TAXONOMY: &str = "/alexandria/taxonomy/1.0";
 pub const TOPIC_GOVERNANCE: &str = "/alexandria/governance/1.0";
 pub const TOPIC_PROFILES: &str = "/alexandria/profiles/1.0";
@@ -42,28 +78,22 @@ pub const TOPIC_PINBOARD: &str = "/alexandria/pinboard/1.0";
 /// bundle bytes are *not* on this topic — they're fetched on demand from
 /// the iroh blob store via the manifest CID.
 pub const TOPIC_PLUGINS: &str = "/alexandria/plugins/1.0";
-/// Plugin DAO attestations — the canonical Alexandria Plugin DAO
-/// publishes threshold-signed (plugin_cid, grader_cid) attestations on
-/// this topic. Verifiers cross-reference attestations from this topic
-/// to decide whether a graded plugin's submissions are credential-eligible.
+/// Reserved for the replacement committee certificate protocol. Messages on
+/// this topic currently confer no plugin or credential authority.
 pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0";
 
-/// Ratified Sentinel adversarial priors — the Sentinel DAO broadcasts
-/// metadata for each prior the committee has approved so every client
-/// can mirror the library locally. The blob itself is content-addressed
-/// and fetched separately on demand; this topic carries only the
-/// envelope metadata plus the approved proposal reference.
-/// See docs/sentinel-adversarial-priors.md.
+/// Retired Sentinel prior library topic. It stays subscribed until the
+/// coordinated wire-protocol removal; every inbound message is rejected
+/// before any database access.
 pub const TOPIC_SENTINEL_PRIORS: &str = "/alexandria/sentinel-priors/1.0";
 
-/// Ratified goal-template versions — a DAO publishes a signed version
-/// document (goal → target-skill maps) here after a `goal_template_change`
-/// proposal is approved. Receivers apply it into `goal_templates`. Privileged.
+/// Retired goal-template version topic. It stays subscribed until the
+/// coordinated wire-protocol removal; every inbound message is rejected
+/// before any database access. Privileged.
 pub const TOPIC_GOAL_TEMPLATES: &str = "/alexandria/goal-templates/1.0";
-/// Ratified assessment question-bank versions — published after a
-/// `question_bank_change` proposal is approved. Receivers apply it into
-/// `question_banks` / `bank_questions`. The answer key travels inside the
-/// signed doc but is never re-exposed to the client. Privileged.
+/// Retired question-bank version topic. It stays subscribed until the
+/// coordinated wire-protocol removal; every inbound message is rejected
+/// before any database access. Privileged.
 pub const TOPIC_QUESTION_BANKS: &str = "/alexandria/question-banks/1.0";
 
 /// All gossip topics the node subscribes to.

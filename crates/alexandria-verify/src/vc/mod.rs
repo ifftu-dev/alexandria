@@ -14,6 +14,23 @@ pub mod verify;
 use serde::{Deserialize, Serialize};
 
 use crate::did::{Did, VerificationMethodRef};
+use crate::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
+
+/// Structural limits for one untrusted credential document, applied before
+/// typed decoding or any signature work. Strings may carry evidence text, not
+/// bulk data; a bundle or list never admits a credential these limits refuse.
+pub const CREDENTIAL_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: 256 * 1024,
+    max_depth: 32,
+    max_array_len: 4096,
+    max_object_entries: 256,
+    max_string_bytes: 64 * 1024,
+};
+
+/// Decode one untrusted credential under [`CREDENTIAL_JSON_LIMITS`].
+pub fn decode_credential(bytes: &[u8]) -> Result<VerifiableCredential, UntrustedJsonError> {
+    decode_untrusted(bytes, &CREDENTIAL_JSON_LIMITS)
+}
 
 /// High-level credential classes (spec §6). The `type` field on the
 /// JSON-LD credential is always `["VerifiableCredential", <class>]`.
@@ -337,11 +354,11 @@ pub struct Witness {
 /// issuer attests to these numbers and they cannot be altered after the
 /// fact.
 ///
-/// `assurance_level` distinguishes the privacy-first local default
-/// (`"local"`) from a future independently-attested high-assurance mode
-/// (`"high_assurance"`); under the local level the figures are
-/// device-reported and a determined attacker could suppress flags, so
-/// downstream verifiers should weight `local` accordingly.
+/// `assurance_level` is `"local"` for every credential Alexandria issues:
+/// the figures are device-reported and a determined attacker could
+/// suppress flags, so downstream verifiers should weight it accordingly.
+/// `"anchored"` and `"high_assurance"` are reserved ladder values with no
+/// verified production path; the value alone is not evidence of either.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IntegrityAssertion {
@@ -355,15 +372,14 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Resolved assurance ladder: `"local"` (privacy-first default) /
-    /// `"anchored"` (commitment chain anchored) / `"high_assurance"`
-    /// (committee-co-signed).
+    /// Achieved assurance: `"local"`. `"anchored"` and `"high_assurance"`
+    /// are reserved ladder values.
     pub assurance_level: String,
-    /// Terminal commitment root of the snapshot stream, when the session
-    /// was attested. Lets a verifier tie the attestation to the anchor.
+    /// Terminal commitment root of the device's snapshot stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commitment_root: Option<String>,
-    /// Anchor reference (DHT/chain) for the commitment root, if anchored.
+    /// Reserved anchor reference for the commitment root; Alexandria
+    /// issuers do not set it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor_ref: Option<String>,
     /// RFC3339 timestamp the assertion was generated (issuance time).
@@ -417,10 +433,9 @@ pub struct Proof {
 
 /// Output of the verification algorithm (§13.1).
 ///
-/// `suspended` and `superseded` were added in the §11.3/§11.4
-/// follow-up. `#[serde(default)]` is set so older persisted results
-/// (e.g. ones hydrated from an earlier schema or an older peer's
-/// gossip) round-trip without a migration.
+/// Lifecycle flags and typed pending reasons use serde defaults so older
+/// persisted results (for example, data hydrated from an earlier schema or an
+/// older peer's gossip) round-trip without a migration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResult {
@@ -430,6 +445,11 @@ pub struct VerificationResult {
     pub valid_signature: bool,
     pub issuer_resolved: bool,
     pub revoked: bool,
+    /// False only when a present status reference is malformed or outside the
+    /// supplied list. Missing/unavailable list evidence is represented by
+    /// `pending_reasons` instead.
+    #[serde(default = "default_true")]
+    pub status_valid: bool,
     pub expired: bool,
     pub subject_bound: bool,
     pub integrity_anchored: bool,
@@ -442,13 +462,27 @@ pub struct VerificationResult {
     #[serde(default)]
     pub superseded: bool,
     pub verification_time: String,
+    #[serde(default)]
+    pub pending_reasons: Vec<VerificationPendingReason>,
     pub acceptance_decision: AcceptanceDecision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationPendingReason {
+    IssuerKeyMissing,
+    IssuerKeyUnavailable,
+    StatusListMissing,
+    StatusListUnavailable,
+    SuspensionStateUnavailable,
+    SupersessionStateUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AcceptanceDecision {
     Accept,
+    Pending,
     Reject,
 }
 
@@ -557,6 +591,8 @@ mod tests {
         // Spec §13.1 shows `"acceptanceDecision": "accept"`.
         let json = serde_json::to_string(&AcceptanceDecision::Accept).unwrap();
         assert_eq!(json, "\"accept\"");
+        let pending = serde_json::to_string(&AcceptanceDecision::Pending).unwrap();
+        assert_eq!(pending, "\"pending\"");
     }
 
     fn sample_entitlement() -> EntitlementClaim {

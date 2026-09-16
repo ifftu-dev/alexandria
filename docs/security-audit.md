@@ -123,6 +123,17 @@ The stress test at `stress.rs` explicitly acknowledges this: `"Freshness check d
 
 **File**: `src-tauri/src/p2p/governance.rs:190-234`
 
+> **Status note (2026-09-15):** the 2026-03-23 fix (sender must be
+> committee/chair, transaction-wrapped) still let one committee signature
+> replace a DAO's whole membership, which is not the approved five-of-seven
+> model. `handle_governance_message` now rejects every governance event,
+> `CommitteeUpdated` included, before any database access in every build
+> except a debug build that enables `legacy-local-governance`; a release
+> build excludes the replacement path even with that feature. Inbound
+> taxonomy gossip, the other link in the escalation chain below, is likewise
+> rejected, and its apply path is deleted. A lasting fix requires verified committee outcome
+> certificates.
+
 When a `CommitteeUpdated` gossip announcement arrives, `handle_committee_updated` DELETE-and-replaces the entire committee membership for the DAO with zero authentication:
 
 ```rust
@@ -289,6 +300,15 @@ While Tauri IPC is internal to the process (not network-exposed), the mnemonic m
 ### M-5: Proposal status set directly from gossip without validation
 
 **File**: `src-tauri/src/p2p/governance.rs:149-183`
+
+> **Status note (2026-09-15):** the 2026-03-23 allowlist fix validated the
+> status value but never checked the sender, so any registered peer could
+> still set any proposal's status and tallies. `ProposalResolved` is now
+> rejected with every other governance event before any database access in
+> every build except a debug build that enables `legacy-local-governance`. In
+> that debug build, the sender must be on the committee of the DAO that owns
+> the proposal. The tallies are still not independently
+> verified; that requires committee outcome certificates.
 
 The `status` field from a `ProposalResolved` gossip message is written directly to the database without validating its value:
 

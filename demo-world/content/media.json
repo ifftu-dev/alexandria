@@ -1,0 +1,128 @@
+{
+  "format": "alexandria-demo-media-manifest",
+  "format_version": 1,
+  "authoritative": false,
+  "licence_status": "unverified: each note is the claim recorded in the retired seed code and must be checked against the source before redistribution",
+  "assets": [
+    {
+      "element_id": "el_algo_1_4",
+      "url": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+      "group": "Videos",
+      "recorded_note": "Algo: Big Buck Bunny trailer (~2.7 MB, CC BY 3.0)"
+    },
+    {
+      "element_id": "el_web_3_2",
+      "url": "https://media.w3.org/2010/05/video/movie_300.mp4",
+      "group": "Videos",
+      "recorded_note": "Web: W3C test movie clip (~300 KB, public domain)"
+    },
+    {
+      "element_id": "el_ml_1_3",
+      "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+      "group": "Videos",
+      "recorded_note": "ML: MDN flower CC0 sample (~1.4 MB, CC0)"
+    },
+    {
+      "element_id": "el_cry_1_2",
+      "url": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+      "group": "Videos",
+      "recorded_note": "Crypto: Sintel trailer (~5 MB, CC BY 3.0)"
+    },
+    {
+      "element_id": "el_ux_1_3",
+      "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+      "group": "Videos",
+      "recorded_note": "UX: MDN friday CC0 sample (~1 MB, CC0)"
+    },
+    {
+      "element_id": "el_web_1_4",
+      "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      "group": "PDFs",
+      "recorded_note": "Web: MDN HTML cheat sheet surrogate — Mozilla PDF reference doc"
+    },
+    {
+      "element_id": "el_ml_4_4",
+      "url": "https://bitcoin.org/bitcoin.pdf",
+      "group": "PDFs",
+      "recorded_note": "ML: Bitcoin whitepaper — real, landmark technical paper (public domain)"
+    },
+    {
+      "element_id": "el_ux_4_3",
+      "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      "group": "PDFs",
+      "recorded_note": "UX: W3C WCAG summary surrogate"
+    },
+    {
+      "element_id": "el_web_5_4",
+      "url": "https://www.rfc-editor.org/rfc/rfc1149.txt",
+      "group": "Downloadable text assets (IETF RFC files, all public domain)",
+      "recorded_note": null
+    },
+    {
+      "element_id": "el_cry_3_4",
+      "url": "https://www.rfc-editor.org/rfc/rfc2324.txt",
+      "group": "Downloadable text assets (IETF RFC files, all public domain)",
+      "recorded_note": null
+    },
+    {
+      "element_id": "el_ux_3_3",
+      "url": "https://www.rfc-editor.org/rfc/rfc8259.txt",
+      "group": "Downloadable text assets (IETF RFC files, all public domain)",
+      "recorded_note": null
+    },
+    {
+      "element_id": "el_tut_bigO_video",
+      "url": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+      "group": "Tutorial videos (kind='tutorial' courses from BACKFILL_SQL)",
+      "recorded_note": "Big-O in 8 Minutes — Big Buck Bunny trailer as a stand-in"
+    },
+    {
+      "element_id": "el_tut_asyncawait_video",
+      "url": "https://media.w3.org/2010/05/video/movie_300.mp4",
+      "group": "Tutorial videos (kind='tutorial' courses from BACKFILL_SQL)",
+      "recorded_note": "Async/Await Quick Tour — W3C short test clip"
+    },
+    {
+      "element_id": "el_tut_ml_regression_video",
+      "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+      "group": "Tutorial videos (kind='tutorial' courses from BACKFILL_SQL)",
+      "recorded_note": "Linear Regression from First Principles — MDN flower"
+    },
+    {
+      "element_id": "el_tut_aes_video",
+      "url": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+      "group": "Tutorial videos (kind='tutorial' courses from BACKFILL_SQL)",
+      "recorded_note": "AES Walkthrough — Sintel trailer"
+    },
+    {
+      "element_id": "el_tut_ux_interviews_video",
+      "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+      "group": "Tutorial videos (kind='tutorial' courses from BACKFILL_SQL)",
+      "recorded_note": "Running a Good User Interview — MDN friday"
+    },
+    {
+      "element_id": "el_civ_1_5",
+      "url": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+      "group": "Civic Sense course + tutorials (AI-generated example content)",
+      "recorded_note": "Civics ch1 video — \"Reading a National Constitution\""
+    },
+    {
+      "element_id": "el_civ_2_5",
+      "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      "group": "Civic Sense course + tutorials (AI-generated example content)",
+      "recorded_note": "Civics ch2 PDF — standing in for UDHR text"
+    },
+    {
+      "element_id": "el_tut_civ_constitution_video",
+      "url": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+      "group": "Civic Sense course + tutorials (AI-generated example content)",
+      "recorded_note": "Civics tutorial — constitution walkthrough"
+    },
+    {
+      "element_id": "el_tut_civ_budget_video",
+      "url": "https://media.w3.org/2010/05/video/movie_300.mp4",
+      "group": "Civic Sense course + tutorials (AI-generated example content)",
+      "recorded_note": "Civics tutorial — reading a budget"
+    }
+  ]
+}

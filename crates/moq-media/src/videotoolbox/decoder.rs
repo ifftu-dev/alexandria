@@ -20,14 +20,14 @@
 
 use std::collections::VecDeque;
 use std::ffi::c_void;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use bytes::Bytes;
 
-use crate::av::{DecodeConfig, DecodedFrame, PixelFormat, VideoDecoder};
+use crate::av::{DecodeConfig, DecodedFrame, VideoDecoder};
 
 // ── C types (same as encoder + VTDecompressionSession) ──
 
@@ -56,7 +56,6 @@ struct CMTimeRepr {
 
 const K_CM_TIME_FLAGS_VALID: u32 = 1;
 const K_CV_PIXEL_FORMAT_TYPE_32_BGRA: u32 = 0x42475241;
-const K_CV_PIXEL_FORMAT_TYPE_32_RGBA: u32 = 0x52474241; // 'RGBA' — not universally supported
 const K_CF_NUMBER_SINT32_TYPE: i64 = 3;
 
 #[repr(C)]
@@ -189,6 +188,13 @@ struct RawDecodedFrame {
     timestamp_us: u64,
 }
 
+type DecoderSession = (
+    VTDecompressionSessionRef,
+    CMFormatDescriptionRef,
+    Arc<Mutex<VecDeque<RawDecodedFrame>>>,
+    *const Mutex<VecDeque<RawDecodedFrame>>,
+);
+
 /// VideoToolbox H.264 decoder for iOS.
 ///
 /// Supports two initialization modes:
@@ -198,22 +204,42 @@ pub struct VtDecoder {
     session: VTDecompressionSessionRef,
     format_desc: CMFormatDescriptionRef,
     output: Arc<Mutex<VecDeque<RawDecodedFrame>>>,
+    callback_context: *const Mutex<VecDeque<RawDecodedFrame>>,
     viewport_w: u32,
     viewport_h: u32,
     frame_count: u64,
     initialized: bool,
 }
 
+// SAFETY: The VideoToolbox session and format-description references are
+// retained until Drop and travel with this non-Clone decoder. Decode/session
+// mutation is only reachable through `&mut self`; asynchronous callbacks write
+// solely to the independently `Arc<Mutex<_>>`-owned output queue. Apple permits
+// VideoToolbox sessions to be driven from a non-creating thread. This type is
+// intentionally not `Sync`, so callers cannot concurrently operate the raw
+// session through safe Rust.
 unsafe impl Send for VtDecoder {}
 
 impl Drop for VtDecoder {
     fn drop(&mut self) {
         if !self.session.is_null() {
             unsafe {
+                let status = VTDecompressionSessionWaitForAsynchronousFrames(self.session);
+                if status != 0 {
+                    tracing::warn!(
+                        "VTDecompressionSessionWaitForAsynchronousFrames failed during drop: {status}"
+                    );
+                }
                 VTDecompressionSessionInvalidate(self.session);
                 CFRelease(self.session as CFTypeRef);
             }
             self.session = ptr::null_mut();
+        }
+        if !self.callback_context.is_null() {
+            // SAFETY: waiting and invalidating ends the session's callback
+            // lifetime. Consume the strong reference handed to VideoToolbox.
+            unsafe { drop(Arc::from_raw(self.callback_context)) };
+            self.callback_context = ptr::null();
         }
         if !self.format_desc.is_null() {
             unsafe { CFRelease(self.format_desc as CFTypeRef) };
@@ -234,7 +260,7 @@ impl VideoDecoder for VtDecoder {
                     desc_bytes.len()
                 );
                 match Self::create_session(desc_bytes) {
-                    Ok((session, format_desc, output)) => {
+                    Ok((session, format_desc, output, callback_context)) => {
                         tracing::info!(
                             "VtDecoder created (eager): session={session:?}, {viewport_w}x{viewport_h}"
                         );
@@ -242,6 +268,7 @@ impl VideoDecoder for VtDecoder {
                             session,
                             format_desc,
                             output,
+                            callback_context,
                             viewport_w,
                             viewport_h,
                             frame_count: 0,
@@ -313,11 +340,12 @@ impl VideoDecoder for VtDecoder {
             avcc.extend_from_slice(&pps);
 
             match Self::create_session(&avcc) {
-                Ok((session, format_desc, output)) => {
+                Ok((session, format_desc, output, callback_context)) => {
                     tracing::info!("VtDecoder: deferred init succeeded, session={session:?}");
                     self.session = session;
                     self.format_desc = format_desc;
                     self.output = output;
+                    self.callback_context = callback_context;
                     self.initialized = true;
                 }
                 Err(e) => {
@@ -333,7 +361,7 @@ impl VideoDecoder for VtDecoder {
         }
 
         self.frame_count += 1;
-        if self.frame_count <= 10 || self.frame_count % 100 == 0 {
+        if self.frame_count <= 10 || self.frame_count.is_multiple_of(100) {
             let preview: String = raw_data
                 .iter()
                 .take(16)
@@ -448,7 +476,7 @@ impl VideoDecoder for VtDecoder {
                 self.frame_count
             );
             // Don't bail — might be a recoverable error on a single frame
-        } else if self.frame_count <= 10 || self.frame_count % 100 == 0 {
+        } else if self.frame_count <= 10 || self.frame_count.is_multiple_of(100) {
             // Check if the synchronous callback queued a frame
             let queue_len = self.output.lock().map(|q| q.len()).unwrap_or(999);
             tracing::info!(
@@ -510,6 +538,7 @@ impl VtDecoder {
             session: ptr::null_mut(),
             format_desc: ptr::null(),
             output: Arc::new(Mutex::new(VecDeque::new())),
+            callback_context: ptr::null(),
             viewport_w,
             viewport_h,
             frame_count: 0,
@@ -520,13 +549,7 @@ impl VtDecoder {
     /// Create a VTDecompressionSession from avcC description bytes.
     ///
     /// Returns `(session, format_desc, output_queue)` on success.
-    fn create_session(
-        desc_bytes: &[u8],
-    ) -> Result<(
-        VTDecompressionSessionRef,
-        CMFormatDescriptionRef,
-        Arc<Mutex<VecDeque<RawDecodedFrame>>>,
-    )> {
+    fn create_session(desc_bytes: &[u8]) -> Result<DecoderSession> {
         // Parse avcC to extract SPS and PPS
         let (sps, pps) = parse_avcc(desc_bytes)?;
 
@@ -553,8 +576,8 @@ impl VtDecoder {
             let dict = CFDictionaryCreateMutable(
                 kCFAllocatorDefault,
                 1,
-                &kCFTypeDictionaryKeyCallBacks as *const _ as *const c_void,
-                &kCFTypeDictionaryValueCallBacks as *const _ as *const c_void,
+                &kCFTypeDictionaryKeyCallBacks as *const _,
+                &kCFTypeDictionaryValueCallBacks as *const _,
             );
             let pixel_format_val: i32 = K_CV_PIXEL_FORMAT_TYPE_32_BGRA as i32;
             let cf_num = CFNumberCreate(
@@ -562,11 +585,7 @@ impl VtDecoder {
                 K_CF_NUMBER_SINT32_TYPE,
                 &pixel_format_val as *const i32 as *const c_void,
             );
-            CFDictionarySetValue(
-                dict,
-                kCVPixelBufferPixelFormatTypeKey as *const c_void,
-                cf_num as *const c_void,
-            );
+            CFDictionarySetValue(dict, kCVPixelBufferPixelFormatTypeKey, cf_num);
             CFRelease(cf_num as CFTypeRef);
             dict
         };
@@ -595,12 +614,17 @@ impl VtDecoder {
 
         if status != 0 || session.is_null() {
             // Clean up format_desc on failure
-            unsafe { CFRelease(format_desc as CFTypeRef) };
+            unsafe {
+                CFRelease(format_desc as CFTypeRef);
+                drop(Arc::from_raw(
+                    output_ptr as *const Mutex<VecDeque<RawDecodedFrame>>,
+                ));
+            }
             bail!("VTDecompressionSessionCreate failed: {status}");
         }
 
         tracing::info!("VtDecoder::create_session: success, session={session:?}");
-        Ok((session, format_desc, output))
+        Ok((session, format_desc, output, output_ptr.cast()))
     }
 
     /// Extract SPS and PPS from AVCC-formatted (length-prefixed) keyframe data.
@@ -671,7 +695,7 @@ fn is_annex_b(data: &[u8]) -> bool {
         let forbidden_bit = nal_byte >> 7;
         let nal_type = nal_byte & 0x1F;
         // Valid H.264 NAL: forbidden_zero_bit=0, type 1-23
-        return forbidden_bit == 0 && nal_type >= 1 && nal_type <= 23;
+        return forbidden_bit == 0 && (1..=23).contains(&nal_type);
     }
     false
 }
@@ -951,6 +975,29 @@ unsafe extern "C" fn vt_decompress_callback(
     presentation_timestamp: CMTimeRepr,
     _presentation_duration: CMTimeRepr,
 ) {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: VideoToolbox supplies valid callback arguments and the
+        // context remains retained until the session is drained and invalidated.
+        unsafe {
+            vt_decompress_callback_inner(
+                decompress_output_ref_con,
+                status,
+                image_buffer,
+                presentation_timestamp,
+            )
+        }
+    }));
+    if result.is_err() {
+        tracing::error!("panic contained inside VideoToolbox decoder callback");
+    }
+}
+
+unsafe fn vt_decompress_callback_inner(
+    decompress_output_ref_con: *mut c_void,
+    status: OSStatus,
+    image_buffer: CVImageBufferRef,
+    presentation_timestamp: CMTimeRepr,
+) {
     if status != 0 || image_buffer.is_null() {
         tracing::warn!(
             "VT decompress callback: status={status}, buffer null={}",
@@ -959,71 +1006,103 @@ unsafe extern "C" fn vt_decompress_callback(
         return;
     }
 
-    let output = &*(decompress_output_ref_con as *const Mutex<VecDeque<RawDecodedFrame>>);
-
-    // Lock pixel buffer to read BGRA data
-    let lock_status = CVPixelBufferLockBaseAddress(image_buffer, 1); // 1 = read-only
-    if lock_status != 0 {
-        tracing::warn!("CVPixelBufferLockBaseAddress failed: {lock_status}");
+    if decompress_output_ref_con.is_null() {
+        tracing::error!("VT decompress callback received a null context");
         return;
     }
 
-    let base = CVPixelBufferGetBaseAddress(image_buffer);
-    let bytes_per_row = CVPixelBufferGetBytesPerRow(image_buffer);
-    let width = CVPixelBufferGetWidth(image_buffer) as u32;
-    let height = CVPixelBufferGetHeight(image_buffer) as u32;
+    // SAFETY: the callback contract establishes live VideoToolbox/CoreVideo
+    // objects. CoreVideo-reported dimensions and strides are validated before
+    // dereferencing the pixel memory.
+    unsafe {
+        let output = &*(decompress_output_ref_con as *const Mutex<VecDeque<RawDecodedFrame>>);
 
-    if !base.is_null() && width > 0 && height > 0 {
-        // Convert BGRA → RGBA in-place while copying
-        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height {
-            let row_ptr = (base as *const u8).add(y as usize * bytes_per_row);
-            for x in 0..width {
-                let px = row_ptr.add(x as usize * 4);
-                let b = *px;
-                let g = *px.add(1);
-                let r = *px.add(2);
-                let a = *px.add(3);
-                rgba.push(r);
-                rgba.push(g);
-                rgba.push(b);
-                rgba.push(a);
-            }
+        let lock_status = CVPixelBufferLockBaseAddress(image_buffer, 1);
+        if lock_status != 0 {
+            tracing::warn!("CVPixelBufferLockBaseAddress failed: {lock_status}");
+            return;
         }
+        let _pixel_buffer_lock = PixelBufferLock(image_buffer);
 
-        let timestamp_us = if presentation_timestamp.flags & K_CM_TIME_FLAGS_VALID != 0
-            && presentation_timestamp.timescale > 0
-        {
-            (presentation_timestamp.value as f64 / presentation_timestamp.timescale as f64
-                * 1_000_000.0) as u64
+        let base = CVPixelBufferGetBaseAddress(image_buffer);
+        let bytes_per_row = CVPixelBufferGetBytesPerRow(image_buffer);
+        let Ok(width) = u32::try_from(CVPixelBufferGetWidth(image_buffer)) else {
+            return;
+        };
+        let Ok(height) = u32::try_from(CVPixelBufferGetHeight(image_buffer)) else {
+            return;
+        };
+        let Some(expected_row) = (width as usize).checked_mul(4) else {
+            return;
+        };
+        let Some(total) = expected_row.checked_mul(height as usize) else {
+            return;
+        };
+
+        if !base.is_null() && width > 0 && height > 0 && bytes_per_row >= expected_row {
+            let mut rgba = Vec::with_capacity(total);
+            for y in 0..height as usize {
+                let Some(row_offset) = y.checked_mul(bytes_per_row) else {
+                    return;
+                };
+                let row_ptr = base.cast::<u8>().add(row_offset);
+                for x in 0..width as usize {
+                    let px = row_ptr.add(x * 4);
+                    let b = *px;
+                    let g = *px.add(1);
+                    let r = *px.add(2);
+                    let a = *px.add(3);
+                    rgba.push(r);
+                    rgba.push(g);
+                    rgba.push(b);
+                    rgba.push(a);
+                }
+            }
+
+            let timestamp_us = if presentation_timestamp.flags & K_CM_TIME_FLAGS_VALID != 0
+                && presentation_timestamp.timescale > 0
+            {
+                (presentation_timestamp.value as f64 / presentation_timestamp.timescale as f64
+                    * 1_000_000.0) as u64
+            } else {
+                0
+            };
+
+            let frame = RawDecodedFrame {
+                rgba_data: rgba,
+                width,
+                height,
+                timestamp_us,
+            };
+
+            if let Ok(mut q) = output.lock() {
+                let qlen = q.len();
+                q.push_back(frame);
+                // Log first 3 decoded frames and every 50th queued frame
+                if qlen == 0 || qlen == 1 || qlen == 2 || (qlen + 1) % 50 == 0 {
+                    tracing::info!(
+                        "VT callback: decoded frame queued, {width}x{height}, queue_len={}, ts={timestamp_us}us",
+                        qlen + 1
+                    );
+                }
+            }
         } else {
-            0
-        };
-
-        let frame = RawDecodedFrame {
-            rgba_data: rgba,
-            width,
-            height,
-            timestamp_us,
-        };
-
-        if let Ok(mut q) = output.lock() {
-            let qlen = q.len();
-            q.push_back(frame);
-            // Log first 3 decoded frames and every 50th queued frame
-            if qlen == 0 || qlen == 1 || qlen == 2 || (qlen + 1) % 50 == 0 {
-                tracing::info!(
-                    "VT callback: decoded frame queued, {width}x{height}, queue_len={}, ts={timestamp_us}us",
-                    qlen + 1
-                );
-            }
+            tracing::warn!(
+                "VT callback: invalid buffer layout, base_null={}, stride={bytes_per_row}, expected_stride={expected_row}, {width}x{height}",
+                base.is_null()
+            );
         }
-    } else {
-        tracing::warn!(
-            "VT callback: null/zero-size buffer, base_null={}, {width}x{height}",
-            base.is_null()
-        );
     }
+}
 
-    CVPixelBufferUnlockBaseAddress(image_buffer, 1);
+struct PixelBufferLock(CVPixelBufferRef);
+
+impl Drop for PixelBufferLock {
+    fn drop(&mut self) {
+        // SAFETY: created only after a successful read-only lock and dropped
+        // exactly once before VideoToolbox ends the callback.
+        unsafe {
+            CVPixelBufferUnlockBaseAddress(self.0, 1);
+        }
+    }
 }

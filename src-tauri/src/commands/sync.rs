@@ -6,11 +6,13 @@
 //!   - Manual sync trigger
 //!   - Auto-sync toggle
 
-use tauri::State;
+use crate::profile::scope::ProfileState as State;
 
+use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::domain::sync::{DeviceInfo, SyncHistoryEntry, SyncResult, SyncStatus};
 use crate::p2p::device_sync::SyncRequest;
 use crate::p2p::sync;
+use crate::profile::scope::ProfileLease;
 use crate::AppState;
 
 /// Get information about the local device.
@@ -19,52 +21,60 @@ use crate::AppState;
 /// doesn't exist yet (auto-registers on first call).
 #[tauri::command]
 pub async fn sync_get_device_info(state: State<'_, AppState>) -> Result<DeviceInfo, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    let platform = std::env::consts::OS;
-    let device_id = sync::get_or_create_local_device(conn, platform)?;
-    sync::get_device(conn, &device_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.device-info",
+            move |db| {
+                let device_id = sync::get_or_create_local_device(db.conn(), std::env::consts::OS)?;
+                sync::get_device(db.conn(), &device_id)
+            },
+        )
+        .await
 }
 
 /// Set a user-friendly name for the local device.
 #[tauri::command]
 pub async fn sync_set_device_name(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    let device_id = conn
-        .query_row("SELECT id FROM devices WHERE is_local = 1", [], |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(|e| format!("no local device registered: {e}"))?;
-
-    conn.execute(
-        "UPDATE devices SET device_name = ?1 WHERE id = ?2",
-        rusqlite::params![name, device_id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.device-name.set",
+            move |db| {
+                let device_id = db
+                    .conn()
+                    .query_row("SELECT id FROM devices WHERE is_local = 1", [], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .map_err(|e| format!("no local device registered: {e}"))?;
+                db.conn()
+                    .execute(
+                        "UPDATE devices SET device_name = ?1 WHERE id = ?2",
+                        rusqlite::params![name, device_id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
+        )
+        .await
 }
 
 /// List all known devices (local + remote).
 #[tauri::command]
 pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<DeviceInfo>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    sync::list_devices(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.devices.list",
+            move |db| sync::list_devices(db.conn()),
+        )
+        .await
 }
 
 /// Remove a remote device and its sync state.
@@ -75,12 +85,15 @@ pub async fn sync_remove_device(
     state: State<'_, AppState>,
     device_id: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    sync::remove_device(db.conn(), &device_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.device.remove",
+            move |db| sync::remove_device(db.conn(), &device_id),
+        )
+        .await
 }
 
 /// Get the current sync status.
@@ -89,12 +102,15 @@ pub async fn sync_remove_device(
 /// per-device sync summaries.
 #[tauri::command]
 pub async fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    sync::get_sync_status(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.status",
+            move |db| sync::get_sync_status(db.conn()),
+        )
+        .await
 }
 
 /// Manually trigger a sync with every paired device.
@@ -109,13 +125,18 @@ pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> 
 
     // Snapshot the paired peers up front, then release the DB lock
     // before any network I/O.
-    let targets = {
-        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-        sync::prune_delivered_queue(conn).ok();
-        sync_targets(conn)?
-    };
+    let targets = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.targets",
+            move |db| {
+                sync::prune_delivered_queue(db.conn()).ok();
+                sync_targets(db.conn())
+            },
+        )
+        .await?;
 
     let mut total = SyncResult {
         rows_sent: 0,
@@ -126,7 +147,17 @@ pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> 
     };
 
     for (peer_id, key, addrs) in targets {
-        match sync_one_peer(&state.db, &state.p2p_node, &peer_id, &key, &addrs).await {
+        match sync_one_peer(
+            &state.db_executor,
+            state.profile_lease(),
+            DatabaseWorkload::Learner,
+            &state.p2p_node,
+            &peer_id,
+            &key,
+            &addrs,
+        )
+        .await
+        {
             Ok(r) => {
                 total.rows_sent += r.rows_sent;
                 total.rows_received += r.rows_received;
@@ -168,30 +199,45 @@ fn sync_targets(conn: &rusqlite::Connection) -> Result<Vec<SyncTarget>, String> 
 /// on, run one sync exchange with every paired peer. Invoked from the
 /// app's periodic queue loop. Returns rows merged across all peers.
 pub(crate) async fn auto_sync_all(
-    db: &crate::commands::pairing::DbHandle,
+    db_executor: &DatabaseExecutor,
+    lease: &ProfileLease,
     node: &crate::commands::pairing::NodeHandle,
 ) -> usize {
-    let targets = {
-        let Ok(guard) = db.lock() else { return 0 };
-        let Some(database) = guard.as_ref() else {
+    let targets = match db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            lease.clone(),
+            "sync.auto-targets",
+            move |db| {
+                if sync::is_auto_sync_enabled(db.conn()) {
+                    sync_targets(db.conn())
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+        )
+        .await
+    {
+        Ok(targets) => targets,
+        Err(e) => {
+            log::debug!("auto-sync: target query failed: {e}");
             return 0;
-        };
-        let conn = database.conn();
-        if !sync::is_auto_sync_enabled(conn) {
-            return 0;
-        }
-        match sync_targets(conn) {
-            Ok(t) => t,
-            Err(e) => {
-                log::debug!("auto-sync: target query failed: {e}");
-                return 0;
-            }
         }
     };
 
     let mut merged = 0usize;
     for (peer_id, key, addrs) in targets {
-        match sync_one_peer(db, node, &peer_id, &key, &addrs).await {
+        match sync_one_peer(
+            db_executor,
+            lease.clone(),
+            DatabaseWorkload::Background,
+            node,
+            &peer_id,
+            &key,
+            &addrs,
+        )
+        .await
+        {
             Ok(r) => merged += r.rows_merged.max(0) as usize,
             Err(e) => log::debug!("auto-sync: peer {peer_id} skipped: {e}"),
         }
@@ -201,7 +247,9 @@ pub(crate) async fn auto_sync_all(
 
 /// Run a single already-paired sync exchange (no pairing handshake).
 async fn sync_one_peer(
-    db: &crate::commands::pairing::DbHandle,
+    db_executor: &DatabaseExecutor,
+    lease: ProfileLease,
+    workload: DatabaseWorkload,
     node_handle: &crate::commands::pairing::NodeHandle,
     peer_id: &str,
     key: &[u8; 32],
@@ -209,15 +257,19 @@ async fn sync_one_peer(
 ) -> Result<SyncResult, String> {
     let started = std::time::Instant::now();
 
-    let (device_id, stake_address, sealed) = {
-        let db_guard = db.lock().map_err(|_| "db lock poisoned")?;
-        let database = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = database.conn();
-        let device_id = sync::get_or_create_local_device(conn, std::env::consts::OS)?;
-        let stake = sync::local_stake_address(conn)?.ok_or("no local identity")?;
-        let payload = sync::build_sync_payload(conn)?;
-        (device_id, stake, sync::seal_payload(key, &payload)?)
-    };
+    let key_for_payload = *key;
+    let (device_id, stake_address, sealed) = db_executor
+        .execute(workload, lease.clone(), "sync.payload.build", move |db| {
+            let device_id = sync::get_or_create_local_device(db.conn(), std::env::consts::OS)?;
+            let stake = sync::local_stake_address(db.conn())?.ok_or("no local identity")?;
+            let payload = sync::build_sync_payload(db.conn())?;
+            Ok((
+                device_id,
+                stake,
+                sync::seal_payload(&key_for_payload, &payload)?,
+            ))
+        })
+        .await?;
 
     let peer: libp2p::PeerId = peer_id.parse().map_err(|e| format!("bad peer id: {e}"))?;
     let multiaddrs: Vec<libp2p::Multiaddr> = addrs.iter().filter_map(|a| a.parse().ok()).collect();
@@ -237,7 +289,16 @@ async fn sync_one_peer(
             .map_err(|e| e.to_string())?
     };
 
-    crate::commands::pairing::finish_exchange(db, peer_id, key, response, started)
+    crate::commands::pairing::finish_exchange(
+        db_executor,
+        lease,
+        workload,
+        peer_id,
+        key,
+        response,
+        started,
+    )
+    .await
 }
 
 /// Toggle automatic background sync.
@@ -246,12 +307,15 @@ async fn sync_one_peer(
 /// remote devices (every 60 seconds when peers are online).
 #[tauri::command]
 pub async fn sync_set_auto(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    sync::set_auto_sync(db.conn(), enabled)?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.auto.set",
+            move |db| sync::set_auto_sync(db.conn(), enabled),
+        )
+        .await?;
     log::info!("sync: auto-sync set to {enabled}");
     Ok(())
 }
@@ -262,12 +326,15 @@ pub async fn sync_history(
     state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<SyncHistoryEntry>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    sync::get_sync_history(db.conn(), limit.unwrap_or(50))
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sync.history",
+            move |db| sync::get_sync_history(db.conn(), limit.unwrap_or(50)),
+        )
+        .await
 }
 
 #[cfg(test)]

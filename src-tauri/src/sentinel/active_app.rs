@@ -71,6 +71,9 @@ mod imp {
             GetForegroundWindow, GetWindowThreadProcessId,
         };
 
+        // SAFETY: every Win32 call receives initialized storage of the stated
+        // size. `OpenProcess` is checked before use, and its owned HANDLE is
+        // closed on every path after successful acquisition.
         unsafe {
             let hwnd = GetForegroundWindow();
             if hwnd.0.is_null() {

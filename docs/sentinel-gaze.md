@@ -49,8 +49,8 @@ Copy the `paste_classifier.rs` shape verbatim:
 - `detect(frame: &GrayOrRgbFrame) -> Result<Vec<FaceDetection>>` — runs YuNet, applies NMS in
   Rust host code (tract has no NMS op; YuNet exports raw boxes+scores), returns bbox + 5 landmarks
   + score per face.
-- Optional `set_dao_session`/`revert_to_bundled`/`loaded_info` later — reuse the DAO CID pipeline
-  for a better detector without an app update. Not required for P1; bundled-only is fine to start.
+- A better detector ships with an app release. Runtime model replacement is deleted, so the
+  tract parser only sees models embedded at build time.
 
 NMS + decode: port YuNet's priors/stride decode (3 strides, anchor boxes) into a small pure-Rust
 `decode.rs` helper. ~80 lines. Deterministic, unit-testable against a known frame.

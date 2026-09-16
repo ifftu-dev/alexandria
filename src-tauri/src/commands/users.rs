@@ -4,10 +4,11 @@
 
 use std::collections::HashMap;
 
+use crate::profile::scope::ProfileState as State;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::crypto::did::Did;
+use crate::db::executor::DatabaseWorkload;
 use crate::p2p::profile_fetch::{
     build_own_profile, cache_peer_profile, ProfileFetchRequest, ProfileFetchResponse, PublicProfile,
 };
@@ -29,8 +30,21 @@ pub async fn resolve_profiles(
     state: State<'_, AppState>,
     dids: Vec<String>,
 ) -> Result<HashMap<String, ResolvedName>, String> {
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "users.resolve_profiles",
+            move |db| Ok(resolve_profiles_db(db, dids)),
+        )
+        .await
+}
+
+fn resolve_profiles_db(
+    db: &crate::db::Database,
+    dids: Vec<String>,
+) -> HashMap<String, ResolvedName> {
     let conn = db.conn();
 
     let mut out = HashMap::new();
@@ -65,7 +79,7 @@ pub async fn resolve_profiles(
             out.insert(did, r);
         }
     }
-    Ok(out)
+    out
 }
 
 /// Fetch a user's public profile by DID or @username.
@@ -113,36 +127,27 @@ pub async fn fetch_user_profile(
     }
 
     // 1 + 2: local answers, releasing the std lock before any await.
-    let requestor_did = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-
-        if let Some(own) = build_own_profile(conn) {
-            let own_username_match = match (&username, &own.username) {
-                (Some(q), Some(u)) => q == u,
-                _ => false,
-            };
-            if did.as_deref() == Some(own.did.as_str()) || own_username_match {
-                return Ok(own);
-            }
-        }
-
-        if !force {
-            let cached = if let Some(ref d) = did {
-                lookup_cache(conn, "did = ?1", d)
-            } else if let Some(ref u) = username {
-                lookup_cache(conn, "username = ?1", u)
-            } else {
-                None
-            };
-            if let Some(p) = cached {
-                return Ok(p);
-            }
-        }
-
-        SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID)
-    };
+    let lookup_did = did.clone();
+    let lookup_username = username.clone();
+    let (local_profile, requestor_did) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "users.fetch_profile.local",
+            move |db| {
+                Ok(lookup_local_profile(
+                    db,
+                    &lookup_did,
+                    &lookup_username,
+                    force,
+                ))
+            },
+        )
+        .await?;
+    if let Some(profile) = local_profile {
+        return Ok(profile);
+    }
 
     // 3: network broadcast.
     let requestor = Did(if requestor_did.is_empty() {
@@ -193,20 +198,37 @@ pub async fn fetch_user_profile(
     }
 
     let (mut private, mut not_owner, mut unreachable) = (0u32, 0u32, 0u32);
+    let mut fetched = None;
     while let Some(res) = inflight.next().await {
         match res {
             Ok(Ok(ProfileFetchResponse::Ok(profile))) => {
-                let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-                if let Some(db) = guard.as_ref() {
-                    let _ = cache_peer_profile(db.conn(), &profile);
-                }
-                return Ok(*profile);
+                fetched = Some(*profile);
+                break;
             }
             Ok(Ok(ProfileFetchResponse::Private)) => private += 1,
             Ok(Ok(ProfileFetchResponse::NotOwner)) => not_owner += 1,
             Ok(Err(_)) => unreachable += 1, // network error
             Err(_) => unreachable += 1,     // per-request timeout
         }
+    }
+    drop(inflight);
+    drop(node_guard);
+
+    if let Some(profile) = fetched {
+        let cached_profile = profile.clone();
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Background,
+                state.profile_lease(),
+                "users.fetch_profile.cache",
+                move |db| {
+                    let _ = cache_peer_profile(db.conn(), &cached_profile);
+                    Ok(())
+                },
+            )
+            .await?;
+        return Ok(profile);
     }
 
     if private > 0 {
@@ -215,6 +237,39 @@ pub async fn fetch_user_profile(
     Err(format!(
         "profile not found: {not_owner} peer(s) answered not-owner, {unreachable} unreachable"
     ))
+}
+
+fn lookup_local_profile(
+    db: &crate::db::Database,
+    did: &Option<String>,
+    username: &Option<String>,
+    force: bool,
+) -> (Option<PublicProfile>, String) {
+    let conn = db.conn();
+    if let Some(own) = build_own_profile(conn) {
+        let own_username_match = match (username, &own.username) {
+            (Some(query), Some(own_username)) => query == own_username,
+            _ => false,
+        };
+        if did.as_deref() == Some(own.did.as_str()) || own_username_match {
+            return (Some(own), String::new());
+        }
+    }
+
+    if !force {
+        let cached = if let Some(did) = did {
+            lookup_cache(conn, "did = ?1", did)
+        } else if let Some(username) = username {
+            lookup_cache(conn, "username = ?1", username)
+        } else {
+            None
+        };
+        if cached.is_some() {
+            return (cached, String::new());
+        }
+    }
+
+    (None, SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID))
 }
 
 fn lookup_cache(
@@ -239,4 +294,95 @@ fn lookup_cache(
         },
     )
     .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn database() -> crate::db::Database {
+        let db = crate::db::Database::open_in_memory().expect("in-memory database");
+        db.run_migrations().expect("migrations");
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity \
+                 (id, stake_address, payment_address, username, display_name, visibility) \
+                 VALUES (1, 'stake_test_alice', 'addr_test_alice', 'alice', 'Alice', 'public')",
+                [],
+            )
+            .expect("local identity");
+        SettingsStore::set(
+            db.conn(),
+            keys::IDENTITY_LOCAL_DID,
+            "did:key:alice".to_string(),
+        )
+        .expect("local DID");
+        cache_peer_profile(
+            db.conn(),
+            &PublicProfile {
+                did: "did:key:bob".into(),
+                username: Some("bob".into()),
+                display_name: Some("Bob".into()),
+                bio: None,
+                avatar_cid: None,
+            },
+        )
+        .expect("cached peer");
+        db
+    }
+
+    #[test]
+    fn local_lookup_prefers_the_owner_and_returns_the_requestor_identity() {
+        let db = database();
+        let (own, requestor) =
+            lookup_local_profile(&db, &Some("did:key:alice".into()), &None, false);
+        assert_eq!(own.expect("owner").display_name.as_deref(), Some("Alice"));
+        assert!(requestor.is_empty());
+
+        let (missing, requestor) =
+            lookup_local_profile(&db, &Some("did:key:unknown".into()), &None, false);
+        assert!(missing.is_none());
+        assert_eq!(requestor, "did:key:alice");
+    }
+
+    #[test]
+    fn force_skips_the_cached_peer_without_losing_the_requestor_identity() {
+        let db = database();
+        let query = Some("did:key:bob".to_string());
+        let (cached, _) = lookup_local_profile(&db, &query, &None, false);
+        assert_eq!(
+            cached.expect("cached peer").username.as_deref(),
+            Some("bob")
+        );
+
+        let (forced, requestor) = lookup_local_profile(&db, &query, &None, true);
+        assert!(forced.is_none());
+        assert_eq!(requestor, "did:key:alice");
+    }
+
+    #[test]
+    fn batch_resolution_returns_owned_and_cached_profiles_only() {
+        let db = database();
+        let profiles = resolve_profiles_db(
+            &db,
+            vec![
+                "did:key:alice".into(),
+                "did:key:bob".into(),
+                "did:key:unknown".into(),
+            ],
+        );
+        assert_eq!(profiles.len(), 2);
+        assert_eq!(
+            profiles
+                .get("did:key:alice")
+                .and_then(|profile| profile.display_name.as_deref()),
+            Some("Alice")
+        );
+        assert_eq!(
+            profiles
+                .get("did:key:bob")
+                .and_then(|profile| profile.username.as_deref()),
+            Some("bob")
+        );
+    }
 }

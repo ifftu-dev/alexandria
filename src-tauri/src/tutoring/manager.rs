@@ -43,7 +43,12 @@ use live::Live;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinHandle;
+
+use super::tasks::{SessionTasks, TaskHandle};
+
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -288,12 +293,12 @@ struct ActiveSession {
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     app_handle: AppHandle,
     /// Handle for the self-preview task (aborted on toggle).
-    self_preview_task: Option<JoinHandle<()>>,
+    self_preview_task: Option<TaskHandle>,
     /// User's selected devices — preserved for toggle_video/toggle_audio re-creation.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     device_selection: DeviceSelection,
     /// Background tasks to abort on leave.
-    _tasks: Vec<JoinHandle<()>>,
+    _tasks: Vec<TaskHandle>,
     /// Ring buffer of recent log entries for diagnostics.
     recent_logs: Vec<String>,
     /// Home relay URL at time of session creation.
@@ -312,6 +317,7 @@ struct ActiveSession {
 ///
 /// Thread-safe via `Arc<Mutex<>>`. Stored in Tauri `AppState`.
 pub struct TutoringManager {
+    tasks: Arc<SessionTasks>,
     inner: Arc<Mutex<Option<ActiveSession>>>,
 }
 
@@ -325,6 +331,7 @@ impl TutoringManager {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(None)),
+            tasks: Arc::new(SessionTasks::default()),
         }
     }
 
@@ -333,22 +340,30 @@ impl TutoringManager {
     /// Optionally accepts specific input/output device IDs. Pass `None`
     /// for either to use the system default.
     ///
-    /// Returns `None` only if initialization panics (shouldn't happen
-    /// with the cpal 0.17.x fix for macOS Sequoia).
-    fn try_create_audio_backend(
+    /// Returns `None` if initialization panics or task admission is closed.
+    async fn try_create_audio_backend(
+        tasks: Arc<SessionTasks>,
         input_device_id: Option<DeviceId>,
         output_device_id: Option<DeviceId>,
     ) -> Option<AudioBackend> {
-        let result = std::panic::catch_unwind(move || {
-            AudioBackend::new_with_devices(input_device_id, output_device_id)
-        });
+        let result = tasks
+            .run_blocking(move || {
+                std::panic::catch_unwind(move || {
+                    AudioBackend::new_with_devices(input_device_id, output_device_id)
+                })
+            })
+            .await;
         match result {
-            Ok(backend) => {
+            Ok(Ok(backend)) => {
                 log::info!("tutoring: audio backend initialized");
                 Some(backend)
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 log::error!("tutoring: audio backend panicked during init: {e:?}");
+                None
+            }
+            Err(error) => {
+                log::warn!("tutoring: audio initialization cancelled: {error}");
                 None
             }
         }
@@ -381,132 +396,162 @@ impl TutoringManager {
         app_handle: AppHandle,
         devices: DeviceSelection,
     ) -> Result<String, String> {
+        let tasks = self.tasks.clone();
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
             return Err("already in a tutoring session".into());
         }
+        self.tasks.shutdown().await;
+        self.tasks.open()?;
+        let mut startup = self.tasks.startup_guard();
+        let result = async {
+            let our_node_id = endpoint.id().to_string();
+            let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
 
-        let our_node_id = endpoint.id().to_string();
-        let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
+            let ticket = RoomTicket::generate();
+            let room = Room::new(endpoint, gossip.clone(), live, ticket)
+                .await
+                .map_err(|e| format!("failed to create room: {e}"))?;
 
-        let ticket = RoomTicket::generate();
-        let room = Room::new(endpoint, gossip.clone(), live, ticket)
-            .await
-            .map_err(|e| format!("failed to create room: {e}"))?;
+            let ticket_str = room.ticket().to_string();
 
-        let ticket_str = room.ticket().to_string();
+            // Try to initialize audio with user-selected devices
+            let mic_id = Self::parse_device_id(&devices.mic_device_id);
+            let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
+            let audio_ctx = Self::try_create_audio_backend(tasks.clone(), mic_id, speaker_id).await;
+            let has_audio = audio_ctx.is_some();
+            if !has_audio {
+                log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
+            }
 
-        // Try to initialize audio with user-selected devices
-        let mic_id = Self::parse_device_id(&devices.mic_device_id);
-        let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
-        let audio_ctx = Self::try_create_audio_backend(mic_id, speaker_id);
-        let has_audio = audio_ctx.is_some();
-        if !has_audio {
-            log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
+            // Start publishing local media (using selected camera if any)
+            let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+                tasks.clone(),
+                audio_ctx.as_ref(),
+                true,
+                has_audio,
+                devices.camera_index.clone(),
+            )
+            .await?;
+            room.publish(BROADCAST_NAME, broadcast.producer())
+                .await
+                .map_err(|e| format!("failed to publish broadcast: {e}"))?;
+
+            let (events, handle) = room.split();
+
+            // Start self-preview from local camera source
+            let self_preview_task =
+                Self::start_self_preview(tasks.clone(), &mut broadcast, app_handle.clone());
+
+            // Set up chat on a derived gossip topic
+            let topic_seed = room_topic_bytes(&ticket_str);
+            let chat_sender = Self::setup_chat(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                app_handle.clone(),
+            )
+            .await;
+
+            // Set up name announcements on a derived /names gossip topic
+            let names_setup = Self::setup_names(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                &display_name,
+                self.inner.clone(),
+                app_handle.clone(),
+            )
+            .await;
+            let (names_sender, names_task) = match names_setup {
+                Some((s, t)) => (Some(s), Some(t)),
+                None => (None, None),
+            };
+
+            // Spawn event loop to track peers and bridge video frames
+            let inner_clone = self.inner.clone();
+            let audio_ctx_clone = audio_ctx.clone();
+            let app_handle_clone = app_handle.clone();
+            let event_tasks = tasks.clone();
+            let event_task = tasks.clone().spawn(async move {
+                Self::event_loop(
+                    event_tasks,
+                    events,
+                    inner_clone,
+                    audio_ctx_clone,
+                    app_handle_clone,
+                )
+                .await;
+            });
+
+            let mut session_tasks = vec![event_task];
+            if let Some(t) = names_task {
+                session_tasks.push(t);
+            }
+            let session_output = Self::create_session_output(&audio_ctx).await;
+
+            let init_logs = vec![
+                format!("create_room: audio={has_audio}, video={has_video}"),
+                format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
+            ];
+
+            *inner = Some(ActiveSession {
+                session_id,
+                session_title: title,
+                handle,
+                broadcast,
+                audio_ctx,
+                mic_input,
+                output_stream: session_output,
+                remote_output_streams: HashMap::new(),
+                _moq_sessions: Vec::new(),
+                peers: HashMap::new(),
+                video_enabled: has_video,
+                audio_enabled: has_audio,
+                screen_sharing: false,
+                chat_sender,
+                names_sender,
+                our_node_id,
+                our_display_name: display_name,
+                started_at: Self::now_millis(),
+                last_chat_sent: Instant::now() - Duration::from_secs(10),
+                #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+                app_handle: app_handle.clone(),
+                self_preview_task,
+                #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+                device_selection: devices,
+                _tasks: session_tasks,
+                recent_logs: init_logs,
+                home_relay,
+                _subscribe_broadcasts: Vec::new(),
+                _repair_broadcast_keys: HashSet::new(),
+                _subscribed_audio_keys: HashSet::new(),
+                _subscribed_video_keys: HashSet::new(),
+            });
+
+            // Spawn audio level emitter after session is stored (reads from inner)
+            let audio_level_task =
+                Self::start_audio_level_emitter(tasks.clone(), self.inner.clone(), app_handle);
+            if let Some(session) = inner.as_mut() {
+                session._tasks.push(audio_level_task);
+            }
+
+            log::info!(
+                "tutoring: room created — audio={has_audio}, video={has_video}, ticket={}...",
+                &ticket_str[..ticket_str.len().min(20)]
+            );
+
+            Ok(ticket_str)
         }
-
-        // Start publishing local media (using selected camera if any)
-        let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
-            audio_ctx.as_ref(),
-            true,
-            has_audio,
-            devices.camera_index.clone(),
-        )
-        .await?;
-        room.publish(BROADCAST_NAME, broadcast.producer())
-            .await
-            .map_err(|e| format!("failed to publish broadcast: {e}"))?;
-
-        let (events, handle) = room.split();
-
-        // Start self-preview from local camera source
-        let self_preview_task = Self::start_self_preview(&mut broadcast, app_handle.clone());
-
-        // Set up chat on a derived gossip topic
-        let topic_seed = room_topic_bytes(&ticket_str);
-        let chat_sender =
-            Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
-
-        // Set up name announcements on a derived /names gossip topic
-        let names_setup = Self::setup_names(
-            &gossip,
-            &topic_seed,
-            &our_node_id,
-            &display_name,
-            self.inner.clone(),
-            app_handle.clone(),
-        )
         .await;
-        let (names_sender, names_task) = match names_setup {
-            Some((s, t)) => (Some(s), Some(t)),
-            None => (None, None),
-        };
-
-        // Spawn event loop to track peers and bridge video frames
-        let inner_clone = self.inner.clone();
-        let audio_ctx_clone = audio_ctx.clone();
-        let app_handle_clone = app_handle.clone();
-        let event_task = tokio::spawn(async move {
-            Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
-        });
-
-        let mut tasks = vec![event_task];
-        if let Some(t) = names_task {
-            tasks.push(t);
+        if result.is_ok() {
+            startup.commit();
+        } else {
+            self.tasks.shutdown().await;
         }
-        let session_output = Self::create_session_output(&audio_ctx).await;
-
-        let init_logs = vec![
-            format!("create_room: audio={has_audio}, video={has_video}"),
-            format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
-        ];
-
-        *inner = Some(ActiveSession {
-            session_id,
-            session_title: title,
-            handle,
-            broadcast,
-            audio_ctx,
-            mic_input,
-            output_stream: session_output,
-            remote_output_streams: HashMap::new(),
-            _moq_sessions: Vec::new(),
-            peers: HashMap::new(),
-            video_enabled: has_video,
-            audio_enabled: has_audio,
-            screen_sharing: false,
-            chat_sender,
-            names_sender,
-            our_node_id,
-            our_display_name: display_name,
-            started_at: Self::now_millis(),
-            last_chat_sent: Instant::now() - Duration::from_secs(10),
-            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-            app_handle: app_handle.clone(),
-            self_preview_task,
-            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-            device_selection: devices,
-            _tasks: tasks,
-            recent_logs: init_logs,
-            home_relay,
-            _subscribe_broadcasts: Vec::new(),
-            _repair_broadcast_keys: HashSet::new(),
-            _subscribed_audio_keys: HashSet::new(),
-            _subscribed_video_keys: HashSet::new(),
-        });
-
-        // Spawn audio level emitter after session is stored (reads from inner)
-        let audio_level_task = Self::start_audio_level_emitter(self.inner.clone(), app_handle);
-        if let Some(session) = inner.as_mut() {
-            session._tasks.push(audio_level_task);
-        }
-
-        log::info!(
-            "tutoring: room created — audio={has_audio}, video={has_video}, ticket={}...",
-            &ticket_str[..ticket_str.len().min(20)]
-        );
-
-        Ok(ticket_str)
+        result
     }
 
     /// Join an existing tutoring room using a ticket string.
@@ -523,146 +568,185 @@ impl TutoringManager {
         app_handle: AppHandle,
         devices: DeviceSelection,
     ) -> Result<String, String> {
+        let tasks = self.tasks.clone();
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
             return Err("already in a tutoring session".into());
         }
+        self.tasks.shutdown().await;
+        self.tasks.open()?;
+        let mut startup = self.tasks.startup_guard();
+        let result = async {
+            let our_node_id = endpoint.id().to_string();
+            let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
 
-        let our_node_id = endpoint.id().to_string();
-        let home_relay = endpoint.addr().relay_urls().next().map(|u| u.to_string());
+            let ticket: RoomTicket = ticket_str
+                .parse()
+                .map_err(|e| format!("invalid room ticket: {e}"))?;
 
-        let ticket: RoomTicket = ticket_str
-            .parse()
-            .map_err(|e| format!("invalid room ticket: {e}"))?;
+            let room = Room::new(endpoint, gossip.clone(), live, ticket)
+                .await
+                .map_err(|e| format!("failed to join room: {e}"))?;
 
-        let room = Room::new(endpoint, gossip.clone(), live, ticket)
-            .await
-            .map_err(|e| format!("failed to join room: {e}"))?;
+            let ticket_str = room.ticket().to_string();
 
-        let ticket_str = room.ticket().to_string();
+            // Try to initialize audio with user-selected devices
+            let mic_id = Self::parse_device_id(&devices.mic_device_id);
+            let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
+            let audio_ctx = Self::try_create_audio_backend(tasks.clone(), mic_id, speaker_id).await;
+            let has_audio = audio_ctx.is_some();
+            if !has_audio {
+                log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
+            }
 
-        // Try to initialize audio with user-selected devices
-        let mic_id = Self::parse_device_id(&devices.mic_device_id);
-        let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
-        let audio_ctx = Self::try_create_audio_backend(mic_id, speaker_id);
-        let has_audio = audio_ctx.is_some();
-        if !has_audio {
-            log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
+            // Start publishing local media (using selected camera if any)
+            let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+                tasks.clone(),
+                audio_ctx.as_ref(),
+                true,
+                has_audio,
+                devices.camera_index.clone(),
+            )
+            .await?;
+            room.publish(BROADCAST_NAME, broadcast.producer())
+                .await
+                .map_err(|e| format!("failed to publish broadcast: {e}"))?;
+
+            let (events, handle) = room.split();
+
+            // Start self-preview from local camera source
+            let self_preview_task =
+                Self::start_self_preview(tasks.clone(), &mut broadcast, app_handle.clone());
+
+            // Set up chat on a derived gossip topic
+            let topic_seed = room_topic_bytes(&ticket_str);
+            let chat_sender = Self::setup_chat(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                app_handle.clone(),
+            )
+            .await;
+
+            // Set up name announcements on a derived /names gossip topic
+            let names_setup = Self::setup_names(
+                tasks.clone(),
+                &gossip,
+                &topic_seed,
+                &our_node_id,
+                &display_name,
+                self.inner.clone(),
+                app_handle.clone(),
+            )
+            .await;
+            let (names_sender, names_task) = match names_setup {
+                Some((s, t)) => (Some(s), Some(t)),
+                None => (None, None),
+            };
+
+            let inner_clone = self.inner.clone();
+            let audio_ctx_clone = audio_ctx.clone();
+            let app_handle_clone = app_handle.clone();
+            let event_tasks = tasks.clone();
+            let event_task = tasks.clone().spawn(async move {
+                Self::event_loop(
+                    event_tasks,
+                    events,
+                    inner_clone,
+                    audio_ctx_clone,
+                    app_handle_clone,
+                )
+                .await;
+            });
+
+            let mut session_tasks = vec![event_task];
+            if let Some(t) = names_task {
+                session_tasks.push(t);
+            }
+            let session_output = Self::create_session_output(&audio_ctx).await;
+
+            let init_logs = vec![
+                format!("join_room: audio={has_audio}, video={has_video}"),
+                format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
+            ];
+
+            *inner = Some(ActiveSession {
+                session_id,
+                session_title: title,
+                handle,
+                broadcast,
+                audio_ctx,
+                mic_input,
+                output_stream: session_output,
+                remote_output_streams: HashMap::new(),
+                _moq_sessions: Vec::new(),
+                peers: HashMap::new(),
+                video_enabled: has_video,
+                audio_enabled: has_audio,
+                screen_sharing: false,
+                chat_sender,
+                names_sender,
+                our_node_id,
+                our_display_name: display_name,
+                started_at: Self::now_millis(),
+                last_chat_sent: Instant::now() - Duration::from_secs(10),
+                #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+                app_handle: app_handle.clone(),
+                self_preview_task,
+                #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+                device_selection: devices,
+                _tasks: session_tasks,
+                recent_logs: init_logs,
+                home_relay,
+                _subscribe_broadcasts: Vec::new(),
+                _repair_broadcast_keys: HashSet::new(),
+                _subscribed_audio_keys: HashSet::new(),
+                _subscribed_video_keys: HashSet::new(),
+            });
+
+            // Spawn audio level emitter after session is stored (reads from inner)
+            let audio_level_task =
+                Self::start_audio_level_emitter(tasks.clone(), self.inner.clone(), app_handle);
+            if let Some(session) = inner.as_mut() {
+                session._tasks.push(audio_level_task);
+            }
+
+            Ok(ticket_str)
         }
-
-        // Start publishing local media (using selected camera if any)
-        let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
-            audio_ctx.as_ref(),
-            true,
-            has_audio,
-            devices.camera_index.clone(),
-        )
-        .await?;
-        room.publish(BROADCAST_NAME, broadcast.producer())
-            .await
-            .map_err(|e| format!("failed to publish broadcast: {e}"))?;
-
-        let (events, handle) = room.split();
-
-        // Start self-preview from local camera source
-        let self_preview_task = Self::start_self_preview(&mut broadcast, app_handle.clone());
-
-        // Set up chat on a derived gossip topic
-        let topic_seed = room_topic_bytes(&ticket_str);
-        let chat_sender =
-            Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
-
-        // Set up name announcements on a derived /names gossip topic
-        let names_setup = Self::setup_names(
-            &gossip,
-            &topic_seed,
-            &our_node_id,
-            &display_name,
-            self.inner.clone(),
-            app_handle.clone(),
-        )
         .await;
-        let (names_sender, names_task) = match names_setup {
-            Some((s, t)) => (Some(s), Some(t)),
-            None => (None, None),
-        };
-
-        let inner_clone = self.inner.clone();
-        let audio_ctx_clone = audio_ctx.clone();
-        let app_handle_clone = app_handle.clone();
-        let event_task = tokio::spawn(async move {
-            Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
-        });
-
-        let mut tasks = vec![event_task];
-        if let Some(t) = names_task {
-            tasks.push(t);
+        if result.is_ok() {
+            startup.commit();
+        } else {
+            self.tasks.shutdown().await;
         }
-        let session_output = Self::create_session_output(&audio_ctx).await;
-
-        let init_logs = vec![
-            format!("join_room: audio={has_audio}, video={has_video}"),
-            format!("home_relay={}", home_relay.as_deref().unwrap_or("none")),
-        ];
-
-        *inner = Some(ActiveSession {
-            session_id,
-            session_title: title,
-            handle,
-            broadcast,
-            audio_ctx,
-            mic_input,
-            output_stream: session_output,
-            remote_output_streams: HashMap::new(),
-            _moq_sessions: Vec::new(),
-            peers: HashMap::new(),
-            video_enabled: has_video,
-            audio_enabled: has_audio,
-            screen_sharing: false,
-            chat_sender,
-            names_sender,
-            our_node_id,
-            our_display_name: display_name,
-            started_at: Self::now_millis(),
-            last_chat_sent: Instant::now() - Duration::from_secs(10),
-            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-            app_handle: app_handle.clone(),
-            self_preview_task,
-            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-            device_selection: devices,
-            _tasks: tasks,
-            recent_logs: init_logs,
-            home_relay,
-            _subscribe_broadcasts: Vec::new(),
-            _repair_broadcast_keys: HashSet::new(),
-            _subscribed_audio_keys: HashSet::new(),
-            _subscribed_video_keys: HashSet::new(),
-        });
-
-        // Spawn audio level emitter after session is stored (reads from inner)
-        let audio_level_task = Self::start_audio_level_emitter(self.inner.clone(), app_handle);
-        if let Some(session) = inner.as_mut() {
-            session._tasks.push(audio_level_task);
-        }
-
-        Ok(ticket_str)
+        result
     }
 
     /// Leave the current room.
     pub async fn leave_room(&self) -> Result<(), String> {
+        self.stop_room(true).await
+    }
+
+    pub async fn shutdown(&self) -> Result<(), String> {
+        self.stop_room(false).await
+    }
+
+    async fn stop_room(&self, require_active: bool) -> Result<(), String> {
         let mut inner = self.inner.lock().await;
-        let session = inner.take().ok_or("not in a tutoring session")?;
-
-        // Abort all background tasks
-        if let Some(t) = &session.self_preview_task {
-            t.abort();
+        if require_active && inner.is_none() {
+            return Err("not in a tutoring session".into());
         }
-        for task in &session._tasks {
-            task.abort();
+        if let Some(session) = inner.as_ref() {
+            if let Some(preview) = &session.self_preview_task {
+                preview.abort();
+            }
+            for task in &session._tasks {
+                task.abort();
+            }
         }
-        drop(session);
-
-        log::info!("left tutoring session");
+        self.tasks.shutdown().await;
+        *inner = None;
         Ok(())
     }
 
@@ -671,8 +755,12 @@ impl TutoringManager {
     /// Toggle local camera on/off.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
+        let tasks = self.tasks.clone();
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         if enable == session.video_enabled && !session.screen_sharing {
             return Ok(session.video_enabled);
@@ -704,6 +792,7 @@ impl TutoringManager {
                     session.video_enabled = true;
                     // Restart self-preview
                     session.self_preview_task = Self::start_self_preview(
+                        tasks.clone(),
                         &mut session.broadcast,
                         session.app_handle.clone(),
                     );
@@ -744,7 +833,10 @@ impl TutoringManager {
     /// Toggle local microphone on/off.
     pub async fn toggle_audio(&self, enable: bool) -> Result<bool, String> {
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         if enable == session.audio_enabled {
             return Ok(session.audio_enabled);
@@ -788,8 +880,12 @@ impl TutoringManager {
     /// the camera is restored if it was previously enabled.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_screen_share(&self, enable: bool) -> Result<bool, String> {
+        let tasks = self.tasks.clone();
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         if enable == session.screen_sharing {
             return Ok(session.screen_sharing);
@@ -813,6 +909,7 @@ impl TutoringManager {
                     session.video_enabled = true;
                     // Self-preview now shows screen share
                     session.self_preview_task = Self::start_self_preview(
+                        tasks.clone(),
                         &mut session.broadcast,
                         session.app_handle.clone(),
                     );
@@ -839,6 +936,7 @@ impl TutoringManager {
                         .map_err(|e| format!("failed to restore camera: {e}"))?;
                     session.video_enabled = true;
                     session.self_preview_task = Self::start_self_preview(
+                        tasks.clone(),
                         &mut session.broadcast,
                         session.app_handle.clone(),
                     );
@@ -884,7 +982,10 @@ impl TutoringManager {
         }
 
         let mut inner = self.inner.lock().await;
-        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
 
         // Rate limit
         let now = Instant::now();
@@ -956,7 +1057,7 @@ impl TutoringManager {
     /// Get the current session status.
     pub async fn status(&self) -> Option<SessionStatus> {
         let inner = self.inner.lock().await;
-        let session = inner.as_ref()?;
+        let session = inner.as_ref().filter(|_| self.tasks.is_open())?;
 
         Some(SessionStatus {
             session_id: session.session_id.clone(),
@@ -982,13 +1083,13 @@ impl TutoringManager {
     /// Check if currently in a session.
     pub async fn is_active(&self) -> bool {
         let inner = self.inner.lock().await;
-        inner.is_some()
+        inner.is_some() && self.tasks.is_open()
     }
 
     /// Get diagnostic info about the current session for debugging A/V pipeline.
     pub async fn diagnostics(&self) -> Option<SessionDiagnostics> {
         let inner = self.inner.lock().await;
-        let session = inner.as_ref()?;
+        let session = inner.as_ref().filter(|_| self.tasks.is_open())?;
 
         Some(SessionDiagnostics {
             session_id: session.session_id.clone(),
@@ -1129,6 +1230,7 @@ impl TutoringManager {
     }
 
     async fn repair_remote_audio_subscription(
+        tasks: Arc<SessionTasks>,
         inner: &Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: &Option<AudioBackend>,
         broadcast: &SubscribeBroadcast,
@@ -1174,7 +1276,7 @@ impl TutoringManager {
                 let bname_audio = name.to_string();
                 let sub_key_audio = audio_key.clone();
                 let remote_audio_key_for_cleanup = remote_audio_key.clone();
-                let keepalive = tokio::spawn(async move {
+                let keepalive = tasks.clone().spawn(async move {
                     audio_track.stopped().await;
                     log::warn!("tutoring: audio track stopped for {nid_audio}:{bname_audio}");
                     Self::clear_remote_audio_subscription(
@@ -1199,6 +1301,7 @@ impl TutoringManager {
 
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     async fn repair_remote_video_subscription(
+        tasks: Arc<SessionTasks>,
         inner: &Arc<Mutex<Option<ActiveSession>>>,
         broadcast: &SubscribeBroadcast,
         node_id: &str,
@@ -1234,6 +1337,7 @@ impl TutoringManager {
                 log::info!("tutoring: watching video from {short_id}:{name}");
                 Self::push_log(inner, format!("video_watch OK: {short_id}:{name}")).await;
                 Self::spawn_frame_bridge_with_resubscribe(
+                    tasks.clone(),
                     video,
                     node_id.to_string(),
                     app_handle.clone(),
@@ -1255,14 +1359,15 @@ impl TutoringManager {
     }
 
     fn spawn_remote_broadcast_repair_task(
+        tasks: Arc<SessionTasks>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: Option<AudioBackend>,
         broadcast: SubscribeBroadcast,
         node_id: String,
         name: String,
         app_handle: AppHandle,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    ) -> TaskHandle {
+        tasks.clone().spawn(async move {
             #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
             let _ = &app_handle;
 
@@ -1286,7 +1391,7 @@ impl TutoringManager {
                             break;
                         }
 
-                        Self::repair_remote_audio_subscription(
+                        Self::repair_remote_audio_subscription(tasks.clone(),
                             &inner,
                             &audio_ctx,
                             &broadcast,
@@ -1296,7 +1401,7 @@ impl TutoringManager {
                         .await;
 
                         #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-                        Self::repair_remote_video_subscription(
+                        Self::repair_remote_video_subscription(tasks.clone(),
                             &inner,
                             &broadcast,
                             &node_id,
@@ -1325,11 +1430,15 @@ impl TutoringManager {
     ///
     /// `camera_index` selects a specific camera; `None` uses the default.
     async fn create_broadcast(
+        tasks: Arc<SessionTasks>,
         audio_ctx: Option<&AudioBackend>,
         video: bool,
         audio: bool,
         camera_index: Option<String>,
     ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
+        if !tasks.is_open() {
+            return Err("media session is closing".into());
+        }
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
         #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
@@ -1363,11 +1472,10 @@ impl TutoringManager {
         if video {
             log::info!("tutoring: initializing camera (spawn_blocking)...");
             let parsed_camera_index = camera_index.as_deref().and_then(parse_camera_index);
-            let camera_result = tokio::task::spawn_blocking(move || {
-                CameraCapturer::with_index(parsed_camera_index)
-            })
-            .await
-            .map_err(|e| format!("camera task panicked: {e}"))?;
+            let camera_result = tasks
+                .run_blocking(move || CameraCapturer::with_index(parsed_camera_index))
+                .await
+                .map_err(|e| format!("camera initialization failed: {e}"))?;
 
             match camera_result {
                 Ok(camera) => {
@@ -1400,14 +1508,16 @@ impl TutoringManager {
     /// are emitted as `tutoring:video-frame` events with `node_id = "self"`.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     fn start_self_preview(
+        tasks: Arc<SessionTasks>,
         broadcast: &mut PublishBroadcast,
         app_handle: AppHandle,
-    ) -> Option<JoinHandle<()>> {
+    ) -> Option<TaskHandle> {
         let config = DecodeConfig::default();
         let watch = broadcast.watch_local(config)?;
 
         log::info!("tutoring: starting self-preview");
         Some(Self::spawn_frame_bridge(
+            tasks.clone(),
             watch,
             "self".into(),
             app_handle,
@@ -1419,19 +1529,21 @@ impl TutoringManager {
 
     #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
     fn start_self_preview(
+        _tasks: Arc<SessionTasks>,
         _broadcast: &mut PublishBroadcast,
         _app_handle: AppHandle,
-    ) -> Option<JoinHandle<()>> {
+    ) -> Option<TaskHandle> {
         None
     }
 
     /// Spawn a background task that periodically reads mic + output peak levels
     /// and emits `tutoring:audio-level` Tauri events for the frontend VU meters.
     fn start_audio_level_emitter(
+        tasks: Arc<SessionTasks>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         app_handle: AppHandle,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    ) -> TaskHandle {
+        tasks.clone().spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(50));
             loop {
                 interval.tick().await;
@@ -1497,6 +1609,7 @@ impl TutoringManager {
 
     /// Set up a chat channel on a gossip topic derived from the room.
     async fn setup_chat(
+        tasks: Arc<SessionTasks>,
         gossip: &Gossip,
         topic_seed: &[u8],
         our_node_id: &str,
@@ -1517,7 +1630,7 @@ impl TutoringManager {
                 let our_id = our_node_id.to_string();
 
                 // Spawn task to receive chat messages and forward to webview
-                tokio::spawn(async move {
+                tasks.clone().spawn(async move {
                     use futures::StreamExt;
                     while let Some(Ok(event)) = receiver.next().await {
                         if let iroh_gossip::api::Event::Received(msg) = event {
@@ -1583,13 +1696,14 @@ impl TutoringManager {
     /// and listens for name announcements from other peers, updating the
     /// peers map and emitting `tutoring:peer-name` events.
     async fn setup_names(
+        tasks: Arc<SessionTasks>,
         gossip: &Gossip,
         topic_seed: &[u8],
         our_node_id: &str,
         our_display_name: &str,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         app_handle: AppHandle,
-    ) -> Option<(iroh_gossip::api::GossipSender, JoinHandle<()>)> {
+    ) -> Option<(iroh_gossip::api::GossipSender, TaskHandle)> {
         use iroh_gossip::proto::TopicId;
 
         let mut hasher = blake3::Hasher::new();
@@ -1608,7 +1722,7 @@ impl TutoringManager {
                 // Spawn a task that:
                 // 1. Broadcasts our name immediately and every N seconds
                 // 2. Listens for name announcements from peers
-                let task = tokio::spawn(async move {
+                let task = tasks.clone().spawn(async move {
                     // Broadcast our name immediately
                     let announce = NameAnnouncement {
                         node_id: our_id.clone(),
@@ -1702,6 +1816,7 @@ impl TutoringManager {
     /// connections, broadcast subscriptions) and spawns video frame
     /// bridge tasks for each subscribed remote broadcast.
     async fn event_loop(
+        tasks: Arc<SessionTasks>,
         mut events: mpsc::Receiver<RoomEvent>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: Option<AudioBackend>,
@@ -1854,13 +1969,19 @@ impl TutoringManager {
                     }
 
                     Self::repair_remote_audio_subscription(
-                        &inner, &audio_ctx, &broadcast, &node_id, &name,
+                        tasks.clone(),
+                        &inner,
+                        &audio_ctx,
+                        &broadcast,
+                        &node_id,
+                        &name,
                     )
                     .await;
 
                     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
                     {
                         Self::repair_remote_video_subscription(
+                            tasks.clone(),
                             &inner,
                             &broadcast,
                             &node_id,
@@ -1889,6 +2010,7 @@ impl TutoringManager {
 
                     if spawn_repair_task {
                         let repair_task = Self::spawn_remote_broadcast_repair_task(
+                            tasks.clone(),
                             inner.clone(),
                             audio_ctx.clone(),
                             broadcast_for_repair,
@@ -1915,21 +2037,33 @@ impl TutoringManager {
     /// `tutoring:peer-video-ended` event so the frontend can clean up.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     fn spawn_frame_bridge(
+        tasks: Arc<SessionTasks>,
         watch: WatchTrack,
         node_id: String,
         app_handle: AppHandle,
         viewport: (u32, u32),
         quality: u8,
         fps: u32,
-    ) -> JoinHandle<()> {
+    ) -> TaskHandle {
         Self::spawn_frame_bridge_with_resubscribe(
-            watch, node_id, app_handle, viewport, quality, fps, None, None, None, None,
+            tasks.clone(),
+            watch,
+            node_id,
+            app_handle,
+            viewport,
+            quality,
+            fps,
+            None,
+            None,
+            None,
+            None,
         )
     }
 
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     #[allow(clippy::too_many_arguments)]
     fn spawn_frame_bridge_with_resubscribe(
+        tasks: Arc<SessionTasks>,
         watch: WatchTrack,
         node_id: String,
         app_handle: AppHandle,
@@ -1940,11 +2074,11 @@ impl TutoringManager {
         subscription_key: Option<String>,
         _remote_endpoint: Option<EndpointId>,
         _broadcast_name: Option<String>,
-    ) -> JoinHandle<()> {
+    ) -> TaskHandle {
         let (mut frames, handle) = watch.split();
         handle.set_viewport(viewport.0, viewport.1);
 
-        tokio::spawn(async move {
+        tasks.clone().spawn(async move {
             let _handle = handle;
             log::info!(
                 "tutoring: frame bridge started for {node_id} ({}x{} q={quality} fps={fps})",

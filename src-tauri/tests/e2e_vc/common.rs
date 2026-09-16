@@ -1,5 +1,4 @@
-//! Shared test harness for the e2e VC scenarios. Stubs — PR 1 scaffolds
-//! these; the real implementations land as dependency PRs arrive.
+//! Shared fixtures for VC scenarios and directly connected loopback swarms.
 
 use app_lib::crypto::did::Did;
 use app_lib::db::Database;
@@ -43,8 +42,7 @@ fn uuid_like() -> String {
     format!("{nanos}-{}-{seq}", std::process::id())
 }
 
-/// Convenience: derive a `did:key` from a role-keyed signing key.
-/// Panics if invoked before PR 3 lands `derive_did_key`.
+/// Derive a `did:key` from a role-keyed signing key.
 pub fn test_did(role: &str) -> Did {
     let key = test_key(role);
     app_lib::crypto::did::derive_did_key(&key)
@@ -54,43 +52,35 @@ pub fn test_did(role: &str) -> Did {
 pub const TEST_NOW: &str = "2026-04-13T00:00:00Z";
 
 // ---------------------------------------------------------------------------
-// Two-node libp2p harness (lifted from `p2p::stress::tests`).
-//
-// P2P e2e tests boot real libp2p swarms via `start_node`. These helpers
-// mirror the stress-test pattern — deterministic keys per role, graceful
-// SKIP on mDNS timeout (common in CI / containers), and shutdown on drop.
-// Each test costs ~10–15s wall-clock.
+// Real libp2p swarms, loopback listeners, explicit peers, bounded failures.
 // ---------------------------------------------------------------------------
 
-use app_lib::p2p::network::{derive_libp2p_keypair, start_node_with_db, P2pNode};
-use app_lib::p2p::types::P2pEvent;
+use app_lib::p2p::network::{
+    derive_libp2p_keypair, start_loopback_node_with_db, NetworkError, P2pNode,
+};
+use app_lib::p2p::types::{P2pEvent, SignedGossipMessage};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-/// Start a libp2p node with a deterministic key derived from `role`.
-/// Returns `Some((node, event_rx))` on success, `None` if the node
-/// couldn't start (e.g. ephemeral port binding failed) — callers
-/// should treat `None` as SKIP, not FAIL.
-pub async fn start_test_node(
-    role: &str,
-    capacity: usize,
-) -> Option<(P2pNode, mpsc::Receiver<P2pEvent>)> {
-    let mut seed = [0u8; 32];
-    let b = role.as_bytes();
-    for (i, byte) in seed.iter_mut().enumerate() {
-        *byte = b[i % b.len().max(1)];
+pub struct EventDrain(tokio::task::JoinHandle<()>);
+
+impl Drop for EventDrain {
+    fn drop(&mut self) {
+        self.0.abort();
     }
-    let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
-    let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
-    match start_node_with_db(kp, tx, vec![], None, false).await {
-        Ok(node) => Some((node, rx)),
-        Err(err) => {
-            eprintln!("SKIP: node `{role}` failed to start ({err:?})");
-            None
-        }
-    }
+}
+
+pub fn discard_events(mut receiver: mpsc::Receiver<P2pEvent>) -> EventDrain {
+    EventDrain(tokio::spawn(async move {
+        while receiver.recv().await.is_some() {}
+    }))
+}
+
+/// Start a real loopback node. Startup failures fail the test.
+pub async fn start_test_node(role: &str, capacity: usize) -> (P2pNode, mpsc::Receiver<P2pEvent>) {
+    start_fixture(role, capacity, None).await
 }
 
 /// Fixed device id for deterministic test PeerIds — real installs use a
@@ -104,62 +94,111 @@ pub async fn start_test_node_with_db(
     role: &str,
     capacity: usize,
     db: app_lib::db::Database,
-) -> Option<(P2pNode, mpsc::Receiver<P2pEvent>)> {
+) -> (P2pNode, mpsc::Receiver<P2pEvent>) {
+    start_fixture(role, capacity, Some(db)).await
+}
+
+async fn start_fixture(
+    role: &str,
+    capacity: usize,
+    db: Option<Database>,
+) -> (P2pNode, mpsc::Receiver<P2pEvent>) {
     let mut seed = [0u8; 32];
     let b = role.as_bytes();
     for (i, byte) in seed.iter_mut().enumerate() {
         *byte = b[i % b.len().max(1)];
     }
-    let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
+    let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).expect("test keypair");
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
-    let db_arc = Arc::new(StdMutex::new(Some(db)));
-    match start_node_with_db(kp, tx, vec![], Some(db_arc), false).await {
-        Ok(node) => Some((node, rx)),
-        Err(err) => {
-            eprintln!("SKIP: node `{role}` failed to start ({err:?})");
-            None
-        }
-    }
+    let db_arc = db.map(|database| Arc::new(StdMutex::new(Some(database))));
+    let node = timeout(
+        Duration::from_secs(10),
+        start_loopback_node_with_db(kp, tx, db_arc),
+    )
+    .await
+    .expect("loopback node startup timed out")
+    .expect("loopback node startup failed");
+    (node, rx)
 }
 
-/// Poll until both nodes see each other as connected, or `timeout_s`
-/// elapses. Returns `true` on success, `false` on timeout (SKIP signal).
-pub async fn await_peers_connected(a: &P2pNode, b: &P2pNode, timeout_s: u64) -> bool {
+/// Dial the fixture's loopback listener and require mutual connection.
+pub async fn await_peers_connected(a: &P2pNode, b: &P2pNode, timeout_s: u64) {
     let a_id = a.peer_id().to_string();
     let b_id = b.peer_id().to_string();
     timeout(Duration::from_secs(timeout_s), async {
+        let address = loop {
+            let status = b.status().await.expect("fixture status");
+            assert!(
+                status
+                    .listening_addresses
+                    .iter()
+                    .all(|address| address.starts_with("/ip4/127.0.0.1/tcp/")),
+                "fixture exposed a non-loopback listener"
+            );
+            if let Some(address) = status.listening_addresses.first() {
+                break address.parse().expect("loopback multiaddress");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert!(a.connected_peers().await.expect("fixture peers").is_empty());
+        assert!(b.connected_peers().await.expect("fixture peers").is_empty());
+        a.connect_peer(*b.peer_id(), vec![address])
+            .await
+            .expect("direct loopback dial");
         loop {
-            let peers_a = a.connected_peers().await.unwrap_or_default();
-            let peers_b = b.connected_peers().await.unwrap_or_default();
-            if peers_a.contains(&b_id) || peers_b.contains(&a_id) {
-                return true;
+            let peers_a = a.connected_peers().await.expect("fixture A peers");
+            let peers_b = b.connected_peers().await.expect("fixture B peers");
+            if peers_a.contains(&b_id) && peers_b.contains(&a_id) {
+                assert_eq!(peers_a.len(), 1);
+                assert_eq!(peers_b.len(), 1);
+                return;
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     })
     .await
-    .unwrap_or(false)
+    .expect("direct test-peer connection timed out");
+}
+
+pub async fn publish_until_ready<F, Fut>(mut publish: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), NetworkError>>,
+{
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match publish().await {
+                Ok(()) => return,
+                Err(NetworkError::Publish(error)) if error.contains("InsufficientPeers") => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(error) => panic!("gossip publication failed: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("gossip mesh did not become ready");
 }
 
 /// Drain the receiver until a `GossipMessage` arrives on the given
-/// topic suffix, or the timeout elapses. Returns the deserialized
-/// envelope payload.
+/// topic suffix. Timeout or channel closure fails the test. The original
+/// signed envelope is retained for application-handler assertions.
 pub async fn await_gossip_on(
     rx: &mut mpsc::Receiver<P2pEvent>,
     topic_suffix: &str,
     timeout_s: u64,
-) -> Option<Vec<u8>> {
+) -> SignedGossipMessage {
     timeout(Duration::from_secs(timeout_s), async {
         while let Some(event) = rx.recv().await {
             if let P2pEvent::GossipMessage { topic, message } = event {
                 if topic.contains(topic_suffix) {
-                    return Some(message.payload);
+                    return Some(message);
                 }
             }
         }
         None
     })
     .await
-    .ok()
-    .flatten()
+    .expect("gossip propagation timed out")
+    .expect("gossip event channel closed")
 }

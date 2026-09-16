@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use alexandria_studio::{model::*, store, Error as StudioError};
-use tauri::{Manager, State};
+use tauri::Manager;
+
+use crate::profile::scope::ProfileState as State;
 
 use crate::AppState;
 

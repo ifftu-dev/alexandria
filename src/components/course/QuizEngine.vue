@@ -69,9 +69,7 @@ async function loadQuiz() {
   loading.value = true
   error.value = null
   try {
-    const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: props.contentCid })
-    const decoder = new TextDecoder()
-    const json = decoder.decode(new Uint8Array(bytes))
+    const json = await invoke<string>('content_resolve_text', { identifier: props.contentCid })
     parseAndResetQuiz(json)
   } catch (e: unknown) {
     error.value = t('courses.quiz.loadError', { error: String(e) })

@@ -15,8 +15,17 @@ const { t } = useI18n()
 const router = useRouter()
 const {
   isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId,
-  unmetElements, elapsedMs, etaMs, progressPct, close,
+  unmetElements, elapsedMs, etaMs, progressPct, witnessStatus,
+  endorsementRequest, endorsementMissingEvidence, endorsementStatus,
+  endorsementLoading, endorsementError, endorsementMessage,
+  refreshEndorsementStatus, importEndorsementJson, close,
 } = useCourseCompletion()
+
+const endorsementImportJson = ref('')
+const endorsementUiMessage = ref('')
+const endorsementRequestJson = computed(() => endorsementRequest.value
+  ? JSON.stringify(endorsementRequest.value, null, 2)
+  : '')
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -38,9 +47,6 @@ function fmtSecs(ms: number): string {
 const etaLabel = computed(() => {
   if (mintStage.value === 'issued') return t('courses.completion.etaDone', { seconds: fmtSecs(elapsedMs.value) })
   if (mintStage.value === 'unavailable') return ''
-  if (mintStage.value === 'anchoring') {
-    return etaMs.value > 0 ? t('courses.completion.etaSecuring', { seconds: fmtSecs(etaMs.value) }) : t('courses.completion.etaSecuringConfirming')
-  }
   return etaMs.value > 0 ? t('courses.completion.etaLeft', { seconds: fmtSecs(etaMs.value) }) : t('courses.completion.etaFinishing')
 })
 
@@ -93,6 +99,8 @@ function spawnConfetti() {
 
 watch(isOpen, (open) => {
   if (open) {
+    endorsementImportJson.value = ''
+    endorsementUiMessage.value = ''
     document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', onKey)
     spawnConfetti()
@@ -102,6 +110,25 @@ watch(isOpen, (open) => {
     pieces.value = []
   }
 })
+
+async function copyEndorsementRequest() {
+  if (!endorsementRequestJson.value) return
+  try {
+    await navigator.clipboard.writeText(endorsementRequestJson.value)
+    endorsementUiMessage.value = t('courses.completion.endorsementRequestCopied')
+  } catch (error) {
+    endorsementUiMessage.value = t('courses.completion.endorsementCopyFailed', { error: String(error) })
+  }
+}
+
+async function importEndorsement() {
+  endorsementUiMessage.value = ''
+  const imported = await importEndorsementJson(endorsementImportJson.value)
+  if (imported) {
+    endorsementImportJson.value = ''
+    endorsementUiMessage.value = t('courses.completion.endorsementImported')
+  }
+}
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') close()
@@ -129,11 +156,6 @@ const mint = computed(() => {
         label: t('courses.completion.creatingLabel'),
         note: t('courses.completion.creatingNote', { done: mintedCount.value, total }),
       }
-    case 'anchoring':
-      return {
-        label: t('courses.completion.securingLabel'),
-        note: t('courses.completion.securingNote'),
-      }
     default:
       return {
         label: t('courses.completion.notEarnedLabel'),
@@ -145,6 +167,18 @@ const mint = computed(() => {
 })
 
 const hasCredential = computed(() => mintStage.value !== 'unavailable' && items.value.length > 0)
+
+const witnessNote = computed(() => {
+  switch (witnessStatus.value) {
+    case 'pending': return t('courses.completion.witnessPending')
+    case 'submitted': return t('courses.completion.witnessSubmitted')
+    case 'outcome_unknown': return t('courses.completion.witnessUnknown')
+    case 'confirmed': return t('courses.completion.witnessConfirmed')
+    case 'failed_on_chain': return t('courses.completion.witnessFailed')
+    case 'unavailable': return t('courses.completion.witnessUnavailable')
+    default: return ''
+  }
+})
 
 function viewCredential() {
   const id = primaryCredentialId.value
@@ -223,7 +257,6 @@ function continueToDashboard() {
               <div class="mint-bar">
                 <div
                   class="mint-bar-fill"
-                  :class="{ anchoring: mintStage === 'anchoring' }"
                   :style="{ width: `${progressPct}%` }"
                 />
               </div>
@@ -282,14 +315,98 @@ function continueToDashboard() {
               <p class="unmet-cta">{{ $t('courses.completion.cta', { pct: pct(unmet[0]?.required_score ?? 0.6) }) }}</p>
             </div>
 
+            <p v-if="witnessNote" class="mt-3 text-sm" role="status">{{ witnessNote }}</p>
             <a
-              v-if="shortTx"
+              v-if="shortTx && witnessStatus === 'confirmed'"
               class="mint-tx"
               :href="`https://preprod.cardanoscan.io/transaction/${txHash}`"
               target="_blank"
               rel="noopener"
             >{{ $t('courses.completion.viewPublicRecord') }}</a>
           </div>
+
+          <section
+            v-if="endorsementRequest || endorsementMissingEvidence.length"
+            class="endorsement"
+          >
+            <div class="endorsement-head">
+              <div class="text-start">
+                <h3 class="endorsement-title">{{ $t('courses.completion.endorsementTitle') }}</h3>
+                <p class="endorsement-note">{{ $t('courses.completion.endorsementDescription') }}</p>
+              </div>
+              <button
+                v-if="endorsementRequest"
+                class="endorsement-refresh"
+                :disabled="endorsementLoading"
+                @click="refreshEndorsementStatus"
+              >
+                {{ $t('courses.completion.endorsementRefresh') }}
+              </button>
+            </div>
+
+            <div v-if="endorsementMissingEvidence.length" class="endorsement-warning">
+              <p>{{ $t('courses.completion.endorsementMissingEvidence') }}</p>
+              <ul>
+                <li v-for="requirement in endorsementMissingEvidence" :key="`${requirement.kind}-${requirement.format_version}`">
+                  {{ requirement.kind }} v{{ requirement.format_version }}
+                </li>
+              </ul>
+            </div>
+
+            <template v-if="endorsementRequest">
+              <p v-if="endorsementStatus" class="endorsement-status">
+                {{ endorsementStatus.satisfied
+                  ? $t('courses.completion.endorsementSatisfied', { count: endorsementStatus.valid_attestors.length })
+                  : $t('courses.completion.endorsementProgress', {
+                    count: endorsementStatus.valid_attestors.length,
+                    required: endorsementStatus.required_attestors,
+                  }) }}
+              </p>
+              <dl class="endorsement-facts">
+                <div><dt>{{ $t('courses.completion.endorsementCourseVersion') }}</dt><dd>v{{ endorsementRequest.course_document_version }}</dd></div>
+                <div><dt>{{ $t('courses.completion.endorsementDocument') }}</dt><dd>{{ endorsementRequest.course_document_cid }}</dd></div>
+                <div><dt>{{ $t('courses.completion.endorsementCompletionRoot') }}</dt><dd>{{ endorsementRequest.completion_root }}</dd></div>
+              </dl>
+              <label class="endorsement-label" for="completion-endorsement-request">
+                {{ $t('courses.completion.endorsementRequestJson') }}
+              </label>
+              <textarea
+                id="completion-endorsement-request"
+                class="endorsement-json"
+                :value="endorsementRequestJson"
+                rows="4"
+                readonly
+              />
+              <button class="endorsement-button" @click="copyEndorsementRequest">
+                {{ $t('courses.completion.endorsementCopyRequest') }}
+              </button>
+
+              <label class="endorsement-label" for="completion-endorsement-import">
+                {{ $t('courses.completion.endorsementImportJson') }}
+              </label>
+              <textarea
+                id="completion-endorsement-import"
+                v-model="endorsementImportJson"
+                class="endorsement-json"
+                rows="4"
+                :placeholder="$t('courses.completion.endorsementImportPlaceholder')"
+              />
+              <button
+                class="endorsement-button"
+                :disabled="endorsementLoading || !endorsementImportJson.trim()"
+                @click="importEndorsement"
+              >
+                {{ endorsementLoading
+                  ? $t('courses.completion.endorsementChecking')
+                  : $t('courses.completion.endorsementImport') }}
+              </button>
+            </template>
+            <p v-if="endorsementUiMessage" class="endorsement-message" role="status">{{ endorsementUiMessage }}</p>
+            <p v-else-if="endorsementMessage === 'imported'" class="endorsement-message" role="status">
+              {{ $t('courses.completion.endorsementImported') }}
+            </p>
+            <p v-if="endorsementError" class="endorsement-error" role="alert">{{ endorsementError }}</p>
+          </section>
 
           <div class="actions">
             <button v-if="hasCredential" class="btn btn-primary" @click="viewCredential">
@@ -332,7 +449,99 @@ function continueToDashboard() {
   background: var(--app-card, #0b1220);
   box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02);
   text-align: center;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
   animation: card-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.endorsement {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.2));
+  border-radius: 0.75rem;
+  background: rgba(148, 163, 184, 0.06);
+}
+.endorsement-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.endorsement-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--app-foreground, #e2e8f0);
+}
+.endorsement-note,
+.endorsement-label {
+  font-size: 0.68rem;
+  color: var(--app-muted-foreground, #94a3b8);
+}
+.endorsement-label {
+  display: block;
+  margin: 0.65rem 0 0.25rem;
+  text-align: left;
+  font-weight: 600;
+}
+.endorsement-refresh,
+.endorsement-button {
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--app-foreground, #e2e8f0);
+}
+.endorsement-button {
+  width: 100%;
+  margin-top: 0.35rem;
+}
+.endorsement-refresh:disabled,
+.endorsement-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.endorsement-warning,
+.endorsement-status,
+.endorsement-message,
+.endorsement-error {
+  margin-top: 0.6rem;
+  font-size: 0.7rem;
+  text-align: left;
+}
+.endorsement-warning,
+.endorsement-error { color: var(--app-error, #f87171); }
+.endorsement-message,
+.endorsement-status { color: var(--app-success, #34d399); }
+.endorsement-warning ul { margin: 0.25rem 0 0; padding-left: 1rem; }
+.endorsement-facts {
+  margin-top: 0.65rem;
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+}
+.endorsement-facts div { min-width: 0; }
+.endorsement-facts dt {
+  font-size: 0.62rem;
+  color: var(--app-muted-foreground, #94a3b8);
+}
+.endorsement-facts dd {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  color: var(--app-foreground, #e2e8f0);
+}
+.endorsement-json {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border-radius: 0.45rem;
+  background: var(--app-background, #020617);
+  padding: 0.45rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  color: var(--app-foreground, #e2e8f0);
 }
 
 /* Emblem */

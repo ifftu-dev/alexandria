@@ -151,7 +151,7 @@ subsequent handling of that file.
 
 ## Data model and IPC
 
-Migration 083 adds six interview tables and adds `purpose` to
+Migration 092 adds six interview tables and adds `purpose` to
 `integrity_sessions`:
 
 - `interview_sessions`

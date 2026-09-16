@@ -1,7 +1,8 @@
 # VC-First Cutover (Migration 040)
 
 **Date:** 2026-04-24
-**Branch:** `refactor/vc-first-migration`
+**Original branch:** `refactor/vc-first-migration`
+**Last reconciled:** 2026-09-15 on `rebuild/foundation`
 
 This document is the authoritative account of the cutover from the
 legacy SkillProof pipeline to a W3C Verifiable Credentials (VC) model.
@@ -9,6 +10,12 @@ It supersedes the pre-cutover descriptions in `architecture.md`,
 `protocol-specification.md`, `skills-and-reputation.md`,
 `database-schema.md`, and `vision.md` wherever those docs reference
 SkillProof / EvidenceRecord / SkillAssessment artifacts.
+
+Later work briefly rebuilt a credential challenge committee and Cardano escrow.
+Assessment-remediation package T01 retired that experiment again. The current
+authority model is issuer-bound status lists: only the issuer can revoke,
+suspend, or reinstate its credential. This document records both the original
+cutover and that current state.
 
 ## What changed
 
@@ -28,6 +35,18 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   against credentials (not evidence rows).
 - Reputation join tables (`reputation_evidence`,
   `reputation_impact_deltas`) — will be rebuilt against credentials.
+- The later `commands::challenge` module, credential-challenge domain types,
+  challenge UI, escrow transaction builders and recovery worker, and the Aiken
+  challenge validator. The migration-043/050/082 tables remain only as legacy
+  pre-launch storage pending cleanup migration D03.
+- Plugin-attestation ingest/status IPC and inbound persistence. The reserved
+  gossip topic remains subscribed for compatibility but grants no authority.
+- Migration 042's mutable `completion_attestation_requirements` and
+  transaction-hash-only `completion_attestations` tables, together with their
+  set/remove/submit/status IPC. Migration 091 drops the tables.
+- The registered `submit_completion_witness` IPC that accepted a completion
+  element list from its caller. `claim_course_completion` is the authoritative
+  path and reconstructs its inputs from persisted passing submissions.
 
 **New:**
 
@@ -37,6 +56,17 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
 - `VerifiableCredential` struct gains an optional `witness` field
   carrying those three pieces of on-chain authorization state. The
   JWS covers the witness block when present.
+- Course-document v2 signs the author DID and optional bounded completion
+  policy. New enrollments freeze the verified document CID/version/policy;
+  completion claims and endorsements bind that exact snapshot.
+- `course_completion_endorsements` stores only artifacts accepted by the
+  shared I/O-free verifier. Each authorized attestor is counted once.
+- Credential verification now returns `accept`, `pending`, or `reject`.
+  `VerificationStore` adapters distinguish confirmed missing rows from failed
+  lookups, and the wire result carries `statusValid` plus typed
+  `pendingReasons`. A missing referenced status list or external issuer key no
+  longer becomes an accepted credential. Imports leave pending credentials out
+  of the active store.
 
 **Staying:**
 
@@ -51,14 +81,17 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   request-response protocol.
 - All governance/Aiken validators (`dao_registry`, `dao_minting`,
   `election`, `proposal`, `reputation_minting`, `soulbound`,
-  `vote_minting`) — unchanged.
+  `vote_minting`) — historical deployments remain, while release authority is
+  gated on explicitly pinned governance genesis and future committee outcome
+  certificates.
 
 ## New conceptual model
 
 1. A learner's identity is a `did:key` Ed25519 derived from their
    BIP-39 mnemonic (unchanged).
 2. Course elements are gradeable; `claim_course_completion` assembles
-   completion leaves from the learner's graded `element_submissions`
+   completion leaves from the learner's persisted graded
+   `element_submissions` for the exact verified enrollment
    (**implemented**).
 3. Element leaves aggregate to a course-completion Merkle root that is
    verified against the registered course template (gradeable elements
@@ -82,17 +115,16 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
 
 1. **VC integrity anchoring** — BLAKE3-of-VC metadata txs (label 1697)
    via `cardano/anchor_queue.rs` (wired).
-2. **DAO governance** — election/proposal/vote txs via
-   `cardano/gov_tx_builder.rs` and `cardano/onchain_queue.rs`
-   (wired; reference scripts deployed on preprod — see
-   `cardano/script_refs.rs`).
+2. **DAO governance** — the operator election/proposal/vote transaction
+   queue is deleted. Governance will anchor verified committee outcomes once
+   the committee protocol lands; the deployed reference scripts remain listed
+   in `cardano/script_refs.rs`.
 3. **Completion-witness minting** — `completion.ak` validator
    (deployed) + observer + auto-issuance (live).
-4. **Challenge-stake escrow** — `challenge_escrow.ak` validator; lock
-   and settle both work on preprod (escrow reference script deployed).
-5. **CIP-68 soulbound reputation snapshots** — `soulbound_tx_builder.rs`
-   / `submit_snapshot_tx`; mint works on preprod (reputation-minting
-   reference script deployed).
+4. **Reputation snapshots** — new snapshots are signed
+   `DerivedCredential` VCs whose canonical hashes use the normal optional
+   credential-anchor queue. Historical CIP-68 rows remain identifiable and can
+   only reconcile an already-journaled signed transaction.
 
 ## What compiles today
 
@@ -112,7 +144,7 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   asset_name_hex)`.
 - `src-tauri/src/commands/auto_issuance.rs` — self-signs a
   `SelfAssertion` VC for each pending observation with the `Witness`
-  block populated. Attestation gate below.
+  block populated. Instructor endorsement is tracked independently.
 - `src-tauri/src/domain/completion.rs` — `element_leaf` /
   `merkle_root` that match the Aiken algorithm byte-for-byte.
 - `src-tauri/src/cardano/completion_tx_builder.rs` — Conway tx
@@ -121,18 +153,21 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   populated (deployed to preprod 2026-05-22, block 4736927).
 - Migration 041 adds `completion_observations`.
 - `src-tauri/src/commands/completion.rs` — frontend IPC:
-  `preview_completion_root`, `submit_completion_witness`.
+  `preview_completion_root`, `get_course_completion_status`, and
+  `claim_course_completion`. The write path accepts no caller-built element
+  list.
 
 ## Session 3 additions — rebuilt subsystems
 
 - **Governance + opinion gating** (task #9): queries read the
   proficiency level out of `signed_vc_json` via `json_extract`;
   opinions require `apply+` credentials under the target subject.
-- **Attestation** (task #17): rebuilt at
-  `commands::attestation` + `completion_attestation_requirements` +
-  `completion_attestations` tables (migration 042). Assessors sign
-  the witness tx hash; the auto-issuance pipeline refuses to emit
-  until the DAO-configured threshold of valid signatures is present.
+- **Attestation** (historical task #17): migration 042 keyed mutable
+  requirements by course ID and signed only the witness transaction hash.
+  Assessment-remediation T02 replaced this with an author-signed policy on the
+  exact course document, a canonical learner/course/version/evidence/network
+  binding, shared verifier, and `course_completion_endorsements` persistence
+  in migration 091. Learner self-claims do not wait for an instructor.
 - **Reputation engine** (task #15): rebuilt at
   `evidence::reputation`. `on_credential_accepted` is the single
   entry point, called after every issuance path. Learner rows
@@ -142,16 +177,11 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
   variance / learner_count) **are now computed and persisted**;
   `commands::reputation::get_reputation` derives a sample-size
   confidence (`learner_count / (learner_count + 5)`) on read.
-- **Challenge system** (task #16): rebuilt at
-  `commands::challenge` + `credential_challenges` +
-  `credential_challenge_votes` tables (migration 043). Targets a
-  specific credential; 2/3 supermajority upholds → revocation via
-  status-list bit flip. Stake escrow is now real: 5 ADA locks at the
-  `challenge_escrow.ak` validator (migration 050 added `stake_status`
-  + `settle_tx_hash`); the lock tx works on preprod, and on resolution
-  the DAO authority settles (Refund → challenger / Forfeit →
-  treasury). `CHALLENGE_ESCROW_REF_UTXO` is deployed on preprod
-  (2026-05-22, block 4736927), so settlement is live-capable.
+- **Challenge system** (historical task #16): migrations 043, 050, and
+  082 added a VC-first challenge and escrow experiment. T01 removed every
+  executable and user-facing path because an off-chain committee could mutate
+  issuer status without a complete authority policy. The remaining tables do
+  not authorize any action.
 
 ## Observer daemon wiring
 
@@ -161,49 +191,68 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
    Blockfrost for new mints under
    `ALEXANDRIA_COMPLETION_POLICY_ID` and writes
    `completion_observations` rows.
-2. `commands::auto_issuance::tick(&conn, &learner_key)` — emits
-   VCs for observations whose attestation requirement is satisfied.
+2. `commands::auto_issuance::tick(&conn, &learner_key)` — emits the learner's
+   self-signed witnessed VC for matching local observations. Instructor
+   endorsement is a separate exact-binding artifact.
 
 Both are silent no-ops if the env var is unset or no profile is
 currently unlocked, matching the posture of the other cardano queues.
 
-## Seed updates
+## Seed status
 
-Migration-time SQL seeds (`db::seed`) gain:
-- One demo `completion_attestation_requirements` row on
-  `course_civics_101` (required_attestors = 2).
-- One pending `completion_observations` row so the frontend can
-  exercise the "awaiting attestation" state.
-- One demo `completion_attestations` row that partially satisfies
-  the requirement.
+The former fake requirement and attestation rows were removed, and the startup
+seed itself is deleted: a new profile carries no fabricated rows and no
+instructor signature. The planned demo-world
+builder must create course policies and endorsements with the actual persona
+keys through the real publication and import paths.
 
 ## Frontend wiring
 
-**Done.** The credential pages are rewired against the VC IPC surface
-(`list_credentials`, `preview_completion_root`,
-`submit_completion_witness`, `claim_course_completion`,
-`list_reputation_rows`, `get_reputation`, `list_credential_challenges`,
-`get_completion_attestation_status`, etc.), and the frontend exposes a
-"Claim Credential" affordance that drives the completion-witness flow.
+The credential pages use the VC IPC surface, and the learner UI calls
+`claim_course_completion`. Backend commands now support exact endorsement
+request export, local authorized signing, verified import, and threshold
+status. The composer now saves an author-scoped policy for the next signed
+publication and blocks publication while policy edits are unsaved. The learner
+completion modal copies the exact request. For each returned endorsement it
+passes the pasted JSON text unchanged to the backend, which parses it strictly
+and verifies it before import. The modal then shows threshold status. The instructor inbox requires a separate
+parse-and-review step before it will call the authorized local signer, then
+exports the resulting signed JSON. This workflow is manual; authenticated
+addressed transport remains pending. Credential verification DTOs use their
+actual camelCase Tauri wire shape in TypeScript, and the detail badge
+distinguishes pending from rejection. The credential detail page also shows a
+provenance panel from `get_credential_trust`: invalid, pending, own claim, signed
+by another issuer, or endorsed for an exact course version, with the reason or
+endorsement count. The panel states that provenance does not grant privileges.
+The proof panel reports revocation as pending, not "no", while the issuer's
+status list is missing or unreadable, and notes that a check on this device uses
+the status information it holds and cannot see a revocation the issuer published
+after the device last received that list.
 
 ## Deploy prerequisites
 
-The subsystem rebuilds are **done**: auto-issuance
-(`commands::auto_issuance`), the credential-sourced reputation engine
-(`evidence/reputation.rs`), credential challenges (`commands::challenge`,
-status-list revocation), completion attestation (`commands::attestation`),
-and the frontend rewire all ship.
+The auto-issuance path, credential-sourced reputation engine
+(`evidence/reputation.rs`), exact endorsement backend
+(`commands::attestation`), issuer-bound status-list lifecycle, and learner VC
+surface ship. Credential challenges do not. Hosted or peer delivery of an
+endorsement request must authenticate the addressed instructor before it is a
+complete acquisition flow.
 
-All nine Aiken/Plutus v3 reference scripts are now deployed on
+Status-bearing bare credentials can prove their signatures offline but remain
+pending until their referenced status list is available. Exported survivability
+bundles carry the status lists and historical key bindings needed for a
+conclusive offline decision. The independent Node verifier and twelve published
+vectors exercise accepted, rejected, and pending outcomes.
+
+Eight retained Aiken/Plutus v3 reference scripts are deployed on
 **preprod testnet** (2026-05-22, block 4736927) via
 `cardano/governance/deploy_blockfrost.py` (a node-free deployer:
 `cardano-cli build-raw` + Blockfrost submit), and `cardano/script_refs.rs`
 carries their UTxOs. `ref_utxos_deployed()`, `completion_ref_deployed()`,
-and `challenge_escrow_deployed()` all return `true`, so the soulbound
-snapshot mint, challenge-stake settlement, completion-witness, and
-governance tx builders all reference live scripts. The end-to-end
-governance enforcement *flows* (election/proposal lifecycle) are still
-maturing on top of the now-deployed validators.
+and the completion/governance reference checks identify deployed historical
+scripts. The active app no longer compiles the soulbound mint or challenge
+escrow builders. The end-to-end governance enforcement flows remain gated in
+release builds while committee outcome certificates are unfinished.
 
 To run the flows against preprod:
 

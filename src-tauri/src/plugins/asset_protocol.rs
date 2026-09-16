@@ -107,7 +107,8 @@ pub fn handle(plugins_dir: &Path, request: Request<Vec<u8>>) -> Response<Vec<u8>
         }
     };
 
-    let bytes = match std::fs::read(&resolved) {
+    let bytes = match registry::read_file_with_limit(&resolved, registry::COMMUNITY_MAX_FILE_BYTES)
+    {
         Ok(b) => b,
         Err(e) => {
             log::warn!(

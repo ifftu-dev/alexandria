@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "network_id": "preprod",
+  "profile_revision": 1,
+  "cardano_network": "preprod",
+  "cardano_network_magic": 1,
+  "relays": [
+    {
+      "peer_id": "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR",
+      "dns_name": "alexandria-relay.fly.dev",
+      "port": 4001,
+      "fallback_ips": ["168.220.86.30"],
+      "registry_https_origin": "https://alexandria-relay.fly.dev"
+    },
+    {
+      "peer_id": "12D3KooWFDVfPBwa6EVEp8v8cqXpgmiksV7qMarHCYLF174XV9xj",
+      "dns_name": "alexandria-relay-eu.fly.dev",
+      "port": 4001,
+      "fallback_ips": ["66.51.123.68"],
+      "registry_https_origin": "https://alexandria-relay-eu.fly.dev"
+    }
+  ],
+  "receipt_issuer_keys": [
+    "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR",
+    "12D3KooWFDVfPBwa6EVEp8v8cqXpgmiksV7qMarHCYLF174XV9xj"
+  ],
+  "stake_registry_founder_keys": [
+    {
+      "id": "founder_a",
+      "public_key_hex": "53483cedf2f537accf9f7bfaa17aab81b0c80767664d52129a070db0e9660312"
+    },
+    {
+      "id": "founder_b",
+      "public_key_hex": "6f6aaae8df089ae21120fc4eb96a362bc9bf0cc8e34639daaae6d7e24abdf19c"
+    },
+    {
+      "id": "founder_c",
+      "public_key_hex": "c5a88da0cbdfbfb57065549c347b6f7daf8ad60ed2b36258570fccd2e7ec6186"
+    }
+  ],
+  "signed_bootstrap_registry_identity": {
+    "schema_version": 1,
+    "sha256": "4c7868f14ba85533a8f68da42af90c1596374f2057a919312bb0983454872c4c"
+  },
+  "subject_qualification_policy_digests": [],
+  "cloud_https_origin": null,
+  "cloud_service_id": null,
+  "governance_locator": null,
+  "committee_instance_id": null,
+  "committee_https_endpoints": [],
+  "protocol_namespace": "/alexandria/preprod",
+  "optional_governance_anchor_address": null
+}

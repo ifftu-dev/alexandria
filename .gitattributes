@@ -13,3 +13,8 @@ patches/** linguist-vendored
 # are deliberately left alone here.)
 **/plutus.json linguist-generated
 cardano/governance/build/** linguist-generated
+
+# The Model Context Protocol schema used by the MCP conformance tests is an
+# unmodified upstream copy (see its NOTICE). Keep git's whitespace checks off
+# it rather than editing a file whose provenance depends on being unchanged.
+crates/alexandria-mcp/tests/schema/*.schema.json -whitespace linguist-vendored

@@ -251,6 +251,7 @@ pub fn map_selection_to_original(selected_positions: &[usize], option_order: &[u
 /// Where a grader's bytes live on disk, plus the CID that must match them.
 struct ResolvedGrader {
     cid: String,
+    #[cfg(desktop)]
     install_path: String,
 }
 
@@ -275,9 +276,12 @@ fn resolve_grader(db: &Database, item: &AssessmentItem) -> Result<ResolvedGrader
         .grader
         .as_ref()
         .ok_or_else(|| format!("plugin {plugin_cid} declares no grader"))?;
+    #[cfg(not(desktop))]
+    let _ = installed;
 
     Ok(ResolvedGrader {
         cid: grader.cid.clone(),
+        #[cfg(desktop)]
         install_path: installed.install_path,
     })
 }
@@ -629,7 +633,11 @@ mod e2e {
 
     /// Insert a bank + question and run the backfill, so the item under test
     /// arrives the same way a real migrated item would.
-    fn insert_migrated_item(db: &Database, id: &str, correct: &str, options: &str) {
+    /// Insert one MCQ item the way the runtime stores them: the prompt, its
+    /// options and the kind in `content_public`, and the answer key only in
+    /// `grader_private`. Writing the two halves here rather than deriving
+    /// them keeps the fixture honest about what a served item looks like.
+    fn insert_item(db: &Database, id: &str, correct: &str, options: &str) {
         db.conn()
             .execute(
                 "INSERT OR IGNORE INTO question_banks (id, skill_id, label, ratified) \
@@ -639,18 +647,18 @@ mod e2e {
             .expect("bank");
         db.conn()
             .execute(
-                "INSERT INTO bank_questions (id, bank_id, prompt, options, correct_indices) \
-                 VALUES (?1, 'bank_e2e', 'Which?', ?2, ?3)",
+                "INSERT INTO assessment_items \
+                     (id, item_kind, skill_id, content_public, grader_private, bank_id, ratified) \
+                 VALUES (?1, 'mcq', 'skill_rust', \
+                     json_object( \
+                         'kind', CASE WHEN json_array_length(?3) = 1 THEN 'single' ELSE 'multi' END, \
+                         'prompt', 'Which?', \
+                         'options', json(?2)), \
+                     json_object('correct_indices', json(?3)), \
+                     'bank_e2e', 1)",
                 rusqlite::params![id, options, correct],
             )
-            .expect("question");
-        // Re-run migration 072 (idempotent) so the item arrives through the
-        // real backfill rather than a hand-written INSERT that could drift.
-        let (_, _, sql) = crate::db::schema::MIGRATIONS
-            .iter()
-            .find(|(v, _, _)| *v == 72)
-            .expect("migration 072 exists");
-        db.conn().execute_batch(sql).expect("backfill");
+            .expect("item");
     }
 
     fn grade(
@@ -675,7 +683,7 @@ mod e2e {
     #[test]
     fn migrated_item_grades_through_the_builtin_grader() {
         let f = fixture();
-        insert_migrated_item(&f.db, "q_e2e", "[0]", r#"["fn","func","def","lambda"]"#);
+        insert_item(&f.db, "q_e2e", "[0]", r#"["fn","func","def","lambda"]"#);
 
         let right = grade(&f, "q_e2e", &[0], None);
         assert_eq!(right.score, 1.0);
@@ -689,7 +697,7 @@ mod e2e {
         // does not trust this device — which is the property the whole
         // unification exists to buy.
         let f = fixture();
-        insert_migrated_item(&f.db, "q_triple", "[1]", r#"["a","b","c"]"#);
+        insert_item(&f.db, "q_triple", "[1]", r#"["a","b","c"]"#);
 
         let g = grade(&f, "q_triple", &[1], None);
         assert_eq!(g.grader_cid.len(), 64, "grader cid is a blake3 hex digest");
@@ -711,7 +719,7 @@ mod e2e {
         // A verifier re-derives from the item alone, so per-attempt
         // shuffling must not change the content it hashes.
         let f = fixture();
-        insert_migrated_item(&f.db, "q_stable", "[0]", r#"["a","b","c","d"]"#);
+        insert_item(&f.db, "q_stable", "[0]", r#"["a","b","c","d"]"#);
 
         let plain = grade(&f, "q_stable", &[0], None);
         let shuffled = grade(&f, "q_stable", &[2], Some(&[1, 2, 0, 3]));
@@ -721,7 +729,7 @@ mod e2e {
     #[test]
     fn shuffled_attempt_grades_against_original_indices() {
         let f = fixture();
-        insert_migrated_item(&f.db, "q_shuf", "[2]", r#"["a","b","c","d"]"#);
+        insert_item(&f.db, "q_shuf", "[2]", r#"["a","b","c","d"]"#);
 
         // order[served] = original. Original 2 sits at served position 1.
         let order = [0usize, 2, 1, 3];
@@ -734,7 +742,7 @@ mod e2e {
         // submission_cid must be a function of the answer, not of the order
         // the client happened to click in.
         let f = fixture();
-        insert_migrated_item(&f.db, "q_hash", "[0,2]", r#"["a","b","c","d"]"#);
+        insert_item(&f.db, "q_hash", "[0,2]", r#"["a","b","c","d"]"#);
 
         let a = grade(&f, "q_hash", &[0, 2], None);
         let b = grade(&f, "q_hash", &[2, 0], None);
@@ -745,7 +753,7 @@ mod e2e {
     #[test]
     fn grading_is_byte_reproducible() {
         let f = fixture();
-        insert_migrated_item(&f.db, "q_repro", "[1,3]", r#"["a","b","c","d"]"#);
+        insert_item(&f.db, "q_repro", "[1,3]", r#"["a","b","c","d"]"#);
 
         let first = grade(&f, "q_repro", &[1], None);
         for _ in 0..5 {
@@ -760,7 +768,7 @@ mod e2e {
     #[test]
     fn multi_select_earns_partial_credit_end_to_end() {
         let f = fixture();
-        insert_migrated_item(&f.db, "q_partial", "[0,1]", r#"["a","b","c","d"]"#);
+        insert_item(&f.db, "q_partial", "[0,1]", r#"["a","b","c","d"]"#);
 
         assert_eq!(grade(&f, "q_partial", &[0, 1], None).score, 1.0);
         assert_eq!(grade(&f, "q_partial", &[0], None).score, 0.5);

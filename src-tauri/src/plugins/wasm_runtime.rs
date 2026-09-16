@@ -171,10 +171,10 @@ fn apply_ios_tuning(config: &mut Config) {
     config.signals_based_traps(false);
 }
 
-/// Ahead-of-time compile a grader `wasm` into a serialized `.cwasm` artifact
-/// (native code) using the canonical grader config. Called at plugin *install*
-/// time so the first `grade` of a session is a fast `deserialize` (mmap of
-/// native code) instead of a multi-second cranelift compile.
+/// Ahead-of-time compile grader `wasm` into a serialized `.cwasm` artifact
+/// using the canonical grader config. Called at plugin *install* time so the
+/// first `grade` of a session deserializes compiled code instead of repeating
+/// a multi-second Cranelift compile.
 ///
 /// Engine-free: builds a throwaway engine, so no live [`GraderRuntime`] /
 /// `AppState` is needed at install time. The output is host- and
@@ -212,13 +212,13 @@ impl GraderRuntime {
     /// resulting `ScoreRecord`. The same inputs (and same `wasm_bytes`)
     /// must yield byte-identical output every time.
     ///
-    /// `grader_cid` is the BLAKE3 hex of `wasm_bytes` — the caller is
-    /// responsible for passing a CID that matches the bytes (the install
-    /// flow already verified this). The CID is used as a cache key.
+    /// `grader_cid` is the BLAKE3 hex of `wasm_bytes`. A cold load verifies
+    /// that binding before compiling or deserializing; the CID is then the
+    /// in-memory cache key.
     ///
     /// `cwasm_path`, when supplied, points at the precompiled `.cwasm` sibling
     /// of `grader.wasm` written at install time. On a cold cache the runtime
-    /// tries to `deserialize` it (fast mmap of native code); if that fails or
+    /// tries to deserialize the compiled artifact; if that fails or
     /// the file is absent it falls back to compiling `wasm_bytes` and rewrites
     /// the `.cwasm` for next time. Passing `None` always JIT-compiles.
     pub fn grade(
@@ -365,8 +365,15 @@ impl GraderRuntime {
             return Ok(m);
         }
 
-        // Prefer the precompiled `.cwasm`: `deserialize` is an mmap of native
-        // code, orders of magnitude faster than a cranelift compile.
+        let computed_cid = blake3::hash(wasm_bytes).to_hex();
+        if !computed_cid.as_str().eq_ignore_ascii_case(grader_cid) {
+            return Err(format!(
+                "grader bytes do not match grader CID: expected {grader_cid}, got {computed_cid}"
+            ));
+        }
+
+        // Prefer the precompiled `.cwasm`; deserializing compiled code is
+        // orders of magnitude faster than a Cranelift compile.
         //
         // It is also the one place in the plugin system where the wasm sandbox
         // is not in the way, so the artifact must be proven to be ours before
@@ -374,41 +381,41 @@ impl GraderRuntime {
         // check, not an authenticity one — Wasmtime documents the call as
         // unsafe for exactly this reason — so a crafted `.cwasm` with the right
         // header runs as native code. The install path deletes any `.cwasm` a
-        // bundle ships, and this is the second lock: the digest sidecar is
-        // written only by `compile_and_persist`, from bytes this machine
-        // produced, so a file without a matching one is not ours.
+        // bundle ships, and this is the second lock: local precompilation
+        // writes a source-bound digest sidecar, so a file without a matching
+        // record is not eligible for deserialization.
         let module = match cwasm_path {
-            Some(path) if path.exists() && cwasm_digest_matches(path) => {
-                // SAFETY: `path` was written by `compile_and_persist` on this
-                // machine from the CID-verified `grader.wasm`, and its recorded
-                // BLAKE3 digest was just re-checked against the bytes on disk.
-                // A stale artifact (different wasmtime version/arch/config)
-                // additionally fails deserialization with Err rather than
-                // executing.
-                match unsafe { Module::deserialize_file(&self.engine, path) } {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::warn!(
-                            "precompiled grader {grader_cid} failed to deserialize ({e}); \
-                             recompiling from wasm and rewriting {}",
-                            path.display()
-                        );
-                        self.compile_and_persist(wasm_bytes, Some(path))?
+            Some(path) if path.exists() => {
+                if let Some(bytes) = read_verified_cwasm(path, grader_cid) {
+                    // SAFETY: installation purges bundle-supplied native
+                    // artifacts. The sidecar written by `compile_and_persist`
+                    // binds these exact in-memory bytes to `grader_cid`, which
+                    // was just verified against `wasm_bytes` above.
+                    // Deserializing this same buffer (rather than reopening the
+                    // path) prevents a verification/use file-replacement race.
+                    match unsafe { Module::deserialize(&self.engine, &bytes) } {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::warn!(
+                                "precompiled grader {grader_cid} failed to deserialize ({e}); \
+                                 recompiling from wasm and rewriting {}",
+                                path.display()
+                            );
+                            self.compile_and_persist(grader_cid, wasm_bytes, Some(path))?
+                        }
                     }
+                } else {
+                    // Present but unattested or bound to different Wasm. Never
+                    // deserialize it; overwrite it from the verified source.
+                    log::warn!(
+                        "precompiled grader {grader_cid} has no matching source-bound digest at {}; \
+                         refusing to deserialize it and recompiling from wasm",
+                        path.display()
+                    );
+                    self.compile_and_persist(grader_cid, wasm_bytes, Some(path))?
                 }
             }
-            Some(path) if path.exists() => {
-                // Present but unattested. Never deserialize it — recompile from
-                // the wasm, which `commands::plugins` has already checked
-                // against `manifest.grader.cid`, and overwrite.
-                log::warn!(
-                    "precompiled grader {grader_cid} has no matching digest at {}; \
-                     refusing to deserialize it and recompiling from wasm",
-                    path.display()
-                );
-                self.compile_and_persist(wasm_bytes, Some(path))?
-            }
-            other => self.compile_and_persist(wasm_bytes, other)?,
+            other => self.compile_and_persist(grader_cid, wasm_bytes, other)?,
         };
 
         self.cache
@@ -422,6 +429,7 @@ impl GraderRuntime {
     /// artifact to `cwasm_path` so the next cold load can `deserialize` it.
     fn compile_and_persist(
         &self,
+        grader_cid: &str,
         wasm_bytes: &[u8],
         cwasm_path: Option<&Path>,
     ) -> Result<Module, String> {
@@ -441,7 +449,7 @@ impl GraderRuntime {
                             std::fs::remove_file(crate::plugins::registry::cwasm_digest_path(path));
                     } else if let Err(e) = std::fs::write(
                         crate::plugins::registry::cwasm_digest_path(path),
-                        blake3::hash(&bytes).to_hex().as_str(),
+                        crate::plugins::registry::cwasm_digest_record(grader_cid, &bytes),
                     ) {
                         // An artifact with no digest will be refused on the next
                         // cold load, so remove it rather than leaving a file
@@ -460,29 +468,38 @@ impl GraderRuntime {
     }
 }
 
-/// Whether the `.cwasm` at `path` is one this machine wrote.
+/// Read a source-bound `.cwasm` that this installation generated.
 ///
-/// The digest file is written only by `compile_and_persist`, from the exact
-/// bytes it just serialized. So a `.cwasm` whose digest is missing, unreadable,
-/// or different is one that arrived some other way — most plausibly inside a
-/// plugin bundle — and must not reach `Module::deserialize_file`, which
-/// executes its argument as native code.
+/// Local precompilation writes the sidecar from the source CID and exact native
+/// bytes. A missing, malformed, source-mismatched, or content-mismatched record
+/// therefore does not authorize deserialization. Returning the verified bytes
+/// also makes the later unsafe call operate on the same read that was hashed,
+/// rather than reopening a replaceable path.
 ///
-/// Returns `false` on any error. "Cannot tell" and "not ours" get the same
-/// answer here, because the cost of being wrong in one direction is a
-/// recompile and in the other is arbitrary code execution.
-pub fn cwasm_digest_matches(path: &Path) -> bool {
+/// Returns `None` on any error. "Cannot tell" and "not ours" get the same
+/// answer because the safe fallback is recompilation from verified Wasm.
+fn read_verified_cwasm(path: &Path, grader_cid: &str) -> Option<Vec<u8>> {
     let Ok(recorded) = std::fs::read_to_string(crate::plugins::registry::cwasm_digest_path(path))
     else {
-        return false;
+        return None;
     };
     let Ok(bytes) = std::fs::read(path) else {
-        return false;
+        return None;
     };
     let actual = blake3::hash(&bytes).to_hex();
-    // Trim: the file holds a bare hex digest, and an editor may have added a
-    // trailing newline.
-    recorded.trim().eq_ignore_ascii_case(actual.as_str())
+    let mut fields = recorded.lines();
+    if fields.next() != Some("v1")
+        || !fields
+            .next()
+            .is_some_and(|source| source.eq_ignore_ascii_case(grader_cid))
+        || !fields
+            .next()
+            .is_some_and(|digest| digest.eq_ignore_ascii_case(actual.as_str()))
+        || fields.next().is_some()
+    {
+        return None;
+    }
+    Some(bytes)
 }
 
 /// Unpack the i64 return value of `alex_grade` into `(ptr, len)`. Both
@@ -561,13 +578,23 @@ mod tests {
 
     #[test]
     fn precompiled_cwasm_round_trips() {
-        // precompile_grader → deserialize_file must yield a runnable module.
+        // precompile_grader → source-bound deserialize must yield a runnable
+        // module without falling back to compilation.
         let echo = echo_grader_wasm();
         let cid = blake3::hash(&echo).to_hex().to_string();
         let dir = tempfile::TempDir::new().unwrap();
         let cwasm = dir.path().join("grader.cwasm");
         let bytes = precompile_grader(&echo).expect("precompile");
         std::fs::write(&cwasm, &bytes).unwrap();
+        std::fs::write(
+            crate::plugins::registry::cwasm_digest_path(&cwasm),
+            crate::plugins::registry::cwasm_digest_record(&cid, &bytes),
+        )
+        .unwrap();
+        assert_eq!(
+            read_verified_cwasm(&cwasm, &cid).as_deref(),
+            Some(bytes.as_slice())
+        );
 
         let input = serde_json::to_vec(&serde_json::json!({
             "version": "1", "score": 0.7, "details": {},
@@ -586,6 +613,46 @@ mod tests {
             )
             .expect("grade via precompiled artifact succeeds");
         assert!((result.score - 0.7).abs() < 1e-12);
+    }
+
+    #[test]
+    fn precompiled_cwasm_is_bound_to_its_source_cid_and_exact_bytes() {
+        let echo = echo_grader_wasm();
+        let cid = blake3::hash(&echo).to_hex().to_string();
+        let dir = tempfile::TempDir::new().unwrap();
+        let cwasm = dir.path().join("grader.cwasm");
+        let bytes = precompile_grader(&echo).expect("precompile");
+        std::fs::write(&cwasm, &bytes).unwrap();
+        std::fs::write(
+            crate::plugins::registry::cwasm_digest_path(&cwasm),
+            crate::plugins::registry::cwasm_digest_record(&cid, &bytes),
+        )
+        .unwrap();
+
+        assert!(read_verified_cwasm(&cwasm, &"0".repeat(64)).is_none());
+        std::fs::write(&cwasm, b"replaced after sidecar creation").unwrap();
+        assert!(read_verified_cwasm(&cwasm, &cid).is_none());
+    }
+
+    #[test]
+    fn cold_load_rejects_a_mismatched_grader_cid() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let echo = echo_grader_wasm();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1", "score": 0.7, "details": {},
+        }))
+        .unwrap();
+
+        let err = runtime
+            .grade(
+                &"0".repeat(64),
+                &echo,
+                None,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect_err("a cache miss must bind the source bytes to their CID");
+        assert!(err.contains("do not match grader CID"), "{err}");
     }
 
     #[test]
@@ -619,6 +686,7 @@ mod tests {
         let rewritten = std::fs::read(&cwasm).unwrap();
         assert_ne!(rewritten, b"not a real cwasm artifact");
         assert!(!rewritten.is_empty());
+        assert!(read_verified_cwasm(&cwasm, &cid).is_some());
     }
 
     #[test]

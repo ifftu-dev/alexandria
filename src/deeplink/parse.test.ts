@@ -56,6 +56,32 @@ describe('parseDeepLink', () => {
     })
   })
 
+  describe('governance genesis locator', () => {
+    it('routes custom and official links to explicit review', () => {
+      const dao = 'ab'.repeat(32)
+      const content = 'cd'.repeat(32)
+      const query = `content=${content}&source=iroh%3A%2F%2F${content}&source=https%3A%2F%2Fmirror.example%2Fgenesis.json%23blake3%3D${content}`
+      const custom = `alexandria://governance/genesis/${dao}?${query}`
+      expect(parseDeepLink(custom)).toEqual({
+        kind: 'governance-genesis-locator',
+        locator: custom,
+      })
+
+      const official = `https://alexandria.ifftu.dev/governance/genesis/${dao}?${query}`
+      expect(parseDeepLink(official)).toEqual({
+        kind: 'governance-genesis-locator',
+        locator: official,
+      })
+    })
+
+    it('rejects a missing DAO id and an oversized locator', () => {
+      expect(parseDeepLink('alexandria://governance/genesis')).toBeNull()
+      expect(
+        parseDeepLink(`alexandria://governance/genesis/${'a'.repeat(64)}?${'x'.repeat(2048)}`),
+      ).toBeNull()
+    })
+  })
+
   describe('generic open?route', () => {
     it('accepts an absolute in-app path', () => {
       expect(parseDeepLink('alexandria://open?route=/skills/rust')).toEqual({

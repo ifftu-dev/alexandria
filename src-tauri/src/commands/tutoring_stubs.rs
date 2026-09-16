@@ -9,9 +9,11 @@
 //! screen share, chat, status, peers. Device enumeration returns
 //! audio-only capabilities.
 
+use crate::profile::scope::ProfileState as State;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
 
 /// Result of a pre-join device availability check.
@@ -154,39 +156,41 @@ pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
     // Still read from DB on mobile (past sessions from desktop sync)
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard
-        .as_ref()
-        .ok_or_else(|| "database not initialized".to_string())?;
-    let mut stmt = db
-        .conn()
-        .prepare(
-            "SELECT id, title, ticket, status, created_at, ended_at
-             FROM tutoring_sessions
-             ORDER BY created_at DESC
-             LIMIT 50",
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.list-sessions",
+            |db| {
+                let mut stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT id, title, ticket, status, created_at, ended_at
+                         FROM tutoring_sessions
+                         ORDER BY created_at DESC
+                         LIMIT 50",
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                let sessions = stmt
+                    .query_map([], |row| {
+                        Ok(TutoringSessionInfo {
+                            id: row.get(0)?,
+                            title: row.get(1)?,
+                            ticket: row.get(2)?,
+                            status: row.get(3)?,
+                            created_at: row.get(4)?,
+                            ended_at: row.get(5)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                Ok(sessions)
+            },
         )
-        .map_err(|e| e.to_string())?;
-
-    let sessions = stmt
-        .query_map([], |row| {
-            Ok(TutoringSessionInfo {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                ticket: row.get(2)?,
-                status: row.get(3)?,
-                created_at: row.get(4)?,
-                ended_at: row.get(5)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(sessions)
+        .await
 }
 
 #[tauri::command]

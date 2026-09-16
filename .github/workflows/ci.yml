@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/**'
       - 'cli/**'
+      - 'committee/**'
+      - 'core/**'
       - 'crates/**'
       - 'patches/**'
       - 'scripts/**'
@@ -20,12 +22,15 @@ on:
       - 'index.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
+      - 'world/**'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'cli/**'
+      - 'committee/**'
+      - 'core/**'
       - 'crates/**'
       - 'patches/**'
       - 'scripts/**'
@@ -39,6 +44,7 @@ on:
       - 'index.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
+      - 'world/**'
       - '.github/workflows/ci.yml'
 
 concurrency:
@@ -83,39 +89,7 @@ jobs:
 
           mapfile -t changed_files < <(git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}")
 
-          matches_any() {
-            local path
-            for path in "${changed_files[@]}"; do
-              case "${path}" in
-                .github/workflows/*|cli/*|crates/*|patches/*|scripts/*|src-tauri/*|Cargo.toml|Cargo.lock)
-                  if [ "$1" = "backend" ] || [ "$1" = "security" ]; then
-                    return 0
-                  fi
-                  ;;
-                src/*|package.json|package-lock.json|index.html|vite.config.ts|tsconfig*.json)
-                  if [ "$1" = "frontend" ]; then
-                    return 0
-                  fi
-                  ;;
-              esac
-            done
-            return 1
-          }
-
-          for surface in backend frontend security; do
-            if matches_any "${surface}"; then
-              echo "${surface}=true" >> "${GITHUB_OUTPUT}"
-            else
-              echo "${surface}=false" >> "${GITHUB_OUTPUT}"
-            fi
-          done
-
-          if printf '%s\n' "${changed_files[@]}" | grep -Eq \
-            '^(\.github/workflows/((release|validate)-|desktop-shared\.yml|mobile-shared\.yml)|\.github/workflows/ci\.yml|scripts/|src-tauri/tauri.*\.json|src-tauri/Cargo\.toml|src-tauri/src/commands/mod\.rs|src-tauri/src/commands/tutoring_stubs\.rs|src-tauri/src/tutoring/manager_android\.rs|package\.json|package-lock\.json)$'; then
-            echo "release=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "release=false" >> "${GITHUB_OUTPUT}"
-          fi
+          node scripts/classify-ci-changes.mjs "${changed_files[@]}" >> "${GITHUB_OUTPUT}"
 
   check:
     name: Lint & Test
@@ -214,12 +188,12 @@ jobs:
       - name: Check Rust formatting
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy (lint)
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
-        run: cargo clippy --features tutoring-video-static -- -D warnings
+        run: cargo clippy --workspace --all-targets --features tutoring-video-static -- -D warnings
 
       - name: Run Rust tests
         if: needs.changes.outputs.backend == 'true'
@@ -232,14 +206,40 @@ jobs:
         env:
           CARGO_PROFILE_TEST_DEBUG: "0"
           CARGO_BUILD_JOBS: "2"
-        run: cargo test --features tutoring-video-static
+        run: cargo test --workspace --features tutoring-video-static
 
       - name: Tauri command guard
         # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
         # run whenever either surface changed. Pure Node, no npm deps needed.
         if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
-        run: node scripts/check-tauri-commands.mjs
+        run: |
+          node scripts/check-tauri-commands.mjs
+          node --test scripts/check-tauri-commands.test.mjs
+
+      - name: Independent verifier agrees with the shared vectors
+        # A second implementation only proves the format is specified if
+        # something fails when the two disagree. This verifier is written from
+        # the README alone, imports nothing but Node's standard library, and
+        # checks the same credential, limit and endorsement vectors the Rust
+        # verifier does. `crates/` is a backend prefix, so editing a vector or
+        # the verifier itself triggers it.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria/crates/alexandria-verify/tests/vectors
+        run: node independent-verifier.mjs
+
+      - name: Schema document matches the baseline
+        # docs/database-schema.md is generated from schema.rs. The previous
+        # hand-written version described a deleted migration chain for weeks;
+        # this fails the build the moment the schema and its document diverge.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: python3 scripts/db/generate-schema-doc.py --check
+
+      - name: CI change-classifier regressions
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: node --test scripts/classify-ci-changes.test.mjs
       - name: CSP style hashes match the libraries that inject styles
         # style-src carries sha256 hashes for the <style> blocks two libraries
         # inject at runtime. A version bump changes the CSS, the hash stops

@@ -15,11 +15,12 @@
 
 use std::str::FromStr;
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::content_store::{content, fetch};
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::verify_credential_db;
 use crate::domain::vc::{
     AcceptanceDecision, CredentialSubject, EntitlementClaim, RoleClaim, SkillClaim,
@@ -98,6 +99,12 @@ pub fn import_credential_impl(
         .ok_or_else(|| "credential has no envelope id".to_string())?;
 
     let result = verify_credential_db(conn, vc, now, &import_policy());
+    if result.acceptance_decision == AcceptanceDecision::Pending {
+        return Err(format!(
+            "credential verification pending: {}",
+            super::credentials::rejection_reasons(&result).join(", ")
+        ));
+    }
     if result.acceptance_decision != AcceptanceDecision::Accept {
         // Report the failed checks rather than a bare "invalid" — an import
         // that fails for an expired credential and one that fails for a bad
@@ -114,6 +121,9 @@ pub fn import_credential_impl(
         }
         if result.revoked {
             why.push("revoked");
+        }
+        if !result.status_valid {
+            why.push("invalid status reference");
         }
         if result.expired {
             why.push("expired");
@@ -206,13 +216,16 @@ pub async fn import_credential(
     state: State<'_, AppState>,
     credential: VerifiableCredential,
 ) -> Result<ImportOutcome, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
-    import_credential_impl(db.conn(), &credential, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "import.credential",
+            move |db| import_credential_impl(db.conn(), &credential, &now),
+        )
+        .await
 }
 
 /// Where a credential can be fetched from: a provider endpoint and the BLAKE3
@@ -235,7 +248,7 @@ pub struct CredentialTicket {
 /// node. Anything that is not a VC is rejected here rather than reaching the
 /// verifier with a half-populated envelope.
 fn credential_from_bytes(bytes: &[u8]) -> Result<VerifiableCredential, String> {
-    serde_json::from_slice(bytes)
+    alexandria_verify::vc::decode_credential(bytes)
         .map_err(|e| format!("fetched bytes are not a verifiable credential: {e}"))
 }
 
@@ -268,24 +281,33 @@ pub async fn import_credential_from_peer(
     ticket: CredentialTicket,
 ) -> Result<ImportOutcome, String> {
     let addr = provider_addr(&ticket.provider)?;
+    let hash = content::parse_hash(&ticket.hash)
+        .map_err(|e| format!("bad credential hash {}: {e}", ticket.hash))?;
     let node = state.content_node_required().await?;
+    // A credential larger than a direct import accepts is refused during the
+    // transfer. The blob is not retained: the verified credential lives in
+    // the credential store, not the content store.
+    let max_bytes = alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_bytes;
 
-    fetch::fetch_hex_from_peer(&node, addr, &ticket.hash)
+    fetch::fetch_from_peer_unretained_bounded(&node, addr, hash, max_bytes)
         .await
         .map_err(|e| format!("fetch credential {}: {e}", ticket.hash))?;
 
-    let bytes = content::get_bytes(&node, &ticket.hash)
+    let bytes = content::get_bytes_bounded(&node, &ticket.hash, max_bytes)
         .await
         .map_err(|e| format!("read fetched credential {}: {e}", ticket.hash))?;
     let vc = credential_from_bytes(&bytes)?;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
-    import_credential_impl(db.conn(), &vc, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "import.credential_from_peer",
+            move |db| import_credential_impl(db.conn(), &vc, &now),
+        )
+        .await
 }
 
 /// Result of importing a payload that may hold many credentials.
@@ -323,34 +345,39 @@ pub struct ImportFailure {
 /// rewrite your trust and revocation state. Credentials themselves are safe to
 /// take from anyone precisely because each one carries a signature that is
 /// checked on the way in.
+///
+/// The payload is parsed under explicit structural limits first, and each
+/// credential in it is held to the single-credential limits, so duplicate
+/// keys, unsafe numbers, hostile nesting and oversized entries never reach
+/// verification or storage.
 fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(payload).map_err(|e| format!("not valid JSON: {e}"))?;
+    let value = super::credentials::parse_credential_payload(payload)?;
 
     if let Some(list) = value.get("credentials").and_then(|c| c.as_array()) {
-        let mut out = Vec::with_capacity(list.len());
-        for (i, item) in list.iter().enumerate() {
-            let vc: VerifiableCredential = serde_json::from_value(item.clone())
-                .map_err(|e| format!("bundle entry {i} is not a credential: {e}"))?;
-            out.push(vc);
-        }
-        return Ok(out);
+        return credential_entries(list, "bundle entry");
     }
 
     // Bare array, for a payload that is just a list of credentials.
     if let Some(list) = value.as_array() {
-        let mut out = Vec::with_capacity(list.len());
-        for (i, item) in list.iter().enumerate() {
-            let vc: VerifiableCredential = serde_json::from_value(item.clone())
-                .map_err(|e| format!("entry {i} is not a credential: {e}"))?;
-            out.push(vc);
-        }
-        return Ok(out);
+        return credential_entries(list, "entry");
     }
 
-    let vc: VerifiableCredential =
-        serde_json::from_value(value).map_err(|e| format!("not a credential: {e}"))?;
+    let vc = super::credentials::credential_entry(&value)
+        .map_err(|e| format!("not a credential: {e}"))?;
     Ok(vec![vc])
+}
+
+fn credential_entries(
+    list: &[serde_json::Value],
+    label: &str,
+) -> Result<Vec<VerifiableCredential>, String> {
+    list.iter()
+        .enumerate()
+        .map(|(i, item)| {
+            super::credentials::credential_entry(item)
+                .map_err(|e| format!("{label} {i} is not a credential: {e}"))
+        })
+        .collect()
 }
 
 /// Import every credential in `payload`, continuing past individual failures.
@@ -398,13 +425,16 @@ pub async fn import_credentials(
     state: State<'_, AppState>,
     payload: String,
 ) -> Result<ImportSummary, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
-    import_credentials_impl(db.conn(), &payload, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "import.credentials",
+            move |db| import_credentials_impl(db.conn(), &payload, &now),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -413,7 +443,7 @@ mod tests {
     use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
     use crate::db::Database;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::domain::vc::{CredentialType, Proof};
+    use crate::domain::vc::{CredentialStatus, CredentialType, Proof};
     use ed25519_dalek::SigningKey;
 
     const NOW: &str = "2026-04-13T00:00:00Z";
@@ -541,6 +571,47 @@ mod tests {
 
         let err = import_credential_impl(db.conn(), &vc, NOW).unwrap_err();
         assert!(err.contains("expired"), "unexpected reason: {err}");
+    }
+
+    #[test]
+    fn a_credential_with_an_unavailable_status_list_remains_pending() {
+        let db = open_db();
+        let issuer_key = key("issuer");
+        let issuer = derive_did_key(&issuer_key);
+        let mut vc = signed_vc(
+            &issuer_key,
+            CredentialType::EntitlementCredential,
+            "urn:test:import:pending-status",
+            entitlement_props(),
+            None,
+        );
+        vc.credential_status = Some(CredentialStatus {
+            id: "urn:test:missing-status#0".into(),
+            type_: "RevocationList2020Status".into(),
+            status_purpose: "revocation".into(),
+            status_list_index: "0".into(),
+            status_list_credential: "urn:test:missing-status".into(),
+        });
+        let vc = sign_credential(UnsignedCredential { credential: vc }, &issuer_key, &issuer)
+            .expect("re-sign status-bearing credential");
+
+        let err = import_credential_impl(db.conn(), &vc, NOW).unwrap_err();
+        assert!(
+            err.contains("verification pending"),
+            "unexpected reason: {err}"
+        );
+        assert!(
+            err.contains("status list is missing"),
+            "unexpected reason: {err}"
+        );
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "pending credentials must not enter the active store"
+        );
     }
 
     /// Delivery channels retry and customers click links twice.
@@ -872,6 +943,42 @@ mod tests {
         assert_eq!(again.imported, 0);
         assert_eq!(again.already_present, 1);
         assert!(again.failed.is_empty());
+    }
+
+    /// Ambiguous or over-limit payloads fail before verification or storage.
+    #[test]
+    fn duplicate_keys_and_over_limit_entries_are_refused_before_import() {
+        let db = open_db();
+        let vc = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:limits",
+            entitlement_props(),
+            None,
+        );
+        let payload = serde_json::to_string(&vc).unwrap();
+
+        let duplicated = format!("{{\"id\":\"urn:test:other\",{}", &payload[1..]);
+        let err = import_credentials_impl(db.conn(), &duplicated, NOW).unwrap_err();
+        assert!(err.contains("duplicate"), "got: {err}");
+        let err = credential_from_bytes(duplicated.as_bytes()).unwrap_err();
+        assert!(err.contains("duplicate"), "got: {err}");
+
+        // The bundle fits its own limits, but its entry exceeds what a direct
+        // import of that credential would accept.
+        let mut oversized = serde_json::to_value(&vc).unwrap();
+        oversized["credentialSubject"]["note"] = serde_json::Value::String(
+            "a".repeat(alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_string_bytes + 1),
+        );
+        let bundle = serde_json::json!({ "credentials": [oversized] }).to_string();
+        let err = import_credentials_impl(db.conn(), &bundle, NOW).unwrap_err();
+        assert!(err.contains("bundle entry 0"), "got: {err}");
+
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     /// The wrong file is a hard error, not a partial import.

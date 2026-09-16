@@ -8,14 +8,15 @@ import {
   labelLinkDistance,
 } from '@/composables/useSkillGraphHover'
 import type { SkillStatus } from '@/composables/useSkillGraphState'
+import {
+  createForceGraph,
+  type ForceGraphInstance,
+  type SkillGraphLink,
+  type SkillGraphNode,
+} from '@/utils/forceGraph'
 
-interface ModalSkillNode {
-  id: string
-  name: string
-  routeId: string
+interface ModalSkillNode extends SkillGraphNode {
   status: SkillStatus
-  prerequisites: string[]
-  bloom_level: string
   /** User's proven proficiency (VC-derived Bloom level); undefined until earned. */
   proficiency?: string
   /** Derived confidence in `proficiency`, 0..1. */
@@ -35,9 +36,9 @@ const emit = defineEmits<{ close: [] }>()
 
 const router = useRouter()
 const containerRef = ref<HTMLElement | null>(null)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const graphInstance = ref<any>(null)
+let graphInstance: ForceGraphInstance | null = null
 let resizeObserver: ResizeObserver | null = null
+let graphGeneration = 0
 
 const { buildAdjacency, createHoverHandler, renderNode, renderLink, nodePointerAreaPaint } = useSkillGraphHover()
 
@@ -65,34 +66,42 @@ watch(() => props.nodes, async () => {
 }, { deep: true })
 
 function destroyGraph() {
+  graphGeneration++
   resizeObserver?.disconnect()
   resizeObserver = null
-  if (graphInstance.value) {
-    graphInstance.value._destructor?.()
-    graphInstance.value = null
+  if (graphInstance) {
+    graphInstance._destructor()
+    graphInstance = null
   }
 }
 
 async function initGraph() {
-  if (!containerRef.value || !props.nodes.length) return
+  const container = containerRef.value
+  if (!container || !props.nodes.length) return
 
   destroyGraph()
+  const generation = graphGeneration
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ForceGraph = (await import('force-graph')).default as any
-
-  const links: Array<{ source: string; target: string }> = []
+  const links: SkillGraphLink[] = []
   for (const node of props.nodes) {
     for (const prereqId of node.prerequisites ?? []) {
       links.push({ source: prereqId, target: node.id })
     }
   }
-  buildAdjacency(links)
+  buildAdjacency(links.map(link => ({
+    source: String(link.source),
+    target: String(link.target),
+  })))
 
-  const width = containerRef.value.clientWidth
-  const height = containerRef.value.clientHeight
+  const width = container.clientWidth
+  const height = container.clientHeight
 
-  const graph = ForceGraph()(containerRef.value)
+  const graph = await createForceGraph(container)
+  if (generation !== graphGeneration || container !== containerRef.value) {
+    graph._destructor()
+    return
+  }
+  graph
     .width(width)
     .height(height)
     .graphData({ nodes: props.nodes, links })
@@ -141,7 +150,7 @@ async function initGraph() {
   graph.d3Force('collide', createLabelCollisionForce())
   graph.d3ReheatSimulation?.()
 
-  graphInstance.value = graph
+  graphInstance = graph
 
   resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
@@ -149,7 +158,7 @@ async function initGraph() {
       graph.height(entry.contentRect.height)
     }
   })
-  resizeObserver.observe(containerRef.value)
+  resizeObserver.observe(container)
 }
 
 onBeforeUnmount(() => {

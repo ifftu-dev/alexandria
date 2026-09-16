@@ -2,9 +2,10 @@
 //!
 //! The bundled `paste-v1.onnx` is embedded at compile time via
 //! `include_bytes!` so there is no runtime filesystem lookup, no asset
-//! protocol handshake, and no CSP for WASM to worry about. DAO-swapped
-//! weights replace the active session at runtime when
-//! `set_dao_session()` is called from the DAO upgrade flow.
+//! protocol handshake, and no CSP for WASM to worry about. It is the only
+//! model this classifier parses: no command accepts model bytes, so the
+//! tract parser never sees a network- or caller-supplied artifact. A new
+//! model ships with an app release.
 //!
 //! Replaces the legacy `src/utils/sentinel/paste-classifier.ts` +
 //! `onnx-runtime.ts`. Mobile is fully supported because tract is a
@@ -12,48 +13,25 @@
 //! gate that the frontend used to enforce is gone.
 
 use std::io::Cursor;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Context, Result};
 use tract_onnx::prelude::*;
 
 use super::features::FEATURE_DIM;
 
-/// Embedded fallback weights. Always available; never fails to load
+/// Embedded model weights. Always available; never fails to load
 /// outside of catastrophic ONNX-parser regressions.
 const BUNDLED_PASTE_V1: &[u8] = include_bytes!("../../resources/sentinel/paste-v1.onnx");
 
-/// Maximum number of ONNX nodes allowed in a DAO-supplied graph. Caps
-/// the attack surface for a malicious envelope that ships a giant
-/// model just to trigger an OOM on parse / optimize. Our trained MLP
-/// has ~10 nodes; setting the bar at 256 gives the DAO room to ship
-/// modestly larger architectures (small transformers etc.) without
-/// also accepting adversarial bloat.
-const MAX_DAO_MODEL_NODES: usize = 256;
+const BUNDLED_VERSION: &str = "bundled-v1";
 
-/// Maximum size in bytes for an incoming DAO ONNX blob. Pairs with
-/// `MAX_WEIGHTS_BYTES` in `sentinel_priors.rs`; the smaller of the two
-/// wins. Set conservatively because our bundled artifact is ~5 KB
-/// and even a small transformer would be < 5 MiB.
-const MAX_DAO_MODEL_BYTES: usize = 50 * 1024 * 1024;
-
-/// `tract`'s `RunnableModel` is `Send + Sync`. Wrap in an `Arc<RwLock<...>>`
-/// so the DAO swap path can atomically replace it without blocking
-/// in-flight scoring calls for more than a release cycle.
 type Runnable = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
-
-#[derive(Clone)]
-struct LoadedClassifier {
-    source: ClassifierSource,
-    version: String,
-    model: Arc<Runnable>,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClassifierSource {
     Bundled,
-    Dao,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -62,10 +40,10 @@ pub struct LoadedClassifierInfo {
     pub version: String,
 }
 
-static CLASSIFIER: OnceLock<RwLock<LoadedClassifier>> = OnceLock::new();
+static CLASSIFIER: OnceLock<Runnable> = OnceLock::new();
 
-fn build_runnable(bytes: &[u8]) -> Result<Arc<Runnable>> {
-    let model = tract_onnx::onnx()
+fn build_runnable(bytes: &[u8]) -> Result<Runnable> {
+    tract_onnx::onnx()
         .model_for_read(&mut Cursor::new(bytes))
         .context("parse ONNX bytes")?
         .with_input_fact(0, f32::fact([1, FEATURE_DIM as i32]).into())
@@ -73,19 +51,13 @@ fn build_runnable(bytes: &[u8]) -> Result<Arc<Runnable>> {
         .into_optimized()
         .context("optimize graph")?
         .into_runnable()
-        .context("compile runnable")?;
-    Ok(Arc::new(model))
+        .context("compile runnable")
 }
 
-fn ensure_initialized() -> &'static RwLock<LoadedClassifier> {
+fn classifier() -> &'static Runnable {
     CLASSIFIER.get_or_init(|| {
-        let model = build_runnable(BUNDLED_PASTE_V1)
-            .expect("bundled paste-v1.onnx failed to parse — release-blocking");
-        RwLock::new(LoadedClassifier {
-            source: ClassifierSource::Bundled,
-            version: "bundled-v1".to_string(),
-            model,
-        })
+        build_runnable(BUNDLED_PASTE_V1)
+            .expect("bundled paste-v1.onnx failed to parse — release-blocking")
     })
 }
 
@@ -93,15 +65,9 @@ fn ensure_initialized() -> &'static RwLock<LoadedClassifier> {
 /// higher means more cheat-like. Errors only on tract internal failure;
 /// the bundled model guarantees a usable session always exists.
 pub fn score(features: &[f32; FEATURE_DIM]) -> Result<f32> {
-    let runnable = {
-        let guard = ensure_initialized()
-            .read()
-            .map_err(|_| anyhow!("classifier rwlock poisoned"))?;
-        guard.model.clone()
-    };
     let input = tract_ndarray::Array2::from_shape_vec((1, FEATURE_DIM), features.to_vec())
         .context("reshape features to [1,12]")?;
-    let result = runnable
+    let result = classifier()
         .run(tvec!(Tensor::from(input).into()))
         .context("run inference")?;
     let view = result[0]
@@ -118,67 +84,10 @@ pub fn score(features: &[f32; FEATURE_DIM]) -> Result<f32> {
     Ok(raw.clamp(0.0, 1.0))
 }
 
-/// Replace the active session with one built from DAO-supplied ONNX
-/// bytes. Caller is responsible for envelope/eval re-verification —
-/// this function trusts the *origin* of the bytes but still validates
-/// shape + size + node count before handing them to tract.
-///
-/// Returns `Ok(())` on success; leaves the previous session in place
-/// (bundled or earlier DAO) on failure.
-pub fn set_dao_session(bytes: &[u8], version: String) -> Result<()> {
-    if bytes.len() > MAX_DAO_MODEL_BYTES {
-        return Err(anyhow!(
-            "DAO model exceeds size cap: {} > {} bytes",
-            bytes.len(),
-            MAX_DAO_MODEL_BYTES
-        ));
-    }
-    // Build through tract once to count nodes BEFORE swapping into the
-    // shared session. A malicious envelope with thousands of ops would
-    // already have OOM'd by here; the cap is an additional safety belt.
-    let model = build_runnable(bytes)?;
-    let node_count = model.model().nodes().len();
-    if node_count > MAX_DAO_MODEL_NODES {
-        return Err(anyhow!(
-            "DAO model exceeds node cap: {} > {}",
-            node_count,
-            MAX_DAO_MODEL_NODES
-        ));
-    }
-    let mut guard = ensure_initialized()
-        .write()
-        .map_err(|_| anyhow!("classifier rwlock poisoned"))?;
-    *guard = LoadedClassifier {
-        source: ClassifierSource::Dao,
-        version,
-        model,
-    };
-    Ok(())
-}
-
-/// Drop the DAO session and revert to the bundled artifact. Used by
-/// the kill switch + rollback paths.
-pub fn revert_to_bundled() {
-    if let Some(lock) = CLASSIFIER.get() {
-        if let Ok(mut guard) = lock.write() {
-            if matches!(guard.source, ClassifierSource::Dao) {
-                if let Ok(model) = build_runnable(BUNDLED_PASTE_V1) {
-                    *guard = LoadedClassifier {
-                        source: ClassifierSource::Bundled,
-                        version: "bundled-v1".to_string(),
-                        model,
-                    };
-                }
-            }
-        }
-    }
-}
-
 pub fn loaded_info() -> LoadedClassifierInfo {
-    let guard = ensure_initialized().read().expect("rwlock poisoned");
     LoadedClassifierInfo {
-        source: guard.source.clone(),
-        version: guard.version.clone(),
+        source: ClassifierSource::Bundled,
+        version: BUNDLED_VERSION.to_string(),
     }
 }
 
@@ -222,43 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn loaded_info_returns_well_formed_state() {
-        // The classifier's global state can be flipped to DAO by other
-        // tests in this process (cargo runs tests in parallel and the
-        // `CLASSIFIER` OnceLock is process-wide). We only assert that
-        // loaded_info() returns *something* — the bundled-on-cold-start
-        // invariant is covered by `bundled_model_loads_and_scores`.
+    fn loaded_info_reports_the_bundled_model() {
         let info = loaded_info();
-        assert!(!info.version.is_empty());
-        assert!(matches!(
-            info.source,
-            ClassifierSource::Bundled | ClassifierSource::Dao
-        ));
-    }
-
-    #[test]
-    fn set_dao_session_rejects_oversized_bytes() {
-        // Hand-craft a buffer that exceeds the size cap so the size
-        // check trips before tract even sees it. Contents don't matter.
-        let oversized = vec![0_u8; MAX_DAO_MODEL_BYTES + 1];
-        let err = set_dao_session(&oversized, "bogus".into()).unwrap_err();
-        assert!(
-            err.to_string().contains("size cap"),
-            "expected size-cap error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn set_dao_session_accepts_bundled_within_node_cap() {
-        // The bundled model is our reference for sane node counts.
-        // If this fails after a retrain, MAX_DAO_MODEL_NODES likely
-        // needs raising to match the new architecture.
-        set_dao_session(BUNDLED_PASTE_V1, "test-dao".into())
-            .expect("bundled model should pass node cap");
-        let info = loaded_info();
-        assert_eq!(info.source, ClassifierSource::Dao);
-        // Revert so other tests see a clean classifier state.
-        revert_to_bundled();
+        assert_eq!(info.source, ClassifierSource::Bundled);
+        assert_eq!(info.version, BUNDLED_VERSION);
     }
 
     // ---- End-to-end cheat-test: synthetic streams → features → tract --

@@ -1,7 +1,6 @@
 //! Plugin domain types.
 //!
-//! Phase 1 of the community plugin system (see
-//! `/Users/hack/.claude/plans/prancy-bubbling-grove.md`). A plugin is an
+//! Phase 1 of the community plugin system (see `docs/plugins.md`). A plugin is an
 //! iroh blob with a signed manifest plus a `ui/` bundle that renders inside
 //! a sandboxed iframe. In Phase 2 a `grader.wasm` is added for credential-
 //! eligible assessments. For Phase 1 we only deal with interactive plugins,
@@ -69,13 +68,14 @@ impl PluginCapability {
 pub enum PluginKind {
     /// UI only. Progress-tracked, never credential-eligible.
     Interactive,
-    /// Requires a deterministic WASM grader (Phase 2+). Eligible for
-    /// credential issuance subject to Plugin DAO attestation.
+    /// Requires a deterministic WASM grader (Phase 2+). Credential
+    /// eligibility is a separate host policy; today it requires exact
+    /// bundled manifest and grader bytes.
     Graded,
 }
 
-/// When a plugin is installed on a learner's machine. Author-declared and part
-/// of what the Plugin DAO attests (the attestation covers the whole manifest).
+/// When a plugin is installed on a learner's machine. Author-declared and
+/// covered by the signed manifest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginScope {
@@ -140,17 +140,18 @@ pub struct PluginManifest {
     pub platforms: Vec<String>,
     /// Relative path to a small icon inside the bundle (optional).
     pub icon_path: Option<String>,
-    /// BLAKE3 (hex) of every file in the bundle, keyed by bundle-relative
-    /// path. Optional for compatibility with manifests written before this
-    /// field existed; when present it is enforced at install.
+    /// BLAKE3 (hex) of every executable, grader, UI, and supporting file in
+    /// the bundle, keyed by bundle-relative path. Embedded built-ins may omit
+    /// the map because their bytes are compiled into the trusted host binary;
+    /// community installation requires a complete, non-empty map.
     ///
     /// Without it, `plugin_cid = BLAKE3(manifest.json)` identifies the
     /// manifest and nothing else — so two bundles with identical manifests,
     /// identical author signatures and identical CIDs could ship completely
-    /// different `ui/index.html`, and a Plugin DAO attestation over
+    /// different `ui/index.html`, while any policy that named only
     /// `(plugin_cid, grader_cid)` would say nothing about the code the learner
-    /// actually runs. `grader.wasm` was already covered by
-    /// `PluginGraderRef::blake3`; this extends that to the rest of the bundle.
+    /// actually runs. `grader.wasm` is also required in this map even though
+    /// `PluginGraderRef::blake3` independently covers it.
     #[serde(default)]
     pub files: Option<std::collections::BTreeMap<String, String>>,
     /// Relative path to the iframe entry HTML. Defaults to `ui/index.html`.
@@ -297,65 +298,4 @@ pub struct PluginCatalogEntry {
     pub source: String,
     pub announced_at: String,
     pub last_seen_at: String,
-}
-
-/// Plugin DAO attestation event broadcast on
-/// `/alexandria/plugin-attestations/1.0`. A multi-sig committee binds a
-/// `(plugin_cid, grader_cid)` pair as credential-eligible.
-///
-/// `signatures` is a list of per-member Ed25519 signatures over
-/// `BLAKE3(plugin_cid || grader_cid || canonical_attestation_terms_json)`.
-/// Verification requires N-of-M signatures from the listed
-/// `committee_pubkeys` to validate, where N is the policy-defined
-/// threshold (default 5-of-7; see `plugins::attestation`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginAttestationEvent {
-    pub plugin_cid: String,
-    pub grader_cid: String,
-    /// JSON object with freeform terms — the canonical bytes of this
-    /// field (serde_json::to_vec) are part of the signed message.
-    pub attestation_terms: serde_json::Value,
-    /// Committee members' Ed25519 public keys (32-byte hex). The
-    /// (committee_pubkeys, threshold) pair *is* the DAO at the moment
-    /// of attestation; key rotation produces a new attestation event.
-    pub committee_pubkeys: Vec<String>,
-    /// Hex-encoded Ed25519 signatures (64 bytes each), one per signer
-    /// who endorsed. Order is paired with `signer_indices`.
-    pub signatures: Vec<String>,
-    /// Indices into `committee_pubkeys` for each signature in `signatures`.
-    pub signer_indices: Vec<u32>,
-    pub issued_at: String,
-}
-
-/// A stored plugin attestation row (mirrors `plugin_attestations`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredPluginAttestation {
-    pub plugin_cid: String,
-    pub grader_cid: String,
-    pub attestation_terms: serde_json::Value,
-    pub committee_pubkeys: Vec<String>,
-    pub issued_at: String,
-    pub advisory_kind: Option<String>,
-    pub advisory_message: Option<String>,
-}
-
-/// Verifier-policy view of "is this plugin attested for credentials?"
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginAttestationStatus {
-    pub plugin_cid: String,
-    pub attested: bool,
-    /// Some(record) when `attested` is true.
-    pub attestation: Option<StoredPluginAttestation>,
-    /// Active advisories for this plugin — non-blocking but surfaced
-    /// in UI ("known flawed", "deprecated", etc.).
-    pub advisories: Vec<PluginAdvisoryRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginAdvisoryRecord {
-    pub id: String,
-    pub plugin_cid: String,
-    pub kind: String,
-    pub message: String,
-    pub issued_at: String,
 }

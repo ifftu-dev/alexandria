@@ -410,6 +410,12 @@ struct VaapiState {
     frames_ctx: *mut ffmpeg::sys::AVBufferRef,
 }
 
+// SAFETY: Both pointers are owned FFmpeg reference-counted buffers retained by
+// this value until Drop. `VaapiState` is moved with its encoder, is never
+// cloned or exposed, and all frame-pool operations occur through the encoder's
+// exclusive `&mut self` path. FFmpeg permits AVBuffer references and VAAPI
+// device/frame contexts to be transferred between threads; this type is not
+// `Sync`, so it does not authorize concurrent access.
 unsafe impl Send for VaapiState {}
 
 impl VaapiState {

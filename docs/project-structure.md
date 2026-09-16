@@ -20,7 +20,7 @@ alexandria/
 ├── crates/                 # Workspace member crates (live, iroh-moq, moq-media)
 ├── patches/                # Local crate patches (netdev, if-watch, audiopus_sys, webrtc-audio-processing-sys, ffmpeg-sys-next, ffmpeg-next)
 ├── docs/                   # Documentation
-├── bootstrap/              # Seed data (public_courses.json)
+├── bootstrap/              # Bundled built-in data (public_taxonomy.json)
 └── scripts/                # Build/dev scripts (incl. check-tauri-commands.mjs: CI guard that every registered command has a frontend caller or is allowlisted)
 ```
 
@@ -70,12 +70,11 @@ src-tauri/
     │   ├── assessment.rs   # Dynamic Sentinel-gated assessments: start attempt, host-side grade
     │   ├── goal_templates.rs # Resolve learner goals → skill graph; list/get DAO goal templates
     │   ├── skill_bootstrap.rs # Bootstrap skill graph from uploaded resume/transcript
-    │   ├── content_governance.rs # DAO propose/publish for goal templates + question banks
     │   ├── role_assessment.rs # Enterprise sponsor role/JD assessments
     │   ├── content.rs      # iroh blob operations
     │   ├── pinning.rs      # PinBoard commitments
     │   ├── storage.rs      # Quota and cache management
-    │   ├── snapshot.rs     # Reputation snapshot + soulbound entry points
+    │   ├── snapshot.rs     # Reputation snapshot creation + anchor requests
     │   ├── reputation.rs   # Reputation assertions and impact
     │   ├── enrollment.rs   # Enrollment and progress
     │   ├── elements.rs     # Course element CRUD
@@ -89,10 +88,10 @@ src-tauri/
     │   └── graph.rs      # Skill-graph fetch + learning-path helpers
     │
     ├── crypto/             # BIP-39 wallet, keystore, Ed25519, did:key
-    ├── db/                 # SQLite, migrations, seed data
+    ├── db/                 # SQLite, migrations, bundled built-in data
     ├── domain/             # Core types and VC domain models
     ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted)
-    ├── evidence/           # Reputation, challenge, taxonomy, thresholds logic
+    ├── evidence/           # Reputation, challenge, thresholds logic
     ├── goals/              # Goal → skill-graph resolver + on-device JD/resume parser
     │   ├── mod.rs
     │   └── jd_parser.rs    # Pure n-gram matcher over skill names + synonyms
@@ -113,17 +112,18 @@ src-tauri/
     │   ├── manifest.rs     # Manifest parse + validate
     │   ├── verifier.rs     # Signature + CID verification
     │   ├── catalog.rs      # Gossip discovery cache
-    │   ├── attestation.rs  # DAO multi-sig attestations
     │   ├── builtins.rs     # Embedded builtin bundles (MCQ, editors, IRL review)
     │   ├── asset_protocol.rs # plugin:// asset handler + per-plugin CSP
     │   └── irl_review.rs   # Local instructor-review inbox
     ├── content_store/      # iroh node + resolver + public URL fallback
     │
+    ├── network_profile.rs  # Strict embedded network identity, services, relays, and trust roots
+    │
     ├── profile/            # Multi-user profile manager
     │   ├── mod.rs          # Module exports
-    │   ├── index.rs        # profiles_index.json sidecar (public — names/avatars only)
+    │   ├── index.rs        # format-v2 profiles_index.json (public network IDs/names/avatars)
     │   ├── manager.rs      # ProfileManager: list/create/rename/delete/touch + ProfilePaths
-    │   └── migration.rs    # First-launch auto-migrator from legacy single-vault layout
+    │   └── legacy_layout.rs # Detects and reports the unsupported pre-profile layout
     │
     ├── settings/           # Unified per-profile settings (sync + device scope)
     │   ├── mod.rs          # Module exports
@@ -141,7 +141,7 @@ src-tauri/
     │   ├── scoring.rs      # Per-topic GossipSub peer scoring (14 scored topics)
     │   ├── discovery.rs    # Relay bootstrap + namespace discovery
     │   ├── catalog.rs      # Catalog topic handler
-    │   ├── taxonomy.rs     # Taxonomy topic handler
+    │   ├── taxonomy.rs     # Retired taxonomy topic (rejects every message)
     │   ├── governance.rs   # Governance topic handler
     │   ├── opinions.rs     # Opinions topic handler
     │   ├── sync.rs         # Cross-device sync
@@ -173,11 +173,8 @@ src-tauri/
         ├── blockfrost.rs   # REST client (preprod)
         ├── tx_builder.rs   # Shared tx-builder primitives (fee/metadata/hash; NFT minters moved out at mig 040)
         ├── username_anchor.rs # Batched label-1698 username-claim anchoring
-        ├── gov_tx_builder.rs # Governance tx builders
-        ├── soulbound_tx_builder.rs # Soulbound/reputation tx builder path
-        ├── snapshot.rs     # Asset names, datum encoding, metadata
-        ├── governance.rs   # Metadata labels and payloads
-        ├── onchain_queue.rs  # Persistent governance tx queue
+        ├── gov_tx_builder.rs # Shared Plutus script helpers
+        ├── snapshot_recovery.rs # Reputation snapshot row readers
         ├── anchor_queue.rs   # VC integrity-anchor queue
         ├── anchor_tx.rs      # Metadata-only anchor transactions
         └── script_refs.rs    # Reference-script hashes/UTXOs (deployed to preprod, block 4736927)
@@ -274,8 +271,7 @@ src/
 │   │   ├── Sentinel.vue
 │   │   └── Sync.vue
 │   ├── governance/
-│   │   ├── DaoDetail.vue
-│   │   └── Index.vue
+│   │   └── ImportGenesis.vue
 │   ├── instructor/
 │   │   ├── Composer.vue
 │   │   ├── CourseLearners.vue

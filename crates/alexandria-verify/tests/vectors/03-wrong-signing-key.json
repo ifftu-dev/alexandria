@@ -53,12 +53,14 @@
     "validSignature": false,
     "issuerResolved": true,
     "revoked": false,
+    "statusValid": true,
     "expired": false,
     "subjectBound": true,
     "integrityAnchored": false,
     "suspended": false,
     "superseded": false,
     "verificationTime": "2026-06-01T00:00:00Z",
+    "pendingReasons": [],
     "acceptanceDecision": "reject"
   }
 }

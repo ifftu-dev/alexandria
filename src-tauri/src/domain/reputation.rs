@@ -286,19 +286,6 @@ mod tests {
     }
 
     #[test]
-    fn cip68_constants() {
-        assert_eq!(cip68::REFERENCE_LABEL_PREFIX, [0x00, 0x06, 0x43, 0xb0]);
-        assert_eq!(cip68::USER_LABEL_PREFIX, [0x00, 0x0d, 0xe1, 0x40]);
-        assert_eq!(cip68::ROLE_INSTRUCTOR, 0x01);
-        assert_eq!(cip68::ROLE_LEARNER, 0x02);
-        assert_eq!(cip68::ROLE_ASSESSOR, 0x03);
-        assert_eq!(cip68::ROLE_AUTHOR, 0x04);
-        assert_eq!(cip68::ROLE_MENTOR, 0x05);
-        assert_eq!(cip68::IMPACT_SCALE, 1_000_000);
-        assert_eq!(cip68::CONFIDENCE_SCALE, 10_000);
-    }
-
-    #[test]
     fn full_reputation_assertion_serde_roundtrip() {
         let assertion = FullReputationAssertion {
             id: "ra1".into(),
@@ -329,35 +316,17 @@ mod tests {
     }
 }
 
-/// CIP-68 label prefixes for soulbound reputation tokens.
-pub mod cip68 {
-    /// Reference NFT label (100) — 4-byte prefix.
-    pub const REFERENCE_LABEL_PREFIX: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
-    /// User token label (222) — 4-byte prefix.
-    pub const USER_LABEL_PREFIX: [u8; 4] = [0x00, 0x0d, 0xe1, 0x40];
-
-    /// Role byte encoding for asset name.
-    pub const ROLE_INSTRUCTOR: u8 = 0x01;
-    pub const ROLE_LEARNER: u8 = 0x02;
-    pub const ROLE_ASSESSOR: u8 = 0x03;
-    pub const ROLE_AUTHOR: u8 = 0x04;
-    pub const ROLE_MENTOR: u8 = 0x05;
-
-    /// Scale factor for on-chain impact scores (10^6).
-    pub const IMPACT_SCALE: i64 = 1_000_000;
-    /// Scale factor for on-chain confidence values (10^4).
-    pub const CONFIDENCE_SCALE: i64 = 10_000;
-}
-
 /// Snapshot status for on-chain reputation anchoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SnapshotStatus {
     Pending,
     Building,
+    OutcomeUnknown,
     Submitted,
     Confirmed,
     Failed,
+    FailedOnChain,
 }
 
 impl SnapshotStatus {
@@ -365,9 +334,11 @@ impl SnapshotStatus {
         match self {
             SnapshotStatus::Pending => "pending",
             SnapshotStatus::Building => "building",
+            SnapshotStatus::OutcomeUnknown => "outcome_unknown",
             SnapshotStatus::Submitted => "submitted",
             SnapshotStatus::Confirmed => "confirmed",
             SnapshotStatus::Failed => "failed",
+            SnapshotStatus::FailedOnChain => "failed_on_chain",
         }
     }
 
@@ -376,9 +347,11 @@ impl SnapshotStatus {
         match s {
             "pending" => Some(SnapshotStatus::Pending),
             "building" => Some(SnapshotStatus::Building),
+            "outcome_unknown" => Some(SnapshotStatus::OutcomeUnknown),
             "submitted" => Some(SnapshotStatus::Submitted),
             "confirmed" => Some(SnapshotStatus::Confirmed),
             "failed" => Some(SnapshotStatus::Failed),
+            "failed_on_chain" => Some(SnapshotStatus::FailedOnChain),
             _ => None,
         }
     }
@@ -394,12 +367,13 @@ pub struct SnapshotRecord {
     pub skill_count: i64,
     pub tx_status: String,
     pub tx_hash: Option<String>,
-    pub policy_id: Option<String>,
-    pub ref_asset_name: Option<String>,
-    pub user_asset_name: Option<String>,
     pub error_message: Option<String>,
     pub snapshot_at: String,
     pub confirmed_at: Option<String>,
+    /// Reputation calculation declared by the signed snapshot.
+    pub computation_spec: Option<String>,
+    /// Signed VC whose integrity hash is anchored for replacement snapshots.
+    pub credential_id: Option<String>,
 }
 
 /// On-chain skill score (part of ReputationDatum).

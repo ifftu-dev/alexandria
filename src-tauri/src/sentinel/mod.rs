@@ -7,6 +7,8 @@
 //! - `face_detect` — YuNet face detector (5 landmarks) via tract
 //! - `gaze` — head-pose / second-device detection + per-user
 //!   calibration MLP (candle)
+//! - `prior_blob` — labeled-samples blob shape and validation for the
+//!   encrypted holdout set
 //! - `types` — shared input shapes (keystroke events, mouse points,
 //!   digraphs, camera frames) mirrored from the legacy TS structs
 //! - `evidence` — learner-consented retention of appeal evidence for
@@ -24,4 +26,5 @@ pub mod gaze;
 pub mod keystroke_ae;
 pub mod mouse_cnn;
 pub mod paste_classifier;
+pub mod prior_blob;
 pub mod types;

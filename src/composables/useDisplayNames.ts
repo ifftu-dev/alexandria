@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { onProfileLocked } from '@/composables/useProfiles'
 
 /**
  * Resolve `did:key` strings to human display names, app-wide.
@@ -18,6 +19,14 @@ import { useLocalApi } from '@/composables/useLocalApi'
 const cache = ref<Record<string, string>>({})
 const usernameCache = ref<Record<string, string>>({})
 const inFlight = new Set<string>()
+let profileGeneration = 0
+
+onProfileLocked(() => {
+  profileGeneration += 1
+  cache.value = {}
+  usernameCache.value = {}
+  inFlight.clear()
+})
 
 export function shortDid(did: string | null | undefined): string {
   if (!did) return 'Unknown'
@@ -55,6 +64,7 @@ export function useDisplayNames() {
 
   /** Resolve + cache any DIDs not already known. Safe to call repeatedly. */
   async function ensureNames(dids: Array<string | null | undefined>): Promise<void> {
+    const generation = profileGeneration
     const want = Array.from(
       new Set(
         dids.filter((d): d is string => !!d && !(d in cache.value) && !inFlight.has(d)),
@@ -70,6 +80,7 @@ export function useDisplayNames() {
           { dids: want },
         ).catch(() => ({}) as Record<string, { username: string | null; display_name: string | null }>),
       ])
+      if (generation !== profileGeneration) return
       cache.value = { ...cache.value, ...names }
       const usernames: Record<string, string> = {}
       for (const [did, r] of Object.entries(profiles)) {
@@ -82,7 +93,9 @@ export function useDisplayNames() {
     } catch {
       // Leave unresolved → callers fall back to shortDid.
     } finally {
-      for (const d of want) inFlight.delete(d)
+      if (generation === profileGeneration) {
+        for (const d of want) inFlight.delete(d)
+      }
     }
   }
 

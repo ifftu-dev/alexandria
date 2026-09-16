@@ -3,12 +3,10 @@
   "subtitle": "Garde vos évaluations honnêtes",
   "actions": {
     "resetProfile": "Réinitialiser la configuration",
-    "proposeCheat": "Proposer un schéma de triche",
     "recalibrate": "Refaire la configuration",
     "train": "Configurer Sentinel",
     "open": "Ouvrir",
-    "runTest": "Lancer le test",
-    "openCommunity": "Ouvrir la communauté"
+    "runTest": "Lancer le test"
   },
   "tabs": {
     "overview": "Aperçu",
@@ -32,14 +30,6 @@
     "clean": "Sans anomalie",
     "flagged": "Signalée",
     "suspended": "Suspendue"
-  },
-  "community": {
-    "title": "Communauté Sentinel",
-    "active": "Active",
-    "pending": "En cours de démarrage",
-    "description": "Relit la bibliothèque partagée de schémas de triche dont chaque copie de Sentinel apprend.",
-    "noCouncil": "Aucun conseil choisi pour l'instant. Proposez le premier conseil Sentinel dans la communauté Alexandria principale pour débloquer les approbations et les tests de précision.",
-    "members": "Membres du conseil"
   },
   "holdout": {
     "title": "Jeu de test de précision",
@@ -208,9 +198,7 @@
   "pasteClassifier": {
     "title": "Détecteur de collage Sentinel",
     "description": "Ajoute le signal du détecteur de collage lorsque la notation intelligente est activée. Désactivez-le s'il signale trop de réponses honnêtes ; les autres signaux intelligents continuent de fonctionner.",
-    "loadedModel": "Détecteur chargé",
-    "activeModel": "Détecteur communautaire",
-    "bundledFallback": "valeur par défaut intégrée"
+    "loadedModel": "Détecteur chargé"
   },
   "reset": {
     "title": "Effacer votre configuration",
@@ -265,48 +253,6 @@
     "verdictAttack": "Jeu de test de triche : le niveau d'alerte moyen de Sentinel était de {score}% (plus haut est meilleur). {adv}% des {count} échantillons {kind} ont été détectés comme triche — c'est votre taux de détection pour la famille « {label} ».",
     "note": "Le jeu de test déverrouillé reste sur cet appareil. Ne partagez pas les échantillons étiquetés — les divulguer donne aux tricheurs le corrigé.",
     "holdoutOption": "{kind} · seuil {threshold} · {date}"
-  },
-  "propose": {
-    "back": "Retour à Sentinel",
-    "title": "Proposer un schéma de triche",
-    "subtitle": "Soumettez un schéma de triche étiqueté pour que la communauté Sentinel le relise. Les schémas approuvés apprennent à chaque copie de Sentinel à reconnaître ce type de triche. Les schémas de visage ne sont pas acceptés.",
-    "submittedTitle": "Proposition envoyée",
-    "submittedBody": "Identifiant de la proposition : {id}. Les membres de la communauté Sentinel voteront dessus — consultez le tableau de bord de la communauté pour suivre la progression.",
-    "another": "Proposer un autre",
-    "step1": "1. Quel modèle",
-    "step1Body": "Quel modèle doit apprendre à détecter ce schéma ? Les données de visage ne sont jamais partagées.",
-    "step2": "2. Étiquette",
-    "step2Body": "Quel type de triche est-ce ? Choisissez une étiquette connue ou saisissez la vôtre.",
-    "labelPlaceholder": "Ou saisissez une étiquette personnalisée (remplace le choix ci-dessus)",
-    "step3": "3. Fichier d'échantillons",
-    "step3Body": "Un fichier JSON au format 1, un modèle correspondant à votre choix ci-dessus, une étiquette, et au moins 20 échantillons. Voir {doc} pour le format.",
-    "selected": "Sélectionné : {name}",
-    "parsedOk": "Tout semble bon — {count} échantillons, étiquette {label}.",
-    "kindMismatch": "Attention : le modèle du fichier est « {fileKind} » mais vous avez choisi « {selectedKind} ». Modifiez-en un avant de soumettre.",
-    "selfCheckTitle": "Auto-vérification Sentinel",
-    "step4": "4. Session source (facultatif)",
-    "step4Body": "Si vous avez tiré ces échantillons de l'une de vos propres sessions d'évaluation, choisissez-la ici. Les sessions signalées ou suspendues ne peuvent pas être utilisées — les données de triche ne doivent pas façonner le détecteur. Sentinel vérifie à nouveau dans tous les cas.",
-    "sessionNone": "Aucune",
-    "step5": "5. Résumé de la proposition",
-    "titlePlaceholder": "Titre court affiché aux votants",
-    "descriptionPlaceholder": "Pourquoi devrait-elle être approuvée ? Comment avez-vous collecté les données ?",
-    "submit": "Soumettre la proposition",
-    "verdict": {
-      "untrained": "Sentinel n'est pas encore configuré ici, il ne peut donc pas s'auto-vérifier. Configurez d'abord Sentinel pour voir si cela ressemble vraiment à de la triche.",
-      "strong": "Sentinel signale ceci fortement (moyenne {pct}%, {adv}% des échantillons au-dessus du seuil). Un schéma de triche solide.",
-      "weak": "Sentinel lit ceci comme proche de la normale (moyenne {pct}%). L'approuver pourrait apprendre au modèle à signaler des personnes honnêtes — reconsidérez avant de soumettre.",
-      "borderline": "Limite : moyenne {pct}%, {adv}% signalés. Le schéma peut être faible ou mixte — réexaminez les échantillons."
-    },
-    "errors": {
-      "samplesArray": "« samples » doit être une liste.",
-      "tooFew": "Il faut au moins 20 échantillons ({count} fourni(s)).",
-      "faceForbidden": "Les schémas de visage ne sont pas acceptés.",
-      "unsupportedKind": "Modèle non pris en charge : {kind}.",
-      "unsupportedSchema": "Format non pris en charge : {schema}.",
-      "emptyLabel": "L'étiquette ne peut pas être vide.",
-      "readFailed": "Impossible de lire le fichier : {error}"
-    },
-    "statusOption": "{date} — statut : {status}"
   },
   "wizard": {
     "welcomeTitle": "Configurer Sentinel",

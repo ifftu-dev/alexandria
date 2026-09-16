@@ -89,7 +89,7 @@ Three keys back the skill-graph/reputation home surface (see
 | Key | Scope | Kind | Use |
 |---|---|---|---|
 | `instructor.graph_prefs` | sync | json | `{ skill_id: { public, teaching } }` — per-skill visibility + teaching highlight. Read by `p2p::graph_fetch` when serving the owner's public graph. |
-| `learner.targets` | sync | json | `Goal[]` the user is working toward. Each goal carries `kind`, optional `source_key` / `source_url`, `resolution_provenance`, and `taxonomy_version` — resolved from DAO-ratified `goal_templates` (exam/curriculum/job-role) or on-device job-description parsing. |
+| `learner.targets` | sync | json | `Goal[]` the user is working toward. Each goal carries `kind`, optional `source_key` / `source_url`, `resolution_provenance`, and `taxonomy_version` — resolved from the bundled `goal_templates` (exam/curriculum/job-role) or on-device job-description parsing. |
 | `identity.local_did` | device | string | Cached `did:key` of the active profile, written by `get_local_did`. Lets the swarm event loop (no keystore access) answer `graph-fetch` requests for its own owner. Internal — not user-facing. |
 
 ## Where settings used to live
@@ -100,7 +100,6 @@ Before this work, preferences were scattered:
 |---|---|---|
 | `localStorage` | theme, sidebar collapsed, sidebar sections, keyboard shortcuts, omni recents, sentinel AI / paste toggles | Per-device only, lost on profile switch, never synced |
 | `app_settings` table (ad hoc) | `storage_quota_bytes` | One-off SQL, no schema |
-| Hardcoded seed | `theme`, `language`, `notifications_enabled`, `auto_sync`, `sentinel_camera_enabled`, `sentinel_keyboard_enabled` | Written by `db/seed.rs` but never read |
 | Module-level refs | video volume / mute | Lost on remount |
 | Env vars | `BLOCKFROST_PROJECT_ID`, `ALEXANDRIA_COMPLETION_POLICY_ID`, `ALEXANDRIA_DEVICE_LABEL` | Process-wide fallback. `BLOCKFROST_PROJECT_ID` is now overridden by the per-device `cardano.blockfrost_project_id` setting (resolved via `cardano::blockfrost::resolve_project_id`); the env var stays as a CI / dev-script convenience. |
 

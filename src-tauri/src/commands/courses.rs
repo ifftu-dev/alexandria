@@ -1,14 +1,17 @@
-use rusqlite::params;
-use tauri::State;
+use crate::profile::scope::ProfileState as State;
+use rusqlite::{params, OptionalExtension};
 
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
 use crate::AppState;
 
 use crate::content_store::course as content_course;
+use crate::crypto::did::did_from_verifying_key;
 use crate::crypto::wallet;
 use crate::domain::course_document::{
-    CourseDocumentPayload, DocumentChapter, DocumentElement, PublishCourseResult,
+    CourseCompletionPolicy, CourseDocumentPayload, DocumentChapter, DocumentElement,
+    PublishCourseResult,
 };
 use crate::p2p::catalog;
 
@@ -18,12 +21,21 @@ pub async fn list_courses(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Course>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "courses.list",
+            move |db| list_courses_db(db, status),
+        )
+        .await
+}
 
+fn list_courses_db(
+    db: &crate::db::Database,
+    status: Option<String>,
+) -> Result<Vec<Course>, String> {
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ref s) =
         status
     {
@@ -90,12 +102,18 @@ pub async fn get_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<Course>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "courses.get",
+            move |db| get_course_db(db, &course_id),
+        )
+        .await
+}
 
+fn get_course_db(db: &crate::db::Database, course_id: &str) -> Result<Option<Course>, String> {
     let result = db.conn().query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
          thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind, provenance \
@@ -143,12 +161,18 @@ pub async fn create_course(
     state: State<'_, AppState>,
     req: CreateCourseRequest,
 ) -> Result<Course, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.create",
+            move |db| create_course_db(db, req),
+        )
+        .await
+}
 
+fn create_course_db(db: &crate::db::Database, req: CreateCourseRequest) -> Result<Course, String> {
     // Get the local user's stake address
     let author_address: String = db
         .conn()
@@ -205,12 +229,22 @@ pub async fn update_course(
     course_id: String,
     req: UpdateCourseRequest,
 ) -> Result<Course, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.update",
+            move |db| update_course_db(db, &course_id, req),
+        )
+        .await
+}
 
+fn update_course_db(
+    db: &crate::db::Database,
+    course_id: &str,
+    req: UpdateCourseRequest,
+) -> Result<Course, String> {
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -243,7 +277,7 @@ pub async fn update_course(
     }
 
     set_clauses.push("updated_at = datetime('now')");
-    values.push(Box::new(course_id.clone()));
+    values.push(Box::new(course_id.to_owned()));
 
     let sql = format!("UPDATE courses SET {} WHERE id = ?", set_clauses.join(", "));
 
@@ -258,18 +292,24 @@ pub async fn update_course(
         return Err("course not found".into());
     }
 
-    get_course_by_id(db.conn(), &course_id)
+    get_course_by_id(db.conn(), course_id)
 }
 
 /// Delete a course.
 #[tauri::command]
 pub async fn delete_course(state: State<'_, AppState>, course_id: String) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.delete",
+            move |db| delete_course_db(db, &course_id),
+        )
+        .await
+}
 
+fn delete_course_db(db: &crate::db::Database, course_id: &str) -> Result<(), String> {
     let rows = db
         .conn()
         .execute("DELETE FROM courses WHERE id = ?1", params![course_id])
@@ -284,17 +324,25 @@ pub async fn delete_course(state: State<'_, AppState>, course_id: String) -> Res
 
 /// Publish a course to the iroh blob store.
 ///
-/// Reads the course, its chapters, and elements from SQLite, builds
-/// a CourseDocumentPayload, signs it with the wallet key, stores it
-/// on iroh, and updates the course's `content_cid` with the BLAKE3 hash.
+/// Reads the course, its chapters, and elements from SQLite, uploads any
+/// inline text lessons, builds a CourseDocumentPayload, signs it with the
+/// wallet key, stores it on iroh, and updates the course's `content_cid` with
+/// the BLAKE3 hash.
 ///
-/// Requires the vault to be unlocked (wallet key needed for signing).
+/// Requires the vault to be unlocked (wallet key needed for signing), and
+/// refuses a course the signer did not author.
 #[tauri::command]
 pub async fn publish_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<PublishCourseResult, String> {
+    // Publication spans several awaits. Database phases are fenced by profile
+    // leases; the studio epoch additionally catches a profile switch between
+    // them, so a commit can never land in a different profile than the read.
     let studio_epoch = state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst);
+    let profile_unchanged =
+        || state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) == studio_epoch;
+
     // Get the wallet signing key from the vault
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
@@ -302,152 +350,182 @@ pub async fn publish_course(
     drop(keystore);
 
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let author_did = did_from_verifying_key(&w.signing_key.verifying_key());
+    let signer_address = w.stake_address.clone();
 
-    // Read course data from DB (scoped to release the lock before iroh calls)
-    let (mut payload, inline_text) = {
-        let mut inline_text: Vec<(String, String)> = Vec::new();
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let course = get_course_by_id(db.conn(), &course_id)?;
-        if course.author_address != w.stake_address {
-            return Err("course not found or not authored by you".into());
-        }
-
-        // Read chapters with their elements
-        let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
-            let mut stmt = db
-                .conn()
-                .prepare(
-                    "SELECT id, title, description, position \
-                     FROM course_chapters WHERE course_id = ?1 ORDER BY position ASC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            let rows = stmt
-                .query_map(params![course_id], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            rows
-        };
-
-        let mut chapters = Vec::new();
-        for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
-            let elements: Vec<DocumentElement> = {
-                let mut el_stmt = db
+    // Read course data off the async runtime before iroh calls.
+    let read_course_id = course_id.clone();
+    let (mut payload, inline_text) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.publish.read",
+            move |db| {
+                let course = get_course_by_id(db.conn(), &read_course_id)?;
+                if course.author_address != signer_address {
+                    return Err("course not found or not authored by you".into());
+                }
+                let draft_policy_json: Option<String> = db
                     .conn()
-                    .prepare(
-                        "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
-                         FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
+                    .query_row(
+                        "SELECT draft_completion_policy_json FROM courses WHERE id = ?1",
+                        params![read_course_id],
+                        |row| row.get(0),
                     )
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|error| error.to_string())?;
+                let completion_policy = draft_policy_json
+                    .as_deref()
+                    .map(serde_json::from_str::<CourseCompletionPolicy>)
+                    .transpose()
+                    .map_err(|error| format!("invalid draft completion policy: {error}"))?;
+                if let Some(policy) = &completion_policy {
+                    policy
+                        .validate()
+                        .map_err(|error| format!("invalid draft completion policy: {error}"))?;
+                }
 
-                let els = el_stmt
-                    .query_map(params![ch_id], |row| {
-                        let el_id: String = row.get(0)?;
-                        let element_type: String = row.get(2)?;
-                        if element_type == "text" {
-                            if let Some(text) = row.get::<_, Option<String>>(6)? {
-                                inline_text.push((el_id.clone(), text));
-                            }
-                        }
-                        Ok(DocumentElement {
-                            id: el_id,
-                            title: row.get(1)?,
-                            element_type: row.get(2)?,
-                            content_hash: row.get(3)?,
-                            position: row.get(4)?,
-                            duration_seconds: row.get(5)?,
-                            // video_chapters are joined in below after the
-                            // element list is materialised, to keep the row
-                            // closure free of outer borrows.
-                            video_chapters: Vec::new(),
-                        })
-                    })
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?;
-
-                // Load chapter markers for any video elements in this
-                // chapter. Small N — a chapter rarely has more than a
-                // handful of videos, so a per-element query is fine.
-                let mut els = els;
-                for el in els.iter_mut() {
-                    if el.element_type != "video" {
-                        continue;
-                    }
-                    let mut vc_stmt = db
+                // Read chapters with their elements
+                let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
+                    let mut stmt = db
                         .conn()
                         .prepare(
-                            "SELECT title, start_seconds, position \
-                             FROM video_chapters WHERE element_id = ?1 \
-                             ORDER BY position ASC",
+                            "SELECT id, title, description, position \
+                     FROM course_chapters WHERE course_id = ?1 ORDER BY position ASC",
                         )
                         .map_err(|e| e.to_string())?;
-                    let vcs: Vec<_> = vc_stmt
-                        .query_map(params![el.id], |row| {
-                            Ok(crate::domain::course_document::VideoChapter {
-                                title: row.get(0)?,
-                                start_seconds: row.get(1)?,
-                                position: row.get(2)?,
-                            })
+
+                    let rows = stmt
+                        .query_map(params![read_course_id], |row| {
+                            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                         })
                         .map_err(|e| e.to_string())?
-                        .filter_map(|r| r.ok())
-                        .collect();
-                    el.video_chapters = vcs;
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())?;
+                    rows
+                };
+
+                // Text lessons written in the studio are stored inline and
+                // uploaded as blobs before signing, so the signed document
+                // references content rather than carrying it.
+                let mut inline_text: Vec<(String, String)> = Vec::new();
+                let mut chapters = Vec::new();
+                for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
+                    let elements: Vec<DocumentElement> = {
+                        let mut el_stmt = db
+                            .conn()
+                            .prepare(
+                                "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
+                                 FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
+                            )
+                            .map_err(|e| e.to_string())?;
+
+                        let els = el_stmt
+                            .query_map(params![ch_id], |row| {
+                                let el_id: String = row.get(0)?;
+                                let element_type: String = row.get(2)?;
+                                if element_type == "text" {
+                                    if let Some(text) = row.get::<_, Option<String>>(6)? {
+                                        inline_text.push((el_id.clone(), text));
+                                    }
+                                }
+                                Ok(DocumentElement {
+                                    id: el_id,
+                                    title: row.get(1)?,
+                                    element_type,
+                                    content_hash: row.get(3)?,
+                                    position: row.get(4)?,
+                                    duration_seconds: row.get(5)?,
+                                    // video_chapters are joined in below after the
+                                    // element list is materialised, to keep the row
+                                    // closure free of outer borrows.
+                                    video_chapters: Vec::new(),
+                                })
+                            })
+                            .map_err(|e| e.to_string())?
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|e| e.to_string())?;
+
+                        // Load chapter markers for any video elements in this
+                        // chapter. Small N — a chapter rarely has more than a
+                        // handful of videos, so a per-element query is fine.
+                        let mut els = els;
+                        for el in els.iter_mut() {
+                            if el.element_type != "video" {
+                                continue;
+                            }
+                            let mut vc_stmt = db
+                                .conn()
+                                .prepare(
+                                    "SELECT title, start_seconds, position \
+                             FROM video_chapters WHERE element_id = ?1 \
+                             ORDER BY position ASC",
+                                )
+                                .map_err(|e| e.to_string())?;
+                            let vcs: Vec<_> = vc_stmt
+                                .query_map(params![el.id], |row| {
+                                    Ok(crate::domain::course_document::VideoChapter {
+                                        title: row.get(0)?,
+                                        start_seconds: row.get(1)?,
+                                        position: row.get(2)?,
+                                    })
+                                })
+                                .map_err(|e| e.to_string())?
+                                .filter_map(|r| r.ok())
+                                .collect();
+                            el.video_chapters = vcs;
+                        }
+                        els
+                    };
+
+                    chapters.push(DocumentChapter {
+                        id: ch_id.clone(),
+                        position: *ch_pos,
+                        title: ch_title.clone(),
+                        description: ch_desc.clone(),
+                        elements,
+                    });
                 }
-                els
-            };
 
-            chapters.push(DocumentChapter {
-                id: ch_id.clone(),
-                position: *ch_pos,
-                title: ch_title.clone(),
-                description: ch_desc.clone(),
-                elements,
-            });
-        }
+                let created_at = parse_datetime_to_unix(&course.created_at);
+                let updated_at = chrono::Utc::now().timestamp();
+                let tutor_policy = alexandria_studio::store::tutor_policy(db.conn(), &course.id)
+                    .map_err(|error| error.to_string())?;
 
-        let created_at = parse_datetime_to_unix(&course.created_at);
-        let updated_at = chrono::Utc::now().timestamp();
-
-        (
-            CourseDocumentPayload {
-                version: 1,
-                course_id: course.id.clone(),
-                author_address: course.author_address.clone(),
-                title: course.title.clone(),
-                description: course.description.clone(),
-                thumbnail_hash: course.thumbnail_cid.clone(),
-                tags: course.tags.clone().unwrap_or_default(),
-                skill_ids: course.skill_ids.clone().unwrap_or_default(),
-                chapters,
-                created_at,
-                updated_at,
-                kind: course.kind.clone(),
-                tutor_policy: alexandria_studio::store::tutor_policy(db.conn(), &course.id)
-                    .map_err(|error| error.to_string())?,
+                Ok((
+                    CourseDocumentPayload {
+                        version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
+                        course_id: course.id.clone(),
+                        author_address: course.author_address.clone(),
+                        author_did: Some(author_did),
+                        title: course.title.clone(),
+                        description: course.description.clone(),
+                        thumbnail_hash: course.thumbnail_cid.clone(),
+                        tags: course.tags.clone().unwrap_or_default(),
+                        skill_ids: course.skill_ids.clone().unwrap_or_default(),
+                        chapters,
+                        created_at,
+                        updated_at,
+                        kind: course.kind.clone(),
+                        completion_policy,
+                        tutor_policy,
+                    },
+                    inline_text,
+                ))
             },
-            inline_text,
         )
-        // db lock dropped here
-    };
+        .await?;
 
-    if state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) != studio_epoch {
+    if !profile_unchanged() {
         return Err("profile changed during publication".into());
     }
     content_course::materialize_text_lessons(&state.content_node, &mut payload, &inline_text)
         .await
         .map_err(|error| error.to_string())?;
-    if state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) != studio_epoch {
+    if !profile_unchanged() {
         return Err("profile changed during publication".into());
     }
+
     // Sign the document
     let signed = content_course::sign_course_document(&payload, &w.signing_key)
         .map_err(|e| e.to_string())?;
@@ -457,76 +535,110 @@ pub async fn publish_course(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Update the course in the database and build catalog announcement
-    let (announcement, signed_ann, version) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        if state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) != studio_epoch {
-            return Err("profile changed during publication".into());
-        }
-        for (element_id, expected_text) in &inline_text {
-            let matches: bool = db.conn().query_row(
-                "SELECT EXISTS(SELECT 1 FROM course_elements e JOIN course_chapters ch ON ch.id=e.chapter_id WHERE e.id=?1 AND ch.course_id=?2 AND e.content_inline=?3 AND e.element_type='text')",
-                params![element_id, course_id, expected_text], |row| row.get(0),
-            ).map_err(|error| error.to_string())?;
-            if !matches {
-                return Err("lesson changed during publication; review and publish again".into());
-            }
-        }
-        db.conn()
-            .execute(
-                "UPDATE courses SET content_cid = ?1, status = 'published', \
+    if !profile_unchanged() {
+        return Err("profile changed during publication".into());
+    }
+
+    // Update the course and build the catalog announcement off the runtime.
+    let update_course_id = course_id.clone();
+    let content_hash = result.content_hash.clone();
+    let content_size = result.size;
+    let document_version = i64::from(signed.version);
+    let completion_policy_json = signed
+        .completion_policy
+        .as_ref()
+        .map(serde_json_canonicalizer::to_string)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let (announcement, signed_ann, version) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.publish.commit",
+            move |db| {
+                // The signed document carries the lesson text as it was read.
+                // If an author edited a lesson while it uploaded, publishing
+                // would record a document that no longer matches the draft.
+                for (element_id, expected_text) in &inline_text {
+                    let matches: bool = db
+                        .conn()
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM course_elements e \
+                             JOIN course_chapters ch ON ch.id = e.chapter_id \
+                             WHERE e.id = ?1 AND ch.course_id = ?2 \
+                             AND e.content_inline = ?3 AND e.element_type = 'text')",
+                            params![element_id, update_course_id, expected_text],
+                            |row| row.get(0),
+                        )
+                        .map_err(|error| error.to_string())?;
+                    if !matches {
+                        return Err(
+                            "lesson changed during publication; review and publish again".into(),
+                        );
+                    }
+                }
+
+                db.conn()
+                    .execute(
+                        "UPDATE courses SET content_cid = ?1, course_document_version = ?2, \
+                 completion_policy_json = ?3, status = 'published', \
                  version = version + 1, published_at = datetime('now'), \
-                 updated_at = datetime('now') WHERE id = ?2",
-                params![result.content_hash, course_id],
-            )
-            .map_err(|e| e.to_string())?;
+                 updated_at = datetime('now') WHERE id = ?4",
+                        params![
+                            content_hash,
+                            document_version,
+                            completion_policy_json,
+                            update_course_id,
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
 
-        // Track as a non-evictable pin (authored content)
-        crate::content_store::storage::upsert_pin(
-            db.conn(),
-            &result.content_hash,
-            "course",
-            result.size,
-            false, // auto_unpin = false: authored content is never evicted
-        );
+                // Track as a non-evictable pin (authored content)
+                crate::content_store::storage::upsert_pin(
+                    db.conn(),
+                    &content_hash,
+                    "course",
+                    content_size,
+                    false, // auto_unpin = false: authored content is never evicted
+                )?;
 
-        // Read back the updated course to get the new version number
-        let updated_course = get_course_by_id(db.conn(), &course_id)?;
-        let version = updated_course.version;
+                // Read back the updated course to get the new version number
+                let updated_course = get_course_by_id(db.conn(), &update_course_id)?;
+                let version = updated_course.version;
 
-        // Build a catalog announcement for P2P discovery
-        let announcement = catalog::build_catalog_announcement(
-            &payload.author_address,
-            &payload.title,
-            payload.description.as_deref(),
-            &result.content_hash,
-            payload.thumbnail_hash.as_deref(),
-            &payload.tags,
-            &payload.skill_ids,
-            version,
-            &payload.kind,
-        );
+                // Build a catalog announcement for P2P discovery
+                let announcement = catalog::build_catalog_announcement(
+                    &payload.course_id,
+                    &payload.author_address,
+                    &payload.title,
+                    payload.description.as_deref(),
+                    &content_hash,
+                    payload.thumbnail_hash.as_deref(),
+                    &payload.tags,
+                    &payload.skill_ids,
+                    version,
+                    &payload.kind,
+                );
 
-        // Sign the announcement payload to get the signature for the catalog entry
-        let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
-        let signed_ann = crate::p2p::signing::sign_gossip_message(
-            crate::p2p::types::TOPIC_CATALOG,
-            ann_json,
-            &w.signing_key,
-            &w.stake_address,
-        );
-        let signature_hex = hex::encode(&signed_ann.signature);
+                // Sign the announcement payload to get the signature for the catalog entry
+                let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
+                let signed_ann = crate::p2p::signing::sign_gossip_message(
+                    crate::p2p::types::TOPIC_CATALOG,
+                    ann_json,
+                    &w.signing_key,
+                    &w.stake_address,
+                );
+                let signature_hex = hex::encode(&signed_ann.signature);
 
-        // Insert into local catalog table (author's own course, pinned=1)
-        catalog::insert_own_catalog_entry(db, &announcement, &signature_hex)
-            .map_err(|e| format!("catalog insert: {e}"))?;
+                // Insert into local catalog table (author's own course, pinned=1)
+                catalog::insert_own_catalog_entry(db, &announcement, &signature_hex)
+                    .map_err(|e| format!("catalog insert: {e}"))?;
 
-        (announcement, signed_ann, version)
-    }; // db guard dropped here — before any .await
+                Ok((announcement, signed_ann, version))
+            },
+        )
+        .await?;
 
     // Broadcast via P2P if the node is running (best-effort — don't fail publish)
     let p2p_node = state.p2p_node.lock().await;
@@ -542,6 +654,94 @@ pub async fn publish_course(
     }
 
     Ok(result)
+}
+
+/// Update the local draft policy that will be covered by the next signed
+/// course publication. Passing `None` clears it. Published documents and
+/// existing enrollments remain immutable.
+#[tauri::command]
+pub async fn set_course_completion_policy(
+    state: State<'_, AppState>,
+    course_id: String,
+    policy: Option<CourseCompletionPolicy>,
+) -> Result<(), String> {
+    let canonical = policy
+        .as_ref()
+        .map(|policy| {
+            policy.validate().map_err(|error| error.to_string())?;
+            serde_json_canonicalizer::to_string(policy).map_err(|error| error.to_string())
+        })
+        .transpose()?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.completion-policy.update",
+            move |db| {
+                set_course_completion_policy_impl(db.conn(), &course_id, canonical.as_deref())
+            },
+        )
+        .await
+}
+
+/// Read the active author's unpublished policy for the next course version.
+#[tauri::command]
+pub async fn get_course_completion_policy(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> Result<Option<CourseCompletionPolicy>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.completion-policy.read",
+            move |db| get_course_completion_policy_impl(db.conn(), &course_id),
+        )
+        .await
+}
+
+fn get_course_completion_policy_impl(
+    conn: &rusqlite::Connection,
+    course_id: &str,
+) -> Result<Option<CourseCompletionPolicy>, String> {
+    let row = conn
+        .query_row(
+            "SELECT draft_completion_policy_json FROM courses \
+             WHERE id = ?1 AND author_address = \
+               (SELECT stake_address FROM local_identity WHERE id = 1)",
+            [course_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .ok_or("course not found or active profile is not its author")?;
+    row.map(|json| {
+        serde_json::from_str(&json)
+            .map_err(|error| format!("invalid draft completion policy: {error}"))
+    })
+    .transpose()
+}
+
+fn set_course_completion_policy_impl(
+    conn: &rusqlite::Connection,
+    course_id: &str,
+    canonical_policy: Option<&str>,
+) -> Result<(), String> {
+    let rows = conn
+        .execute(
+            "UPDATE courses SET draft_completion_policy_json = ?1, \
+             updated_at = datetime('now') \
+             WHERE id = ?2 AND author_address = \
+               (SELECT stake_address FROM local_identity WHERE id = 1)",
+            params![canonical_policy, course_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if rows != 1 {
+        return Err("course not found or active profile is not its author".into());
+    }
+    Ok(())
 }
 
 /// Parse a SQLite datetime string to a Unix timestamp.
@@ -638,6 +838,56 @@ mod tests {
         let db = test_db();
         let result = get_course_by_id(db.conn(), "nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn draft_completion_policy_is_author_scoped_and_clearable() {
+        let db = test_db();
+        setup_identity(&db);
+        insert_course(&db, "owned", "Owned", "draft");
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) \
+                 VALUES ('foreign', 'Foreign', 'stake_test1uother')",
+                [],
+            )
+            .unwrap();
+
+        set_course_completion_policy_impl(db.conn(), "owned", Some("{}"))
+            .expect("owned draft policy");
+        assert!(
+            get_course_completion_policy_impl(db.conn(), "owned").is_err(),
+            "invalid stored policy must fail closed"
+        );
+        let stored: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT draft_completion_policy_json FROM courses WHERE id = 'owned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some("{}"));
+
+        assert!(
+            set_course_completion_policy_impl(db.conn(), "foreign", Some("{}"))
+                .unwrap_err()
+                .contains("not found or active profile is not its author")
+        );
+        set_course_completion_policy_impl(db.conn(), "owned", None).expect("clear policy");
+        assert!(get_course_completion_policy_impl(db.conn(), "owned")
+            .expect("read cleared policy")
+            .is_none());
+        let cleared: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT draft_completion_policy_json FROM courses WHERE id = 'owned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cleared.is_none());
+        assert!(get_course_completion_policy_impl(db.conn(), "foreign").is_err());
     }
 
     #[test]

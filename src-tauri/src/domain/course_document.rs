@@ -10,16 +10,24 @@
 use serde::{Deserialize, Serialize};
 
 use alexandria_studio::model::TutorPolicy;
+pub use alexandria_verify::course::CourseCompletionPolicy;
+
+pub const COURSE_DOCUMENT_VERSION: u32 = 2;
 
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {
-    /// Document format version (currently 1).
+    /// Document format version. Version 2 is the only supported format; it
+    /// carries the author DID and the immutable completion policy.
     pub version: u32,
     /// Deterministic course ID: blake2b(author_address + title + timestamp).
     pub course_id: String,
     /// Cardano stake address of the author.
     pub author_address: String,
+    /// Exact Ed25519 author identity. Required in v2 and bound to the embedded
+    /// document signing key; absent from legacy v1 documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_did: Option<alexandria_verify::Did>,
     /// Course title.
     pub title: String,
     /// Course description.
@@ -40,6 +48,10 @@ pub struct CourseDocumentPayload {
     /// keeps documents from older nodes parseable as regular courses.
     #[serde(default = "default_kind")]
     pub kind: String,
+    /// Author-selected endorsement requirements for this exact document.
+    /// Absence means completion remains a learner self-claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_policy: Option<CourseCompletionPolicy>,
     /// Public learner-tutor behavior chosen by the instructor. Disabled policies
     /// are omitted so signatures on course documents from older nodes remain valid.
     #[serde(default, skip_serializing_if = "TutorPolicy::is_disabled")]
@@ -106,6 +118,8 @@ pub struct SignedCourseDocument {
     pub version: u32,
     pub course_id: String,
     pub author_address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_did: Option<alexandria_verify::Did>,
     pub title: String,
     pub description: Option<String>,
     pub thumbnail_hash: Option<String>,
@@ -116,6 +130,8 @@ pub struct SignedCourseDocument {
     pub updated_at: i64,
     #[serde(default = "default_kind")]
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_policy: Option<CourseCompletionPolicy>,
     #[serde(default, skip_serializing_if = "TutorPolicy::is_disabled")]
     pub tutor_policy: TutorPolicy,
 
@@ -133,6 +149,7 @@ impl SignedCourseDocument {
             version: self.version,
             course_id: self.course_id.clone(),
             author_address: self.author_address.clone(),
+            author_did: self.author_did.clone(),
             title: self.title.clone(),
             description: self.description.clone(),
             thumbnail_hash: self.thumbnail_hash.clone(),
@@ -142,6 +159,7 @@ impl SignedCourseDocument {
             created_at: self.created_at,
             updated_at: self.updated_at,
             kind: self.kind.clone(),
+            completion_policy: self.completion_policy.clone(),
             tutor_policy: self.tutor_policy.clone(),
         }
     }
@@ -162,9 +180,10 @@ mod tests {
 
     fn sample_signed_course_doc() -> SignedCourseDocument {
         SignedCourseDocument {
-            version: 1,
+            version: COURSE_DOCUMENT_VERSION,
             course_id: "course1".into(),
             author_address: "stake_test1u123".into(),
+            author_did: None,
             title: "Intro to Rust".into(),
             description: Some("Learn Rust".into()),
             thumbnail_hash: None,
@@ -188,6 +207,7 @@ mod tests {
             created_at: 1700000000,
             updated_at: 1700100000,
             kind: "course".into(),
+            completion_policy: None,
             tutor_policy: TutorPolicy::default(),
             signature: "deadbeef".into(),
             public_key: "cafebabe".into(),
@@ -199,7 +219,7 @@ mod tests {
         let signed = sample_signed_course_doc();
         let payload = signed.payload();
 
-        assert_eq!(payload.version, 1);
+        assert_eq!(payload.version, COURSE_DOCUMENT_VERSION);
         assert_eq!(payload.course_id, "course1");
         assert_eq!(payload.author_address, "stake_test1u123");
         assert_eq!(payload.title, "Intro to Rust");
@@ -221,9 +241,10 @@ mod tests {
     #[test]
     fn course_document_payload_serde_roundtrip() {
         let payload = CourseDocumentPayload {
-            version: 1,
+            version: COURSE_DOCUMENT_VERSION,
             course_id: "c1".into(),
             author_address: "addr1".into(),
+            author_did: None,
             title: "Test".into(),
             description: None,
             thumbnail_hash: None,
@@ -233,6 +254,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             kind: "course".into(),
+            completion_policy: None,
             tutor_policy: TutorPolicy::default(),
         };
         let json = serde_json::to_string(&payload).unwrap();

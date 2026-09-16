@@ -12,8 +12,6 @@ default-run = "alexandria-node"
 
 [features]
 default = []
-dev-seed = []
-
 
 # Enable desktop tutoring video without acoustic echo cancellation.
 # This keeps Windows buildable on GitHub's MSVC runners, where the bundled
@@ -73,7 +71,7 @@ serde_json_canonicalizer = "0.3"
 tokio = { version = "1", features = ["full"] }
 
 # Cryptography (always available — needed for wallet on all platforms)
-ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+ed25519-dalek = { version = "2", features = ["serde", "rand_core", "zeroize"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 blake2 = "0.10"
 sha2 = "0.10"
@@ -95,7 +93,7 @@ pallas-traverse = "0.35"
 pallas-codec = "0.35"
 
 # LRU cache (used for gossip dedup — avoids full-clear replay window)
-lru = "0.12"
+lru = "0.18.2"
 
 # Sentinel ML (Rust backend, replaces TS+onnxruntime-web)
 # tract-onnx: ONNX inference for the frozen paste classifier
@@ -137,6 +135,9 @@ aes-gcm = "0.10"
 # that does not cross-compile to iOS/Android.
 iroh = { version = "1.0.2", default-features = false, features = ["metrics", "fast-apple-datapath", "portmapper", "tls-ring"] }
 iroh-blobs = { version = "0.103", features = ["fs-store"] }
+# iroh-blobs returns irpc errors; the content node matches them to tell a
+# store that has already closed from a close that failed.
+irpc = { version = "0.17", default-features = false }
 
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
@@ -156,7 +157,7 @@ blake3 = "1"
 [target.'cfg(any(target_os = "ios", target_os = "android", target_os = "windows"))'.dependencies]
 # Mobile and Windows release runners do not provide a reliable SQLCipher OpenSSL
 # toolchain out of the box. Vendor OpenSSL here so builds do not depend on runner-specific paths.
-rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl", "uuid"] }
+rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl", "uuid", "functions"] }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 # ObjC runtime — for configuring WKWebView scrollView insets (iOS) and
@@ -185,7 +186,7 @@ ndk-context = "0.1"
 # ── macOS / Linux SQLCipher dependencies ─────────────────────────────
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 # macOS/Linux desktop builds can link SQLCipher against the runner's native crypto stack.
-rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid"] }
+rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid", "functions"] }
 
 # ── Active-app detection (Sentinel, per-OS) ──────────────────────────
 # macOS: NSWorkspace.frontmostApplication for the focused app's name + bundle id.
@@ -255,6 +256,7 @@ wasmtime = { version = "36", default-features = false, features = ["cranelift", 
 
 [dev-dependencies]
 tempfile = "3"
+tauri = { version = "2.10.0", features = ["test"] }
 # Pull in Wasmtime's Pulley interpreter for test builds on every platform, not
 # just iOS. Cargo unions features across dependency kinds only when
 # dev-dependencies are in play, so this equips the test binary to build a

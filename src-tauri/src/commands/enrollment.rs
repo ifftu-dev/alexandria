@@ -1,8 +1,10 @@
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
+use crate::domain::course_document::{CourseCompletionPolicy, COURSE_DOCUMENT_VERSION};
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
 use crate::AppState;
 
@@ -12,12 +14,21 @@ pub async fn list_enrollments(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Enrollment>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.list",
+            move |db| list_enrollments_db(db, status),
+        )
+        .await
+}
 
+fn list_enrollments_db(
+    db: &crate::db::Database,
+    status: Option<String>,
+) -> Result<Vec<Enrollment>, String> {
     // Order by most recent learner activity so the dashboard "pick up where
     // you left off" card surfaces the course/tutorial the user last
     // viewed/progressed. Activity is the latest element_progress.updated_at
@@ -27,24 +38,27 @@ pub async fn list_enrollments(
         (SELECT MAX(ep.updated_at) FROM element_progress ep \
          WHERE ep.enrollment_id = enrollments.id), enrolled_at)";
 
-    let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-        if let Some(ref s) = status {
-            (
+    let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ref s) =
+        status
+    {
+        (
                 format!(
-                    "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
+                    "SELECT id, course_id, course_document_cid, course_document_version, completion_policy_json, \
+                            enrolled_at, completed_at, status, updated_at \
                      FROM enrollments WHERE status = ?1 ORDER BY {LAST_ACTIVITY} DESC"
                 ),
                 vec![Box::new(s.clone())],
             )
-        } else {
-            (
+    } else {
+        (
                 format!(
-                    "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
+                    "SELECT id, course_id, course_document_cid, course_document_version, completion_policy_json, \
+                            enrolled_at, completed_at, status, updated_at \
                      FROM enrollments ORDER BY {LAST_ACTIVITY} DESC"
                 ),
                 vec![],
             )
-        };
+    };
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
         param_values.iter().map(|v| v.as_ref()).collect();
@@ -56,10 +70,13 @@ pub async fn list_enrollments(
             Ok(Enrollment {
                 id: row.get(0)?,
                 course_id: row.get(1)?,
-                enrolled_at: row.get(2)?,
-                completed_at: row.get(3)?,
-                status: row.get(4)?,
-                updated_at: row.get(5)?,
+                course_document_cid: row.get(2)?,
+                course_document_version: row.get(3)?,
+                completion_policy_json: row.get(4)?,
+                enrolled_at: row.get(5)?,
+                completed_at: row.get(6)?,
+                status: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -72,12 +89,18 @@ pub async fn list_enrollments(
 /// Enroll in a course.
 #[tauri::command]
 pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enrollment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.enroll",
+            move |db| enroll_db(db, course_id),
+        )
+        .await
+}
 
+fn enroll_db(db: &crate::db::Database, course_id: String) -> Result<Enrollment, String> {
     // Get the local user's stake address for deterministic ID
     let stake_address: String = db
         .conn()
@@ -88,19 +111,29 @@ pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enr
         )
         .map_err(|e| format!("no identity found — generate a wallet first: {}", e))?;
 
-    // Verify course exists
-    let course_exists: bool = db
+    // Read only the projection written by verified publication/hydration.
+    let course_binding: Option<(Option<String>, Option<i64>, Option<String>)> = db
         .conn()
         .query_row(
-            "SELECT COUNT(*) > 0 FROM courses WHERE id = ?1",
+            "SELECT content_cid, course_document_version, completion_policy_json \
+             FROM courses WHERE id = ?1",
             params![course_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
+        .optional()
         .map_err(|e| e.to_string())?;
-
-    if !course_exists {
-        return Err("course not found".into());
-    }
+    let Some((Some(course_document_cid), Some(course_document_version), completion_policy_json)) =
+        course_binding
+    else {
+        return Err(
+            "course has no verified document to enroll in; publish or hydrate it first".into(),
+        );
+    };
+    validate_course_binding(
+        &course_document_cid,
+        course_document_version,
+        completion_policy_json.as_deref(),
+    )?;
 
     // Check for existing active enrollment
     let already_enrolled: bool = db
@@ -116,32 +149,81 @@ pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enr
         return Err("already enrolled in this course".into());
     }
 
-    let id = entity_id(&[&stake_address, &course_id]);
+    let id = entity_id(&[&stake_address, &course_id, &course_document_cid]);
 
     db.conn()
         .execute(
-            "INSERT INTO enrollments (id, course_id) VALUES (?1, ?2)",
-            params![id, course_id],
+            "INSERT INTO enrollments \
+             (id, course_id, course_document_cid, course_document_version, completion_policy_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id,
+                course_id,
+                course_document_cid,
+                course_document_version,
+                completion_policy_json,
+            ],
         )
         .map_err(|e| e.to_string())?;
 
     db.conn()
         .query_row(
-            "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
+            "SELECT id, course_id, course_document_cid, course_document_version, completion_policy_json, \
+                    enrolled_at, completed_at, status, updated_at \
              FROM enrollments WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Enrollment {
                     id: row.get(0)?,
                     course_id: row.get(1)?,
-                    enrolled_at: row.get(2)?,
-                    completed_at: row.get(3)?,
-                    status: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    course_document_cid: row.get(2)?,
+                    course_document_version: row.get(3)?,
+                    completion_policy_json: row.get(4)?,
+                    enrolled_at: row.get(5)?,
+                    completed_at: row.get(6)?,
+                    status: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             },
         )
         .map_err(|e| e.to_string())
+}
+
+fn validate_course_binding(
+    course_document_cid: &str,
+    course_document_version: i64,
+    completion_policy_json: Option<&str>,
+) -> Result<(), String> {
+    if course_document_cid.len() != 64
+        || !course_document_cid
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("verified course document CID must be canonical lowercase 32-byte hex".into());
+    }
+    let version = u32::try_from(course_document_version)
+        .map_err(|_| "invalid verified course document version".to_string())?;
+    match version {
+        COURSE_DOCUMENT_VERSION => {}
+        _ => {
+            return Err(format!(
+                "unsupported verified course document version: {version}"
+            ))
+        }
+    }
+    if let Some(json) = completion_policy_json {
+        let policy: CourseCompletionPolicy = serde_json::from_str(json)
+            .map_err(|error| format!("invalid completion policy projection: {error}"))?;
+        policy
+            .validate()
+            .map_err(|error| format!("invalid completion policy projection: {error}"))?;
+        let canonical = serde_json_canonicalizer::to_string(&policy)
+            .map_err(|error| format!("canonicalize completion policy: {error}"))?;
+        if canonical != json {
+            return Err("completion policy projection is not canonical JSON".into());
+        }
+    }
+    Ok(())
 }
 
 /// Update progress on a course element.
@@ -151,18 +233,26 @@ pub async fn update_progress(
     enrollment_id: String,
     req: UpdateProgressRequest,
 ) -> Result<ElementProgress, String> {
-    // All DB work in a block so the guard is dropped before any .await.
-    let progress = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.update_progress",
+            move |db| update_progress_db(db, enrollment_id, req),
+        )
+        .await
+}
 
-        let id = entity_id(&[&enrollment_id, &req.element_id]);
+fn update_progress_db(
+    db: &crate::db::Database,
+    enrollment_id: String,
+    req: UpdateProgressRequest,
+) -> Result<ElementProgress, String> {
+    let id = entity_id(&[&enrollment_id, &req.element_id]);
 
-        // Upsert: insert or update
-        db.conn()
+    // Upsert: insert or update
+    db.conn()
             .execute(
                 "INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent)
                  VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, 0))
@@ -183,8 +273,8 @@ pub async fn update_progress(
             )
             .map_err(|e| e.to_string())?;
 
-        // Read back the progress
-        let progress: ElementProgress = db
+    // Read back the progress
+    let progress: ElementProgress = db
             .conn()
             .query_row(
                 "SELECT id, enrollment_id, element_id, status, score, time_spent, completed_at, updated_at \
@@ -205,24 +295,28 @@ pub async fn update_progress(
             )
             .map_err(|e| e.to_string())?;
 
-        // Post-migration 040: completion no longer triggers evidence
-        // creation or aggregation. In the VC-first model, element
-        // completion is expected to produce a Cardano completion-witness
-        // tx; the Blockfrost observer (Session 2) auto-issues a signed
-        // VC referencing that tx and writes it to `credentials`. That
-        // wiring lands in a follow-up session; for now progress tracking
-        // alone is preserved so learners still see their course state
-        // move forward locally.
-        progress
-    }; // db guard dropped
-
+    // Post-migration 040: completion no longer triggers evidence
+    // creation or aggregation. In the VC-first model, element
+    // completion is expected to produce a Cardano completion-witness
+    // tx; the Blockfrost observer (Session 2) auto-issues a signed
+    // VC referencing that tx and writes it to `credentials`. That
+    // wiring lands in a follow-up session; for now progress tracking
+    // alone is preserved so learners still see their course state
+    // move forward locally.
     Ok(progress)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{enroll_db, list_enrollments_db};
     use crate::crypto::hash::entity_id;
     use crate::db::Database;
+    use alexandria_verify::course::{
+        AuthorizedAttestor, CourseCompletionPolicy, EvidenceRequirement,
+        COMPLETION_POLICY_FORMAT_VERSION,
+    };
+    use alexandria_verify::did::did_from_verifying_key;
+    use ed25519_dalek::SigningKey;
     use rusqlite::params;
 
     fn test_db() -> Database {
@@ -253,6 +347,145 @@ mod tests {
             )
             .unwrap();
         (enrollment_id, "c1".into())
+    }
+
+    fn setup_identity(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1u', 'addr_test1q')",
+                [],
+            )
+            .unwrap();
+    }
+
+    fn policy_json(seed: u8) -> String {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let policy = CourseCompletionPolicy {
+            format_version: COMPLETION_POLICY_FORMAT_VERSION,
+            required_attestors: 1,
+            authorized_attestors: vec![AuthorizedAttestor {
+                did: did_from_verifying_key(&key.verifying_key()),
+                public_key_hex: hex::encode(key.verifying_key().as_bytes()),
+            }],
+            evidence_requirements: vec![EvidenceRequirement {
+                kind: "completion-root".into(),
+                format_version: 1,
+            }],
+        };
+        serde_json_canonicalizer::to_string(&policy).unwrap()
+    }
+
+    #[test]
+    fn enroll_requires_a_verified_course_document_projection() {
+        let db = test_db();
+        setup_identity(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) VALUES ('c1', 'Draft', 'author')",
+                [],
+            )
+            .unwrap();
+
+        let error = enroll_db(&db, "c1".into()).unwrap_err();
+        assert!(error.contains("no verified document"), "got: {error}");
+    }
+
+    #[test]
+    fn enrollment_freezes_exact_cid_version_and_policy() {
+        let db = test_db();
+        setup_identity(&db);
+        let first_cid = "11".repeat(32);
+        let second_cid = "22".repeat(32);
+        let first_policy = policy_json(1);
+        let second_policy = policy_json(2);
+        db.conn()
+            .execute(
+                "INSERT INTO courses \
+                 (id, title, author_address, content_cid, course_document_version, completion_policy_json) \
+                 VALUES ('c1', 'Course', 'author', ?1, 2, ?2)",
+                params![first_cid, first_policy],
+            )
+            .unwrap();
+
+        let enrolled = enroll_db(&db, "c1".into()).unwrap();
+        assert_eq!(
+            enrolled.course_document_cid.as_deref(),
+            Some(first_cid.as_str())
+        );
+        assert_eq!(enrolled.course_document_version, Some(2));
+        assert_eq!(
+            enrolled.completion_policy_json.as_deref(),
+            Some(first_policy.as_str())
+        );
+
+        db.conn()
+            .execute(
+                "UPDATE courses SET content_cid = ?1, completion_policy_json = ?2 WHERE id = 'c1'",
+                params![second_cid, second_policy],
+            )
+            .unwrap();
+        let rows = list_enrollments_db(&db, None).unwrap();
+        assert_eq!(
+            rows[0].course_document_cid.as_deref(),
+            Some(first_cid.as_str())
+        );
+        assert_eq!(
+            rows[0].completion_policy_json.as_deref(),
+            Some(first_policy.as_str())
+        );
+    }
+
+    #[test]
+    fn malformed_policy_projection_is_not_enrolled() {
+        let db = test_db();
+        setup_identity(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO courses \
+                 (id, title, author_address, content_cid, course_document_version, completion_policy_json) \
+                 VALUES ('c1', 'Course', 'author', ?1, 2, '{\"required_attestors\":0}')",
+                ["11".repeat(32)],
+            )
+            .unwrap();
+
+        let error = enroll_db(&db, "c1".into()).unwrap_err();
+        assert!(
+            error.contains("invalid completion policy projection"),
+            "got: {error}"
+        );
+    }
+
+    /// Version 2 is the only accepted course document format, and signing and
+    /// verification already refuse version 1. A course row stored before that
+    /// change still carries version 1, and enrolment reads it straight from
+    /// the row -- so that is the path that has to refuse, and it had no test.
+    #[test]
+    fn a_stored_version_one_document_is_not_enrolled() {
+        let db = test_db();
+        setup_identity(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO courses \
+                 (id, title, author_address, content_cid, course_document_version) \
+                 VALUES ('c1', 'Course', 'author', ?1, 1)",
+                ["11".repeat(32)],
+            )
+            .unwrap();
+
+        let error = enroll_db(&db, "c1".into()).unwrap_err();
+        assert!(
+            error.contains("unsupported verified course document version: 1"),
+            "got: {error}"
+        );
+        let enrolled: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM enrollments", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            enrolled, 0,
+            "a refused document must not leave an enrollment"
+        );
     }
 
     #[test]
@@ -426,12 +659,21 @@ pub async fn get_progress(
     state: State<'_, AppState>,
     enrollment_id: String,
 ) -> Result<Vec<ElementProgress>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.get_progress",
+            move |db| get_progress_db(db, &enrollment_id),
+        )
+        .await
+}
 
+fn get_progress_db(
+    db: &crate::db::Database,
+    enrollment_id: &str,
+) -> Result<Vec<ElementProgress>, String> {
     let mut stmt = db
         .conn()
         .prepare(
@@ -494,11 +736,34 @@ pub async fn record_element_submission(
     answers_json: String,
     score: f64,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.record_submission",
+            move |db| {
+                record_element_submission_db(
+                    db,
+                    enrollment_id,
+                    element_id,
+                    element_type,
+                    answers_json,
+                    score,
+                )
+            },
+        )
+        .await
+}
+
+fn record_element_submission_db(
+    db: &crate::db::Database,
+    enrollment_id: String,
+    element_id: String,
+    element_type: String,
+    answers_json: String,
+    score: f64,
+) -> Result<(), String> {
     let conn = db.conn();
 
     let score = score.clamp(0.0, 1.0);
@@ -570,12 +835,22 @@ pub async fn get_element_submission(
     enrollment_id: String,
     element_id: String,
 ) -> Result<Option<ElementSubmissionRecord>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "enrollment.get_submission",
+            move |db| get_element_submission_db(db, &enrollment_id, &element_id),
+        )
+        .await
+}
 
+fn get_element_submission_db(
+    db: &crate::db::Database,
+    enrollment_id: &str,
+    element_id: &str,
+) -> Result<Option<ElementSubmissionRecord>, String> {
     let row = db
         .conn()
         .query_row(

@@ -6,7 +6,7 @@
 //! the hex-encoded BLAKE3 of the manifest bytes.
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, OptionalExtension};
@@ -20,6 +20,36 @@ use crate::plugins::{manifest, verifier};
 const MANIFEST_FILENAME: &str = "manifest.json";
 const SIGNATURE_FILENAME: &str = "manifest.sig";
 pub const GRADER_FILENAME: &str = "grader.wasm";
+
+/// Resource envelope for an untrusted community plugin bundle. Embedded
+/// built-ins have a separate compile-time trust and packaging path.
+pub const COMMUNITY_MAX_MANIFEST_BYTES: u64 = 256 * 1024;
+pub const COMMUNITY_SIGNATURE_BYTES: u64 = 64;
+pub const COMMUNITY_MAX_FILES: u64 = 512;
+pub const COMMUNITY_MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+pub const COMMUNITY_MAX_TOTAL_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Read a plugin file with a hard byte ceiling that remains effective if the
+/// file grows after its metadata is inspected.
+pub fn read_file_with_limit(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let size = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > limit {
+        return Err(format!("file exceeds the {limit} byte limit"));
+    }
+
+    let input = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::with_capacity(usize::try_from(size.min(limit)).unwrap_or(0));
+    input
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > limit {
+        return Err(format!(
+            "file grew beyond the {limit} byte limit while reading"
+        ));
+    }
+    Ok(bytes)
+}
 /// Backend tag baked into the `.cwasm` filename. iOS runs the Pulley
 /// interpreter; every other target runs the native Cranelift JIT. A `.cwasm`
 /// serialized by one backend fails to `deserialize` into the other (Wasmtime
@@ -88,7 +118,7 @@ fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
                 purge_precompiled_graders(dest_dir);
             } else if let Err(e) = fs::write(
                 cwasm_digest_path(&cwasm_path),
-                blake3::hash(&cwasm).to_hex().as_str(),
+                cwasm_digest_record(blake3::hash(grader_bytes).to_hex().as_str(), &cwasm),
             ) {
                 // Without the digest the loader will refuse the artifact and
                 // JIT instead, which is slow but correct. Remove it anyway so
@@ -115,6 +145,17 @@ fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
 /// must run on every platform, and `wasm_runtime` is `#[cfg(grader)]`.
 pub const CWASM_DIGEST_SUFFIX: &str = ".blake3";
 
+/// Versioned sidecar that binds native code to the exact WebAssembly source
+/// from which it was compiled.
+///
+/// Recording only the native artifact hash detects corruption, but does not
+/// stop one valid locally compiled artifact from being moved beside a
+/// different `grader.wasm`. The loader checks both fields before deserializing
+/// the already-verified bytes.
+pub fn cwasm_digest_record(grader_cid: &str, cwasm: &[u8]) -> String {
+    format!("v1\n{grader_cid}\n{}\n", blake3::hash(cwasm).to_hex())
+}
+
 /// Where the digest for `cwasm_path` lives.
 pub fn cwasm_digest_path(cwasm_path: &Path) -> PathBuf {
     let mut name = cwasm_path.as_os_str().to_os_string();
@@ -124,7 +165,7 @@ pub fn cwasm_digest_path(cwasm_path: &Path) -> PathBuf {
 
 /// Delete every `.cwasm` under `dest_dir`.
 ///
-/// A `.cwasm` is serialized **native code**, and `Module::deserialize_file` is
+/// A `.cwasm` is serialized **compiled code**, and Wasmtime deserialization is
 /// `unsafe` precisely because Wasmtime trusts those bytes to be its own output
 /// — the version header it checks is a compatibility check, not an
 /// authenticity one. So a `.cwasm` in a bundle is arbitrary machine code with
@@ -181,9 +222,8 @@ fn verify_bundle_files(
         if rel.starts_with('/') || rel.contains("..") {
             return Err(format!("manifest lists an invalid file path '{rel}'"));
         }
-        let bytes = fs::read(dest_dir.join(rel))
-            .map_err(|e| format!("manifest lists '{rel}' but it could not be read: {e}"))?;
-        let got = blake3::hash(&bytes).to_hex().to_string();
+        let got = hash_file_bounded(&dest_dir.join(rel))
+            .map_err(|e| format!("manifest lists '{rel}' but it could not be verified: {e}"))?;
         if !got.eq_ignore_ascii_case(want) {
             return Err(format!(
                 "bundle file '{rel}' does not match the manifest: expected {want}, got {got}"
@@ -207,6 +247,118 @@ fn verify_bundle_files(
     Ok(())
 }
 
+fn hash_file_bounded(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = blake3::Hasher::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "file size overflow".to_string())?;
+        if total > COMMUNITY_MAX_FILE_BYTES {
+            return Err(format!(
+                "file exceeds the {} byte community-plugin limit",
+                COMMUNITY_MAX_FILE_BYTES
+            ));
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Validate the complete untrusted source envelope before allocating buffers
+/// for the manifest/signature or copying files into the profile directory.
+fn validate_community_bundle_limits(root: &Path) -> Result<(), String> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut file_count = 0_u64;
+    let mut total_bytes = 0_u64;
+
+    while let Some(dir) = pending.pop() {
+        let entries = fs::read_dir(&dir)
+            .map_err(|e| format!("cannot read plugin bundle directory {}: {e}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("cannot read plugin bundle entry: {e}"))?;
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|e| {
+                format!("cannot inspect plugin bundle entry {}: {e}", path.display())
+            })?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "community plugin bundles must not contain symlinks: {}",
+                    path.display()
+                ));
+            }
+            if file_type.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                return Err(format!(
+                    "community plugin bundles may contain only files and directories: {}",
+                    path.display()
+                ));
+            }
+
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| "plugin bundle entry escaped its root".to_string())?;
+            let relative = relative
+                .to_str()
+                .ok_or_else(|| "plugin bundle paths must be valid UTF-8".to_string())?
+                .replace('\\', "/");
+            let size = entry
+                .metadata()
+                .map_err(|e| format!("cannot inspect plugin file '{relative}': {e}"))?
+                .len();
+
+            file_count = file_count
+                .checked_add(1)
+                .ok_or_else(|| "plugin file count overflow".to_string())?;
+            if file_count > COMMUNITY_MAX_FILES {
+                return Err(format!(
+                    "community plugin bundle exceeds the {} file limit",
+                    COMMUNITY_MAX_FILES
+                ));
+            }
+            if size > COMMUNITY_MAX_FILE_BYTES {
+                return Err(format!(
+                    "community plugin file '{relative}' exceeds the {} byte per-file limit",
+                    COMMUNITY_MAX_FILE_BYTES
+                ));
+            }
+            if relative == MANIFEST_FILENAME && size > COMMUNITY_MAX_MANIFEST_BYTES {
+                return Err(format!(
+                    "community plugin manifest exceeds the {} byte limit",
+                    COMMUNITY_MAX_MANIFEST_BYTES
+                ));
+            }
+            if relative == SIGNATURE_FILENAME && size != COMMUNITY_SIGNATURE_BYTES {
+                return Err(format!(
+                    "community plugin signature must be exactly {} bytes",
+                    COMMUNITY_SIGNATURE_BYTES
+                ));
+            }
+
+            total_bytes = total_bytes
+                .checked_add(size)
+                .ok_or_else(|| "plugin aggregate size overflow".to_string())?;
+            if total_bytes > COMMUNITY_MAX_TOTAL_BYTES {
+                return Err(format!(
+                    "community plugin bundle exceeds the {} byte aggregate limit",
+                    COMMUNITY_MAX_TOTAL_BYTES
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Every regular file under `dir`, as paths relative to `root`.
 fn collect_files(
     root: &Path,
@@ -214,7 +366,8 @@ fn collect_files(
     out: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), String> {
     let entries = fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("reading {}: {e}", dir.display()))?;
         let path = entry.path();
         let ty = entry
             .file_type()
@@ -245,14 +398,26 @@ pub fn install_from_directory(
     let manifest_path = src_dir.join(MANIFEST_FILENAME);
     let signature_path = src_dir.join(SIGNATURE_FILENAME);
 
-    let manifest_bytes =
-        fs::read(&manifest_path).map_err(|e| format!("cannot read manifest.json: {e}"))?;
-    let signature_bytes =
-        fs::read(&signature_path).map_err(|e| format!("cannot read manifest.sig: {e}"))?;
+    validate_community_bundle_limits(src_dir)?;
+
+    let manifest_bytes = read_file_with_limit(&manifest_path, COMMUNITY_MAX_MANIFEST_BYTES)
+        .map_err(|e| format!("cannot read manifest.json: {e}"))?;
+    let signature_bytes = read_file_with_limit(&signature_path, COMMUNITY_SIGNATURE_BYTES)
+        .map_err(|e| format!("cannot read manifest.sig: {e}"))?;
+    if signature_bytes.len() as u64 != COMMUNITY_SIGNATURE_BYTES {
+        return Err(format!(
+            "community plugin signature must be exactly {} bytes",
+            COMMUNITY_SIGNATURE_BYTES
+        ));
+    }
 
     let manifest = manifest::parse_and_validate(&manifest_bytes)?;
 
     verifier::verify_manifest_signature(&manifest_bytes, &signature_bytes, &manifest.author_did)?;
+
+    let expected_files = manifest.files.as_ref().ok_or_else(|| {
+        "community plugin manifests must include a complete non-empty 'files' hash map".to_string()
+    })?;
 
     let plugin_cid = verifier::compute_plugin_cid(&manifest_bytes);
 
@@ -282,7 +447,16 @@ pub fn install_from_directory(
     }
     fs::create_dir_all(&dest_dir).map_err(|e| format!("failed to create plugin dir: {e}"))?;
 
-    copy_tree(src_dir, &dest_dir).map_err(|e| format!("failed to copy plugin bundle: {e}"))?;
+    copy_tree_bounded(src_dir, &dest_dir)
+        .map_err(|e| format!("failed to copy plugin bundle: {e}"))?;
+
+    // Re-check the copied envelope before deleting supplied precompiled
+    // artifacts. This catches source mutation during copy and keeps the
+    // destination within the same resource limits as the inspected source.
+    if let Err(error) = validate_community_bundle_limits(&dest_dir) {
+        let _ = fs::remove_dir_all(&dest_dir);
+        return Err(error);
+    }
 
     // `copy_tree` copies the bundle verbatim, so anything the author put in it
     // is now on disk — including a `.cwasm`, which is native code that the
@@ -295,31 +469,67 @@ pub fn install_from_directory(
     // Safety net: if the manifest we just parsed ever diverged from what
     // we copied, abort. This catches races where the source dir changed
     // mid-install.
-    let copied_manifest = fs::read(dest_dir.join(MANIFEST_FILENAME))
-        .map_err(|e| format!("failed to re-read copied manifest: {e}"))?;
+    let copied_manifest = match read_file_with_limit(
+        &dest_dir.join(MANIFEST_FILENAME),
+        COMMUNITY_MAX_MANIFEST_BYTES,
+    ) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&dest_dir);
+            return Err(format!("failed to re-read copied manifest: {error}"));
+        }
+    };
     if verifier::compute_plugin_cid(&copied_manifest) != plugin_cid {
         let _ = fs::remove_dir_all(&dest_dir);
         return Err("plugin bundle changed during install".into());
     }
 
-    // Enforce the manifest's file digests, if it declares any.
+    let copied_signature = match read_file_with_limit(
+        &dest_dir.join(SIGNATURE_FILENAME),
+        COMMUNITY_SIGNATURE_BYTES,
+    ) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&dest_dir);
+            return Err(format!("failed to re-read copied signature: {error}"));
+        }
+    };
+    if copied_signature.len() as u64 != COMMUNITY_SIGNATURE_BYTES {
+        let _ = fs::remove_dir_all(&dest_dir);
+        return Err(format!(
+            "copied plugin signature must be exactly {} bytes",
+            COMMUNITY_SIGNATURE_BYTES
+        ));
+    }
+    if let Err(error) = verifier::verify_manifest_signature(
+        &copied_manifest,
+        &copied_signature,
+        &manifest.author_did,
+    ) {
+        let _ = fs::remove_dir_all(&dest_dir);
+        return Err(format!(
+            "copied plugin signature verification failed: {error}"
+        ));
+    }
+
+    // Enforce the manifest's complete file digest map.
     //
     // The plugin CID is BLAKE3 of manifest.json alone, so on its own it
     // identifies the manifest and not the bundle: same manifest, same author
     // signature, same CID, entirely different UI. `files` closes that, and a
     // DAO attestation over the CID starts meaning something about the code
     // that actually runs.
-    if let Some(expected) = &manifest.files {
-        if let Err(e) = verify_bundle_files(&dest_dir, expected) {
-            let _ = fs::remove_dir_all(&dest_dir);
-            return Err(e);
-        }
+    if let Err(e) = verify_bundle_files(&dest_dir, expected_files) {
+        let _ = fs::remove_dir_all(&dest_dir);
+        return Err(e);
     }
 
     // Precompile the grader (if any) from the CID-verified copy on disk. Never
     // trust a `.cwasm` a community bundle might ship — regenerate it locally.
     if manifest.grader.is_some() {
-        if let Ok(grader_bytes) = fs::read(dest_dir.join(GRADER_FILENAME)) {
+        if let Ok(grader_bytes) =
+            read_file_with_limit(&dest_dir.join(GRADER_FILENAME), COMMUNITY_MAX_FILE_BYTES)
+        {
             write_precompiled_grader(&dest_dir, &grader_bytes);
         }
     }
@@ -869,39 +1079,86 @@ pub fn read_docs(plugins_dir: &Path, plugin_cid: &str) -> Result<String, String>
             Ok(p) => p,
             Err(_) => continue,
         };
-        match fs::read_to_string(&path) {
-            Ok(s) => return Ok(s),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+        match read_file_with_limit(&path, COMMUNITY_MAX_FILE_BYTES) {
+            Ok(bytes) => {
+                return String::from_utf8(bytes)
+                    .map_err(|e| format!("plugin docs are not valid UTF-8: {e}"));
+            }
             Err(e) => return Err(format!("failed to read plugin docs: {e}")),
         }
     }
     Ok(String::new())
 }
 
-/// Recursive directory copy that refuses symlinks (Phase 1 can't verify
-/// their targets stay within the bundle). Regular files and directories
-/// are allowed; everything else is skipped with a logged warning.
-fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
+/// Copy an already-inspected community bundle while enforcing the same limits
+/// against bytes actually read. The second bound prevents a mutable source
+/// file from growing without limit between metadata inspection and copying.
+fn copy_tree_bounded(src: &Path, dst: &Path) -> Result<(), String> {
+    let mut pending = vec![(src.to_path_buf(), dst.to_path_buf())];
+    let mut file_count = 0_u64;
+    let mut total_bytes = 0_u64;
 
-        if file_type.is_symlink() {
-            log::warn!(
-                "plugin bundle contains a symlink, skipping: {}",
-                src_path.display()
-            );
-            continue;
-        }
-        if file_type.is_dir() {
-            fs::create_dir_all(&dst_path)?;
-            copy_tree(&src_path, &dst_path)?;
-        } else if file_type.is_file() {
-            fs::copy(&src_path, &dst_path)?;
+    while let Some((source_dir, destination_dir)) = pending.pop() {
+        for entry in fs::read_dir(&source_dir)
+            .map_err(|e| format!("cannot read {}: {e}", source_dir.display()))?
+        {
+            let entry = entry.map_err(|e| format!("cannot read bundle entry: {e}"))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("cannot inspect {}: {e}", entry.path().display()))?;
+            let source = entry.path();
+            let destination = destination_dir.join(entry.file_name());
+
+            if file_type.is_symlink() {
+                return Err(format!("bundle changed to a symlink: {}", source.display()));
+            }
+            if file_type.is_dir() {
+                fs::create_dir_all(&destination)
+                    .map_err(|e| format!("cannot create {}: {e}", destination.display()))?;
+                pending.push((source, destination));
+                continue;
+            }
+            if !file_type.is_file() {
+                return Err(format!("unsupported bundle entry: {}", source.display()));
+            }
+
+            file_count = file_count
+                .checked_add(1)
+                .ok_or_else(|| "plugin file count overflow".to_string())?;
+            if file_count > COMMUNITY_MAX_FILES {
+                return Err(format!(
+                    "bundle changed while copying and exceeds the {} file limit",
+                    COMMUNITY_MAX_FILES
+                ));
+            }
+
+            let mut input = fs::File::open(&source)
+                .map_err(|e| format!("cannot open {}: {e}", source.display()))?;
+            let mut output = fs::File::create(&destination)
+                .map_err(|e| format!("cannot create {}: {e}", destination.display()))?;
+            let copied = io::copy(
+                &mut input.by_ref().take(COMMUNITY_MAX_FILE_BYTES + 1),
+                &mut output,
+            )
+            .map_err(|e| format!("cannot copy {}: {e}", source.display()))?;
+            if copied > COMMUNITY_MAX_FILE_BYTES {
+                return Err(format!(
+                    "bundle file grew beyond the {} byte per-file limit while copying",
+                    COMMUNITY_MAX_FILE_BYTES
+                ));
+            }
+            total_bytes = total_bytes
+                .checked_add(copied)
+                .ok_or_else(|| "plugin aggregate size overflow".to_string())?;
+            if total_bytes > COMMUNITY_MAX_TOTAL_BYTES {
+                return Err(format!(
+                    "bundle grew beyond the {} byte aggregate limit while copying",
+                    COMMUNITY_MAX_TOTAL_BYTES
+                ));
+            }
         }
     }
+
     Ok(())
 }
 
@@ -1023,7 +1280,12 @@ mod tests {
         fs::create_dir_all(dir.join("ui")).unwrap();
         fs::write(dir.join("ui/index.html"), "<html></html>").unwrap();
 
-        (manifest_json, sk)
+        let digest = blake3::hash(&fs::read(dir.join("ui/index.html")).unwrap())
+            .to_hex()
+            .to_string();
+        add_files_map(dir, &sk, &[("ui/index.html", &digest)]);
+
+        (fs::read_to_string(dir.join(MANIFEST_FILENAME)).unwrap(), sk)
     }
 
     /// Build a signed bundle with a given slug + declared dependencies.
@@ -1058,6 +1320,10 @@ mod tests {
         fs::write(dir.join(SIGNATURE_FILENAME), sig.to_bytes()).unwrap();
         fs::create_dir_all(dir.join("ui")).unwrap();
         fs::write(dir.join("ui/index.html"), "<html></html>").unwrap();
+        let digest = blake3::hash(&fs::read(dir.join("ui/index.html")).unwrap())
+            .to_hex()
+            .to_string();
+        add_files_map(dir, &sk, &[("ui/index.html", &digest)]);
         (id, sk)
     }
 
@@ -1185,6 +1451,83 @@ mod tests {
     }
 
     #[test]
+    fn rejects_signature_with_wrong_length_before_verification() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        build_bundle(src.path());
+        fs::write(src.path().join(SIGNATURE_FILENAME), [0_u8; 63]).unwrap();
+
+        let error = install_from_directory(&db, plugins_dir.path(), src.path()).unwrap_err();
+        assert!(error.contains("signature must be exactly 64 bytes"));
+    }
+
+    #[test]
+    fn rejects_oversized_manifest_before_parsing() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        fs::File::create(src.path().join(MANIFEST_FILENAME))
+            .unwrap()
+            .set_len(COMMUNITY_MAX_MANIFEST_BYTES + 1)
+            .unwrap();
+        fs::write(
+            src.path().join(SIGNATURE_FILENAME),
+            [0_u8; COMMUNITY_SIGNATURE_BYTES as usize],
+        )
+        .unwrap();
+
+        let error = install_from_directory(&db, plugins_dir.path(), src.path()).unwrap_err();
+        assert!(error.contains("manifest exceeds the 262144 byte limit"));
+    }
+
+    #[test]
+    fn rejects_more_than_512_bundle_files() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        build_bundle(src.path());
+        for index in 0..510 {
+            fs::write(src.path().join(format!("extra-{index}")), []).unwrap();
+        }
+
+        let error = install_from_directory(&db, plugins_dir.path(), src.path()).unwrap_err();
+        assert!(error.contains("exceeds the 512 file limit"));
+    }
+
+    #[test]
+    fn rejects_file_larger_than_16_mib_without_reading_it() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        build_bundle(src.path());
+        fs::File::create(src.path().join("oversized.bin"))
+            .unwrap()
+            .set_len(COMMUNITY_MAX_FILE_BYTES + 1)
+            .unwrap();
+
+        let error = install_from_directory(&db, plugins_dir.path(), src.path()).unwrap_err();
+        assert!(error.contains("exceeds the 16777216 byte per-file limit"));
+    }
+
+    #[test]
+    fn rejects_bundle_larger_than_32_mib_in_aggregate() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        build_bundle(src.path());
+        for name in ["large-a.bin", "large-b.bin"] {
+            fs::File::create(src.path().join(name))
+                .unwrap()
+                .set_len(COMMUNITY_MAX_FILE_BYTES)
+                .unwrap();
+        }
+
+        let error = install_from_directory(&db, plugins_dir.path(), src.path()).unwrap_err();
+        assert!(error.contains("exceeds the 33554432 byte aggregate limit"));
+    }
+
+    #[test]
     fn grant_and_revoke() {
         let db = test_db();
         let plugins_dir = TempDir::new().unwrap();
@@ -1211,7 +1554,7 @@ mod tests {
             .is_empty());
     }
 
-    /// A `.cwasm` is serialized native code, and `Module::deserialize_file`
+    /// A `.cwasm` is serialized compiled code, and Wasmtime deserialization
     /// executes it — Wasmtime's version header is a compatibility check, not
     /// an authenticity one. So a bundle shipping one is shipping machine code
     /// with a filename that gets it run, and install must not keep it.
@@ -1231,6 +1574,7 @@ mod tests {
         // The attacker's artifact, named exactly what the loader looks for.
         let planted = src.path().join(grader_cwasm_filename());
         fs::write(&planted, b"\x00this-would-be-native-code").unwrap();
+        fs::write(cwasm_digest_path(&planted), "attacker-controlled sidecar").unwrap();
         // And one for another target, to prove the purge is not name-specific.
         fs::write(src.path().join("grader.other-arch-cranelift.cwasm"), b"x").unwrap();
 
@@ -1241,7 +1585,7 @@ mod tests {
             .unwrap()
             .flatten()
             .map(|e| e.file_name().to_string_lossy().to_string())
-            .filter(|n| n.ends_with(".cwasm"))
+            .filter(|n| n.ends_with(".cwasm") || n.ends_with(CWASM_DIGEST_SUFFIX))
             .collect();
         assert!(
             leftovers.is_empty(),
@@ -1252,8 +1596,8 @@ mod tests {
         assert!(dest.join("ui/index.html").is_file());
     }
 
-    /// The digest sidecar is what lets the loader tell "we compiled this" from
-    /// "this appeared". It must be derived from the artifact's own bytes.
+    /// The digest sidecar records both source and compiled output. Its path is
+    /// deterministic so the loader can require it beside the artifact.
     #[test]
     fn a_cwasm_digest_sits_beside_its_artifact() {
         let dir = TempDir::new().unwrap();
@@ -1333,15 +1677,21 @@ mod tests {
             .expect("a bundle matching its manifest must install");
     }
 
-    /// Manifests written before `files` existed keep working — the field is
-    /// optional, and absent means "not pinned" rather than "pinned to nothing".
+    /// Community bundles without a complete file map fail closed. There are no
+    /// launched legacy installs to preserve; embedded built-ins use their
+    /// separate trusted installation path.
     #[test]
-    fn a_manifest_without_a_files_map_still_installs() {
+    fn a_manifest_without_a_files_map_is_rejected() {
         let db = test_db();
         let plugins_dir = TempDir::new().unwrap();
         let src = TempDir::new().unwrap();
-        build_bundle_slug(src.path(), "legacy", &[]);
-        install_from_directory(&db, plugins_dir.path(), src.path()).expect("legacy bundle");
+        let (_, sk) = build_bundle_with_key(src.path(), "unpinned", &[]);
+        remove_files_map(src.path(), &sk);
+
+        let error = install_from_directory(&db, plugins_dir.path(), src.path())
+            .expect_err("an unpinned community bundle must be refused");
+        assert!(error.contains("must include"), "{error}");
+        assert!(list_installed(&db).unwrap().is_empty());
     }
 
     /// Rewrite the bundle's manifest with a `files` map and re-sign it.
@@ -1353,6 +1703,16 @@ mod tests {
             .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
             .collect();
         manifest["files"] = serde_json::Value::Object(map);
+        let json = serde_json::to_string_pretty(&manifest).unwrap();
+        fs::write(dir.join(MANIFEST_FILENAME), &json).unwrap();
+        let sig = sk.sign(json.as_bytes());
+        fs::write(dir.join(SIGNATURE_FILENAME), sig.to_bytes()).unwrap();
+    }
+
+    fn remove_files_map(dir: &Path, sk: &SigningKey) {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(MANIFEST_FILENAME)).unwrap()).unwrap();
+        manifest.as_object_mut().unwrap().remove("files");
         let json = serde_json::to_string_pretty(&manifest).unwrap();
         fs::write(dir.join(MANIFEST_FILENAME), &json).unwrap();
         let sig = sk.sign(json.as_bytes());

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Sentinel debug PiP (dev only) — a floating picture-in-picture window
+ * Sentinel diagnostics PiP — a floating picture-in-picture window
  * showing what the Sentinel engine "sees" live: the camera feed with the
  * YuNet face box + 5 landmarks + gaze direction overlaid, plus the live
  * signal readout from the active monitoring session.
@@ -8,7 +8,7 @@
  * Runs its own camera preview (independent of any course session) so it
  * works for tuning even outside an assessment; the numeric session
  * signals come from `useSentinel().debug`, populated by the real session.
- * Gated behind `import.meta.env.DEV` by the caller.
+ * Mounted only while the user has explicitly entered diagnostics mode.
  */
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -152,8 +152,8 @@ function toggle() {
   if (!open.value) stopCamera()
 }
 
-// Activation comes from the native Develop menu ("Sentinel Live View",
-// ⌘⇧S) rather than an in-app button.
+// Activation comes from the explicit diagnostics controls rather than an
+// always-visible release-build developer menu.
 let unlistenToggle: UnlistenFn | null = null
 onMounted(async () => {
   try {
@@ -253,8 +253,6 @@ onBeforeUnmount(() => {
           <span class="text-end font-mono text-foreground">{{ debug.signals?.tab_switches ?? 0 }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowUnfocused') }}</span>
           <span class="text-end font-mono text-foreground">{{ Math.round((debug.signals?.unfocused_ms ?? 0) / 1000) }}s</span>
-          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDevtools') }}</span>
-          <span class="text-end font-mono" :class="debug.signals?.devtools_detected ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.devtools_detected) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowEnvChanged') }}</span>
           <span class="text-end font-mono" :class="debug.signals?.environment_changed ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.environment_changed) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowAppFocusLost') }}</span>

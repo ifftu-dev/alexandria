@@ -27,7 +27,6 @@ import {
 import type {
   InstalledPlugin,
   IrlSubmission,
-  PluginAttestationStatus,
   PluginCapability,
   PluginManifest,
   PluginPermissionRecord,
@@ -54,7 +53,6 @@ const tabs = computed(() => [
 const plugins = ref<InstalledPlugin[]>([])
 const manifests = ref<Record<string, PluginManifest>>({})
 const permissions = ref<Record<string, PluginPermissionRecord[]>>({})
-const attestation = ref<Record<string, PluginAttestationStatus>>({})
 const loading = ref(true)
 const installPath = ref('')
 const installing = ref(false)
@@ -136,31 +134,25 @@ async function refresh() {
     plugins.value = await invoke<InstalledPlugin[]>('plugin_list')
     const detail = await Promise.all(
       plugins.value.map(async (p) => {
-        const [m, perms, att] = await Promise.all([
+        const [m, perms] = await Promise.all([
           invoke<PluginManifest>('plugin_get_manifest', { pluginCid: p.plugin_cid }).catch(
             () => null,
           ),
           invoke<PluginPermissionRecord[]>('plugin_list_permissions', {
             pluginCid: p.plugin_cid,
           }).catch(() => [] as PluginPermissionRecord[]),
-          invoke<PluginAttestationStatus>('plugin_attestation_status', {
-            pluginCid: p.plugin_cid,
-          }).catch(() => null),
         ])
-        return { cid: p.plugin_cid, m, perms, att }
+        return { cid: p.plugin_cid, m, perms }
       }),
     )
     const mMap: Record<string, PluginManifest> = {}
     const pMap: Record<string, PluginPermissionRecord[]> = {}
-    const aMap: Record<string, PluginAttestationStatus> = {}
     for (const d of detail) {
       if (d.m) mMap[d.cid] = d.m
       pMap[d.cid] = d.perms
-      if (d.att) aMap[d.cid] = d.att
     }
     manifests.value = mMap
     permissions.value = pMap
-    attestation.value = aMap
     void loadThumbnails()
   } catch (e) {
     installError.value = t('settings.plugins.loadFailed', { msg: String(e) })
@@ -257,17 +249,6 @@ async function revoke(cid: string, capability: PluginCapability) {
     installError.value = t('settings.plugins.revokeFailed', { msg: String(e) })
   }
 }
-
-function attestationBadge(cid: string): { label: string; variant: 'success' | 'warning' | 'secondary' } {
-  const s = attestation.value[cid]
-  if (!s) return { label: t('settings.plugins.statusPending'), variant: 'secondary' }
-  if (s.advisories.some((a) => a.kind === 'known_flawed')) {
-    return { label: t('settings.plugins.knownFlawed'), variant: 'warning' }
-  }
-  if (s.attested) return { label: t('settings.plugins.attested'), variant: 'success' }
-  return { label: t('settings.plugins.unattested'), variant: 'secondary' }
-}
-
 
 // ---- IRL Review: instructor inbox ----------------------------------------
 const pendingInbox = ref<IrlSubmission[]>([])
@@ -479,11 +460,8 @@ async function loadMySubmissions() {
           </p>
           <div v-else class="flex-1" />
 
-          <!-- Attestation + capability chips -->
+          <!-- Capability chips -->
           <div class="mt-3 flex flex-wrap items-center gap-1.5">
-            <AppBadge :variant="attestationBadge(p.plugin_cid).variant">
-              {{ attestationBadge(p.plugin_cid).label }}
-            </AppBadge>
             <button
               v-for="perm in permissions[p.plugin_cid] ?? []"
               :key="perm.capability"

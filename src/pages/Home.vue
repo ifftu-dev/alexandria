@@ -202,11 +202,6 @@ onMounted(async () => {
     const coursesBeforeSync = await invoke<Course[]>('list_courses').catch(() => [])
     const beforeCount = coursesBeforeSync.length
 
-    const bootstrapped = await invoke<number>('bootstrap_public_catalog').catch((e) => {
-      console.warn('Public catalog bootstrap skipped on Home:', e)
-      return 0
-    })
-
     const hydrated = await invoke<number>('hydrate_catalog_courses', { limit: 200 }).catch((e) => {
       console.warn('Catalog hydration skipped on Home:', e)
       return 0
@@ -228,7 +223,6 @@ onMounted(async () => {
     }
 
     completeContentSync({
-      bootstrapped,
       hydrated,
       beforeCourses: beforeCount,
       afterCourses: allCourses.length,

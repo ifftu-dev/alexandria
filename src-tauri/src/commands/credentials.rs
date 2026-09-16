@@ -6,16 +6,17 @@
 //! `&Did`. This split keeps the business logic unit-testable without
 //! constructing a full `State<AppState>`.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::State;
 
 use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
     Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof, VerifiableCredential,
-    VerificationResult,
+    VerificationPendingReason, VerificationResult,
 };
 use crate::AppState;
 
@@ -41,8 +42,8 @@ pub struct IssuancePolicy {
     /// `flagged` / `suspended` are rejected.
     #[serde(default)]
     pub require_clean: bool,
-    /// If set, the assertion's `assurance_level` must equal this
-    /// (e.g. `"high_assurance"`).
+    /// If set, the assertion's `assurance_level` must equal this. Only
+    /// `"local"` is currently achievable.
     #[serde(default)]
     pub required_assurance_level: Option<String>,
 }
@@ -101,8 +102,10 @@ impl IssuancePolicy {
 }
 
 /// Load an integrity session and summarise it as an `IntegrityAssertion`
-/// for embedding at issuance. `assurance_level` is `"local"` until the
-/// independently-attested high-assurance mode lands.
+/// for embedding at issuance. `assurance_level` is always
+/// [`ACHIEVED_ASSURANCE_LEVEL`](crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL),
+/// and no anchor reference is embedded: the stored assurance and anchor
+/// columns are not verified evidence.
 fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
@@ -110,8 +113,7 @@ fn build_integrity_assertion(
 ) -> Result<IntegrityAssertion, String> {
     let row = conn
         .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count,
-                    assurance_level, commitment_root, anchor_ref
+            "SELECT status, integrity_score, critical_count, warning_count, commitment_root
              FROM integrity_sessions WHERE id = ?1",
             params![session_id],
             |r| {
@@ -120,33 +122,23 @@ fn build_integrity_assertion(
                     r.get::<_, Option<f64>>(1)?,
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(4)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("integrity session {session_id} not found"))?;
-    let (
-        status,
-        integrity_score,
-        critical_count,
-        warning_count,
-        assurance_level,
-        commitment_root,
-        anchor_ref,
-    ) = row;
+    let (status, integrity_score, critical_count, warning_count, commitment_root) = row;
     Ok(IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
         integrity_score,
         critical_count,
         warning_count,
-        assurance_level,
+        assurance_level: crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL.to_string(),
         commitment_root,
-        anchor_ref,
+        anchor_ref: None,
         generated_at: now.to_string(),
     })
 }
@@ -363,29 +355,47 @@ pub fn issue_credential_impl(
 /// leaves the bit set and the row flagged.
 pub fn revoke_credential_impl(
     conn: &Connection,
+    issuer_did: &Did,
     credential_id: &str,
     reason: &str,
     now: &str,
 ) -> Result<(), String> {
-    let row: Option<(String, i64)> = conn
+    let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let row: Option<(String, String, i64, String)> = transaction
         .query_row(
-            "SELECT status_list_id, status_list_index FROM credentials \
-             WHERE id = ?1",
+            "SELECT c.issuer_did, c.status_list_id, c.status_list_index, s.issuer_did \
+             FROM credentials c \
+             JOIN credential_status_lists s ON s.list_id = c.status_list_id \
+             WHERE c.id = ?1",
             params![credential_id],
-            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<i64>>(1)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get(3)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .and_then(|(lid, idx)| match (lid, idx) {
-            (Some(l), Some(i)) => Some((l, i)),
-            _ => None,
-        });
+        .and_then(
+            |(credential_issuer, list_id, index, list_issuer)| match (list_id, index) {
+                (Some(list_id), Some(index)) => {
+                    Some((credential_issuer, list_id, index, list_issuer))
+                }
+                _ => None,
+            },
+        );
 
-    let (list_id, index) =
+    let (credential_issuer, list_id, index, list_issuer) =
         row.ok_or_else(|| format!("credential {credential_id} not found or has no status list"))?;
+    if credential_issuer != issuer_did.as_str() || list_issuer != issuer_did.as_str() {
+        return Err("only the credential issuer may revoke it".to_string());
+    }
 
     // Read current bits, set the revocation bit, write back + bump version.
-    let mut bits: Vec<u8> = conn
+    let mut bits: Vec<u8> = transaction
         .query_row(
             "SELECT bits FROM credential_status_lists WHERE list_id = ?1",
             params![list_id],
@@ -399,22 +409,25 @@ pub fn revoke_credential_impl(
     }
     bits[byte] |= 1 << bit;
 
-    conn.execute(
-        "UPDATE credential_status_lists \
+    transaction
+        .execute(
+            "UPDATE credential_status_lists \
          SET bits = ?2, version = version + 1, updated_at = ?3 \
-         WHERE list_id = ?1",
-        params![list_id, bits, now],
-    )
-    .map_err(|e| format!("update status list: {e}"))?;
+         WHERE list_id = ?1 AND issuer_did = ?4",
+            params![list_id, bits, now, issuer_did.as_str()],
+        )
+        .map_err(|e| format!("update status list: {e}"))?;
 
-    conn.execute(
-        "UPDATE credentials \
+    transaction
+        .execute(
+            "UPDATE credentials \
          SET revoked = 1, revoked_at = ?2, revocation_reason = ?3 \
-         WHERE id = ?1",
-        params![credential_id, now, reason],
-    )
-    .map_err(|e| format!("update credential: {e}"))?;
+         WHERE id = ?1 AND issuer_did = ?4",
+            params![credential_id, now, reason, issuer_did.as_str()],
+        )
+        .map_err(|e| format!("update credential: {e}"))?;
 
+    transaction.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -423,6 +436,7 @@ pub fn revoke_credential_impl(
 /// Idempotent — re-suspending updates the until window.
 pub fn suspend_credential_impl(
     conn: &Connection,
+    issuer_did: &Did,
     credential_id: &str,
     until: Option<&str>,
     reason: Option<&str>,
@@ -433,26 +447,38 @@ pub fn suspend_credential_impl(
             "UPDATE credentials \
              SET suspended = 1, suspended_at = ?2, \
                  suspended_until = ?3, suspended_reason = ?4 \
-             WHERE id = ?1",
-            params![credential_id, now, until, reason],
+             WHERE id = ?1 AND issuer_did = ?5",
+            params![credential_id, now, until, reason, issuer_did.as_str()],
         )
         .map_err(|e| format!("suspend credential: {e}"))?;
     if updated == 0 {
-        return Err(format!("credential {credential_id} not found"));
+        return Err(format!(
+            "credential {credential_id} not found or caller is not its issuer"
+        ));
     }
     Ok(())
 }
 
 /// §11.3 reinstatement — clear the suspension flag. Idempotent.
-pub fn reinstate_credential_impl(conn: &Connection, credential_id: &str) -> Result<(), String> {
-    conn.execute(
-        "UPDATE credentials \
+pub fn reinstate_credential_impl(
+    conn: &Connection,
+    issuer_did: &Did,
+    credential_id: &str,
+) -> Result<(), String> {
+    let updated = conn
+        .execute(
+            "UPDATE credentials \
          SET suspended = 0, suspended_at = NULL, \
              suspended_until = NULL, suspended_reason = NULL \
-         WHERE id = ?1",
-        params![credential_id],
-    )
-    .map_err(|e| format!("reinstate credential: {e}"))?;
+         WHERE id = ?1 AND issuer_did = ?2",
+            params![credential_id, issuer_did.as_str()],
+        )
+        .map_err(|e| format!("reinstate credential: {e}"))?;
+    if updated == 0 {
+        return Err(format!(
+            "credential {credential_id} not found or caller is not its issuer"
+        ));
+    }
     Ok(())
 }
 
@@ -585,12 +611,15 @@ pub async fn issue_credential(
 ) -> Result<VerifiableCredential, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    issue_credential_impl(db.conn(), &signing_key, &issuer_did, &req, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.issue",
+            move |db| issue_credential_impl(db.conn(), &signing_key, &issuer_did, &req, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -599,12 +628,15 @@ pub async fn list_credentials(
     subject: Option<String>,
     skill_id: Option<String>,
 ) -> Result<Vec<VerifiableCredential>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_credentials_impl(db.conn(), subject.as_deref(), skill_id.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.list",
+            move |db| list_credentials_impl(db.conn(), subject.as_deref(), skill_id.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -612,12 +644,15 @@ pub async fn get_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<Option<VerifiableCredential>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    get_credential_impl(db.conn(), &credential_id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.get",
+            move |db| get_credential_impl(db.conn(), &credential_id),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -626,13 +661,17 @@ pub async fn revoke_credential(
     credential_id: String,
     reason: String,
 ) -> Result<(), String> {
+    let (_, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    revoke_credential_impl(db.conn(), &credential_id, &reason, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.revoke",
+            move |db| revoke_credential_impl(db.conn(), &issuer_did, &credential_id, &reason, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -642,19 +681,26 @@ pub async fn suspend_credential(
     until: Option<String>,
     reason: Option<String>,
 ) -> Result<(), String> {
+    let (_, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    suspend_credential_impl(
-        db.conn(),
-        &credential_id,
-        until.as_deref(),
-        reason.as_deref(),
-        &now,
-    )
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.suspend",
+            move |db| {
+                suspend_credential_impl(
+                    db.conn(),
+                    &issuer_did,
+                    &credential_id,
+                    until.as_deref(),
+                    reason.as_deref(),
+                    &now,
+                )
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -662,12 +708,16 @@ pub async fn reinstate_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    reinstate_credential_impl(db.conn(), &credential_id)
+    let (_, issuer_did) = load_issuer_key(&state).await?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.reinstate",
+            move |db| reinstate_credential_impl(db.conn(), &issuer_did, &credential_id),
+        )
+        .await
 }
 
 /// Add a (credential_id, requestor_did) entry to the per-credential
@@ -679,12 +729,15 @@ pub async fn allow_credential_fetch(
     credential_id: String,
     requestor_did: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    crate::p2p::vc_fetch::allow_fetch(db.conn(), &credential_id, &requestor_did)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.allow_fetch",
+            move |db| crate::p2p::vc_fetch::allow_fetch(db.conn(), &credential_id, &requestor_did),
+        )
+        .await
 }
 
 /// Remove a (credential_id, requestor_did) entry from the
@@ -695,12 +748,17 @@ pub async fn disallow_credential_fetch(
     credential_id: String,
     requestor_did: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    crate::p2p::vc_fetch::disallow_fetch(db.conn(), &credential_id, &requestor_did)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.disallow_fetch",
+            move |db| {
+                crate::p2p::vc_fetch::disallow_fetch(db.conn(), &credential_id, &requestor_did)
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -709,17 +767,22 @@ pub async fn verify_credential_cmd(
     credential: VerifiableCredential,
 ) -> Result<VerificationResult, String> {
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    Ok(crate::domain::vc::verify_credential_db(
-        db.conn(),
-        &credential,
-        &now,
-        &crate::domain::vc::VerificationPolicy::default(),
-    ))
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.verify",
+            move |db| {
+                Ok(crate::domain::vc::verify_credential_db(
+                    db.conn(),
+                    &credential,
+                    &now,
+                    &crate::domain::vc::VerificationPolicy::default(),
+                ))
+            },
+        )
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +830,69 @@ pub struct StatusListRow {
 }
 
 const BUNDLE_FORMAT_VERSION: &str = "alexandria-credential-bundle/1.0";
+
+/// Structural limits for an untrusted credential payload: a bundle, a list of
+/// credentials, or one credential. A bundle's status lists carry base64
+/// bitmaps up to the status-list bitmap cap, so its strings may be longer than
+/// a credential's; every credential entry is still held to
+/// [`alexandria_verify::vc::CREDENTIAL_JSON_LIMITS`].
+pub const CREDENTIAL_PAYLOAD_JSON_LIMITS: alexandria_verify::json::JsonLimits =
+    alexandria_verify::json::JsonLimits {
+        max_bytes: 16 * 1024 * 1024,
+        max_depth: 32,
+        max_array_len: 4096,
+        max_object_entries: 256,
+        max_string_bytes: 4 * crate::p2p::vc_status::MAX_BITS_BYTES.div_ceil(3),
+    };
+
+/// Parse an untrusted credential payload under
+/// [`CREDENTIAL_PAYLOAD_JSON_LIMITS`] before any typed decoding.
+pub(crate) fn parse_credential_payload(payload: &str) -> Result<serde_json::Value, String> {
+    alexandria_verify::json::parse_untrusted(payload.as_bytes(), &CREDENTIAL_PAYLOAD_JSON_LIMITS)
+        .map_err(|error| format!("not a valid credential payload: {error}"))
+}
+
+/// Decode one credential entry of a parsed payload under the single-credential
+/// limits, so a bundle or list cannot carry a credential a direct import would
+/// refuse.
+pub(crate) fn credential_entry(
+    entry: &serde_json::Value,
+) -> Result<VerifiableCredential, alexandria_verify::json::UntrustedJsonError> {
+    let bytes = serde_json::to_vec(entry)
+        .map_err(|error| alexandria_verify::json::UntrustedJsonError::Invalid(error.to_string()))?;
+    alexandria_verify::vc::decode_credential(&bytes)
+}
+
+fn bounded_credentials(entries: &[serde_json::Value]) -> Result<Vec<VerifiableCredential>, String> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            credential_entry(entry).map_err(|error| format!("credential {index}: {error}"))
+        })
+        .collect()
+}
+
+/// Decode a parsed payload as a §20.4 bundle. `None` means the payload is not
+/// a bundle; an unsupported format version or an over-limit credential entry
+/// is an error.
+fn bundle_from_payload(value: &serde_json::Value) -> Result<Option<CredentialBundle>, String> {
+    let Ok(mut bundle) = serde_json::from_value::<CredentialBundle>(value.clone()) else {
+        return Ok(None);
+    };
+    if bundle.format_version != BUNDLE_FORMAT_VERSION {
+        return Err(format!(
+            "unsupported bundle format_version: {}",
+            bundle.format_version
+        ));
+    }
+    let entries = value
+        .get("credentials")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("bundle credentials are not a list")?;
+    bundle.credentials = bounded_credentials(entries)?;
+    Ok(Some(bundle))
+}
 
 /// Build a JCS-canonical export bundle of every credential, key
 /// registry row, and status list known to this node.
@@ -887,6 +1013,28 @@ pub struct OfflineVerification {
 /// would report two independent failures where only one thing happened, and
 /// would send the reader looking at the signature when the problem is the DID.
 pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
+    if result.acceptance_decision == crate::domain::vc::AcceptanceDecision::Pending {
+        return result
+            .pending_reasons
+            .iter()
+            .map(|reason| match reason {
+                VerificationPendingReason::IssuerKeyMissing => "issuer key is missing",
+                VerificationPendingReason::IssuerKeyUnavailable => {
+                    "issuer key lookup is unavailable"
+                }
+                VerificationPendingReason::StatusListMissing => "status list is missing",
+                VerificationPendingReason::StatusListUnavailable => {
+                    "status list lookup is unavailable"
+                }
+                VerificationPendingReason::SuspensionStateUnavailable => {
+                    "suspension lookup is unavailable"
+                }
+                VerificationPendingReason::SupersessionStateUnavailable => {
+                    "supersession lookup is unavailable"
+                }
+            })
+            .collect();
+    }
     if !result.issuer_resolved {
         return vec!["issuer DID could not be resolved — signature not checked"];
     }
@@ -903,6 +1051,9 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
     }
     if result.revoked {
         reasons.push("revoked");
+    }
+    if !result.status_valid {
+        reasons.push("invalid status reference");
     }
     if result.suspended {
         reasons.push("suspended");
@@ -944,15 +1095,13 @@ pub fn verify_offline_impl(json: &str, now: &str) -> Result<OfflineVerification,
         }
     };
 
+    // Structural limits, duplicate keys and unsafe numbers are checked once,
+    // before any shape is tried.
+    let value = parse_credential_payload(json)?;
+
     // A bundle is the most specific shape, so it is tried first: it has a
     // `format_version` that neither of the others carries.
-    if let Ok(bundle) = serde_json::from_str::<CredentialBundle>(json) {
-        if bundle.format_version != BUNDLE_FORMAT_VERSION {
-            return Err(format!(
-                "unsupported bundle format_version: {}",
-                bundle.format_version
-            ));
-        }
+    if let Some(bundle) = bundle_from_payload(&value)? {
         let store = BundleStore::new(&bundle)?;
         let results = bundle
             .credentials
@@ -962,12 +1111,17 @@ pub fn verify_offline_impl(json: &str, now: &str) -> Result<OfflineVerification,
         return Ok(tally(results, OfflineSource::Bundle, false));
     }
 
-    if let Ok(vc) = serde_json::from_str::<VerifiableCredential>(json) {
+    if serde_json::from_value::<VerifiableCredential>(value.clone()).is_ok() {
+        let vc = credential_entry(&value).map_err(|error| format!("credential: {error}"))?;
         let results = vec![verify::verify_credential(&NullStore, &vc, now, &policy)];
         return Ok(tally(results, OfflineSource::Credential, true));
     }
 
-    if let Ok(list) = serde_json::from_str::<Vec<VerifiableCredential>>(json) {
+    if let Some(entries) = value
+        .as_array()
+        .filter(|_| serde_json::from_value::<Vec<VerifiableCredential>>(value.clone()).is_ok())
+    {
+        let list = bounded_credentials(entries)?;
         let results = list
             .iter()
             .map(|vc| verify::verify_credential(&NullStore, vc, now, &policy))
@@ -987,14 +1141,9 @@ pub fn verify_bundle_offline_impl(
 ) -> Result<(u32, u32), String> {
     use crate::domain::vc::{verify, AcceptanceDecision, VerificationPolicy};
 
-    let bundle: CredentialBundle =
-        serde_json::from_str(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
-    if bundle.format_version != BUNDLE_FORMAT_VERSION {
-        return Err(format!(
-            "unsupported bundle format_version: {}",
-            bundle.format_version
-        ));
-    }
+    let value = parse_credential_payload(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
+    let bundle = bundle_from_payload(&value)?
+        .ok_or_else(|| "parse bundle: not a §20.4 credential bundle".to_string())?;
 
     let store = BundleStore::new(&bundle)?;
 
@@ -1053,7 +1202,7 @@ impl crate::domain::vc::VerificationStore for BundleStore {
         &self,
         did: &alexandria_verify::did::Did,
         at: &str,
-    ) -> Option<alexandria_verify::did::KeyRegistryEntry> {
+    ) -> crate::domain::vc::StoreLookup<alexandria_verify::did::KeyRegistryEntry> {
         self.keys
             .iter()
             .filter(|e| {
@@ -1072,32 +1221,42 @@ impl crate::domain::vc::VerificationStore for BundleStore {
                     rotated_by: e.rotated_by.clone(),
                 })
             })
+            .map(crate::domain::vc::StoreLookup::Found)
+            .unwrap_or(crate::domain::vc::StoreLookup::Missing)
     }
 
-    fn status_list_bits(&self, list_id: &str) -> Option<Vec<u8>> {
+    fn status_list_bits(&self, list_id: &str) -> crate::domain::vc::StoreLookup<Vec<u8>> {
         self.status_lists
             .iter()
             .find(|(id, _)| id == list_id)
             .map(|(_, bits)| bits.clone())
+            .map(crate::domain::vc::StoreLookup::Found)
+            .unwrap_or(crate::domain::vc::StoreLookup::Missing)
     }
 
-    fn suspension(&self, _credential_id: &str) -> Option<(bool, Option<String>)> {
-        None
+    fn suspension(
+        &self,
+        _credential_id: &str,
+    ) -> crate::domain::vc::StoreLookup<(bool, Option<String>)> {
+        crate::domain::vc::StoreLookup::Missing
     }
 
-    fn is_superseded(&self, _credential_id: &str) -> bool {
-        false
+    fn is_superseded(&self, _credential_id: &str) -> crate::domain::vc::StoreLookup<bool> {
+        crate::domain::vc::StoreLookup::Missing
     }
 }
 
 #[tauri::command]
 pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    export_bundle_impl(db.conn())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.export-bundle",
+            move |db| export_bundle_impl(db.conn()),
+        )
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,7 +1270,7 @@ pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<Str
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::domain::vc::SkillClaim;
+    use crate::domain::vc::{AcceptanceDecision, SkillClaim};
 
     const NOW: &str = "2026-04-13T00:00:00Z";
 
@@ -1157,7 +1316,7 @@ mod tests {
     // ---- Shape-agnostic offline verification ---------------------------
 
     #[test]
-    fn verify_offline_accepts_a_bare_credential() {
+    fn verify_offline_marks_a_status_bearing_bare_credential_pending() {
         // Reported as a bug: pasting a single credential into offline verify
         // failed with "missing field `format_version`", because only the
         // bundle shape was accepted. A credential signed by a `did:key` issuer
@@ -1176,12 +1335,55 @@ mod tests {
         let report = verify_offline_impl(&json, NOW).unwrap();
 
         assert_eq!(report.source, OfflineSource::Credential);
-        assert_eq!((report.accepted, report.total), (1, 1));
+        assert_eq!((report.accepted, report.total), (0, 1));
         assert!(report.results[0].valid_signature);
         assert!(report.results[0].issuer_resolved, "did:key self-resolution");
+        assert_eq!(
+            report.results[0].acceptance_decision,
+            AcceptanceDecision::Pending
+        );
+        assert_eq!(
+            report.results[0].pending_reasons,
+            vec![VerificationPendingReason::StatusListMissing]
+        );
         // A bare credential carries no status list, so this must not read as
         // a clean bill of health.
         assert!(report.revocation_unknown);
+    }
+
+    #[test]
+    fn credential_payloads_are_bounded_before_verification() {
+        let (db, issuer_key, issuer, subject) = setup();
+        issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+        let bundle = export_bundle_impl(db.conn()).unwrap();
+
+        let max = CREDENTIAL_PAYLOAD_JSON_LIMITS.max_bytes;
+        let mut exact = bundle.clone();
+        exact.push_str(&" ".repeat(max - bundle.len()));
+        assert_eq!(verify_bundle_offline_impl(&exact, NOW).unwrap(), (1, 1));
+        exact.push(' ');
+        let error = verify_bundle_offline_impl(&exact, NOW).unwrap_err();
+        assert!(error.contains("exceeds"), "{error}");
+
+        let duplicated = format!("{{\"format_version\":\"forged\",{}", &bundle[1..]);
+        let error = verify_offline_impl(&duplicated, NOW).unwrap_err();
+        assert!(error.contains("duplicate"), "{error}");
+
+        // The bundle fits, but one credential in it exceeds what a direct
+        // import of that credential would accept.
+        let mut value: serde_json::Value = serde_json::from_str(&bundle).unwrap();
+        value["credentials"][0]["credentialSubject"]["note"] = serde_json::Value::String(
+            "a".repeat(alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_string_bytes + 1),
+        );
+        let error = verify_offline_impl(&value.to_string(), NOW).unwrap_err();
+        assert!(error.contains("credential 0"), "{error}");
     }
 
     #[test]
@@ -1205,7 +1407,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_offline_accepts_an_array_of_credentials() {
+    fn verify_offline_marks_status_bearing_credential_arrays_pending() {
         let (db, issuer_key, issuer, subject) = setup();
         let vc = issue_credential_impl(
             db.conn(),
@@ -1219,7 +1421,11 @@ mod tests {
         let json = serde_json::to_string(&vec![vc.clone(), vc]).unwrap();
         let report = verify_offline_impl(&json, NOW).unwrap();
         assert_eq!(report.source, OfflineSource::Credentials);
-        assert_eq!((report.accepted, report.total), (2, 2));
+        assert_eq!((report.accepted, report.total), (0, 2));
+        assert!(report
+            .results
+            .iter()
+            .all(|result| result.acceptance_decision == AcceptanceDecision::Pending));
     }
 
     #[test]
@@ -1361,6 +1567,37 @@ mod tests {
     }
 
     #[test]
+    fn stored_assurance_claims_never_raise_the_embedded_level() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_claimed", "completed", Some(0.95), 0, 0);
+        db.conn()
+            .execute(
+                "UPDATE integrity_sessions
+                 SET assurance_level = 'high_assurance', anchor_ref = 'dht:unverified'
+                 WHERE id = 'sess_claimed'",
+                [],
+            )
+            .unwrap();
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_claimed".into());
+
+        for required in ["anchored", "high_assurance"] {
+            req.integrity_policy = Some(IssuancePolicy {
+                required_assurance_level: Some(required.into()),
+                ..Default::default()
+            });
+            let error = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+            assert!(error.contains("does not meet required"), "{error}");
+        }
+
+        req.integrity_policy = None;
+        let vc = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        let assertion = vc.integrity.as_ref().expect("integrity assertion embedded");
+        assert_eq!(assertion.assurance_level, "local");
+        assert_eq!(assertion.anchor_ref, None);
+    }
+
+    #[test]
     fn issuance_policy_blocks_when_session_fails_gate() {
         let (db, key, issuer, subject) = setup();
         seed_session(db.conn(), "sess_bad", "suspended", Some(0.30), 2, 1);
@@ -1450,7 +1687,14 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "superseded", NOW).unwrap();
+        revoke_credential_impl(
+            db.conn(),
+            &issuer,
+            vc.id.as_deref().unwrap(),
+            "superseded",
+            NOW,
+        )
+        .unwrap();
 
         let revoked: i64 = db
             .conn()
@@ -1479,8 +1723,8 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "r1", NOW).unwrap();
-        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "r2", NOW).unwrap();
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "r1", NOW).unwrap();
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "r2", NOW).unwrap();
         // One bit set; not doubled up.
         let bits: Vec<u8> = db
             .conn()
@@ -1491,6 +1735,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(bits[0], 0x01);
+    }
+
+    #[test]
+    fn one_local_issuer_cannot_revoke_another_issuers_credential() {
+        let (db, _, local_issuer, subject) = setup();
+        let other_key = test_key("other-issuer");
+        let other_issuer = derive_did_key(&other_key);
+        let credential = issue_credential_impl(
+            db.conn(),
+            &other_key,
+            &other_issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+
+        let error = revoke_credential_impl(
+            db.conn(),
+            &local_issuer,
+            credential.id.as_deref().unwrap(),
+            "not mine",
+            NOW,
+        )
+        .unwrap_err();
+        assert!(error.contains("only the credential issuer"));
+
+        let revoked: i64 = db
+            .conn()
+            .query_row(
+                "SELECT revoked FROM credentials WHERE id = ?1",
+                params![credential.id.as_deref().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revoked, 0);
+    }
+
+    #[test]
+    fn one_local_issuer_cannot_suspend_or_reinstate_another_issuers_credential() {
+        let (db, _, local_issuer, subject) = setup();
+        let other_key = test_key("other-suspension-issuer");
+        let other_issuer = derive_did_key(&other_key);
+        let credential = issue_credential_impl(
+            db.conn(),
+            &other_key,
+            &other_issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+        let credential_id = credential.id.as_deref().unwrap();
+
+        let suspend_error = suspend_credential_impl(
+            db.conn(),
+            &local_issuer,
+            credential_id,
+            None,
+            Some("not mine"),
+            NOW,
+        )
+        .unwrap_err();
+        assert!(suspend_error.contains("caller is not its issuer"));
+
+        suspend_credential_impl(
+            db.conn(),
+            &other_issuer,
+            credential_id,
+            None,
+            Some("issuer review"),
+            NOW,
+        )
+        .unwrap();
+        let reinstate_error =
+            reinstate_credential_impl(db.conn(), &local_issuer, credential_id).unwrap_err();
+        assert!(reinstate_error.contains("caller is not its issuer"));
+
+        let suspended: i64 = db
+            .conn()
+            .query_row(
+                "SELECT suspended FROM credentials WHERE id = ?1",
+                params![credential_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(suspended, 1);
     }
 
     #[test]
@@ -1542,7 +1871,7 @@ mod tests {
         assert_eq!(accepted.acceptance_decision, AcceptanceDecision::Accept);
         assert!(!accepted.revoked);
 
-        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
 
         let rejected = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(rejected.revoked, "revocation bit must propagate to verify");
@@ -1597,7 +1926,7 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
         let json = export_bundle_impl(db.conn()).unwrap();
         let (accepted, total) = verify_bundle_offline_impl(&json, NOW).unwrap();
         assert_eq!(total, 1);
@@ -1637,6 +1966,7 @@ mod tests {
         // Suspend with no upper bound — indefinite suspension.
         suspend_credential_impl(
             db.conn(),
+            &issuer,
             vc.id.as_deref().unwrap(),
             None,
             Some("under review"),
@@ -1648,7 +1978,7 @@ mod tests {
         assert_eq!(mid.acceptance_decision, AcceptanceDecision::Reject);
 
         // Reinstate.
-        reinstate_credential_impl(db.conn(), vc.id.as_deref().unwrap()).unwrap();
+        reinstate_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap()).unwrap();
         let after = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(!after.suspended);
         assert_eq!(after.acceptance_decision, AcceptanceDecision::Accept);
@@ -1668,6 +1998,7 @@ mod tests {
         // active again.
         suspend_credential_impl(
             db.conn(),
+            &issuer,
             vc.id.as_deref().unwrap(),
             Some("2026-01-01T00:00:00Z"),
             None,
@@ -1686,7 +2017,15 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        suspend_credential_impl(db.conn(), vc.id.as_deref().unwrap(), None, None, NOW).unwrap();
+        suspend_credential_impl(
+            db.conn(),
+            &issuer,
+            vc.id.as_deref().unwrap(),
+            None,
+            None,
+            NOW,
+        )
+        .unwrap();
 
         let permissive = VerificationPolicy {
             reject_suspended: false,

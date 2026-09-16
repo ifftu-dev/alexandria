@@ -1,8 +1,8 @@
 use std::sync::atomic::Ordering;
 
+use crate::profile::scope::ProfileState as State;
 use alexandria_studio::{grants::StudioGrant, Error as StudioError};
 use serde::Serialize;
-use tauri::State;
 
 use super::studio::with_db;
 use crate::AppState;

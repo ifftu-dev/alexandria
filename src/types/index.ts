@@ -28,8 +28,6 @@ export type AccountRole = 'learner' | 'instructor' | 'parent'
 export interface AccountStatus {
   /** Canonical role set; always contains 'learner'. */
   roles: AccountRole[]
-  /** First extra role, or 'learner'. Legacy single-valued view of `roles`. */
-  role: AccountRole
   /** ISO date (YYYY-MM-DD). Local-only: never published. */
   birthdate: string | null
   is_minor: boolean
@@ -74,6 +72,7 @@ export type Avatar =
 
 export interface ProfileSummary {
   id: string
+  network_id: string
   display_name: string
   avatar: Avatar
   color: string
@@ -249,11 +248,31 @@ export interface PublishCourseResult {
   size: number
 }
 
+export interface AuthorizedCourseAttestor {
+  did: string
+  public_key_hex: string
+}
+
+export interface CourseEvidenceRequirement {
+  kind: string
+  format_version: number
+}
+
+export interface CourseCompletionPolicy {
+  format_version: number
+  required_attestors: number
+  authorized_attestors: AuthorizedCourseAttestor[]
+  evidence_requirements: CourseEvidenceRequirement[]
+}
+
 // ---- Enrollment ----
 
 export interface Enrollment {
   id: string
   course_id: string
+  course_document_cid: string | null
+  course_document_version: number | null
+  completion_policy_json: string | null
   enrolled_at: string
   completed_at: string | null
   status: string
@@ -363,7 +382,7 @@ export interface RecomputeResult {
   duration_ms: number
 }
 
-export interface VerificationResult {
+export interface ReputationVerificationResult {
   score_matches: boolean
   confidence_matches: boolean
   recomputed_score: number
@@ -375,7 +394,7 @@ export interface VerificationResult {
 
 // ---- Snapshots ----
 
-export type SnapshotStatus = 'pending' | 'building' | 'submitted' | 'confirmed' | 'failed'
+export type SnapshotStatus = 'pending' | 'building' | 'outcome_unknown' | 'submitted' | 'confirmed' | 'failed' | 'failed_on_chain'
 
 export interface SnapshotRecord {
   id: string
@@ -385,12 +404,11 @@ export interface SnapshotRecord {
   skill_count: number
   tx_status: string
   tx_hash: string | null
-  policy_id: string | null
-  ref_asset_name: string | null
-  user_asset_name: string | null
   error_message: string | null
   snapshot_at: string
   confirmed_at: string | null
+  computation_spec: string | null
+  credential_id: string | null
 }
 
 export interface CreateSnapshotParams {
@@ -400,36 +418,66 @@ export interface CreateSnapshotParams {
 
 // ---- Governance ----
 
-export type ElectionPhase = 'nomination' | 'voting' | 'finalized' | 'cancelled'
-export type ProposalStatus = 'draft' | 'published' | 'approved' | 'rejected' | 'cancelled'
+export interface GovernanceGenesisLocator {
+  version: number
+  dao_id: string
+  content_hash: string
+  locations: string[]
+}
 
-export interface DaoInfo {
-  id: string
+/** Returned by `governance_preview_genesis_locator`. Retrieval and sharing
+ *  must use `canonical_uri`, never the text that was typed. */
+export interface ReviewedGenesisLocator extends GovernanceGenesisLocator {
+  canonical_uri: string
+}
+
+export interface GenesisMemberPreview {
+  member_id: string
+  identity_public_key_hex: string
+  consensus_public_key_hex: string
+  governance_public_key_hex: string
+}
+
+export interface GenesisPreview {
+  dao_id: string
+  /** Hash of the genesis core; equals `dao_id` for every valid envelope. */
+  core_hash: string
+  /** BLAKE3 of the exact signed envelope bytes. */
+  envelope_hash: string
   name: string
-  description: string | null
-  icon_emoji: string | null
   scope_type: string
   scope_id: string
-  status: string
+  protocol_version: number
+  rules_version: string
+  rules_hash: string
+  proposal_approval_numerator: number
+  proposal_approval_denominator: number
+  minimum_turnout_count: number
   committee_size: number
-  election_interval_days: number
-  on_chain_tx: string | null
-  created_at: string
-  updated_at: string
+  receipt_threshold: number
+  outcome_threshold: number
+  qualification_policy_version: string
+  accepted_issuers: string[]
+  accepted_assessment_evidence: string[]
+  cometbft_chain_id: string
+  initial_epoch: number
+  initial_height: number
+  activation_time_unix: number
+  members: GenesisMemberPreview[]
 }
 
-export interface DaoMember {
-  dao_id: string
-  stake_address: string
-  role: string
-  joined_at: string
+export interface RetrievedGenesisPreview {
+  locator: GovernanceGenesisLocator
+  resolved_from: string
+  genesis_json: string
+  preview: GenesisPreview
 }
 
-/** Returned by `sentinel_dao_get_info`. */
-export interface SentinelDaoInfo {
-  dao: DaoInfo
-  committee: DaoMember[]
-  recognized_categories: string[]
+export interface PinGenesisResponse {
+  preview: GenesisPreview
+  newly_pinned: boolean
+  /** A differently signed envelope over the same core was already pinned and kept. */
+  stored_envelope_differs: boolean
 }
 
 /** Returned by `sentinel_holdout_list`. */
@@ -457,92 +505,6 @@ export interface SentinelHoldoutKeyPolicy {
 export interface SentinelHoldoutPlaintextShare {
   share_index: number
   y_hex: string
-}
-
-export interface Election {
-  id: string
-  dao_id: string
-  title: string
-  description: string | null
-  phase: string
-  seats: number
-  nominee_min_proficiency: string
-  voter_min_proficiency: string
-  nomination_start: string
-  nomination_end: string | null
-  voting_end: string | null
-  on_chain_tx: string | null
-  created_at: string
-  finalized_at: string | null
-}
-
-export interface ElectionNominee {
-  id: string
-  election_id: string
-  stake_address: string
-  accepted: boolean
-  votes_received: number
-  is_winner: boolean
-  nominated_at: string
-}
-
-export interface ElectionVote {
-  id: string
-  election_id: string
-  voter: string
-  nominee_id: string
-  on_chain_tx: string | null
-  voted_at: string
-}
-
-export interface OpenElectionParams {
-  dao_id: string
-  title: string
-  description?: string | null
-  seats?: number | null
-  nominee_min_proficiency?: string | null
-  voter_min_proficiency?: string | null
-  nomination_end?: string | null
-  voting_end?: string | null
-}
-
-export interface Proposal {
-  id: string
-  dao_id: string
-  title: string
-  description: string | null
-  category: string
-  status: string
-  proposer: string
-  votes_for: number
-  votes_against: number
-  voting_deadline: string | null
-  min_vote_proficiency: string
-  on_chain_tx: string | null
-  created_at: string
-  resolved_at: string | null
-}
-
-export interface ProposalVote {
-  id: string
-  proposal_id: string
-  voter: string
-  in_favor: boolean
-  on_chain_tx: string | null
-  voted_at: string
-}
-
-export interface SubmitProposalParams {
-  dao_id: string
-  title: string
-  description?: string | null
-  category: string
-  min_vote_proficiency?: string | null
-}
-
-export interface GovernanceTxResult {
-  tx_hash: string
-  action: string
 }
 
 // ---- Opinions (Field Commentary) ----
@@ -600,71 +562,6 @@ export interface CatalogEntry {
   kind: string
 }
 
-// ---- Taxonomy ----
-
-export interface TaxonomySubjectField {
-  id: string
-  name: string
-  description: string | null
-}
-
-export interface TaxonomySubject {
-  id: string
-  name: string
-  description: string | null
-  subject_field_id: string
-}
-
-export interface TaxonomySkill {
-  id: string
-  name: string
-  description: string | null
-  subject_id: string
-  bloom_level: string
-}
-
-export interface TaxonomyChanges {
-  subject_fields: TaxonomySubjectField[]
-  subjects: TaxonomySubject[]
-  skills: TaxonomySkill[]
-  prerequisites: [string, string][]
-  removed_prerequisites: [string, string][]
-}
-
-export interface TaxonomyVersion {
-  version: number
-  cid: string
-  previous_cid: string | null
-  ratified_by: string | null
-  ratified_at: string | null
-  signature: string | null
-  applied_at: string
-}
-
-export interface TaxonomyPreview {
-  subject_fields_affected: number
-  subjects_affected: number
-  skills_affected: number
-  prerequisites_added: number
-  prerequisites_removed: number
-  has_modifications: boolean
-  new_skill_ids: string[]
-  modified_skill_ids: string[]
-}
-
-export interface TaxonomyPublishResult {
-  version: number
-  content_cid: string
-  changes_applied: number
-}
-
-export interface ProposeTaxonomyParams {
-  dao_id: string
-  title: string
-  description?: string | null
-  changes: TaxonomyChanges
-}
-
 // ---- Sync ----
 
 export interface DeviceInfo {
@@ -710,100 +607,22 @@ export interface SyncHistoryEntry {
   direction: string
 }
 
-// ---- Challenge (VC-first) ----
-//
-// The legacy evidence/skill_proof/opinion challenge shape is gone.
-// Challenges now target individual credentials; upholding a challenge
-// revokes the credential via its RevocationList2020 status list.
+// ---- Exact course-completion endorsements ----
 
-export type ChallengeStatus = 'pending' | 'reviewing' | 'upheld' | 'rejected' | 'expired'
-
-export interface CredentialChallenge {
-  id: string
-  challenger: string
-  credential_id: string
-  reason: string
-  stake_lovelace: number
-  stake_tx_hash: string | null
-  status: string
-  dao_id: string
-  resolution_tx: string | null
-  signature: string
-  created_at: string
-  resolved_at: string | null
-  expires_at: string | null
-}
-
-export interface ChallengeVote {
-  id: string
-  challenge_id: string
-  voter: string
-  upheld: boolean
-  reason: string | null
-  voted_at: string
-}
-
-export interface SubmitCredentialChallengeParams {
-  credential_id: string
-  reason: string
-  stake_lovelace: number
-  dao_id: string
-}
-
-export interface ChallengeResolution {
-  challenge_id: string
-  status: string
-  votes_for_uphold: number
-  votes_for_reject: number
-  credential_revoked: boolean
-}
-
-// ---- Attestation ----
-
-// ---- Completion Attestation (VC-first) ----
-//
-// Replaces the legacy evidence-cosigning types. Requirements now key
-// on `course_id`; attestations are Ed25519 signatures over the
-// 32-byte completion-witness tx hash.
-
-export interface CompletionAttestationRequirement {
-  course_id: string
-  required_attestors: number
-  dao_id: string
-  set_by_proposal: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface CompletionAttestation {
-  id: string
-  witness_tx_hash: string
+export interface CourseCompletionEndorsement {
+  binding: CourseCompletionBinding
   attestor_did: string
-  attestor_pubkey: string
-  signature: string
-  note: string | null
-  created_at: string
+  attestor_public_key_hex: string
+  signature_hex: string
 }
 
-export interface CompletionAttestationStatus {
-  witness_tx_hash: string
-  course_id: string | null
+export interface CourseCompletionEndorsementStatus {
+  claim_id: string
   required_attestors: number
-  current_attestors: number
-  is_satisfied: boolean
-  attestations: CompletionAttestation[]
-}
-
-export interface SetCompletionRequirementParams {
-  course_id: string
-  required_attestors: number
-  dao_id: string
-  set_by_proposal: string | null
-}
-
-export interface SubmitCompletionAttestationParams {
-  witness_tx_hash: string
-  note: string | null
+  valid_attestors: string[]
+  rejected_endorsements: number
+  satisfied: boolean
+  endorsements: CourseCompletionEndorsement[]
 }
 
 // ---- Taxonomy (skill graph) ----
@@ -910,38 +729,6 @@ export interface IntegritySession {
   ended_at: string | null
 }
 
-/** Ratified adversarial-prior metadata as persisted in `sentinel_priors`. */
-export interface SentinelPrior {
-  id: string
-  proposal_id: string
-  cid: string
-  model_kind: string
-  label: string
-  schema_version: number
-  sample_count: number
-  notes: string | null
-  ratified_at: string
-  signature: string
-  weights_cid?: string | null
-  eval_cid?: string | null
-  eval_tpr?: number | null
-  eval_fpr?: number | null
-  version?: string | null
-}
-
-/** Active DAO-ratified paste classifier returned by
- *  `sentinel_get_active_paste_classifier`. Null means no entry passes
- *  the runtime gate and the client should keep its bundled fallback. */
-export interface ActivePasteClassifier {
-  prior_id: string
-  weights_cid: string
-  version: string
-  eval_tpr: number
-  eval_fpr: number
-  signature: string
-  ratified_at: string
-}
-
 // ---------------------------------------------------------------------------
 // Sentinel backend ML (Rust: tract + candle). Mirrors the structs in
 // `src-tauri/src/sentinel/types.rs` + `src-tauri/src/commands/sentinel_ml.rs`.
@@ -973,7 +760,7 @@ export interface ScorePasteResponse {
 }
 
 export interface LoadedClassifierInfo {
-  source: 'bundled' | 'dao'
+  source: 'bundled'
   version: string
 }
 
@@ -1054,7 +841,7 @@ export interface TrainGazeCalibResponse {
   trained_epochs: number
 }
 
-/** Parsed labeled-samples blob loaded via `sentinel_priors_load`. */
+/** Parsed labeled-samples blob returned by `sentinel_holdout_evaluate`. */
 export interface SentinelPriorBlob {
   schema_version: number
   model_kind: string
@@ -1090,7 +877,6 @@ export interface SignalData {
   face_consistency?: number
   tab_switches: number
   unfocused_ms: number
-  devtools_detected: boolean
   paste_events: number
   pasted_chars: number
   environment_changed: boolean
@@ -1118,8 +904,6 @@ export interface BehavioralProfile {
   }
   lastUpdated: number
   aiModels?: {
-    keystrokeAutoencoder?: Record<string, unknown>
-    mouseCNN?: Record<string, unknown>
     faceEnrollment?: {
       vector: number[]
       frameCount: number
@@ -1552,7 +1336,15 @@ export type CredentialType =
   | 'DerivedCredential'
   | 'SelfAssertion'
 
-export type AcceptanceDecision = 'accept' | 'reject'
+export type AcceptanceDecision = 'accept' | 'pending' | 'reject'
+
+export type VerificationPendingReason =
+  | 'issuer_key_missing'
+  | 'issuer_key_unavailable'
+  | 'status_list_missing'
+  | 'status_list_unavailable'
+  | 'suspension_state_unavailable'
+  | 'supersession_state_unavailable'
 
 /**
  * Strongly-typed view over a `credentialSubject`'s skill properties.
@@ -1659,7 +1451,7 @@ export interface IntegrityAssertion {
   integrityScore?: number | null
   criticalCount: number
   warningCount: number
-  /** Assurance ladder: 'local' | 'anchored' | 'high_assurance'. */
+  /** Achieved assurance. Alexandria issuers only produce 'local'; 'anchored' and 'high_assurance' are reserved. */
   assuranceLevel: string
   /** Terminal commitment root of the snapshot stream, if attested. */
   commitmentRoot?: string | null
@@ -1743,20 +1535,68 @@ export interface CreateRoleAssessmentRequest {
 }
 
 export interface VerificationResult {
-  credential_id: string
-  valid_signature: boolean
-  issuer_resolved: boolean
+  credentialId: string
+  validSignature: boolean
+  issuerResolved: boolean
   revoked: boolean
+  statusValid: boolean
   expired: boolean
-  subject_bound: boolean
-  integrity_anchored: boolean
+  subjectBound: boolean
+  integrityAnchored: boolean
   /** §11.3: temporary invalidation window currently active. */
   suspended: boolean
   /** §11.4: a newer credential supersedes this one. */
   superseded: boolean
-  verification_time: string
-  acceptance_decision: AcceptanceDecision
+  verificationTime: string
+  pendingReasons: VerificationPendingReason[]
+  acceptanceDecision: AcceptanceDecision
 }
+
+/** Mirrors `alexandria_verify::trust::TrustInvalidReason`. */
+export type TrustInvalidReason =
+  | 'inconsistent_verification_result'
+  | 'issuer_unresolved'
+  | 'invalid_signature'
+  | 'subject_not_bound'
+  | 'invalid_status_reference'
+  | 'revoked'
+  | 'expired'
+  | 'suspended'
+  | 'superseded'
+  | 'integrity_anchor_missing'
+  | 'type_not_allowed'
+
+/** Mirrors `alexandria_verify::trust::EndorsementMismatch`. */
+export type EndorsementMismatch =
+  | 'wrong_network'
+  | 'subject_mismatch'
+  | 'not_skill_claim'
+  | 'course_document_not_claimed'
+  | 'completion_root_not_claimed'
+
+/** Mirrors `alexandria_verify::trust::EndorsementOutcome`. */
+export type EndorsementOutcome =
+  | { outcome: 'not_supplied' }
+  | { outcome: 'not_applicable'; reason: EndorsementMismatch }
+  | { outcome: 'invalid_evidence' }
+  | { outcome: 'threshold_unmet'; required_attestors: number; valid_attestors: number }
+
+/**
+ * Mirrors `alexandria_verify::trust::CredentialTrust`. A trust state describes
+ * provenance only; it never grants a privilege by itself.
+ */
+export type CredentialTrust =
+  | { state: 'invalid'; reasons: TrustInvalidReason[] }
+  | { state: 'pending'; reasons: VerificationPendingReason[] }
+  | { state: 'verified_self_claim'; endorsement: EndorsementOutcome }
+  | { state: 'verified_issuer_signed'; issuer: string }
+  | {
+    state: 'verified_course_endorsement'
+    course_id: string
+    course_document_cid: string
+    course_document_version: number
+    attestors: string[]
+  }
 
 // --- Survivability bundle (§20.4) ----------------------------------------
 
@@ -1849,7 +1689,7 @@ export interface DerivedSkillState {
 
 // ============================================================
 // Community plugin system — Phase 1
-// See /Users/hack/.claude/plans/prancy-bubbling-grove.md
+// See docs/plugins.md
 // ============================================================
 
 /** Capabilities a plugin can declare. Only these are recognized at the
@@ -1996,7 +1836,7 @@ export interface PluginPermissionRecord {
   granted_until: string | null
 }
 
-// ---- Phase 3: discovery + DAO attestation ----
+// ---- Plugin discovery ----
 
 /** A row in the local plugin discovery cache. */
 export interface PluginCatalogEntry {
@@ -2018,31 +1858,6 @@ export interface PluginCatalogEntry {
   last_seen_at: string
 }
 
-/** Verifier-policy view of "is this plugin attested?" */
-export interface PluginAttestationStatus {
-  plugin_cid: string
-  attested: boolean
-  attestation: StoredPluginAttestation | null
-  advisories: PluginAdvisoryRecord[]
-}
-
-export interface StoredPluginAttestation {
-  plugin_cid: string
-  grader_cid: string
-  attestation_terms: unknown
-  committee_pubkeys: string[]
-  issued_at: string
-  advisory_kind: string | null
-  advisory_message: string | null
-}
-
-export interface PluginAdvisoryRecord {
-  id: string
-  plugin_cid: string
-  kind: 'deprecated' | 'superseded' | 'known_flawed'
-  message: string
-  issued_at: string
-}
 
 // ---- Skill graph (public) + learning path ----
 // Mirrors src-tauri/src/p2p/graph_fetch.rs + commands/graph.rs.
@@ -2172,6 +1987,7 @@ export interface StartedAttempt {
   skill_id: string
   pass_threshold: number
   questions: ServedQuestion[]
+  draft_answers: SubmittedAnswer[]
 }
 
 /** One submitted answer: the served option positions the learner selected. */
@@ -2221,6 +2037,42 @@ export type GoalInput =
   | { kind: 'job_role'; key: string }
   | { kind: 'jd_text'; text: string }
   | { kind: 'jd_link'; url: string }
+export type CompletionWitnessStatus = 'not_requested' | 'pending' | 'submitted' | 'outcome_unknown' | 'confirmed' | 'failed_on_chain' | 'unavailable'
+
+export interface CompletionWitnessState {
+  status: CompletionWitnessStatus
+  tx_hash: string | null
+}
+
+export interface CompletionWitnessResult {
+  claim_id: string
+  witness_status: CompletionWitnessStatus
+  tx_hash: string
+  completion_root: string
+  leaves: string[]
+  credential_ids: string[]
+  endorsement_request: CourseCompletionBinding | null
+  endorsement_missing_evidence: CourseEvidenceRequirement[]
+}
+
+export interface CompletionEvidence {
+  kind: string
+  format_version: number
+  id: string
+  digest: string
+}
+
+export interface CourseCompletionBinding {
+  format_version: number
+  network_id: string
+  subject_did: string
+  course_id: string
+  course_document_cid: string
+  course_document_version: number
+  completion_root: string
+  evidence: CompletionEvidence[]
+  witness_tx_hash?: string | null
+}
 
 export interface StudioSource { id: string; title: string; text: string; selected: boolean }
 export interface TutorPolicy { enabled: boolean; guidance: 'socratic' | 'balanced' | 'direct'; initial_prompt: string }

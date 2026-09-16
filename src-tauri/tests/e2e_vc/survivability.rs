@@ -66,8 +66,8 @@ async fn exported_bundle_propagates_revocation_to_offline_verifier() {
     // The status list inside the bundle carries the revocation bit,
     // so the offline verifier sees the same Reject as the local one.
     let db = new_test_db();
-    let (_issuer, cred_id) = issue_one(&db, "skill_survival_revoked");
-    revoke_credential_impl(db.conn(), &cred_id, "test", TEST_NOW).expect("revoke");
+    let (issuer, cred_id) = issue_one(&db, "skill_survival_revoked");
+    revoke_credential_impl(db.conn(), &issuer, &cred_id, "test", TEST_NOW).expect("revoke");
     let bundle = export_bundle_impl(db.conn()).expect("export");
     let (accepted, total) = verify_bundle_offline_impl(&bundle, TEST_NOW).expect("verify");
     assert_eq!(total, 1);

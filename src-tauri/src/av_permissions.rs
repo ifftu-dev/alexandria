@@ -64,6 +64,38 @@ mod jni {
 
     const ACTIVITY: &str = "org.alexandria.node.MainActivity";
 
+    fn local_ref_from_global<'local>(
+        env: &::jni::JNIEnv<'local>,
+        global: ::jni::sys::jobject,
+    ) -> ::jni::errors::Result<JObject<'local>> {
+        if global.is_null() {
+            return Err(::jni::errors::Error::NullPtr("Android application context"));
+        }
+        let interface = env.get_native_interface();
+        if interface.is_null() {
+            return Err(::jni::errors::Error::NullPtr("JNIEnv"));
+        }
+        // SAFETY: `interface` belongs to the attached current thread and
+        // `global` is the process-lifetime NewGlobalRef retained by JNI_OnLoad.
+        // NewLocalRef returns a reference owned by the local frame below, which
+        // is exactly the reference kind JObject::from_raw requires.
+        let local = unsafe {
+            let table = (*interface)
+                .as_ref()
+                .ok_or(::jni::errors::Error::NullDeref("JNIEnv function table"))?;
+            let new_local_ref = table
+                .NewLocalRef
+                .ok_or(::jni::errors::Error::JNIEnvMethodNotFound("NewLocalRef"))?;
+            new_local_ref(interface, global)
+        };
+        if local.is_null() {
+            return Err(::jni::errors::Error::NullPtr("NewLocalRef"));
+        }
+        // SAFETY: NewLocalRef returned a unique live local reference in the
+        // current thread's active local frame.
+        Ok(unsafe { JObject::from_raw(local) })
+    }
+
     fn with_activity_class<T>(
         f: impl FnOnce(&mut ::jni::JNIEnv, &JClass) -> ::jni::errors::Result<T>,
     ) -> Result<T, String> {
@@ -73,23 +105,24 @@ mod jni {
         // stay valid for the life of the process.
         let vm = unsafe { ::jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
         let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-        let app = unsafe { JObject::from_raw(ctx.context().cast()) };
-        let loader = env
-            .call_method(&app, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
-            .and_then(|v| v.l())
-            .map_err(|e| e.to_string())?;
-        let name = env.new_string(ACTIVITY).map_err(|e| e.to_string())?;
-        let class = env
-            .call_method(
-                &loader,
-                "loadClass",
-                "(Ljava/lang/String;)Ljava/lang/Class;",
-                &[JValue::Object(&name)],
-            )
-            .and_then(|v| v.l())
-            .map_err(|e| e.to_string())?;
-        let class = JClass::from(class);
-        f(&mut env, &class).map_err(|e| format!("{ACTIVITY}: {e}"))
+        env.with_local_frame(8, |env| {
+            let app = local_ref_from_global(env, ctx.context().cast())?;
+            let loader = env
+                .call_method(&app, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
+                .and_then(|v| v.l())?;
+            let name = env.new_string(ACTIVITY)?;
+            let class = env
+                .call_method(
+                    &loader,
+                    "loadClass",
+                    "(Ljava/lang/String;)Ljava/lang/Class;",
+                    &[JValue::Object(&name)],
+                )
+                .and_then(|v| v.l())?;
+            let class = JClass::from(class);
+            f(env, &class)
+        })
+        .map_err(|e| format!("{ACTIVITY}: {e}"))
     }
 
     pub fn state() -> Result<i32, String> {

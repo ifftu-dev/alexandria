@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Encrypted vault filename.
 const VAULT_FILENAME: &str = "vault.bin";
@@ -63,7 +63,7 @@ pub struct Keystore {
 impl std::fmt::Debug for Keystore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Keystore")
-            .field("vault_dir", &self.vault_dir)
+            .field("state", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -90,7 +90,7 @@ impl Keystore {
         let salt = generate_salt();
         write_salt_with_hmac(vault_dir, &salt, password)?;
 
-        log::info!("Portable keystore created at {}", vault_dir.display());
+        log::info!("portable keystore created");
 
         Ok(Self {
             vault_dir: vault_dir.to_path_buf(),
@@ -129,7 +129,7 @@ impl Keystore {
         let mnemonic = String::from_utf8(plaintext)
             .map_err(|e| KeystoreError::Crypto(format!("invalid UTF-8: {e}")))?;
 
-        log::info!("Portable keystore unlocked from {}", vault_dir.display());
+        log::info!("portable keystore unlocked");
 
         Ok(Self {
             vault_dir: vault_dir.to_path_buf(),
@@ -197,9 +197,15 @@ impl Keystore {
 
     /// Lock the vault, clearing in-memory secrets.
     pub fn lock(mut self) -> Result<(), KeystoreError> {
-        self.mnemonic = None;
+        self.clear_secrets()?;
         // password is Zeroizing — dropped and zeroed here
         log::info!("Portable keystore locked");
+        Ok(())
+    }
+
+    pub(crate) fn clear_secrets(&mut self) -> Result<(), KeystoreError> {
+        self.mnemonic = None;
+        self.password.zeroize();
         Ok(())
     }
 
@@ -314,10 +320,10 @@ fn write_salt_with_hmac(
     Ok(())
 }
 
-/// Read salt file and verify its integrity HMAC.
+/// Read the salt file and verify its integrity HMAC.
 ///
-/// Supports both the new format (salt + HMAC = 64 bytes) and the legacy
-/// format (salt only = 32 bytes) for backward compatibility.
+/// The file is salt + HMAC, 64 bytes. The pre-HMAC 32-byte format is not
+/// supported: it is refused rather than accepted without verification.
 fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, KeystoreError> {
     let salt_path = vault_dir.join(SALT_FILENAME);
     let data = std::fs::read(&salt_path).map_err(|_| {
@@ -328,18 +334,17 @@ fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, Key
         let (salt, stored_tag) = data.split_at(SALT_LEN);
         let expected_tag = compute_salt_hmac(password, salt);
         if stored_tag != expected_tag {
-            return Err(KeystoreError::Crypto(
-                "salt file corrupted or tampered — integrity check failed".into(),
-            ));
+            // The HMAC is keyed by the entered password, so a mismatch is
+            // indistinguishable from an incorrect password at unlock time.
+            // Report it as a wrong password rather than claim tampering.
+            return Err(KeystoreError::IncorrectPassword);
         }
         Ok(salt.to_vec())
-    } else if data.len() == SALT_LEN {
-        log::warn!("Salt file uses legacy format (no integrity HMAC) — will upgrade on next save");
-        Ok(data)
     } else {
         Err(KeystoreError::Crypto(format!(
-            "salt file has unexpected size: {} bytes",
-            data.len()
+            "unsupported salt file: {} bytes, expected {} (salt + integrity HMAC)",
+            data.len(),
+            SALT_LEN + HMAC_LEN
         )))
     }
 }
@@ -348,6 +353,20 @@ fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, Key
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn clear_secrets_erases_password_and_vault_memory_and_is_repeatable() {
+        let directory = tempfile::TempDir::new().expect("temporary vault");
+        let mut keystore =
+            Keystore::create(directory.path(), "testpassword").expect("create vault");
+        keystore
+            .store_mnemonic("test mnemonic")
+            .expect("store mnemonic");
+        keystore.clear_secrets().expect("clear secrets");
+        assert!(keystore.password.is_empty());
+        assert!(keystore.retrieve_mnemonic().is_err());
+        keystore.clear_secrets().expect("repeat cleanup");
+    }
 
     fn temp_vault_dir() -> PathBuf {
         let dir = std::env::temp_dir()
@@ -370,6 +389,11 @@ mod tests {
         let mut ks = Keystore::create(&dir, "testpassword").expect("create failed");
         ks.store_mnemonic("test mnemonic").expect("store failed");
         assert!(Keystore::exists(&dir));
+        let debug = format!("{ks:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains(dir.to_string_lossy().as_ref()));
+        assert!(!debug.contains("testpassword"));
+        assert!(!debug.contains("test mnemonic"));
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -411,9 +435,47 @@ mod tests {
         ks.lock().expect("lock failed");
 
         let result = Keystore::open(&dir, "wrongpassword");
-        assert!(result.is_err());
+        // The variant is the point. An HMAC mismatch is what a wrong password
+        // produces, and reporting it as corruption or tampering would send a
+        // user who mistyped towards believing their vault was attacked.
+        assert!(
+            matches!(result, Err(KeystoreError::IncorrectPassword)),
+            "expected IncorrectPassword"
+        );
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unsupported_legacy_salt_file_is_refused() {
+        let dir = tempfile::TempDir::new().expect("temporary vault");
+        // `create` alone does not write the vault file; storing and locking
+        // does. Without this, `open` fails on the missing vault before it ever
+        // reads the salt, and the refusal below is never reached. That is how
+        // this test stayed wrong: it was compiled only for mobile targets, so
+        // nothing ever ran it.
+        let mut keystore = Keystore::create(dir.path(), "testpassword").expect("create failed");
+        keystore.store_mnemonic("test").expect("store failed");
+        keystore.lock().expect("lock failed");
+        assert!(
+            dir.path().join(VAULT_FILENAME).exists(),
+            "setup must produce a vault, or the salt check is never exercised"
+        );
+        let salt_path = dir.path().join(SALT_FILENAME);
+        let current = fs::read(&salt_path).expect("read salt");
+        fs::write(&salt_path, &current[..SALT_LEN]).expect("write pre-HMAC salt");
+
+        let error = Keystore::open(dir.path(), "testpassword").expect_err("must refuse");
+
+        assert!(
+            format!("{error}").contains("unsupported salt file"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read(&salt_path).expect("salt still readable").len(),
+            SALT_LEN,
+            "the refused file must be left as it was"
+        );
     }
 
     #[test]

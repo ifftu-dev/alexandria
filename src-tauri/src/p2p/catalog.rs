@@ -13,7 +13,6 @@
 use rusqlite::params;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::crypto::hash::entity_id;
 use crate::db::Database;
 use crate::domain::catalog::CatalogAnnouncement;
 use crate::p2p::types::SignedGossipMessage;
@@ -49,11 +48,6 @@ pub fn handle_catalog_message(
     if announcement.author_address != message.stake_address {
         return Err("catalog announcement author does not match envelope signer".into());
     }
-    let expected_course_id = entity_id(&[&announcement.author_address, &announcement.content_cid]);
-    if announcement.course_id != expected_course_id {
-        return Err("catalog announcement has invalid deterministic course_id".into());
-    }
-
     // Check if we already have a newer version
     let existing_version: Option<i64> = db
         .conn()
@@ -143,6 +137,7 @@ pub fn handle_catalog_message(
 /// The announcement is a lightweight summary for gossip discovery.
 #[allow(clippy::too_many_arguments)]
 pub fn build_catalog_announcement(
+    course_id: &str,
     author_address: &str,
     title: &str,
     description: Option<&str>,
@@ -153,16 +148,13 @@ pub fn build_catalog_announcement(
     version: i64,
     kind: &str,
 ) -> CatalogAnnouncement {
-    // Spec: course_id = blake2b(author_address + content_cid)
-    let course_id = entity_id(&[author_address, content_cid]);
-
     let published_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
 
     CatalogAnnouncement {
-        course_id,
+        course_id: course_id.to_string(),
         title: title.to_string(),
         description: description.map(String::from),
         content_cid: content_cid.to_string(),
@@ -250,6 +242,7 @@ mod tests {
 
     fn sample_announcement() -> CatalogAnnouncement {
         build_catalog_announcement(
+            &"11".repeat(32),
             "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
             "Algorithm Design",
             Some("An advanced algorithms course"),
@@ -263,8 +256,9 @@ mod tests {
     }
 
     #[test]
-    fn build_announcement_generates_deterministic_id() {
+    fn build_announcement_preserves_logical_course_id() {
         let a1 = build_catalog_announcement(
+            &"11".repeat(32),
             "stake1u8abc",
             "Test",
             None,
@@ -276,6 +270,7 @@ mod tests {
             "course",
         );
         let a2 = build_catalog_announcement(
+            &"11".repeat(32),
             "stake1u8abc",
             "Different Title",
             None,
@@ -286,13 +281,14 @@ mod tests {
             1,
             "course",
         );
-        // Same author + content_cid → same course_id (title not in ID)
+        // A course keeps its signed logical ID across metadata changes.
         assert_eq!(a1.course_id, a2.course_id);
     }
 
     #[test]
-    fn different_cids_produce_different_ids() {
+    fn course_update_keeps_logical_id_across_content_cids() {
         let a1 = build_catalog_announcement(
+            &"11".repeat(32),
             "stake1u8abc",
             "Test",
             None,
@@ -304,6 +300,7 @@ mod tests {
             "course",
         );
         let a2 = build_catalog_announcement(
+            &"11".repeat(32),
             "stake1u8abc",
             "Test",
             None,
@@ -314,7 +311,7 @@ mod tests {
             1,
             "course",
         );
-        assert_ne!(a1.course_id, a2.course_id);
+        assert_eq!(a1.course_id, a2.course_id);
     }
 
     #[test]
@@ -505,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_catalog_message_rejects_invalid_course_id() {
+    fn handle_catalog_message_defers_course_id_binding_to_document_hydration() {
         let db = test_db();
         let mut ann = sample_announcement();
         ann.course_id = "tampered".into();
@@ -522,6 +519,6 @@ mod tests {
             key_id: None,
         };
 
-        assert!(handle_catalog_message(&db, &msg).is_err());
+        assert!(handle_catalog_message(&db, &msg).is_ok());
     }
 }

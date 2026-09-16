@@ -11,16 +11,17 @@
 //! Thin `#[tauri::command]` handlers delegate to pure `*_impl` functions
 //! taking `&Connection`, keeping the logic unit-testable.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::commands::credentials::{
     issue_credential_impl, load_issuer_key, now_rfc3339, IssuancePolicy, IssueCredentialRequest,
 };
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, RoleClaim, VerifiableCredential};
 use crate::AppState;
 
@@ -153,8 +154,14 @@ pub fn create_role_assessment_impl(
         return Err(format!("organization {} not found", req.org_id));
     }
     if let Some(level) = &req.required_assurance_level {
-        if !matches!(level.as_str(), "local" | "anchored" | "high_assurance") {
-            return Err(format!("invalid required_assurance_level: {level}"));
+        match level.as_str() {
+            crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL => {}
+            "anchored" | "high_assurance" => {
+                return Err(format!(
+                    "required_assurance_level '{level}' is unavailable: no verified path can achieve it"
+                ))
+            }
+            _ => return Err(format!("invalid required_assurance_level: {level}")),
         }
     }
     let id = entity_id(&[&req.org_id, &req.role_title, now]);
@@ -291,12 +298,11 @@ pub fn issue_role_credential_impl(
     // Issue under the organisation's own DID, not the caller's personal one.
     //
     // This is what makes the credential independent evidence. Aggregation
-    // weighs a skill by how many *distinct* issuer clusters back it
-    // (`unique_issuer_clusters`); a learner's own self-issued assessment
-    // credentials all share one cluster and so cannot raise confidence past a
-    // structural cap. An organisation issuing under its own stable DID is a
-    // second, independent cluster — the thing an employer is actually paying
-    // for. Using the caller's personal DID here would collapse every org this
+    // weighs a skill by how many *distinct* independent issuer clusters back
+    // it (`unique_issuer_clusters`); a learner's own self-issued assessment
+    // credentials are scored but add no independent cluster at all. An
+    // organisation issuing under its own stable DID is an independent
+    // cluster — the thing an employer is actually paying for. Using the caller's personal DID here would collapse every org this
     // person administers into one issuer and defeat that.
     //
     // The caller must hold the org's key: an org's DID defaults to its
@@ -359,6 +365,28 @@ pub fn issue_role_credential_impl(
     issue_credential_impl(conn, issuer_key, &org_issuer, &req, now)
 }
 
+fn issue_role_credential_transactional(
+    conn: &Connection,
+    issuer_key: &SigningKey,
+    issuer_did: &Did,
+    role_assessment_id: &str,
+    subject: &Did,
+    integrity_session_id: &str,
+    now: &str,
+) -> Result<VerifiableCredential, String> {
+    crate::db::with_transaction(conn, || {
+        issue_role_credential_impl(
+            conn,
+            issuer_key,
+            issuer_did,
+            role_assessment_id,
+            subject,
+            integrity_session_id,
+            now,
+        )
+    })
+}
+
 // ============================================================================
 // Tauri command handlers
 // ============================================================================
@@ -370,18 +398,18 @@ pub async fn create_organization(
     owner_address: String,
     did: Option<String>,
 ) -> Result<Organization, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    create_organization_impl(
-        db.conn(),
-        &name,
-        &owner_address,
-        did.as_deref(),
-        &now_rfc3339(),
-    )
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.organization.create",
+            move |db| {
+                create_organization_impl(db.conn(), &name, &owner_address, did.as_deref(), &now)
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -389,12 +417,15 @@ pub async fn list_organizations(
     state: State<'_, AppState>,
     owner_address: Option<String>,
 ) -> Result<Vec<Organization>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_organizations_impl(db.conn(), owner_address.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.organization.list",
+            move |db| list_organizations_impl(db.conn(), owner_address.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -402,12 +433,16 @@ pub async fn create_role_assessment(
     state: State<'_, AppState>,
     req: CreateRoleAssessmentRequest,
 ) -> Result<RoleAssessment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    create_role_assessment_impl(db.conn(), &req, &now_rfc3339())
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.create",
+            move |db| create_role_assessment_impl(db.conn(), &req, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -415,12 +450,15 @@ pub async fn list_role_assessments(
     state: State<'_, AppState>,
     org_id: Option<String>,
 ) -> Result<Vec<RoleAssessment>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_role_assessments_impl(db.conn(), org_id.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.list",
+            move |db| list_role_assessments_impl(db.conn(), org_id.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -428,12 +466,15 @@ pub async fn get_role_assessment(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Option<RoleAssessment>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    get_role_assessment_impl(db.conn(), &id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "role-assessment.get",
+            move |db| get_role_assessment_impl(db.conn(), &id),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -442,12 +483,16 @@ pub async fn set_role_assessment_status(
     id: String,
     status: String,
 ) -> Result<RoleAssessment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    set_role_assessment_status_impl(db.conn(), &id, &status, &now_rfc3339())
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.status.set",
+            move |db| set_role_assessment_status_impl(db.conn(), &id, &status, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -459,20 +504,25 @@ pub async fn issue_role_credential(
 ) -> Result<VerifiableCredential, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    issue_role_credential_impl(
-        db.conn(),
-        &signing_key,
-        &issuer_did,
-        &role_assessment_id,
-        &Did(subject),
-        &integrity_session_id,
-        &now,
-    )
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.credential.issue",
+            move |db| {
+                issue_role_credential_transactional(
+                    db.conn(),
+                    &signing_key,
+                    &issuer_did,
+                    &role_assessment_id,
+                    &Did(subject),
+                    &integrity_session_id,
+                    &now,
+                )
+            },
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -519,16 +569,13 @@ mod tests {
                 require_clean: true,
                 ..Default::default()
             }),
-            required_assurance_level: Some("anchored".into()),
+            required_assurance_level: Some("local".into()),
         };
         let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
         let fetched = get_role_assessment_impl(conn, &ra.id).unwrap().unwrap();
         assert_eq!(fetched.role_title, "SRE L4");
         assert_eq!(fetched.skill_ids, vec!["skill:sre".to_string()]);
-        assert_eq!(
-            fetched.required_assurance_level.as_deref(),
-            Some("anchored")
-        );
+        assert_eq!(fetched.required_assurance_level.as_deref(), Some("local"));
         assert!(fetched.issuance_policy.unwrap().require_clean);
         assert_eq!(
             list_role_assessments_impl(conn, Some(&org.id))
@@ -536,6 +583,26 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn unavailable_assurance_level_is_distinct_from_invalid() {
+        let (db, ..) = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        for level in ["anchored", "high_assurance"] {
+            let req = CreateRoleAssessmentRequest {
+                org_id: org.id.clone(),
+                role_title: format!("Role {level}"),
+                job_description: None,
+                course_id: None,
+                skill_ids: vec![],
+                issuance_policy: None,
+                required_assurance_level: Some(level.into()),
+            };
+            let error = create_role_assessment_impl(conn, &req, NOW).unwrap_err();
+            assert!(error.contains("is unavailable"), "{error}");
+        }
     }
 
     #[test]
@@ -679,6 +746,59 @@ mod tests {
     }
 
     #[test]
+    fn failed_credential_insert_rolls_back_org_did_adoption() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let role_assessment_id = ready_to_issue(conn, None);
+        conn.execute_batch(
+            "CREATE TRIGGER fail_role_credential_insert BEFORE INSERT ON credentials \
+             BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END;",
+        )
+        .unwrap();
+
+        let error = issue_role_credential_transactional(
+            conn,
+            &key,
+            &owner,
+            &role_assessment_id,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("injected credential failure"));
+        let organization_did: Option<String> = conn
+            .query_row(
+                "SELECT o.did FROM organizations o \
+                 JOIN role_assessments ra ON ra.org_id = o.id WHERE ra.id = ?1",
+                [&role_assessment_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(organization_did, None);
+        let status_lists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM credential_status_lists", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(status_lists, 0);
+
+        conn.execute_batch("DROP TRIGGER fail_role_credential_insert")
+            .unwrap();
+        issue_role_credential_transactional(
+            conn,
+            &key,
+            &owner,
+            &role_assessment_id,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn issuance_is_refused_when_the_caller_does_not_hold_the_org_key() {
         // The org's DID belongs to someone else; this caller cannot sign as it
         // and must be refused rather than silently signing personally.
@@ -708,10 +828,10 @@ mod tests {
 
     #[test]
     fn an_org_credential_is_a_distinct_issuer_cluster_from_self_assessment() {
-        // The payoff finding 1 predicted: a learner's own assessment
-        // credentials share one issuer cluster and cannot lift confidence past
-        // a cap, but an org-issued role credential is a second, independent
-        // cluster — so it raises the count aggregation weighs.
+        // A learner's own assessment credentials are scored but are not
+        // corroboration, so they add no independent issuer cluster. An
+        // org-issued skill credential is an independent cluster, so it raises
+        // the count aggregation weighs.
         use crate::commands::aggregation::recompute_all_impl;
         use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
         use crate::domain::vc::SkillClaim;
@@ -782,7 +902,11 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(self_only, 1, "self-issued credentials are one cluster");
+        assert_eq!(
+            self_only, 0,
+            "self-issued credentials add no independent cluster"
+        );
+        assert_eq!(with_org, 1, "the org issuer is one independent cluster");
         assert!(
             with_org > self_only,
             "an independent org issuer must raise the cluster count: {with_org} !> {self_only}"

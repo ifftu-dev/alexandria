@@ -25,7 +25,7 @@ use crate::p2p::types::SignedGossipMessage;
 /// 1 MiB is 8.4 million credentials in one list, far past any real issuer, and
 /// the value arrives base64-encoded from the network with nothing else bounding
 /// it.
-const MAX_BITS_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_BITS_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StatusIngest {

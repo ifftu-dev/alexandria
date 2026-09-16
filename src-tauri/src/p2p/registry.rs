@@ -2,8 +2,8 @@
 //!
 //! Persistent replacement for the TOFU identity binding that
 //! previously lived in `MessageValidator`. Every privileged-topic
-//! gossip message (taxonomy, governance, Sentinel priors, plugin
-//! attestations, goal templates, question banks) is authorized by
+//! gossip message (taxonomy, governance, Sentinel priors, the reserved
+//! plugin-certificate topic, goal templates, question banks) is authorized by
 //! checking that the message's
 //! `(stake_address, public_key)` pair appears in this registry within
 //! its validity window.
@@ -20,15 +20,16 @@
 //! `Database` handle from `AppState` and forwards it into
 //! [`lookup`] for each privileged-topic message.
 //!
-//! Founder verifier keys are hardcoded constants ([`SNAPSHOT_VERIFIERS`])
-//! to close key-substitution attacks; rotating them requires a code
-//! change + release.
+//! Founder verifier keys are pinned by the active network profile to close
+//! key-substitution attacks; rotating them requires a reviewed profile revision.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+
+use crate::network_profile::{embedded_preprod, NamedVerifyingKey};
 
 use super::types::{
     SignedGossipMessage, TOPIC_GOAL_TEMPLATES, TOPIC_GOVERNANCE, TOPIC_PLUGIN_ATTESTATIONS,
@@ -40,38 +41,15 @@ use super::types::{
 /// misreading them.
 pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 
-/// Required signatures from [`SNAPSHOT_VERIFIERS`] for a bootstrap
+/// Required signatures from the network profile's founder keys for a bootstrap
 /// snapshot to be accepted. 2-of-3 multisig.
 pub const SNAPSHOT_QUORUM: usize = 2;
 
-/// Hardcoded Ed25519 verifier keys for the bootstrap snapshot signature.
-///
-/// **Solo-founder origin.** Generated 2026-05-25 via the
-/// `snapshot_keygen` example on a single dev machine; all three secrets
-/// currently live in `~/.alexandria-founder-keys/`. Until additional
-/// cofounders rotate their own keys in, the practical trust threshold
-/// on these signatures is single-key (one operator holds every secret),
-/// even though the verifier still enforces the 2-of-3 quorum at the
-/// code level. Rotate by replacing one or more entries below and
-/// re-running the multisig signing ceremony.
-///
-/// Each entry is `(name, hex-encoded 32-byte Ed25519 public key)`. The
-/// names are advisory only; signature verification ignores them and
-/// just collects a set of valid keys.
-pub const SNAPSHOT_VERIFIERS: &[(&str, &str)] = &[
-    (
-        "founder_a",
-        "53483cedf2f537accf9f7bfaa17aab81b0c80767664d52129a070db0e9660312",
-    ),
-    (
-        "founder_b",
-        "6f6aaae8df089ae21120fc4eb96a362bc9bf0cc8e34639daaae6d7e24abdf19c",
-    ),
-    (
-        "founder_c",
-        "c5a88da0cbdfbfb57065549c347b6f7daf8ad60ed2b36258570fccd2e7ec6186",
-    ),
-];
+fn snapshot_verifiers() -> &'static [NamedVerifyingKey] {
+    &embedded_preprod()
+        .expect("embedded network profile is validated during app setup")
+        .stake_registry_founder_keys
+}
 
 /// Source of a registry row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,7 +100,7 @@ pub struct SnapshotEntry {
 }
 
 /// A signature attached to a snapshot. `signer` is purely advisory —
-/// verification iterates [`SNAPSHOT_VERIFIERS`] and counts matches.
+/// verification iterates the network profile's founder keys and counts matches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotSignature {
     pub signer: String,
@@ -133,8 +111,7 @@ pub struct SnapshotSignature {
 ///
 /// Verification re-canonicalizes `(version, issued_at, entries)` to
 /// JCS bytes and accepts the snapshot iff ≥ [`SNAPSHOT_QUORUM`] of the
-/// attached signatures verify under any distinct key in
-/// [`SNAPSHOT_VERIFIERS`].
+/// attached signatures verify under distinct network-profile founder keys.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BootstrapSnapshot {
     pub version: u32,
@@ -155,7 +132,7 @@ pub enum RegistryError {
     SnapshotCanonicalize(String),
     #[error("invalid hex: {0}")]
     Hex(String),
-    #[error("invalid verifier key in SNAPSHOT_VERIFIERS: {0}")]
+    #[error("invalid verifier key in the network profile: {0}")]
     VerifierKey(String),
     #[error("db error: {0}")]
     Db(#[from] rusqlite::Error),
@@ -174,19 +151,19 @@ impl BootstrapSnapshot {
         Ok(snap)
     }
 
-    /// Run the multisig verification against [`SNAPSHOT_VERIFIERS`].
+    /// Run multisig verification against the active network profile.
     pub fn verify_signatures(&self) -> Result<(), RegistryError> {
-        // Resolve the hardcoded verifier keys once.
-        let mut verifiers: Vec<VerifyingKey> = Vec::with_capacity(SNAPSHOT_VERIFIERS.len());
-        for (name, hex_pk) in SNAPSHOT_VERIFIERS {
-            let pk_bytes = hex::decode(hex_pk)
-                .map_err(|e| RegistryError::VerifierKey(format!("{name}: {e}")))?;
+        let configured = snapshot_verifiers();
+        let mut verifiers: Vec<VerifyingKey> = Vec::with_capacity(configured.len());
+        for key in configured {
+            let pk_bytes = hex::decode(&key.public_key_hex)
+                .map_err(|e| RegistryError::VerifierKey(format!("{}: {e}", key.id)))?;
             let pk_arr: [u8; 32] = pk_bytes
                 .try_into()
-                .map_err(|_| RegistryError::VerifierKey(format!("{name}: wrong length")))?;
+                .map_err(|_| RegistryError::VerifierKey(format!("{}: wrong length", key.id)))?;
             verifiers.push(
                 VerifyingKey::from_bytes(&pk_arr)
-                    .map_err(|e| RegistryError::VerifierKey(format!("{name}: {e}")))?,
+                    .map_err(|e| RegistryError::VerifierKey(format!("{}: {e}", key.id)))?,
             );
         }
 
@@ -390,32 +367,14 @@ pub const EMBEDDED_BOOTSTRAP_JSON: &[u8] =
 
 /// Seed the registry from the bundled [`EMBEDDED_BOOTSTRAP_JSON`].
 /// Idempotent — relies on the table's PRIMARY KEY to drop duplicates.
-/// Empty / placeholder snapshots short-circuit silently.
 pub fn load_embedded_bootstrap(conn: &Connection) -> Result<usize, RegistryError> {
-    // Mirror the placeholder short-circuit in `load_bootstrap_if_present`.
-    if let Ok(peek) = serde_json::from_slice::<BootstrapSnapshot>(EMBEDDED_BOOTSTRAP_JSON) {
-        if peek.entries.is_empty() && peek.signatures.is_empty() {
-            return Ok(0);
-        }
-    }
-    match BootstrapSnapshot::parse_and_verify(EMBEDDED_BOOTSTRAP_JSON) {
-        Ok(snap) => apply_bootstrap(conn, &snap),
-        Err(RegistryError::VerifierKey(reason)) => {
-            log::warn!(
-                "embedded bootstrap skipped: verifier keys not configured ({reason}). \
-                 Replace SNAPSHOT_VERIFIERS before public launch."
-            );
-            Ok(0)
-        }
-        Err(e) => Err(e),
-    }
+    let snap = BootstrapSnapshot::parse_and_verify(EMBEDDED_BOOTSTRAP_JSON)?;
+    apply_bootstrap(conn, &snap)
 }
 
 /// Load `bootstrap_registry.json` from `path` if present, verify its
 /// signatures, and apply it to the registry. Missing file / parse
-/// failure / placeholder verifier keys are logged at INFO and treated
-/// as a no-op — privileged-topic gossip will simply have no bindings
-/// until the on-chain refresh path supplies them.
+/// failure is returned without mutating the registry.
 ///
 /// This is the only side effect of the snapshot path on a fresh boot.
 pub fn load_bootstrap_if_present(
@@ -431,40 +390,14 @@ pub fn load_bootstrap_if_present(
     }
     let bytes = std::fs::read(path).map_err(|e| RegistryError::SnapshotParse(e.to_string()))?;
 
-    // Pre-launch placeholder: the shipped file may have no entries and
-    // no signatures while founders are still finalizing keys. Detect
-    // that shape up front and short-circuit before verification so we
-    // don't trip the quorum check on an obviously-empty file.
-    if let Ok(peek) = serde_json::from_slice::<BootstrapSnapshot>(&bytes) {
-        if peek.entries.is_empty() && peek.signatures.is_empty() {
-            log::info!("bootstrap_registry.json is the empty placeholder — no entries to seed yet");
-            return Ok(0);
-        }
-    }
-
-    match BootstrapSnapshot::parse_and_verify(&bytes) {
-        Ok(snap) => {
-            let inserted = apply_bootstrap(conn, &snap)?;
-            log::info!(
-                "applied bootstrap_registry.json: {} new rows from {} entries",
-                inserted,
-                snap.entries.len()
-            );
-            Ok(inserted)
-        }
-        Err(RegistryError::VerifierKey(reason)) => {
-            // Pre-launch / dev: SNAPSHOT_VERIFIERS still holds
-            // placeholder all-zero keys. Don't crash startup; just
-            // refuse to seed and let the on-chain path take over once
-            // it's wired.
-            log::warn!(
-                "bootstrap snapshot skipped: verifier keys not configured ({reason}). \
-                 Replace SNAPSHOT_VERIFIERS before public launch."
-            );
-            Ok(0)
-        }
-        Err(e) => Err(e),
-    }
+    let snap = BootstrapSnapshot::parse_and_verify(&bytes)?;
+    let inserted = apply_bootstrap(conn, &snap)?;
+    log::info!(
+        "applied bootstrap_registry.json: {} new rows from {} entries",
+        inserted,
+        snap.entries.len()
+    );
+    Ok(inserted)
 }
 
 // ---------------------------------------------------------------------------
@@ -668,22 +601,14 @@ mod tests {
             .map(|(idx, sk)| {
                 let sig = sk.sign(&bytes);
                 SnapshotSignature {
-                    signer: SNAPSHOT_VERIFIERS[*idx].0.to_string(),
+                    signer: snapshot_verifiers()[*idx].id.clone(),
                     sig_hex: hex::encode(sig.to_bytes()),
                 }
             })
             .collect();
     }
 
-    /// Replace `SNAPSHOT_VERIFIERS` in-test by stuffing the snapshot's
-    /// known-good keys into a fresh set of `SigningKey`s; verify against
-    /// the actual constants by constructing the verifier keys from the
-    /// signing keys' public halves.
-    ///
-    /// Because `SNAPSHOT_VERIFIERS` is `const`, we can't swap it at
-    /// runtime — instead the verify test path is exercised by a local
-    /// helper [`verify_with_keys`] that mirrors [`BootstrapSnapshot::verify_signatures`]
-    /// but accepts the verifier set as an argument.
+    /// Exercise the verification algorithm with deterministic test keys.
     fn verify_with_keys(
         snap: &BootstrapSnapshot,
         verifiers: &[VerifyingKey],
@@ -720,6 +645,11 @@ mod tests {
         // Deterministic test keys — never re-used in production.
         let seeds: [[u8; 32]; 3] = [[1; 32], [2; 32], [3; 32]];
         seeds.map(|s| SigningKey::from_bytes(&s))
+    }
+
+    #[test]
+    fn embedded_bootstrap_verifies_against_network_profile_keys() {
+        BootstrapSnapshot::parse_and_verify(EMBEDDED_BOOTSTRAP_JSON).unwrap();
     }
 
     #[test]

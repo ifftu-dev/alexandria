@@ -1,0 +1,99 @@
+{
+  "captured_at": "2026-09-15",
+  "cometbft": {
+    "requested_tag": "v0.40.0",
+    "tag_object": "06b4cbf4b776554bd2b95fc39c80991e7529e765",
+    "source_commit": "0880b4d378f347ab16e54ec677ff50d803f37d62",
+    "darwin_arm64_binary_sha256": "3aa50b6e1b163e8c24e7de637813ad37605e42d801cf76dd2f756a8e0ede973b",
+    "reported_version": "0.39.0",
+    "abci_version": "2.0.0",
+    "block_protocol": 11,
+    "p2p_protocol": 8,
+    "release_anomaly": "The signed v0.40.0 tag builds a daemon whose embedded version reports 0.39.0. Pin source commit and artifact digest."
+  },
+  "rust_abci": {
+    "crate": "tendermint-abci",
+    "version": "0.40.4",
+    "wire_module": "tendermint_proto::v0_38",
+    "transport": "TCP socket with protobuf length-delimited framing",
+    "grpc": "not selected or tested"
+  },
+  "rust_light_verifier": {
+    "crate": "cometbft-light-client-verifier",
+    "version": "0.1.0-alpha.2",
+    "core_types_crate": "cometbft",
+    "core_types_version": "0.1.0-alpha.2"
+  },
+  "rust_toolchain": {
+    "rustc": "1.91.0 (f8297e351 2025-10-28)",
+    "cargo": "1.91.0 (ea2d97820 2025-10-10)"
+  },
+  "callback_cycle": [
+    "Info reports the last durable application height and hash",
+    "InitChain runs once for an empty daemon store",
+    "CheckTx admits the transaction to the mempool",
+    "ProcessProposal rejects a proposal containing an unknown transaction",
+    "FinalizeBlock deterministically creates the pending state and application hash",
+    "Commit atomically persists the pending state",
+    "a restart repeats Info and replays a missing persisted height"
+  ],
+  "target_matrix": {
+    "aarch64-apple-darwin": {
+      "compile": "passed",
+      "known_answer_runtime": "passed"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "compile": "passed",
+      "known_answer_runtime": "pending target runtime"
+    },
+    "x86_64-pc-windows-msvc": {
+      "compile": "passed",
+      "known_answer_runtime": "pending target runtime"
+    },
+    "aarch64-apple-ios": {
+      "compile": "passed with rustc fullfp16 target-feature warning",
+      "known_answer_runtime": "pending physical device/runtime"
+    },
+    "aarch64-linux-android": {
+      "compile": "passed with rustc fullfp16 target-feature warning",
+      "known_answer_runtime": "pending physical device/runtime"
+    }
+  },
+  "runtime_vector": {
+    "transaction": "increment",
+    "transaction_hash": "F679230253E596B02442B1CA20083DA5EFD7BF5DFE48A9814AFB6FE8EBE58BC9",
+    "transaction_height": 15,
+    "post_state_header_height": 16,
+    "post_state_app_hash": "D1135C44CB26A136D9D036B3451C7DBA718BF968427D846E26BFB5DC87CFDC53",
+    "post_state_value": 1,
+    "verified_commit_height": 15
+  },
+  "replay_vector": {
+    "app_height_before_restart": 352,
+    "daemon_store_height_before_restart": 353,
+    "replayed_height": 353,
+    "replayed_app_hash": "7434528258286902C1B160B3190F3A04D194044AC13EB6F187E6CB2D9E90B60F"
+  },
+  "timing_inputs": {
+    "finalize_block": "block time and decided-last-commit votes; no individual vote timestamps or vote extensions",
+    "extend_vote": "block hash, height, block time, transactions and prior commit",
+    "prepare_proposal": "local-last-commit extended votes, including vote extensions and extension signatures",
+    "conclusion": "U08/U09 require explicit committed observation evidence; block time alone is insufficient"
+  },
+  "height_sequence": [
+    "transaction bytes and their Merkle root are committed by the signed header at H=15",
+    "FinalizeBlock at H=15 returns the new application hash and deterministic transaction result",
+    "Commit durably records application state height=15 value=1",
+    "the signed header at H+1=16 commits the H=15 application hash and transaction-results root"
+  ],
+  "compatibility_conclusion": "The pinned daemon source and Rust crates interoperate over ABCI socket transport on macOS and the verifier compiles for all five targets. G02 must design committed member observation evidence because FinalizeBlock lacks the individual timestamp/signature material required by U08/U09. Non-macOS known-answer runtime execution remains an operational gate.",
+  "fixture_sha256": {
+    "genesis.json": "525ed1f1b004b61b89a6eae06c4d3337be34646872a4244ae7f17ee8ed578f4b",
+    "block-15.json": "3a14e4c800f0502e632dbaede3ff93370331aeab9c8834d7e4cd91adad4b3bd0",
+    "block-16.json": "af3e211d361845420175e28d595951eeeb53c056dd01809c643440353beb62a4",
+    "commit-15.json": "45a9469dcaf73ee5ce755d8fefb84cf52a6b71f260a7d1c75e46342029ff2c66",
+    "commit-16.json": "ce1c1a1ac6b2e95efb06a7acaf6c35c5b12fb79e99d58efbe37648e162bfc8ac",
+    "block-results-15.json": "9e65a2805860ec0d81a32ce5a444c732e15be0d8354694a4ea5a7a8644285a3e",
+    "tx-15.json": "fac073d0b33cf0fc34263c02601c4b468938bd622bf375c6f24f112e07bde035"
+  }
+}

@@ -10,7 +10,7 @@ use thiserror::Error;
 use super::manager::ProfileId;
 
 /// Current schema version. Bump when adding non-backward-compatible fields.
-pub const INDEX_VERSION: u32 = 1;
+pub const INDEX_VERSION: u32 = 2;
 
 /// Filename of the public sidecar.
 pub const INDEX_FILENAME: &str = "profiles_index.json";
@@ -39,6 +39,7 @@ impl Default for Avatar {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfileSummary {
     pub id: ProfileId,
+    pub network_id: String,
     pub display_name: String,
     #[serde(default)]
     pub avatar: Avatar,
@@ -76,8 +77,8 @@ pub enum IndexError {
     Io(#[from] std::io::Error),
     #[error("invalid profiles index JSON: {0}")]
     Parse(#[from] serde_json::Error),
-    #[error("unsupported profiles index version: {0}")]
-    UnsupportedVersion(u32),
+    #[error("profiles index version {found} is incompatible with required version {expected}")]
+    IncompatibleVersion { found: u32, expected: u32 },
 }
 
 impl ProfileIndex {
@@ -89,11 +90,24 @@ impl ProfileIndex {
             return Ok(Self::default());
         }
         let bytes = std::fs::read(&path)?;
-        let index: ProfileIndex = serde_json::from_slice(&bytes)?;
-        if index.version > INDEX_VERSION {
-            return Err(IndexError::UnsupportedVersion(index.version));
+        let header: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let version = header
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| {
+                serde_json::Error::io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "profiles index is missing an integer version",
+                ))
+            })?;
+        if version != INDEX_VERSION {
+            return Err(IndexError::IncompatibleVersion {
+                found: version,
+                expected: INDEX_VERSION,
+            });
         }
-        Ok(index)
+        serde_json::from_slice(&bytes).map_err(IndexError::Parse)
     }
 
     /// Atomically persist the index. Writes to a temp file then renames,
@@ -144,6 +158,7 @@ mod tests {
     fn sample(id: ProfileId, name: &str) -> ProfileSummary {
         ProfileSummary {
             id,
+            network_id: "preprod".to_string(),
             display_name: name.to_string(),
             avatar: Avatar::default(),
             color: default_color(),
@@ -200,7 +215,28 @@ mod tests {
         let path = tmp.path().join(INDEX_FILENAME);
         std::fs::write(&path, r#"{"version":999,"profiles":[]}"#).unwrap();
         let err = ProfileIndex::load(tmp.path()).unwrap_err();
-        assert!(matches!(err, IndexError::UnsupportedVersion(999)));
+        assert!(matches!(
+            err,
+            IndexError::IncompatibleVersion {
+                found: 999,
+                expected: INDEX_VERSION
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_legacy_index_without_network_identity() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(INDEX_FILENAME);
+        std::fs::write(&path, r#"{"version":1,"profiles":[]}"#).unwrap();
+        let err = ProfileIndex::load(tmp.path()).unwrap_err();
+        assert!(matches!(
+            err,
+            IndexError::IncompatibleVersion {
+                found: 1,
+                expected: INDEX_VERSION
+            }
+        ));
     }
 
     #[test]

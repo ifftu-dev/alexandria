@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use argon2::Argon2;
 use iota_stronghold::{KeyProvider, SnapshotPath, Stronghold};
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Store record key for the mnemonic.
 const MNEMONIC_KEY: &[u8] = b"mnemonic";
@@ -67,7 +67,7 @@ pub struct Keystore {
 impl std::fmt::Debug for Keystore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Keystore")
-            .field("vault_dir", &self.vault_dir)
+            .field("state", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -255,13 +255,20 @@ impl Keystore {
     ///
     /// After this call, the Keystore is consumed. A new `open()` call
     /// is required to access secrets again.
-    pub fn lock(self) -> Result<(), KeystoreError> {
-        self.stronghold
-            .clear()
-            .map_err(|e| KeystoreError::Stronghold(format!("{e:?}")))?;
+    pub fn lock(mut self) -> Result<(), KeystoreError> {
+        self.clear_secrets()?;
         // `self.password` is `Zeroizing<String>` — dropped and zeroed here.
         log::info!("Keystore locked");
         Ok(())
+    }
+
+    pub(crate) fn clear_secrets(&mut self) -> Result<(), KeystoreError> {
+        // Zeroize first: a failed Stronghold clear leaves this keystore in
+        // shared state, and it must not keep the password alive there.
+        self.password.zeroize();
+        self.stronghold
+            .clear()
+            .map_err(|e| KeystoreError::Stronghold(format!("{e:?}")))
     }
 
     /// Get the vault directory path.
@@ -385,10 +392,10 @@ fn write_salt_with_hmac(
     Ok(())
 }
 
-/// Read salt file and verify its integrity HMAC.
+/// Read the salt file and verify its integrity HMAC.
 ///
-/// Supports both the new format (salt + HMAC = 64 bytes) and the legacy
-/// format (salt only = 32 bytes) for backward compatibility.
+/// The file is salt + HMAC, 64 bytes. The pre-HMAC 32-byte format is not
+/// supported: it is refused rather than accepted without verification.
 fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, KeystoreError> {
     let salt_path = vault_dir.join(SALT_FILENAME);
     let data = std::fs::read(&salt_path).map_err(|_| {
@@ -407,14 +414,11 @@ fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, Key
             return Err(KeystoreError::IncorrectPassword);
         }
         Ok(salt.to_vec())
-    } else if data.len() == SALT_LEN {
-        // Legacy format: no HMAC, accept but upgrade on next save
-        log::warn!("Salt file uses legacy format (no integrity HMAC) — will upgrade on next save");
-        Ok(data)
     } else {
         Err(KeystoreError::Stronghold(format!(
-            "salt file has unexpected size: {} bytes",
-            data.len()
+            "unsupported salt file: {} bytes, expected {} (salt + integrity HMAC)",
+            data.len(),
+            SALT_LEN + HMAC_LEN
         )))
     }
 }
@@ -423,6 +427,20 @@ fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, Key
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn clear_secrets_erases_password_and_vault_memory_and_is_repeatable() {
+        let directory = tempfile::TempDir::new().expect("temporary vault");
+        let mut keystore =
+            Keystore::create(directory.path(), "testpassword").expect("create vault");
+        keystore
+            .store_mnemonic("test mnemonic")
+            .expect("store mnemonic");
+        keystore.clear_secrets().expect("clear secrets");
+        assert!(keystore.password.is_empty());
+        assert!(keystore.retrieve_mnemonic().is_err());
+        keystore.clear_secrets().expect("repeat cleanup");
+    }
 
     fn temp_vault_dir() -> PathBuf {
         let dir = std::env::temp_dir()
@@ -442,8 +460,12 @@ mod tests {
     #[test]
     fn create_vault_and_check_exists() {
         let dir = temp_vault_dir();
-        let _ks = Keystore::create(&dir, "testpassword").expect("create failed");
+        let ks = Keystore::create(&dir, "testpassword").expect("create failed");
         assert!(Keystore::exists(&dir));
+        let debug = format!("{ks:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains(dir.to_string_lossy().as_ref()));
+        assert!(!debug.contains("testpassword"));
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -507,6 +529,27 @@ mod tests {
         );
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unsupported_legacy_salt_file_is_refused() {
+        let dir = tempfile::TempDir::new().expect("temporary vault");
+        let _keystore = Keystore::create(dir.path(), "testpassword").expect("create failed");
+        let salt_path = dir.path().join(SALT_FILENAME);
+        let current = fs::read(&salt_path).expect("read salt");
+        fs::write(&salt_path, &current[..SALT_LEN]).expect("write pre-HMAC salt");
+
+        let error = Keystore::open(dir.path(), "testpassword").expect_err("must refuse");
+
+        assert!(
+            format!("{error}").contains("unsupported salt file"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read(&salt_path).expect("salt still readable").len(),
+            SALT_LEN,
+            "the refused file must be left as it was"
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! [`relay_registry::set_onchain_issuers`].
 //!
 //! Trust model: a label-[`REGISTRY_LABEL`] tx counts only if one of its
-//! *inputs* is spent from [`GOV_ADDRESS`] — only the gov key can do
+//! *inputs* is spent from the network profile's governance anchor — only the gov key can do
 //! that, so a relay cannot publish a registry that names itself. Genesis
 //! issuers stay trusted regardless (see [`relay_registry`]), so naming
 //! keeps working when the chain is unreachable or the registry is empty.
@@ -18,7 +18,7 @@
 use libp2p::PeerId;
 
 use super::blockfrost::BlockfrostClient;
-use crate::p2p::relay_registry::{self, GOV_ADDRESS, REGISTRY_LABEL};
+use crate::p2p::relay_registry::{self, REGISTRY_LABEL};
 
 /// Metadata payload shape under the label: `{ "v": 1, "seq": N,
 /// "r": [ "<peer_id>", … ] }`. Returns `(seq, peer_ids)`.
@@ -44,8 +44,10 @@ pub fn parse_registry_metadata(json: &serde_json::Value) -> Option<(u64, Vec<Str
 
 /// Fetch the authoritative issuer set from chain. Returns the
 /// `(seq, peer_ids)` of the highest-seq registry tx that was authored by
-/// [`GOV_ADDRESS`], or `None` when none exists / chain unreachable.
+/// the configured governance anchor, or `None` when governance is disabled,
+/// none exists, or the chain is unreachable.
 pub async fn fetch_authorized_issuers(blockfrost: &BlockfrostClient) -> Option<(u64, Vec<String>)> {
+    let governance_anchor = relay_registry::governance_anchor_address()?;
     let txs = blockfrost
         .get_metadata_by_label(REGISTRY_LABEL)
         .await
@@ -69,7 +71,7 @@ pub async fn fetch_authorized_issuers(blockfrost: &BlockfrostClient) -> Option<(
         let authored_by_gov = utxos
             .inputs
             .iter()
-            .any(|i| !i.collateral && i.address == GOV_ADDRESS);
+            .any(|i| !i.collateral && i.address == governance_anchor);
         if !authored_by_gov {
             continue;
         }

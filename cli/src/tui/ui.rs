@@ -1137,7 +1137,7 @@ pub mod render_tests_support {
         crate::tui::logs::clear();
         crate::tui::logs::install();
         log::info!("alexandria tui 0.1.0 starting");
-        log::info!("vault unlocked for profile HackRidesTest (52fce5a0)");
+        log::info!("vault unlocked");
         log::debug!("refreshed: 6 credentials, 2 assessments, 1 organizations, 34 tables");
         log::warn!("status list for urn:uuid:aaa not found — treating as not revoked");
         log::error!("action failed: Incorrect vault password");

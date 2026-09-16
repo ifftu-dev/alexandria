@@ -127,7 +127,6 @@ pub enum Pending {
     VerifyBundle,
     VerifyPresentation,
     SetFilter,
-    DbSeed,
 }
 
 /// A modal over the browse screen.
@@ -419,7 +418,7 @@ impl App {
     fn try_unlock(&mut self, password: &str) {
         match vault::unlock_with_password(&self.ctx, password) {
             Ok(signer) => {
-                log::info!("vault unlocked for profile {}", self.ctx.profile.label());
+                log::info!("vault unlocked");
                 self.signer = Some(signer);
                 self.screen = Screen::Browse;
                 self.refresh();
@@ -649,7 +648,6 @@ impl App {
                     "browse the rows in this table, then ⏎ again for one row",
                 ),
                 ("m", "run pending migrations"),
-                ("s", "seed demo data if the database is empty"),
             ],
             Tab::Verify => vec![("⏎", "run the selected verification")],
             Tab::Doctor => vec![("g", "re-run the checks")],
@@ -1050,18 +1048,8 @@ impl App {
     }
 
     fn on_key_database(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('m') => self.run_migrate(),
-            KeyCode::Char('s') => {
-                self.modal = Modal::Confirm {
-                    title: "Seed demo data?".into(),
-                    body: "Inserts the demo taxonomy, courses, and governance rows \
-                           if the database is empty. Existing data is left alone."
-                        .into(),
-                    action: Pending::DbSeed,
-                };
-            }
-            _ => {}
+        if let KeyCode::Char('m') = key.code {
+            self.run_migrate()
         }
     }
 
@@ -1291,7 +1279,6 @@ impl App {
                 self.verify_bundle(&values[0], at.as_deref())
             }
             Pending::VerifyPresentation => self.verify_presentation(&values[0], &values[1]),
-            Pending::DbSeed => self.db_seed(),
             Pending::SetFilter => {
                 // Filtering touches no state the lists are derived from, so it
                 // skips the refresh every other action triggers.
@@ -1326,25 +1313,51 @@ impl App {
 
     fn revoke(&mut self, id: &str, reason: &str) -> Result<String> {
         let now = vault::now_rfc3339();
-        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::commands::credentials::revoke_credential_impl(conn, id, reason, &now)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        app_lib::commands::credentials::revoke_credential_impl(
+            &signer.conn,
+            &signer.issuer_did,
+            id,
+            reason,
+            &now,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
         Ok(format!("Revoked {id}"))
     }
 
     fn suspend(&mut self, id: &str, until: Option<&str>, reason: Option<&str>) -> Result<String> {
         let now = vault::now_rfc3339();
-        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::commands::credentials::suspend_credential_impl(conn, id, until, reason, &now)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        app_lib::commands::credentials::suspend_credential_impl(
+            &signer.conn,
+            &signer.issuer_did,
+            id,
+            until,
+            reason,
+            &now,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
         Ok(format!("Suspended {id}"))
     }
 
     fn reinstate(&mut self, id: &str) {
         let result = (|| -> Result<String> {
-            let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-            app_lib::commands::credentials::reinstate_credential_impl(conn, id)
-                .map_err(|e| anyhow::anyhow!(e))?;
+            let signer = self
+                .signer
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+            app_lib::commands::credentials::reinstate_credential_impl(
+                &signer.conn,
+                &signer.issuer_did,
+                id,
+            )
+            .map_err(|e| anyhow::anyhow!(e))?;
             Ok(format!("Reinstated {id}"))
         })();
         match result {
@@ -1633,16 +1646,6 @@ impl App {
         }
     }
 
-    fn db_seed(&mut self) -> Result<String> {
-        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        let inserted = crate::commands::db::seed_if_empty(conn)?;
-        Ok(if inserted {
-            "Seed data inserted".to_string()
-        } else {
-            "Database already has data — seed skipped".to_string()
-        })
-    }
-
     /// Run the same checks `alexandria doctor` runs. Synchronous: the checks
     /// shell out to rustup/java/xcodebuild, so the UI pauses briefly. That is
     /// preferable to a background thread whose result could land after the
@@ -1840,6 +1843,80 @@ impl App {
             scroll: 0,
         };
     }
+}
+
+/// Read a page of rows from `table`.
+///
+/// Free-standing rather than a method so it can be exercised against a real
+/// SQLite database in tests, without a vault or an unlocked keystore.
+/// Render one SQLite value as display text.
+///
+/// `limit` differs between the grid and the expanded row: the grid needs cells
+/// short enough to lay out, the expanded row exists precisely to show what the
+/// grid cut.
+fn cell_text(row: &rusqlite::Row, i: usize, limit: usize) -> rusqlite::Result<String> {
+    use rusqlite::types::ValueRef;
+
+    let text = match row.get_ref(i)? {
+        ValueRef::Null => "NULL".to_string(),
+        ValueRef::Integer(n) => n.to_string(),
+        ValueRef::Real(f) => f.to_string(),
+        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
+        // Never dump binary into a terminal: it corrupts the display and tells
+        // the reader nothing.
+        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
+    };
+    Ok(clip(&text, limit))
+}
+
+/// Read every column of one row, without the grid's narrow cell cap.
+///
+/// Re-queried rather than taken from the loaded page, so the values are the
+/// full ones. `LIMIT 1 OFFSET n` against the same unordered `SELECT *` returns
+/// the same row the page put at position `n`: identical statement, unchanged
+/// table.
+pub(super) fn read_row(conn: &Connection, table: &str, index: usize) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT 1 OFFSET {index}"))?;
+    let count = stmt.column_count();
+    let mut rows = stmt.query([])?;
+    let row = rows
+        .next()?
+        .ok_or_else(|| anyhow::anyhow!("row {} is no longer there", index + 1))?;
+    Ok((0..count)
+        .map(|i| cell_text(row, i, MAX_DETAIL_CELL))
+        .collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
+pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
+    // Table names come from sqlite_master, not from user input, so
+    // interpolating one here cannot inject. Quoted anyway, because plenty
+    // of them would otherwise collide with SQL keywords.
+    let total: i64 = conn
+        .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(-1);
+
+    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {ROW_PAGE}"))?;
+    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+    let column_count = columns.len();
+
+    let rows = stmt
+        .query_map([], |row| {
+            (0..column_count)
+                .map(|i| cell_text(row, i, MAX_CELL))
+                .collect::<rusqlite::Result<Vec<String>>>()
+        })?
+        .collect::<rusqlite::Result<Vec<Vec<String>>>>()?;
+
+    Ok(TableRows {
+        table: table.to_string(),
+        columns,
+        rows,
+        total,
+        selected: 0,
+        col_offset: 0,
+    })
 }
 
 #[cfg(test)]
@@ -2298,13 +2375,13 @@ mod tests {
     }
 
     #[test]
-    fn database_tab_offers_migrate_and_seed() {
+    fn database_tab_offers_migrate_only() {
         let mut app = browsing_app(0, 0);
         app.tab = Tab::Database;
-        // Seed asks first — it writes rows.
         app.on_key(key(KeyCode::Char('s')));
-        assert!(matches!(app.modal, Modal::Confirm { .. }));
+        assert!(matches!(app.modal, Modal::None));
         assert!(app.help_lines().iter().any(|(k, _)| *k == "m"));
+        assert!(!app.help_lines().iter().any(|(k, _)| *k == "s"));
     }
 
     // ---- Table row browser ---------------------------------------------
@@ -3010,78 +3087,4 @@ mod tests {
         assert!(matches!(app.modal, Modal::None));
         assert!(!app.should_quit, "closing help does not quit");
     }
-}
-
-/// Read a page of rows from `table`.
-///
-/// Free-standing rather than a method so it can be exercised against a real
-/// SQLite database in tests, without a vault or an unlocked keystore.
-/// Render one SQLite value as display text.
-///
-/// `limit` differs between the grid and the expanded row: the grid needs cells
-/// short enough to lay out, the expanded row exists precisely to show what the
-/// grid cut.
-fn cell_text(row: &rusqlite::Row, i: usize, limit: usize) -> rusqlite::Result<String> {
-    use rusqlite::types::ValueRef;
-
-    let text = match row.get_ref(i)? {
-        ValueRef::Null => "NULL".to_string(),
-        ValueRef::Integer(n) => n.to_string(),
-        ValueRef::Real(f) => f.to_string(),
-        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
-        // Never dump binary into a terminal: it corrupts the display and tells
-        // the reader nothing.
-        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
-    };
-    Ok(clip(&text, limit))
-}
-
-/// Read every column of one row, without the grid's narrow cell cap.
-///
-/// Re-queried rather than taken from the loaded page, so the values are the
-/// full ones. `LIMIT 1 OFFSET n` against the same unordered `SELECT *` returns
-/// the same row the page put at position `n`: identical statement, unchanged
-/// table.
-pub(super) fn read_row(conn: &Connection, table: &str, index: usize) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT 1 OFFSET {index}"))?;
-    let count = stmt.column_count();
-    let mut rows = stmt.query([])?;
-    let row = rows
-        .next()?
-        .ok_or_else(|| anyhow::anyhow!("row {} is no longer there", index + 1))?;
-    Ok((0..count)
-        .map(|i| cell_text(row, i, MAX_DETAIL_CELL))
-        .collect::<rusqlite::Result<Vec<String>>>()?)
-}
-
-pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
-    // Table names come from sqlite_master, not from user input, so
-    // interpolating one here cannot inject. Quoted anyway, because plenty
-    // of them would otherwise collide with SQL keywords.
-    let total: i64 = conn
-        .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |r| {
-            r.get(0)
-        })
-        .unwrap_or(-1);
-
-    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {ROW_PAGE}"))?;
-    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
-    let column_count = columns.len();
-
-    let rows = stmt
-        .query_map([], |row| {
-            (0..column_count)
-                .map(|i| cell_text(row, i, MAX_CELL))
-                .collect::<rusqlite::Result<Vec<String>>>()
-        })?
-        .collect::<rusqlite::Result<Vec<Vec<String>>>>()?;
-
-    Ok(TableRows {
-        table: table.to_string(),
-        columns,
-        rows,
-        total,
-        selected: 0,
-        col_offset: 0,
-    })
 }

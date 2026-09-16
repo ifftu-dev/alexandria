@@ -11,6 +11,7 @@ import type {
   AudioLevelEvent,
 } from '@/types'
 import { useLocalApi } from './useLocalApi'
+import { onProfileLocked } from './useProfiles'
 
 const { invoke } = useLocalApi()
 
@@ -56,6 +57,12 @@ let transcriptUnlisten: (() => void) | null = null
 let peerEndedUnlisten: (() => void) | null = null
 let peerNameUnlisten: (() => void) | null = null
 let audioLevelUnlisten: (() => void) | null = null
+let listenerSetup: Promise<void> | null = null
+let profileGeneration = 0
+
+function isCurrentProfile(generation: number): boolean {
+  return generation === profileGeneration
+}
 
 /** Pending video frames batched via rAF to avoid overwhelming Vue reactivity. */
 const pendingFrames: Record<string, string> = {}
@@ -74,51 +81,110 @@ function flushVideoFrames() {
 }
 
 async function setupEventListeners() {
-  if (videoUnlisten) return // already set up
+  if (
+    videoUnlisten
+    && chatUnlisten
+    && transcriptUnlisten
+    && peerEndedUnlisten
+    && peerNameUnlisten
+    && audioLevelUnlisten
+  ) return
+  if (listenerSetup) return listenerSetup
 
-  try {
+  const generation = profileGeneration
+  const setup = (async () => {
+    const installed: Array<() => void> = []
     const { listen } = await import('@tauri-apps/api/event')
+    if (!isCurrentProfile(generation)) return
 
-    videoUnlisten = await listen<TutoringVideoFrame>('tutoring:video-frame', (event) => {
-      const { node_id, jpeg_b64 } = event.payload
-      pendingFrames[node_id] = `data:image/jpeg;base64,${jpeg_b64}`
-      if (rafId === null) {
-        rafId = requestAnimationFrame(flushVideoFrames)
-      }
-    })
+    try {
+      const nextVideoUnlisten = await listen<TutoringVideoFrame>('tutoring:video-frame', (event) => {
+        if (!isCurrentProfile(generation)) return
+        const { node_id, jpeg_b64 } = event.payload
+        pendingFrames[node_id] = `data:image/jpeg;base64,${jpeg_b64}`
+        if (rafId === null) {
+          rafId = requestAnimationFrame(flushVideoFrames)
+        }
+      })
+      installed.push(nextVideoUnlisten)
+      if (!isCurrentProfile(generation)) return
 
-    chatUnlisten = await listen<TutoringChatMessage>('tutoring:chat', (event) => {
-      chatMessages.value = [...chatMessages.value, event.payload]
-      if (!chatOpen.value) {
-        unreadChatCount.value++
-      }
-    })
+      const nextChatUnlisten = await listen<TutoringChatMessage>('tutoring:chat', (event) => {
+        if (!isCurrentProfile(generation)) return
+        chatMessages.value = [...chatMessages.value, event.payload]
+        if (!chatOpen.value) {
+          unreadChatCount.value++
+        }
+      })
+      installed.push(nextChatUnlisten)
+      if (!isCurrentProfile(generation)) return
 
-    transcriptUnlisten = await listen<TutoringTranscriptMessage>('tutoring:transcript', (event) => {
-      transcriptMessages.value = [...transcriptMessages.value, event.payload].slice(-200)
-    })
+      const nextTranscriptUnlisten = await listen<TutoringTranscriptMessage>(
+        'tutoring:transcript',
+        (event) => {
+          if (!isCurrentProfile(generation)) return
+          transcriptMessages.value = [...transcriptMessages.value, event.payload].slice(-200)
+        },
+      )
+      installed.push(nextTranscriptUnlisten)
+      if (!isCurrentProfile(generation)) return
 
-    peerEndedUnlisten = await listen<{ node_id: string }>('tutoring:peer-video-ended', (event) => {
-      const { node_id } = event.payload
-      const updated = { ...videoFrames.value }
-      delete updated[node_id]
-      videoFrames.value = updated
-    })
+      const nextPeerEndedUnlisten = await listen<{ node_id: string }>(
+        'tutoring:peer-video-ended',
+        (event) => {
+          if (!isCurrentProfile(generation)) return
+          const { node_id } = event.payload
+          const updated = { ...videoFrames.value }
+          delete updated[node_id]
+          videoFrames.value = updated
+        },
+      )
+      installed.push(nextPeerEndedUnlisten)
+      if (!isCurrentProfile(generation)) return
 
-    peerNameUnlisten = await listen<{ node_id: string; display_name: string }>('tutoring:peer-name', (event) => {
-      const { node_id, display_name } = event.payload
-      peerNames.value = {
-        ...peerNames.value,
-        [node_id]: display_name,
-      }
-    })
+      const nextPeerNameUnlisten = await listen<{ node_id: string; display_name: string }>(
+        'tutoring:peer-name',
+        (event) => {
+          if (!isCurrentProfile(generation)) return
+          const { node_id, display_name } = event.payload
+          peerNames.value = {
+            ...peerNames.value,
+            [node_id]: display_name,
+          }
+        },
+      )
+      installed.push(nextPeerNameUnlisten)
+      if (!isCurrentProfile(generation)) return
 
-    audioLevelUnlisten = await listen<AudioLevelEvent>('tutoring:audio-level', (event) => {
-      micLevel.value = event.payload.mic_level
-      outputLevel.value = event.payload.output_level
-    })
+      const nextAudioLevelUnlisten = await listen<AudioLevelEvent>(
+        'tutoring:audio-level',
+        (event) => {
+          if (!isCurrentProfile(generation)) return
+          micLevel.value = event.payload.mic_level
+          outputLevel.value = event.payload.output_level
+        },
+      )
+      installed.push(nextAudioLevelUnlisten)
+      if (!isCurrentProfile(generation)) return
+
+      videoUnlisten = nextVideoUnlisten
+      chatUnlisten = nextChatUnlisten
+      transcriptUnlisten = nextTranscriptUnlisten
+      peerEndedUnlisten = nextPeerEndedUnlisten
+      peerNameUnlisten = nextPeerNameUnlisten
+      audioLevelUnlisten = nextAudioLevelUnlisten
+      installed.length = 0
+    } finally {
+      for (const unlisten of installed) unlisten()
+    }
+  })()
+  listenerSetup = setup
+  try {
+    await setup
   } catch (e) {
     console.warn('Failed to set up Tauri event listeners:', e)
+  } finally {
+    if (listenerSetup === setup) listenerSetup = null
   }
 }
 
@@ -158,22 +224,53 @@ function teardownEventListeners() {
   outputLevel.value = 0
 }
 
+function resetForProfileLock(): void {
+  profileGeneration++
+  listenerSetup = null
+  if (pollInterval) clearInterval(pollInterval)
+  pollInterval = null
+  pollSubscribers = 0
+  sessionStatus.value = null
+  sessions.value = []
+  lastError.value = null
+  loading.value = false
+  videoFrames.value = {}
+  chatMessages.value = []
+  transcriptMessages.value = []
+  peerNames.value = {}
+  unreadChatCount.value = 0
+  chatOpen.value = false
+  teardownEventListeners()
+}
+
+onProfileLocked(resetForProfileLock)
+
 // ── API functions ──────────────────────────────────────────────────
 
 async function refreshStatus(): Promise<void> {
+  const generation = profileGeneration
   try {
-    sessionStatus.value = await invoke<TutoringSessionStatus | null>('tutoring_status')
-    lastError.value = null
+    const status = await invoke<TutoringSessionStatus | null>('tutoring_status')
+    if (isCurrentProfile(generation)) {
+      sessionStatus.value = status
+      lastError.value = null
+    }
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+    }
   }
 }
 
 async function refreshSessions(): Promise<void> {
+  const generation = profileGeneration
   try {
-    sessions.value = await invoke<TutoringSessionInfo[]>('tutoring_list_sessions')
+    const loaded = await invoke<TutoringSessionInfo[]>('tutoring_list_sessions')
+    if (isCurrentProfile(generation)) sessions.value = loaded
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+    }
   }
 }
 
@@ -184,6 +281,7 @@ async function createRoom(
   micId?: string | null,
   speakerId?: string | null,
 ): Promise<TutoringSessionInfo> {
+  const generation = profileGeneration
   loading.value = true
   lastError.value = null
   try {
@@ -194,7 +292,9 @@ async function createRoom(
       micId: micId || null,
       speakerId: speakerId || null,
     })
+    if (!isCurrentProfile(generation)) throw new Error('Profile changed while creating room')
     await setupEventListeners()
+    if (!isCurrentProfile(generation)) throw new Error('Profile changed while creating room')
     chatMessages.value = []
     transcriptMessages.value = []
     videoFrames.value = {}
@@ -205,10 +305,10 @@ async function createRoom(
     return session
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    lastError.value = msg
+    if (isCurrentProfile(generation)) lastError.value = msg
     throw new Error(msg)
   } finally {
-    loading.value = false
+    if (isCurrentProfile(generation)) loading.value = false
   }
 }
 
@@ -220,6 +320,7 @@ async function joinRoom(
   micId?: string | null,
   speakerId?: string | null,
 ): Promise<TutoringSessionInfo> {
+  const generation = profileGeneration
   loading.value = true
   lastError.value = null
   try {
@@ -231,7 +332,9 @@ async function joinRoom(
       micId: micId || null,
       speakerId: speakerId || null,
     })
+    if (!isCurrentProfile(generation)) throw new Error('Profile changed while joining room')
     await setupEventListeners()
+    if (!isCurrentProfile(generation)) throw new Error('Profile changed while joining room')
     chatMessages.value = []
     transcriptMessages.value = []
     videoFrames.value = {}
@@ -242,18 +345,20 @@ async function joinRoom(
     return session
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    lastError.value = msg
+    if (isCurrentProfile(generation)) lastError.value = msg
     throw new Error(msg)
   } finally {
-    loading.value = false
+    if (isCurrentProfile(generation)) loading.value = false
   }
 }
 
 async function leaveRoom(): Promise<void> {
+  const generation = profileGeneration
   loading.value = true
   lastError.value = null
   try {
     await invoke('tutoring_leave_room')
+    if (!isCurrentProfile(generation)) return
     sessionStatus.value = null
     videoFrames.value = {}
     chatMessages.value = []
@@ -263,48 +368,55 @@ async function leaveRoom(): Promise<void> {
     teardownEventListeners()
     await refreshSessions()
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) {
+      lastError.value = e instanceof Error ? e.message : String(e)
+    }
   } finally {
-    loading.value = false
+    if (isCurrentProfile(generation)) loading.value = false
   }
 }
 
 async function toggleVideo(enable: boolean): Promise<boolean> {
+  const generation = profileGeneration
   try {
     const result = await invoke<boolean>('tutoring_toggle_video', { enable })
-    await refreshStatus()
+    if (isCurrentProfile(generation)) await refreshStatus()
     return result
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
   }
 }
 
 async function toggleAudio(enable: boolean): Promise<boolean> {
+  const generation = profileGeneration
   try {
     const result = await invoke<boolean>('tutoring_toggle_audio', { enable })
-    await refreshStatus()
+    if (isCurrentProfile(generation)) await refreshStatus()
     return result
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
   }
 }
 
 async function toggleScreenShare(enable: boolean): Promise<boolean> {
+  const generation = profileGeneration
   try {
     const result = await invoke<boolean>('tutoring_toggle_screen_share', { enable })
-    await refreshStatus()
+    if (isCurrentProfile(generation)) await refreshStatus()
     return result
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
   }
 }
 
 async function sendChat(text: string): Promise<void> {
+  const generation = profileGeneration
   try {
     await invoke('tutoring_send_chat', { text })
+    if (!isCurrentProfile(generation)) return
     // Add our own message to the local list (server doesn't echo it back)
     chatMessages.value = [
       ...chatMessages.value,
@@ -316,14 +428,16 @@ async function sendChat(text: string): Promise<void> {
       },
     ]
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
   }
 }
 
 async function sendTranscript(text: string, confidence?: number): Promise<void> {
+  const generation = profileGeneration
   try {
     await invoke('tutoring_send_transcript', { text, confidence })
+    if (!isCurrentProfile(generation)) return
     transcriptMessages.value = [
       ...transcriptMessages.value,
       {
@@ -335,14 +449,16 @@ async function sendTranscript(text: string, confidence?: number): Promise<void> 
       },
     ].slice(-200)
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
   }
 }
 
 async function getPeers(): Promise<TutoringPeer[]> {
+  const generation = profileGeneration
   try {
-    return await invoke<TutoringPeer[]>('tutoring_peers')
+    const peers = await invoke<TutoringPeer[]>('tutoring_peers')
+    return isCurrentProfile(generation) ? peers : []
   } catch {
     return []
   }
@@ -350,47 +466,65 @@ async function getPeers(): Promise<TutoringPeer[]> {
 
 /** Get diagnostic info about the current A/V pipeline state. */
 async function getDiagnostics(): Promise<Record<string, unknown> | null> {
+  const generation = profileGeneration
   try {
-    return await invoke<Record<string, unknown> | null>('tutoring_diagnostics')
+    const diagnostics = await invoke<Record<string, unknown> | null>('tutoring_diagnostics')
+    return isCurrentProfile(generation) ? diagnostics : null
   } catch (e: unknown) {
-    console.warn('Failed to get diagnostics:', e)
+    if (isCurrentProfile(generation)) console.warn('Failed to get diagnostics:', e)
     return null
+  }
+}
+
+function emptyDeviceList(): DeviceList {
+  return {
+    audio_inputs: [],
+    audio_outputs: [],
+    cameras: [],
+    selected_audio_input: null,
+    selected_audio_output: null,
   }
 }
 
 /** List all available audio and camera devices. */
 async function listDevices(): Promise<DeviceList> {
+  const generation = profileGeneration
   try {
-    return await invoke<DeviceList>('tutoring_list_devices')
+    const devices = await invoke<DeviceList>('tutoring_list_devices')
+    return isCurrentProfile(generation) ? devices : emptyDeviceList()
   } catch (e: unknown) {
-    console.warn('Failed to list devices:', e)
-    return {
-      audio_inputs: [],
-      audio_outputs: [],
-      cameras: [],
-      selected_audio_input: null,
-      selected_audio_output: null,
-    }
+    if (isCurrentProfile(generation)) console.warn('Failed to list devices:', e)
+    return emptyDeviceList()
   }
 }
 
 async function setAudioDevices(micId?: string | null, speakerId?: string | null): Promise<void> {
+  const generation = profileGeneration
   try {
     await invoke('tutoring_set_audio_devices', {
       micId: micId || null,
       speakerId: speakerId || null,
     })
-    await refreshStatus()
+    if (isCurrentProfile(generation)) await refreshStatus()
   } catch (e: unknown) {
-    lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
     throw e
   }
 }
 
 /** Check device availability (camera + mic) before joining a session. */
 async function checkDevices(): Promise<DeviceCheckResult> {
+  const generation = profileGeneration
   try {
-    return await invoke<DeviceCheckResult>('tutoring_check_devices')
+    const result = await invoke<DeviceCheckResult>('tutoring_check_devices')
+    return isCurrentProfile(generation)
+      ? result
+      : {
+          has_camera: false,
+          camera_name: null,
+          has_audio: false,
+          error: 'Profile changed while checking devices',
+        }
   } catch (e: unknown) {
     return {
       has_camera: false,
@@ -404,8 +538,8 @@ async function checkDevices(): Promise<DeviceCheckResult> {
 function startPolling(intervalMs = 3000) {
   pollSubscribers += 1
   if (pollInterval) return
-  refreshStatus()
-  pollInterval = setInterval(refreshStatus, intervalMs)
+  void refreshStatus()
+  pollInterval = setInterval(() => void refreshStatus(), intervalMs)
 }
 
 function stopPolling() {

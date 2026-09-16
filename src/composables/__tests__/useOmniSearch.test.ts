@@ -14,9 +14,12 @@ import { nextTick } from 'vue'
 // `invoke` return value per command is controlled by `mockResults`,
 // keyed by command name. Tests set this before triggering a query.
 const mockResults: Record<string, unknown> = {}
+// Every command name the composable invoked, in order.
+const mockInvokedCommands: string[] = []
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string) => {
+    mockInvokedCommands.push(cmd)
     if (cmd in mockResults) return mockResults[cmd]
     return []
   }),
@@ -45,6 +48,7 @@ async function freshUseOmniSearch(): Promise<UseOmniSearch> {
 beforeEach(() => {
   window.localStorage.removeItem('alexandria:omni-search-recents')
   for (const key of Object.keys(mockResults)) delete mockResults[key]
+  mockInvokedCommands.length = 0
 })
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -116,22 +120,6 @@ describe('useOmniSearch', () => {
       },
     ]
     mockResults['search_catalog'] = []
-    mockResults['list_daos'] = [
-      {
-        id: 'dao1',
-        name: 'Computer Science',
-        description: null,
-        icon_emoji: '💻',
-        scope_type: 'subject_field',
-        scope_id: 'fld1',
-        status: 'active',
-        committee_size: 5,
-        election_interval_days: 365,
-        on_chain_tx: null,
-        created_at: '',
-        updated_at: '',
-      },
-    ]
     mockResults['classroom_list'] = []
 
     const s = (await freshUseOmniSearch())()
@@ -148,7 +136,9 @@ describe('useOmniSearch', () => {
     expect(items.length).toBeGreaterThan(0)
     expect(items.some(i => i.type === 'skill' && i.title === 'Graph Algorithms')).toBe(true)
     expect(items.some(i => i.type === 'course' && i.title === 'Graphs 101')).toBe(true)
-    expect(items.some(i => i.type === 'dao' && i.title === 'Computer Science')).toBe(true)
+    // The retired governance domain is never queried.
+    expect(mockInvokedCommands).toContain('list_skills')
+    expect(mockInvokedCommands).not.toContain('list_daos')
   })
 
   it('filters `list_courses` client-side (backend has no search param)', async () => {
@@ -174,8 +164,8 @@ describe('useOmniSearch', () => {
     mockResults['list_courses'] = [
       { id: 'c1', title: 'Course match', description: null, author_address: 'x', author_name: null, content_cid: null, thumbnail_cid: null, thumbnail_svg: null, tags: null, skill_ids: null, version: 1, status: 'published', published_at: null, on_chain_tx: null, created_at: '', updated_at: '' },
     ]
-    mockResults['list_daos'] = [
-      { id: 'd1', name: 'DAO match', description: null, icon_emoji: null, scope_type: 'subject', scope_id: '', status: 'active', committee_size: 5, election_interval_days: 365, on_chain_tx: null, created_at: '', updated_at: '' },
+    mockResults['classroom_list'] = [
+      { id: 'cl1', name: 'Classroom match', description: null, icon_emoji: null },
     ]
 
     const s = (await freshUseOmniSearch())()
@@ -185,13 +175,13 @@ describe('useOmniSearch', () => {
 
     const groups = s.groupedItems.value
     const types = groups.map(g => g.type)
-    // Skills must come before courses must come before daos
+    // Skills must come before courses must come before classrooms
     const iSkill = types.indexOf('skill')
     const iCourse = types.indexOf('course')
-    const iDao = types.indexOf('dao')
+    const iClassroom = types.indexOf('classroom')
     expect(iSkill).toBeGreaterThanOrEqual(0)
     expect(iSkill).toBeLessThan(iCourse)
-    expect(iCourse).toBeLessThan(iDao)
+    expect(iCourse).toBeLessThan(iClassroom)
   })
 
   it('navigate() wraps around with up/down', async () => {

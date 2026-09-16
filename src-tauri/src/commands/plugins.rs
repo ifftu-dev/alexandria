@@ -8,22 +8,39 @@ use std::path::PathBuf;
 
 use std::collections::HashSet;
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::params;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
 use crate::crypto::wallet;
-use crate::db::Database;
+use crate::db::{executor::DatabaseWorkload, Database};
 use crate::domain::plugin::{
-    InstalledPlugin, IrlSubmission, PluginAttestationEvent, PluginAttestationStatus,
-    PluginCapability, PluginCatalogEntry, PluginManifest, PluginPermissionRecord,
+    InstalledPlugin, IrlSubmission, PluginCapability, PluginCatalogEntry, PluginManifest,
+    PluginPermissionRecord,
 };
 #[cfg(grader)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
-use crate::plugins::{attestation, builtins, catalog, irl_review, manifest, registry, verifier};
+use crate::plugins::{builtins, catalog, irl_review, manifest, registry, verifier};
 use crate::AppState;
+
+async fn plugin_db<T, F>(
+    state: &State<'_, AppState>,
+    workload: DatabaseWorkload,
+    label: &'static str,
+    operation: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
+{
+    state
+        .db_executor
+        .execute(workload, state.profile_lease(), label, operation)
+        .await
+}
 
 /// Install a plugin from a directory on the user's local filesystem.
 /// The directory must contain `manifest.json`, `manifest.sig`, and the
@@ -35,12 +52,6 @@ pub async fn plugin_install_from_file(
     directory: String,
 ) -> Result<InstalledPlugin, String> {
     check_rate_limit(&state, "plugin_install_from_file")?;
-
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     // The webview may only name a directory inside the places a person picks
     // files from — the same set the `fs:allow-read-file` capability is scoped
@@ -65,7 +76,13 @@ pub async fn plugin_install_from_file(
         );
     }
     let plugins_dir = state.plugins_dir()?;
-    registry::install_from_directory(db, &plugins_dir, &src)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.install-from-file",
+        move |db| registry::install_from_directory(db, &plugins_dir, &src),
+    )
+    .await
 }
 
 /// A plugin a course requires, plus whether it is already installed on this
@@ -151,42 +168,44 @@ pub async fn course_required_plugins(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Vec<RequiredPlugin>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    let cids = course_plugin_cids(db, &course_id)?;
-    let mut out = Vec::with_capacity(cids.len());
-    for cid in cids {
-        let installed = registry::get_installed(db, &cid)?;
-        // Prefer the installed manifest; fall back to the embedded builtin
-        // manifest so not-yet-installed plugins still show a name + icon.
-        let manifest = match &installed {
-            Some(_) => registry::get_manifest(db, &cid).ok(),
-            None => builtins::find_bundle_by_cid(&cid)
-                .and_then(|b| manifest::parse_and_validate(b.manifest_json).ok()),
-        };
-        let (name, icon_path, scope) = match manifest {
-            Some(m) => {
-                let scope = match m.scope {
-                    crate::domain::plugin::PluginScope::Global => "global",
-                    crate::domain::plugin::PluginScope::Course => "course",
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.course-required",
+        move |db| {
+            let cids = course_plugin_cids(db, &course_id)?;
+            let mut out = Vec::with_capacity(cids.len());
+            for cid in cids {
+                let installed = registry::get_installed(db, &cid)?;
+                // Prefer the installed manifest; fall back to the embedded builtin
+                // manifest so not-yet-installed plugins still show a name + icon.
+                let manifest = match &installed {
+                    Some(_) => registry::get_manifest(db, &cid).ok(),
+                    None => builtins::find_bundle_by_cid(&cid)
+                        .and_then(|b| manifest::parse_and_validate(b.manifest_json).ok()),
                 };
-                (m.name, m.icon_path, scope.to_string())
+                let (name, icon_path, scope) = match manifest {
+                    Some(m) => {
+                        let scope = match m.scope {
+                            crate::domain::plugin::PluginScope::Global => "global",
+                            crate::domain::plugin::PluginScope::Course => "course",
+                        };
+                        (m.name, m.icon_path, scope.to_string())
+                    }
+                    None => (cid.clone(), None, "global".to_string()),
+                };
+                out.push(RequiredPlugin {
+                    plugin_cid: cid,
+                    name,
+                    icon_path,
+                    scope,
+                    installed: installed.is_some(),
+                });
             }
-            None => (cid.clone(), None, "global".to_string()),
-        };
-        out.push(RequiredPlugin {
-            plugin_cid: cid,
-            name,
-            icon_path,
-            scope,
-            installed: installed.is_some(),
-        });
-    }
-    Ok(out)
+            Ok(out)
+        },
+    )
+    .await
 }
 
 /// Install every not-yet-installed builtin plugin a course requires (plus their
@@ -208,25 +227,25 @@ pub async fn install_course_plugins(
     // Resolve the ordered install plan (not-installed builtins + their deps)
     // under a short DB lock; the bundles are `'static` so we can hold them
     // across the install loop without borrowing the DB.
-    let plan: Vec<&'static registry::BuiltinBundle<'static>> = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-        let required = course_plugin_cids(db, &course_id)?;
-        let mut candidates = builtin_install_plan(&required);
-        // Drop anything already installed (a dependency may already be present).
-        let mut keep = Vec::new();
-        for bundle in candidates.drain(..) {
-            let cid = verifier::compute_plugin_cid(bundle.manifest_json);
-            if registry::get_installed(db, &cid)?.is_none() {
-                keep.push(bundle);
+    let plan: Vec<&'static registry::BuiltinBundle<'static>> = plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.course-install-plan",
+        move |db| {
+            let required = course_plugin_cids(db, &course_id)?;
+            let mut candidates = builtin_install_plan(&required);
+            // Drop anything already installed (a dependency may already be present).
+            let mut keep = Vec::new();
+            for bundle in candidates.drain(..) {
+                let cid = verifier::compute_plugin_cid(bundle.manifest_json);
+                if registry::get_installed(db, &cid)?.is_none() {
+                    keep.push(bundle);
+                }
             }
-        }
-        keep
-    };
+            Ok(keep)
+        },
+    )
+    .await?;
 
     let total = plan.len();
     if total == 0 {
@@ -253,14 +272,15 @@ pub async fn install_course_plugins(
 
         // install_builtin writes the bundle AND precompiles the grader (the
         // slow part), so a single "installing" step covers both.
-        let result = {
-            let db_guard = state
-                .db
-                .lock()
-                .map_err(|_| "database lock poisoned".to_string())?;
-            let db = db_guard.as_ref().ok_or("database not initialized")?;
-            registry::install_builtin(db, &plugins_dir, bundle)
-        };
+        let install_plugins_dir = plugins_dir.clone();
+        let install_bundle = *bundle;
+        let result = plugin_db(
+            &state,
+            DatabaseWorkload::Learner,
+            "plugin.install-course-builtin",
+            move |db| registry::install_builtin(db, &install_plugins_dir, install_bundle),
+        )
+        .await;
 
         match result {
             Ok(_) => {
@@ -305,26 +325,26 @@ pub async fn plugin_uninstall(
     state: State<'_, AppState>,
     plugin_cid: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    // Refuse to remove a plugin that other installed plugins still depend
-    // on — otherwise the dependents would silently break. The user must
-    // uninstall the dependents first.
-    let dependents = registry::list_dependents(db, &plugin_cid)?;
-    if !dependents.is_empty() {
-        let names: Vec<String> = dependents.into_iter().map(|p| p.name).collect();
-        return Err(format!(
-            "cannot uninstall: still required by {}",
-            names.join(", ")
-        ));
-    }
-
     let plugins_dir = state.plugins_dir()?;
-    registry::uninstall(db, &plugins_dir, &plugin_cid)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.uninstall",
+        move |db| {
+            // Keep the dependency check and removal on the same serialized
+            // database owner so another install cannot invalidate the check.
+            let dependents = registry::list_dependents(db, &plugin_cid)?;
+            if !dependents.is_empty() {
+                let names: Vec<String> = dependents.into_iter().map(|p| p.name).collect();
+                return Err(format!(
+                    "cannot uninstall: still required by {}",
+                    names.join(", ")
+                ));
+            }
+            registry::uninstall(db, &plugins_dir, &plugin_cid)
+        },
+    )
+    .await
 }
 
 /// Persist a plugin's opaque per-element state (the `alex.persistState` blob —
@@ -338,24 +358,26 @@ pub async fn plugin_save_element_state(
     plugin_cid: String,
     state_json: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    db.conn()
-        .execute(
-            "INSERT INTO plugin_element_state (element_id, plugin_cid, state_json, updated_at) \
-             VALUES (?1, ?2, ?3, datetime('now')) \
-             ON CONFLICT(element_id) DO UPDATE SET \
-               plugin_cid = excluded.plugin_cid, \
-               state_json = excluded.state_json, \
-               updated_at = excluded.updated_at",
-            params![element_id, plugin_cid, state_json],
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.save-element-state",
+        move |db| {
+            db.conn()
+                .execute(
+                    "INSERT INTO plugin_element_state (element_id, plugin_cid, state_json, updated_at) \
+                     VALUES (?1, ?2, ?3, datetime('now')) \
+                     ON CONFLICT(element_id) DO UPDATE SET \
+                       plugin_cid = excluded.plugin_cid, \
+                       state_json = excluded.state_json, \
+                       updated_at = excluded.updated_at",
+                    params![element_id, plugin_cid, state_json],
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        },
+    )
+    .await
 }
 
 /// Load a plugin's saved per-element state, if any. Returns the opaque
@@ -366,20 +388,22 @@ pub async fn plugin_load_element_state(
     element_id: String,
 ) -> Result<Option<String>, String> {
     use rusqlite::OptionalExtension;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    db.conn()
-        .query_row(
-            "SELECT state_json FROM plugin_element_state WHERE element_id = ?1",
-            params![element_id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.load-element-state",
+        move |db| {
+            db.conn()
+                .query_row(
+                    "SELECT state_json FROM plugin_element_state WHERE element_id = ?1",
+                    params![element_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())
+        },
+    )
+    .await
 }
 
 /// List the plugins that an installed plugin depends on (its resolved
@@ -389,25 +413,25 @@ pub async fn plugin_list_dependencies(
     state: State<'_, AppState>,
     plugin_cid: String,
 ) -> Result<Vec<InstalledPlugin>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::list_dependencies(db, &plugin_cid)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.list-dependencies",
+        move |db| registry::list_dependencies(db, &plugin_cid),
+    )
+    .await
 }
 
 /// List every plugin installed on this node, newest first.
 #[tauri::command]
 pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<InstalledPlugin>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::list_installed(db)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.list",
+        registry::list_installed,
+    )
+    .await
 }
 
 /// Return the parsed manifest for an installed plugin.
@@ -416,13 +440,13 @@ pub async fn plugin_get_manifest(
     state: State<'_, AppState>,
     plugin_cid: String,
 ) -> Result<PluginManifest, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::get_manifest(db, &plugin_cid)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.get-manifest",
+        move |db| registry::get_manifest(db, &plugin_cid),
+    )
+    .await
 }
 
 /// Grant a capability to a plugin. Scope is `"once"`, `"session"`, or
@@ -439,13 +463,13 @@ pub async fn plugin_grant_capability(
     let cap = PluginCapability::parse(&capability)
         .ok_or_else(|| format!("unknown capability '{capability}'"))?;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::grant_capability(db, &plugin_cid, cap, &scope, None)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.grant-capability",
+        move |db| registry::grant_capability(db, &plugin_cid, cap, &scope, None),
+    )
+    .await
 }
 
 /// Revoke a previously-granted capability. Safe to call when no grant
@@ -459,13 +483,13 @@ pub async fn plugin_revoke_capability(
     let cap = PluginCapability::parse(&capability)
         .ok_or_else(|| format!("unknown capability '{capability}'"))?;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::revoke_capability(db, &plugin_cid, cap)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.revoke-capability",
+        move |db| registry::revoke_capability(db, &plugin_cid, cap),
+    )
+    .await
 }
 
 /// Tell the platform which media captures the user has consented to for the
@@ -481,7 +505,11 @@ pub async fn plugin_revoke_capability(
 /// "always grant" (which is what the audit found: a plugin could capture
 /// silently by calling `getUserMedia` directly and never asking the host).
 #[tauri::command]
-pub async fn plugin_set_media_grants(camera: bool, microphone: bool) -> Result<(), String> {
+pub async fn plugin_set_media_grants(
+    _profile: crate::profile::scope::ProfileLease,
+    camera: bool,
+    microphone: bool,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     crate::macos_media_delegate::grant(crate::macos_media_delegate::MediaGrants {
         camera,
@@ -495,7 +523,9 @@ pub async fn plugin_set_media_grants(camera: bool, microphone: bool) -> Result<(
 /// Drop every media grant. Called when a plugin is unmounted, so consent given
 /// to one plugin cannot be inherited by the next.
 #[tauri::command]
-pub async fn plugin_clear_media_grants() -> Result<(), String> {
+pub async fn plugin_clear_media_grants(
+    _profile: crate::profile::scope::ProfileLease,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     crate::macos_media_delegate::revoke_all();
     Ok(())
@@ -510,13 +540,13 @@ pub async fn plugin_set_enabled(
     plugin_cid: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::set_enabled(db, &plugin_cid, enabled)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.set-enabled",
+        move |db| registry::set_enabled(db, &plugin_cid, enabled),
+    )
+    .await
 }
 
 /// Return the README markdown bundled with a plugin (empty string if
@@ -549,15 +579,14 @@ pub async fn plugin_read_asset_data_url(
         Ok(p) => p,
         Err(_) => return Ok(String::new()),
     };
-    let bytes = match std::fs::read(&resolved) {
+    const MAX_INLINE_ASSET_BYTES: u64 = 8 * 1024 * 1024;
+    let bytes = match registry::read_file_with_limit(&resolved, MAX_INLINE_ASSET_BYTES) {
         Ok(b) => b,
+        Err(error) if error.contains("byte limit") => {
+            return Err("plugin asset too large to inline (8 MiB cap)".into());
+        }
         Err(_) => return Ok(String::new()),
     };
-    // Cap at 8 MiB so a hostile bundle can't blow up the webview with a
-    // giant data URL.
-    if bytes.len() > 8 * 1024 * 1024 {
-        return Err("plugin asset too large to inline (8 MiB cap)".into());
-    }
     let mime = mime_for_path(&path);
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
@@ -589,13 +618,13 @@ pub async fn plugin_list_permissions(
     state: State<'_, AppState>,
     plugin_cid: String,
 ) -> Result<Vec<PluginPermissionRecord>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    registry::list_permissions(db, &plugin_cid)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.list-permissions",
+        move |db| registry::list_permissions(db, &plugin_cid),
+    )
+    .await
 }
 
 /// Run a graded plugin's WASM grader against a learner's submission and
@@ -657,34 +686,45 @@ pub async fn plugin_submit_and_grade(
 
     // Resolve manifest + grader path in a short DB-lock scope so we don't
     // hold the lock across grader execution.
-    let (manifest, grader_path, cwasm_path, grader_cid) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let resolved_plugin_cid = plugin_cid.clone();
+    let resolved_bundle_dir = bundle_dir.clone();
+    let (manifest, manifest_json, grader_path, cwasm_path, grader_cid) = plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.grade-resolve",
+        move |db| {
+            let installed = registry::get_installed(db, &resolved_plugin_cid)?
+                .ok_or_else(|| format!("plugin not installed: {resolved_plugin_cid}"))?;
+            let manifest = registry::get_manifest(db, &resolved_plugin_cid)?;
+            let grader = manifest
+                .grader
+                .as_ref()
+                .ok_or_else(|| {
+                    "plugin manifest has no grader (Phase 2 graded path requires one)".to_string()
+                })?
+                .clone();
+            let grader_path = resolved_bundle_dir.join(registry::GRADER_FILENAME);
+            let cwasm_path = resolved_bundle_dir.join(registry::grader_cwasm_filename());
+            Ok((
+                manifest,
+                installed.manifest_json,
+                grader_path,
+                cwasm_path,
+                grader.cid,
+            ))
+        },
+    )
+    .await?;
 
-        registry::get_installed(db, &plugin_cid)?
-            .ok_or_else(|| format!("plugin not installed: {plugin_cid}"))?;
-        let manifest = registry::get_manifest(db, &plugin_cid)?;
-        let grader = manifest
-            .grader
-            .as_ref()
-            .ok_or_else(|| {
-                "plugin manifest has no grader (Phase 2 graded path requires one)".to_string()
-            })?
-            .clone();
-        let grader_path = bundle_dir.join(registry::GRADER_FILENAME);
-        let cwasm_path = bundle_dir.join(registry::grader_cwasm_filename());
-        (manifest, grader_path, cwasm_path, grader.cid)
-    };
-
-    let wasm_bytes = std::fs::read(&grader_path).map_err(|e| {
-        format!(
-            "failed to read grader.wasm at {}: {e}",
-            grader_path.display()
-        )
-    })?;
+    let wasm_bytes =
+        registry::read_file_with_limit(&grader_path, registry::COMMUNITY_MAX_FILE_BYTES).map_err(
+            |e| {
+                format!(
+                    "failed to read grader.wasm at {}: {e}",
+                    grader_path.display()
+                )
+            },
+        )?;
 
     // Sanity check: the bytes on disk must match the cid in the manifest.
     // The plugin install flow already verified the manifest signature, but
@@ -696,6 +736,13 @@ pub async fn plugin_submit_and_grade(
             "grader.wasm hash mismatch: manifest declared {grader_cid}, on-disk is {computed}"
         ));
     }
+
+    let issuance_block = credential_trust(
+        &plugin_cid,
+        manifest_json.as_bytes(),
+        &grader_cid,
+        &wasm_bytes,
+    )?;
 
     // Build the input envelope. Pre-canonicalize via serde_json::Value
     // so the bytes the grader sees match what we hash for content_cid /
@@ -762,110 +809,123 @@ pub async fn plugin_submit_and_grade(
         Vec::new()
     };
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let persisted_record = record.clone();
+    let persisted_manifest_version = manifest.version.clone();
+    let persisted_plugin_cid = plugin_cid.clone();
+    let persisted_grader_cid = grader_cid.clone();
+    let persisted_element_id = element_id.clone();
+    let persisted_enrollment_id = enrollment_id.clone();
+    let persisted_submission_cid = submission_cid.clone();
+    let persisted_content_cid = content_cid.clone();
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.grade-persist",
+        move |db| {
+            persist_submission(
+                db,
+                &SubmissionRow {
+                    element_id: &persisted_element_id,
+                    enrollment_id: &persisted_enrollment_id,
+                    submission_cid: &persisted_submission_cid,
+                    grader_cid: &persisted_grader_cid,
+                    content_cid: &persisted_content_cid,
+                    score: persisted_record.score,
+                    details: &persisted_record.details,
+                    learner_did: &learner_did_str,
+                    grader_version: &persisted_manifest_version,
+                    evidence_published: publish_evidence && !published_pins.is_empty(),
+                },
+            )?;
 
-    persist_submission(
-        db,
-        &SubmissionRow {
-            element_id: &element_id,
-            enrollment_id: &enrollment_id,
-            submission_cid: &submission_cid,
-            grader_cid: &grader_cid,
-            content_cid: &content_cid,
-            score: record.score,
-            details: &record.details,
-            learner_did: &learner_did_str,
-            grader_version: &manifest.version,
-            evidence_published: publish_evidence && !published_pins.is_empty(),
-        },
-    )?;
-
-    // Promote the bundle blob to a permanent pin so eviction never reclaims a
-    // submission's reproducibility bytes.
-    if let Some(pin) = &bundle_pin {
-        crate::content_store::storage::upsert_pin(
-            db.conn(),
-            &pin.hash,
-            "submission",
-            pin.size,
-            false,
-        );
-    }
-    // Published plaintext evidence is likewise permanent — a verifier may
-    // fetch it long after the grade.
-    for pin in &published_pins {
-        crate::content_store::storage::upsert_pin(
-            db.conn(),
-            &pin.hash,
-            "published_evidence",
-            pin.size,
-            false,
-        );
-    }
-
-    // Issue a signed Verifiable Credential for a passing grade — one per skill
-    // the element is tagged with (`element_skill_tags`). Self-issued (subject ==
-    // learner), same pipeline as the assessment path. Best-effort: a failure to
-    // issue must not fail the grade itself, and each skill is independent.
-    // Only a trusted grader may mint a credential. An untrusted grade still
-    // ran and its score is returned to the learner (practice is fine); it
-    // just carries no weight into the credential graph. See `credential_trust`.
-    let issuance_block = credential_trust(db, &plugin_cid, &grader_cid)?;
-    if let Some(reason) = &issuance_block {
-        log::info!("plugin grade: withholding credential for cid={plugin_cid} — {reason}");
-    }
-
-    if issuance_block.is_none() && record.score >= PLUGIN_PASS_THRESHOLD {
-        let skills = element_skill_ids(db, &element_id).unwrap_or_default();
-        if !skills.is_empty() {
-            let now = crate::commands::credentials::now_rfc3339();
-            let evidence = vec![
-                submission_cid.clone(),
-                content_cid.clone(),
-                grader_cid.clone(),
-            ];
-            for skill_id in skills {
-                let claim = crate::domain::vc::SkillClaim {
-                    skill_id: skill_id.clone(),
-                    level: crate::aggregation::level::map_level(record.score),
-                    score: record.score,
-                    evidence_refs: evidence.clone(),
-                    rubric_version: Some(manifest.version.clone()),
-                    assessment_method: Some("plugin_grader".to_string()),
-                    provenance: None,
-                };
-                let req = crate::commands::credentials::IssueCredentialRequest {
-                    credential_type: crate::domain::vc::CredentialType::AssessmentCredential,
-                    subject: learner_did.clone(),
-                    claim: crate::domain::vc::Claim::Skill(claim),
-                    evidence_refs: vec![submission_cid.clone()],
-                    expiration_date: None,
-                    supersedes: None,
-                    integrity_session_id: integrity_session_id.clone(),
-                    integrity_policy: None,
-                };
-                match crate::commands::credentials::issue_credential_impl(
+            // Promote the bundle blob to a permanent pin so eviction never reclaims a
+            // submission's reproducibility bytes.
+            if let Some(pin) = &bundle_pin {
+                crate::content_store::storage::upsert_pin(
                     db.conn(),
-                    &signing_key,
-                    &learner_did,
-                    &req,
-                    &now,
-                ) {
-                    Ok(vc) => log::info!(
-                        "plugin grade: issued credential {:?} for skill {skill_id}",
-                        vc.id
-                    ),
-                    Err(e) => {
-                        log::warn!("plugin grade: credential issuance failed for {skill_id}: {e}")
+                    &pin.hash,
+                    "submission",
+                    pin.size,
+                    false,
+                )?;
+            }
+            // Published plaintext evidence is likewise permanent — a verifier may
+            // fetch it long after the grade.
+            for pin in &published_pins {
+                crate::content_store::storage::upsert_pin(
+                    db.conn(),
+                    &pin.hash,
+                    "published_evidence",
+                    pin.size,
+                    false,
+                )?;
+            }
+
+            // Issue a signed Verifiable Credential for a passing grade — one per skill
+            // the element is tagged with (`element_skill_tags`). Self-issued (subject ==
+            // learner), same pipeline as the assessment path. Best-effort: a failure to
+            // issue must not fail the grade itself, and each skill is independent.
+            // Only a trusted grader may mint a credential. An untrusted grade still
+            // ran and its score is returned to the learner (practice is fine); it
+            // just carries no weight into the credential graph. See `credential_trust`.
+            if let Some(reason) = &issuance_block {
+                log::info!(
+                    "plugin grade: withholding credential for cid={persisted_plugin_cid} — {reason}"
+                );
+            }
+
+            if issuance_block.is_none() && persisted_record.score >= PLUGIN_PASS_THRESHOLD {
+                let skills = element_skill_ids(db, &persisted_element_id).unwrap_or_default();
+                if !skills.is_empty() {
+                    let now = crate::commands::credentials::now_rfc3339();
+                    let evidence = vec![
+                        persisted_submission_cid.clone(),
+                        persisted_content_cid.clone(),
+                        persisted_grader_cid.clone(),
+                    ];
+                    for skill_id in skills {
+                        let claim = crate::domain::vc::SkillClaim {
+                            skill_id: skill_id.clone(),
+                            level: crate::aggregation::level::map_level(persisted_record.score),
+                            score: persisted_record.score,
+                            evidence_refs: evidence.clone(),
+                            rubric_version: Some(persisted_manifest_version.clone()),
+                            assessment_method: Some("plugin_grader".to_string()),
+                            provenance: None,
+                        };
+                        let req = crate::commands::credentials::IssueCredentialRequest {
+                            credential_type:
+                                crate::domain::vc::CredentialType::AssessmentCredential,
+                            subject: learner_did.clone(),
+                            claim: crate::domain::vc::Claim::Skill(claim),
+                            evidence_refs: vec![persisted_submission_cid.clone()],
+                            expiration_date: None,
+                            supersedes: None,
+                            integrity_session_id: integrity_session_id.clone(),
+                            integrity_policy: None,
+                        };
+                        match crate::commands::credentials::issue_credential_impl(
+                            db.conn(),
+                            &signing_key,
+                            &learner_did,
+                            &req,
+                            &now,
+                        ) {
+                            Ok(vc) => log::info!(
+                                "plugin grade: issued credential {:?} for skill {skill_id}",
+                                vc.id
+                            ),
+                            Err(e) => log::warn!(
+                                "plugin grade: credential issuance failed for {skill_id}: {e}"
+                            ),
+                        }
                     }
                 }
             }
-        }
-    }
+            Ok(())
+        },
+    )
+    .await?;
 
     // `fuel` is the wasm-instruction count the grader burned. It is metered by
     // Wasmtime at the wasm level, so it is machine- and backend-independent: the
@@ -892,7 +952,9 @@ pub async fn plugin_submit_and_grade(
 /// unknown command.
 #[cfg(not(grader))]
 #[tauri::command]
-pub async fn plugin_submit_and_grade() -> Result<serde_json::Value, String> {
+pub async fn plugin_submit_and_grade(
+    _profile: crate::profile::scope::ProfileLease,
+) -> Result<serde_json::Value, String> {
     Err(
         "GraderUnavailable: graded submission runs on the desktop app; \
          this device can run tests but not submit for a grade"
@@ -901,7 +963,7 @@ pub async fn plugin_submit_and_grade() -> Result<serde_json::Value, String> {
 }
 
 /// Minimum grade fraction (0.0–1.0) that earns a skill credential from a graded
-/// plugin. A single challenge is coarse evidence, so the bar is a strong-but-
+/// plugin. A single submission is coarse evidence, so the bar is a strong-but-
 /// not-perfect pass; the aggregation layer weighs it by provenance afterward.
 const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 
@@ -913,14 +975,8 @@ const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 /// could mint self-issued `AssessmentCredential`s. That is the governance
 /// hole this closes.
 ///
-/// A grader is trusted for issuance when either:
-///
-/// * it is **built-in** — its bytes are `include_bytes!`'d into the app
-///   binary and CID-verified at install, so the app's own signature already
-///   vouches for them; committee attestation would be redundant; or
-/// * it carries a **committee attestation** for exactly this
-///   `(plugin_cid, grader_cid)` pair, and the committee has not since flagged
-///   the grader as `known_flawed`.
+/// A grader is trusted for issuance only when its plugin manifest and grader
+/// bytes exactly match one of the bundles embedded in the signed app.
 ///
 /// Grading itself is never blocked — running an unattested grader is
 /// harmless (sandboxed, deterministic) and useful for practice. Only
@@ -930,36 +986,48 @@ const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 /// Returns `Ok(None)` when trusted, or `Ok(Some(reason))` explaining the
 /// refusal for the log and, later, the UI.
 fn credential_trust(
-    db: &Database,
     plugin_cid: &str,
+    plugin_manifest_bytes: &[u8],
     grader_cid: &str,
+    grader_bytes: &[u8],
 ) -> Result<Option<String>, String> {
-    // Built-in graders are vouched for by the signed app binary.
-    if crate::plugins::builtins::find_bundle_by_cid(plugin_cid).is_some() {
-        return Ok(None);
-    }
-
-    let status = crate::plugins::attestation::status_for(db, plugin_cid)?;
-    let Some(attestation) = status.attestation.as_ref() else {
+    let Some(bundle) = crate::plugins::builtins::find_bundle_by_cid(plugin_cid) else {
         return Ok(Some(
-            "grader is not attested by a governance committee".to_string(),
+            "only exact graders bundled with this app may issue credentials".to_string(),
         ));
     };
-
-    // The attestation binds a specific grader; a plugin that swapped in a
-    // different grader after attestation must not ride the old approval.
-    if attestation.grader_cid != grader_cid {
+    if bundle.manifest_json != plugin_manifest_bytes {
+        return Ok(Some(
+            "the installed manifest does not exactly match the bundled manifest".to_string(),
+        ));
+    }
+    let bundled_manifest = manifest::parse_and_validate(bundle.manifest_json)?;
+    let Some(bundled_grader) = bundled_manifest.grader else {
+        return Ok(Some(
+            "the bundled plugin has no credential grader".to_string(),
+        ));
+    };
+    if bundled_grader.cid != grader_cid {
         return Ok(Some(format!(
-            "attestation covers grader {} but this grade used {grader_cid}",
-            attestation.grader_cid
+            "the bundled plugin requires grader {} but this grade used {grader_cid}",
+            bundled_grader.cid
         )));
     }
-
-    // An attested-but-since-flagged grader must not keep minting credentials.
-    if status.advisories.iter().any(|a| a.kind == "known_flawed") {
+    let Some(bundled_bytes) = bundle.grader_wasm else {
         return Ok(Some(
-            "grader is under a 'known_flawed' advisory".to_string(),
+            "the bundled plugin's grader bytes are unavailable".to_string(),
         ));
+    };
+    if bundled_bytes != grader_bytes {
+        return Ok(Some(
+            "the executed grader bytes do not exactly match the bundled grader".to_string(),
+        ));
+    }
+    let bundled_cid = blake3::hash(bundled_bytes).to_hex().to_string();
+    if bundled_cid != grader_cid {
+        return Ok(Some(format!(
+            "the embedded grader bytes identify as {bundled_cid}, not {grader_cid}"
+        )));
     }
 
     Ok(None)
@@ -1077,26 +1145,27 @@ pub async fn irl_submit_for_review(
     check_rate_limit(&state, "irl_submit_for_review")?;
 
     let (_sk, learner_did) = load_learner_did(&state).await?;
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.irl-submit",
+        move |db| {
+            let course_id =
+                resolve_submission_course_id(db, enrollment_id.as_deref(), element_id.as_deref());
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    let course_id =
-        resolve_submission_course_id(db, enrollment_id.as_deref(), element_id.as_deref());
-
-    irl_review::submit(
-        db,
-        &plugin_cid,
-        element_id.as_deref(),
-        enrollment_id.as_deref(),
-        course_id.as_deref(),
-        &learner_did.0,
-        &submission_json,
-        &skills_json,
+            irl_review::submit(
+                db,
+                &plugin_cid,
+                element_id.as_deref(),
+                enrollment_id.as_deref(),
+                course_id.as_deref(),
+                &learner_did.0,
+                &submission_json,
+                &skills_json,
+            )
+        },
     )
+    .await
 }
 
 /// Resolve the course a review submission belongs to: prefer the enrollment's
@@ -1136,14 +1205,13 @@ pub async fn irl_list_my_submissions(
     plugin_cid: Option<String>,
 ) -> Result<Vec<IrlSubmission>, String> {
     let (_sk, learner_did) = load_learner_did(&state).await?;
-
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    irl_review::list_for_learner(db, &learner_did.0, plugin_cid.as_deref())
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.irl-list-mine",
+        move |db| irl_review::list_for_learner(db, &learner_did.0, plugin_cid.as_deref()),
+    )
+    .await
 }
 
 /// List IRL Review submissions awaiting an instructor review. Optional
@@ -1153,16 +1221,16 @@ pub async fn irl_list_pending(
     state: State<'_, AppState>,
     plugin_cid: Option<String>,
 ) -> Result<Vec<IrlSubmission>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
     // Single-user local node: the local user is the instructor and sees every
     // pending row, so course scoping stays disabled here (`None`). The
     // course-scoped path exists for multi-instructor / federated review later.
-    irl_review::list_pending(db, plugin_cid.as_deref(), None)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Instructor,
+        "plugin.irl-list-pending",
+        move |db| irl_review::list_pending(db, plugin_cid.as_deref(), None),
+    )
+    .await
 }
 
 /// Fetch a single submission by id (for instructors to open the review
@@ -1172,13 +1240,13 @@ pub async fn irl_get_submission(
     state: State<'_, AppState>,
     submission_id: String,
 ) -> Result<Option<IrlSubmission>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    irl_review::get(db, &submission_id)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.irl-get",
+        move |db| irl_review::get(db, &submission_id),
+    )
+    .await
 }
 
 /// Post a review on a pending submission. Score is 0..=1; feedback is
@@ -1194,24 +1262,25 @@ pub async fn irl_post_review(
     check_rate_limit(&state, "irl_post_review")?;
 
     let (_sk, reviewer_did) = load_learner_did(&state).await?;
-
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    irl_review::post_review(
-        db,
-        &submission_id,
-        &reviewer_did.0,
-        score,
-        &feedback,
-        &skill_ratings_json,
+    plugin_db(
+        &state,
+        DatabaseWorkload::Instructor,
+        "plugin.irl-post-review",
+        move |db| {
+            irl_review::post_review(
+                db,
+                &submission_id,
+                &reviewer_did.0,
+                score,
+                &feedback,
+                &skill_ratings_json,
+            )
+        },
     )
+    .await
 }
 
-// ---- Phase 3: discovery + DAO attestation IPC -----------------------------
+// ---- P2P discovery --------------------------------------------------------
 
 /// List every plugin known to this node — built-ins + locally-installed +
 /// any plugins seen on the `/alexandria/plugins/1.0` gossip topic. The
@@ -1220,51 +1289,13 @@ pub async fn irl_post_review(
 pub async fn plugin_browse_catalog(
     state: State<'_, AppState>,
 ) -> Result<Vec<PluginCatalogEntry>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    catalog::list_catalog(db)
-}
-
-/// Look up the Plugin DAO attestation status for a single plugin CID.
-/// Returns `attested = true` when a multi-sig committee attestation row
-/// exists in `plugin_attestations`. Active advisory notes are surfaced
-/// as well — they don't affect attestation status, but the UI should
-/// display them prominently.
-#[tauri::command]
-pub async fn plugin_attestation_status(
-    state: State<'_, AppState>,
-    plugin_cid: String,
-) -> Result<PluginAttestationStatus, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    attestation::status_for(db, &plugin_cid)
-}
-
-/// Submit a fully-formed attestation event for verification + storage.
-/// The host validates the multi-sig threshold against the embedded
-/// committee pubkeys before persisting. Used by the gossip handler when
-/// a new attestation arrives on `/alexandria/plugin-attestations/1.0`,
-/// and by tests / CLI tooling. Idempotent — duplicates are no-ops.
-#[tauri::command]
-pub async fn plugin_ingest_attestation(
-    state: State<'_, AppState>,
-    event: PluginAttestationEvent,
-) -> Result<(), String> {
-    attestation::verify_event(&event, &attestation::AttestationPolicy::default())?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    attestation::persist_event(db, &event)
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.browse-catalog",
+        catalog::list_catalog,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -1276,8 +1307,8 @@ mod grade_credential_tests {
 
     /// Seed a minimal skill taxonomy plus one plugin element tagged with two
     /// skills at different weights, so the credential path has real
-    /// `element_skill_tags`. Built from raw inserts (not the `dev-seed` seeder)
-    /// so the test runs under the default feature set CI checks.
+    /// `element_skill_tags`. Built from raw inserts rather than production
+    /// fixtures.
     fn seed_tagged_element(db: &Database) {
         let c = db.conn();
         c.execute(
@@ -1387,102 +1418,99 @@ mod grade_credential_tests {
         assert_eq!(n, skills.len() as i64);
     }
 
-    // ---- credential_trust: the plugin governance gate --------------------
+    // ---- credential_trust: exact bundled identity gate -------------------
 
-    fn trust_db() -> Database {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        db
-    }
-
-    fn seed_attestation(db: &Database, plugin_cid: &str, grader_cid: &str) {
-        db.conn()
-            .execute(
-                "INSERT INTO plugin_attestations                  (plugin_cid, grader_cid, attestation_terms, threshold_signature_blob,                   committee_pubkeys_json, issued_at)                  VALUES (?1, ?2, '{}', x'00', '[]', '2026-07-23T00:00:00Z')",
-                params![plugin_cid, grader_cid],
-            )
-            .unwrap();
-    }
-
-    fn seed_advisory(db: &Database, plugin_cid: &str, kind: &str) {
-        db.conn()
-            .execute(
-                "INSERT INTO plugin_advisories                  (id, plugin_cid, kind, message, threshold_signature_blob, committee_pubkeys_json)                  VALUES (?1, ?2, ?3, 'flagged', x'00', '[]')",
-                params![format!("adv_{kind}"), plugin_cid, kind],
-            )
-            .unwrap();
+    fn bundled_mcq_identity() -> (String, &'static [u8], String, &'static [u8]) {
+        let plugin_cid = crate::plugins::builtins::mcq_plugin_cid();
+        let bundle = crate::plugins::builtins::find_bundle_by_cid(&plugin_cid).unwrap();
+        let grader_cid = manifest::parse_and_validate(bundle.manifest_json)
+            .unwrap()
+            .grader
+            .unwrap()
+            .cid;
+        (
+            plugin_cid,
+            bundle.manifest_json,
+            grader_cid,
+            bundle.grader_wasm.unwrap(),
+        )
     }
 
     #[test]
-    fn builtin_graders_are_trusted_without_attestation() {
-        // The built-in MCQ grader ships in the signed binary; requiring
-        // committee attestation for it would break the first-party graded
-        // flow that works today.
-        let db = trust_db();
-        let cid = crate::plugins::builtins::mcq_plugin_cid();
+    fn exact_bundled_plugin_and_grader_are_trusted() {
+        let (plugin_cid, manifest, grader_cid, grader) = bundled_mcq_identity();
         assert_eq!(
-            credential_trust(&db, &cid, "any-grader").unwrap(),
-            None,
-            "a builtin plugin must be trusted for issuance"
-        );
-    }
-
-    #[test]
-    fn an_unattested_third_party_grader_is_blocked() {
-        // The hole: any installed plugin could mint credentials. An unknown,
-        // unattested plugin must not.
-        let db = trust_db();
-        let reason = credential_trust(&db, "did:key:zEvil#grader", "g1").unwrap();
-        assert!(reason.is_some(), "unattested grader should be blocked");
-        assert!(reason.unwrap().contains("not attested"));
-    }
-
-    #[test]
-    fn an_attested_grader_is_trusted() {
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        assert_eq!(
-            credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap(),
+            credential_trust(&plugin_cid, manifest, &grader_cid, grader).unwrap(),
             None
         );
     }
 
     #[test]
-    fn attestation_does_not_cover_a_swapped_grader() {
-        // The attestation binds one grader; installing a different grader
-        // under the same plugin id must not inherit the old approval.
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        let reason = credential_trust(&db, "did:key:zAuthor#p", "grader_v2").unwrap();
-        assert!(
-            reason.is_some(),
-            "a swapped grader must not ride old attestation"
-        );
-        assert!(reason.unwrap().contains("attestation covers grader"));
+    fn bundled_plugin_with_a_swapped_grader_is_blocked() {
+        let (plugin_cid, manifest, _, grader) = bundled_mcq_identity();
+        let reason = credential_trust(&plugin_cid, manifest, &"f".repeat(64), grader)
+            .unwrap()
+            .expect("swapped grader must be blocked");
+        assert!(reason.contains("bundled plugin requires grader"));
     }
 
     #[test]
-    fn a_known_flawed_advisory_blocks_even_an_attested_grader() {
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        seed_advisory(&db, "did:key:zAuthor#p", "known_flawed");
-        let reason = credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap();
-        assert!(reason.is_some());
-        assert!(reason.unwrap().contains("known_flawed"));
+    fn bundled_plugin_cid_mismatch_is_blocked() {
+        let (plugin_cid, manifest, grader_cid, grader) = bundled_mcq_identity();
+        let mut mismatched_cid = plugin_cid;
+        let replacement = if mismatched_cid.ends_with('0') {
+            "1"
+        } else {
+            "0"
+        };
+        mismatched_cid.replace_range(mismatched_cid.len() - 1.., replacement);
+
+        let reason = credential_trust(&mismatched_cid, manifest, &grader_cid, grader)
+            .unwrap()
+            .expect("a near-match plugin CID must be blocked");
+        assert!(reason.contains("only exact graders bundled"));
+    }
+
+    /// This once inserted a forged `plugin_attestations` row to prove a
+    /// stored attestation granted no authority. The baseline schema has no
+    /// such table, so that authority cannot be persisted at all -- a stronger
+    /// guarantee than ignoring it, and one worth asserting directly.
+    #[test]
+    fn plugin_attestation_authority_cannot_be_persisted_or_claimed() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let storable: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'plugin_attestations'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(storable, 0, "attestation authority must not be storable");
+
+        let reason = credential_trust("plugin", b"forged", "grader", b"forged")
+            .unwrap()
+            .expect("an unknown plugin must be blocked");
+        assert!(reason.contains("only exact graders bundled"));
     }
 
     #[test]
-    fn a_non_blocking_advisory_does_not_block_issuance() {
-        // 'deprecated' is informational — it should surface in the UI but not
-        // stop an otherwise-valid, attested grader from crediting.
-        let db = trust_db();
-        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
-        seed_advisory(&db, "did:key:zAuthor#p", "deprecated");
-        assert_eq!(
-            credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap(),
-            None,
-            "a deprecation notice must not block issuance"
-        );
+    fn forged_manifest_for_a_bundled_cid_is_blocked() {
+        let (plugin_cid, _, grader_cid, grader) = bundled_mcq_identity();
+        let reason = credential_trust(&plugin_cid, b"{}", &grader_cid, grader)
+            .unwrap()
+            .expect("forged persisted manifest must be blocked");
+        assert!(reason.contains("manifest does not exactly match"));
+    }
+
+    #[test]
+    fn copied_grader_cid_with_different_bytes_is_blocked() {
+        let (plugin_cid, manifest, grader_cid, _) = bundled_mcq_identity();
+        let reason = credential_trust(&plugin_cid, manifest, &grader_cid, b"copied-key grader")
+            .unwrap()
+            .expect("copied identity with different bytes must be blocked");
+        assert!(reason.contains("grader bytes do not exactly match"));
     }
 
     #[test]

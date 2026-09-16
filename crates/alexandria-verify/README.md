@@ -19,16 +19,21 @@ list's bits, a local suspension flag, and whether something supersedes the
 credential — and each arrives through the `VerificationStore` trait.
 
 ```rust
-use alexandria_verify::{NullStore, vc::{VerificationPolicy, verify::verify_credential}};
+use alexandria_verify::{
+    NullStore,
+    vc::{AcceptanceDecision, VerificationPolicy, verify::verify_credential},
+};
 
-// NullStore answers "no revocation, no suspension, no supersession" to
-// everything. Correct for a self-contained check; wrong if you hold status
-// data and forgot to wire it in.
+// NullStore supplies no external status or key-registry state. A signed
+// credential that references an absent status list remains pending.
 let store = NullStore;
 let policy = VerificationPolicy::default();
 let result = verify_credential(&store, &credential, "2026-08-13T00:00:00Z", &policy);
 
 assert!(result.valid_signature);
+if credential.credential_status.is_some() {
+    assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+}
 ```
 
 Implement `VerificationStore` over whatever you actually have — SQLite, a
@@ -36,13 +41,57 @@ credential bundle, Postgres — and the same verification logic runs against it.
 `tests/no_io_deps.rs` fails the build if a dependency that reaches the outside
 world is ever added.
 
+## Untrusted input
+
+`json::parse_untrusted` and `json::decode_untrusted` parse bytes from a peer, a
+file, or a service under explicit `JsonLimits` before any typed decoding or
+signature work. They refuse, as distinct errors:
+- documents over the byte limit, checked before parsing;
+- nesting deeper than the depth limit;
+- arrays, objects, or strings over their limits;
+- duplicate object keys at any depth;
+- numbers outside JavaScript's exact integer range (±2^53−1) or non-finite;
+- trailing bytes.
+
+`vc::decode_credential` applies `vc::CREDENTIAL_JSON_LIMITS`:
+- 256 KiB;
+- depth 32;
+- 4096 array elements;
+- 256 object entries;
+- 64 KiB strings.
+
+A payload that holds several credentials may have its own outer limits, but
+each credential in it must still pass these.
+`tests/credential_limits.rs` checks every limit at its exact boundary and one
+past it.
+
+## Trust classification
+
+A valid signature says who signed a credential, not that the signer is approved
+for anything. `trust::classify_credential` turns a verification result into a
+provenance state: `Invalid` (with reason codes), `Pending` (with the missing
+evidence), `VerifiedSelfClaim`, `VerifiedIssuerSigned`, or
+`VerifiedCourseEndorsement`. It rechecks the supplied result against the
+credential, so a result for another credential or an `accept` that contradicts
+its own flags is invalid.
+
+A self-claim is only classified as course-endorsed when its signed evidence
+references name the exact course document and completion root of a supplied
+`CourseCompletionBinding`, the binding matches the expected network and subject,
+and distinct authorized attestors meet the signed policy threshold. These states
+carry no privilege; policy qualification is a separate decision.
+
 ## Interoperability
 
 `tests/vectors/` holds signed credentials with known-good and known-bad
-outcomes, plus `independent-verifier.mjs` — a ~70-line Node implementation
+outcomes, plus `independent-verifier.mjs` — a small Node implementation
 written against the specification rather than against this code. It passes all
-ten vectors. If you are writing your own verifier in another language, start
-there: the vectors are the contract, and this crate is one implementation of it.
+twelve credential vectors, the exact-byte limit vectors in
+`tests/vectors/limits/`, and the course completion endorsement vectors in
+`tests/vectors/endorsements/`. `tests/limit_vectors.rs` and
+`tests/endorsement_vectors.rs` check those against this crate, and the app's
+endorsement import consumes the same endorsement bytes. If you are writing your own verifier in another language, start there:
+the vectors are the contract, and this crate is one implementation of it.
 
 The signing input is **raw payload bytes**, not base64url — RFC 7797 with
 `b64:false`. This is the detail most independent implementations get wrong.

@@ -37,6 +37,8 @@ const entries = ref<SettingEntry[]>([])
 const ready = ref(false)
 const loading = ref(false)
 let unlisten: UnlistenFn | null = null
+let cacheGeneration = 0
+let initialization: Promise<void> | null = null
 
 /**
  * Clear the local cache. Called when the active profile is locked —
@@ -45,8 +47,14 @@ let unlisten: UnlistenFn | null = null
  * values while the picker is up.
  */
 export function clearSettingsCache(): void {
+  cacheGeneration++
   entries.value = []
   ready.value = false
+  loading.value = false
+  initialization = null
+  const release = unlisten
+  unlisten = null
+  release?.()
 }
 
 // `entries` keyed by `key` for O(1) lookup.
@@ -57,35 +65,53 @@ const byKey = computed(() => {
 })
 
 async function refresh(): Promise<void> {
-  entries.value = await invoke<SettingEntry[]>('list_settings')
+  const generation = cacheGeneration
+  const result = await invoke<SettingEntry[]>('list_settings')
+  if (generation === cacheGeneration) entries.value = result
 }
 
-async function initialize(): Promise<void> {
-  if (ready.value || loading.value) return
+function initialize(): Promise<void> {
+  if (initialization) return initialization
+  if (ready.value) return Promise.resolve()
+  const generation = cacheGeneration
   loading.value = true
-  try {
-    await refresh()
+  initialization = (async () => {
+    try {
+      await refresh()
+      if (generation !== cacheGeneration) return
 
-    // Listen for in-process writes from other windows + inbound sync.
-    if (!unlisten) {
-      unlisten = await listen<{ key: string | null }>('settings-changed', async () => {
-        try {
-          await refresh()
-        } catch {
-          // Refresh may fail if the active profile was locked between
-          // emit and handler. Treat that as "no overrides".
-          entries.value = []
+      // Events and asynchronously installed listeners belong to one cache
+      // generation. A late event from the old profile cannot refresh the next.
+      if (!unlisten) {
+        const release = await listen<{ key: string | null }>('settings-changed', async () => {
+          if (generation !== cacheGeneration) return
+          try {
+            await refresh()
+          } catch {
+            if (generation === cacheGeneration) entries.value = []
+          }
+        })
+        if (generation !== cacheGeneration) {
+          release()
+          return
         }
-      })
+        unlisten = release
+      }
+      ready.value = true
+    } finally {
+      if (generation === cacheGeneration) {
+        loading.value = false
+        initialization = null
+      }
     }
-    ready.value = true
-  } finally {
-    loading.value = false
-  }
+  })()
+  return initialization
 }
 
 async function setSetting(key: string, value: string): Promise<void> {
+  const generation = cacheGeneration
   await invoke('set_setting', { key, value })
+  if (generation !== cacheGeneration) return
   // Optimistic local update so callers see the new value immediately.
   const found = entries.value.find((e) => e.key === key)
   if (found) {
@@ -95,7 +121,9 @@ async function setSetting(key: string, value: string): Promise<void> {
 }
 
 async function resetSetting(key: string): Promise<void> {
+  const generation = cacheGeneration
   await invoke('reset_setting', { key })
+  if (generation !== cacheGeneration) return
   const found = entries.value.find((e) => e.key === key)
   if (found) {
     found.current_value = found.default_value
@@ -184,13 +212,14 @@ export function useSetting<T>(key: string): {
   watch(entries, sync, { immediate: true, deep: true })
 
   async function set(v: T) {
+    const generation = cacheGeneration
     const entry = byKey.value.get(key)
     if (!entry) {
       console.warn(`[useSetting] unknown key: ${key}`)
       return
     }
     await setSetting(key, encode(v, entry.kind))
-    local.value = v
+    if (generation === cacheGeneration) local.value = v
   }
 
   async function reset() {

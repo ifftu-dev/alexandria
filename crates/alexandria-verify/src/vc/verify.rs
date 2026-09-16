@@ -8,18 +8,22 @@
 //! 3. Verify the detached JWS signature.
 //! 4. Check subject binding (subject.id is a well-formed DID).
 //! 5. Check expiration against `verification_time`.
-//! 6. Emit a `VerificationResult`.
+//! 6. Resolve referenced status and local lifecycle state.
+//! 7. Emit an accepted, pending, or rejected `VerificationResult`.
 //!
-//! Revocation (§11.2) is handled by the PR 5 status-list layer;
-//! until then `revoked = false`. Integrity anchor (§12.3) is
-//! handled by PR 8; until then `integrity_anchored = false`.
+//! Missing or unavailable issuer/status evidence produces a typed pending
+//! result. A malformed reference or a failed cryptographic/policy check is a
+//! rejection.
 
 use ed25519_dalek::{Signature, VerifyingKey};
 
 use super::sign::{b64url_decode, canonicalize_credential};
-use super::{AcceptanceDecision, VerifiableCredential, VerificationPolicy, VerificationResult};
-use crate::did::{parse_did_key, resolve_did_key, Did};
-use crate::VerificationStore;
+use super::{
+    AcceptanceDecision, VerifiableCredential, VerificationPendingReason, VerificationPolicy,
+    VerificationResult,
+};
+use crate::did::{parse_did_key, resolve_did_key, Did, DidError};
+use crate::{StoreLookup, VerificationStore};
 
 /// Verification algorithm per spec §13.2, steps 1–10.
 pub fn verify_credential(
@@ -37,12 +41,14 @@ pub fn verify_credential(
         valid_signature: false,
         issuer_resolved: false,
         revoked: false,
+        status_valid: true,
         expired: false,
         subject_bound: false,
         integrity_anchored: false,
         suspended: false,
         superseded: false,
         verification_time: verification_time.to_string(),
+        pending_reasons: Vec::new(),
         acceptance_decision: AcceptanceDecision::Reject,
     };
 
@@ -64,21 +70,29 @@ pub fn verify_credential(
     }
 
     // -- revocation via credential_status -----------------------------------
-    // §11.2: each revocable credential MUST provide a resolvable status
-    // reference. We look up the referenced status list locally (remote
-    // lists land via the PR 9 P2P sync path) and check the bit. If the
-    // list isn't known yet, we leave `revoked = false` — strict-mode
-    // verifiers can reject on `credentialStatus` presence alone via a
-    // future policy flag. This is the conservative default.
+    // §11.2: a status-bearing credential is conclusive only when the supplied
+    // store can read the referenced bit. Missing/unavailable evidence is a
+    // pending result, while malformed or out-of-range indices are invalid.
     if let Some(status) = &credential.credential_status {
-        if let Ok(idx) = status.status_list_index.parse::<i64>() {
-            if let Some(bits) = db.status_list_bits(&status.status_list_credential) {
-                let byte = (idx / 8) as usize;
-                let bit = (idx % 8) as u8;
-                if byte < bits.len() && (bits[byte] & (1 << bit)) != 0 {
-                    result.revoked = true;
+        match status.status_list_index.parse::<usize>() {
+            Ok(idx) => match db.status_list_bits(&status.status_list_credential) {
+                StoreLookup::Found(bits) => {
+                    let byte = idx / 8;
+                    let bit = (idx % 8) as u8;
+                    if byte >= bits.len() {
+                        result.status_valid = false;
+                    } else if (bits[byte] & (1 << bit)) != 0 {
+                        result.revoked = true;
+                    }
                 }
-            }
+                StoreLookup::Missing => result
+                    .pending_reasons
+                    .push(VerificationPendingReason::StatusListMissing),
+                StoreLookup::Unavailable => result
+                    .pending_reasons
+                    .push(VerificationPendingReason::StatusListUnavailable),
+            },
+            Err(_) => result.status_valid = false,
         }
     }
 
@@ -89,16 +103,22 @@ pub fn verify_credential(
     // Skipped when the envelope has no `id` — local revocation/suspension
     // state is keyed by id and an id-less VC can't have any.
     if !credential_id.is_empty() {
-        if let Some((sus_flag, sus_until)) = db.suspension(&credential_id) {
-            if sus_flag {
-                let active = match sus_until {
-                    Some(until) => until.as_str() > verification_time,
-                    None => true,
-                };
-                if active {
-                    result.suspended = true;
+        match db.suspension(&credential_id) {
+            StoreLookup::Found((sus_flag, sus_until)) => {
+                if sus_flag {
+                    let active = match sus_until {
+                        Some(until) => until.as_str() > verification_time,
+                        None => true,
+                    };
+                    if active {
+                        result.suspended = true;
+                    }
                 }
             }
+            StoreLookup::Missing => {}
+            StoreLookup::Unavailable => result
+                .pending_reasons
+                .push(VerificationPendingReason::SuspensionStateUnavailable),
         }
 
         // -- supersession (§11.4) -------------------------------------------
@@ -106,18 +126,41 @@ pub fn verify_credential(
         // `supersedes` marks it as superseded. The match is on id only — the
         // stricter same-subject/same-claim/same-issuer invariant is enforced
         // at the INSERT site (see `supersede_credential_impl`).
-        if db.is_superseded(&credential_id) {
-            result.superseded = true;
+        match db.is_superseded(&credential_id) {
+            StoreLookup::Found(superseded) => result.superseded = superseded,
+            StoreLookup::Missing => {}
+            StoreLookup::Unavailable => result
+                .pending_reasons
+                .push(VerificationPendingReason::SupersessionStateUnavailable),
         }
     }
 
     // -- issuer resolution --------------------------------------------------
     let issuer_pk = match resolve_issuer_key(db, &credential.issuer, verification_time) {
-        Some(pk) => {
+        IssuerKeyResolution::Found(pk) => {
             result.issuer_resolved = true;
             pk
         }
-        None => return finalize(result, credential, policy),
+        IssuerKeyResolution::FoundWithUnavailableStore(pk) => {
+            result.issuer_resolved = true;
+            result
+                .pending_reasons
+                .push(VerificationPendingReason::IssuerKeyUnavailable);
+            pk
+        }
+        IssuerKeyResolution::Missing => {
+            result
+                .pending_reasons
+                .push(VerificationPendingReason::IssuerKeyMissing);
+            return finalize(result, credential, policy);
+        }
+        IssuerKeyResolution::Unavailable => {
+            result
+                .pending_reasons
+                .push(VerificationPendingReason::IssuerKeyUnavailable);
+            return finalize(result, credential, policy);
+        }
+        IssuerKeyResolution::Invalid => return finalize(result, credential, policy),
     };
 
     // -- signature verification --------------------------------------------
@@ -130,22 +173,45 @@ pub fn verify_credential(
 
 /// Resolve an issuer DID to a `VerifyingKey` valid at `at`.
 ///
-/// For `did:key` we first try self-resolution — the current pubkey
-/// embedded in the identifier. If the key registry has a historical
-/// entry whose window contains `at`, prefer it so that credentials
-/// signed under a pre-rotation key still verify after rotation
-/// (§5.3).
-fn resolve_issuer_key(db: &dyn VerificationStore, issuer: &Did, at: &str) -> Option<VerifyingKey> {
+/// The key registry is consulted first so a historical entry whose window
+/// contains `at` can verify credentials across rotation (§5.3). When the
+/// registry has no entry, `did:key` falls back to the public key embedded in
+/// the identifier.
+enum IssuerKeyResolution {
+    Found(VerifyingKey),
+    FoundWithUnavailableStore(VerifyingKey),
+    Missing,
+    Unavailable,
+    Invalid,
+}
+
+fn resolve_issuer_key(db: &dyn VerificationStore, issuer: &Did, at: &str) -> IssuerKeyResolution {
     // Prefer the time-anchored historical entry (§5.3) when present.
-    if let Some(entry) = db.key_at(issuer, at) {
-        if let Ok(vk) = verifying_key_from_slice(&entry.public_key_bytes) {
-            return Some(vk);
+    let store_unavailable = match db.key_at(issuer, at) {
+        StoreLookup::Found(entry) => {
+            return verifying_key_from_slice(&entry.public_key_bytes)
+                .map(IssuerKeyResolution::Found)
+                .unwrap_or(IssuerKeyResolution::Invalid);
         }
+        StoreLookup::Missing => false,
+        StoreLookup::Unavailable => true,
+    };
+    // Fall back to did:key self-resolution. An unsupported DID method can be
+    // resolved later by acquiring its key binding; malformed did:key bytes are
+    // permanently invalid.
+    let resolved = match parse_did_key(issuer.as_str()) {
+        Ok(_) => resolve_did_key(issuer),
+        Err(DidError::UnsupportedMethod) if store_unavailable => {
+            return IssuerKeyResolution::Unavailable;
+        }
+        Err(DidError::UnsupportedMethod) => return IssuerKeyResolution::Missing,
+        Err(DidError::InvalidFormat(_)) => return IssuerKeyResolution::Invalid,
+    };
+    match resolved {
+        Ok(key) if store_unavailable => IssuerKeyResolution::FoundWithUnavailableStore(key),
+        Ok(key) => IssuerKeyResolution::Found(key),
+        Err(_) => IssuerKeyResolution::Invalid,
     }
-    // Fall back to did:key self-resolution. Parse first so an
-    // unsupported method short-circuits cleanly.
-    parse_did_key(issuer.as_str()).ok()?;
-    resolve_did_key(issuer).ok()
 }
 
 fn verifying_key_from_slice(bytes: &[u8]) -> Result<VerifyingKey, String> {
@@ -204,7 +270,7 @@ fn verify_detached_jws(
 /// its class, so this looks for *any* member that is an allowed class. A
 /// credential naming several classes is accepted if any one is allowed, which
 /// is the same permissive reading the rest of the type handling uses.
-fn type_allowed(credential: &VerifiableCredential, policy: &VerificationPolicy) -> bool {
+pub(crate) fn type_allowed(credential: &VerifiableCredential, policy: &VerificationPolicy) -> bool {
     if policy.allowed_types.is_empty() {
         return true;
     }
@@ -226,18 +292,30 @@ fn finalize(
     credential: &VerifiableCredential,
     policy: &VerificationPolicy,
 ) -> VerificationResult {
-    let accept = result.valid_signature
-        && result.issuer_resolved
+    let issuer_evidence_pending = result.pending_reasons.iter().any(|reason| {
+        matches!(
+            reason,
+            VerificationPendingReason::IssuerKeyMissing
+                | VerificationPendingReason::IssuerKeyUnavailable
+        )
+    });
+    let valid_or_pending = (result.valid_signature && result.issuer_resolved)
+        || (!result.issuer_resolved && issuer_evidence_pending);
+    let accept = valid_or_pending
+        && result.status_valid
         && result.subject_bound
         && type_allowed(credential, policy)
         && !result.revoked
+        && (!policy.require_integrity_anchor || result.integrity_anchored)
         && !(policy.reject_expired && result.expired)
         && !(policy.reject_suspended && result.suspended)
         && !(policy.reject_superseded && result.superseded);
-    result.acceptance_decision = if accept {
+    result.acceptance_decision = if !accept {
+        AcceptanceDecision::Reject
+    } else if result.pending_reasons.is_empty() {
         AcceptanceDecision::Accept
     } else {
-        AcceptanceDecision::Reject
+        AcceptanceDecision::Pending
     };
     result
 }
@@ -245,10 +323,12 @@ fn finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::did::{derive_did_key, VerificationMethodRef};
+    use crate::did::{derive_did_key, KeyRegistryEntry, VerificationMethodRef};
     use crate::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::vc::{Claim, CredentialType, Proof, SkillClaim, VerifiableCredential};
-    use crate::NullStore;
+    use crate::vc::{
+        Claim, CredentialStatus, CredentialType, Proof, SkillClaim, VerifiableCredential,
+    };
+    use crate::{NullStore, StoreLookup};
 
     const NOW: &str = "2026-04-13T00:00:00Z";
     use ed25519_dalek::SigningKey;
@@ -309,6 +389,26 @@ mod tests {
         (NullStore, vc)
     }
 
+    struct UnavailableStore;
+
+    impl VerificationStore for UnavailableStore {
+        fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+            StoreLookup::Unavailable
+        }
+
+        fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
+            StoreLookup::Unavailable
+        }
+
+        fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
+            StoreLookup::Unavailable
+        }
+
+        fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
+            StoreLookup::Unavailable
+        }
+    }
+
     /// The default policy omits `EntitlementCredential` on purpose — a
     /// commercial artifact must not pass a capability-credential check. That
     /// only holds if `allowed_types` is actually enforced, so assert it on a
@@ -331,6 +431,19 @@ mod tests {
         assert!(result.issuer_resolved);
         assert!(result.subject_bound);
         assert!(!result.revoked && !result.expired);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+    }
+
+    #[test]
+    fn required_integrity_anchor_is_enforced() {
+        let (db, vc) = signed(None);
+        let policy = VerificationPolicy {
+            require_integrity_anchor: true,
+            ..VerificationPolicy::default()
+        };
+        let result = verify_credential(&db, &vc, NOW, &policy);
+        assert!(result.valid_signature);
+        assert!(!result.integrity_anchored);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
     }
 
@@ -396,6 +509,117 @@ mod tests {
         assert!(result.subject_bound);
         assert!(!result.expired);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    #[test]
+    fn missing_status_list_is_pending_not_active() {
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let subject = derive_did_key(&test_signing_key("subject"));
+        let mut credential = skeleton(issuer.clone(), subject, None);
+        credential.credential_status = Some(CredentialStatus {
+            id: "urn:uuid:entry".into(),
+            type_: "RevocationList2020Status".into(),
+            status_purpose: "revocation".into(),
+            status_list_index: "0".into(),
+            status_list_credential: "urn:uuid:missing-list".into(),
+        });
+        let credential = sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap();
+
+        let result = verify_credential(&NullStore, &credential, NOW, &Default::default());
+        assert!(result.valid_signature);
+        assert!(!result.revoked);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+        assert_eq!(
+            result.pending_reasons,
+            vec![VerificationPendingReason::StatusListMissing]
+        );
+    }
+
+    #[test]
+    fn unavailable_store_is_pending_even_when_did_key_signature_verifies() {
+        let (_, credential) = signed(None);
+        let result = verify_credential(
+            &UnavailableStore,
+            &credential,
+            NOW,
+            &VerificationPolicy::default(),
+        );
+        assert!(result.valid_signature);
+        assert!(result.issuer_resolved);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+        assert!(result
+            .pending_reasons
+            .contains(&VerificationPendingReason::IssuerKeyUnavailable));
+        assert!(result
+            .pending_reasons
+            .contains(&VerificationPendingReason::SuspensionStateUnavailable));
+        assert!(result
+            .pending_reasons
+            .contains(&VerificationPendingReason::SupersessionStateUnavailable));
+    }
+
+    #[test]
+    fn unavailable_external_issuer_lookup_is_distinct_from_a_missing_key() {
+        let key = test_signing_key("issuer");
+        let issuer = Did("did:web:issuer.example".into());
+        let subject = derive_did_key(&test_signing_key("subject"));
+        let credential = sign_credential(
+            UnsignedCredential {
+                credential: skeleton(issuer.clone(), subject, None),
+            },
+            &key,
+            &issuer,
+        )
+        .unwrap();
+
+        let result = verify_credential(
+            &UnavailableStore,
+            &credential,
+            NOW,
+            &VerificationPolicy::default(),
+        );
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+        assert!(result
+            .pending_reasons
+            .contains(&VerificationPendingReason::IssuerKeyUnavailable));
+        assert!(!result
+            .pending_reasons
+            .contains(&VerificationPendingReason::IssuerKeyMissing));
+    }
+
+    #[test]
+    fn malformed_or_out_of_range_status_reference_is_rejected() {
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let subject = derive_did_key(&test_signing_key("subject"));
+        let mut credential = skeleton(issuer.clone(), subject, None);
+        credential.credential_status = Some(CredentialStatus {
+            id: "urn:uuid:entry".into(),
+            type_: "RevocationList2020Status".into(),
+            status_purpose: "revocation".into(),
+            status_list_index: "9".into(),
+            status_list_credential: "urn:uuid:short-list".into(),
+        });
+        let credential = sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap();
+        struct ShortList;
+        impl VerificationStore for ShortList {
+            fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+                StoreLookup::Missing
+            }
+            fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
+                StoreLookup::Found(vec![0])
+            }
+            fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
+                StoreLookup::Missing
+            }
+            fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
+                StoreLookup::Found(false)
+            }
+        }
+        let result = verify_credential(&ShortList, &credential, NOW, &Default::default());
+        assert!(!result.status_valid);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
     }
 
     #[test]

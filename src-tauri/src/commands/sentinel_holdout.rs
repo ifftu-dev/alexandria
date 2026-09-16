@@ -27,22 +27,22 @@
 
 use std::collections::BTreeSet;
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use x25519_dalek::{PublicKey, StaticSecret};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
-use crate::commands::sentinel_priors::{validate_prior_blob, ModelKind, PriorBlob};
 use crate::content_store::{content, storage};
 use crate::crypto::group_key::{decrypt_message, encrypt_message, generate_group_key};
 use crate::crypto::hash::entity_id;
 use crate::crypto::shamir::{self, Share};
+use crate::db::executor::DatabaseWorkload;
+use crate::sentinel::prior_blob::{validate_prior_blob, ModelKind, PriorBlob};
 use crate::AppState;
 
-/// Pin type for encrypted holdout blobs. Separate from 'sentinel_prior'
-/// so eviction heuristics can treat them independently — the holdout is
-/// smaller and re-creating it is a governance event, not a re-sync.
+/// Pin type for encrypted holdout blobs, kept apart from cache pins so
+/// eviction never drops a holdout set.
 const PIN_TYPE_SENTINEL_HOLDOUT: &str = "sentinel_holdout";
 
 // ============================================================================
@@ -75,7 +75,7 @@ pub struct KeyPolicy {
     pub shares: Vec<SealedShare>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct UploadHoldoutRequest {
     pub model_kind: String,
     pub threshold: u8,
@@ -84,6 +84,23 @@ pub struct UploadHoldoutRequest {
     /// envelope with the same `model_kind`. Keep this in memory only —
     /// it's the plaintext holdout.
     pub plaintext: Vec<u8>,
+}
+
+impl std::fmt::Debug for UploadHoldoutRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadHoldoutRequest")
+            .field("model_kind", &self.model_kind)
+            .field("threshold", &self.threshold)
+            .field("member_count", &self.members.len())
+            .field("plaintext", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for UploadHoldoutRequest {
+    fn drop(&mut self) {
+        self.plaintext.zeroize();
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -101,7 +118,7 @@ pub struct HoldoutRef {
     pub created_at: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct UnsealShareRequest {
     pub holdout_id: String,
     /// Hex-encoded 32-byte X25519 static secret of the calling member.
@@ -110,10 +127,40 @@ pub struct UnsealShareRequest {
     pub our_x25519_secret_hex: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl std::fmt::Debug for UnsealShareRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnsealShareRequest")
+            .field("holdout_id", &self.holdout_id)
+            .field("our_x25519_secret_hex", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for UnsealShareRequest {
+    fn drop(&mut self) {
+        self.our_x25519_secret_hex.zeroize();
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct PlaintextShare {
     pub share_index: u8,
     pub y_hex: String,
+}
+
+impl std::fmt::Debug for PlaintextShare {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlaintextShare")
+            .field("share_index", &self.share_index)
+            .field("y_hex", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for PlaintextShare {
+    fn drop(&mut self) {
+        self.y_hex.zeroize();
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -274,36 +321,30 @@ pub async fn sentinel_holdout_upload(
         &chrono::Utc::now().to_rfc3339(),
     ]);
 
-    {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-
-        conn.execute(
-            "INSERT INTO sentinel_holdout_refs
-                 (id, encrypted_cid, model_kind, threshold, key_policy)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                holdout_id,
-                add_result.hash,
-                req.model_kind,
-                req.threshold as i64,
-                policy_json,
-            ],
+    let stored_holdout_id = holdout_id.clone();
+    let encrypted_cid = add_result.hash.clone();
+    let stored_model_kind = req.model_kind.clone();
+    let stored_threshold = i64::from(req.threshold);
+    let encrypted_size = add_result.size;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.holdout.upload",
+            move |db| {
+                insert_holdout_ref(
+                    db.conn(),
+                    &stored_holdout_id,
+                    &encrypted_cid,
+                    &stored_model_kind,
+                    stored_threshold,
+                    &policy_json,
+                    encrypted_size,
+                )
+            },
         )
-        .map_err(|e| format!("holdout insert failed: {e}"))?;
-
-        storage::upsert_pin(
-            conn,
-            &add_result.hash,
-            PIN_TYPE_SENTINEL_HOLDOUT,
-            add_result.size,
-            false,
-        );
-    }
+        .await?;
 
     // aes_key is Zeroizing and will be wiped when this function
     // returns. Same for `shares` once it goes out of scope — the y
@@ -317,36 +358,85 @@ pub async fn sentinel_holdout_upload(
     })
 }
 
-/// List all holdout sets — returns metadata only, never the policy.
-#[tauri::command]
-pub async fn sentinel_holdout_list(state: State<'_, AppState>) -> Result<Vec<HoldoutRef>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+fn insert_holdout_ref(
+    conn: &rusqlite::Connection,
+    holdout_id: &str,
+    encrypted_cid: &str,
+    model_kind: &str,
+    threshold: i64,
+    policy_json: &str,
+    encrypted_size: u64,
+) -> Result<(), String> {
+    let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO sentinel_holdout_refs
+                 (id, encrypted_cid, model_kind, threshold, key_policy)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                holdout_id,
+                encrypted_cid,
+                model_kind,
+                threshold,
+                policy_json,
+            ],
+        )
+        .map_err(|e| format!("holdout insert failed: {e}"))?;
+    storage::upsert_pin(
+        &transaction,
+        encrypted_cid,
+        PIN_TYPE_SENTINEL_HOLDOUT,
+        encrypted_size,
+        false,
+    )?;
+    transaction.commit().map_err(|e| e.to_string())
+}
 
+fn list_holdout_refs(conn: &rusqlite::Connection) -> Result<Vec<HoldoutRef>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, encrypted_cid, model_kind, threshold, created_at
              FROM sentinel_holdout_refs ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<HoldoutRef> = stmt
+    let rows = stmt
         .query_map([], |row| {
-            Ok(HoldoutRef {
-                id: row.get(0)?,
-                encrypted_cid: row.get(1)?,
-                model_kind: row.get(2)?,
-                threshold: row.get::<_, i64>(3)? as u8,
-                created_at: row.get(4)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
         })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    Ok(rows)
+    rows.map(|row| {
+        let (id, encrypted_cid, model_kind, threshold, created_at) =
+            row.map_err(|e| e.to_string())?;
+        Ok(HoldoutRef {
+            id,
+            encrypted_cid,
+            model_kind,
+            threshold: u8::try_from(threshold)
+                .map_err(|_| format!("invalid holdout threshold {threshold}"))?,
+            created_at,
+        })
+    })
+    .collect()
+}
+
+/// List all holdout sets — returns metadata only, never the policy.
+#[tauri::command]
+pub async fn sentinel_holdout_list(state: State<'_, AppState>) -> Result<Vec<HoldoutRef>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.holdout.list",
+            |db| list_holdout_refs(db.conn()),
+        )
+        .await
 }
 
 /// Fetch the sealed key policy for a given holdout.
@@ -358,20 +448,23 @@ pub async fn sentinel_holdout_get_policy(
     state: State<'_, AppState>,
     holdout_id: String,
 ) -> Result<KeyPolicy, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    let policy_json: String = conn
-        .query_row(
-            "SELECT key_policy FROM sentinel_holdout_refs WHERE id = ?1",
-            params![holdout_id],
-            |row| row.get(0),
+    let policy_json = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.holdout.get-policy",
+            move |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT key_policy FROM sentinel_holdout_refs WHERE id = ?1",
+                        params![holdout_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .map_err(|e| format!("holdout not found: {e}"))
+            },
         )
-        .map_err(|e| format!("holdout not found: {e}"))?;
+        .await?;
 
     serde_json::from_str(&policy_json).map_err(|e| format!("policy parse: {e}"))
 }
@@ -384,7 +477,7 @@ pub async fn sentinel_holdout_unseal_share(
     state: State<'_, AppState>,
     req: UnsealShareRequest,
 ) -> Result<PlaintextShare, String> {
-    let policy = sentinel_holdout_get_policy(state, req.holdout_id).await?;
+    let policy = sentinel_holdout_get_policy(state, req.holdout_id.clone()).await?;
 
     let our_secret = parse_x25519_secret(&req.our_x25519_secret_hex)?;
     let our_pub = PublicKey::from(&our_secret);
@@ -437,20 +530,24 @@ pub async fn sentinel_holdout_evaluate(
     req: EvaluateRequest,
 ) -> Result<PriorBlob, String> {
     // Fetch the policy for threshold + encrypted CID lookup.
-    let (encrypted_cid, threshold): (String, i64) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .query_row(
-                "SELECT encrypted_cid, threshold FROM sentinel_holdout_refs WHERE id = ?1",
-                params![req.holdout_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|e| format!("holdout not found: {e}"))?
-    };
+    let holdout_id = req.holdout_id.clone();
+    let (encrypted_cid, threshold): (String, i64) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.holdout.evaluate.load",
+            move |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT encrypted_cid, threshold FROM sentinel_holdout_refs WHERE id = ?1",
+                        params![holdout_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|e| format!("holdout not found: {e}"))
+            },
+        )
+        .await?;
 
     if (req.shares.len() as i64) < threshold {
         return Err(format!(
@@ -511,6 +608,7 @@ pub async fn sentinel_holdout_evaluate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
 
     #[test]
     fn hex_roundtrip_preserves_bytes() {
@@ -574,5 +672,92 @@ mod tests {
         // authentication fails.
         let wrong_wrap = derive_wrap_key(&wrong_secret, &sender_pub);
         assert!(decrypt_message(&wrong_wrap, &sealed).is_err());
+    }
+
+    #[test]
+    fn sensitive_request_debug_output_is_redacted() {
+        let upload = UploadHoldoutRequest {
+            model_kind: "mouse".into(),
+            threshold: 1,
+            members: Vec::new(),
+            plaintext: b"unique-holdout-secret".to_vec(),
+        };
+        let upload_debug = format!("{upload:?}");
+        assert!(upload_debug.contains("<redacted>"));
+        assert!(!upload_debug.contains("unique-holdout-secret"));
+
+        let secret_hex = "ab".repeat(32);
+        let unseal = UnsealShareRequest {
+            holdout_id: "holdout-safe-to-log".into(),
+            our_x25519_secret_hex: secret_hex.clone(),
+        };
+        let unseal_debug = format!("{unseal:?}");
+        assert!(unseal_debug.contains("holdout-safe-to-log"));
+        assert!(!unseal_debug.contains(&secret_hex));
+
+        let share = PlaintextShare {
+            share_index: 3,
+            y_hex: "feedfacecafebeef".into(),
+        };
+        let share_debug = format!("{share:?}");
+        assert!(share_debug.contains("share_index: 3"));
+        assert!(!share_debug.contains("feedfacecafebeef"));
+    }
+
+    #[test]
+    fn holdout_reference_and_permanent_pin_commit_atomically() {
+        let db = Database::open_in_memory().expect("database");
+        db.run_migrations().expect("migrations");
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_holdout_pin BEFORE INSERT ON pins \
+                 BEGIN SELECT RAISE(FAIL, 'injected pin failure'); END;",
+            )
+            .expect("failure trigger");
+
+        let error =
+            insert_holdout_ref(db.conn(), "holdout-1", "encrypted-1", "mouse", 5, "{}", 512)
+                .expect_err("injected failure");
+        assert!(error.contains("injected pin failure"));
+        let refs: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM sentinel_holdout_refs", [], |row| {
+                row.get(0)
+            })
+            .expect("reference count");
+        assert_eq!(refs, 0);
+
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_holdout_pin")
+            .expect("drop trigger");
+        insert_holdout_ref(db.conn(), "holdout-1", "encrypted-1", "mouse", 5, "{}", 512)
+            .expect("retry");
+        assert_eq!(list_holdout_refs(db.conn()).expect("references").len(), 1);
+        let pins: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM pins WHERE cid = 'encrypted-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("pin count");
+        assert_eq!(pins, 1);
+    }
+
+    #[test]
+    fn holdout_list_rejects_thresholds_outside_the_wire_type() {
+        let db = Database::open_in_memory().expect("database");
+        db.run_migrations().expect("migrations");
+        db.conn()
+            .execute(
+                "INSERT INTO sentinel_holdout_refs \
+                 (id, encrypted_cid, model_kind, threshold, key_policy) \
+                 VALUES ('bad-threshold', 'encrypted-2', 'mouse', 300, '{}')",
+                [],
+            )
+            .expect("fixture");
+        assert!(list_holdout_refs(db.conn())
+            .expect_err("invalid threshold")
+            .contains("invalid holdout threshold"));
     }
 }

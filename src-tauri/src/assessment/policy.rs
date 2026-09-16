@@ -37,6 +37,9 @@ pub struct AttemptRecord {
     pub started_at: String,
     /// `None` while an attempt is still open.
     pub graded_at: Option<String>,
+    /// Set when an ungraded attempt was deliberately ended and must count as
+    /// consumed rather than being treated as resumable.
+    pub ended_at: Option<String>,
     /// `None` if never graded.
     pub passed: Option<bool>,
 }
@@ -181,19 +184,24 @@ pub fn evaluate_attempt_policy(
 
     let attempts_used = in_window.len() as u32;
 
-    if let Some(max) = policy.max_attempts {
-        if attempts_used >= max {
-            return PolicyDecision::Exhausted { attempts_used, max };
-        }
-    }
-
     // An attempt that was started but never graded is still open; the
-    // learner should finish it rather than be handed another.
-    if let Some((_, open)) = in_window.iter().find(|(_, a)| a.graded_at.is_none()) {
+    // learner should finish it rather than be handed another. Check this
+    // before the cap so an idempotent resume of the already-counted attempt
+    // remains possible when it occupies the final allowed slot.
+    if let Some((_, open)) = in_window
+        .iter()
+        .find(|(_, a)| a.graded_at.is_none() && a.ended_at.is_none())
+    {
         let _ = open;
         return PolicyDecision::Allow {
             ordinal: attempts_used,
         };
+    }
+
+    if let Some(max) = policy.max_attempts {
+        if attempts_used >= max {
+            return PolicyDecision::Exhausted { attempts_used, max };
+        }
     }
 
     let Some((last_started, _)) = in_window.first() else {
@@ -251,6 +259,7 @@ mod tests {
         AttemptRecord {
             started_at: started_at.to_string(),
             graded_at: Some(started_at.to_string()),
+            ended_at: None,
             passed,
         }
     }
@@ -371,6 +380,7 @@ mod tests {
         let history = [AttemptRecord {
             started_at: hours_before(1),
             graded_at: None,
+            ended_at: None,
             passed: None,
         }];
         let d = evaluate_attempt_policy(&history, &policy, NOW);
@@ -378,6 +388,41 @@ mod tests {
             d.is_allowed(),
             "an open attempt should not be blocked: {d:?}"
         );
+    }
+
+    #[test]
+    fn an_open_attempt_in_the_final_slot_can_still_resume() {
+        let policy = AttemptPolicy {
+            max_attempts: Some(1),
+            ..AttemptPolicy::default()
+        };
+        let history = [AttemptRecord {
+            started_at: hours_before(1),
+            graded_at: None,
+            ended_at: None,
+            passed: None,
+        }];
+        assert_eq!(
+            evaluate_attempt_policy(&history, &policy, NOW),
+            PolicyDecision::Allow { ordinal: 1 }
+        );
+    }
+
+    #[test]
+    fn an_attempt_ended_for_diagnostics_counts_and_cools_down() {
+        let history = [AttemptRecord {
+            started_at: hours_before(1),
+            graded_at: None,
+            ended_at: Some(hours_before(0)),
+            passed: None,
+        }];
+        assert!(matches!(
+            evaluate_attempt_policy(&history, &AttemptPolicy::default(), NOW),
+            PolicyDecision::Cooldown {
+                attempts_used: 1,
+                ..
+            }
+        ));
     }
 
     #[test]

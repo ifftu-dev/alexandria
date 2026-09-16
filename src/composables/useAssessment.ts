@@ -14,7 +14,7 @@ import type {
 export function useAssessment() {
   const { invoke } = useLocalApi()
 
-  function startAttempt(skillId: string, integritySessionId: string | null): Promise<StartedAttempt> {
+  function startAttempt(skillId: string, integritySessionId: string): Promise<StartedAttempt> {
     return invoke<StartedAttempt>('assessment_start_attempt', {
       skillId,
       integritySessionId,
@@ -25,11 +25,15 @@ export function useAssessment() {
     return invoke<GradeResult>('assessment_grade', { attemptId, answers })
   }
 
+  function saveDraft(attemptId: string, answers: SubmittedAnswer[]): Promise<void> {
+    return invoke('assessment_save_draft', { attemptId, answers })
+  }
+
   /** Order a goal's skills by prerequisite and annotate each with whether it
    *  can be assessed right now. Drives the goal-assessment sequence. */
   function planGoal(goalSkillIds: string[]): Promise<GoalAssessmentPlan> {
     return invoke<GoalAssessmentPlan>('assessment_plan_goal', { goalSkillIds })
   }
 
-  return { startAttempt, grade, planGoal }
+  return { startAttempt, saveDraft, grade, planGoal }
 }

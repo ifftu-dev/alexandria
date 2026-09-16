@@ -2,8 +2,7 @@
 /**
  * Sandboxed plugin iframe + host↔plugin postMessage bridge (protocol v1).
  *
- * Phase 1 of the community plugin system. See
- * `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
+ * Phase 1 of the community plugin system. See `docs/plugins.md`.
  *
  * Security contract:
  *  - sandbox = `allow-scripts allow-same-origin allow-downloads allow-forms`

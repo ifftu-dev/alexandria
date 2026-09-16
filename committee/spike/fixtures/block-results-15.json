@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "height": "15",
+    "txs_results": [
+      {
+        "code": 0,
+        "data": null,
+        "log": "accepted",
+        "info": "",
+        "gas_wanted": "0",
+        "gas_used": "0",
+        "events": [],
+        "codespace": ""
+      }
+    ],
+    "finalize_block_events": null,
+    "validator_updates": null,
+    "consensus_param_updates": null,
+    "app_hash": "0RNcRMsmoTbZ0DazRRx9unGL+WhCfYRuJr+13IfP3FM="
+  }
+}

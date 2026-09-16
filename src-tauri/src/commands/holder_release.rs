@@ -36,11 +36,12 @@
 //! person does; taking back is something they are owed, and being offline at
 //! the moment of the decision must not quietly cost them it.
 
+use crate::profile::scope::ProfileState as State;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use super::holder_pull::{directories, is_loopback, nonce, proof, Directory};
+use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::evidence;
 use crate::AppState;
 
@@ -141,7 +142,7 @@ async fn signed_send(
 /// "what do they have" than the export already gives.
 #[tauri::command]
 pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsResult, String> {
-    let dirs = directories(&state)?;
+    let dirs = directories(&state).await?;
     let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
     let client = reqwest::Client::new();
 
@@ -160,7 +161,7 @@ pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsR
 
     // Noted as they go past. Whatever else this call was for, it is the moment
     // this device learns that somebody has been accused of something.
-    note_flags(&state, &items)?;
+    note_flags(&state, &items).await?;
 
     Ok(RunsResult { items, problems })
 }
@@ -170,28 +171,48 @@ pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsR
 /// Written from an export that was being read anyway. Nothing is fetched in
 /// order to do this, and a person with no directories configured never gets a
 /// row — the same rule the rest of this module follows.
-fn note_flags(state: &State<'_, AppState>, runs: &[ContestableRun]) -> Result<(), String> {
-    let flagged: Vec<&ContestableRun> = runs.iter().filter(|r| r.integrity_flagged).collect();
+async fn note_flags(state: &State<'_, AppState>, runs: &[ContestableRun]) -> Result<(), String> {
+    let flagged: Vec<ContestableRun> = runs
+        .iter()
+        .filter(|run| run.integrity_flagged)
+        .cloned()
+        .collect();
     if flagged.is_empty() {
         return Ok(());
     }
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    for r in flagged {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            state.profile_lease(),
+            "holder.flags.note",
+            move |db| note_flags_db(db.conn(), &flagged),
+        )
+        .await
+}
+
+fn note_flags_db(conn: &rusqlite::Connection, flagged: &[ContestableRun]) -> Result<(), String> {
+    let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for run in flagged {
         // Left alone if it is already here. The row carries when this device
         // first learned of the flag and whether the learner has been told, and
         // re-reading the export must not reset either.
-        db.conn()
+        transaction
             .execute(
                 "INSERT INTO integrity_flag_notice \
                      (directory_url, run_id, organisation, role_label) \
                  VALUES (?1, ?2, ?3, ?4) \
                  ON CONFLICT (directory_url, run_id) DO NOTHING",
-                rusqlite::params![&r.directory_url, &r.run_id, &r.organisation, &r.role],
+                rusqlite::params![
+                    &run.directory_url,
+                    &run.run_id,
+                    &run.organisation,
+                    &run.role
+                ],
             )
             .map_err(|e| e.to_string())?;
     }
-    Ok(())
+    transaction.commit().map_err(|e| e.to_string())
 }
 
 /// A flag this person has not been told about.
@@ -220,26 +241,34 @@ pub async fn holder_unseen_flags(state: State<'_, AppState>) -> Result<Vec<FlagN
     // call that notices a flag raised since the last time anybody looked.
     let _ = holder_contestable_runs(state.clone()).await?;
 
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    let mut stmt = db
-        .conn()
-        .prepare(
-            "SELECT directory_url, run_id, organisation, role_label \
-             FROM integrity_flag_notice WHERE told_at IS NULL ORDER BY first_seen_at",
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.flags.unseen",
+            |db| {
+                let mut stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT directory_url, run_id, organisation, role_label \
+                         FROM integrity_flag_notice WHERE told_at IS NULL ORDER BY first_seen_at",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok(FlagNotice {
+                            directory_url: row.get(0)?,
+                            run_id: row.get(1)?,
+                            organisation: row.get(2)?,
+                            role: row.get(3)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?;
+                Ok(rows.filter_map(Result::ok).collect())
+            },
         )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok(FlagNotice {
-                directory_url: r.get(0)?,
-                run_id: r.get(1)?,
-                organisation: r.get(2)?,
-                role: r.get(3)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(rows.filter_map(Result::ok).collect())
+        .await
 }
 
 /// Record that the learner has been shown these flags.
@@ -252,18 +281,30 @@ pub async fn holder_mark_flags_seen(
     state: State<'_, AppState>,
     runs: Vec<FlagNotice>,
 ) -> Result<(), String> {
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    for r in runs {
-        db.conn()
-            .execute(
-                "UPDATE integrity_flag_notice SET told_at = datetime('now') \
-                 WHERE directory_url = ?1 AND run_id = ?2 AND told_at IS NULL",
-                rusqlite::params![&r.directory_url, &r.run_id],
-            )
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.flags.mark-seen",
+            move |db| {
+                let transaction = db
+                    .conn()
+                    .unchecked_transaction()
+                    .map_err(|e| e.to_string())?;
+                for run in runs {
+                    transaction
+                        .execute(
+                            "UPDATE integrity_flag_notice SET told_at = datetime('now') \
+                             WHERE directory_url = ?1 AND run_id = ?2 AND told_at IS NULL",
+                            rusqlite::params![run.directory_url, run.run_id],
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                transaction.commit().map_err(|e| e.to_string())
+            },
+        )
+        .await
 }
 
 async fn export_from(
@@ -386,11 +427,18 @@ pub async fn holder_release_evidence(
     https_only(&directory_url)?;
     let (sk, _did) = crate::commands::credentials::load_issuer_key(&state).await?;
 
-    let items = {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        evidence::stored_items(db.conn(), &session_id).map_err(|e| e.to_string())?
-    };
+    let evidence_session_id = session_id.clone();
+    let items = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.release.load-evidence",
+            move |db| {
+                evidence::stored_items(db.conn(), &evidence_session_id).map_err(|e| e.to_string())
+            },
+        )
+        .await?;
     if items.is_empty() {
         return Err(
             "there is no retained evidence for this session — either it was declined, or \
@@ -443,13 +491,8 @@ pub async fn holder_release_evidence(
             // Recorded first. The record is the address a withdrawal is sent
             // to, and if this device dies here the retry on next unlock is what
             // finishes the job.
-            record_release(&state, &session_id, &directory_url, &run_id, sent)?;
-            {
-                let guard = state.db.lock().map_err(|e| e.to_string())?;
-                let db = guard.as_ref().ok_or("database not initialized")?;
-                want_withdrawal(db.conn(), &session_id, &directory_url, &run_id)
-                    .map_err(|e| e.to_string())?;
-            }
+            record_release_and_want_withdrawal(&state, &session_id, &directory_url, &run_id, sent)
+                .await?;
             let taken_back = withdraw_one(&state, &sk, &session_id, &directory_url, &run_id)
                 .await
                 .is_ok();
@@ -473,7 +516,7 @@ pub async fn holder_release_evidence(
         sent += batch.len();
     }
 
-    record_release(&state, &session_id, &directory_url, &run_id, sent)?;
+    record_release(&state, &session_id, &directory_url, &run_id, sent).await?;
 
     Ok(Released { items: sent, bytes })
 }
@@ -484,27 +527,89 @@ pub async fn holder_release_evidence(
 /// copy exists somewhere, and the whole purpose of the row is to be able to
 /// destroy that copy — one written for a release that never landed would send a
 /// withdrawal for something that was never there.
-fn record_release(
+async fn record_release(
     state: &State<'_, AppState>,
     session_id: &str,
     directory_url: &str,
     run_id: &str,
     items: usize,
 ) -> Result<(), String> {
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
+    let session_id = session_id.to_string();
+    let directory_url = directory_url.to_string();
+    let run_id = run_id.to_string();
+    let items = i64::try_from(items).map_err(|_| "release item count is too large")?;
+    state
+        .db_executor
         .execute(
-            "INSERT INTO integrity_evidence_release \
-                 (session_id, directory_url, run_id, item_count) \
-             VALUES (?1, ?2, ?3, ?4) \
-             ON CONFLICT (session_id, directory_url, run_id) DO UPDATE SET \
-                 released_at = datetime('now'), item_count = excluded.item_count, \
-                 revoke_wanted_at = NULL, revoked_at = NULL",
-            rusqlite::params![session_id, directory_url, run_id, items as i64],
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.release.record",
+            move |db| record_release_db(db.conn(), &session_id, &directory_url, &run_id, items),
         )
-        .map_err(|e| e.to_string())?;
+        .await
+}
+
+fn record_release_db(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    directory_url: &str,
+    run_id: &str,
+    items: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO integrity_evidence_release \
+             (session_id, directory_url, run_id, item_count) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT (session_id, directory_url, run_id) DO UPDATE SET \
+             released_at = datetime('now'), item_count = excluded.item_count, \
+             revoke_wanted_at = NULL, revoked_at = NULL",
+        rusqlite::params![session_id, directory_url, run_id, items],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+async fn record_release_and_want_withdrawal(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    directory_url: &str,
+    run_id: &str,
+    items: usize,
+) -> Result<(), String> {
+    let session_id = session_id.to_string();
+    let directory_url = directory_url.to_string();
+    let run_id = run_id.to_string();
+    let items = i64::try_from(items).map_err(|_| "release item count is too large")?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.release.record-partial",
+            move |db| {
+                record_release_and_want_withdrawal_db(
+                    db.conn(),
+                    &session_id,
+                    &directory_url,
+                    &run_id,
+                    items,
+                )
+            },
+        )
+        .await
+}
+
+fn record_release_and_want_withdrawal_db(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    directory_url: &str,
+    run_id: &str,
+    items: i64,
+) -> Result<(), String> {
+    let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    record_release_db(&transaction, session_id, directory_url, run_id, items)?;
+    want_withdrawal(&transaction, session_id, directory_url, run_id).map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())
 }
 
 /// Ask a service to destroy what this person released to it.
@@ -519,12 +624,26 @@ pub async fn holder_withdraw_evidence(
     run_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        want_withdrawal(db.conn(), &session_id, &directory_url, &run_id)
-            .map_err(|e| e.to_string())?;
-    }
+    let wanted_session_id = session_id.clone();
+    let wanted_directory_url = directory_url.clone();
+    let wanted_run_id = run_id.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.withdraw.want",
+            move |db| {
+                want_withdrawal(
+                    db.conn(),
+                    &wanted_session_id,
+                    &wanted_directory_url,
+                    &wanted_run_id,
+                )
+                .map_err(|e| e.to_string())
+            },
+        )
+        .await?;
     let (sk, _did) = crate::commands::credentials::load_issuer_key(&state).await?;
     withdraw_one(&state, &sk, &session_id, &directory_url, &run_id).await
 }
@@ -563,16 +682,27 @@ async fn withdraw_one(
     )
     .await?;
 
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    db.conn()
+    let session_id = session_id.to_string();
+    let directory_url = directory_url.to_string();
+    let run_id = run_id.to_string();
+    state
+        .db_executor
         .execute(
-            "UPDATE integrity_evidence_release SET revoked_at = datetime('now') \
-             WHERE session_id = ?1 AND directory_url = ?2 AND run_id = ?3",
-            rusqlite::params![session_id, directory_url, run_id],
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.withdraw.confirm",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "UPDATE integrity_evidence_release SET revoked_at = datetime('now') \
+                         WHERE session_id = ?1 AND directory_url = ?2 AND run_id = ?3",
+                        rusqlite::params![session_id, directory_url, run_id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
         )
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .await
 }
 
 /// Retry every withdrawal this device still owes.
@@ -590,21 +720,27 @@ async fn withdraw_one(
 /// trying" honestly rather than claiming a deletion that has not happened.
 #[tauri::command]
 pub async fn holder_retry_withdrawals(state: State<'_, AppState>) -> Result<usize, String> {
-    let owed: Vec<(String, String, String)> = {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        let mut stmt = db
-            .conn()
-            .prepare(
-                "SELECT session_id, directory_url, run_id FROM integrity_evidence_release \
-                 WHERE revoke_wanted_at IS NOT NULL AND revoked_at IS NULL",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map_err(|e| e.to_string())?;
-        rows.filter_map(Result::ok).collect()
-    };
+    let owed: Vec<(String, String, String)> = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            state.profile_lease(),
+            "holder.withdraw.list-owed",
+            |db| {
+                let mut stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT session_id, directory_url, run_id FROM integrity_evidence_release \
+                         WHERE revoke_wanted_at IS NOT NULL AND revoked_at IS NULL",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                    .map_err(|e| e.to_string())?;
+                Ok(rows.filter_map(Result::ok).collect())
+            },
+        )
+        .await?;
     if owed.is_empty() {
         return Ok(0);
     }
@@ -861,6 +997,52 @@ mod tests {
 
         want_withdrawal(db.conn(), "s1", "https://svc.example", "run-1").expect("want");
         assert_eq!(owed(&db), 1, "still owed until a service confirms");
+    }
+
+    #[test]
+    fn partial_release_and_withdrawal_intent_commit_atomically() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_withdrawal_intent \
+                 BEFORE UPDATE OF revoke_wanted_at ON integrity_evidence_release \
+                 WHEN NEW.revoke_wanted_at IS NOT NULL \
+                 BEGIN SELECT RAISE(FAIL, 'injected withdrawal failure'); END;",
+            )
+            .expect("failure trigger");
+
+        let error = record_release_and_want_withdrawal_db(
+            db.conn(),
+            "s-partial",
+            "https://svc.example",
+            "run-partial",
+            2,
+        )
+        .expect_err("injected failure");
+        assert!(error.contains("injected withdrawal failure"));
+        let rows: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM integrity_evidence_release WHERE session_id = 's-partial'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("release count");
+        assert_eq!(rows, 0, "release record must roll back with its intent");
+
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_withdrawal_intent")
+            .expect("drop trigger");
+        record_release_and_want_withdrawal_db(
+            db.conn(),
+            "s-partial",
+            "https://svc.example",
+            "run-partial",
+            2,
+        )
+        .expect("retry");
+        assert_eq!(owed(&db), 1);
     }
 
     /// The first asking is the one that counts. A second call must not move the

@@ -25,10 +25,8 @@
 
 use pallas_addresses::Address as PallasAddress;
 use pallas_codec::utils::KeyValuePairs;
-use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_primitives::{Metadatum, MetadatumLabel};
 use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
-use pallas_wallet::PrivateKey;
 
 use crate::cardano::script_refs::ALEXANDRIA_ANCHOR_LABEL;
 use crate::cardano::tx_builder::{self, MIN_UTXO_LOVELACE, TTL_OFFSET};
@@ -103,11 +101,8 @@ pub async fn build_anchor_metadata_tx(
             .map_err(|e| format!("inject_metadata: {e}"))?;
 
     // 5. Sign.
-    // Safety: bytes were derived via pallas-wallet BIP32 in `crypto::wallet`
-    // — the BIP32-Ed25519 clamping invariants are upheld by construction.
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(wallet.payment_key_extended)
-    });
+    let private_key = tx_builder::extended_private_key(&wallet.payment_key_extended)
+        .map_err(|e| format!("payment key: {e}"))?;
     let signed_cbor =
         tx_builder::sign_raw_tx(&with_metadata, &private_key).map_err(|e| format!("sign: {e}"))?;
     let tx_hash = tx_builder::compute_tx_hash(&signed_cbor).map_err(|e| format!("hash: {e}"))?;

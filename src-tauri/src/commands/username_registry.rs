@@ -9,9 +9,9 @@
 
 use std::time::Duration;
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tokio::time::timeout;
 
 /// Hard ceiling per network operation in the registry path. Kademlia
@@ -28,8 +28,25 @@ const DHT_OP_TIMEOUT: Duration = Duration::from_secs(8);
 const DHT_PUBLISH_TIMEOUT: Duration = Duration::from_secs(25);
 
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::username_claim::{best_claim, dht_key, UsernameClaim};
 use crate::AppState;
+
+async fn username_db<T, F>(
+    state: &State<'_, AppState>,
+    workload: DatabaseWorkload,
+    label: &'static str,
+    operation: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&crate::db::Database) -> Result<T, String> + Send + 'static,
+{
+    state
+        .db_executor
+        .execute(workload, state.profile_lease(), label, operation)
+        .await
+}
 
 /// Reserved handles that signup must refuse.
 const RESERVED: &[&str] = &[
@@ -93,6 +110,39 @@ fn cached_claim(conn: &Connection, username: &str) -> Option<UsernameClaim> {
     .map(UsernameClaim::normalize)
 }
 
+fn commit_username_rename(
+    db: &crate::db::Database,
+    username: &str,
+    claim: &UsernameClaim,
+    released_old: Option<&UsernameClaim>,
+) -> Result<(), String> {
+    let tx =
+        rusqlite::Transaction::new_unchecked(db.conn(), rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| e.to_string())?;
+    let updated = tx
+        .execute(
+            "UPDATE local_identity SET username = ?1, updated_at = datetime('now') WHERE id = 1",
+            [username],
+        )
+        .map_err(|e| e.to_string())?;
+    if updated != 1 {
+        return Err("local identity not found".to_string());
+    }
+    cache_claim(&tx, claim)?;
+    if let Some(old) = released_old {
+        cache_claim(&tx, old)?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
+fn current_unix_seconds() -> Result<i64, String> {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "system clock is before the Unix epoch".to_string())?
+        .as_secs();
+    i64::try_from(seconds).map_err(|_| "system time is outside the supported range".to_string())
+}
+
 /// Gather every claim visible for a username: DHT records (when the
 /// node is up) plus the local cache, verified + deterministically
 /// ordered. Returns `(winner, dht_reachable)`.
@@ -101,13 +151,33 @@ pub(crate) async fn resolve_claims(
     username: &str,
 ) -> Result<(Option<UsernameClaim>, bool), String> {
     let mut candidates: Vec<UsernameClaim> = Vec::new();
-    {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        if let Some(db) = guard.as_ref() {
-            if let Some(c) = cached_claim(db.conn(), username) {
-                candidates.push(c);
-            }
-        }
+    let cached_username = username.to_string();
+    let (cached, verified_sig) = username_db(
+        state,
+        DatabaseWorkload::Learner,
+        "username.resolve-cache",
+        move |db| {
+            let cached = cached_claim(db.conn(), &cached_username);
+            let verified_sig = db
+                .conn()
+                .query_row(
+                    "SELECT claim_json FROM username_claims
+                     WHERE username = ?1 AND anchor_verified = 1",
+                    [&cached_username],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok()
+                .and_then(|json| {
+                    serde_json::from_str::<UsernameClaim>(&json)
+                        .ok()
+                        .map(|claim| claim.sig)
+                });
+            Ok((cached, verified_sig))
+        },
+    )
+    .await?;
+    if let Some(cached) = cached {
+        candidates.push(cached);
     }
 
     let mut dht_reachable = false;
@@ -131,24 +201,6 @@ pub(crate) async fn resolve_claims(
                 // the digest on-chain (anchor_verified, set by the
                 // username_anchor tick). An unverified anchor is
                 // stripped so a forged tx_hash can't fake tier 2.
-                let verified_sig: Option<String> = {
-                    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-                    guard.as_ref().and_then(|db| {
-                        db.conn()
-                            .query_row(
-                                "SELECT claim_json FROM username_claims
-                                 WHERE username = ?1 AND anchor_verified = 1",
-                                [username],
-                                |r| r.get::<_, String>(0),
-                            )
-                            .ok()
-                            .and_then(|json| {
-                                serde_json::from_str::<UsernameClaim>(&json)
-                                    .ok()
-                                    .map(|c| c.sig)
-                            })
-                    })
-                };
                 for c in candidates.iter_mut() {
                     if c.anchor.is_some() && verified_sig.as_deref() != Some(c.sig.as_str()) {
                         c.anchor = None;
@@ -159,11 +211,17 @@ pub(crate) async fn resolve_claims(
     }
 
     let winner = best_claim(candidates);
-    if let Some(ref w) = winner {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        if let Some(db) = guard.as_ref() {
-            let _ = cache_claim(db.conn(), w);
-        }
+    if let Some(winner_to_cache) = winner.clone() {
+        username_db(
+            state,
+            DatabaseWorkload::Learner,
+            "username.cache-winner",
+            move |db| {
+                let _ = cache_claim(db.conn(), &winner_to_cache);
+                Ok(())
+            },
+        )
+        .await?;
     }
     Ok((winner, dht_reachable))
 }
@@ -249,18 +307,22 @@ pub async fn resolve_username(
 #[tauri::command]
 pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim, String> {
     // Username from the identity row.
-    let username: String = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .query_row(
-                "SELECT username FROM local_identity WHERE id = 1",
-                [],
-                |r| r.get::<_, Option<String>>(0),
-            )
-            .map_err(|e| e.to_string())?
-            .ok_or("no username set on this profile")?
-    };
+    let username = username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.claim-identity",
+        |db| {
+            db.conn()
+                .query_row(
+                    "SELECT username FROM local_identity WHERE id = 1",
+                    [],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .map_err(|e| e.to_string())?
+                .ok_or("no username set on this profile".to_string())
+        },
+    )
+    .await?;
     let username = crate::domain::identity::validate_username(&username)?;
     if is_reserved(&username) {
         return Err("this username is reserved".to_string());
@@ -285,10 +347,7 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
         }
     }
 
-    let claimed_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let claimed_at = current_unix_seconds()?;
     // Re-publishing keeps the ORIGINAL claim time — refreshing a
     // record must not reset your priority. Re-claiming your own
     // released name within the grace window undoes the release.
@@ -302,11 +361,14 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
 
     // Cache locally first; DHT publish is best-effort (offline nodes
     // claim locally and the unlock-time republish wins the race later).
-    {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        cache_claim(db.conn(), &claim)?;
-    }
+    let initial_claim = claim.clone();
+    username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.cache-claim",
+        move |db| cache_claim(db.conn(), &initial_claim),
+    )
+    .await?;
 
     // Upgrade to tier 1: gather countersignatures from EVERY trusted
     // relay (receipt diversity — ordering uses the median time, so one
@@ -333,7 +395,7 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
                 )
                 .await;
                 let Ok(attempt) = attempt else {
-                    log::warn!("relay receipt request timed out for @{username}");
+                    log::warn!("username relay receipt request timed out");
                     continue;
                 };
                 match attempt {
@@ -369,11 +431,14 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
     }
 
     // Re-cache with receipts attached (tier 1) and publish.
-    {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        cache_claim(db.conn(), &claim)?;
-    }
+    let receipted_claim = claim.clone();
+    username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.cache-receipted-claim",
+        move |db| cache_claim(db.conn(), &receipted_claim),
+    )
+    .await?;
     let payload = serde_json::to_vec(&claim).map_err(|e| e.to_string())?;
     {
         let node_guard = state.p2p_node.lock().await;
@@ -415,23 +480,27 @@ pub struct UsernameConflict {
 pub async fn check_my_username_conflict(
     state: State<'_, AppState>,
 ) -> Result<Option<UsernameConflict>, String> {
-    let (username, my_did) = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        let username: Option<String> = db
-            .conn()
-            .query_row(
-                "SELECT username FROM local_identity WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        let my_did = crate::settings::SettingsStore::get(
-            db.conn(),
-            crate::settings::registry::keys::IDENTITY_LOCAL_DID,
-        );
-        (username, my_did)
-    };
+    let (username, my_did) = username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.conflict-identity",
+        |db| {
+            let username: Option<String> = db
+                .conn()
+                .query_row(
+                    "SELECT username FROM local_identity WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            let my_did = crate::settings::SettingsStore::get(
+                db.conn(),
+                crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+            );
+            Ok((username, my_did))
+        },
+    )
+    .await?;
     let Some(username) = username else {
         return Ok(None);
     };
@@ -462,14 +531,18 @@ pub async fn set_username(
         return Err("this username is reserved".to_string());
     }
 
-    let my_did = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        crate::settings::SettingsStore::get(
-            db.conn(),
-            crate::settings::registry::keys::IDENTITY_LOCAL_DID,
-        )
-    };
+    let my_did = username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.rename-did",
+        |db| {
+            Ok(crate::settings::SettingsStore::get(
+                db.conn(),
+                crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+            ))
+        },
+    )
+    .await?;
     let (winner, _) = resolve_claims(&state, &username).await?;
     if let Some(w) = winner {
         if w.did != my_did {
@@ -480,33 +553,26 @@ pub async fn set_username(
     // Tombstone the old handle: a signed release frees it (at relays
     // and in ordering) after the grace window, instead of leaving it
     // squatted-by-absence forever.
-    let old_released: Option<UsernameClaim> = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        let old_username: Option<String> = db
-            .conn()
-            .query_row(
-                "SELECT username FROM local_identity WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
-            .ok()
-            .flatten();
-        old_username
-            .filter(|old| *old != username)
-            .and_then(|old| cached_claim(db.conn(), &old))
-    };
-
-    {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .execute(
-                "UPDATE local_identity SET username = ?1, updated_at = datetime('now') WHERE id = 1",
-                [&username],
-            )
-            .map_err(|e| e.to_string())?;
-    }
+    let replacement_username = username.clone();
+    let old_released = username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.rename-current",
+        move |db| {
+            let old_username: Option<String> = db
+                .conn()
+                .query_row(
+                    "SELECT username FROM local_identity WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(old_username
+                .filter(|old| *old != replacement_username)
+                .and_then(|old| cached_claim(db.conn(), &old)))
+        },
+    )
+    .await?;
 
     // Sign + cache the claim locally so the rename is durable and the
     // UI returns immediately. Receipt + DHT publish run in the
@@ -522,85 +588,100 @@ pub async fn set_username(
         w.signing_key.clone()
     };
     let did = crate::crypto::did::derive_did_key(&signing_key);
-    let claimed_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let claimed_at = current_unix_seconds()?;
     let claim = UsernameClaim::create(&username, &did, claimed_at, &signing_key);
     let released_old = old_released.filter(|c| c.did == did.as_str()).map(|mut c| {
         c.release(claimed_at, &signing_key);
         c
     });
-    {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        cache_claim(db.conn(), &claim)?;
-        if let Some(ref old) = released_old {
-            cache_claim(db.conn(), old)?;
-        }
-    }
+    let persisted_username = username.clone();
+    let persisted_claim = claim.clone();
+    let persisted_release = released_old.clone();
+    username_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "username.rename-commit",
+        move |db| {
+            commit_username_rename(
+                db,
+                &persisted_username,
+                &persisted_claim,
+                persisted_release.as_ref(),
+            )
+        },
+    )
+    .await?;
 
-    let db = state.db.clone();
+    let db_executor = state.db_executor.clone();
+    let background_lease = state.profile_lease();
     let node_handle = state.p2p_node.clone();
     let bg_claim = claim.clone();
     let bg_released = released_old;
-    tauri::async_runtime::spawn(async move {
-        let node_guard = node_handle.lock().await;
-        let Some(node) = node_guard.as_ref() else {
-            return;
-        };
-        // Receipts (tier 1) from every relay — best-effort.
-        let mut enriched = bg_claim;
-        for relay in crate::p2p::discovery::relay_peer_ids() {
-            let req = crate::p2p::username_reg::ReceiptRequest {
-                claim: enriched.clone(),
+    state
+        .profile_operations
+        .spawn_job(async move {
+            let node_guard = node_handle.lock().await;
+            let Some(node) = node_guard.as_ref() else {
+                return;
             };
-            if let Ok(Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt))) = timeout(
-                DHT_PUBLISH_TIMEOUT,
-                node.request_username_receipt(relay, req),
-            )
-            .await
-            {
-                if crate::p2p::username_reg::verify_receipt(&enriched.sig, &receipt) {
-                    enriched.add_receipt(receipt);
-                }
-            }
-        }
-        if !enriched.receipts.is_empty() {
-            if let Ok(guard) = db.lock() {
-                if let Some(database) = guard.as_ref() {
-                    let _ = cache_claim(database.conn(), &enriched);
-                }
-            }
-        }
-        if let Ok(payload) = serde_json::to_vec(&enriched) {
-            let _ = timeout(
-                DHT_PUBLISH_TIMEOUT,
-                node.put_dht_record(dht_key(&enriched.username), payload),
-            )
-            .await;
-        }
-        // Publish the old handle's tombstone: DHT record + a receipt
-        // round to each relay so their first-seen stores learn the
-        // release and free the name after grace.
-        if let Some(old) = bg_released {
-            if let Ok(payload) = serde_json::to_vec(&old) {
-                let _ = timeout(
-                    DHT_PUBLISH_TIMEOUT,
-                    node.put_dht_record(dht_key(&old.username), payload),
-                )
-                .await;
-            }
+            // Receipts (tier 1) from every relay — best-effort.
+            let mut enriched = bg_claim;
             for relay in crate::p2p::discovery::relay_peer_ids() {
-                let req = crate::p2p::username_reg::ReceiptRequest { claim: old.clone() };
+                let req = crate::p2p::username_reg::ReceiptRequest {
+                    claim: enriched.clone(),
+                };
+                if let Ok(Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt))) =
+                    timeout(
+                        DHT_PUBLISH_TIMEOUT,
+                        node.request_username_receipt(relay, req),
+                    )
+                    .await
+                {
+                    if crate::p2p::username_reg::verify_receipt(&enriched.sig, &receipt) {
+                        enriched.add_receipt(receipt);
+                    }
+                }
+            }
+            if let Ok(payload) = serde_json::to_vec(&enriched) {
                 let _ = timeout(
                     DHT_PUBLISH_TIMEOUT,
-                    node.request_username_receipt(relay, req),
+                    node.put_dht_record(dht_key(&enriched.username), payload),
                 )
                 .await;
             }
-        }
-    });
+            // Publish the old handle's tombstone: DHT record + a receipt
+            // round to each relay so their first-seen stores learn the
+            // release and free the name after grace.
+            if let Some(old) = bg_released {
+                if let Ok(payload) = serde_json::to_vec(&old) {
+                    let _ = timeout(
+                        DHT_PUBLISH_TIMEOUT,
+                        node.put_dht_record(dht_key(&old.username), payload),
+                    )
+                    .await;
+                }
+                for relay in crate::p2p::discovery::relay_peer_ids() {
+                    let req = crate::p2p::username_reg::ReceiptRequest { claim: old.clone() };
+                    let _ = timeout(
+                        DHT_PUBLISH_TIMEOUT,
+                        node.request_username_receipt(relay, req),
+                    )
+                    .await;
+                }
+            }
+            drop(node_guard);
+            if !enriched.receipts.is_empty() {
+                let _ = db_executor
+                    .execute(
+                        DatabaseWorkload::Background,
+                        background_lease,
+                        "username.cache-background-receipts",
+                        move |db| cache_claim(db.conn(), &enriched),
+                    )
+                    .await;
+            }
+        })
+        .await;
 
     Ok(claim)
 }
@@ -624,4 +705,80 @@ pub async fn resolve_username_did_via_relay(username: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use ed25519_dalek::SigningKey;
+
+    use super::*;
+    use crate::crypto::did::derive_did_key;
+    use crate::db::Database;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("open database");
+        db.run_migrations().expect("run migrations");
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity \
+                 (id, stake_address, payment_address, username) \
+                 VALUES (1, 'stake_test1owner', 'addr_test1owner', 'oldname')",
+                [],
+            )
+            .expect("insert identity");
+        db
+    }
+
+    fn claim(username: &str) -> UsernameClaim {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let did = derive_did_key(&key);
+        UsernameClaim::create(username, &did, 1_700_000_000, &key)
+    }
+
+    #[test]
+    fn username_rename_updates_identity_and_claim_together() {
+        let db = test_db();
+        let new_claim = claim("newname");
+        commit_username_rename(&db, "newname", &new_claim, None).unwrap();
+
+        let username: String = db
+            .conn()
+            .query_row(
+                "SELECT username FROM local_identity WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(username, "newname");
+        assert_eq!(
+            cached_claim(db.conn(), "newname").map(|stored| stored.sig),
+            Some(new_claim.sig)
+        );
+    }
+
+    #[test]
+    fn username_rename_rolls_back_when_claim_persistence_fails() {
+        let db = test_db();
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_username_claim \
+                 BEFORE INSERT ON username_claims \
+                 BEGIN SELECT RAISE(FAIL, 'injected claim failure'); END;",
+            )
+            .unwrap();
+
+        let error = commit_username_rename(&db, "newname", &claim("newname"), None)
+            .expect_err("claim failure must abort the identity update");
+        assert!(error.contains("injected claim failure"));
+        let username: String = db
+            .conn()
+            .query_row(
+                "SELECT username FROM local_identity WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(username, "oldname");
+        assert!(cached_claim(db.conn(), "newname").is_none());
+    }
 }

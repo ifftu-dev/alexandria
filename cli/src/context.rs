@@ -218,14 +218,14 @@ impl ProjectContext {
 
 /// Pick which profile's data to operate on.
 ///
-/// Deserializes the app's own `profiles_index.json` through `app_lib`, so the
-/// CLI cannot drift from the format the app writes.
+/// Loads the app's own `profiles_index.json` through `app_lib`'s version and
+/// network-identity gate, so the CLI cannot select a profile the app refuses.
 fn resolve_profile(app_data_dir: &Path, wanted: Option<&str>) -> Result<ProfileSelection> {
-    use app_lib::profile::index::{ProfileIndex, INDEX_FILENAME};
-    use app_lib::profile::manager::PROFILES_DIRNAME;
+    use app_lib::profile::index::INDEX_FILENAME;
+    use app_lib::profile::manager::{load_network_index, PROFILES_DIRNAME};
 
     let index_path = app_data_dir.join(INDEX_FILENAME);
-    let Ok(raw) = std::fs::read_to_string(&index_path) else {
+    if !index_path.exists() {
         // No index: either a pre-migration install or the app has never run.
         // Either way the legacy paths are the only ones that could exist.
         if let Some(name) = wanted {
@@ -236,10 +236,11 @@ fn resolve_profile(app_data_dir: &Path, wanted: Option<&str>) -> Result<ProfileS
             );
         }
         return Ok(ProfileSelection::Legacy);
-    };
+    }
 
-    let index: ProfileIndex = serde_json::from_str(&raw)
-        .with_context(|| format!("Failed to parse {}", index_path.display()))?;
+    // Same version and network-identity gate the app applies on open.
+    let index = load_network_index(app_data_dir)
+        .with_context(|| format!("Failed to load {}", index_path.display()))?;
 
     if index.profiles.is_empty() {
         return Ok(ProfileSelection::Legacy);
@@ -431,10 +432,12 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(
             base.join("profiles_index.json"),
-            r#"{"version":1,"profiles":[
-                {"id":"11111111-1111-4111-8111-111111111111","display_name":"Older",
+            r#"{"version":2,"profiles":[
+                {"id":"11111111-1111-4111-8111-111111111111","network_id":"preprod",
+                 "display_name":"Older",
                  "created_at":"2026-01-01T00:00:00Z","last_unlocked_at":"2026-01-02T00:00:00Z"},
-                {"id":"22222222-2222-4222-8222-222222222222","display_name":"Newer",
+                {"id":"22222222-2222-4222-8222-222222222222","network_id":"preprod",
+                 "display_name":"Newer",
                  "created_at":"2026-01-01T00:00:00Z","last_unlocked_at":"2026-06-01T00:00:00Z"}
             ]}"#,
         )
@@ -479,6 +482,40 @@ mod tests {
         // Asking for a named profile when there is no index is an error, not a
         // silent fall back to the wrong data.
         assert!(resolve_profile(&base, Some("whatever")).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn resolve_profile_refuses_networkless_and_foreign_network_indexes() {
+        let base = std::env::temp_dir().join("alexandria-ctx-network-test");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let index_path = base.join("profiles_index.json");
+
+        // A version-1 index predates network binding; even with a network
+        // field present it must not be accepted.
+        std::fs::write(
+            &index_path,
+            r#"{"version":1,"profiles":[
+                {"id":"11111111-1111-4111-8111-111111111111","network_id":"preprod",
+                 "display_name":"Old","created_at":"2026-01-01T00:00:00Z"}
+            ]}"#,
+        )
+        .unwrap();
+        assert!(resolve_profile(&base, None).is_err());
+
+        // A profile bound to another network is refused rather than selected.
+        std::fs::write(
+            &index_path,
+            r#"{"version":2,"profiles":[
+                {"id":"11111111-1111-4111-8111-111111111111","network_id":"mainnet",
+                 "display_name":"Foreign","created_at":"2026-01-01T00:00:00Z"}
+            ]}"#,
+        )
+        .unwrap();
+        let err = format!("{:#}", resolve_profile(&base, Some("Foreign")).unwrap_err());
+        assert!(err.contains("mainnet"), "got: {err}");
+
         let _ = std::fs::remove_dir_all(&base);
     }
 

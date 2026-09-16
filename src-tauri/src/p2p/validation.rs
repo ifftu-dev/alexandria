@@ -10,11 +10,15 @@
 //!    `docs/stake-pubkey-registry.md` and [`crate::p2p::registry`].
 //! 3. **Freshness**: Timestamp is within ±5 minutes of local time.
 //! 4. **Deduplication**: Blake2b-256 hash of payload not in seen cache.
-//! 5. **Schema**: Payload is valid JSON (topic-specific schema validation
-//!    is deferred to the domain handlers in later PRs).
+//! 5. **Schema**: Payload is strict JSON within
+//!    [`GOSSIP_PAYLOAD_JSON_LIMITS`]: no duplicate keys, unsafe numbers or
+//!    trailing bytes (topic-specific decoding happens in the domain handlers).
 //! 6. **Authority**: For taxonomy updates, verify the signer is a DAO
 //!    committee member (the domain handler does the heavy check; this
 //!    step is a lightweight gate).
+//!
+//! The envelope itself is decoded under [`GOSSIP_ENVELOPE_JSON_LIMITS`]
+//! before any step runs; see [`decode_envelope`].
 //!
 //! Per spec (§7.3): "Invalid messages are dropped silently. Peers that
 //! repeatedly send invalid messages are scored down by GossipSub's
@@ -24,6 +28,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use alexandria_verify::json::{decode_untrusted, parse_untrusted, UntrustedJsonError};
 use lru::LruCache;
 use thiserror::Error;
 
@@ -32,7 +37,22 @@ use crate::db::Database;
 
 use super::registry;
 use super::signing::verify_gossip_signature;
-use super::types::{SignedGossipMessage, TOPIC_TAXONOMY};
+use super::types::{
+    PeerExchangeMessage, SignedGossipMessage, GOSSIP_ENVELOPE_JSON_LIMITS,
+    GOSSIP_PAYLOAD_JSON_LIMITS, PEER_EXCHANGE_JSON_LIMITS, TOPIC_TAXONOMY,
+};
+
+/// Decode raw gossip bytes as a signed envelope under
+/// [`GOSSIP_ENVELOPE_JSON_LIMITS`]. A failure is a protocol violation.
+pub(crate) fn decode_envelope(data: &[u8]) -> Result<SignedGossipMessage, UntrustedJsonError> {
+    decode_untrusted(data, &GOSSIP_ENVELOPE_JSON_LIMITS)
+}
+
+/// Decode an unsigned peer exchange announcement under
+/// [`PEER_EXCHANGE_JSON_LIMITS`].
+pub(crate) fn decode_peer_exchange(data: &[u8]) -> Result<PeerExchangeMessage, UntrustedJsonError> {
+    decode_untrusted(data, &PEER_EXCHANGE_JSON_LIMITS)
+}
 
 /// Maximum age of a message in seconds (5 minutes per spec §7.3).
 const FRESHNESS_WINDOW_SECS: u64 = 5 * 60;
@@ -69,9 +89,17 @@ pub type ValidationResult = Result<(), ValidationError>;
 /// Holds an LRU dedup cache and an optional `Database` handle. The
 /// handle is used by [`check_identity_binding`](MessageValidator::check_identity_binding)
 /// to look up `(stake_address, public_key)` bindings in
-/// `stake_pubkey_registry` for privileged topics. Validators without a
-/// DB handle (legacy `start_node` entry, unit tests) fail-open on the
-/// identity check — they're intended for non-privileged paths only.
+/// `stake_pubkey_registry` for privileged topics, and only tests
+/// construct a validator that carries one.
+///
+/// The running node never does. Its event loop must not lock the profile
+/// database, so it runs the identity binding itself as a profile-fenced
+/// executor job — `registry::check_message` between
+/// [`check_before_identity`](Self::check_before_identity) and
+/// [`check_after_identity`](Self::check_after_identity) — and reaches
+/// [`validate`](Self::validate) only for non-privileged topics. A
+/// privileged message reaching the fail-open branch below therefore means
+/// the node started without a database handle at all.
 ///
 /// Thread-safe via interior mutability (`Mutex`) so it can be shared
 /// across the async swarm event loop.
@@ -99,9 +127,14 @@ impl MessageValidator {
         }
     }
 
-    /// Create a validator wired to the active profile's database so the
-    /// identity binding step can consult `stake_pubkey_registry`.
-    pub fn with_db(db: Arc<Mutex<Option<Database>>>) -> Self {
+    /// Create a validator that consults `stake_pubkey_registry`
+    /// synchronously through a shared database handle. Test-only: the swarm
+    /// event loop must not lock the profile database, so production runs the
+    /// identity step as a profile-fenced executor job between
+    /// [`check_before_identity`](Self::check_before_identity) and
+    /// [`check_after_identity`](Self::check_after_identity).
+    #[cfg(test)]
+    pub(crate) fn with_db(db: Arc<Mutex<Option<Database>>>) -> Self {
         Self {
             seen: Mutex::new(LruCache::new(NonZeroUsize::new(DEDUP_CACHE_MAX).unwrap())),
             db: Some(db),
@@ -114,13 +147,24 @@ impl MessageValidator {
     /// `ValidationError` encountered. Checks run in order:
     /// signature → identity → freshness → dedup → schema → authority.
     pub fn validate(&self, message: &SignedGossipMessage) -> ValidationResult {
-        self.check_signature(message)?;
+        self.check_before_identity(message)?;
         self.check_identity_binding(message)?;
+        self.check_after_identity(message)
+    }
+
+    /// The pipeline steps that precede the registry identity binding.
+    pub(crate) fn check_before_identity(&self, message: &SignedGossipMessage) -> ValidationResult {
+        self.check_signature(message)
+    }
+
+    /// The pipeline steps that follow the registry identity binding. A caller
+    /// running the binding asynchronously invokes this only after it passed,
+    /// so a rejected message is never recorded in the dedup cache.
+    pub(crate) fn check_after_identity(&self, message: &SignedGossipMessage) -> ValidationResult {
         self.check_freshness(message)?;
         self.check_dedup(message)?;
         self.check_schema(message)?;
-        self.check_authority(message)?;
-        Ok(())
+        self.check_authority(message)
     }
 
     /// Step 1: Verify the Ed25519 signature over the payload.
@@ -132,8 +176,9 @@ impl MessageValidator {
     /// Step 1.5: identity binding via the persistent stake-pubkey
     /// registry.
     ///
-    /// For **privileged** topics (taxonomy, governance, Sentinel
-    /// priors, plugin DAO attestations) the
+    /// For **privileged** topics (taxonomy, governance, Sentinel priors,
+    /// goal templates, question banks, and the reserved plugin-attestation
+    /// compatibility topic) the
     /// `(stake_address, public_key)` pair MUST appear in
     /// `stake_pubkey_registry` within a window covering the current
     /// time. Non-privileged topics skip the check so arbitrary peers
@@ -234,41 +279,37 @@ impl MessageValidator {
         Ok(())
     }
 
-    /// Step 4: Validate that the payload is well-formed JSON.
+    /// Step 4: Validate that the payload is strict JSON within
+    /// [`GOSSIP_PAYLOAD_JSON_LIMITS`].
     ///
-    /// Topic-specific schema validation (e.g., verifying a catalog
-    /// message has the required `course_id`, `title`, etc.) is deferred
-    /// to the domain handlers in later PRs (catalog PR 3, evidence PR 4,
-    /// taxonomy PR 5). This check only verifies syntactic validity.
+    /// Duplicate keys, numbers outside JavaScript's exact integer range,
+    /// hostile nesting, oversized collections and trailing bytes are refused
+    /// here, so no topic handler ever decodes them. Topic-specific decoding
+    /// and field checks remain the domain handlers' job.
     fn check_schema(&self, message: &SignedGossipMessage) -> ValidationResult {
-        // Payload must be valid JSON
-        serde_json::from_slice::<serde_json::Value>(&message.payload)
-            .map_err(|e| ValidationError::InvalidPayload(format!("invalid JSON: {e}")))?;
+        parse_untrusted(&message.payload, &GOSSIP_PAYLOAD_JSON_LIMITS)
+            .map_err(|e| ValidationError::InvalidPayload(e.to_string()))?;
         Ok(())
     }
 
     /// Step 5: Authority check for privileged topics.
     ///
-    /// Per spec §7.3: "For taxonomy updates, verify the signer is a
-    /// DAO committee member."
-    ///
     /// The validation pipeline runs without DB access (it lives in the
-    /// swarm event loop). Full authority verification — checking that
-    /// the signer is a DAO committee member via `governance_dao_members`
-    /// — is performed by the taxonomy domain handler (`p2p::taxonomy::
-    /// handle_taxonomy_message`) which has DB access. This step does a
-    /// lightweight topic-level check only.
+    /// swarm event loop), so this step does a lightweight topic-level
+    /// check only. The retired taxonomy handler (`p2p::taxonomy::
+    /// handle_taxonomy_message`) rejects every message before any database
+    /// access.
     fn check_authority(&self, message: &SignedGossipMessage) -> ValidationResult {
         if message.topic == TOPIC_TAXONOMY {
             // Lightweight check: taxonomy messages must have a non-empty
-            // stake address (the domain handler verifies committee membership).
+            // stake address (the retired domain handler rejects them).
             if message.stake_address.is_empty() {
                 return Err(ValidationError::Unauthorized(
                     "taxonomy update missing stake_address".into(),
                 ));
             }
             log::debug!(
-                "Taxonomy message from {} — committee check deferred to domain handler",
+                "Taxonomy message from {} — the retired domain handler rejects it",
                 message.stake_address
             );
         }
@@ -332,6 +373,98 @@ mod tests {
             key,
             "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
         )
+    }
+
+    const STAKE: &str = "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4";
+
+    fn payload_error(validator: &MessageValidator, key: &SigningKey, payload: &[u8]) -> String {
+        let message = sign_gossip_message("/alexandria/catalog/1.0", payload.to_vec(), key, STAKE);
+        match validator.check_schema(&message) {
+            Err(ValidationError::InvalidPayload(reason)) => reason,
+            other => panic!("expected an invalid payload, got {other:?}"),
+        }
+    }
+
+    // -- Strict bounded JSON --
+
+    #[test]
+    fn payload_limits_accept_the_boundary_and_refuse_one_more() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+        let max = GOSSIP_PAYLOAD_JSON_LIMITS.max_bytes;
+        let mut exact = b"{\"test\":true}".to_vec();
+        exact.resize(max, b' ');
+        let message = sign_gossip_message("/alexandria/catalog/1.0", exact.clone(), &key, STAKE);
+        assert!(validator.check_schema(&message).is_ok());
+        exact.push(b' ');
+        assert!(payload_error(&validator, &key, &exact).contains("exceeds"));
+
+        let depth = GOSSIP_PAYLOAD_JSON_LIMITS.max_depth;
+        let nested = |levels: usize| format!("{}{}", "[".repeat(levels), "]".repeat(levels));
+        let message = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            nested(depth).into_bytes(),
+            &key,
+            STAKE,
+        );
+        assert!(validator.check_schema(&message).is_ok());
+        assert!(payload_error(&validator, &key, nested(depth + 1).as_bytes()).contains("depth"));
+    }
+
+    #[test]
+    fn ambiguous_payloads_never_reach_topic_handlers() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+        assert!(
+            payload_error(&validator, &key, br#"{"course_id":"a","course_id":"b"}"#)
+                .contains("duplicate")
+        );
+        assert!(
+            payload_error(&validator, &key, br#"{"version":9007199254740992}"#)
+                .contains("exactly representable")
+        );
+        assert!(payload_error(&validator, &key, br#"{"test":true} {}"#).contains("invalid JSON"));
+    }
+
+    #[test]
+    fn envelopes_and_peer_exchange_are_decoded_under_their_limits() {
+        let key = test_key();
+        let encoded = serde_json::to_vec(&valid_message(&key, "/alexandria/catalog/1.0")).unwrap();
+        assert!(decode_envelope(&encoded).is_ok());
+
+        let max = GOSSIP_ENVELOPE_JSON_LIMITS.max_bytes;
+        let mut exact = encoded.clone();
+        exact.resize(max, b' ');
+        assert!(decode_envelope(&exact).is_ok());
+        exact.push(b' ');
+        assert_eq!(
+            decode_envelope(&exact).unwrap_err(),
+            UntrustedJsonError::TooLarge { max }
+        );
+
+        let rest = std::str::from_utf8(&encoded)
+            .unwrap()
+            .strip_prefix('{')
+            .unwrap();
+        let duplicated = format!("{{\"topic\":\"/alexandria/opinions/1.0\",{rest}");
+        assert_eq!(
+            decode_envelope(duplicated.as_bytes()).unwrap_err(),
+            UntrustedJsonError::DuplicateKey("topic".into())
+        );
+
+        assert!(
+            decode_peer_exchange(br#"{"peer_id":"p","addresses":["/ip4/1.2.3.4/tcp/1"]}"#).is_ok()
+        );
+        let crowded = serde_json::json!({
+            "peer_id": "p",
+            "addresses": vec!["/ip4/1.2.3.4/tcp/1"; PEER_EXCHANGE_JSON_LIMITS.max_array_len + 1],
+        });
+        assert_eq!(
+            decode_peer_exchange(crowded.to_string().as_bytes()).unwrap_err(),
+            UntrustedJsonError::TooManyElements {
+                max: PEER_EXCHANGE_JSON_LIMITS.max_array_len
+            }
+        );
     }
 
     // -- Signature tests --
@@ -449,6 +582,72 @@ mod tests {
         assert!(validator.validate(&msg1).is_ok());
         assert!(validator.validate(&msg2).is_ok());
         assert_eq!(validator.seen_count(), 2);
+    }
+
+    #[test]
+    fn dedup_capacity_evicts_only_oldest_unique_envelope() {
+        let key = test_key();
+        let messages: Vec<_> = (0..3)
+            .map(|id| {
+                sign_gossip_message(
+                    "/alexandria/catalog/1.0",
+                    format!("{{\"id\":{id}}}").into_bytes(),
+                    &key,
+                    "stake_test_dedup",
+                )
+            })
+            .collect();
+        let validator = MessageValidator {
+            seen: Mutex::new(LruCache::new(NonZeroUsize::new(2).unwrap())),
+            db: None,
+        };
+        assert!(validator.validate(&messages[0]).is_ok());
+        assert!(validator.validate(&messages[1]).is_ok());
+        assert!(matches!(
+            validator.validate(&messages[0]),
+            Err(ValidationError::Duplicate { .. })
+        ));
+        assert!(validator.validate(&messages[2]).is_ok());
+        assert_eq!(validator.seen_count(), 2);
+        for message in &messages[1..] {
+            assert!(matches!(
+                validator.validate(message),
+                Err(ValidationError::Duplicate { .. })
+            ));
+        }
+        assert!(validator.validate(&messages[0]).is_ok());
+        assert_eq!(validator.seen_count(), 2);
+    }
+
+    #[test]
+    fn concurrent_duplicate_validation_accepts_once() {
+        let key = test_key();
+        let message = valid_message(&key, "/alexandria/catalog/1.0");
+        let validator = MessageValidator::new();
+        let barrier = std::sync::Barrier::new(8);
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        validator.validate(&message)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ValidationError::Duplicate { .. })))
+                .count(),
+            7
+        );
+        assert_eq!(validator.seen_count(), 1);
     }
 
     // -- Identity binding tests --

@@ -1,9 +1,9 @@
 # Community Plugin System
 
 **Status:** Phase 1–2 implemented (iframe-sandboxed interactive plugins,
-WASM graders, capability consent, management UI). Phase 3 (P2P discovery +
-DAO attestation) types and gossip topics are in place; discovery UI is
-partial.
+WASM graders, capability consent, management UI). Phase-3 P2P catalog
+discovery is partial. The earlier Plugin DAO attestation authority is retired;
+its gossip topic remains reserved compatibility traffic only.
 
 ## Overview
 
@@ -72,7 +72,6 @@ away automatically when either endpoint is uninstalled.
 | `asset_protocol` | `plugin://<cid>/` URI handler; injects the bootstrap script + per-plugin nonce CSP |
 | `builtins` | First-party bundles embedded via `include_bytes!`, installed (and refreshed) at startup; prunes stale builtin rows when a builtin's manifest/CID changes |
 | `catalog` | Discovery cache for the `/alexandria/plugins/1.0` gossip topic |
-| `attestation` | Plugin DAO multi-sig attestation verify + store |
 | `wasm_runtime` | Wasmtime grader sandbox (every platform — see the `grader` cfg in `build.rs`) |
 | `irl_review` | Local instructor-review inbox (see below) |
 
@@ -83,7 +82,9 @@ uninstall / list / get-manifest, capability grant/revoke/list,
 (runs the real wasmtime grader on every platform; a `GraderUnavailable:`
 marker exists only as a dormant fallback for a hypothetical target that
 cannot run Pulley, and is compiled on none of the shipping ones), the
-`irl_*` inbox commands, and the Phase-3 catalog + attestation commands.
+`irl_*` inbox commands, and the Phase-3 catalog commands. The former
+attestation ingest/status commands are removed and guarded by the retired-command
+denylist.
 DID→username resolution is `resolve_display_names` in
 `commands/identity.rs`.
 
@@ -114,6 +115,16 @@ graders run on iOS; the heavier ones (TypeScript, C/C++) simply take longer
 there. The C/C++ grader used to re-parse its interpreter for every test
 case and now loads it once per submission, which cut its fuel use by about
 half.
+
+### Credential eligibility
+
+Executing a grader and authorizing its result to issue a credential are separate
+decisions. The current temporary trust root is the application bundle: issuance
+requires the exact canonical manifest bytes, plugin CID, grader CID, and grader
+bytes embedded for a bundled plugin. CID strings copied onto different bytes,
+modified manifests, unknown plugins, and rows in the legacy
+`plugin_attestations` table are rejected. General policy-approved community
+graders are deferred to remediation package G06.
 
 ### Frontend (Vue)
 
@@ -190,7 +201,7 @@ tabs:
   width) with a search box (matches name / description / capability / tag).
   Each card shows a thumbnail (manifest `icon_path` inlined as a `data:`
   URL, or a deterministic gradient + monogram fallback), badges, the
-  attestation status, and clickable capability chips (click → revoke).
+  source/status metadata and clickable capability chips (click → revoke).
   Card actions: enable/disable toggle, donate (manifest `donate_url`),
   uninstall (built-ins protected). Clicking the card body opens the
   full-page docs viewer at `/settings/plugins/:cid/docs`
@@ -268,8 +279,11 @@ Cross-device / federated review routing is a later phase.
   local-file install.
 - **Phase 2** — deterministic WASM graders, submit-and-grade, the
   `element_submissions` reproducibility bundle.
-- **Phase 3** — P2P discovery (`/alexandria/plugins/1.0`) and Plugin DAO
-  attestation (`/alexandria/plugin-attestations/1.0`).
+- **Phase 3** — P2P discovery (`/alexandria/plugins/1.0`) is partial.
+  `/alexandria/plugin-attestations/1.0` remains subscribed and scored only for
+  compatibility; there is no inbound storage or credential authority path.
+- **Future G06** — authorize community graders through an explicit subject/DAO
+  policy and reviewable bytes-to-identity binding.
 
 ## Related
 

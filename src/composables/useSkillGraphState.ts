@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { onProfileLocked } from './useProfiles'
 import {
   extractSkillClaim,
   type SkillInfo,
@@ -33,6 +34,20 @@ const isModalOpen = ref(false)
 // Drives the user's *proficiency* shown on a graph node (vs the skill's
 // intrinsic Bloom level, which only sizes the node).
 const skillStates = ref<Record<string, DerivedSkillState>>({})
+
+onProfileLocked(() => {
+  skills.value = []
+  edges.value = []
+  credentials.value = []
+  earnedSkillIds.value = new Set()
+  earnedCount.value = 0
+  availableCount.value = 0
+  lockedCount.value = 0
+  totalCount.value = 0
+  loaded.value = false
+  isModalOpen.value = false
+  skillStates.value = {}
+})
 
 export type SkillStatus = 'earned' | 'available' | 'locked'
 

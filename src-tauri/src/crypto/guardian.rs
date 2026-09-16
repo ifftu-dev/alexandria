@@ -14,12 +14,13 @@
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 use crate::crypto::hash::blake2b_256;
 
 /// Everything the parent's device needs to dial the child and complete
 /// the guardian link. Serialised into the invite code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianInvite {
     /// Child's did:key.
     pub child_did: String,
@@ -33,6 +34,22 @@ pub struct GuardianInvite {
     pub shared_key: [u8; 32],
     /// Child's display name, for the parent's confirmation screen.
     pub display_name: Option<String>,
+}
+
+impl std::fmt::Debug for GuardianInvite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuardianInvite")
+            .field("identity", &"<redacted>")
+            .field("routing", &"<redacted>")
+            .field("shared_key", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for GuardianInvite {
+    fn drop(&mut self) {
+        self.shared_key.zeroize();
+    }
 }
 
 /// Encode a [`GuardianInvite`] into its transportable string form.
@@ -87,5 +104,19 @@ mod tests {
     fn decode_rejects_garbage() {
         assert!(decode("!!!nope!!!").is_err());
         assert!(decode("YWJj").is_err());
+    }
+
+    #[test]
+    fn debug_output_redacts_invite_identity_and_key() {
+        let invite = sample();
+        let debug = format!("{invite:?}");
+
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("did:key:zChild"));
+        assert!(!debug.contains("stake_test1uchild"));
+        assert!(!debug.contains("12D3KooWChild"));
+        assert!(!debug.contains("192.168.1.9"));
+        assert!(!debug.contains("Ada"));
+        assert!(!debug.contains("11, 11, 11"));
     }
 }
