@@ -217,6 +217,17 @@ jobs:
           node scripts/check-tauri-commands.mjs
           node --test scripts/check-tauri-commands.test.mjs
 
+      - name: Independent verifier agrees with the shared vectors
+        # A second implementation only proves the format is specified if
+        # something fails when the two disagree. This verifier is written from
+        # the README alone, imports nothing but Node's standard library, and
+        # checks the same credential, limit and endorsement vectors the Rust
+        # verifier does. `crates/` is a backend prefix, so editing a vector or
+        # the verifier itself triggers it.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria/crates/alexandria-verify/tests/vectors
+        run: node independent-verifier.mjs
+
       - name: CI change-classifier regressions
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria

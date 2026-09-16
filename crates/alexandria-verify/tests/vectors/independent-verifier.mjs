@@ -9,8 +9,10 @@
 //
 //   node independent-verifier.mjs
 //
-// Run it from this directory. It is not part of the Rust test suite and nothing
-// depends on it; it is here so the claim can be checked rather than believed.
+// Run it from this directory. It is not part of the Rust test suite, but CI runs
+// it on every backend change and fails the build if any vector disagrees: a
+// second implementation that nothing checks proves nothing, and the claim is
+// only worth making if a divergence is caught rather than believed away.
 //
 // Note what is absent: no network, no JSON-LD processor, no DID resolver
 // service, no Alexandria anything. It is intentionally small and auditable.
