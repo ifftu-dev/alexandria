@@ -170,6 +170,14 @@ fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
 }
 
 /// Bundled question banks so assessments for these skills work offline.
+///
+/// Questions are written as `assessment_items`, which is what an attempt
+/// actually draws from (`commands::assessment::start_attempt` selects
+/// `WHERE bank_id = ?`). Seeding `bank_questions` instead leaves a bank whose
+/// item pool is empty, and an empty pool produces an attempt with no
+/// questions rather than an error, so the split matters: `content_public` is
+/// the half that may reach a client and `grader_private` holds the key.
+///
 /// `correct_indices` are original-option indices; the runtime shuffles per
 /// attempt and grades host-side.
 const QUESTION_BANKS_SQL: &str = r#"
@@ -177,7 +185,7 @@ INSERT OR IGNORE INTO question_banks (id, skill_id, label, pass_threshold, draw_
   ('qb_js', 'skill_javascript', 'JavaScript fundamentals', 0.7, 3, 'bundled', 1),
   ('qb_bigo', 'skill_big_o', 'Big-O & complexity', 0.7, 3, 'bundled', 1);
 
-INSERT OR IGNORE INTO bank_questions (id, bank_id, prompt, options, correct_indices, difficulty, points) VALUES
+WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) AS (VALUES
   ('bq_js1', 'qb_js', 'Which keyword declares a block-scoped variable?',
     '["var","let","function","global"]', '[1]', 1, 1.0),
   ('bq_js2', 'qb_js', 'What does `typeof null` return?',
@@ -193,7 +201,34 @@ INSERT OR IGNORE INTO bank_questions (id, bank_id, prompt, options, correct_indi
   ('bq_bo3', 'qb_bigo', 'Average-case lookup in a hash table?',
     '["O(1)","O(log n)","O(n)","O(n log n)"]', '[0]', 2, 1.0),
   ('bq_bo4', 'qb_bigo', 'Which sorts are O(n log n) worst-case? (select all)',
-    '["quicksort","mergesort","heapsort","bubblesort"]', '[1,2]', 3, 1.0);
+    '["quicksort","mergesort","heapsort","bubblesort"]', '[1,2]', 3, 1.0)
+)
+INSERT OR IGNORE INTO assessment_items
+  (id, item_kind, skill_id, content_public, grader_private,
+   difficulty, points, bank_id, taxonomy_version, ratified)
+SELECT
+  q.id,
+  'mcq',
+  b.skill_id,
+  json_object(
+    'kind',    CASE WHEN json_array_length(q.correct_indices) = 1
+                    THEN 'single' ELSE 'multi' END,
+    'prompt',  q.prompt,
+    'options', json(q.options)
+  ),
+  json_object('correct_indices', json(q.correct_indices)),
+  q.difficulty,
+  q.points,
+  q.bank_id,
+  'bundled',
+  1
+FROM bundled q
+JOIN question_banks b ON b.id = q.bank_id;
+
+-- The primary skill also lands in the multi-skill table, so one query shape
+-- serves both the single- and multi-skill cases.
+INSERT OR IGNORE INTO assessment_item_skills (item_id, skill_id, weight)
+SELECT id, skill_id, 1.0 FROM assessment_items WHERE taxonomy_version = 'bundled';
 "#;
 
 /// Skill synonyms for on-device JD and document matching, and bundled goal
@@ -268,14 +303,15 @@ mod tests {
     use super::*;
     use crate::db::Database;
 
-    const INSTALLED_TABLES: [&str; 7] = [
+    const INSTALLED_TABLES: [&str; 8] = [
         "subject_fields",
         "subjects",
         "skills",
         "skill_prerequisites",
         "goal_templates",
         "question_banks",
-        "bank_questions",
+        "assessment_items",
+        "assessment_item_skills",
     ];
 
     fn migrated() -> Database {
@@ -396,6 +432,70 @@ mod tests {
         );
     }
 
+    /// An attempt draws from `assessment_items WHERE bank_id = ?`, so a bank
+    /// seeded only into `bank_questions` resolves against `skills` and still
+    /// yields an empty draw — an attempt with no questions and no error.
+    /// Counting bank rows cannot see that; this counts what the draw sees.
+    #[test]
+    fn every_bundled_bank_can_fill_a_draw() {
+        let db = migrated();
+        install_bundled_data(db.conn()).expect("install bundled data");
+
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT id, draw_count FROM question_banks")
+            .expect("prepare banks");
+        let banks: Vec<(String, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query banks")
+            .collect::<Result<_, _>>()
+            .expect("read banks");
+        assert!(!banks.is_empty(), "no bundled banks installed");
+
+        for (bank_id, draw_count) in banks {
+            let items: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM assessment_items WHERE bank_id = ?1",
+                    params![bank_id],
+                    |row| row.get(0),
+                )
+                .expect("count items");
+            assert!(
+                items >= draw_count,
+                "bank {bank_id} draws {draw_count} but has {items} items"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bundled_item_serves_its_prompt_and_withholds_its_key() {
+        let db = migrated();
+        install_bundled_data(db.conn()).expect("install bundled data");
+
+        let (public, private): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT content_public, grader_private FROM assessment_items \
+                 WHERE id = 'bq_js3'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read bundled item");
+
+        let public: serde_json::Value = serde_json::from_str(&public).expect("public json");
+        assert_eq!(public["kind"], "multi");
+        assert!(public["prompt"].as_str().expect("prompt").contains("falsy"));
+        assert_eq!(public["options"].as_array().expect("options").len(), 4);
+        assert!(
+            public.get("correct_indices").is_none(),
+            "answer key reached the public half: {public}"
+        );
+
+        let private: serde_json::Value = serde_json::from_str(&private).expect("private json");
+        assert_eq!(private["correct_indices"], serde_json::json!([0, 1, 3]));
+    }
+
     #[test]
     fn reinstalling_changes_nothing() {
         let db = migrated();
@@ -412,7 +512,7 @@ mod tests {
         let db = migrated();
         db.conn()
             .execute_batch(
-                "CREATE TEMP TRIGGER fail_bundled_bank BEFORE INSERT ON bank_questions \
+                "CREATE TEMP TRIGGER fail_bundled_bank BEFORE INSERT ON assessment_items \
                  BEGIN SELECT RAISE(ABORT, 'injected bank failure'); END;",
             )
             .expect("install fault");
