@@ -107,6 +107,46 @@ struct CourseInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ProgressInput {
+    /// Limit to one course; omit for every enrolment.
+    #[serde(default)]
+    #[schemars(length(max = 200))]
+    course_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GoalInput {
+    /// `exam`, `job_role`, `curriculum` or `text`.
+    #[schemars(length(min = 1, max = 20))]
+    kind: String,
+    /// Template key for `exam` and `job_role`.
+    #[serde(default)]
+    #[schemars(length(max = 200))]
+    key: String,
+    /// Curriculum board, with `grade`.
+    #[serde(default)]
+    #[schemars(length(max = 100))]
+    board: String,
+    #[serde(default)]
+    #[schemars(length(max = 20))]
+    grade: String,
+    /// Job-description or course text to match against the taxonomy.
+    #[serde(default)]
+    #[schemars(length(max = 100000))]
+    text: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PathInput {
+    /// Target skill identifiers, for example from resolve_goal.
+    #[schemars(length(min = 1, max = 50))]
+    goal_skill_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct LessonInput {
     #[schemars(length(min = 1, max = 200))]
     course_id: String,
@@ -277,6 +317,106 @@ struct VideoChapter {
     start_seconds: i64,
 }
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct GraphNode {
+    skill_id: String,
+    name: String,
+    bloom_level: String,
+    #[schemars(with = "NullableString")]
+    subject_name: Option<String>,
+    /// Whether this skill is shared with peers; private ones are in your own view only.
+    public: bool,
+    teaching: bool,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct GraphEdge {
+    skill_id: String,
+    prerequisite_id: String,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct SkillGraph {
+    subject_did: String,
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+    includes_private: bool,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct CourseRec {
+    course_id: String,
+    title: String,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct PathStep {
+    skill_id: String,
+    name: String,
+    bloom_level: String,
+    #[schemars(with = "NullableString")]
+    subject_name: Option<String>,
+    /// `earned`, `available` (prerequisites met) or `locked`.
+    status: String,
+    is_goal: bool,
+    prerequisite_ids: Vec<String>,
+    course_recs: Vec<CourseRec>,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct LearningPath {
+    goal_skill_ids: Vec<String>,
+    steps: Vec<PathStep>,
+    total: usize,
+    earned_count: usize,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct SkillSuggestion {
+    skill_id: String,
+    name: String,
+    score: f64,
+    matched: String,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct GoalResolution {
+    label: String,
+    /// Authoritative for a curated template; empty for matched text, where the
+    /// learner confirms suggestions.
+    goal_skill_ids: Vec<String>,
+    suggestions: Vec<SkillSuggestion>,
+    #[schemars(with = "NullableString")]
+    taxonomy_version: Option<String>,
+    /// `template` or `text_parsed`.
+    resolution_provenance: String,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct ProgressElement {
+    element_id: String,
+    #[schemars(with = "NullableString")]
+    title: Option<String>,
+    #[schemars(with = "NullableString")]
+    element_type: Option<String>,
+    status: String,
+    #[schemars(with = "NullableNumber")]
+    score: Option<f64>,
+    #[schemars(with = "NullableInteger")]
+    time_spent_seconds: Option<i64>,
+    #[schemars(with = "NullableString")]
+    completed_at: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct Enrolment {
+    course_id: String,
+    #[schemars(with = "NullableString")]
+    course_title: Option<String>,
+    status: String,
+    enrolled_at: String,
+    #[schemars(with = "NullableString")]
+    completed_at: Option<String>,
+    updated_at: String,
+    elements_total: usize,
+    elements_completed: usize,
+    elements: Vec<ProgressElement>,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct LearningProgress {
+    enrolments: Vec<Enrolment>,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct LessonQuestion {
     #[schemars(with = "NullableString")]
     id: Option<String>,
@@ -335,6 +475,10 @@ impl AlexandriaMcp {
                 "search_catalog",
                 "get_course",
                 "read_lesson",
+                "get_skill_graph",
+                "get_learning_progress",
+                "resolve_goal",
+                "compute_learning_path",
                 "list_course_drafts",
                 "read_lesson_draft",
                 "propose_lesson_draft",
@@ -429,6 +573,91 @@ impl AlexandriaMcp {
             return Err("invalid_input: invalid lesson request".into());
         }
         self.broker_request(serde_json::json!({"operation":"read_lesson","course_id":input.course_id,"element_id":input.element_id,"start":input.start})).await
+    }
+
+    #[tool(
+        description = "The signed-in learner's own skill graph: every skill they hold a live credential for, with prerequisite edges. Each skill says whether it is public (shared with peers) or private; private skills appear here because this is the learner's own device, and must not be republished. Requires learning:read.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_skill_graph(&self) -> Result<Json<SkillGraph>, String> {
+        self.broker_request(serde_json::json!({"operation":"get_skill_graph"}))
+            .await
+    }
+
+    #[tool(
+        description = "The learner's enrolments and observed progress per lesson: status, score where one was recorded, and time spent. Reports only what was observed; it does not infer completion or issued proof. Requires learning:read.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_learning_progress(
+        &self,
+        Parameters(input): Parameters<ProgressInput>,
+    ) -> Result<Json<LearningProgress>, String> {
+        if input.course_id.len() > 200 {
+            return Err("invalid_input: invalid course identifier".into());
+        }
+        self.broker_request(
+            serde_json::json!({"operation":"get_learning_progress","course_id":input.course_id}),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Resolve a goal to target skills: a curated exam, job-role or curriculum template by key, or free job-description text matched on this device against the taxonomy. Template skills are authoritative; matched text returns suggestions for the learner to confirm and saves nothing. Links are not accepted: supply the text itself. Requires learning:read.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn resolve_goal(
+        &self,
+        Parameters(input): Parameters<GoalInput>,
+    ) -> Result<Json<GoalResolution>, String> {
+        if !["exam", "job_role", "curriculum", "text"].contains(&input.kind.as_str())
+            || input.key.len() > 200
+            || input.board.len() > 100
+            || input.grade.len() > 20
+            || input.text.chars().count() > 100_000
+        {
+            return Err("invalid_input: invalid goal".into());
+        }
+        self.broker_request(serde_json::json!({"operation":"resolve_goal","goal_kind":input.kind,"key":input.key,"board":input.board,"grade":input.grade,"text":input.text})).await
+    }
+
+    #[tool(
+        description = "Order the skills needed to reach the given goals: prerequisites first, each marked earned, available or locked against the learner's own credentials, with up to three published courses suggested for skills they do not yet hold. Requires learning:read.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn compute_learning_path(
+        &self,
+        Parameters(input): Parameters<PathInput>,
+    ) -> Result<Json<LearningPath>, String> {
+        if input.goal_skill_ids.is_empty()
+            || input.goal_skill_ids.len() > 50
+            || input
+                .goal_skill_ids
+                .iter()
+                .any(|id| id.is_empty() || id.len() > 200)
+        {
+            return Err("invalid_input: invalid goal skills".into());
+        }
+        self.broker_request(serde_json::json!({"operation":"compute_learning_path","goal_skill_ids":input.goal_skill_ids})).await
     }
 
     #[tool(

@@ -128,29 +128,7 @@ fn get_template_by_key(
 
 /// Load every skill's matchable surface for on-device JD/document matching.
 fn load_skill_entries(conn: &Connection) -> Result<Vec<SkillEntry>, String> {
-    let mut stmt = conn
-        .prepare("SELECT id, name, synonyms FROM skills")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |r| {
-            let id: String = r.get(0)?;
-            let name: String = r.get(1)?;
-            let syn: Option<String> = r.get(2)?;
-            Ok((id, name, syn))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for row in rows {
-        let (id, name, syn) = row.map_err(|e| e.to_string())?;
-        let synonyms = syn
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        out.push(SkillEntry { id, name, synonyms });
-    }
-    Ok(out)
+    alexandria_studio::skills::skill_entries(conn).map_err(|error| error.to_string())
 }
 
 fn parse_jd_text(conn: &Connection, text: &str) -> Result<GoalResolution, String> {

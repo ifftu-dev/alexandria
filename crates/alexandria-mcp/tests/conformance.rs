@@ -217,7 +217,7 @@ async fn tools_list_and_call_conform_to_schema() {
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
-    for (connection, expected) in [(None, 1), (Some(file.as_path()), 7)] {
+    for (connection, expected) in [(None, 1), (Some(file.as_path()), 11)] {
         let mut server = Server::spawn(connection);
         let first = server.request(1, "tools/list", json!({})).await;
         assert_schema("ListToolsResultResponse", &first);

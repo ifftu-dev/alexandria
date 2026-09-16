@@ -18,7 +18,7 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::{
     grants::{Grants, StudioGrant},
-    learning, store, Error, Result,
+    learning, skills, store, Error, Result,
 };
 
 pub const MAX_REQUEST_BYTES: usize = 262_144;
@@ -80,6 +80,16 @@ pub struct Request {
     cursor: String,
     #[serde(default)]
     start: usize,
+    #[serde(default)]
+    goal_kind: String,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    board: String,
+    #[serde(default)]
+    grade: String,
+    #[serde(default)]
+    goal_skill_ids: Vec<String>,
 }
 
 /// A lesson body fetched between the two authorized phases of `read_lesson`.
@@ -200,7 +210,13 @@ fn dispatch(
     fetched: Option<&Fetched>,
 ) -> Result<Dispatched> {
     let scope = match request.operation.as_str() {
-        "search_catalog" | "get_course" | "read_lesson" => "learning:read",
+        "search_catalog"
+        | "get_course"
+        | "read_lesson"
+        | "get_skill_graph"
+        | "get_learning_progress"
+        | "resolve_goal"
+        | "compute_learning_path" => "learning:read",
         "list_course_drafts" | "read_lesson_draft" => "drafts:read",
         "propose_lesson_draft" => "drafts:propose",
         _ => return Err(Error::Permission),
@@ -233,6 +249,36 @@ fn dispatch(
                 (Some(blob), _) => return Ok(Dispatched::NeedsContent(blob.to_string())),
             };
             learning::render_lesson(db, &target, body, request.start)?
+        }
+        // The owner's own view: every earned skill, each flagged with whether
+        // it is one the owner shares with peers.
+        "get_skill_graph" => {
+            let did = skills::local_did(db);
+            serde_json::to_value(skills::skill_graph(db, &did, true)?)?
+        }
+        "get_learning_progress" => {
+            let course = (!request.course_id.is_empty()).then_some(request.course_id.as_str());
+            skills::learning_progress(db, course)?
+        }
+        "resolve_goal" => {
+            let goal = match request.goal_kind.as_str() {
+                "exam" => skills::Goal::Exam { key: &request.key },
+                "job_role" => skills::Goal::JobRole { key: &request.key },
+                "curriculum" => skills::Goal::Curriculum {
+                    board: &request.board,
+                    grade: &request.grade,
+                },
+                // A job description arrives as text. Nothing an assistant says
+                // makes this device fetch a URL.
+                "text" => skills::Goal::Text {
+                    text: &request.text,
+                },
+                _ => return Err(Error::Invalid("unknown goal kind".into())),
+            };
+            serde_json::to_value(skills::resolve_goal(db, goal)?)?
+        }
+        "compute_learning_path" => {
+            serde_json::to_value(skills::my_learning_path(db, &request.goal_skill_ids)?)?
         }
         "list_course_drafts" => {
             let mut stmt = db.prepare(

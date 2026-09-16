@@ -16,8 +16,6 @@
 //!
 //! Mirrors the request-response wiring of [`super::vc_fetch`].
 
-use std::collections::{HashMap, HashSet};
-
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -70,127 +68,44 @@ pub enum GraphFetchResponse {
     Empty,
 }
 
-/// Per-skill visibility/teaching preference as stored in the
-/// `instructor.graph_prefs` synced setting.
-#[derive(Debug, Clone, Copy)]
-struct NodePref {
-    public: bool,
-    teaching: bool,
-}
-
-impl Default for NodePref {
-    fn default() -> Self {
-        // Earned skills are public by default; teaching is opt-in.
-        NodePref {
-            public: true,
-            teaching: false,
-        }
-    }
-}
-
-/// Parse the `instructor.graph_prefs` JSON object into a per-skill map.
-/// Shape: `{ "<skill_id>": { "public": bool, "teaching": bool } }`.
-/// Missing / malformed entries fall back to [`NodePref::default`].
-fn load_prefs(conn: &Connection) -> HashMap<String, NodePref> {
-    let raw = SettingsStore::get(conn, keys::INSTRUCTOR_GRAPH_PREFS).0;
-    let mut out = HashMap::new();
-    if let Some(obj) = raw.as_object() {
-        for (skill_id, v) in obj {
-            let public = v.get("public").and_then(|b| b.as_bool()).unwrap_or(true);
-            let teaching = v.get("teaching").and_then(|b| b.as_bool()).unwrap_or(false);
-            out.insert(skill_id.clone(), NodePref { public, teaching });
-        }
-    }
-    out
-}
-
 /// Build the skill graph owned by `subject_did`.
 ///
 /// `include_private` controls whether non-public earned skills are
 /// included — `true` for the owner's own editor, `false` for anything
 /// that leaves the device.
+///
+/// The implementation lives in `alexandria-studio` so that this P2P path,
+/// the app's own editor and the assistant broker all build one graph from
+/// one place.
 pub fn build_skill_graph(
     conn: &Connection,
     subject_did: &str,
     include_private: bool,
 ) -> Result<PublicSkillGraph, String> {
-    // 1. Earned (non-revoked) skills for this subject.
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT skill_id FROM credentials
-             WHERE subject_did = ?1 AND skill_id IS NOT NULL AND revoked = 0",
-        )
-        .map_err(|e| e.to_string())?;
-    let earned: Vec<String> = stmt
-        .query_map([subject_did], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    let prefs = load_prefs(conn);
-
-    // 2. Resolve each earned skill to a node, applying visibility.
-    let mut nodes = Vec::new();
-    let mut included: HashSet<String> = HashSet::new();
-    for skill_id in earned {
-        let pref = prefs.get(&skill_id).copied().unwrap_or_default();
-        if !include_private && !pref.public {
-            continue;
-        }
-        let row = conn
-            .query_row(
-                "SELECT sk.name, sk.bloom_level, s.name
-                 FROM skills sk
-                 LEFT JOIN subjects s ON sk.subject_id = s.id
-                 WHERE sk.id = ?1",
-                [&skill_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .ok();
-        let Some((name, bloom_level, subject_name)) = row else {
-            // Earned a credential for a skill not in the local taxonomy
-            // — skip rather than emit a nameless node.
-            continue;
-        };
-        included.insert(skill_id.clone());
-        nodes.push(PublicGraphNode {
-            id: skill_id,
-            name,
-            bloom_level,
-            subject_name,
-            public: pref.public,
-            teaching: pref.teaching,
-        });
-    }
-
-    // 3. Edges among the included set only.
-    let mut edge_stmt = conn
-        .prepare("SELECT skill_id, prerequisite_id FROM skill_prerequisites")
-        .map_err(|e| e.to_string())?;
-    let edges: Vec<PublicGraphEdge> = edge_stmt
-        .query_map([], |row| {
-            Ok(PublicGraphEdge {
-                skill_id: row.get(0)?,
-                prerequisite_id: row.get(1)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter(|e| included.contains(&e.skill_id) && included.contains(&e.prerequisite_id))
-        .collect();
-
+    let graph = alexandria_studio::skills::skill_graph(conn, subject_did, include_private)
+        .map_err(|error| error.to_string())?;
     Ok(PublicSkillGraph {
-        subject_did: subject_did.to_string(),
-        nodes,
-        edges,
+        subject_did: graph.subject_did,
+        nodes: graph
+            .nodes
+            .into_iter()
+            .map(|node| PublicGraphNode {
+                id: node.skill_id,
+                name: node.name,
+                bloom_level: node.bloom_level,
+                subject_name: node.subject_name,
+                public: node.public,
+                teaching: node.teaching,
+            })
+            .collect(),
+        edges: graph
+            .edges
+            .into_iter()
+            .map(|edge| PublicGraphEdge {
+                skill_id: edge.skill_id,
+                prerequisite_id: edge.prerequisite_id,
+            })
+            .collect(),
     })
 }
 

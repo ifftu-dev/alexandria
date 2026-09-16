@@ -109,7 +109,7 @@ async fn configured_stdio_client_uses_broker_and_propagates_revocation() {
     command.env("ALEXANDRIA_MCP_CONNECTION_FILE", &file);
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 11);
     assert!(!tools
         .iter()
         .any(|t| t.name.contains("publish") || t.name.contains("apply")));

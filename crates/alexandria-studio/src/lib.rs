@@ -1,9 +1,11 @@
 #[cfg(unix)]
 pub mod broker;
 pub mod grants;
+pub mod jd_parser;
 pub mod learning;
 pub mod model;
 pub mod provider;
+pub mod skills;
 pub mod store;
 
 #[derive(Debug, thiserror::Error)]

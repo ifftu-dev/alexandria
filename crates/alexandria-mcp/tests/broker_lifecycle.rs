@@ -578,6 +578,158 @@ async fn learners_read_published_content_without_answers_or_drafts() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn learners_read_their_own_graph_progress_and_goals() {
+    let a = Profile::new("A");
+    let _server = a.serve();
+    a.db.lock()
+        .unwrap()
+        .execute_batch(
+            r#"INSERT INTO app_settings(key,value) VALUES
+                 ('identity.local_did','did:key:me'),
+                 ('instructor.graph_prefs','{"b":{"public":false,"teaching":true}}');
+               INSERT INTO subject_fields(id,name) VALUES ('field','Science');
+               INSERT INTO subjects(id,name,subject_field_id) VALUES ('sub','Computing','field');
+               INSERT INTO skills(id,name,bloom_level,subject_id,synonyms) VALUES
+                 ('a','Alpha','remember','sub','first steps'),
+                 ('b','Beta','apply','sub',NULL),
+                 ('c','Gamma','create','sub',NULL);
+               INSERT INTO skill_prerequisites(skill_id,prerequisite_id) VALUES ('b','a'),('c','b');
+               INSERT INTO credentials(id,issuer_did,subject_did,credential_type,claim_kind,skill_id,issuance_date,signed_vc_json,integrity_hash,revoked) VALUES
+                 ('v1','did:key:issuer','did:key:me','FormalCredential','skill','a','2026-01-01','{}','hash',0),
+                 ('v2','did:key:issuer','did:key:me','FormalCredential','skill','b','2026-01-02','{}','hash',0);
+               INSERT INTO courses(id,title,author_address,status,skill_ids) VALUES
+                 ('gamma','Gamma course','someone','published','["c"]');
+               INSERT INTO goal_templates(id,kind,key,label,skill_ids,ratified) VALUES
+                 ('t1','exam','finals','Final exams','["c"]',1);
+               INSERT INTO enrollments(id,course_id,status) VALUES ('e1','gamma','active');
+               INSERT INTO course_chapters(id,course_id,title,position) VALUES ('gch','gamma','Chapter',0);
+               INSERT INTO course_elements(id,chapter_id,title,element_type,position) VALUES
+                 ('g1','gch','Lesson one','text',0),
+                 ('g2','gch','Lesson two','text',1);
+               INSERT INTO element_progress(id,enrollment_id,element_id,status,score) VALUES
+                 ('p1','e1','g1','completed',0.9),
+                 ('p2','e1','g2','in_progress',NULL);"#,
+        )
+        .unwrap();
+    let (_, learner_file) = a.grant("Learner", &["learning:read"]);
+    let (_, drafts_file) = a.grant("Drafts", &["drafts:read"]);
+    let (learner, drafter) = (client(&learner_file).await, client(&drafts_file).await);
+
+    // The owner's own view keeps private skills, flagged as such.
+    let (error, graph) = call(&learner, "get_skill_graph", json!({})).await;
+    assert!(!error, "{graph}");
+    let graph = &graph["structuredContent"];
+    assert_eq!(graph["includes_private"], true);
+    assert_eq!(graph["nodes"][0]["skill_id"], "a");
+    assert_eq!(graph["nodes"][0]["public"], true);
+    assert_eq!(graph["nodes"][1]["skill_id"], "b");
+    assert_eq!(graph["nodes"][1]["public"], false);
+    assert_eq!(graph["nodes"][1]["teaching"], true);
+    assert_eq!(graph["edges"][0]["prerequisite_id"], "a");
+
+    let (error, progress) = call(&learner, "get_learning_progress", json!({})).await;
+    assert!(!error, "{progress}");
+    let enrolment = &progress["structuredContent"]["enrolments"][0];
+    assert_eq!(enrolment["course_id"], "gamma");
+    assert_eq!(enrolment["course_title"], "Gamma course");
+    assert_eq!(enrolment["elements_total"], 2);
+    assert_eq!(enrolment["elements_completed"], 1);
+    assert_eq!(enrolment["elements"][0]["score"], 0.9);
+
+    let (error, goal) = call(
+        &learner,
+        "resolve_goal",
+        json!({"kind":"exam","key":"finals"}),
+    )
+    .await;
+    assert!(!error, "{goal}");
+    assert_eq!(goal["structuredContent"]["goal_skill_ids"][0], "c");
+    assert_eq!(
+        goal["structuredContent"]["resolution_provenance"],
+        "template"
+    );
+
+    let (error, parsed) = call(
+        &learner,
+        "resolve_goal",
+        json!({"kind":"text","text":"Looking for first steps and Gamma work"}),
+    )
+    .await;
+    assert!(!error, "{parsed}");
+    assert_eq!(
+        parsed["structuredContent"]["resolution_provenance"],
+        "text_parsed"
+    );
+    assert!(
+        parsed["structuredContent"]["goal_skill_ids"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "matched text only suggests"
+    );
+    let suggested: Vec<&str> = parsed["structuredContent"]["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["skill_id"].as_str().unwrap())
+        .collect();
+    assert!(suggested.contains(&"a"), "{suggested:?}");
+
+    let (error, path) = call(
+        &learner,
+        "compute_learning_path",
+        json!({"goal_skill_ids":["c"]}),
+    )
+    .await;
+    assert!(!error, "{path}");
+    let steps = path["structuredContent"]["steps"].as_array().unwrap();
+    let order: Vec<&str> = steps
+        .iter()
+        .map(|s| s["skill_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(order, ["a", "b", "c"], "prerequisites first");
+    let statuses: Vec<&str> = steps
+        .iter()
+        .map(|s| s["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(statuses, ["earned", "earned", "available"]);
+    assert_eq!(steps[2]["course_recs"][0]["course_id"], "gamma");
+    assert_eq!(path["structuredContent"]["earned_count"], 2);
+
+    // A goal kind the tool does not offer, and a draft grant, are both refused.
+    let (error, body) = call(
+        &learner,
+        "resolve_goal",
+        json!({"kind":"link","key":"https://example.com"}),
+    )
+    .await;
+    assert!(
+        error && body.to_string().contains("invalid_input"),
+        "{body}"
+    );
+    for tool in [
+        "get_skill_graph",
+        "get_learning_progress",
+        "compute_learning_path",
+    ] {
+        let args = if tool == "compute_learning_path" {
+            json!({"goal_skill_ids":["c"]})
+        } else {
+            json!({})
+        };
+        let (error, body) = call(&drafter, tool, args).await;
+        assert!(
+            error && body.to_string().contains("permission_denied"),
+            "{tool}: {body}"
+        );
+    }
+
+    for client in [learner, drafter] {
+        client.cancel().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn revocation_expiry_and_lock_invalidate_connected_clients() {
     let profile = Profile::new("A");
     let _server = profile.serve();
