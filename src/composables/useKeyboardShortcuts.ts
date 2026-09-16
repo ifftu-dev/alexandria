@@ -35,7 +35,7 @@ import { useSettings } from '@/composables/useSettings'
  */
 export const SHORTCUTS_SETTING_KEY = 'input.keyboard_shortcuts'
 const SETTING_KEY = SHORTCUTS_SETTING_KEY
-const LEGACY_LOCALSTORAGE_KEY = 'alexandria-keyboard-shortcuts'
+const SHORTCUTS_CACHE_KEY = 'alexandria-keyboard-shortcuts'
 
 /** A single key combination: modifier flags + a key name. */
 export interface KeyCombo {
@@ -150,7 +150,7 @@ function init() {
   // store has hydrated. `initShortcutsFromSettings` (called from
   // App.vue after profile unlock) reconciles with the canonical value.
   try {
-    const stored = localStorage.getItem(LEGACY_LOCALSTORAGE_KEY)
+    const stored = localStorage.getItem(SHORTCUTS_CACHE_KEY)
     if (stored) {
       const overrides: Record<string, KeyCombo> = JSON.parse(stored)
       for (const [id, keys] of Object.entries(overrides)) {
@@ -178,9 +178,9 @@ function persist() {
   const overrides = collectOverrides()
   // localStorage mirror powers the synchronous fast path on next launch.
   if (Object.keys(overrides).length > 0) {
-    localStorage.setItem(LEGACY_LOCALSTORAGE_KEY, JSON.stringify(overrides))
+    localStorage.setItem(SHORTCUTS_CACHE_KEY, JSON.stringify(overrides))
   } else {
-    localStorage.removeItem(LEGACY_LOCALSTORAGE_KEY)
+    localStorage.removeItem(SHORTCUTS_CACHE_KEY)
   }
   // Per-profile settings store — propagates to the user's other devices.
   void useSettings().setSetting(SETTING_KEY, JSON.stringify(overrides))

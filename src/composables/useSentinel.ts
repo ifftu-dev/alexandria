@@ -365,39 +365,13 @@ function createSentinelService() {
       userAddress: userId,
       deviceFpPrefix,
     })
-    if (stored) {
-      try { localStorage.removeItem(legacyProfileKey(userId, deviceFp)) }
-      catch { /* localStorage not available */ }
-      return stored
-    }
-
-    // Pre-SQLCipher builds used one browser-storage key per exact learner and
-    // device fingerprint. Import only that exact key, require its embedded
-    // ownership fields to agree, and erase it only after the encrypted write
-    // succeeds. Keys belonging to other profiles are never inspected here.
-    const key = legacyProfileKey(userId, deviceFp)
-    let legacy: BehavioralProfile | null = null
-    try {
-      const json = localStorage.getItem(key)
-      if (json) {
-        const candidate = JSON.parse(json) as Partial<BehavioralProfile>
-        if (candidate.userId === userId && candidate.deviceFingerprint === deviceFp) {
-          legacy = candidate as BehavioralProfile
-        } else {
-          localStorage.removeItem(key)
-        }
-      }
-    } catch {
-      // The exact active learner/device key is unusable. Do not leave a
-      // malformed private record readable after the profile locks again.
-      try { localStorage.removeItem(key) } catch { /* localStorage not available */ }
-    }
-    if (!legacy) return null
-
-    persistAIModels(legacy)
-    await tauriInvoke('sentinel_save_behavioral_profile', { profile: legacy })
-    try { localStorage.removeItem(key) } catch { /* localStorage not available */ }
-    return legacy
+    // Pre-SQLCipher builds kept one browser-storage key per exact learner and
+    // device fingerprint. That format is no longer read: the key is erased so
+    // a private behavioural record does not sit in browser storage, and the
+    // profile is rebuilt from training rather than imported unverified.
+    try { localStorage.removeItem(legacyProfileKey(userId, deviceFp)) }
+    catch { /* localStorage not available */ }
+    return stored
   }
 
   const saveProfile = async (userId: string, deviceFp: string, p: BehavioralProfile): Promise<void> => {

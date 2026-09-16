@@ -241,7 +241,7 @@ describe('Sentinel profile-lock boundary', () => {
     await profiles.lockProfile()
   })
 
-  it('migrates only the exact learner/device legacy profile after the encrypted write succeeds', async () => {
+  it('erases a pre-SQLCipher profile key without adopting it', async () => {
     const { profiles, sentinel } = await services()
     await profiles.unlockProfile('A', 'password')
     await sentinel.start('enrollment')
@@ -263,18 +263,16 @@ describe('Sentinel profile-lock boundary', () => {
 
     await profiles.unlockProfile('A', 'password')
     await sentinel.start('enrollment')
-    const save = mocks.invoke.mock.calls.find(([command]) => command === 'sentinel_save_behavioral_profile')
-    expect(save?.[1]?.profile).toMatchObject({
-      userId: 'wallet-A',
-      deviceFingerprint: baseline.deviceFingerprint,
-      aiModels: { faceEnrollment: { frameCount: 5 } },
-    })
+    const imported = mocks.invoke.mock.calls
+      .filter(([command]) => command === 'sentinel_save_behavioral_profile')
+      .some(([, args]) => (args?.profile as { aiModels?: Record<string, unknown> })?.aiModels
+        ?.faceEnrollment !== undefined)
+    expect(imported).toBe(false)
     expect(localStorage.getItem(key)).toBeNull()
-    expect(mocks.behavioralProfiles).toHaveLength(1)
     await profiles.lockProfile()
   })
 
-  it('keeps the exact legacy profile for retry when its encrypted migration fails', async () => {
+  it('does not resurrect a pre-SQLCipher profile when encrypted storage fails', async () => {
     const { profiles, sentinel } = await services()
     await profiles.unlockProfile('A', 'password')
     await sentinel.start('enrollment')
@@ -290,13 +288,12 @@ describe('Sentinel profile-lock boundary', () => {
     mocks.behavioralProfiles.clear()
     const fallback = mocks.invoke.getMockImplementation()!
     mocks.invoke.mockImplementation(async (command, args, options) => {
-      if (command === 'sentinel_save_behavioral_profile') throw new Error('encrypted storage unavailable')
+      if (command === 'sentinel_load_behavioral_profile') throw new Error('encrypted storage unavailable')
       return fallback(command, args, options)
     })
 
     await profiles.unlockProfile('A', 'password')
     await expect(sentinel.start('enrollment')).rejects.toThrow('encrypted storage unavailable')
-    expect(localStorage.getItem(key)).toBe(JSON.stringify(baseline))
     expect(mocks.behavioralProfiles).toHaveLength(0)
     await profiles.lockProfile()
   })
