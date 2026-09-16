@@ -347,6 +347,17 @@ const router = createRouter({
       component: () => import('@/pages/Settings.vue'),
       meta: { layout: 'app' },
     },
+
+    // Anything unmatched. Retired routes are deleted rather than redirected,
+    // so a stale deep link explains itself here instead of rendering nothing.
+    // Must stay last, and must NOT join the guard's `openNames`: a gated
+    // profile that follows an unknown link still belongs on its gate screen.
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('@/pages/NotFound.vue'),
+      meta: { layout: 'app' },
+    },
   ],
 })
 

@@ -120,5 +120,10 @@
     "dayPlaceholder": "Day",
     "monthPlaceholder": "Month",
     "yearPlaceholder": "Year"
+  },
+  "notFound": {
+    "title": "This page doesn't exist",
+    "body": "The link may come from an earlier version of Alexandria, or the address may be mistyped.",
+    "goHome": "Go to home"
   }
 }

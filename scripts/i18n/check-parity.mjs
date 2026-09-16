@@ -81,6 +81,10 @@ const PENDING_TRANSLATION = [
   'interviews.',
   'tutoring.captions.',
   'nav.primary.interviews',
+  // Not-found page for stale deep links, added when retired route redirects
+  // were deleted. English-only pending a translate pass; renders in English
+  // via the i18n fallback.
+  'common.notFound.',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))
