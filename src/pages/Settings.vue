@@ -29,6 +29,7 @@ import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
 import HolderDirectories from '@/components/profile/HolderDirectories.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
+import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
 import type { Identity } from '@/types'
 
@@ -53,7 +54,7 @@ interface SectionMeta {
 }
 const SECTION_IDS: SettingsSectionId[] = [
   'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity',
-  'directories', 'advanced',
+  'directories', 'assistants', 'advanced',
 ]
 const SECTIONS = computed<SectionMeta[]>(() => [
   { id: 'account', label: t('settings.nav.sections.account.label'), desc: t('settings.nav.sections.account.desc'),
@@ -73,6 +74,8 @@ const SECTIONS = computed<SectionMeta[]>(() => [
   { id: 'directories', label: t('settings.nav.sections.directories.label'), desc: t('settings.nav.sections.directories.desc'),
     keywords: ['directory', 'directories', 'registry', 'employer', 'institution', 'who asked', 'who looked',
                'access log', 'disclosure', 'requests', 'publish', 'talent index', 'consent', 'visibility'] },
+  { id: 'assistants', label: t('settings.nav.sections.assistants.label'), desc: t('settings.nav.sections.assistants.desc'),
+    keywords: ['assistant', 'mcp', 'model context protocol', 'claude', 'ai', 'connection', 'grant', 'revoke'] },
   { id: 'advanced', label: t('settings.nav.sections.advanced.label'), desc: t('settings.nav.sections.advanced.desc'),
     keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
 ])
@@ -943,6 +946,11 @@ function onSectionClick(id: SettingsSectionId) {
                      one nobody uses. -->
                 <template v-else-if="activeSection === 'directories'">
                   <HolderDirectories />
+                </template>
+
+                <!-- ──────────── Assistant access — external MCP clients ──────────── -->
+                <template v-else-if="activeSection === 'assistants'">
+                  <AssistantAccessPanel />
                 </template>
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->

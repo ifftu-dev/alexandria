@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use alexandria_studio::model::TutorPolicy;
 pub use alexandria_verify::course::CourseCompletionPolicy;
 
 pub const COURSE_DOCUMENT_VERSION: u32 = 2;
@@ -51,6 +52,10 @@ pub struct CourseDocumentPayload {
     /// Absence means completion remains a learner self-claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_policy: Option<CourseCompletionPolicy>,
+    /// Public learner-tutor behavior chosen by the instructor. Disabled policies
+    /// are omitted so signatures on course documents from older nodes remain valid.
+    #[serde(default, skip_serializing_if = "TutorPolicy::is_disabled")]
+    pub tutor_policy: TutorPolicy,
 }
 
 fn default_kind() -> String {
@@ -127,6 +132,8 @@ pub struct SignedCourseDocument {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_policy: Option<CourseCompletionPolicy>,
+    #[serde(default, skip_serializing_if = "TutorPolicy::is_disabled")]
+    pub tutor_policy: TutorPolicy,
 
     // -- Cryptographic fields --
     /// Ed25519 signature over the payload JSON (hex-encoded, 128 chars).
@@ -153,6 +160,7 @@ impl SignedCourseDocument {
             updated_at: self.updated_at,
             kind: self.kind.clone(),
             completion_policy: self.completion_policy.clone(),
+            tutor_policy: self.tutor_policy.clone(),
         }
     }
 }
@@ -200,6 +208,7 @@ mod tests {
             updated_at: 1700100000,
             kind: "course".into(),
             completion_policy: None,
+            tutor_policy: TutorPolicy::default(),
             signature: "deadbeef".into(),
             public_key: "cafebabe".into(),
         }
@@ -246,6 +255,7 @@ mod tests {
             updated_at: 0,
             kind: "course".into(),
             completion_policy: None,
+            tutor_policy: TutorPolicy::default(),
         };
         let json = serde_json::to_string(&payload).unwrap();
         let parsed: CourseDocumentPayload = serde_json::from_str(&json).unwrap();

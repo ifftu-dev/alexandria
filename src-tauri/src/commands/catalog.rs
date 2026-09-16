@@ -233,6 +233,7 @@ mod tests {
             updated_at: 1,
             kind: "course".into(),
             completion_policy: None,
+            tutor_policy: Default::default(),
             signature: "verified-before-persistence".into(),
             public_key: "verified-before-persistence".into(),
         };
@@ -457,6 +458,13 @@ fn hydrate_catalog_course_db(
             params![signed_doc.course_id],
         )
         .map_err(|e| format!("clear chapters failed: {e}"))?;
+
+        alexandria_studio::store::write_tutor_policy(
+            conn,
+            &signed_doc.course_id,
+            &signed_doc.tutor_policy,
+        )
+        .map_err(|e| format!("save tutor policy failed: {e}"))?;
 
         for chapter in &signed_doc.chapters {
             conn.execute(

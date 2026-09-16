@@ -8,7 +8,7 @@ import { AppButton } from '@/components/ui'
 import type { Element } from '@/types'
 
 const props = defineProps<{ element: Element }>()
-const emit = defineEmits<{ updated: [Element] }>()
+const emit = defineEmits<{ updated: [Element]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -31,6 +31,7 @@ const prompt = ref(initial.prompt)
 const rubric = ref(initial.rubric)
 const minWords = ref<number | null>(initial.min_words)
 const dirty = ref(false)
+watch(dirty, value => emit('dirty', value), { flush: 'sync' })
 const saving = ref(false)
 const error = ref('')
 

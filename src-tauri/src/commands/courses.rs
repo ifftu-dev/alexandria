@@ -324,16 +324,25 @@ fn delete_course_db(db: &crate::db::Database, course_id: &str) -> Result<(), Str
 
 /// Publish a course to the iroh blob store.
 ///
-/// Reads the course, its chapters, and elements from SQLite, builds
-/// a CourseDocumentPayload, signs it with the wallet key, stores it
-/// on iroh, and updates the course's `content_cid` with the BLAKE3 hash.
+/// Reads the course, its chapters, and elements from SQLite, uploads any
+/// inline text lessons, builds a CourseDocumentPayload, signs it with the
+/// wallet key, stores it on iroh, and updates the course's `content_cid` with
+/// the BLAKE3 hash.
 ///
-/// Requires the vault to be unlocked (wallet key needed for signing).
+/// Requires the vault to be unlocked (wallet key needed for signing), and
+/// refuses a course the signer did not author.
 #[tauri::command]
 pub async fn publish_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<PublishCourseResult, String> {
+    // Publication spans several awaits. Database phases are fenced by profile
+    // leases; the studio epoch additionally catches a profile switch between
+    // them, so a commit can never land in a different profile than the read.
+    let studio_epoch = state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst);
+    let profile_unchanged =
+        || state.studio.epoch.load(std::sync::atomic::Ordering::SeqCst) == studio_epoch;
+
     // Get the wallet signing key from the vault
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
@@ -342,10 +351,11 @@ pub async fn publish_course(
 
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
     let author_did = did_from_verifying_key(&w.signing_key.verifying_key());
+    let signer_address = w.stake_address.clone();
 
     // Read course data off the async runtime before iroh calls.
     let read_course_id = course_id.clone();
-    let payload = state
+    let (mut payload, inline_text) = state
         .db_executor
         .execute(
             DatabaseWorkload::Instructor,
@@ -353,6 +363,9 @@ pub async fn publish_course(
             "courses.publish.read",
             move |db| {
                 let course = get_course_by_id(db.conn(), &read_course_id)?;
+                if course.author_address != signer_address {
+                    return Err("course not found or not authored by you".into());
+                }
                 let draft_policy_json: Option<String> = db
                     .conn()
                     .query_row(
@@ -392,24 +405,34 @@ pub async fn publish_course(
                     rows
                 };
 
+                // Text lessons written in the studio are stored inline and
+                // uploaded as blobs before signing, so the signed document
+                // references content rather than carrying it.
+                let mut inline_text: Vec<(String, String)> = Vec::new();
                 let mut chapters = Vec::new();
                 for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
                     let elements: Vec<DocumentElement> = {
                         let mut el_stmt = db
-                    .conn()
-                    .prepare(
-                        "SELECT id, title, element_type, content_cid, position, duration_seconds \
-                         FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
-                    )
-                    .map_err(|e| e.to_string())?;
+                            .conn()
+                            .prepare(
+                                "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
+                                 FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
+                            )
+                            .map_err(|e| e.to_string())?;
 
                         let els = el_stmt
                             .query_map(params![ch_id], |row| {
                                 let el_id: String = row.get(0)?;
+                                let element_type: String = row.get(2)?;
+                                if element_type == "text" {
+                                    if let Some(text) = row.get::<_, Option<String>>(6)? {
+                                        inline_text.push((el_id.clone(), text));
+                                    }
+                                }
                                 Ok(DocumentElement {
                                     id: el_id,
                                     title: row.get(1)?,
-                                    element_type: row.get(2)?,
+                                    element_type,
                                     content_hash: row.get(3)?,
                                     position: row.get(4)?,
                                     duration_seconds: row.get(5)?,
@@ -466,26 +489,42 @@ pub async fn publish_course(
 
                 let created_at = parse_datetime_to_unix(&course.created_at);
                 let updated_at = chrono::Utc::now().timestamp();
+                let tutor_policy = alexandria_studio::store::tutor_policy(db.conn(), &course.id)
+                    .map_err(|error| error.to_string())?;
 
-                Ok(CourseDocumentPayload {
-                    version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
-                    course_id: course.id.clone(),
-                    author_address: course.author_address.clone(),
-                    author_did: Some(author_did),
-                    title: course.title.clone(),
-                    description: course.description.clone(),
-                    thumbnail_hash: course.thumbnail_cid.clone(),
-                    tags: course.tags.clone().unwrap_or_default(),
-                    skill_ids: course.skill_ids.clone().unwrap_or_default(),
-                    chapters,
-                    created_at,
-                    updated_at,
-                    kind: course.kind.clone(),
-                    completion_policy,
-                })
+                Ok((
+                    CourseDocumentPayload {
+                        version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
+                        course_id: course.id.clone(),
+                        author_address: course.author_address.clone(),
+                        author_did: Some(author_did),
+                        title: course.title.clone(),
+                        description: course.description.clone(),
+                        thumbnail_hash: course.thumbnail_cid.clone(),
+                        tags: course.tags.clone().unwrap_or_default(),
+                        skill_ids: course.skill_ids.clone().unwrap_or_default(),
+                        chapters,
+                        created_at,
+                        updated_at,
+                        kind: course.kind.clone(),
+                        completion_policy,
+                        tutor_policy,
+                    },
+                    inline_text,
+                ))
             },
         )
         .await?;
+
+    if !profile_unchanged() {
+        return Err("profile changed during publication".into());
+    }
+    content_course::materialize_text_lessons(&state.content_node, &mut payload, &inline_text)
+        .await
+        .map_err(|error| error.to_string())?;
+    if !profile_unchanged() {
+        return Err("profile changed during publication".into());
+    }
 
     // Sign the document
     let signed = content_course::sign_course_document(&payload, &w.signing_key)
@@ -495,6 +534,10 @@ pub async fn publish_course(
     let result = content_course::publish_course_document(&state.content_node, &signed)
         .await
         .map_err(|e| e.to_string())?;
+
+    if !profile_unchanged() {
+        return Err("profile changed during publication".into());
+    }
 
     // Update the course and build the catalog announcement off the runtime.
     let update_course_id = course_id.clone();
@@ -514,6 +557,28 @@ pub async fn publish_course(
             state.profile_lease(),
             "courses.publish.commit",
             move |db| {
+                // The signed document carries the lesson text as it was read.
+                // If an author edited a lesson while it uploaded, publishing
+                // would record a document that no longer matches the draft.
+                for (element_id, expected_text) in &inline_text {
+                    let matches: bool = db
+                        .conn()
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM course_elements e \
+                             JOIN course_chapters ch ON ch.id = e.chapter_id \
+                             WHERE e.id = ?1 AND ch.course_id = ?2 \
+                             AND e.content_inline = ?3 AND e.element_type = 'text')",
+                            params![element_id, update_course_id, expected_text],
+                            |row| row.get(0),
+                        )
+                        .map_err(|error| error.to_string())?;
+                    if !matches {
+                        return Err(
+                            "lesson changed during publication; review and publish again".into(),
+                        );
+                    }
+                }
+
                 db.conn()
                     .execute(
                         "UPDATE courses SET content_cid = ?1, course_document_version = ?2, \

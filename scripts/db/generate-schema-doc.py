@@ -24,6 +24,13 @@ RUNNER = ROOT / "src-tauri" / "src" / "db" / "mod.rs"
 TESTS = ROOT / "src-tauri" / "src" / "db" / "schema_tests.rs"
 DOC = ROOT / "docs" / "database-schema.md"
 
+# Migration SQL that lives outside schema.rs, keyed by the expression used in
+# the MIGRATIONS list. An entry the generator cannot resolve is an error, not a
+# gap: a document missing a migration would describe a schema no build has.
+EXTERNAL_SOURCES = {
+    "alexandria_studio::store::SCHEMA": ROOT / "crates" / "alexandria-studio" / "src" / "schema.sql",
+}
+
 # Domain assignment by name. Every table must match exactly one rule; the
 # generator fails otherwise, so a new table has to be placed deliberately.
 DOMAINS = [
@@ -46,12 +53,28 @@ DOMAINS = [
     ("Genesis trust", r"^governance_genesis_trust_anchors$"),
     ("P2P, content and sync", r"^(peers|pins|sync_log|devices|sync_state|sync_queue|pending_pairings|dht_records|peer_profiles|username_claims|content_mappings|stake_pubkey_registry)$"),
     ("Settings", r"^app_settings$"),
+    ("Instructor studio", r"^(studio_|course_tutor_policies$|course_lesson_feedback$)"),
 ]
 
 
-def baseline_sql():
+def migrations():
+    """Every (version, name, sql) in the order the runner applies them."""
     text = SCHEMA.read_text()
-    return text.split('const MIGRATION_001_BASELINE: &str = r#"', 1)[1].rsplit('"#;', 1)[0]
+    listing = text.split("pub const MIGRATIONS", 1)[1].split("];", 1)[0]
+    entries = re.findall(r'\(\s*(\d+),\s*"([^"]+)",\s*([A-Za-z0-9_:]+)\s*\)', listing)
+    if not entries:
+        sys.exit("no migrations found in schema.rs")
+    resolved = []
+    for version, name, source in entries:
+        local = re.search(rf'const {re.escape(source)}: &str = r#"(.*?)"#;', text, re.S)
+        if local:
+            sql = local.group(1)
+        elif source in EXTERNAL_SOURCES:
+            sql = EXTERNAL_SOURCES[source].read_text()
+        else:
+            sys.exit(f"migration {version} ({name}) uses {source}, which this generator cannot resolve")
+        resolved.append((int(version), name, sql))
+    return resolved
 
 
 def const(path, name):
@@ -69,7 +92,8 @@ def forbidden_tables():
 
 def inventory():
     conn = sqlite3.connect(":memory:")
-    conn.executescript(baseline_sql())
+    for _, _, sql in migrations():
+        conn.executescript(sql)
     tables = {}
     for name, sql in conn.execute(
         "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
@@ -145,19 +169,23 @@ def render(tables, indexes, views, triggers):
     w("> it with `--check` to see whether this file is stale.")
     w("")
     w("**Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.")
-    w(f"**Schema**: one baseline migration, family `{family}`, epoch {epoch}.")
+    applied = migrations()
+    w(f"**Schema**: {len(applied)} migrations from a baseline, family `{family}`, epoch {epoch}.")
     w(f"**Objects**: {len(tables)} tables, {len(indexes)} indexes, {len(views)} view, {len(triggers)} triggers.")
     w("")
     w("---")
     w("")
     w("## How the schema is managed")
     w("")
-    w("One migration, `MIGRATION_001_BASELINE`, creates the whole schema. It replaced")
-    w("a chain of 94 migrations: that chain was replayed into a database, the result")
+    w("Migration 1, `MIGRATION_001_BASELINE`, creates the core schema. It replaced a")
+    w("chain of 94 migrations: that chain was replayed into a database, the result")
     w("was dumped, the retired tables and columns were removed, and parity was checked")
-    w("object by object. The runner in `db/mod.rs` still applies migrations")
-    w("atomically, one transaction each, and records them in `_migrations`; the")
-    w("baseline is a starting point for future migrations, not a replacement for them.")
+    w("object by object. Later migrations append to it. The runner in `db/mod.rs`")
+    w("applies them atomically, one transaction each, records them in `_migrations`,")
+    w("and requires a database's history to be an exact prefix of this list:")
+    w("")
+    for version, name, _ in applied:
+        w(f"{version}. `{name}`")
     w("")
     w("A database is stamped with its schema family before any normal query runs:")
     w("")

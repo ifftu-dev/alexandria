@@ -11,7 +11,7 @@
 //!      earned skills toward a set of goal skills, with per-skill course
 //!      recommendations — [`compute_learning_path`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::profile::scope::ProfileState as State;
 use rusqlite::Connection;
@@ -216,162 +216,36 @@ pub fn compute_path(
     goals: &[String],
     earned: &HashSet<String>,
 ) -> Result<LearningPath, String> {
-    // Direct prerequisites: skill_id -> [prerequisite_id].
-    let mut prereqs: HashMap<String, Vec<String>> = HashMap::new();
-    {
-        let mut stmt = conn
-            .prepare("SELECT skill_id, prerequisite_id FROM skill_prerequisites")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?;
-        for r in rows {
-            let (skill, prereq) = r.map_err(|e| e.to_string())?;
-            prereqs.entry(skill).or_default().push(prereq);
-        }
-    }
-
-    // Transitive closure of goals over prerequisites.
-    let mut relevant: HashSet<String> = HashSet::new();
-    let mut stack: Vec<String> = goals.to_vec();
-    while let Some(id) = stack.pop() {
-        if !relevant.insert(id.clone()) {
-            continue;
-        }
-        if let Some(ps) = prereqs.get(&id) {
-            for p in ps {
-                if !relevant.contains(p) {
-                    stack.push(p.clone());
-                }
-            }
-        }
-    }
-
-    // Longest-prerequisite-chain depth for ordering (cycle-protected).
-    fn depth(
-        id: &str,
-        prereqs: &HashMap<String, Vec<String>>,
-        relevant: &HashSet<String>,
-        memo: &mut HashMap<String, usize>,
-        visiting: &mut HashSet<String>,
-    ) -> usize {
-        if let Some(d) = memo.get(id) {
-            return *d;
-        }
-        if !visiting.insert(id.to_string()) {
-            return 0; // cycle guard
-        }
-        let d = prereqs
-            .get(id)
-            .map(|ps| {
-                ps.iter()
-                    .filter(|p| relevant.contains(*p))
-                    .map(|p| 1 + depth(p, prereqs, relevant, memo, visiting))
-                    .max()
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-        visiting.remove(id);
-        memo.insert(id.to_string(), d);
-        d
-    }
-
-    let goal_set: HashSet<&String> = goals.iter().collect();
-    let mut memo = HashMap::new();
-    let mut visiting = HashSet::new();
-    let mut ordered: Vec<String> = relevant.iter().cloned().collect();
-    ordered.sort_by(|a, b| {
-        let da = depth(a, &prereqs, &relevant, &mut memo, &mut visiting);
-        let db = depth(b, &prereqs, &relevant, &mut memo, &mut visiting);
-        da.cmp(&db).then_with(|| a.cmp(b))
-    });
-
-    let mut steps = Vec::new();
-    let mut earned_count = 0;
-    for skill_id in &ordered {
-        let row = conn
-            .query_row(
-                "SELECT sk.name, sk.bloom_level, s.name
-                 FROM skills sk
-                 LEFT JOIN subjects s ON sk.subject_id = s.id
-                 WHERE sk.id = ?1",
-                [skill_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .ok();
-        let Some((name, bloom_level, subject_name)) = row else {
-            continue;
-        };
-
-        let direct = prereqs.get(skill_id).cloned().unwrap_or_default();
-        let is_earned = earned.contains(skill_id);
-        let status = if is_earned {
-            earned_count += 1;
-            "earned"
-        } else if direct.iter().all(|p| earned.contains(p)) {
-            "available"
-        } else {
-            "locked"
-        };
-
-        // Recommend up to 3 published courses tagged with this skill.
-        let course_recs = if is_earned {
-            Vec::new()
-        } else {
-            recommend_courses(conn, skill_id).unwrap_or_default()
-        };
-
-        steps.push(LearningPathStep {
-            skill_id: skill_id.clone(),
-            name,
-            bloom_level,
-            subject_name,
-            status: status.to_string(),
-            is_goal: goal_set.contains(skill_id),
-            prerequisite_ids: direct,
-            course_recs,
-        });
-    }
-
-    let total = steps.len();
+    // One implementation, shared with the assistant broker, so a connected
+    // assistant can never see a different order or a different status.
+    let path = alexandria_studio::skills::learning_path(conn, goals, earned)
+        .map_err(|error| error.to_string())?;
     Ok(LearningPath {
-        goal_skill_ids: goals.to_vec(),
-        steps,
-        total,
-        earned_count,
-    })
-}
-
-/// Published courses tagged with `skill_id` (matched against the JSON
-/// `skill_ids` array column), capped at 3.
-fn recommend_courses(conn: &Connection, skill_id: &str) -> Result<Vec<CourseRec>, String> {
-    let pattern = format!("%\"{skill_id}\"%");
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, title FROM courses
-             WHERE status = 'published' AND skill_ids LIKE ?1
-             ORDER BY title LIMIT 3",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([pattern], |row| {
-            Ok(CourseRec {
-                id: row.get(0)?,
-                title: row.get(1)?,
+        goal_skill_ids: path.goal_skill_ids,
+        total: path.total,
+        earned_count: path.earned_count,
+        steps: path
+            .steps
+            .into_iter()
+            .map(|step| LearningPathStep {
+                skill_id: step.skill_id,
+                name: step.name,
+                bloom_level: step.bloom_level,
+                subject_name: step.subject_name,
+                status: step.status,
+                is_goal: step.is_goal,
+                prerequisite_ids: step.prerequisite_ids,
+                course_recs: step
+                    .course_recs
+                    .into_iter()
+                    .map(|rec| CourseRec {
+                        id: rec.course_id,
+                        title: rec.title,
+                    })
+                    .collect(),
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
+            .collect(),
+    })
 }
 
 /// Compute the local user's learning path toward `goal_skill_ids`.

@@ -8,11 +8,11 @@ use crate::context::ProjectContext;
 use crate::output;
 
 // ── Shared SQL from src-tauri ───────────────────────────────────────
-// Include the schema module directly from the Tauri crate so there is a
-// single source of truth for migrations.
+// The migrations come from app_lib itself, so the CLI and the app apply one
+// schema. This used to `#[path]`-include schema.rs into this crate, which
+// broke as soon as a migration referenced a crate the CLI did not depend on.
 
-#[path = "../../../src-tauri/src/db/schema.rs"]
-mod schema;
+use app_lib::db::schema;
 
 // ── CLI subcommands ─────────────────────────────────────────────────
 

@@ -38,7 +38,13 @@
 
 /// Every migration, in order. The baseline is number 1 and, for now, the only
 /// entry; later schema changes append here and are applied on top.
-pub const MIGRATIONS: &[(i64, &str, &str)] = &[(1, "baseline", MIGRATION_001_BASELINE)];
+pub const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (1, "baseline", MIGRATION_001_BASELINE),
+    // Instructor studio: authoring documents, connection secrets, course tutor
+    // policies, tutor threads and lesson feedback. Owned by the studio crate
+    // so its tables and the code that reads them change together.
+    (2, "instructor_studio", alexandria_studio::store::SCHEMA),
+];
 
 const MIGRATION_001_BASELINE: &str = r#"
 CREATE TABLE app_settings (

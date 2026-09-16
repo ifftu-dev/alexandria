@@ -7,19 +7,22 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: one baseline migration, family `alexandria.profile`, epoch 1.
-**Objects**: 92 tables, 105 indexes, 1 view, 3 triggers.
+**Schema**: 2 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 97 tables, 106 indexes, 1 view, 3 triggers.
 
 ---
 
 ## How the schema is managed
 
-One migration, `MIGRATION_001_BASELINE`, creates the whole schema. It replaced
-a chain of 94 migrations: that chain was replayed into a database, the result
+Migration 1, `MIGRATION_001_BASELINE`, creates the core schema. It replaced a
+chain of 94 migrations: that chain was replayed into a database, the result
 was dumped, the retired tables and columns were removed, and parity was checked
-object by object. The runner in `db/mod.rs` still applies migrations
-atomically, one transaction each, and records them in `_migrations`; the
-baseline is a starting point for future migrations, not a replacement for them.
+object by object. Later migrations append to it. The runner in `db/mod.rs`
+applies them atomically, one transaction each, records them in `_migrations`,
+and requires a database's history to be an exact prefix of this list:
+
+1. `baseline`
+2. `instructor_studio`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1201,6 +1204,46 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 - `scope` TEXT NOT NULL default `'sync'`
 
+### Instructor studio (5)
+
+#### `course_lesson_feedback`
+
+- `id` TEXT PK
+- `enrollment_id` TEXT NOT NULL → `enrollments.id`
+- `course_id` TEXT NOT NULL → `courses.id`
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `rating` INTEGER NOT NULL
+- `comment` TEXT NOT NULL default `''`
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `course_tutor_policies`
+
+- `course_id` TEXT PK → `courses.id`
+- `enabled` INTEGER NOT NULL default `0`
+- `guidance` TEXT NOT NULL default `'socratic'`
+- `initial_prompt` TEXT NOT NULL default `''`
+
+#### `studio_documents`
+
+- `kind` TEXT PK
+- `id` TEXT PK
+- `revision` INTEGER NOT NULL
+- `value` TEXT NOT NULL
+
+#### `studio_secrets`
+
+- `connection_id` TEXT PK
+- `secret` TEXT NOT NULL
+
+#### `studio_tutor_threads`
+
+- `id` TEXT PK
+- `course_id` TEXT NOT NULL → `courses.id`
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `connection_id` TEXT NOT NULL
+- `messages` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL default `datetime('now')`
+
 ---
 
 ## View and triggers
@@ -1240,9 +1283,13 @@ erDiagram
     courses ||--o{ course_chapters : course_id
     completion_claims ||--o{ course_completion_endorsements : claim_id
     course_chapters ||--o{ course_elements : chapter_id
+    course_elements ||--o{ course_lesson_feedback : element_id
+    courses ||--o{ course_lesson_feedback : course_id
+    enrollments ||--o{ course_lesson_feedback : enrollment_id
     course_elements ||--o{ course_notes : element_id
     course_chapters ||--o{ course_notes : chapter_id
     enrollments ||--o{ course_notes : enrollment_id
+    courses ||--o{ course_tutor_policies : course_id
     credentials ||--o{ credential_anchors : credential_id
     course_elements ||--o{ element_progress : element_id
     enrollments ||--o{ element_progress : enrollment_id
@@ -1282,6 +1329,8 @@ erDiagram
     skills ||--o{ skill_relations : related_skill_id
     skills ||--o{ skill_relations : skill_id
     subjects ||--o{ skills : subject_id
+    course_elements ||--o{ studio_tutor_threads : element_id
+    courses ||--o{ studio_tutor_threads : course_id
     subject_fields ||--o{ subjects : subject_field_id
     devices ||--o{ sync_state : device_id
     course_elements ||--o{ video_chapters : element_id

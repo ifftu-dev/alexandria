@@ -8,13 +8,14 @@ import { AppButton } from '@/components/ui'
 import type { Element } from '@/types'
 
 const props = defineProps<{ element: Element }>()
-const emit = defineEmits<{ updated: [Element] }>()
+const emit = defineEmits<{ updated: [Element]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
 
 const body = ref(props.element.content_inline ?? '')
 const dirty = ref(false)
+watch(dirty, value => emit('dirty', value), { flush: 'sync' })
 const saving = ref(false)
 const error = ref('')
 

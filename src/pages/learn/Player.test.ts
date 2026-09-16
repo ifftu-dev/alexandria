@@ -27,6 +27,10 @@ vi.mock('@/components/course/elementRegistry', () => ({ resolveElementBinding: (
 vi.mock('@/components/ui/InfoTip.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/components/ui', async () => ({
   AppButton: (await import('@/components/ui/AppButton.vue')).default,
+  // The lesson feedback dialog; stubbed because these tests cover monitoring
+  // ownership, not feedback.
+  AppModal: { template: '<div><slot /></div>' },
+  AppTextarea: { template: '<textarea />' },
   ProvenanceBadge: { template: '<span />' },
 }))
 vi.mock('@/composables/useSentinel', () => ({

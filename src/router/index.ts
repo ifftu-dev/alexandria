@@ -92,6 +92,18 @@ const router = createRouter({
       meta: { layout: 'app', requiresInstructorMode: true },
     },
 
+    {
+      path: '/instructor/workflows',
+      name: 'instructor-workflows',
+      component: () => import('@/pages/instructor/Workflows.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    {
+      path: '/instructor/ai',
+      name: 'instructor-ai',
+      component: () => import('@/pages/instructor/AiSettings.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
     // Instructor — unified composer (courses + tutorials)
     {
       path: '/instructor/composer/new',

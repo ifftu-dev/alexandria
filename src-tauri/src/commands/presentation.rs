@@ -23,11 +23,11 @@
 
 use crate::profile::scope::ProfileState as State;
 use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-use crate::crypto::did::{derive_did_key, parse_did_key, resolve_did_key, Did};
+use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
@@ -43,30 +43,10 @@ pub struct CreatePresentationRequest {
     pub nonce: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PresentationEnvelope {
-    pub id: String,
-    /// JCS-canonical JSON containing the redacted credential bundle
-    /// plus the audience and nonce that bound the presentation.
-    pub payload_json: String,
-    /// Detached Ed25519 JWS over `payload_json`, signed by the
-    /// subject's signing key. Format: `header..signature`.
-    pub proof: String,
-    /// Subject DID — the verifier resolves this to a public key
-    /// to check `proof` against `payload_json`.
-    pub subject: String,
-}
-
-/// Verification outcome from `verify_presentation_impl`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PresentationVerification {
-    Accepted,
-    BadSignature,
-    AudienceMismatch,
-    Replayed,
-    Malformed,
-}
+/// The envelope and its verdicts live in `alexandria-studio`, so this module
+/// and the assistant broker verify a presentation one way. Re-exported here
+/// to keep this module's public surface, and the IPC payloads, unchanged.
+pub use alexandria_studio::credentials::{PresentationEnvelope, PresentationVerification};
 
 /// Always-included structural keys per credential — without these
 /// the verifier can't even tell which credential it's looking at.
@@ -158,75 +138,8 @@ pub fn verify_presentation_impl(
     envelope: &PresentationEnvelope,
     expected_audience: &str,
 ) -> Result<PresentationVerification, String> {
-    // Parse the canonical payload to extract audience + nonce.
-    let payload: serde_json::Value = match serde_json::from_str(&envelope.payload_json) {
-        Ok(v) => v,
-        Err(_) => return Ok(PresentationVerification::Malformed),
-    };
-    let payload_audience = payload.get("audience").and_then(|v| v.as_str());
-    let nonce = payload.get("nonce").and_then(|v| v.as_str());
-    let (Some(payload_audience), Some(nonce)) = (payload_audience, nonce) else {
-        return Ok(PresentationVerification::Malformed);
-    };
-    if payload_audience != expected_audience {
-        return Ok(PresentationVerification::AudienceMismatch);
-    }
-
-    // Replay check first — even if signature is bad, an attacker
-    // shouldn't be able to probe nonce reuse based on response time.
-    // We test seen-state without recording yet; recording happens
-    // only after a successful signature check.
-    let seen: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM presentations_seen WHERE audience = ?1 AND nonce = ?2",
-            params![payload_audience, nonce],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if seen > 0 {
-        return Ok(PresentationVerification::Replayed);
-    }
-
-    // Resolve subject's verifying key from envelope.subject.
-    let subject_did = Did(envelope.subject.clone());
-    if parse_did_key(subject_did.as_str()).is_err() {
-        return Ok(PresentationVerification::Malformed);
-    }
-    let vk: VerifyingKey = match resolve_did_key(&subject_did) {
-        Ok(k) => k,
-        Err(_) => return Ok(PresentationVerification::Malformed),
-    };
-
-    // Verify the detached JWS over payload_json.
-    let parts: Vec<&str> = envelope.proof.split('.').collect();
-    if parts.len() != 3 || !parts[1].is_empty() {
-        return Ok(PresentationVerification::BadSignature);
-    }
-    let sig_bytes = match b64url_decode(parts[2]) {
-        Some(b) if b.len() == 64 => b,
-        _ => return Ok(PresentationVerification::BadSignature),
-    };
-    let mut sig_arr = [0u8; 64];
-    sig_arr.copy_from_slice(&sig_bytes);
-    let sig = ed25519_dalek::Signature::from_bytes(&sig_arr);
-    let mut signing_input = Vec::with_capacity(parts[0].len() + 1 + envelope.payload_json.len());
-    signing_input.extend_from_slice(parts[0].as_bytes());
-    signing_input.push(b'.');
-    signing_input.extend_from_slice(envelope.payload_json.as_bytes());
-    if vk.verify_strict(&signing_input, &sig).is_err() {
-        return Ok(PresentationVerification::BadSignature);
-    }
-
-    // Record the (audience, nonce) pair. INSERT OR IGNORE in case
-    // of a TOCTOU race with a parallel verifier — the first writer
-    // wins, the second sees the row on its next call and returns
-    // Replayed.
-    conn.execute(
-        "INSERT OR IGNORE INTO presentations_seen (audience, nonce) VALUES (?1, ?2)",
-        params![payload_audience, nonce],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(PresentationVerification::Accepted)
+    alexandria_studio::credentials::verify_presentation(conn, envelope, expected_audience)
+        .map_err(|error| error.to_string())
 }
 
 // ---- helpers -------------------------------------------------------------
@@ -294,12 +207,6 @@ fn path_has_descendant_kept(path: &[String], keep: &[Vec<String>]) -> bool {
 
 fn b64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn b64url_decode(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(s.as_bytes())
-        .ok()
 }
 
 async fn load_subject_key(state: &State<'_, AppState>) -> Result<(SigningKey, Did), String> {

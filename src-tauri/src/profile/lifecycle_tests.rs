@@ -17,6 +17,7 @@ pub(super) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         profile_operations: super::operations::ProfileOperations::default(),
         tutoring: Arc::new(TutoringManager::new()),
         classroom: Arc::new(ClassroomManager::new()),
+        studio: Arc::new(crate::commands::studio::StudioRuntime::default()),
         #[cfg(grader)]
         grader_runtime: Arc::new(
             crate::plugins::wasm_runtime::GraderRuntime::new().expect("grader"),

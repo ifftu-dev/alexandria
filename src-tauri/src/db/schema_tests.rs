@@ -79,15 +79,26 @@ const FORBIDDEN_TABLES: [&str; 19] = [
     "opinion_withdrawals",
 ];
 
+/// The baseline is migration 1 and later schema changes append to it. The
+/// runner requires applied history to be an exact prefix of this list, so a
+/// gap or a reused number would strand every database that recorded it.
 #[test]
-fn the_baseline_is_the_only_migration() {
-    assert_eq!(MIGRATIONS.len(), 1);
+fn the_baseline_comes_first_and_migrations_are_contiguous() {
     let (version, name, _) = MIGRATIONS[0];
     assert_eq!(version, 1);
     assert_eq!(
         name, "baseline",
         "the baseline must not reuse the old chain's name for version 1"
     );
+    let mut names = std::collections::HashSet::new();
+    for (index, (version, name, _)) in MIGRATIONS.iter().enumerate() {
+        assert_eq!(
+            *version,
+            index as i64 + 1,
+            "migration versions must be contiguous"
+        );
+        assert!(names.insert(*name), "migration name {name} is reused");
+    }
 }
 
 #[test]
@@ -168,6 +179,8 @@ fn the_view_set_is_exact() {
 /// the 94 migrations it replaced. That reference no longer exists in the repo,
 /// so the parity argument cannot be re-run. These counts are what remains: a
 /// drift detector that fails on any object added or removed without intent.
+/// They cover every migration: the baseline's 92 tables and 105 indexes, plus
+/// the instructor studio's 5 tables and 1 index.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -175,8 +188,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 92, "baseline table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 105, "index count changed");
+    assert_eq!(tables, 97, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 106, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         3,
@@ -258,7 +271,7 @@ fn initialising_twice_changes_nothing() {
         .conn()
         .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
         .expect("count applied");
-    assert_eq!(applied, 1);
+    assert_eq!(applied, MIGRATIONS.len() as i64);
 }
 
 #[test]

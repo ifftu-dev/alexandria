@@ -4,8 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
-import { AppButton, ProvenanceBadge } from '@/components/ui'
+import { AppButton, AppModal, AppTextarea, ProvenanceBadge } from '@/components/ui'
 import InfoTip from '@/components/ui/InfoTip.vue'
+import LearnerTutor from '@/components/course/LearnerTutor.vue'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { getProfileSessionToken } from '@/composables/profileSession'
@@ -38,6 +39,39 @@ const enrollment = ref<Enrollment | null>(null)
 const progress = ref<Record<string, ElementProgress>>({})
 const loading = ref(true)
 const enrolling = ref(false)
+const feedbackOpen = ref(false)
+const feedbackRating = ref(0)
+const feedbackComment = ref('')
+const feedbackSaving = ref(false)
+const feedbackSaved = ref(false)
+const feedbackError = ref('')
+
+function openFeedback() {
+  feedbackRating.value = 0
+  feedbackComment.value = ''
+  feedbackSaved.value = false
+  feedbackError.value = ''
+  feedbackOpen.value = true
+}
+
+async function submitFeedback() {
+  if (!currentElement.value || feedbackRating.value === 0) return
+  feedbackSaving.value = true
+  feedbackError.value = ''
+  try {
+    await invoke('studio_submit_lesson_feedback', {
+      courseId,
+      elementId: currentElement.value.id,
+      rating: feedbackRating.value,
+      comment: feedbackComment.value.trim(),
+    })
+    feedbackSaved.value = true
+  } catch (value) {
+    feedbackError.value = String(value)
+  } finally {
+    feedbackSaving.value = false
+  }
+}
 
 // Auto-earn completion claim
 interface UnmetElement {
@@ -1347,6 +1381,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               {{ $t('learn.player.previous') }}
             </AppButton>
 
+            <AppButton v-if="enrollment && !isAssessment" type="button" variant="ghost" size="sm" @click="openFeedback">
+              {{ t('learn.player.feedback') }}
+            </AppButton>
+
             <!-- Center action -->
             <AppButton
               v-if="!enrollment && course?.kind !== 'tutorial'"
@@ -1395,6 +1433,47 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         </div>
       </div>
     </div>
+
+    <LearnerTutor
+      v-if="course && enrollment && currentElement?.element_type === 'text'"
+      :key="currentElement.id"
+      :course-id="courseId"
+      :element-id="currentElement.id"
+    />
+
+    <AppModal :open="feedbackOpen" :title="t('learn.player.feedbackTitle')" @close="feedbackOpen = false">
+      <div v-if="feedbackSaved" class="py-6 text-center">
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">
+          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7" /></svg>
+        </div>
+        <h3 class="mt-3 font-semibold">{{ t('learn.player.feedbackThanks') }}</h3>
+        <p class="mt-1 text-sm text-muted-foreground">{{ t('learn.player.feedbackSaved') }}</p>
+        <AppButton type="button" class="mt-5" @click="feedbackOpen = false">{{ t('common.actions.done') }}</AppButton>
+      </div>
+      <form v-else class="space-y-5" @submit.prevent="submitFeedback">
+        <p class="text-sm text-muted-foreground">{{ t('learn.player.feedbackIntro') }}</p>
+        <fieldset>
+          <legend class="mb-2 text-sm font-medium">{{ t('learn.player.feedbackRating') }}</legend>
+          <div class="flex gap-2">
+            <button
+              v-for="rating in 5"
+              :key="rating"
+              type="button"
+              class="flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-semibold transition-colors"
+              :class="feedbackRating === rating ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-primary/50'"
+              :aria-label="t('learn.player.feedbackRatingValue', { rating })"
+              @click="feedbackRating = rating"
+            >{{ rating }}</button>
+          </div>
+        </fieldset>
+        <AppTextarea v-model="feedbackComment" :label="t('learn.player.feedbackComment')" :placeholder="t('learn.player.feedbackPlaceholder')" :maxlength="4000" :rows="4" />
+        <p v-if="feedbackError" role="alert" class="text-sm text-error">{{ feedbackError }}</p>
+        <div class="flex justify-end gap-2">
+          <AppButton type="button" variant="ghost" @click="feedbackOpen = false">{{ t('common.actions.cancel') }}</AppButton>
+          <AppButton type="submit" :loading="feedbackSaving" :disabled="feedbackRating === 0">{{ t('learn.player.feedbackSubmit') }}</AppButton>
+        </div>
+      </form>
+    </AppModal>
 
     <!-- ============================== -->
     <!-- MOBILE: Chapter navigator sheet -->

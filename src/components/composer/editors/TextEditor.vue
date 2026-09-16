@@ -6,12 +6,13 @@ import { AppButton } from '@/components/ui'
 import type { Element } from '@/types'
 
 const props = defineProps<{ element: Element }>()
-const emit = defineEmits<{ updated: [Element] }>()
+const emit = defineEmits<{ updated: [Element]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
 
 const body = ref(props.element.content_inline ?? '')
 const dirty = ref(false)
+watch(dirty, value => emit('dirty', value), { flush: 'sync' })
 const saving = ref(false)
 const error = ref('')
 
@@ -46,6 +47,7 @@ async function save() {
     </div>
     <textarea
       v-model="body"
+      :aria-label="$t('instructor.editors.text.heading')"
       rows="18"
       class="w-full rounded-md border border-border bg-background p-3 font-mono text-sm"
       :placeholder="$t('instructor.editors.text.placeholder')"

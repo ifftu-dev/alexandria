@@ -15,7 +15,7 @@ import PluginEditor from './editors/PluginEditor.vue'
 import type { Element } from '@/types'
 
 const props = defineProps<{ element: Element }>()
-const emit = defineEmits<{ updated: [Element]; deleted: [string] }>()
+const emit = defineEmits<{ updated: [Element]; deleted: [string]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
 
@@ -37,6 +37,8 @@ const editorFor = computed<Component>(() => {
 
 const title = ref(props.element.title)
 const titleDirty = ref(false)
+const contentDirty = ref(false)
+watch([titleDirty, contentDirty], () => emit('dirty', titleDirty.value || contentDirty.value), { flush: 'sync' })
 const savingTitle = ref(false)
 const showDelete = ref(false)
 const deleting = ref(false)
@@ -96,6 +98,7 @@ async function deleteElement() {
           type="text"
           class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-base font-semibold"
           :placeholder="$t('instructor.elementEditor.titlePlaceholder')"
+          :aria-label="$t('instructor.elementEditor.titlePlaceholder')"
           @input="titleDirty = true"
           @keydown.enter="saveTitle"
         >
@@ -110,6 +113,7 @@ async function deleteElement() {
         :key="element.id"
         :element="element"
         @updated="(el: Element) => emit('updated', el)"
+        @dirty="contentDirty = $event"
       />
     </div>
 
