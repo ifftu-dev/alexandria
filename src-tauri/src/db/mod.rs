@@ -20,6 +20,11 @@ pub enum DbError {
     Sqlite(#[from] rusqlite::Error),
     #[error("migration failed: {0}")]
     Migration(String),
+    /// The file is not a profile database this build can open. Distinct from
+    /// `Migration` because the caller's only remedy is to choose a different
+    /// file or a different build — never to retry, and never to convert.
+    #[error("unsupported profile database: {0}")]
+    UnsupportedSchema(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -124,11 +129,31 @@ pub fn run_migrations_on_connection(conn: &Connection) -> Result<usize, DbError>
     run_migrations_from_connection(conn, schema::MIGRATIONS)
 }
 
-fn run_migrations_from_connection(
-    conn: &Connection,
-    migrations: &[(i64, &str, &str)],
-) -> Result<usize, DbError> {
-    // Create the migrations tracking table.
+/// Alexandria's mark in the SQLite file header. A database carrying any other
+/// value was written by something else, and that is knowable before reading a
+/// table.
+///
+/// Derived from the family name rather than a four-letter abbreviation, since
+/// the header field holds 32 bits and `alexandria` does not fit in four
+/// characters. Reproduce with:
+///
+/// ```text
+/// python3 -c "import hashlib; \
+///   print(int.from_bytes(hashlib.sha256(b'alexandria.profile').digest()[:4], 'big') & 0x7FFFFFFF)"
+/// ```
+pub const SCHEMA_APPLICATION_ID: i32 = 162_114_141;
+
+/// Epoch of the current schema family. A new baseline bumps this; ordinary
+/// migrations never do, because they extend a family rather than replace it.
+pub const SCHEMA_EPOCH: i32 = 1;
+
+/// Family name carried in `_schema_identity`, so a refusal can say which
+/// family a file belongs to rather than only that it is wrong.
+pub const SCHEMA_FAMILY: &str = "alexandria.profile";
+
+/// Create the applied-migration ledger. Shared so the app and the CLI cannot
+/// drift apart on the DDL for the one table both of them read.
+pub fn ensure_migration_table(conn: &Connection) -> Result<(), DbError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
                 version  INTEGER PRIMARY KEY,
@@ -136,6 +161,128 @@ fn run_migrations_from_connection(
                 applied_at TEXT NOT NULL DEFAULT (datetime('now'))
             );",
     )?;
+    Ok(())
+}
+
+fn pragma_i32(conn: &Connection, name: &str) -> Result<i32, DbError> {
+    Ok(conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get(0))?)
+}
+
+/// Tables that belong to a schema rather than to this bookkeeping.
+fn has_user_tables(conn: &Connection) -> Result<bool, DbError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+         AND name NOT LIKE 'sqlite_%' AND name NOT IN ('_migrations', '_schema_identity')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn recorded_migrations(conn: &Connection) -> Result<i64, DbError> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_migrations'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        return Ok(0);
+    }
+    Ok(conn.query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))?)
+}
+
+fn unsupported(message: String) -> DbError {
+    DbError::UnsupportedSchema(format!(
+        "{message}. Move or remove the file and Alexandria will create a fresh \
+         profile, or open it with the build that wrote it. Nothing has been \
+         changed or deleted."
+    ))
+}
+
+/// Establish that this file belongs to this schema family, or refuse it.
+///
+/// A fresh file is stamped; a file already carrying the stamp is checked; and
+/// anything else is refused without a single write. The stamp lives in the
+/// SQLite header rather than only in a table, so a database whose contents are
+/// unrecognisable can still be identified, and a foreign file cannot be
+/// mistaken for ours by having been migrated to the same version number.
+fn validate_or_stamp_identity(conn: &Connection) -> Result<(), DbError> {
+    let application_id = pragma_i32(conn, "application_id")?;
+    let epoch = pragma_i32(conn, "user_version")?;
+
+    if application_id == 0 && epoch == 0 {
+        if has_user_tables(conn)? || recorded_migrations(conn)? > 0 {
+            return Err(unsupported(
+                "this file holds a schema from an earlier Alexandria that predates \
+                 schema-family identity, and it is not upgraded to the current baseline"
+                    .into(),
+            ));
+        }
+        conn.pragma_update(None, "application_id", SCHEMA_APPLICATION_ID)?;
+        conn.pragma_update(None, "user_version", SCHEMA_EPOCH)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS _schema_identity (
+                 family     TEXT PRIMARY KEY,
+                 epoch      INTEGER NOT NULL,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );",
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO _schema_identity (family, epoch) VALUES (?1, ?2)",
+            rusqlite::params![SCHEMA_FAMILY, SCHEMA_EPOCH],
+        )?;
+        return Ok(());
+    }
+
+    if application_id != SCHEMA_APPLICATION_ID {
+        return Err(unsupported(format!(
+            "this file is not an Alexandria profile database (application id {application_id:#010x})"
+        )));
+    }
+    if epoch > SCHEMA_EPOCH {
+        return Err(unsupported(format!(
+            "this profile was written by a newer Alexandria (schema epoch {epoch}, \
+             this build understands {SCHEMA_EPOCH})"
+        )));
+    }
+    if epoch < SCHEMA_EPOCH {
+        return Err(unsupported(format!(
+            "this profile belongs to an earlier schema family (epoch {epoch}, \
+             this build requires {SCHEMA_EPOCH})"
+        )));
+    }
+
+    // The header says it is ours; the contents must agree.
+    let recorded: Option<(String, i32)> = conn
+        .query_row(
+            "SELECT family, epoch FROM _schema_identity LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match recorded {
+        Some((family, recorded_epoch)) if family == SCHEMA_FAMILY && recorded_epoch == epoch => {
+            Ok(())
+        }
+        Some((family, recorded_epoch)) => Err(unsupported(format!(
+            "this profile's header and contents disagree: the header says \
+             {SCHEMA_FAMILY} epoch {epoch}, the database says {family} epoch {recorded_epoch}"
+        ))),
+        None => Err(unsupported(
+            "this profile carries the Alexandria header but no schema identity".into(),
+        )),
+    }
+}
+
+fn run_migrations_from_connection(
+    conn: &Connection,
+    migrations: &[(i64, &str, &str)],
+) -> Result<usize, DbError> {
+    // Identity first: a file from another family is refused before it is read
+    // or written, so neither entry point can act on a database it does not
+    // understand.
+    validate_or_stamp_identity(conn)?;
+    ensure_migration_table(conn)?;
 
     let applied = {
         let mut stmt = conn.prepare("SELECT version, name FROM _migrations ORDER BY version")?;

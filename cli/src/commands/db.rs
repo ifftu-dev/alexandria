@@ -47,15 +47,11 @@ pub fn execute(
 // ── Migration runner ────────────────────────────────────────────────
 // The CLI already links app_lib; use its atomic runner and schema extensions.
 
+/// Delegates to the app's definition rather than keeping a second copy of the
+/// DDL: two independently maintained `CREATE TABLE` strings for the same table
+/// are exactly the drift the schema parity work exists to prevent.
 pub(crate) fn ensure_migration_table(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS _migrations (
-            version    INTEGER PRIMARY KEY,
-            name       TEXT NOT NULL,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );",
-    )
-    .context("Failed to create _migrations table")?;
+    app_lib::db::ensure_migration_table(conn).context("Failed to create _migrations table")?;
     Ok(())
 }
 
@@ -359,6 +355,46 @@ mod migration_tests {
         assert_eq!(recognition, 0);
     }
 
+    /// The CLI opens its own connection rather than going through
+    /// `Database`, so "both use the same runner" is a claim about code paths
+    /// that can quietly stop being true. Compare the schemas themselves.
+    #[test]
+    fn the_cli_and_the_app_build_the_same_schema() {
+        let cli_conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&cli_conn).unwrap();
+
+        let app_db = app_lib::db::Database::open_in_memory().unwrap();
+        app_db.run_migrations().unwrap();
+
+        fn schema(conn: &Connection) -> Vec<(String, String, String)> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT type, name, COALESCE(sql, '') FROM sqlite_master \
+                     WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        }
+
+        assert_eq!(schema(&cli_conn), schema(app_db.conn()));
+
+        // Including the identity stamp: a database the CLI created must be one
+        // the app accepts, and vice versa.
+        for conn in [&cli_conn, app_db.conn()] {
+            let id: i32 = conn
+                .query_row("PRAGMA application_id", [], |row| row.get(0))
+                .unwrap();
+            let epoch: i32 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(id, app_lib::db::SCHEMA_APPLICATION_ID);
+            assert_eq!(epoch, app_lib::db::SCHEMA_EPOCH);
+        }
+    }
+
     #[test]
     fn cli_migration_record_failure_rolls_back_schema_and_allows_retry() {
         let conn = Connection::open_in_memory().unwrap();
@@ -375,9 +411,12 @@ mod migration_tests {
         .unwrap();
         assert!(apply_migrations(&conn).is_err());
         assert_eq!(current_version(&conn), 0);
+        // `_migrations` and `_schema_identity` are bookkeeping the runner owns;
+        // what must not survive a failed baseline is any schema table.
         let partial: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name != '_migrations'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+                 AND name NOT IN ('_migrations', '_schema_identity')",
                 [],
                 |row| row.get(0),
             )

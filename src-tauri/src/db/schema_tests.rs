@@ -208,12 +208,119 @@ fn a_database_from_the_old_chain_is_refused() {
             .expect_err("an old-chain database must not be adopted");
         let message = error.to_string();
         assert!(
-            message.contains("not a supported prefix"),
-            "refusal should name the mismatch, got: {message}"
+            message.contains("unsupported profile database"),
+            "refusal should name the schema family, got: {message}"
         );
         assert!(
             !table_exists(db.conn(), "credentials"),
             "a refused database must not be written to"
+        );
+    }
+}
+
+/// Schema-family identity.
+///
+/// The prefix check on `_migrations` can only compare a version number and a
+/// name recorded *inside* the database. These assert the stronger property:
+/// the family is stamped in the SQLite file header, so a foreign or future
+/// database is identified before a table is read, and is refused rather than
+/// migrated or deleted.
+#[cfg(test)]
+mod identity {
+    use super::*;
+    use crate::db::{SCHEMA_APPLICATION_ID, SCHEMA_EPOCH, SCHEMA_FAMILY};
+
+    fn pragma(db: &Database, name: &str) -> i32 {
+        db.conn()
+            .query_row(&format!("PRAGMA {name}"), [], |row| row.get(0))
+            .expect("read pragma")
+    }
+
+    #[test]
+    fn a_fresh_database_is_stamped_with_the_family() {
+        let db = migrated();
+        assert_eq!(pragma(&db, "application_id"), SCHEMA_APPLICATION_ID);
+        assert_eq!(pragma(&db, "user_version"), SCHEMA_EPOCH);
+        let (family, epoch): (String, i32) = db
+            .conn()
+            .query_row("SELECT family, epoch FROM _schema_identity", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("identity row");
+        assert_eq!(family, SCHEMA_FAMILY);
+        assert_eq!(epoch, SCHEMA_EPOCH);
+    }
+
+    #[test]
+    fn a_foreign_application_id_is_refused() {
+        let db = Database::open_in_memory().expect("open database");
+        db.conn()
+            .pragma_update(None, "application_id", 0x0BAD_F00D_u32 as i32)
+            .expect("stamp foreign id");
+
+        let message = db
+            .run_migrations()
+            .expect_err("a foreign database must be refused")
+            .to_string();
+        assert!(
+            message.contains("not an Alexandria profile database"),
+            "got: {message}"
+        );
+        assert!(!table_exists(db.conn(), "credentials"));
+    }
+
+    #[test]
+    fn a_newer_schema_epoch_is_refused() {
+        let db = Database::open_in_memory().expect("open database");
+        db.conn()
+            .pragma_update(None, "application_id", SCHEMA_APPLICATION_ID)
+            .expect("stamp id");
+        db.conn()
+            .pragma_update(None, "user_version", SCHEMA_EPOCH + 1)
+            .expect("stamp future epoch");
+
+        let message = db
+            .run_migrations()
+            .expect_err("a future schema must be refused")
+            .to_string();
+        assert!(
+            message.contains("newer Alexandria"),
+            "a future database should say so plainly, got: {message}"
+        );
+    }
+
+    #[test]
+    fn a_header_that_disagrees_with_the_contents_is_refused() {
+        let db = migrated();
+        db.conn()
+            .execute("UPDATE _schema_identity SET family = 'someone.else'", [])
+            .expect("tamper");
+
+        let message = db
+            .run_migrations()
+            .expect_err("a disagreeing identity must be refused")
+            .to_string();
+        assert!(
+            message.contains("header and contents disagree"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn every_refusal_offers_a_non_destructive_remedy() {
+        let db = Database::open_in_memory().expect("open database");
+        db.conn()
+            .pragma_update(None, "application_id", 0x0BAD_F00D_u32 as i32)
+            .expect("stamp foreign id");
+
+        let message = db.run_migrations().expect_err("refused").to_string();
+        assert!(
+            message.contains("Nothing has been changed or deleted"),
+            "a refusal must not imply the file was touched, got: {message}"
+        );
+        assert!(
+            !message.contains("delete the database") && !message.contains("will be removed"),
+            "a refusal must never direct destruction of an unexamined file: {message}"
         );
     }
 }
