@@ -33,7 +33,7 @@ Updated: 2026-09-15
 | S5 — Media creation | S3, content storage | Capability-specific image/audio/video adapters, artifact provenance, accessible alternatives, provider failures, approval before attachment | Pending; text endpoints currently produce media briefs/scripts only |
 | S6 — Learner tutor | S1, S3, learner player | Signed public course policy, learner local/cloud model setup, lesson threads, assessment isolation, policy tests | Implemented for learner BYOM; native provider smoke and sponsored access remain open |
 | S7 — Sponsored access | S6, Cloud delegated auth | Server-held sponsor keys, per-course budgets/limits, learner entitlement, no key disclosure | Pending; unavailable until service exists |
-| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5–M8 pending; M4 foundation on the Cloud branch |
+| M2–M8 — Full MCP Release 1 | M0/M1 and grants | General learner reads, Cloud OAuth/tenant tools, isolated fixtures, full conformance/CI, Inspector and real assistant client | M3 complete (catalog, course and lesson reads; skill graph, progress, goals and learning path; credential summaries and presentation verification); M5 slice 1 (roles, talent search, candidate summaries, candidate-to-role comparison) implemented on the Cloud branch; M5 slices 2–3 and M6–M8 pending |
 | M9+ — Further MCP writes | M2–M8 and domain services | Other reversible writes, consented disclosures, organizational actions | Pending; see Desktop plan |
 
 ### Work that can proceed asynchronously
@@ -129,6 +129,14 @@ M3 slice 3 (2026-09-16):
 - `cargo +1.91.0 clippy -p alexandria-node -p alexandria-studio -p alexandria-mcp --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed (existing warnings from the patched `tao` only).
 - `npx vue-tsc -b --noEmit`, `npm test` (77), `i18n:parity` (8 locales, 2726 keys), `i18n:no-raw-text` and the Tauri command guard (389/306/83): passed. The fourth permission's strings are English in the other locales until translated.
 - Not yet done: a browser check of the four-permission panel, and Inspector against the credential tools.
+
+M5 slice 1 (2026-09-16, Cloud worktree):
+
+- `cargo +1.91.0 test --no-fail-fast` against local Postgres: 33 suites, 337 passed, 0 failed. The MCP gate suite now covers the five-tool listing, the widened protected-resource metadata, and a token holding only `candidates:read` being refused `compare_candidate_to_role` with a challenge naming `roles:read`.
+- `a_name_reaches_an_assistant_only_from_someone_who_answered_this_organisation` tests the mapping directly: a stranger's match carries no name, a match from somebody who answered carries theirs.
+- `cargo +1.91.0 clippy --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed.
+- Cloud `docs/deployment.md` gained a tools-and-scopes section stating the three rules enforced in code; `README.md` updated to match.
+- Not yet done: fixture end-to-end coverage of the four new tools (the Keycloak script still exercises `list_roles` only), and M5 slices 2–3 — assessment runs, cohort reports and verification jobs.
 
 Provider tests use a controlled loopback HTTP server. No paid model or actual assistant account has been tested. Fixtures use in-memory databases and supplied verifier vectors; real profiles have not been opened or modified by the tests.
 
@@ -276,6 +284,19 @@ Validation (2026-09-16, Cloud worktree):
 - `cargo +1.91.0 fmt --check` and `cargo +1.91.0 clippy --all-targets -- -D warnings`: passed.
 - `cargo +1.91.0 test --no-fail-fast` against the local Postgres: 33 suites, 336 tests passed, including `mcp_gate` (challenge, refusals, admission with locally signed tokens), `secrets` and `tenancy` guards for the new tables, route-authorisation and metrics exposition.
 - `python3 scripts/mcp/e2e.py` (fixture Keycloak 26.7.3 plus a stand-in customer realm, fixture-only credentials, torn down afterwards): passed — realm bootstrap; outbox sync created the identity provider; protected resource metadata; unauthenticated 401 challenge; identity-first sign-in by email domain through the customer realm with PKCE, `iss` and `state`; token `aud` exactly the resource, `organization`, `idp`, `upstream_sub` and `roles:read`; `tools/list` and `list_roles`; 403 `insufficient_scope` without `roles:read`; a suspended user's valid token refused; `provision mcp revoke` invalidates the refresh token.
+
+### Cloud evidence tools (M5 slice 1, 2026-09-16)
+
+Decided with the user:
+
+- **Names in `search_talent`:** a match carries its DID, its hits and its gaps; the published display name is included only for somebody who has already sent this organisation a verified presentation. Being listed in the index is consent to be found, not consent to be named to a third-party model. The console screen is unchanged and still shows names.
+- **Candidate summaries:** no email address. Id, DID, name, when they were added, and their assessment runs with status and integrity flag. The contact address, and the evidence behind a flag, stay in the console.
+
+Implemented: `get_role`, `search_talent`, `get_candidate_summary` and `compare_candidate_to_role`, beside `list_roles`. Scopes are `roles:read`, `talent:read` and `candidates:read`; the comparison reads a candidate *and* a role, so the gate now requires every scope a tool names rather than a single one, and the challenge names the missing one.
+
+Shared services: `src/talent_index.rs` (search with its `talent_searches` log, one person's held skills, the prerequisite graph) and `src/candidates.rs` (a candidate with their runs), plus `roles::one`. The console's search handler reads through the same service, so a recruiter and their assistant see the same people under the same rules; its JSON is unchanged.
+
+Worth stating: `search_talent` writes the search log, so it is annotated as not read-only. A comparison reports `listed_in_index: false` when somebody has no current listing — absent evidence, not evidence of absence — and reports per-requirement standings (met, short on evidence, short on Bloom, reachable, or blocked with the prerequisites that come first) plus a count of assessments that would close the gaps. Never a single suitability score.
 
 Comparison evidence: oidc-provider 9.12.2 (MIT) passed every check, including a delegated-login authorization code flow with a resource-bound JWT and code-replay rejection. Ory Hydra v26.2.0 advertised no CIMD, no `iss` parameter and no RFC 8707 support.
 
