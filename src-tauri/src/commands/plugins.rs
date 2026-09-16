@@ -1471,23 +1471,27 @@ mod grade_credential_tests {
         assert!(reason.contains("only exact graders bundled"));
     }
 
+    /// This once inserted a forged `plugin_attestations` row to prove a
+    /// stored attestation granted no authority. The baseline schema has no
+    /// such table, so that authority cannot be persisted at all -- a stronger
+    /// guarantee than ignoring it, and one worth asserting directly.
     #[test]
-    fn unknown_plugin_is_blocked_even_with_a_forged_persisted_attestation() {
+    fn plugin_attestation_authority_cannot_be_persisted_or_claimed() {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO plugin_attestations \
-                 (plugin_cid, grader_cid, attestation_terms, threshold_signature_blob, \
-                  committee_pubkeys_json, issued_at) \
-                 VALUES ('plugin', 'grader', '{}', x'00', '[]', '2026-07-23T00:00:00Z')",
+        let storable: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'plugin_attestations'",
                 [],
+                |row| row.get(0),
             )
             .unwrap();
+        assert_eq!(storable, 0, "attestation authority must not be storable");
 
         let reason = credential_trust("plugin", b"forged", "grader", b"forged")
             .unwrap()
-            .expect("stored legacy authority must be ignored");
+            .expect("an unknown plugin must be blocked");
         assert!(reason.contains("only exact graders bundled"));
     }
 

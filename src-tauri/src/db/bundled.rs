@@ -377,8 +377,6 @@ mod tests {
             "completion_observations",
             "devices",
             "sync_log",
-            "governance_dao_members",
-            "governance_proposals",
         ] {
             assert_eq!(
                 count(&db, &format!("SELECT COUNT(*) FROM {table}")),
@@ -386,13 +384,9 @@ mod tests {
                 "fabricated rows in {table}"
             );
         }
-        assert_eq!(
-            count(
-                &db,
-                "SELECT COUNT(*) FROM governance_daos WHERE id != 'sentinel-dao'"
-            ),
-            0
-        );
+        // The governance DAO, member and proposal tables are not checked for
+        // fabricated rows because the baseline schema does not create them.
+        // `forbidden_tables_are_absent` asserts that directly.
     }
 
     #[test]

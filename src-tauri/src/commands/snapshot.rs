@@ -15,7 +15,6 @@ use crate::domain::reputation::{CreateSnapshotParams, ReputationRole, SnapshotRe
 use crate::domain::vc::{Claim, CredentialType, CustomClaim};
 use crate::AppState;
 
-const SNAPSHOT_FORMAT: &str = "credential_hash_vc";
 const SNAPSHOT_SCOPE: &str = "as_of_all_eligible_evidence";
 const SCORE_SCALE: i64 = 1_000_000;
 const CONFIDENCE_SCALE: i64 = 10_000;
@@ -155,8 +154,8 @@ fn create_snapshot(
         conn.execute(
             "INSERT INTO reputation_snapshots
              (id, actor_address, subject_id, role, skill_count, tx_status,
-              snapshot_at, snapshot_format, snapshot_scope, computation_spec, credential_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ?9, ?10)",
+              snapshot_at, computation_spec, credential_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8)",
             params![
                 snapshot_id,
                 wallet.stake_address,
@@ -164,8 +163,6 @@ fn create_snapshot(
                 role.as_str(),
                 claim.skills.len() as i64,
                 now,
-                SNAPSHOT_FORMAT,
-                SNAPSHOT_SCOPE,
                 computation_spec,
                 credential_id,
             ],
@@ -341,11 +338,10 @@ fn list_snapshots_db(
                 "SELECT rs.id, rs.actor_address, rs.subject_id, rs.role, rs.skill_count,
                  CASE WHEN rs.credential_id IS NULL THEN rs.tx_status ELSE ca.anchor_status END,
                  CASE WHEN rs.credential_id IS NULL THEN rs.tx_hash ELSE ca.anchor_tx_hash END,
-                 rs.policy_id, rs.ref_asset_name, rs.user_asset_name,
                  CASE WHEN rs.credential_id IS NULL THEN rs.error_message ELSE ca.last_error END,
                  rs.snapshot_at,
                  CASE WHEN rs.credential_id IS NULL THEN rs.confirmed_at ELSE ca.confirmed_at END,
-                 rs.snapshot_format, rs.snapshot_scope, rs.computation_spec, rs.credential_id
+                 rs.computation_spec, rs.credential_id
                  FROM reputation_snapshots rs
                  LEFT JOIN credential_anchors ca ON ca.credential_id = rs.credential_id
                  WHERE CASE WHEN rs.credential_id IS NULL THEN rs.tx_status
@@ -359,11 +355,10 @@ fn list_snapshots_db(
                 "SELECT rs.id, rs.actor_address, rs.subject_id, rs.role, rs.skill_count,
                  CASE WHEN rs.credential_id IS NULL THEN rs.tx_status ELSE ca.anchor_status END,
                  CASE WHEN rs.credential_id IS NULL THEN rs.tx_hash ELSE ca.anchor_tx_hash END,
-                 rs.policy_id, rs.ref_asset_name, rs.user_asset_name,
                  CASE WHEN rs.credential_id IS NULL THEN rs.error_message ELSE ca.last_error END,
                  rs.snapshot_at,
                  CASE WHEN rs.credential_id IS NULL THEN rs.confirmed_at ELSE ca.confirmed_at END,
-                 rs.snapshot_format, rs.snapshot_scope, rs.computation_spec, rs.credential_id
+                 rs.computation_spec, rs.credential_id
                  FROM reputation_snapshots rs
                  LEFT JOIN credential_anchors ca ON ca.credential_id = rs.credential_id
                  ORDER BY rs.snapshot_at DESC LIMIT ?1"
@@ -471,8 +466,6 @@ mod tests {
             record.skill_count, 1,
             "DID-backed reputation must not be queried by stake address"
         );
-        assert_eq!(record.snapshot_format, SNAPSHOT_FORMAT);
-        assert_eq!(record.snapshot_scope, SNAPSHOT_SCOPE);
         // The seeded row predates its verified inputs, so snapshotting
         // recomputes it under the current spec before freezing it.
         assert_eq!(record.computation_spec.as_deref(), Some("v4-verified-vc"));

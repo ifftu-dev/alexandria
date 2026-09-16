@@ -120,7 +120,6 @@ fn open_db(ctx: &ProjectContext, password_file: Option<&std::path::Path>) -> Res
     conn.pragma_update(None, "key", format!("x'{key_hex}'"))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    app_lib::db::register_issuer_recognition(&conn)?;
 
     // Verify the key works by reading sqlite_master
     conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
@@ -339,15 +338,16 @@ mod migration_tests {
     use super::*;
 
     #[test]
-    fn cli_migrations_replay_the_app_schema_and_retire_issuer_recognition() {
+    fn cli_migrations_replay_the_app_schema() {
         let conn = Connection::open_in_memory().unwrap();
-        // Migration 085 replays through the SQL function the runner installs.
         assert_eq!(apply_migrations(&conn).unwrap(), schema::MIGRATIONS.len());
         assert_eq!(apply_migrations(&conn).unwrap(), 0);
         conn.execute(
             "INSERT INTO courses (id, title, author_address) VALUES ('course', 'Course', 'public-author')",
             [],
         ).unwrap();
+        // The scoring-recognition objects the old chain built and then retired
+        // are simply not in the baseline.
         let recognition: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE name IN \
@@ -363,41 +363,32 @@ mod migration_tests {
     fn cli_migration_record_failure_rolls_back_schema_and_allows_retry() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_migration_table(&conn).unwrap();
-        for (version, name, sql) in schema::MIGRATIONS.iter().filter(|(v, _, _)| *v < 85) {
-            let tx = conn.unchecked_transaction().unwrap();
-            tx.execute_batch(sql).unwrap();
-            tx.execute(
-                "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
-                rusqlite::params![version, name],
-            )
-            .unwrap();
-            tx.commit().unwrap();
-        }
+        // Fail the bookkeeping insert rather than the DDL. The baseline's
+        // tables and its `_migrations` row commit in one transaction, so a
+        // failure recording it has to take the whole schema back with it --
+        // which matters more for one large baseline than it did for 94 small
+        // steps, because a partial apply would leave a half-built database.
         conn.execute_batch(
             "CREATE TEMP TRIGGER fail_record BEFORE INSERT ON _migrations
-            WHEN NEW.version = 85 BEGIN SELECT RAISE(ABORT, 'injected record failure'); END;",
+            WHEN NEW.version = 1 BEGIN SELECT RAISE(ABORT, 'injected record failure'); END;",
         )
         .unwrap();
         assert!(apply_migrations(&conn).is_err());
-        assert_eq!(current_version(&conn), 84);
+        assert_eq!(current_version(&conn), 0);
         let partial: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'public_derived_issuers'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name != '_migrations'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(partial, 0);
+        assert_eq!(partial, 0, "a failed baseline must leave no tables behind");
+
         conn.execute_batch("DROP TRIGGER fail_record").unwrap();
-        assert_eq!(
-            apply_migrations(&conn).unwrap(),
-            schema::MIGRATIONS
-                .iter()
-                .filter(|(v, _, _)| *v >= 85)
-                .count()
-        );
+        assert_eq!(apply_migrations(&conn).unwrap(), schema::MIGRATIONS.len());
+
         conn.execute(
-            "UPDATE _migrations SET name = 'unsupported' WHERE version = 85",
+            "UPDATE _migrations SET name = 'unsupported' WHERE version = 1",
             [],
         )
         .unwrap();

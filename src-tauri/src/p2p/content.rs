@@ -84,9 +84,8 @@ mod tests {
     fn content_state(db: &Database) -> Vec<String> {
         [
             "SELECT group_concat(id || ':' || pass_threshold || ':' || draw_count || ':' || ratified, '|') FROM question_banks",
-            "SELECT group_concat(id || ':' || correct_indices, '|') FROM bank_questions",
+            "SELECT group_concat(id || ':' || grader_private, '|') FROM assessment_items",
             "SELECT group_concat(id || ':' || label || ':' || skill_ids, '|') FROM goal_templates",
-            "SELECT COUNT(*) FROM question_bank_versions",
             "SELECT COUNT(*) FROM goal_template_versions",
             "SELECT COUNT(*) FROM sync_log",
         ]

@@ -22,7 +22,6 @@ pub fn handle_sentinel_prior_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::params;
 
     fn count(db: &Database, table: &str) -> i64 {
         db.conn()
@@ -36,23 +35,11 @@ mod tests {
     fn committee_signed_prior_announcement_is_rejected_without_mutation() {
         let db = Database::open_in_memory().expect("in-memory db");
         db.run_migrations().expect("migrations");
+        // No committee row is set up because the tables that carried that
+        // authority are not in the baseline schema. The rejection is
+        // unconditional, so a sender that once looked authorised is refused
+        // on exactly the same path as any other.
         let signer = "stake_test1signer";
-        db.conn()
-            .execute(
-                "INSERT INTO governance_dao_members (dao_id, stake_address, role)
-                 VALUES ('sentinel-dao', ?1, 'committee')",
-                params![signer],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO governance_proposals
-                    (id, dao_id, title, category, proposer, status)
-                 VALUES ('prop1', 'sentinel-dao', 'test', 'sentinel_prior', 'stake_test1', 'approved')",
-                [],
-            )
-            .unwrap();
-        let priors_before = count(&db, "sentinel_priors");
         let sync_before = count(&db, "sync_log");
 
         let announcement = serde_json::json!({
@@ -81,7 +68,15 @@ mod tests {
         let error = handle_sentinel_prior_message(&db, &message).unwrap_err();
 
         assert_eq!(error, LEGACY_SENTINEL_PRIORS_DISABLED);
-        assert_eq!(count(&db, "sentinel_priors"), priors_before);
         assert_eq!(count(&db, "sync_log"), sync_before);
+        let priors: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'sentinel_priors'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(priors, 0, "sentinel_priors must not exist in the baseline");
     }
 }

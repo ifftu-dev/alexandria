@@ -1,781 +1,248 @@
-//! Tests for schema migrations.
+//! Baseline schema invariants.
 //!
-//! These live outside `schema.rs` because the `alexandria` CLI `#[path]`-includes
-//! that file into a crate with no `crate::db`, so a test module referencing
-//! it there would break the CLI build. Migration SQL is reached through the
-//! public `MIGRATIONS` table by version rather than by private const, which
-//! also means these tests exercise exactly what the migrator runs.
+//! The tests these replace each asserted that one migration transformed rows
+//! correctly: 072's backfill, 073's bloom normalisation, 083 and 084's
+//! rebuilds, 088's snapshot columns, 091's course binding. They died with the
+//! chain they tested, and they could only ever describe a journey between two
+//! schemas.
+//!
+//! What matters about a baseline is different: which objects it creates, which
+//! ones it must never create again, and that it refuses to adopt a database
+//! written by the old chain instead of silently treating it as current.
+
+use rusqlite::Connection;
 
 use super::schema::MIGRATIONS;
-use crate::db::Database;
+use super::Database;
+
+fn migrated() -> Database {
+    let db = Database::open_in_memory().expect("open database");
+    db.run_migrations().expect("apply baseline");
+    db
+}
+
+fn names(conn: &Connection, kind: &str) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type = ?1 AND name NOT LIKE 'sqlite_%'")
+        .expect("prepare");
+    stmt.query_map([kind], |row| row.get::<_, String>(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("read names")
+}
+
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table],
+        |row| row.get::<_, i64>(0),
+    )
+    .expect("count")
+        > 0
+}
+
+fn columns(conn: &Connection, table: &str) -> Vec<String> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+        .expect("prepare");
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("read columns")
+}
+
+/// Tables the baseline must never create. Each lost the code that gave it
+/// authority in D01 or D02, and a schema is the last place such a thing can
+/// hide: the rows outlive the feature unless the table goes too.
+const FORBIDDEN_TABLES: [&str; 18] = [
+    "credential_challenges",
+    "credential_challenge_votes",
+    "plugin_attestations",
+    "plugin_advisories",
+    "sentinel_kill_switch",
+    "sentinel_weights_blocklist",
+    "sentinel_priors",
+    "integrity_attestations",
+    "onchain_governance_queue",
+    "governance_daos",
+    "governance_dao_members",
+    "governance_proposals",
+    "governance_elections",
+    "governance_election_nominees",
+    "governance_election_votes",
+    "governance_proposal_votes",
+    "bank_questions",
+    "question_bank_versions",
+];
 
 #[test]
-fn credential_snapshot_migration_preserves_legacy_format_and_adds_vc_link() {
-    let db = Database::open_in_memory().unwrap();
-    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version <= 87) {
-        db.conn().execute_batch(sql).unwrap();
-    }
-    db.conn()
-        .execute(
-            "INSERT INTO reputation_snapshots
-             (id, actor_address, subject_id, role, skill_count, tx_status)
-             VALUES ('legacy', 'stake', 'subject', 'learner', 0, 'pending')",
-            [],
-        )
-        .unwrap();
-    let (_, _, sql) = MIGRATIONS
-        .iter()
-        .find(|(version, _, _)| *version == 88)
-        .unwrap();
-    db.conn().execute_batch(sql).unwrap();
-
-    let legacy: (String, String, Option<String>) = db
-        .conn()
-        .query_row(
-            "SELECT snapshot_format, snapshot_scope, credential_id
-             FROM reputation_snapshots WHERE id = 'legacy'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
+fn the_baseline_is_the_only_migration() {
+    assert_eq!(MIGRATIONS.len(), 1);
+    let (version, name, _) = MIGRATIONS[0];
+    assert_eq!(version, 1);
     assert_eq!(
-        legacy,
-        ("legacy_cip68".into(), "legacy_declared_window".into(), None)
+        name, "baseline",
+        "the baseline must not reuse the old chain's name for version 1"
     );
-    assert!(db
-        .conn()
-        .execute(
-            "UPDATE reputation_snapshots SET snapshot_format = 'unknown' WHERE id = 'legacy'",
-            [],
-        )
-        .is_err());
-    assert!(db
-        .conn()
-        .execute(
-            "UPDATE reputation_snapshots SET credential_id = 'missing' WHERE id = 'legacy'",
-            [],
-        )
-        .is_err());
 }
 
 #[test]
-fn recovery_members_migration_preserves_signed_checkpoint_and_requires_new_receipt() {
-    let db = Database::open_in_memory().unwrap();
-    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version <= 83) {
-        db.conn().execute_batch(sql).unwrap();
+fn forbidden_tables_are_absent() {
+    let db = migrated();
+    for table in FORBIDDEN_TABLES {
+        assert!(
+            !table_exists(db.conn(), table),
+            "{table} is retired and must not be created by the baseline"
+        );
     }
-    db.conn()
-        .execute(
-            "INSERT INTO chain_submissions
-         (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json, status,
-          last_error, created_at, updated_at)
-         VALUES ('cardano-preprod', 'test', 'original', ?1, X'010203', '{\"version\":1}',
-                 'confirmed', 'original error', '2026-01-01', '2026-01-02')",
-            ["a".repeat(64)],
-        )
-        .unwrap();
-    let snapshot = || {
-        db.conn().query_row(
-        "SELECT json_array(network, operation_kind, operation_id, tx_hash, hex(signed_cbor),
-                           context_json, status, last_error, created_at, updated_at)
-         FROM chain_submissions", [], |row| row.get::<_, String>(0)).unwrap()
-    };
-    let original = snapshot();
-    let (_, _, sql) = MIGRATIONS
-        .iter()
-        .find(|(version, _, _)| *version == 84)
-        .unwrap();
-    let tx = db.conn().unchecked_transaction().unwrap();
-    tx.execute_batch(sql).unwrap();
-    tx.commit().unwrap();
-    assert_eq!(snapshot(), original);
-    let slot: Option<i64> = db
-        .conn()
-        .query_row("SELECT confirmed_slot FROM chain_submissions", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(
-        slot, None,
-        "old confirmations must not acquire fabricated ledger receipts"
-    );
-    assert!(db.conn().execute(
-        "INSERT INTO chain_submission_members VALUES ('cardano-preprod', 'claim', 'claim-id', 'test', 'missing')", []
-    ).is_err());
-    db.conn().execute(
-        "INSERT INTO chain_submission_members VALUES ('cardano-preprod', 'claim', 'claim-id', 'test', 'original')", []
-    ).unwrap();
+}
+
+#[test]
+fn retired_columns_are_absent() {
+    let db = migrated();
+    let identity = columns(db.conn(), "local_identity");
     assert!(
-        db.conn()
-            .execute("DELETE FROM chain_submissions", [])
-            .is_err(),
-        "reservations must not lose their checkpoint"
+        !identity.iter().any(|c| c == "account_role"),
+        "the single-valued account_role is superseded by account_roles"
     );
+    assert!(identity.iter().any(|c| c == "account_roles"));
+
+    let snapshots = columns(db.conn(), "reputation_snapshots");
+    for retired in [
+        "policy_id",
+        "ref_asset_name",
+        "user_asset_name",
+        "snapshot_format",
+        "snapshot_scope",
+    ] {
+        assert!(
+            !snapshots.iter().any(|c| c == retired),
+            "{retired} belongs to the deleted CIP-68 mint"
+        );
+    }
+    assert!(snapshots.iter().any(|c| c == "credential_id"));
 }
 
 #[test]
-fn recovery_migration_preserves_every_legacy_queue_column_and_widens_status() {
-    let db = Database::open_in_memory().unwrap();
-    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version < 83) {
-        db.conn().execute_batch(sql).unwrap();
+fn the_schema_keeps_what_the_runtime_reads() {
+    let db = migrated();
+    // A sample of tables and the single view that surviving code queries. The
+    // bundled seed defect was exactly this shape -- code reading a table the
+    // schema no longer served -- so the view is asserted by name.
+    for table in [
+        "credentials",
+        "assessment_items",
+        "assessment_item_skills",
+        "question_banks",
+        "reputation_assertions",
+        "reputation_snapshots",
+        "reputation_snapshot_inputs",
+        "governance_genesis_trust_anchors",
+        "chain_submissions",
+        "completion_claims",
+    ] {
+        assert!(table_exists(db.conn(), table), "{table} is missing");
     }
-    db.conn()
-        .execute_batch(
-            "INSERT INTO onchain_governance_queue
-         (id, action_type, payload_json, target_table, target_id, status,
-          tx_hash, attempts, last_error, created_at, updated_at)
-         VALUES ('q', 'resolve_proposal', '{\"test\":true}', 'governance_proposals', 'p',
-                 'submitted', 'original', 3, 'original error', '2026-01-01', '2026-01-02');",
-        )
-        .unwrap();
-    let snapshot =
-        || {
-            db.conn().query_row(
-        "SELECT json_array(id, action_type, payload_json, target_table, target_id, status,
-                           tx_hash, attempts, last_error, created_at, updated_at)
-         FROM onchain_governance_queue WHERE id = 'q'", [], |row| row.get::<_, String>(0)).unwrap()
-        };
-    let original = snapshot();
-    let (_, _, sql) = MIGRATIONS
+    assert!(names(db.conn(), "view")
         .iter()
-        .find(|(version, _, _)| *version == 83)
-        .unwrap();
-    let tx = db.conn().unchecked_transaction().unwrap();
-    tx.execute_batch(sql).unwrap();
-    tx.commit().unwrap();
-    assert_eq!(snapshot(), original);
-    db.conn()
-        .execute(
-            "UPDATE onchain_governance_queue SET status = 'outcome_unknown' WHERE id = 'q'",
-            [],
-        )
-        .unwrap();
-    assert!(db
-        .conn()
-        .execute(
-            "UPDATE onchain_governance_queue SET status = 'invented' WHERE id = 'q'",
-            []
-        )
-        .is_err());
+        .any(|v| v == "current_reputation_assertions"));
+    assert_eq!(names(db.conn(), "trigger").len(), 3);
+}
+
+#[test]
+fn foreign_keys_are_valid() {
+    let db = migrated();
     let violations: i64 = db
         .conn()
-        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
-            r.get(0)
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
         })
-        .unwrap();
+        .expect("foreign key check");
     assert_eq!(violations, 0);
 }
 
-/// Apply migration 072 again over rows inserted afterwards.
-///
-/// The migration is written to be idempotent — `CREATE TABLE IF NOT
-/// EXISTS` plus `INSERT OR IGNORE` on preserved ids — so re-running it
-/// exercises the real SQL rather than a copy that could drift from it.
-fn rerun_migration_072(db: &Database) {
-    let (_, _, sql) = MIGRATIONS
-        .iter()
-        .find(|(v, _, _)| *v == 72)
-        .expect("migration 072 exists");
-    db.conn()
-        .execute_batch(sql)
-        .expect("migration 072 re-runs cleanly");
-}
-
-fn seed_bank(db: &Database) {
-    db.conn()
-        .execute_batch(
-            r#"
-            INSERT INTO question_banks (id, skill_id, label, taxonomy_version, ratified)
-            VALUES ('bank_1', 'skill_rust', 'Rust basics', 'genesis', 1);
-
-            INSERT INTO bank_questions
-                (id, bank_id, prompt, options, correct_indices, difficulty, points)
-            VALUES
-                ('q_single', 'bank_1', 'Which is a keyword?',
-                 '["fn","func","def","lambda"]', '[0]', 2, 1.0),
-                ('q_multi', 'bank_1', 'Which are integer types?',
-                 '["i32","u8","str","bool"]', '[0,1]', 4, 2.0);
-            "#,
-        )
-        .expect("seed bank");
-}
-
-fn item_field(db: &Database, id: &str, sql: &str) -> String {
-    db.conn()
-        .query_row(sql, [id], |r| r.get::<_, String>(0))
-        .expect("item field")
-}
-
 #[test]
-fn backfill_preserves_question_ids() {
-    // `assessment_attempts.question_ids` stores bank-question ids, so a
-    // remapped id would orphan every historical attempt.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    rerun_migration_072(&db);
-
-    let count: i64 = db
+fn initialising_twice_changes_nothing() {
+    let db = migrated();
+    let before = names(db.conn(), "table");
+    db.run_migrations().expect("second run");
+    let after = names(db.conn(), "table");
+    assert_eq!(before, after);
+    let applied: i64 = db
         .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM assessment_items WHERE id IN ('q_single','q_multi')",
-            [],
-            |r| r.get(0),
-        )
-        .expect("count");
-    assert_eq!(count, 2, "both questions became items under their own ids");
+        .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
+        .expect("count applied");
+    assert_eq!(applied, 1);
 }
 
 #[test]
-fn backfill_derives_kind_from_key_cardinality() {
-    // The wasm grader dispatches on `kind`; getting this wrong would
-    // silently score every multi-select question as single-answer.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    rerun_migration_072(&db);
-
-    let kind_of = |id: &str| {
-        item_field(
-            &db,
-            id,
-            "SELECT json_extract(content_public, '$.kind') FROM assessment_items WHERE id = ?1",
-        )
-    };
-    assert_eq!(kind_of("q_single"), "single");
-    assert_eq!(kind_of("q_multi"), "multi");
-}
-
-#[test]
-fn backfill_moves_the_key_into_grader_private() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    rerun_migration_072(&db);
-
-    let key = item_field(
-        &db,
-        "q_multi",
-        "SELECT json_extract(grader_private, '$.correct_indices') FROM assessment_items \
-         WHERE id = ?1",
-    );
-    assert_eq!(key, "[0,1]");
-
-    // And it is absent from the half that may reach a client.
-    let public = item_field(
-        &db,
-        "q_multi",
-        "SELECT content_public FROM assessment_items WHERE id = ?1",
-    );
-    assert!(
-        !public.contains("correct_indices"),
-        "content_public leaks the answer key: {public}"
-    );
-}
-
-#[test]
-fn backfill_carries_prompt_options_difficulty_and_points() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    rerun_migration_072(&db);
-
-    let (difficulty, points, bank): (i64, f64, String) = db
-        .conn()
-        .query_row(
-            "SELECT difficulty, points, bank_id FROM assessment_items WHERE id = 'q_multi'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .expect("row");
-    assert_eq!(difficulty, 4);
-    assert_eq!(points, 2.0);
-    assert_eq!(bank, "bank_1");
-
-    let options = item_field(
-        &db,
-        "q_multi",
-        "SELECT json_extract(content_public, '$.options') FROM assessment_items WHERE id = ?1",
-    );
-    assert_eq!(options, r#"["i32","u8","str","bool"]"#);
-
-    let prompt = item_field(
-        &db,
-        "q_multi",
-        "SELECT json_extract(content_public, '$.prompt') FROM assessment_items WHERE id = ?1",
-    );
-    assert_eq!(prompt, "Which are integer types?");
-}
-
-#[test]
-fn backfill_inherits_skill_and_ratification_from_the_bank() {
-    // An item must not become usable for credentials just by existing —
-    // it inherits the bank's governance state.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    db.conn()
-        .execute_batch(
-            "INSERT INTO question_banks (id, skill_id, label, ratified)
-             VALUES ('bank_draft', 'skill_go', 'Draft', 0);
-             INSERT INTO bank_questions (id, bank_id, prompt, options, correct_indices)
-             VALUES ('q_draft', 'bank_draft', 'p', '[\"a\",\"b\"]', '[0]');",
-        )
-        .expect("seed draft bank");
-    rerun_migration_072(&db);
-
-    let (skill, ratified): (String, i64) = db
-        .conn()
-        .query_row(
-            "SELECT skill_id, ratified FROM assessment_items WHERE id = 'q_single'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .expect("row");
-    assert_eq!(skill, "skill_rust");
-    assert_eq!(ratified, 1);
-
-    let draft_ratified: i64 = db
-        .conn()
-        .query_row(
-            "SELECT ratified FROM assessment_items WHERE id = 'q_draft'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("row");
-    assert_eq!(
-        draft_ratified, 0,
-        "unratified bank must not yield a ratified item"
-    );
-}
-
-#[test]
-fn backfill_populates_the_multi_skill_table() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    rerun_migration_072(&db);
-
-    let (skill, weight): (String, f64) = db
-        .conn()
-        .query_row(
-            "SELECT skill_id, weight FROM assessment_item_skills WHERE item_id = 'q_single'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .expect("row");
-    assert_eq!(skill, "skill_rust");
-    assert_eq!(weight, 1.0);
-}
-
-#[test]
-fn backfill_is_idempotent() {
-    // Migrations can be re-applied across profile restores; a second run
-    // must not duplicate items or resurrect deleted ones.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_bank(&db);
-    rerun_migration_072(&db);
-    rerun_migration_072(&db);
-    rerun_migration_072(&db);
-
-    let count: i64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM assessment_items", [], |r| r.get(0))
-        .expect("count");
-    assert_eq!(count, 2);
-}
-
-#[test]
-fn item_kind_is_constrained() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    let err = db.conn().execute(
-        "INSERT INTO assessment_items (id, item_kind, skill_id, content_public)
-         VALUES ('bad', 'essay-ish', 'skill_x', '{}')",
-        [],
-    );
-    assert!(err.is_err(), "CHECK constraint should reject unknown kinds");
-}
-
-// ---- migration 073: bloom levels -----------------------------------------
-
-fn rerun_migration(db: &Database, version: i64) {
-    let (_, _, sql) = MIGRATIONS
-        .iter()
-        .find(|(v, _, _)| *v == version)
-        .unwrap_or_else(|| panic!("migration {version} exists"));
-    db.conn()
-        .execute_batch(sql)
-        .unwrap_or_else(|e| panic!("migration {version} re-runs cleanly: {e}"));
-}
-
-/// `skills.subject_id` is a real foreign key, so a skill fixture needs a
-/// subject and a subject field behind it.
-fn seed_subject(db: &Database) {
-    db.conn()
-        .execute_batch(
-            "INSERT OR IGNORE INTO subject_fields (id, name) VALUES ('sf', 'Field');
-             INSERT OR IGNORE INTO subjects (id, name, subject_field_id)
-             VALUES ('sub', 'Subject', 'sf');",
-        )
-        .expect("seed subject");
-}
-
-fn skill_level(db: &Database, id: &str) -> String {
-    db.conn()
-        .query_row("SELECT bloom_level FROM skills WHERE id = ?1", [id], |r| {
-            r.get(0)
-        })
-        .expect("skill row")
-}
-
-#[test]
-fn normalises_unknown_bloom_levels_to_the_column_default() {
-    // A row the type would read as `apply` must not keep claiming to be
-    // something else — the row and the type have to agree.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_subject(&db);
-    db.conn()
-        .execute_batch(
-            "INSERT INTO skills (id, name, subject_id, bloom_level)
-             VALUES ('s_bad', 'Bad', 'sub', 'synthesize'),
-                    ('s_empty', 'Empty', 'sub', '');",
-        )
-        .expect("seed");
-    rerun_migration(&db, 73);
-
-    assert_eq!(skill_level(&db, "s_bad"), "apply");
-    assert_eq!(skill_level(&db, "s_empty"), "apply");
-}
-
-#[test]
-fn folds_case_and_whitespace_onto_the_canonical_token() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_subject(&db);
-    db.conn()
-        .execute_batch(
-            "INSERT INTO skills (id, name, subject_id, bloom_level)
-             VALUES ('s_case', 'Case', 'sub', '  Analyze ');",
-        )
-        .expect("seed");
-    rerun_migration(&db, 73);
-
-    assert_eq!(skill_level(&db, "s_case"), "analyze");
-}
-
-#[test]
-fn leaves_valid_bloom_levels_untouched() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_subject(&db);
-    for level in [
-        "remember",
-        "understand",
-        "apply",
-        "analyze",
-        "evaluate",
-        "create",
-    ] {
+fn a_database_from_the_old_chain_is_refused() {
+    // Both an old database at version 1 and a fully migrated one record
+    // `initial_schema`, which is not this schema family. Neither may be
+    // treated as already satisfying the baseline.
+    for history in [vec![(1_i64, "initial_schema")], {
+        let mut rows = vec![(1_i64, "initial_schema")];
+        rows.extend((2..=94).map(|v| (v as i64, "later")));
+        rows
+    }] {
+        let db = Database::open_in_memory().expect("open database");
         db.conn()
-            .execute(
-                "INSERT INTO skills (id, name, subject_id, bloom_level) VALUES (?1, 'S', 'sub', ?2)",
-                rusqlite::params![format!("s_{level}"), level],
+            .execute_batch(
+                "CREATE TABLE _migrations (
+                     version INTEGER PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     applied_at TEXT NOT NULL DEFAULT (datetime('now')));",
             )
-            .expect("seed");
+            .expect("create history");
+        for (version, name) in &history {
+            db.conn()
+                .execute(
+                    "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
+                    rusqlite::params![version, name],
+                )
+                .expect("record history");
+        }
+
+        let error = db
+            .run_migrations()
+            .expect_err("an old-chain database must not be adopted");
+        let message = error.to_string();
+        assert!(
+            message.contains("not a supported prefix"),
+            "refusal should name the mismatch, got: {message}"
+        );
+        assert!(
+            !table_exists(db.conn(), "credentials"),
+            "a refused database must not be written to"
+        );
     }
-    rerun_migration(&db, 73);
-
-    for level in [
-        "remember",
-        "understand",
-        "apply",
-        "analyze",
-        "evaluate",
-        "create",
-    ] {
-        assert_eq!(skill_level(&db, &format!("s_{level}")), level);
-    }
 }
 
 #[test]
-fn backfills_item_bloom_level_from_the_parent_skill() {
-    // Migration 072 left the column NULL; an item should start at its
-    // skill's level rather than at a guess.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_subject(&db);
+fn a_failed_baseline_leaves_no_schema_and_can_retry() {
+    let db = Database::open_in_memory().expect("open database");
     db.conn()
         .execute_batch(
-            "INSERT INTO skills (id, name, subject_id, bloom_level)
-             VALUES ('s_eval', 'Eval', 'sub', 'evaluate');
-             INSERT INTO assessment_items (id, item_kind, skill_id, content_public, bloom_level)
-             VALUES ('i_1', 'mcq', 's_eval', '{}', NULL);",
+            "CREATE TABLE _migrations (
+                 version INTEGER PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 applied_at TEXT NOT NULL DEFAULT (datetime('now')));
+             CREATE TEMP TRIGGER fail_record BEFORE INSERT ON _migrations
+             BEGIN SELECT RAISE(ABORT, 'injected record failure'); END;",
         )
-        .expect("seed");
-    rerun_migration(&db, 73);
+        .expect("install fault");
 
-    let level: String = db
-        .conn()
-        .query_row(
-            "SELECT bloom_level FROM assessment_items WHERE id = 'i_1'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("item row");
-    assert_eq!(level, "evaluate");
-}
-
-#[test]
-fn item_backfill_does_not_overwrite_an_authored_level() {
-    // The column exists on the item precisely so it can differ from the
-    // skill's; a re-run must not flatten that back.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    seed_subject(&db);
-    db.conn()
-        .execute_batch(
-            "INSERT INTO skills (id, name, subject_id, bloom_level)
-             VALUES ('s_x', 'X', 'sub', 'remember');
-             INSERT INTO assessment_items (id, item_kind, skill_id, content_public, bloom_level)
-             VALUES ('i_authored', 'mcq', 's_x', '{}', 'create');",
-        )
-        .expect("seed");
-    rerun_migration(&db, 73);
-    rerun_migration(&db, 73);
-
-    let level: String = db
-        .conn()
-        .query_row(
-            "SELECT bloom_level FROM assessment_items WHERE id = 'i_authored'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("item row");
-    assert_eq!(level, "create");
-}
-
-#[test]
-fn item_with_a_missing_skill_still_gets_a_level() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    db.conn()
-        .execute_batch(
-            "INSERT INTO assessment_items (id, item_kind, skill_id, content_public, bloom_level)
-             VALUES ('i_orphan', 'mcq', 'no_such_skill', '{}', NULL);",
-        )
-        .expect("seed");
-    rerun_migration(&db, 73);
-
-    let level: String = db
-        .conn()
-        .query_row(
-            "SELECT bloom_level FROM assessment_items WHERE id = 'i_orphan'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("item row");
-    assert_eq!(level, "apply");
-}
-
-#[test]
-fn seeded_taxonomy_carries_only_known_bloom_levels() {
-    // The shipped seed is the largest real dataset here; if it contained a
-    // stray level the normalisation above would silently rewrite content.
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-
-    let bad: i64 = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM skills WHERE bloom_level NOT IN
-             ('remember','understand','apply','analyze','evaluate','create')",
-            [],
-            |r| r.get(0),
-        )
-        .expect("count");
-    assert_eq!(bad, 0, "seeded skills must use canonical Bloom tokens");
-}
-
-// ---- migration 075: adaptive delivery ------------------------------------
-
-#[test]
-fn banks_default_to_fixed_delivery_after_migration() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    db.conn()
-        .execute_batch(
-            "INSERT INTO question_banks (id, skill_id, label, ratified)
-             VALUES ('b', 's', 'L', 1);",
-        )
-        .expect("seed");
-
-    let (mode, se, min, max): (String, f64, i64, i64) = db
-        .conn()
-        .query_row(
-            "SELECT delivery_mode, adaptive_se_target, adaptive_min_items, adaptive_max_items
-               FROM question_banks WHERE id = 'b'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
-        .expect("row");
-    assert_eq!(mode, "fixed", "existing banks must stay fixed-form");
-    assert_eq!(se, 0.3);
-    assert_eq!(min, 5);
-    assert_eq!(max, 20);
-}
-
-#[test]
-fn delivery_mode_is_constrained() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    let bad = db.conn().execute(
-        "INSERT INTO question_banks (id, skill_id, label, ratified, delivery_mode)
-         VALUES ('b', 's', 'L', 1, 'psychic')",
-        [],
-    );
+    assert!(db.run_migrations().is_err());
     assert!(
-        bad.is_err(),
-        "delivery_mode CHECK should reject unknown modes"
+        !table_exists(db.conn(), "credentials"),
+        "the baseline and its marker commit together, so a failed marker \
+         must take the whole schema with it"
     );
-}
-
-// ---- migration 089: diagnostics assessment exit ------------------------
-
-#[test]
-fn diagnostics_exit_fields_preserve_ungraded_attempts_and_are_constrained() {
-    let db = Database::open_in_memory().expect("db");
-    db.run_migrations().expect("migrations");
-    db.conn()
-        .execute_batch(
-            "INSERT INTO question_banks (id, skill_id, label, ratified)
-             VALUES ('b_diag', 's_diag', 'Diagnostics', 1);
-             INSERT INTO assessment_attempts
-               (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
-                started_at, ended_at, end_reason, draft_answers_json)
-             VALUES ('a_diag', 'did:key:zLearner', 'b_diag', 's_diag', 1, '[]', '[]',
-                     '2026-09-14T00:00:00Z', '2026-09-14T00:05:00Z', 'diagnostics', '[]');",
-        )
-        .expect("valid diagnostics exit");
-
-    let state: (Option<String>, Option<String>, Option<String>, Option<i64>) = db
-        .conn()
-        .query_row(
-            "SELECT ended_at, end_reason, graded_at, passed FROM assessment_attempts
-              WHERE id = 'a_diag'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .expect("attempt");
-    assert!(state.0.is_some());
-    assert_eq!(state.1.as_deref(), Some("diagnostics"));
-    assert!(state.2.is_none());
-    assert!(state.3.is_none());
 
     db.conn()
-        .execute(
-            "UPDATE assessment_attempts SET end_reason = 'interrupted' WHERE id = 'a_diag'",
-            [],
-        )
-        .expect("interrupted is a supported terminal reason");
-
-    assert!(db
-        .conn()
-        .execute(
-            "UPDATE assessment_attempts SET end_reason = 'operator' WHERE id = 'a_diag'",
-            [],
-        )
-        .is_err());
-    assert!(db
-        .conn()
-        .execute(
-            "UPDATE assessment_attempts SET draft_answers_json = 'not-json' WHERE id = 'a_diag'",
-            [],
-        )
-        .is_err());
-}
-
-// ---- migration 091: exact course completion authority -------------------
-
-#[test]
-fn exact_course_binding_migration_does_not_rebind_legacy_rows() {
-    let db = Database::open_in_memory().expect("db");
-    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version <= 90) {
-        db.conn().execute_batch(sql).expect("pre-091 migration");
-    }
-    db.conn()
-        .execute_batch(
-            "INSERT INTO courses (id, title, author_address, content_cid)
-             VALUES ('course', 'Legacy', 'stake', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-             INSERT INTO enrollments (id, course_id) VALUES ('enrollment', 'course');
-             INSERT INTO completion_claims
-               (id, subject_did, course_id, completion_root, credential_ids_json)
-             VALUES
-               ('claim', 'did:key:zLegacy', 'course',
-                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '[]');
-             INSERT INTO completion_attestation_requirements
-               (course_id, required_attestors, dao_id)
-             VALUES ('course', 1, 'mutable-authority');
-             INSERT INTO completion_attestations
-               (id, witness_tx_hash, attestor_did, attestor_pubkey, signature)
-             VALUES ('old', 'tx', 'did:key:zOld', 'key', 'signature');",
-        )
-        .expect("legacy fixture");
-
-    let (_, _, migration) = MIGRATIONS
-        .iter()
-        .find(|(version, _, _)| *version == 91)
-        .expect("migration 091");
-    db.conn()
-        .execute_batch(migration)
-        .expect("migration 091 applies");
-
-    let enrollment_binding: (Option<String>, Option<i64>, Option<String>) = db
-        .conn()
-        .query_row(
-            "SELECT course_document_cid, course_document_version, completion_policy_json
-             FROM enrollments WHERE id = 'enrollment'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .expect("legacy enrollment");
-    assert_eq!(enrollment_binding, (None, None, None));
-
-    let claim_binding: (Option<String>, Option<i64>, Option<String>, Option<String>) = db
-        .conn()
-        .query_row(
-            "SELECT course_document_cid, course_document_version, completion_binding_json,
-                    enrollment_id FROM completion_claims WHERE id = 'claim'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .expect("legacy claim");
-    assert_eq!(claim_binding, (None, None, None, None));
-
-    for retired in [
-        "completion_attestation_requirements",
-        "completion_attestations",
-    ] {
-        let exists: bool = db
-            .conn()
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-                [retired],
-                |row| row.get(0),
-            )
-            .expect("table lookup");
-        assert!(!exists, "{retired} must be retired");
-    }
-    let replacement_exists: bool = db
-        .conn()
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master
-                            WHERE type = 'table' AND name = 'course_completion_endorsements')",
-            [],
-            |row| row.get(0),
-        )
-        .expect("replacement table lookup");
-    assert!(replacement_exists);
+        .execute_batch("DROP TRIGGER fail_record")
+        .expect("remove fault");
+    db.run_migrations()
+        .expect("retry after the fault is cleared");
+    assert!(table_exists(db.conn(), "credentials"));
 }

@@ -367,16 +367,9 @@ pub struct SnapshotRecord {
     pub skill_count: i64,
     pub tx_status: String,
     pub tx_hash: Option<String>,
-    pub policy_id: Option<String>,
-    pub ref_asset_name: Option<String>,
-    pub user_asset_name: Option<String>,
     pub error_message: Option<String>,
     pub snapshot_at: String,
     pub confirmed_at: Option<String>,
-    /// `legacy_cip68` or the replacement `credential_hash_vc` format.
-    pub snapshot_format: String,
-    /// The time/scope interpretation committed by the snapshot.
-    pub snapshot_scope: String,
     /// Reputation calculation declared by the signed snapshot.
     pub computation_spec: Option<String>,
     /// Signed VC whose integrity hash is anchored for replacement snapshots.

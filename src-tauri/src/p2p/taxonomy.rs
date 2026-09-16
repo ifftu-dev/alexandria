@@ -22,7 +22,6 @@ pub fn handle_taxonomy_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::params;
 
     fn counts(db: &Database) -> Vec<i64> {
         [
@@ -48,22 +47,10 @@ mod tests {
     fn committee_signed_taxonomy_update_is_rejected_without_mutation() {
         let db = Database::open_in_memory().expect("in-memory db");
         db.run_migrations().expect("migrations");
+        // The DAO and committee-member tables the old fixture populated are
+        // not in the baseline schema; the update is rejected regardless of
+        // who appears to have signed it.
         let signer = "stake_test1committee";
-        db.conn()
-            .execute(
-                "INSERT INTO governance_daos \
-                 (id, name, scope_type, scope_id, status, committee_size, election_interval_days) \
-                 VALUES ('dao', 'DAO', 'subject_field', 'scope', 'active', 7, 365)",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO governance_dao_members (dao_id, stake_address, role)
-                 VALUES ('dao', ?1, 'committee')",
-                params![signer],
-            )
-            .unwrap();
         let before = counts(&db);
 
         let update = serde_json::json!({

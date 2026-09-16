@@ -22,16 +22,11 @@ pub fn record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotReco
         skill_count: row.get(4)?,
         tx_status: row.get(5)?,
         tx_hash: row.get(6)?,
-        policy_id: row.get(7)?,
-        ref_asset_name: row.get(8)?,
-        user_asset_name: row.get(9)?,
-        error_message: row.get(10)?,
-        snapshot_at: row.get(11)?,
-        confirmed_at: row.get(12)?,
-        snapshot_format: row.get(13)?,
-        snapshot_scope: row.get(14)?,
-        computation_spec: row.get(15)?,
-        credential_id: row.get(16)?,
+        error_message: row.get(7)?,
+        snapshot_at: row.get(8)?,
+        confirmed_at: row.get(9)?,
+        computation_spec: row.get(10)?,
+        credential_id: row.get(11)?,
     })
 }
 
@@ -40,11 +35,10 @@ pub fn record(conn: &Connection, id: &str) -> Result<SnapshotRecord, String> {
         "SELECT rs.id, rs.actor_address, rs.subject_id, rs.role, rs.skill_count,
             CASE WHEN rs.credential_id IS NULL THEN rs.tx_status ELSE ca.anchor_status END,
             CASE WHEN rs.credential_id IS NULL THEN rs.tx_hash ELSE ca.anchor_tx_hash END,
-            rs.policy_id, rs.ref_asset_name, rs.user_asset_name,
             CASE WHEN rs.credential_id IS NULL THEN rs.error_message ELSE ca.last_error END,
             rs.snapshot_at,
             CASE WHEN rs.credential_id IS NULL THEN rs.confirmed_at ELSE ca.confirmed_at END,
-            rs.snapshot_format, rs.snapshot_scope, rs.computation_spec, rs.credential_id
+            rs.computation_spec, rs.credential_id
          FROM reputation_snapshots rs
          LEFT JOIN credential_anchors ca ON ca.credential_id = rs.credential_id
          WHERE rs.id = ?1",

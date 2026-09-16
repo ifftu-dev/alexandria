@@ -66,7 +66,6 @@ pub fn open_db_with_key(ctx: &ProjectContext, db_key: [u8; 32]) -> Result<Connec
     conn.pragma_update(None, "key", format!("x'{}'", hex::encode(db_key)))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    app_lib::db::register_issuer_recognition(&conn)?;
     conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
         .context("Failed to decrypt database — wrong password?")?;
     Ok(conn)

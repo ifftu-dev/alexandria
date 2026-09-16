@@ -404,14 +404,9 @@ export interface SnapshotRecord {
   skill_count: number
   tx_status: string
   tx_hash: string | null
-  policy_id: string | null
-  ref_asset_name: string | null
-  user_asset_name: string | null
   error_message: string | null
   snapshot_at: string
   confirmed_at: string | null
-  snapshot_format: 'legacy_cip68' | 'credential_hash_vc'
-  snapshot_scope: 'legacy_declared_window' | 'as_of_all_eligible_evidence'
   computation_spec: string | null
   credential_id: string | null
 }

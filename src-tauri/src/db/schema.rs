@@ -1,186 +1,291 @@
-/// Database migrations, ordered by version.
-/// Each entry: (version, name, SQL).
-///
-/// The schema mirrors the v1 PostgreSQL schema with adjustments for
-/// local-first operation (see architecture-v2.md §4.3):
-///   - Deterministic IDs (blake2b-based) instead of server-generated UUIDs
-///   - Only self + known peers in users table
-///   - Local-only tables: peers, pins, sync_log, catalog
-///   - No server-side tables: refresh_tokens, oauth_accounts
-pub const MIGRATIONS: &[(i64, &str, &str)] = &[
-    (1, "initial_schema", MIGRATION_001),
-    (2, "profile_hash", MIGRATION_002),
-    (3, "content_mappings", MIGRATION_003),
-    (4, "assessment_columns", MIGRATION_004),
-    (5, "governance_members", MIGRATION_005),
-    (6, "reputation_engine", MIGRATION_006),
-    (7, "governance_elections", MIGRATION_007),
-    (8, "reputation_snapshots", MIGRATION_008),
-    (9, "taxonomy_ratification", MIGRATION_009),
-    (10, "cross_device_sync", MIGRATION_010),
-    (11, "evidence_challenges", MIGRATION_011),
-    (12, "multi_party_attestation", MIGRATION_012),
-    (13, "visual_assets", MIGRATION_013),
-    (14, "inline_content", MIGRATION_014),
-    (15, "tutoring_sessions", MIGRATION_015),
-    (16, "classrooms", MIGRATION_016),
-    (17, "storage_settings", MIGRATION_017),
-    (18, "onchain_governance_queue", MIGRATION_018),
-    (19, "classroom_encryption", MIGRATION_019),
-    (20, "tutorials_and_video_chapters", MIGRATION_020),
-    (21, "opinions", MIGRATION_021),
-    (22, "vc_key_registry", MIGRATION_022),
-    (23, "vc_credentials_and_status_lists", MIGRATION_023),
-    (24, "vc_credential_anchors", MIGRATION_024),
-    (25, "vc_pinboard_observations", MIGRATION_025),
-    (26, "vc_presentations_seen", MIGRATION_026),
-    (27, "vc_derived_skill_states", MIGRATION_027),
-    (28, "vc_credentials_pending_verification", MIGRATION_028),
-    (29, "vc_credential_suspension", MIGRATION_029),
-    (30, "vc_credential_allowlist", MIGRATION_030),
-    (31, "content_provenance", MIGRATION_031),
-    (32, "plugin_system_phase1", MIGRATION_032),
-    (33, "plugin_system_phase2", MIGRATION_033),
-    (34, "plugin_catalog", MIGRATION_034),
-    (35, "plugin_attestations", MIGRATION_035),
-    (36, "sentinel_flags_and_status", MIGRATION_036),
-    (37, "sentinel_dao_seed", MIGRATION_037),
-    (38, "sentinel_priors", MIGRATION_038),
-    (39, "sentinel_holdout", MIGRATION_039),
-    (40, "vc_first_cutover", MIGRATION_040),
-    (41, "completion_observer", MIGRATION_041),
-    (42, "completion_attestation", MIGRATION_042),
-    (43, "credential_challenges", MIGRATION_043),
-    (44, "integrity_paste_anomaly", MIGRATION_044),
-    (45, "sentinel_priors_model_weights", MIGRATION_045),
-    (46, "sentinel_kill_switch_and_blocklist", MIGRATION_046),
-    (47, "sentinel_user_models", MIGRATION_047),
-    (48, "app_settings_scope", MIGRATION_048),
-    (49, "device_pairing", MIGRATION_049),
-    (50, "challenge_stake_lifecycle", MIGRATION_050),
-    (51, "element_submission_grader_version", MIGRATION_051),
-    (52, "stake_pubkey_registry", MIGRATION_052),
-    (53, "plugin_enabled_and_irl_review", MIGRATION_053),
-    (54, "usernames_profile_visibility", MIGRATION_054),
-    (55, "username_claim_cache", MIGRATION_055),
-    (56, "username_anchor_verified", MIGRATION_056),
-    (57, "dht_record_mirror", MIGRATION_057),
-    (58, "governance_vote_signatures", MIGRATION_058),
-    (59, "governance_dao_onchain_links", MIGRATION_059),
-    (60, "integrity_gaze_offscreen_ratio", MIGRATION_060),
-    (61, "integrity_attestation", MIGRATION_061),
-    (62, "org_role_assessments", MIGRATION_062),
-    (63, "plugin_dependencies", MIGRATION_063),
-    (64, "plugin_element_state", MIGRATION_064),
-    (65, "element_submission_answers", MIGRATION_065),
-    (66, "account_role_birthdate_activation", MIGRATION_066),
-    (67, "guardian_links", MIGRATION_067),
-    (68, "skill_provenance", MIGRATION_068),
-    (69, "goal_templates", MIGRATION_069),
-    (70, "assessment_question_banks", MIGRATION_070),
-    (71, "plugin_review_course_scope", MIGRATION_071),
-    (72, "unified_assessment_items", MIGRATION_072),
-    (73, "bloom_level_normalisation", MIGRATION_073),
-    (74, "assessment_attempt_policy", MIGRATION_074),
-    (75, "assessment_adaptive_delivery", MIGRATION_075),
-    (76, "derived_skill_state_history", MIGRATION_076),
-    (77, "submission_evidence_published", MIGRATION_077),
-    (78, "sentinel_appeal_evidence", MIGRATION_078),
-    (79, "sentinel_evidence_release", MIGRATION_079),
-    (80, "sentinel_flag_notice", MIGRATION_080),
-    (81, "account_roles_set", MIGRATION_081),
-    (82, "escrow_datum_recipients", MIGRATION_082),
-    (83, "durable_chain_submissions", MIGRATION_083),
-    (84, "chain_submission_recovery_members", MIGRATION_084),
-    (85, "public_derived_issuer_exclusion", MIGRATION_085),
-    (86, "durable_completion_requests", MIGRATION_086),
-    (87, "frozen_reputation_snapshots", MIGRATION_087),
-    (88, "credential_backed_reputation_snapshots", MIGRATION_088),
-    (89, "assessment_diagnostics_exit", MIGRATION_089),
-    (90, "governance_genesis_trust_anchors", MIGRATION_090),
-    (91, "exact_course_enrollment_binding", MIGRATION_091),
-    (92, "interview_assistant", MIGRATION_092),
-    (93, "scoring_input_fingerprints", MIGRATION_093),
-    (94, "retire_public_derived_issuer_exclusion", MIGRATION_094),
-];
+//! The baseline schema.
+//!
+//! One migration creates the whole schema. It is not a concatenation of the
+//! 94 migrations it replaces: those were replayed into a database, the result
+//! was dumped, and the dead tables and columns were removed from that dump, so
+//! what follows is what the old chain actually produced rather than a reading
+//! of its SQL. Parity was checked table by table — columns with their types,
+//! nullability, defaults and primary keys, plus every foreign key, index
+//! definition, trigger and view — and differed only by the deliberate
+//! omissions below.
+//!
+//! What is deliberately absent, because the code that gave it authority was
+//! deleted in D01 and D02:
+//!
+//! * the credential challenge and escrow tables, and plugin attestations and
+//!   advisories — retired authority, and a stored row granted nothing even
+//!   before the tables went;
+//! * the Sentinel kill switch, weights blocklist and priors, and integrity
+//!   attestations;
+//! * the on-chain governance queue and the local governance DAO, proposal and
+//!   election tables. `governance_genesis_trust_anchors` stays: genesis trust
+//!   anchors are current, not retired;
+//! * `bank_questions` and `question_bank_versions`, superseded by
+//!   `assessment_items`, which is what an attempt actually draws from;
+//! * `local_identity.account_role`, superseded by the `account_roles` set, and
+//!   the CIP-68 columns on `reputation_snapshots` — `policy_id`,
+//!   `ref_asset_name`, `user_asset_name`, `snapshot_format` and
+//!   `snapshot_scope` — whose minting path is deleted.
+//!
+//! The runner is unchanged and still applies migrations atomically, one
+//! transaction each. A fresh baseline is a starting point, not permission to
+//! stop managing schema change.
+//!
+//! An old database is NOT upgraded to this schema. Disposable pre-launch data
+//! is what makes that acceptable; the identity check in [`crate::db`] refuses
+//! an unrecognised schema family with an actionable message rather than
+//! migrating it or deleting it.
 
-const MIGRATION_094: &str = r#"
--- Scoring re-verifies every signed input and caches by input fingerprint
--- (migration 093), so the exact-match exclusion of reproducible legacy
--- course-authority issuers is retired. A credential signed by such a key is
--- scored like any other unaccepted issuer's and grants no privilege; trust
--- classification and pinned qualification policies decide privilege. The
--- recognition table, triggers, repair queue, filtered views and invalidated
--- history marker are removed. Credential bytes and revocation state are not
--- touched.
-DROP TRIGGER course_authority_recognized_insert;
-DROP TRIGGER course_authority_recognized_update;
-DROP TRIGGER public_derived_issuer_recognized;
-DROP VIEW scoring_credentials;
-DROP VIEW current_reputation_assertions;
-DROP INDEX idx_credentials_scoring_issuer;
-DROP INDEX idx_reputation_needs_refresh;
-DROP TABLE derived_skill_refresh_queue;
-DROP TABLE public_derived_issuers;
-DELETE FROM derived_skill_state_history WHERE input_policy_valid = 0;
-ALTER TABLE derived_skill_state_history DROP COLUMN input_policy_valid;
+/// Every migration, in order. The baseline is number 1 and, for now, the only
+/// entry; later schema changes append here and are applied on top.
+pub const MIGRATIONS: &[(i64, &str, &str)] = &[(1, "baseline", MIGRATION_001_BASELINE)];
 
--- Reputation rows record the fingerprint of the verified inputs they were
--- computed from. Readers recompute a row whose inputs changed and keep a row
--- whose verified inputs are gone as excluded. Existing rows carry no
--- fingerprint, so each is recomputed on its next read.
-ALTER TABLE reputation_assertions ADD COLUMN input_fingerprint TEXT;
-UPDATE reputation_assertions SET input_policy_state = 'excluded'
-    WHERE input_policy_state = 'needs_refresh';
-CREATE VIEW current_reputation_assertions AS
-SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
-"#;
+const MIGRATION_001_BASELINE: &str = r#"
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    scope TEXT NOT NULL DEFAULT 'sync' CHECK (scope IN ('sync', 'device'))
+);
 
-const MIGRATION_093: &str = r#"
--- Derived skill states are projections of verified credentials. Each row
--- records a fingerprint of the local credential, status, key, supersession
--- and endorsement state it was computed from, so a read recomputes when any
--- input changes, including removal of the last input. Existing rows were
--- computed without re-verifying their inputs and are discarded.
-ALTER TABLE derived_skill_states ADD COLUMN input_fingerprint TEXT;
-DELETE FROM derived_skill_states;
-"#;
+CREATE TABLE assessment_attempts (
+    id TEXT PRIMARY KEY,
+    subject_did TEXT NOT NULL,
+    bank_id TEXT NOT NULL REFERENCES question_banks(id),
+    skill_id TEXT NOT NULL,
+    seed INTEGER NOT NULL,
+    question_ids TEXT NOT NULL,                                                                    -- JSON array of served question ids (in served order)
+    option_orders TEXT NOT NULL,                                                                   -- JSON: per-question shuffled option index order
+    integrity_session_id TEXT,
+    score REAL,
+    passed INTEGER,
+    credential_id TEXT,                                                                            -- issued AssessmentCredential, if passed
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    graded_at TEXT,
+    attempt_ordinal INTEGER,
+    ended_at TEXT,
+    end_reason TEXT CHECK (end_reason IS NULL OR end_reason IN ('diagnostics', 'interrupted')),
+    draft_answers_json TEXT CHECK (draft_answers_json IS NULL OR json_valid(draft_answers_json))
+);
 
-const MIGRATION_091: &str = r#"
--- Verified projections from an exact signed course document. These columns are
--- populated only by local publication or verified catalog hydration. Existing
--- rows stay NULL because the current course row is not proof of the document a
--- historical learner actually used.
-ALTER TABLE courses ADD COLUMN course_document_version INTEGER
-    CHECK (course_document_version IS NULL OR course_document_version > 0);
-ALTER TABLE courses ADD COLUMN completion_policy_json TEXT
-    CHECK (completion_policy_json IS NULL OR json_valid(completion_policy_json));
-ALTER TABLE courses ADD COLUMN draft_completion_policy_json TEXT
-    CHECK (draft_completion_policy_json IS NULL OR json_valid(draft_completion_policy_json));
+CREATE TABLE assessment_item_skills (
+    item_id TEXT NOT NULL REFERENCES assessment_items(id) ON DELETE CASCADE,
+    skill_id TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    PRIMARY KEY (item_id, skill_id)
+);
 
--- A new enrollment freezes the verified source identity and completion policy.
--- Author updates can change `courses`, but cannot rewrite these values.
-ALTER TABLE enrollments ADD COLUMN course_document_cid TEXT
-    CHECK (course_document_cid IS NULL OR length(course_document_cid) = 64);
-ALTER TABLE enrollments ADD COLUMN course_document_version INTEGER
-    CHECK (course_document_version IS NULL OR course_document_version > 0);
-ALTER TABLE enrollments ADD COLUMN completion_policy_json TEXT
-    CHECK (completion_policy_json IS NULL OR json_valid(completion_policy_json));
-CREATE INDEX idx_enrollments_course_document
-    ON enrollments(course_id, course_document_cid);
+CREATE TABLE assessment_items (
+    id TEXT PRIMARY KEY,
+    item_kind TEXT NOT NULL CHECK (item_kind IN ('mcq', 'plugin')),
+    skill_id TEXT NOT NULL,                                          -- Plugin providing the UI and grader. NULL for `mcq`, which resolves the built-in mcq-grader at grade time (it is installed at startup, so its CID is not knowable when this migration runs).
+    plugin_cid TEXT,                                                 -- Safe to send to a client: prompt, options, kind, starter code.
+    content_public TEXT NOT NULL,                                    -- NEVER sent to a client. Answer keys, hidden test cases. Merged into the grade envelope host-side as `content.grader_private`.
+    grader_private TEXT,
+    difficulty INTEGER NOT NULL DEFAULT 2,                           -- 1 (easy) .. 5 (hard) Populated in a follow-up once BloomLevel becomes a real enum; orthogonal to difficulty (an easy "create" item is possible).
+    bloom_level TEXT,
+    points REAL NOT NULL DEFAULT 1.0,                                -- Provenance: the bank this item came from, when it came from one.
+    bank_id TEXT REFERENCES question_banks(id) ON DELETE CASCADE,
+    author_did TEXT,
+    taxonomy_version TEXT,
+    ratified INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
--- Completion claims created after this migration carry the exact enrollment
--- source and the canonical instructor-signing request. Historical claims stay
--- NULL rather than being rebound to whichever course version is current now.
-ALTER TABLE completion_claims ADD COLUMN course_document_cid TEXT
-    CHECK (course_document_cid IS NULL OR length(course_document_cid) = 64);
-ALTER TABLE completion_claims ADD COLUMN course_document_version INTEGER
-    CHECK (course_document_version IS NULL OR course_document_version > 0);
-ALTER TABLE completion_claims ADD COLUMN completion_binding_json TEXT
-    CHECK (completion_binding_json IS NULL OR json_valid(completion_binding_json));
-ALTER TABLE completion_claims ADD COLUMN enrollment_id TEXT REFERENCES enrollments(id);
+CREATE TABLE attempt_items (
+    attempt_id TEXT NOT NULL REFERENCES assessment_attempts(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,                                                       -- 0-based served order
+    item_id TEXT NOT NULL,
+    option_order TEXT,                                                              -- JSON: served position -> original index
+    submission_json TEXT,                                                           -- what the learner submitted
+    grader_cid TEXT,                                                                -- grader that actually produced `score`
+    content_cid TEXT,
+    submission_cid TEXT,
+    score REAL,                                                                     -- [0,1] for this item
+    score_details TEXT,                                                             -- grader `details` blob
+    theta_after REAL,
+    se_after REAL,
+    graded_at TEXT,
+    PRIMARY KEY (attempt_id, ordinal)
+);
 
--- Only shared-verifier-approved exact-binding endorsements are authoritative.
+CREATE TABLE catalog (
+    course_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    author_address TEXT NOT NULL,
+    content_cid TEXT NOT NULL,
+    thumbnail_cid TEXT,
+    tags TEXT,                                            -- JSON array
+    skill_ids TEXT,                                       -- JSON array of skill IDs
+    version INTEGER NOT NULL DEFAULT 1,
+    published_at TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now')),
+    pinned INTEGER DEFAULT 0,
+    on_chain_tx TEXT,
+    signature TEXT NOT NULL,                              -- Author's signature over the record
+    kind TEXT NOT NULL DEFAULT 'course'
+);
+
+CREATE TABLE chain_submission_members (
+    network TEXT NOT NULL,
+    member_kind TEXT NOT NULL CHECK (length(member_kind) > 0),
+    member_id TEXT NOT NULL CHECK (length(member_id) > 0),
+    operation_kind TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    PRIMARY KEY (network, member_kind, member_id),
+    FOREIGN KEY (network, operation_kind, operation_id) REFERENCES chain_submissions(network, operation_kind, operation_id)
+);
+
+CREATE TABLE chain_submissions (
+    network TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK (length(operation_kind) > 0),
+    operation_id TEXT NOT NULL CHECK (length(operation_id) > 0),
+    tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
+    signed_cbor BLOB NOT NULL CHECK (length(signed_cbor) > 0),
+    context_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'outcome_unknown' CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed_on_chain')),
+    confirmed_slot INTEGER CHECK (confirmed_slot >= 0),
+    applied_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network, operation_kind, operation_id)
+);
+
+CREATE TABLE classroom_calls (
+    id TEXT PRIMARY KEY,
+    classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    channel_id TEXT REFERENCES classroom_channels(id),
+    title TEXT NOT NULL,
+    ticket TEXT,
+    started_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended')),
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT
+);
+
+CREATE TABLE classroom_channels (
+    id TEXT PRIMARY KEY,                                                                         -- blake2b(classroom_id + name)
+    classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    channel_type TEXT NOT NULL DEFAULT 'text' CHECK (channel_type IN ('text', 'announcement')),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (classroom_id, name)
+);
+
+CREATE TABLE classroom_group_keys (
+    classroom_id TEXT PRIMARY KEY,
+    group_key_enc BLOB NOT NULL,
+    key_version INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE classroom_join_requests (
+    id TEXT PRIMARY KEY,
+    classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    stake_address TEXT NOT NULL,
+    display_name TEXT,
+    message TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
+    reviewed_by TEXT,
+    requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at TEXT
+);
+
+CREATE TABLE classroom_members (
+    classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    stake_address TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'moderator', 'member')),
+    display_name TEXT,
+    joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+    x25519_public_key BLOB,
+    PRIMARY KEY (classroom_id, stake_address)
+);
+
+CREATE TABLE classroom_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES classroom_channels(id) ON DELETE CASCADE,
+    classroom_id TEXT NOT NULL,
+    sender_address TEXT NOT NULL,
+    sender_name TEXT,
+    content TEXT NOT NULL,
+    edited_at TEXT,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    sent_at TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE classrooms (
+    id TEXT PRIMARY KEY,                                                             -- blake2b(owner_address + name + created_at_ms)
+    name TEXT NOT NULL,
+    description TEXT,
+    icon_emoji TEXT,
+    owner_address TEXT NOT NULL,                                                     -- Cardano stake address (bech32)
+    invite_code TEXT UNIQUE,                                                         -- 8-char alphanumeric join code (optional)
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE completion_claims (
+    id TEXT PRIMARY KEY,
+    subject_did TEXT NOT NULL,
+    course_id TEXT NOT NULL,
+    completion_root TEXT NOT NULL,
+    credential_ids_json TEXT NOT NULL CHECK (json_valid(credential_ids_json)),
+    witness_unavailable INTEGER NOT NULL DEFAULT 0 CHECK (witness_unavailable IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    course_document_cid TEXT CHECK (course_document_cid IS NULL OR length(course_document_cid) = 64),
+    course_document_version INTEGER CHECK (course_document_version IS NULL OR course_document_version > 0),
+    completion_binding_json TEXT CHECK (completion_binding_json IS NULL OR json_valid(completion_binding_json)),
+    enrollment_id TEXT REFERENCES enrollments(id),
+    UNIQUE (subject_did, course_id, completion_root)
+);
+
+CREATE TABLE completion_observations (
+    policy_id TEXT NOT NULL,
+    asset_name_hex TEXT NOT NULL,
+    tx_hash TEXT NOT NULL,
+    subject_pubkey TEXT NOT NULL,                         -- hex, 64 chars (32-byte Ed25519 pubkey)
+    course_id TEXT NOT NULL,                              -- hex
+    completion_root TEXT NOT NULL,                        -- hex, 64 chars (32-byte blake2b-256)
+    completion_time TEXT NOT NULL,                        -- ISO 8601 from CompletionDatum.timestamp
+    credential_id TEXT,                                   -- populated once the VC is issued
+    observed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    issued_at TEXT,
+    PRIMARY KEY (policy_id, asset_name_hex)
+);
+
+CREATE TABLE completion_witness_requests (
+    operation_id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL UNIQUE REFERENCES completion_claims(id),
+    context_json TEXT NOT NULL CHECK (json_valid(context_json)),
+    blocked INTEGER NOT NULL DEFAULT 0 CHECK (blocked IN (0, 1)),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE content_mappings (
+    external_id TEXT PRIMARY KEY,
+    blake3_hash TEXT NOT NULL,
+    size_bytes INTEGER,
+    mapped_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE course_chapters (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE course_completion_endorsements (
     id TEXT PRIMARY KEY CHECK (length(id) = 64),
     claim_id TEXT NOT NULL REFERENCES completion_claims(id) ON DELETE CASCADE,
@@ -189,25 +294,251 @@ CREATE TABLE course_completion_endorsements (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (claim_id, attestor_did)
 );
-CREATE INDEX idx_course_completion_endorsements_claim
-    ON course_completion_endorsements(claim_id, created_at);
 
--- Migration 042's mutable course-id gate and raw transaction-hash signatures
--- are obsolete authority. Historical rows cannot be safely promoted because
--- they do not bind the subject, exact course document, evidence, or network.
-DROP TABLE completion_attestations;
-DROP TABLE completion_attestation_requirements;
-"#;
+CREATE TABLE course_elements (
+    id TEXT PRIMARY KEY,
+    chapter_id TEXT NOT NULL REFERENCES course_chapters(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    element_type TEXT NOT NULL,                                                 -- video|text|quiz|interactive|assessment
+    content_cid TEXT,                                                           -- content ID (BLAKE3 hash) of element content
+    position INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    content_inline TEXT,
+    plugin_cid TEXT,
+    plugin_version TEXT,
+    plugin_config_cid TEXT
+);
 
-const MIGRATION_090: &str = r#"
--- A row exists only after an explicit local trust decision. Discovery, sync,
--- Cardano anchors, and matching human-readable names must never insert here.
--- Exact canonical bytes are retained so future verification does not depend
--- on a mutable projection or a network provider.
+CREATE TABLE course_notes (
+    id TEXT PRIMARY KEY,
+    enrollment_id TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+    chapter_id TEXT REFERENCES course_chapters(id),
+    element_id TEXT REFERENCES course_elements(id),
+    content_cid TEXT,                                                          -- content ID (BLAKE3 hash) of note content
+    preview_text TEXT,
+    video_timestamp_seconds INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE courses (
+    id TEXT PRIMARY KEY,                                                                                                         -- blake2b(author_stake_address + content_cid)
+    title TEXT NOT NULL,
+    description TEXT,
+    author_address TEXT NOT NULL,                                                                                                -- Cardano stake address of the author
+    content_cid TEXT,                                                                                                            -- content ID (BLAKE3 hash) of course content root
+    thumbnail_cid TEXT,
+    tags TEXT,                                                                                                                   -- JSON array
+    skill_ids TEXT,                                                                                                              -- JSON array of skill IDs
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft',                                                                                        -- draft|published|archived
+    published_at TEXT,
+    on_chain_tx TEXT,                                                                                                            -- Cardano tx hash (if registered on-chain)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    author_name TEXT,
+    thumbnail_svg TEXT,
+    kind TEXT NOT NULL DEFAULT 'course' CHECK (kind IN ('course', 'tutorial')),
+    provenance TEXT,
+    course_document_version INTEGER CHECK (course_document_version IS NULL OR course_document_version > 0),
+    completion_policy_json TEXT CHECK (completion_policy_json IS NULL OR json_valid(completion_policy_json)),
+    draft_completion_policy_json TEXT CHECK (draft_completion_policy_json IS NULL OR json_valid(draft_completion_policy_json))
+);
+
+CREATE TABLE credential_allowlist (
+    credential_id TEXT NOT NULL,
+    requestor_did TEXT NOT NULL,                         -- or the literal 'public'
+    granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (credential_id, requestor_did)
+);
+
+CREATE TABLE credential_anchors (
+    credential_id TEXT PRIMARY KEY REFERENCES credentials(id),
+    anchor_tx_hash TEXT,
+    anchor_status TEXT NOT NULL DEFAULT 'pending',              -- pending|submitted|confirmed|failed
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TEXT,
+    enqueued_at TEXT NOT NULL DEFAULT (datetime('now')),
+    confirmed_at TEXT
+);
+
+CREATE TABLE credential_status_lists (
+    list_id TEXT PRIMARY KEY,                            -- issuer's list identifier
+    issuer_did TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,                  -- monotonic; older versions ignored
+    status_purpose TEXT NOT NULL DEFAULT 'revocation',
+    bits BLOB NOT NULL,                                  -- packed little-endian bitmap
+    bit_length INTEGER NOT NULL DEFAULT 0,
+    signature TEXT,                                      -- issuer signature over (list_id, version, bits)
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE credentials (
+    id TEXT PRIMARY KEY,                                  -- e.g. urn:uuid:...
+    issuer_did TEXT NOT NULL,
+    subject_did TEXT NOT NULL,
+    credential_type TEXT NOT NULL,                        -- FormalCredential, etc.
+    claim_kind TEXT NOT NULL,                             -- skill | role | custom
+    skill_id TEXT,                                        -- NULL for non-skill claims
+    issuance_date TEXT NOT NULL,
+    expiration_date TEXT,
+    signed_vc_json TEXT NOT NULL,                         -- full JSON-LD VC
+    integrity_hash TEXT NOT NULL,                         -- hex(blake3(JCS bytes))
+    status_list_id TEXT,                                  -- FK to credential_status_lists.list_id
+    status_list_index INTEGER,                            -- bit position in the list
+    revoked INTEGER NOT NULL DEFAULT 0,                   -- cached from status list for fast queries
+    revoked_at TEXT,
+    revocation_reason TEXT,
+    supersedes TEXT,                                      -- prior credential id, §11.4
+    received_at TEXT NOT NULL DEFAULT (datetime('now')),
+    suspended INTEGER NOT NULL DEFAULT 0,
+    suspended_at TEXT,
+    suspended_until TEXT,
+    suspended_reason TEXT,
+    witness_tx_hash TEXT,
+    witness_validator_script_hash TEXT,
+    witness_validator_name TEXT,
+    auto_issued INTEGER NOT NULL DEFAULT 0,
+    provenance TEXT
+);
+
+CREATE TABLE credentials_pending_verification (
+    id TEXT PRIMARY KEY,
+    issuer_did TEXT NOT NULL,
+    subject_did TEXT NOT NULL,
+    signed_vc_json TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE derived_skill_state_history (
+    subject_did TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    raw_score REAL NOT NULL,
+    confidence REAL NOT NULL,
+    trust_score REAL NOT NULL,
+    level INTEGER NOT NULL,
+    evidence_mass REAL NOT NULL,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (subject_did, skill_id, snapshot_date)
+);
+
+CREATE TABLE derived_skill_states (
+    subject_did TEXT NOT NULL,
+    skill_id TEXT NOT NULL,
+    calculation_version TEXT NOT NULL,
+    raw_score REAL NOT NULL,
+    confidence REAL NOT NULL,
+    trust_score REAL NOT NULL,
+    level INTEGER NOT NULL,
+    evidence_mass REAL NOT NULL,
+    unique_issuer_clusters INTEGER NOT NULL,
+    active_evidence_count INTEGER NOT NULL,
+    state_json TEXT NOT NULL,                                  -- full DerivedSkillState
+    computed_at TEXT NOT NULL,
+    dominant_provenance TEXT,
+    input_fingerprint TEXT,
+    PRIMARY KEY (subject_did, skill_id, calculation_version)
+);
+
+CREATE TABLE devices (
+    id TEXT PRIMARY KEY,                                 -- Random UUID per device
+    device_name TEXT,                                    -- User-assigned label
+    platform TEXT,                                       -- macos|windows|linux
+    first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+    last_synced TEXT,
+    is_local INTEGER NOT NULL DEFAULT 0,                 -- 1 = this device
+    peer_id TEXT,                                        -- libp2p PeerId (if known)
+    stake_address TEXT,
+    shared_key BLOB,
+    paired INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE dht_records (
+    key BLOB PRIMARY KEY,
+    value BLOB NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE element_progress (
+    id TEXT PRIMARY KEY,
+    enrollment_id TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+    element_id TEXT NOT NULL REFERENCES course_elements(id),
+    status TEXT NOT NULL DEFAULT 'not_started',                                -- not_started|in_progress|completed
+    score REAL,                                                                -- 0.0 to 1.0 for assessments
+    time_spent INTEGER DEFAULT 0,                                              -- seconds
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(enrollment_id, element_id)
+);
+
+CREATE TABLE element_skill_tags (
+    element_id TEXT NOT NULL REFERENCES course_elements(id) ON DELETE CASCADE,
+    skill_id TEXT NOT NULL REFERENCES skills(id),
+    weight REAL NOT NULL DEFAULT 1.0,
+    PRIMARY KEY (element_id, skill_id)
+);
+
+CREATE TABLE element_submissions (
+    id TEXT PRIMARY KEY,
+    element_id TEXT NOT NULL REFERENCES course_elements(id),
+    enrollment_id TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+    submission_cid TEXT NOT NULL,                                              -- BLAKE3 of the submission bytes (in iroh store)
+    grader_cid TEXT NOT NULL,                                                  -- BLAKE3 of the grader.wasm
+    content_cid TEXT NOT NULL,                                                 -- BLAKE3 of the content bytes the grader saw
+    score REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
+    score_details_json TEXT,                                                   -- plugin-defined `details` payload
+    learner_did TEXT NOT NULL,
+    signed_attestation BLOB,                                                   -- Ed25519 signature over the bundle (NULL until signed)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    grader_version TEXT NOT NULL DEFAULT '',
+    answers_json TEXT,
+    evidence_published INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE enrollments (
+    id TEXT PRIMARY KEY,                                                                                       -- blake2b(stake_address + course_id)
+    course_id TEXT NOT NULL REFERENCES courses(id),
+    enrolled_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active',                                                                     -- active|completed|dropped
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    course_document_cid TEXT CHECK (course_document_cid IS NULL OR length(course_document_cid) = 64),
+    course_document_version INTEGER CHECK (course_document_version IS NULL OR course_document_version > 0),
+    completion_policy_json TEXT CHECK (completion_policy_json IS NULL OR json_valid(completion_policy_json))
+);
+
+CREATE TABLE goal_template_versions (
+    version INTEGER PRIMARY KEY,
+    content_cid TEXT NOT NULL,
+    previous_cid TEXT,
+    ratified_by TEXT,                                      -- DAO multisig / committee id
+    signature TEXT,
+    taxonomy_version TEXT,
+    published_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE goal_templates (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('exam','curriculum','job_role')),
+    key TEXT NOT NULL,                                                    -- stable slug, e.g. 'cbse.grade10', 'jee_main', 'engineering_manager'
+    label TEXT NOT NULL,                                                  -- human label, e.g. 'CBSE — Grade 10'
+    board TEXT,                                                           -- curriculum only: 'CBSE' | 'ICSE' | 'IB' | ...
+    grade TEXT,                                                           -- curriculum only: '10'
+    skill_ids TEXT NOT NULL,                                              -- JSON array of target skill ids
+    taxonomy_version TEXT,                                                -- skill-graph version these ids were authored against
+    dao_id TEXT,                                                          -- ratifying DAO (NULL for genesis-seeded)
+    ratified INTEGER NOT NULL DEFAULT 0,
+    content_cid TEXT,                                                     -- published version doc CID (NULL for genesis)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE governance_genesis_trust_anchors (
     dao_id TEXT PRIMARY KEY CHECK (length(dao_id) = 64),
-    genesis_hash TEXT NOT NULL UNIQUE
-        CHECK (length(genesis_hash) = 64 AND genesis_hash = dao_id),
+    genesis_hash TEXT NOT NULL UNIQUE CHECK (length(genesis_hash) = 64 AND genesis_hash = dao_id),
     genesis_json BLOB NOT NULL CHECK (length(genesis_json) > 0),
     name TEXT NOT NULL CHECK (length(name) > 0),
     scope_type TEXT NOT NULL CHECK (length(scope_type) > 0),
@@ -215,50 +546,744 @@ CREATE TABLE governance_genesis_trust_anchors (
     rules_hash TEXT NOT NULL CHECK (length(rules_hash) = 64),
     pinned_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_governance_genesis_trust_scope
-    ON governance_genesis_trust_anchors(scope_type, scope_id);
-"#;
 
-const MIGRATION_089: &str = r#"
--- An assessment ended for diagnostics or after monitoring continuity is lost
--- is neither graded nor failed, but it is consumed for normal attempt-limit /
--- cooldown accounting because its questions were shown. Fixed-form answers
--- can be saved locally before the transition.
-ALTER TABLE assessment_attempts ADD COLUMN ended_at TEXT;
-ALTER TABLE assessment_attempts ADD COLUMN end_reason TEXT
-    CHECK (end_reason IS NULL OR end_reason IN ('diagnostics', 'interrupted'));
-ALTER TABLE assessment_attempts ADD COLUMN draft_answers_json TEXT
-    CHECK (draft_answers_json IS NULL OR json_valid(draft_answers_json));
-CREATE INDEX idx_assessment_attempts_open
-    ON assessment_attempts(subject_did, started_at DESC)
-    WHERE graded_at IS NULL AND ended_at IS NULL;
-"#;
+CREATE TABLE guardian_activity_rows (
+    link_id TEXT NOT NULL REFERENCES guardian_links(id) ON DELETE CASCADE,
+    table_name TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (link_id, table_name, entity_id)
+);
 
-const MIGRATION_088: &str = r#"
--- New reputation snapshots are signed DerivedCredential VCs whose integrity
--- hash is handled by the existing credential anchor queue. Older CIP-68 rows
--- remain distinguishable and may only reconcile already-signed transactions.
-ALTER TABLE reputation_snapshots ADD COLUMN snapshot_format TEXT NOT NULL
-    DEFAULT 'legacy_cip68' CHECK (snapshot_format IN ('legacy_cip68', 'credential_hash_vc'));
-ALTER TABLE reputation_snapshots ADD COLUMN snapshot_scope TEXT NOT NULL
-    DEFAULT 'legacy_declared_window' CHECK (
-        snapshot_scope IN ('legacy_declared_window', 'as_of_all_eligible_evidence')
-    );
-ALTER TABLE reputation_snapshots ADD COLUMN computation_spec TEXT;
-ALTER TABLE reputation_snapshots ADD COLUMN credential_id TEXT REFERENCES credentials(id);
-CREATE UNIQUE INDEX idx_reputation_snapshots_credential
-    ON reputation_snapshots(credential_id) WHERE credential_id IS NOT NULL;
-"#;
+CREATE TABLE guardian_links (
+    id TEXT PRIMARY KEY,
+    side TEXT NOT NULL CHECK (side IN ('ward','guardian')),
+    peer_did TEXT NOT NULL,
+    peer_stake_address TEXT,
+    peer_peer_id TEXT,                                                      -- libp2p PeerId once known
+    peer_display_name TEXT,
+    shared_key BLOB NOT NULL,                                               -- 32-byte AEAD key (profile DB is vault-scoped)
+    status TEXT NOT NULL CHECK (status IN ('pending','active','revoked')),
+    guardian_vc_id TEXT,                                                    -- parent-issued RoleCredential(role='guardian')
+    invite_code_hash TEXT,                                                  -- guardian side: for retrying Link while pending
+    child_birthdate TEXT,                                                   -- guardian side only, from sealed payload
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_sync_at TEXT
+);
 
-const MIGRATION_087: &str = r#"
--- Preserve old records, including uncertain legacy transactions. Missing frozen
--- inputs are not permission to reconstruct a potentially different transaction.
+CREATE TABLE guardian_pending_invites (
+    code_hash TEXT PRIMARY KEY,
+    shared_key BLOB NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE integrity_evidence (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,  -- The flagged snapshot this evidence belongs to.
+    snapshot_id TEXT REFERENCES integrity_snapshots(id) ON DELETE CASCADE,         -- camera_frame | keystroke | mouse | gaze
+    kind TEXT NOT NULL,                                                            -- Opaque payload. Camera frames are stored encoded, not as raw RGBA. The database file is SQLCipher-encrypted at rest under the profile vault key, so this inherits that protection and nothing weaker.
+    payload BLOB NOT NULL,
+    captured_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE integrity_evidence_consent (
+    session_id TEXT PRIMARY KEY REFERENCES integrity_sessions(id) ON DELETE CASCADE,  -- 1 = learner chose to preserve, 0 = declined. There is no default: a row exists only because a human answered.
+    granted INTEGER NOT NULL CHECK (granted IN (0, 1)),
+    decided_at TEXT NOT NULL DEFAULT (datetime('now')),                               -- NULL when declined. Absolute deadline, not a duration, so a device that is offline for a month still expires the evidence on next open.
+    expires_at TEXT
+);
+
+CREATE TABLE integrity_evidence_release (
+    session_id TEXT NOT NULL,                             -- The service it went to, as the learner's directory list spells it.
+    directory_url TEXT NOT NULL,                          -- Their identifier for the assessment, learned from that person's own export. This device does not otherwise have a name for it.
+    run_id TEXT NOT NULL,
+    released_at TEXT NOT NULL DEFAULT (datetime('now')),
+    item_count INTEGER NOT NULL DEFAULT 0,                -- Set the moment the learner asks for it back. Cleared never; it is the record that they asked.
+    revoke_wanted_at TEXT,                                -- Set when the service confirmed. Until then the withdrawal is still owed.
+    revoked_at TEXT,
+    PRIMARY KEY (session_id, directory_url, run_id)
+);
+
+CREATE TABLE integrity_flag_notice (
+    directory_url TEXT NOT NULL,                            -- The service's identifier for the assessment.
+    run_id TEXT NOT NULL,                                   -- What it was for, kept so the notice can name it without another fetch.
+    organisation TEXT NOT NULL DEFAULT '',
+    role_label TEXT NOT NULL DEFAULT '',
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),  -- When the learner was shown it. NULL means they have not been yet.
+    told_at TEXT,
+    PRIMARY KEY (directory_url, run_id)
+);
+
+CREATE TABLE integrity_sessions (
+    id TEXT PRIMARY KEY,
+    enrollment_id TEXT REFERENCES enrollments(id),
+    status TEXT NOT NULL DEFAULT 'active',                                                      -- active|completed|flagged|suspended
+    integrity_score REAL,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT,
+    critical_count INTEGER NOT NULL DEFAULT 0,
+    warning_count INTEGER NOT NULL DEFAULT 0,
+    assurance_level TEXT NOT NULL DEFAULT 'local',
+    commitment_root TEXT,
+    anchor_ref TEXT,
+    purpose TEXT NOT NULL DEFAULT 'assessment' CHECK (purpose IN ('assessment', 'interview'))
+);
+
+CREATE TABLE integrity_snapshots (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,
+    typing_score REAL,
+    mouse_score REAL,
+    human_score REAL,
+    tab_score REAL,
+    paste_score REAL,
+    devtools_score REAL,
+    camera_score REAL,
+    composite_score REAL,
+    captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+    anomaly_flags TEXT,
+    ai_paste_anomaly REAL,
+    gaze_offscreen_ratio REAL,
+    commitment_hash TEXT
+);
+
+CREATE TABLE interview_criteria (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'not_covered' CHECK (status IN ('not_covered', 'partial', 'covered')),
+    notes TEXT
+);
+
+CREATE TABLE interview_followups (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    source_segment_id TEXT REFERENCES interview_transcript_segments(id) ON DELETE SET NULL,
+    criterion_id TEXT REFERENCES interview_criteria(id) ON DELETE SET NULL,
+    question TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested', 'asked', 'dismissed')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE interview_notes (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    is_private INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE interview_participants (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    peer_id TEXT,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('interviewer', 'candidate', 'observer')),
+    pseudonym TEXT NOT NULL,
+    consent_transcription INTEGER NOT NULL DEFAULT 0,
+    consent_audio_recording INTEGER NOT NULL DEFAULT 0,
+    consent_video_recording INTEGER NOT NULL DEFAULT 0,
+    consent_sentinel INTEGER NOT NULL DEFAULT 0,
+    consent_camera INTEGER NOT NULL DEFAULT 0,
+    consented_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE interview_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    objective TEXT,
+    role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL,
+    tutoring_session_id TEXT,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ready', 'live', 'completed')),
+    duration_minutes INTEGER NOT NULL DEFAULT 45 CHECK (duration_minutes > 0),
+    retention_days INTEGER NOT NULL DEFAULT 30 CHECK (retention_days BETWEEN 1 AND 365),
+    record_audio INTEGER NOT NULL DEFAULT 0,
+    record_video INTEGER NOT NULL DEFAULT 0,
+    sentinel_enabled INTEGER NOT NULL DEFAULT 1,
+    integrity_session_id TEXT REFERENCES integrity_sessions(id) ON DELETE SET NULL,
+    summary TEXT,
+    conclusion TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    ended_at TEXT,
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE interview_transcript_segments (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+    participant_id TEXT NOT NULL REFERENCES interview_participants(id) ON DELETE CASCADE,
+    speaker_label TEXT NOT NULL,
+    text TEXT NOT NULL,
+    start_ms INTEGER NOT NULL DEFAULT 0,
+    end_ms INTEGER NOT NULL DEFAULT 0,
+    is_final INTEGER NOT NULL DEFAULT 1,
+    confidence REAL,
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('local_stt', 'remote_stt', 'manual')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE key_registry (
+    did TEXT NOT NULL,
+    key_id TEXT NOT NULL,          -- '<did>#key-N' fragment
+    public_key_hex TEXT NOT NULL,  -- raw 32-byte Ed25519 pubkey, hex
+    valid_from TEXT NOT NULL,      -- ISO 8601 UTC
+    valid_until TEXT,              -- NULL while active
+    rotated_by TEXT,               -- DID of successor, if rotated
+    PRIMARY KEY (did, key_id)
+);
+
+CREATE TABLE local_identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),                                                                      -- Singleton
+    stake_address TEXT NOT NULL UNIQUE,
+    payment_address TEXT NOT NULL,
+    display_name TEXT,
+    bio TEXT,
+    avatar_cid TEXT,
+    mnemonic_enc BLOB,                                                                                          -- Encrypted mnemonic (OS keychain preferred, this is fallback)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    profile_hash TEXT,
+    device_id TEXT,
+    x25519_public_key BLOB,
+    username TEXT,
+    visibility TEXT NOT NULL DEFAULT 'public',
+    birthdate TEXT,
+    activation_state TEXT NOT NULL DEFAULT 'active' CHECK (activation_state IN ('active','pending_guardian')),
+    account_roles TEXT NOT NULL DEFAULT '["learner"]'
+);
+
+CREATE TABLE opinion_withdrawals (
+    opinion_id TEXT PRIMARY KEY,
+    dao_id TEXT NOT NULL REFERENCES governance_daos(id),
+    reason TEXT NOT NULL,                                  -- e.g. 'challenge_upheld', 'author_request'
+    dao_signature TEXT NOT NULL,                           -- DAO committee signature over the record
+    withdrawn_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE opinions (
+    id TEXT PRIMARY KEY,                                           -- blake2b(author_address + video_cid)
+    author_address TEXT NOT NULL,                                  -- Cardano stake address
+    subject_field_id TEXT NOT NULL REFERENCES subject_fields(id),
+    title TEXT NOT NULL,
+    summary TEXT,                                                  -- soft limit 280 chars at app layer
+    video_cid TEXT NOT NULL,                                       -- iroh BLAKE3 of video blob
+    thumbnail_cid TEXT,
+    duration_seconds INTEGER,
+    credential_proof_ids TEXT NOT NULL,                            -- JSON array of skill_proof IDs the author stakes
+    signature TEXT NOT NULL,                                       -- Ed25519 over the canonical payload
+    public_key TEXT,                                               -- Ed25519 public key (hex) for verification
+    published_at TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now')),
+    withdrawn INTEGER NOT NULL DEFAULT 0,
+    withdrawn_reason TEXT,                                         -- e.g. 'challenge_upheld'
+    on_chain_tx TEXT,                                              -- optional: future DAO-attested anchor
+    provenance TEXT
+);
+
+CREATE TABLE opinions_pending_verification (
+    id TEXT PRIMARY KEY,
+    author_address TEXT NOT NULL,
+    subject_field_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    video_cid TEXT NOT NULL,
+    thumbnail_cid TEXT,
+    duration_seconds INTEGER,
+    credential_proof_ids TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    public_key TEXT,
+    published_at TEXT NOT NULL,
+    queued_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE organizations (
+    id TEXT PRIMARY KEY,                                 -- blake2b(name + owner_address)
+    name TEXT NOT NULL,
+    owner_address TEXT NOT NULL,                         -- sponsor admin stake address
+    did TEXT,                                            -- optional org issuer DID
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE peer_profiles (
+    did TEXT PRIMARY KEY,
+    username TEXT,
+    display_name TEXT,
+    bio TEXT,
+    avatar_cid TEXT,
+    visibility TEXT NOT NULL DEFAULT 'public',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE peers (
+    peer_id TEXT PRIMARY KEY,  -- libp2p PeerId
+    stake_address TEXT,        -- Cardano stake address (if known)
+    display_name TEXT,
+    last_seen TEXT NOT NULL,
+    addresses TEXT NOT NULL,   -- JSON array of multiaddrs
+    roles TEXT,                -- JSON array: ["instructor", "learner"]
+    reputation REAL
+);
+
+CREATE TABLE pending_pairings (
+    code_hash TEXT PRIMARY KEY,                          -- BLAKE2b hash of the pairing code
+    shared_key BLOB NOT NULL,                            -- 32-byte key offered to the acceptor
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE pinboard_observations (
+    id TEXT PRIMARY KEY,
+    pinner_did TEXT NOT NULL,
+    subject_did TEXT NOT NULL,
+    scope TEXT NOT NULL,                                  -- JSON array of strings
+    commitment_since TEXT NOT NULL,
+    revoked_at TEXT,
+    signature TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE pins (
+    cid TEXT PRIMARY KEY,
+    pin_type TEXT NOT NULL,                             -- course|evidence|profile|taxonomy
+    size_bytes INTEGER,
+    last_accessed TEXT,
+    auto_unpin INTEGER DEFAULT 0,                       -- 1 = ok to unpin under storage pressure
+    pinned_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE plugin_catalog (
+    plugin_cid TEXT PRIMARY KEY,                           -- BLAKE3 of manifest.json
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    author_did TEXT NOT NULL,
+    description TEXT,
+    api_version TEXT NOT NULL,
+    kinds_json TEXT NOT NULL,                              -- JSON array
+    capabilities_json TEXT NOT NULL,                       -- JSON array
+    subject_tags_json TEXT NOT NULL,                       -- JSON array
+    platforms_json TEXT NOT NULL,                          -- JSON array
+    has_grader INTEGER NOT NULL DEFAULT 0,
+    grader_cid TEXT,                                       -- NULL for interactive-only
+    source TEXT NOT NULL,                                  -- 'gossip' | 'builtin' | 'local'
+    announced_at TEXT NOT NULL,                            -- author-stamped time from announcement
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE plugin_dependencies (
+    plugin_cid TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    dependency_id TEXT NOT NULL,                                                             -- manifest id: did:key:<author>#<slug>
+    dependency_cid TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    PRIMARY KEY (plugin_cid, dependency_id)
+);
+
+CREATE TABLE plugin_element_state (
+    element_id TEXT PRIMARY KEY,
+    plugin_cid TEXT NOT NULL,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE plugin_installed (
+    plugin_cid TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    author_did TEXT NOT NULL,
+    install_path TEXT NOT NULL,                            -- filesystem path under app_data/plugins/
+    source TEXT NOT NULL,                                  -- 'local_file' | 'p2p' | 'builtin'
+    manifest_json TEXT NOT NULL,                           -- full manifest at install time
+    installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE plugin_irl_submissions (
+    id TEXT PRIMARY KEY,
+    plugin_cid TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    element_id TEXT,
+    enrollment_id TEXT,
+    learner_did TEXT NOT NULL,
+    submission_json TEXT NOT NULL,
+    skills_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL CHECK (status IN ('pending','reviewed','rejected')) DEFAULT 'pending',
+    reviewer_did TEXT,
+    score REAL,
+    feedback TEXT,
+    skill_ratings_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at TEXT,
+    course_id TEXT
+);
+
+CREATE TABLE plugin_permissions (
+    plugin_cid TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    capability TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('once','session','always')),
+    granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    granted_until TEXT,                                                                  -- NULL for 'always'
+    PRIMARY KEY (plugin_cid, capability)
+);
+
+CREATE TABLE presentations_seen (
+    audience TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (audience, nonce)
+);
+
+CREATE TABLE question_banks (
+    id TEXT PRIMARY KEY,
+    skill_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    pass_threshold REAL NOT NULL DEFAULT 0.7,                                                    -- fraction correct to pass
+    draw_count INTEGER NOT NULL DEFAULT 5,                                                       -- questions per attempt
+    taxonomy_version TEXT,
+    dao_id TEXT,
+    ratified INTEGER NOT NULL DEFAULT 0,
+    content_cid TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    max_attempts INTEGER,
+    cooldown_hours TEXT NOT NULL DEFAULT '[0,24,72,168]',
+    attempt_window_days INTEGER NOT NULL DEFAULT 90,
+    score_policy TEXT NOT NULL DEFAULT 'best',
+    delivery_mode TEXT NOT NULL DEFAULT 'fixed' CHECK (delivery_mode IN ('fixed', 'adaptive')),
+    adaptive_se_target REAL NOT NULL DEFAULT 0.3,
+    adaptive_min_items INTEGER NOT NULL DEFAULT 5,
+    adaptive_max_items INTEGER NOT NULL DEFAULT 20
+);
+
+CREATE TABLE reputation_assertions (
+    id TEXT PRIMARY KEY,
+    actor_address TEXT NOT NULL,                                                                                            -- Cardano stake address
+    role TEXT NOT NULL,                                                                                                     -- instructor|learner|assessor|author|mentor
+    skill_id TEXT REFERENCES skills(id),
+    proficiency_level TEXT,
+    score REAL NOT NULL,
+    evidence_count INTEGER NOT NULL DEFAULT 0,
+    median_impact REAL,
+    impact_p25 REAL,
+    impact_p75 REAL,
+    learner_count INTEGER,
+    impact_variance REAL,
+    window_start TEXT,
+    window_end TEXT,
+    computation_spec TEXT NOT NULL DEFAULT 'v2',
+    cid TEXT,                                                                                                               -- content ID (BLAKE3 hash) of reputation proof
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    input_policy_state TEXT NOT NULL DEFAULT 'valid' CHECK (input_policy_state IN ('valid', 'needs_refresh', 'excluded')),
+    input_fingerprint TEXT
+);
+
 CREATE TABLE reputation_snapshot_inputs (
     snapshot_id TEXT PRIMARY KEY REFERENCES reputation_snapshots(id),
     context_json TEXT NOT NULL CHECK (json_valid(context_json))
 );
--- The request is visibly uncertain from the same durable checkpoint as its
--- signed bytes, even if the process stops before the provider POST returns.
+
+CREATE TABLE reputation_snapshots (
+    id TEXT PRIMARY KEY,
+    actor_address TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    skill_count INTEGER NOT NULL DEFAULT 0,
+    tx_status TEXT NOT NULL DEFAULT 'pending',            -- pending|building|submitted|confirmed|failed
+    tx_hash TEXT,
+    error_message TEXT,
+    snapshot_at TEXT NOT NULL DEFAULT (datetime('now')),
+    confirmed_at TEXT,
+    computation_spec TEXT,
+    credential_id TEXT REFERENCES credentials(id)
+);
+
+CREATE TABLE role_assessments (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    role_title TEXT NOT NULL,                                             -- e.g. "SRE L4"
+    job_description TEXT,                                                 -- JD text
+    course_id TEXT REFERENCES courses(id),                                -- backing assessment
+    skill_ids TEXT,                                                       -- JSON array of required skill ids
+    issuance_policy_json TEXT,                                            -- serialized IssuancePolicy (P0)
+    required_assurance_level TEXT,                                        -- local|anchored|high_assurance
+    status TEXT NOT NULL DEFAULT 'draft',                                 -- draft|published|archived
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE sentinel_holdout_refs (
+    id TEXT PRIMARY KEY,
+    encrypted_cid TEXT NOT NULL,
+    model_kind TEXT NOT NULL,                            -- 'keystroke' | 'mouse'
+    threshold INTEGER NOT NULL,
+    key_policy TEXT NOT NULL,                            -- JSON: sealed-share envelope
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE sentinel_user_models (
+    user_address TEXT NOT NULL,
+    device_fp_prefix TEXT NOT NULL,
+    model_kind TEXT NOT NULL,
+    weights_json TEXT NOT NULL,
+    train_loss REAL,
+    trained_epochs INTEGER NOT NULL DEFAULT 0,
+    training_samples INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_address, device_fp_prefix, model_kind)
+);
+
+CREATE TABLE skill_prerequisites (
+    skill_id TEXT NOT NULL REFERENCES skills(id),
+    prerequisite_id TEXT NOT NULL REFERENCES skills(id),
+    PRIMARY KEY (skill_id, prerequisite_id),
+    CHECK (skill_id != prerequisite_id)
+);
+
+CREATE TABLE skill_relations (
+    skill_id TEXT NOT NULL REFERENCES skills(id),
+    related_skill_id TEXT NOT NULL REFERENCES skills(id),
+    relation_type TEXT NOT NULL DEFAULT 'related',         -- related|complementary|alternative
+    PRIMARY KEY (skill_id, related_skill_id),
+    CHECK (skill_id != related_skill_id)
+);
+
+CREATE TABLE skills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    subject_id TEXT NOT NULL REFERENCES subjects(id),
+    bloom_level TEXT NOT NULL DEFAULT 'apply',           -- remember|understand|apply|analyze|evaluate|create
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    synonyms TEXT
+);
+
+CREATE TABLE stake_pubkey_registry (
+    stake_address TEXT NOT NULL,                                   -- Cardano stake addr (bech32)
+    public_key_hex TEXT NOT NULL,                                  -- Ed25519 libp2p pubkey, lowercase hex
+    valid_from INTEGER NOT NULL,                                   -- unix secs
+    valid_until INTEGER,                                           -- unix secs, NULL = open-ended
+    source TEXT NOT NULL CHECK (source IN ('chain', 'snapshot')),
+    on_chain_tx TEXT,                                              -- tx hash, NULL for snapshot-only
+    snapshot_sig TEXT,                                             -- multisig hex, NULL for chain rows
+    last_verified INTEGER NOT NULL DEFAULT 0,                      -- unix secs of last chain re-check
+    PRIMARY KEY (stake_address, public_key_hex, valid_from)
+);
+
+CREATE TABLE subject_fields (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    icon_emoji TEXT
+);
+
+CREATE TABLE subjects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    subject_field_id TEXT NOT NULL REFERENCES subject_fields(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,                          -- evidence|catalog|taxonomy|governance
+    entity_id TEXT NOT NULL,
+    direction TEXT NOT NULL,                            -- sent|received
+    peer_id TEXT,                                       -- Which peer (null = broadcast)
+    signature TEXT,
+    synced_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE sync_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,                               -- PK of the changed row
+    operation TEXT NOT NULL,                            -- insert|update|delete
+    row_data TEXT,                                      -- JSON snapshot of the row (null for delete)
+    updated_at TEXT NOT NULL,                           -- Timestamp of the change (LWW tiebreaker)
+    queued_at TEXT NOT NULL DEFAULT (datetime('now')),
+    delivered_to TEXT DEFAULT '[]'                      -- JSON array of device_ids that received it
+);
+
+CREATE TABLE sync_state (
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    table_name TEXT NOT NULL,                        -- enrollments|element_progress|course_notes|evidence_records|skill_proof_evidence
+    last_synced_at TEXT NOT NULL,                    -- ISO 8601 timestamp of last sync
+    row_count INTEGER NOT NULL DEFAULT 0,            -- Number of rows synced
+    PRIMARY KEY (device_id, table_name)
+);
+
+CREATE TABLE taxonomy_versions (
+    version INTEGER PRIMARY KEY,
+    cid TEXT NOT NULL,                                   -- content ID (BLAKE3 hash) of the full taxonomy document
+    previous_cid TEXT,                                   -- CID of the previous version
+    ratified_by TEXT,                                    -- DAO committee multisig info
+    ratified_at TEXT,
+    signature TEXT,                                      -- Ed25519 signature
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE tutoring_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    ticket TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'cancelled')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT
+);
+
+CREATE TABLE username_claims (
+    username TEXT PRIMARY KEY,
+    did TEXT NOT NULL,
+    claimed_at INTEGER NOT NULL,
+    tier INTEGER NOT NULL DEFAULT 0,                     -- 0 bare | 1 receipted | 2 anchored
+    claim_json TEXT NOT NULL,                            -- full UsernameClaim
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    anchor_verified INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE video_chapters (
+    id TEXT PRIMARY KEY,
+    element_id TEXT NOT NULL REFERENCES course_elements(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    start_seconds INTEGER NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+
+CREATE INDEX idx_app_settings_scope_updated ON app_settings(scope, updated_at);
+CREATE INDEX idx_assessment_attempts_history ON assessment_attempts(subject_did, skill_id, started_at DESC);
+CREATE INDEX idx_assessment_attempts_open ON assessment_attempts(subject_did, started_at DESC) WHERE graded_at IS NULL AND ended_at IS NULL;
+CREATE INDEX idx_assessment_attempts_subject ON assessment_attempts(subject_did, skill_id);
+CREATE INDEX idx_assessment_item_skills_skill ON assessment_item_skills(skill_id);
+CREATE INDEX idx_assessment_items_bank ON assessment_items(bank_id);
+CREATE INDEX idx_assessment_items_skill ON assessment_items(skill_id, ratified);
+CREATE INDEX idx_attempt_items_item ON attempt_items(item_id);
+CREATE INDEX idx_calls_classroom ON classroom_calls(classroom_id, status);
+CREATE INDEX idx_catalog_author ON catalog(author_address);
+CREATE INDEX idx_catalog_kind ON catalog(kind);
+CREATE INDEX idx_chain_submissions_recovery ON chain_submissions(network, operation_kind, applied_at, updated_at);
+CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
+CREATE INDEX idx_channels_classroom ON classroom_channels(classroom_id, position);
+CREATE INDEX idx_classrooms_owner ON classrooms(owner_address);
+CREATE INDEX idx_classrooms_status ON classrooms(status);
+CREATE INDEX idx_completion_obs_pending ON completion_observations(credential_id) WHERE credential_id IS NULL;
+CREATE INDEX idx_completion_obs_subject ON completion_observations(subject_pubkey);
+CREATE INDEX idx_completion_witness_due ON completion_witness_requests(next_attempt_at, operation_id) WHERE blocked = 0;
+CREATE INDEX idx_content_mappings_blake3 ON content_mappings(blake3_hash);
+CREATE INDEX idx_course_completion_endorsements_claim ON course_completion_endorsements(claim_id, created_at);
+CREATE INDEX idx_courses_author ON courses(author_address);
+CREATE INDEX idx_courses_kind ON courses(kind);
+CREATE INDEX idx_courses_status ON courses(status);
+CREATE INDEX idx_credential_allowlist_cred ON credential_allowlist(credential_id);
+CREATE INDEX idx_credential_anchors_status ON credential_anchors(anchor_status, next_attempt_at);
+CREATE INDEX idx_credentials_auto_issued ON credentials(auto_issued, subject_did);
+CREATE INDEX idx_credentials_issuer ON credentials(issuer_did);
+CREATE INDEX idx_credentials_pending_issuer ON credentials_pending_verification(issuer_did);
+CREATE INDEX idx_credentials_skill ON credentials(skill_id) WHERE skill_id IS NOT NULL;
+CREATE INDEX idx_credentials_status ON credentials(status_list_id, status_list_index) WHERE status_list_id IS NOT NULL;
+CREATE INDEX idx_credentials_subject ON credentials(subject_did);
+CREATE INDEX idx_credentials_supersedes ON credentials(supersedes) WHERE supersedes IS NOT NULL;
+CREATE INDEX idx_credentials_witness_tx ON credentials(witness_tx_hash) WHERE witness_tx_hash IS NOT NULL;
+CREATE INDEX idx_derived_skill_states_skill ON derived_skill_states(skill_id);
+CREATE INDEX idx_derived_skill_states_subject ON derived_skill_states(subject_did);
+CREATE INDEX idx_devices_local ON devices(is_local);
+CREATE INDEX idx_dss_history_subject_skill ON derived_skill_state_history(subject_did, skill_id, snapshot_date);
+CREATE INDEX idx_element_progress_enrollment ON element_progress(enrollment_id);
+CREATE INDEX idx_element_submissions_element ON element_submissions(element_id);
+CREATE INDEX idx_element_submissions_enrollment ON element_submissions(enrollment_id);
+CREATE INDEX idx_element_submissions_grader ON element_submissions(grader_cid);
+CREATE INDEX idx_enrollments_course ON enrollments(course_id);
+CREATE INDEX idx_enrollments_course_document ON enrollments(course_id, course_document_cid);
+CREATE INDEX idx_evidence_release_owed ON integrity_evidence_release(revoke_wanted_at) WHERE revoke_wanted_at IS NOT NULL AND revoked_at IS NULL;
+CREATE INDEX idx_flag_notice_untold ON integrity_flag_notice(told_at) WHERE told_at IS NULL;
+CREATE UNIQUE INDEX idx_goal_templates_key ON goal_templates(kind, key);
+CREATE INDEX idx_goal_templates_kind ON goal_templates(kind);
+CREATE INDEX idx_governance_genesis_trust_scope ON governance_genesis_trust_anchors(scope_type, scope_id);
+CREATE INDEX idx_integrity_evidence_expires ON integrity_evidence(expires_at);
+CREATE INDEX idx_integrity_evidence_session ON integrity_evidence(session_id);
+CREATE INDEX idx_integrity_snapshots_session ON integrity_snapshots(session_id);
+CREATE INDEX idx_interview_criteria_session ON interview_criteria(session_id, position);
+CREATE INDEX idx_interview_followups_session ON interview_followups(session_id, status, created_at DESC);
+CREATE INDEX idx_interview_notes_session ON interview_notes(session_id, created_at);
+CREATE INDEX idx_interview_participants_session ON interview_participants(session_id, created_at);
+CREATE INDEX idx_interview_sessions_expiry ON interview_sessions(expires_at);
+CREATE INDEX idx_interview_sessions_status ON interview_sessions(status, created_at DESC);
+CREATE INDEX idx_interview_transcript_session ON interview_transcript_segments(session_id, start_ms, created_at);
+CREATE INDEX idx_irl_submissions_course ON plugin_irl_submissions(course_id);
+CREATE INDEX idx_irl_submissions_learner ON plugin_irl_submissions(learner_did);
+CREATE INDEX idx_irl_submissions_plugin ON plugin_irl_submissions(plugin_cid);
+CREATE INDEX idx_irl_submissions_status ON plugin_irl_submissions(status);
+CREATE INDEX idx_join_req_address ON classroom_join_requests(stake_address);
+CREATE INDEX idx_join_req_classroom ON classroom_join_requests(classroom_id, status);
+CREATE UNIQUE INDEX idx_join_requests_unique_pending ON classroom_join_requests(classroom_id, stake_address) WHERE status = 'pending';
+CREATE INDEX idx_key_registry_active ON key_registry(did) WHERE valid_until IS NULL;
+CREATE INDEX idx_key_registry_did_valid_from ON key_registry(did, valid_from);
+CREATE INDEX idx_members_address ON classroom_members(stake_address);
+CREATE INDEX idx_members_classroom ON classroom_members(classroom_id);
+CREATE INDEX idx_messages_channel ON classroom_messages(channel_id, sent_at);
+CREATE INDEX idx_messages_classroom ON classroom_messages(classroom_id, sent_at);
+CREATE INDEX idx_opinions_author ON opinions(author_address);
+CREATE INDEX idx_opinions_pending_author ON opinions_pending_verification(author_address);
+CREATE INDEX idx_opinions_subject ON opinions(subject_field_id, published_at DESC);
+CREATE INDEX idx_opinions_withdrawn ON opinions(withdrawn);
+CREATE INDEX idx_organizations_owner ON organizations(owner_address);
+CREATE INDEX idx_peer_profiles_username ON peer_profiles(username);
+CREATE INDEX idx_peers_last_seen ON peers(last_seen);
+CREATE INDEX idx_pinboard_observations_active ON pinboard_observations(subject_did) WHERE revoked_at IS NULL;
+CREATE INDEX idx_pinboard_observations_pinner ON pinboard_observations(pinner_did);
+CREATE INDEX idx_pinboard_observations_subject ON pinboard_observations(subject_did);
+CREATE INDEX idx_plugin_catalog_author ON plugin_catalog(author_did);
+CREATE INDEX idx_plugin_catalog_source ON plugin_catalog(source);
+CREATE INDEX idx_plugin_dependencies_dep ON plugin_dependencies(dependency_cid);
+CREATE INDEX idx_plugin_installed_author ON plugin_installed(author_did);
+CREATE INDEX idx_presentations_seen_audience ON presentations_seen(audience);
+CREATE INDEX idx_question_banks_skill ON question_banks(skill_id);
+CREATE INDEX idx_registry_address_window ON stake_pubkey_registry(stake_address, valid_from, valid_until);
+CREATE INDEX idx_reputation_actor ON reputation_assertions(actor_address);
+CREATE INDEX idx_reputation_role_skill ON reputation_assertions(role, skill_id, proficiency_level);
+CREATE INDEX idx_reputation_skill ON reputation_assertions(skill_id);
+CREATE UNIQUE INDEX idx_reputation_snapshots_credential ON reputation_snapshots(credential_id) WHERE credential_id IS NOT NULL;
+CREATE INDEX idx_role_assessments_org ON role_assessments(org_id);
+CREATE INDEX idx_sentinel_holdout_kind ON sentinel_holdout_refs(model_kind);
+CREATE INDEX idx_sentinel_user_models_kind ON sentinel_user_models(model_kind);
+CREATE INDEX idx_snapshots_actor ON reputation_snapshots(actor_address);
+CREATE INDEX idx_snapshots_status ON reputation_snapshots(tx_status);
+CREATE INDEX idx_snapshots_subject ON reputation_snapshots(subject_id);
+CREATE INDEX idx_status_lists_issuer ON credential_status_lists(issuer_did);
+CREATE INDEX idx_sync_log_entity ON sync_log(entity_type, entity_id);
+CREATE INDEX idx_sync_queue_queued ON sync_queue(queued_at);
+CREATE INDEX idx_sync_queue_table ON sync_queue(table_name);
+CREATE INDEX idx_username_claims_did ON username_claims(did);
+CREATE INDEX idx_video_chapters_element ON video_chapters(element_id, position);
+
+CREATE VIEW current_reputation_assertions AS
+SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
+
+CREATE TRIGGER completion_request_existing_journal AFTER INSERT ON completion_witness_requests
+WHEN EXISTS (SELECT 1 FROM chain_submissions WHERE network = 'cardano-preprod'
+    AND operation_kind = 'completion_witness' AND operation_id = NEW.operation_id)
+BEGIN
+    UPDATE completion_witness_requests SET blocked = 1 WHERE operation_id = NEW.operation_id;
+END;
+
+CREATE TRIGGER completion_request_journal_handoff AFTER INSERT ON chain_submissions
+WHEN NEW.network = 'cardano-preprod' AND NEW.operation_kind = 'completion_witness'
+BEGIN
+    UPDATE completion_witness_requests SET blocked = 1 WHERE operation_id = NEW.operation_id;
+END;
+
 CREATE TRIGGER snapshot_submission_checkpoint AFTER INSERT ON chain_submissions
 WHEN NEW.network = 'cardano-preprod' AND NEW.operation_kind = 'reputation_snapshot'
 BEGIN
@@ -273,3509 +1298,4 @@ BEGIN
     UPDATE reputation_snapshots SET tx_status = 'outcome_unknown', tx_hash = NEW.tx_hash,
         error_message = NULL, confirmed_at = NULL WHERE id = NEW.operation_id;
 END;
-"#;
-
-const MIGRATION_086: &str = r#"
-CREATE TABLE completion_claims (
-    id TEXT PRIMARY KEY,
-    subject_did TEXT NOT NULL,
-    course_id TEXT NOT NULL,
-    completion_root TEXT NOT NULL,
-    credential_ids_json TEXT NOT NULL CHECK (json_valid(credential_ids_json)),
-    witness_unavailable INTEGER NOT NULL DEFAULT 0 CHECK (witness_unavailable IN (0, 1)),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (subject_did, course_id, completion_root)
-);
--- Local, immutable intent. No keys or provider secrets; never synced to peers.
-CREATE TABLE completion_witness_requests (
-    operation_id TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL UNIQUE REFERENCES completion_claims(id),
-    context_json TEXT NOT NULL CHECK (json_valid(context_json)),
-    blocked INTEGER NOT NULL DEFAULT 0 CHECK (blocked IN (0, 1)),
-    attempts INTEGER NOT NULL DEFAULT 0,
-    next_attempt_at INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_completion_witness_due
-    ON completion_witness_requests(next_attempt_at, operation_id) WHERE blocked = 0;
--- Remove signed requests from the dispatch index in the journal transaction.
--- Their user-visible state comes from receipt recovery, not this dispatch flag.
-CREATE TRIGGER completion_request_journal_handoff AFTER INSERT ON chain_submissions
-WHEN NEW.network = 'cardano-preprod' AND NEW.operation_kind = 'completion_witness'
-BEGIN
-    UPDATE completion_witness_requests SET blocked = 1 WHERE operation_id = NEW.operation_id;
-END;
-CREATE TRIGGER completion_request_existing_journal AFTER INSERT ON completion_witness_requests
-WHEN EXISTS (SELECT 1 FROM chain_submissions WHERE network = 'cardano-preprod'
-    AND operation_kind = 'completion_witness' AND operation_id = NEW.operation_id)
-BEGIN
-    UPDATE completion_witness_requests SET blocked = 1 WHERE operation_id = NEW.operation_id;
-END;
-"#;
-
-const MIGRATION_085: &str = r#"
--- Local recognition evidence, not an issuer-trust allowlist. A matching public
--- preimage proves that the historical private key can be reproduced by anyone.
-CREATE TABLE public_derived_issuers (
-    issuer_did TEXT PRIMARY KEY,
-    author_address TEXT NOT NULL CHECK (length(author_address) > 0),
-    recognized_at TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (issuer_did = legacy_course_authority_did(author_address))
-);
-CREATE TABLE derived_skill_refresh_queue (
-    subject_did TEXT NOT NULL,
-    skill_id TEXT NOT NULL,
-    PRIMARY KEY (subject_did, skill_id)
-);
-CREATE INDEX idx_credentials_scoring_issuer ON credentials (
-    CASE WHEN json_valid(signed_vc_json) THEN json_extract(signed_vc_json, '$.issuer') END
-);
-ALTER TABLE reputation_assertions ADD COLUMN input_policy_state TEXT NOT NULL
-    DEFAULT 'valid' CHECK (input_policy_state IN ('valid', 'needs_refresh', 'excluded'));
-CREATE INDEX idx_reputation_needs_refresh ON reputation_assertions(id)
-    WHERE input_policy_state = 'needs_refresh';
-ALTER TABLE derived_skill_state_history ADD COLUMN input_policy_valid INTEGER NOT NULL
-    DEFAULT 1 CHECK (input_policy_valid IN (0, 1));
-
--- Use the signed payload's issuer, not an assessment label or a mutable
--- denormalized issuer column. Unmatched historical credentials stay untouched.
-CREATE VIEW scoring_credentials AS
-SELECT c.* FROM credentials c
-WHERE NOT EXISTS (
-    SELECT 1 FROM public_derived_issuers p
-    WHERE p.issuer_did = CASE WHEN json_valid(c.signed_vc_json)
-        THEN json_extract(c.signed_vc_json, '$.issuer') END
-);
-CREATE VIEW current_reputation_assertions AS
-SELECT r.* FROM reputation_assertions r
-WHERE r.input_policy_state = 'valid'
-  AND NOT (r.role = 'instructor' AND EXISTS (
-      SELECT 1 FROM public_derived_issuers p WHERE p.issuer_did = r.actor_address
-  ));
-
-CREATE TRIGGER public_derived_issuer_recognized AFTER INSERT ON public_derived_issuers
-BEGIN
-    INSERT OR IGNORE INTO derived_skill_refresh_queue (subject_did, skill_id)
-    SELECT subject_did, skill_id FROM credentials
-    WHERE skill_id IS NOT NULL AND CASE WHEN json_valid(signed_vc_json)
-        THEN json_extract(signed_vc_json, '$.issuer') END = NEW.issuer_did;
-    DELETE FROM derived_skill_states
-    WHERE (subject_did, skill_id) IN (SELECT subject_did, skill_id FROM derived_skill_refresh_queue);
-    UPDATE derived_skill_state_history SET input_policy_valid = 0
-    WHERE (subject_did, skill_id) IN (SELECT subject_did, skill_id FROM derived_skill_refresh_queue);
-    UPDATE reputation_assertions SET input_policy_state = 'needs_refresh'
-    WHERE (role = 'instructor' AND actor_address = NEW.issuer_did)
-       OR (role = 'instructor' AND (actor_address, skill_id) IN
-           (SELECT issuer_did, skill_id FROM credentials WHERE
-            CASE WHEN json_valid(signed_vc_json) THEN json_extract(signed_vc_json, '$.issuer') END
-                = NEW.issuer_did))
-       OR (role = 'learner' AND (actor_address, skill_id) IN
-           (SELECT subject_did, skill_id FROM derived_skill_refresh_queue));
-END;
-
--- Retain old recognition evidence when a course is edited or deleted.
-CREATE TRIGGER course_authority_recognized_insert AFTER INSERT ON courses
-WHEN NEW.author_address <> ''
-BEGIN
-    INSERT OR IGNORE INTO public_derived_issuers (issuer_did, author_address)
-    VALUES (legacy_course_authority_did(NEW.author_address), NEW.author_address);
-END;
-CREATE TRIGGER course_authority_recognized_update AFTER UPDATE OF author_address ON courses
-WHEN NEW.author_address <> '' AND NEW.author_address <> OLD.author_address
-BEGIN
-    INSERT OR IGNORE INTO public_derived_issuers (issuer_did, author_address)
-    VALUES (legacy_course_authority_did(NEW.author_address), NEW.author_address);
-END;
-INSERT OR IGNORE INTO public_derived_issuers (issuer_did, author_address)
-SELECT legacy_course_authority_did(author_address), author_address
-FROM (SELECT DISTINCT author_address FROM courses WHERE author_address <> '');
-"#;
-
-const MIGRATION_084: &str = r#"
--- Preserve v83 checkpoints while distinguishing successful ledger execution
--- from inclusion with a failed script. New fields are unknown for old rows;
--- recovery must fetch a receipt before treating those rows as executed.
-ALTER TABLE chain_submissions RENAME TO chain_submissions_v83;
-CREATE TABLE chain_submissions (
-    network TEXT NOT NULL,
-    operation_kind TEXT NOT NULL CHECK (length(operation_kind) > 0),
-    operation_id TEXT NOT NULL CHECK (length(operation_id) > 0),
-    tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
-    signed_cbor BLOB NOT NULL CHECK (length(signed_cbor) > 0),
-    context_json TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'outcome_unknown'
-           CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed_on_chain')),
-    confirmed_slot INTEGER CHECK (confirmed_slot >= 0),
-    applied_at TEXT,
-    last_error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (network, operation_kind, operation_id)
-);
-INSERT INTO chain_submissions
-    (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json,
-     status, last_error, created_at, updated_at)
-SELECT network, operation_kind, operation_id, tx_hash, signed_cbor, context_json,
-       status, last_error, created_at, updated_at FROM chain_submissions_v83;
-DROP TABLE chain_submissions_v83;
-CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
-CREATE INDEX idx_chain_submissions_recovery
-    ON chain_submissions(network, operation_kind, applied_at, updated_at);
-
--- A batch binds each member before sending. Overlapping batches cannot send
--- replacement transactions for an item already owned by another checkpoint.
-CREATE TABLE chain_submission_members (
-    network TEXT NOT NULL,
-    member_kind TEXT NOT NULL CHECK (length(member_kind) > 0),
-    member_id TEXT NOT NULL CHECK (length(member_id) > 0),
-    operation_kind TEXT NOT NULL,
-    operation_id TEXT NOT NULL,
-    PRIMARY KEY (network, member_kind, member_id),
-    FOREIGN KEY (network, operation_kind, operation_id)
-        REFERENCES chain_submissions(network, operation_kind, operation_id)
-);
-"#;
-
-const MIGRATION_083: &str = r#"
--- Local-only recovery journal. Never sync signed transactions or these
--- operation bindings to peers. Commit the exact bytes BEFORE network I/O.
--- An interrupted submission is uncertain, not permission to build another.
-CREATE TABLE chain_submissions (
-    network         TEXT NOT NULL,
-    operation_kind  TEXT NOT NULL CHECK (length(operation_kind) > 0),
-    operation_id    TEXT NOT NULL CHECK (length(operation_id) > 0),
-    tx_hash         TEXT NOT NULL CHECK (length(tx_hash) = 64),
-    signed_cbor     BLOB NOT NULL CHECK (length(signed_cbor) > 0),
-    context_json    TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'outcome_unknown'
-                    CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed')),
-    last_error      TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (network, operation_kind, operation_id)
-);
-CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
-
--- Widen the legacy queue's status constraint without discarding its rows.
-CREATE TABLE onchain_governance_queue_recovery (
-    id TEXT PRIMARY KEY,
-    action_type TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    target_table TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
-           CHECK (status IN ('pending', 'outcome_unknown', 'submitted', 'confirmed', 'failed')),
-    tx_hash TEXT,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-INSERT INTO onchain_governance_queue_recovery
-    (id, action_type, payload_json, target_table, target_id, status,
-     tx_hash, attempts, last_error, created_at, updated_at)
-SELECT id, action_type, payload_json, target_table, target_id, status,
-       tx_hash, attempts, last_error, created_at, updated_at
-FROM onchain_governance_queue;
-DROP TABLE onchain_governance_queue;
-ALTER TABLE onchain_governance_queue_recovery RENAME TO onchain_governance_queue;
-CREATE INDEX idx_onchain_queue_status ON onchain_governance_queue(status);
-"#;
-
-const MIGRATION_001: &str = r#"
--- ============================================================
--- Migration 001: Initial Schema
--- Alexandria Node — Local-first SQLite database
--- ============================================================
-
--- ---- Identity ----
-
--- The local user's wallet and profile.
--- In a local-first model, there is exactly ONE row: the node owner.
-CREATE TABLE IF NOT EXISTS local_identity (
-    id              INTEGER PRIMARY KEY CHECK (id = 1),  -- Singleton
-    stake_address   TEXT NOT NULL UNIQUE,
-    payment_address TEXT NOT NULL,
-    display_name    TEXT,
-    bio             TEXT,
-    avatar_cid      TEXT,
-    mnemonic_enc    BLOB,          -- Encrypted mnemonic (OS keychain preferred, this is fallback)
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Skill Taxonomy ----
-
-CREATE TABLE IF NOT EXISTS subject_fields (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS subjects (
-    id               TEXT PRIMARY KEY,
-    name             TEXT NOT NULL,
-    description      TEXT,
-    subject_field_id TEXT NOT NULL REFERENCES subject_fields(id),
-    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS skills (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT,
-    subject_id  TEXT NOT NULL REFERENCES subjects(id),
-    bloom_level TEXT NOT NULL DEFAULT 'apply',  -- remember|understand|apply|analyze|evaluate|create
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS skill_prerequisites (
-    skill_id        TEXT NOT NULL REFERENCES skills(id),
-    prerequisite_id TEXT NOT NULL REFERENCES skills(id),
-    PRIMARY KEY (skill_id, prerequisite_id),
-    CHECK (skill_id != prerequisite_id)
-);
-
-CREATE TABLE IF NOT EXISTS skill_relations (
-    skill_id        TEXT NOT NULL REFERENCES skills(id),
-    related_skill_id TEXT NOT NULL REFERENCES skills(id),
-    relation_type   TEXT NOT NULL DEFAULT 'related',  -- related|complementary|alternative
-    PRIMARY KEY (skill_id, related_skill_id),
-    CHECK (skill_id != related_skill_id)
-);
-
--- Taxonomy version tracking (signed by DAO)
-CREATE TABLE IF NOT EXISTS taxonomy_versions (
-    version      INTEGER PRIMARY KEY,
-    cid          TEXT NOT NULL,       -- content ID (BLAKE3 hash) of the full taxonomy document
-    previous_cid TEXT,                -- CID of the previous version
-    ratified_by  TEXT,                -- DAO committee multisig info
-    ratified_at  TEXT,
-    signature    TEXT,                -- Ed25519 signature
-    applied_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Courses ----
-
-CREATE TABLE IF NOT EXISTS courses (
-    id              TEXT PRIMARY KEY,  -- blake2b(author_stake_address + content_cid)
-    title           TEXT NOT NULL,
-    description     TEXT,
-    author_address  TEXT NOT NULL,     -- Cardano stake address of the author
-    content_cid     TEXT,              -- content ID (BLAKE3 hash) of course content root
-    thumbnail_cid   TEXT,
-    tags            TEXT,              -- JSON array
-    skill_ids       TEXT,              -- JSON array of skill IDs
-    version         INTEGER NOT NULL DEFAULT 1,
-    status          TEXT NOT NULL DEFAULT 'draft',  -- draft|published|archived
-    published_at    TEXT,
-    on_chain_tx     TEXT,              -- Cardano tx hash (if registered on-chain)
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Course content structure (chapters, elements)
-CREATE TABLE IF NOT EXISTS course_chapters (
-    id          TEXT PRIMARY KEY,
-    course_id   TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-    title       TEXT NOT NULL,
-    description TEXT,
-    position    INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS course_elements (
-    id          TEXT PRIMARY KEY,
-    chapter_id  TEXT NOT NULL REFERENCES course_chapters(id) ON DELETE CASCADE,
-    title       TEXT NOT NULL,
-    element_type TEXT NOT NULL,  -- video|text|quiz|interactive|assessment
-    content_cid TEXT,            -- content ID (BLAKE3 hash) of element content
-    position    INTEGER NOT NULL DEFAULT 0,
-    duration_seconds INTEGER,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Skill tags on elements (for evidence pipeline)
-CREATE TABLE IF NOT EXISTS element_skill_tags (
-    element_id TEXT NOT NULL REFERENCES course_elements(id) ON DELETE CASCADE,
-    skill_id   TEXT NOT NULL REFERENCES skills(id),
-    weight     REAL NOT NULL DEFAULT 1.0,
-    PRIMARY KEY (element_id, skill_id)
-);
-
--- ---- Enrollments & Progress ----
-
-CREATE TABLE IF NOT EXISTS enrollments (
-    id          TEXT PRIMARY KEY,  -- blake2b(stake_address + course_id)
-    course_id   TEXT NOT NULL REFERENCES courses(id),
-    enrolled_at TEXT NOT NULL DEFAULT (datetime('now')),
-    completed_at TEXT,
-    status      TEXT NOT NULL DEFAULT 'active',  -- active|completed|dropped
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS element_progress (
-    id           TEXT PRIMARY KEY,
-    enrollment_id TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
-    element_id   TEXT NOT NULL REFERENCES course_elements(id),
-    status       TEXT NOT NULL DEFAULT 'not_started',  -- not_started|in_progress|completed
-    score        REAL,             -- 0.0 to 1.0 for assessments
-    time_spent   INTEGER DEFAULT 0,  -- seconds
-    completed_at TEXT,
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(enrollment_id, element_id)
-);
-
--- ---- Course Notes ----
-
-CREATE TABLE IF NOT EXISTS course_notes (
-    id            TEXT PRIMARY KEY,
-    enrollment_id TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
-    chapter_id    TEXT REFERENCES course_chapters(id),
-    element_id    TEXT REFERENCES course_elements(id),
-    content_cid   TEXT,           -- content ID (BLAKE3 hash) of note content
-    preview_text  TEXT,
-    video_timestamp_seconds INTEGER,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Assessments & Evidence ----
-
-CREATE TABLE IF NOT EXISTS skill_assessments (
-    id              TEXT PRIMARY KEY,
-    skill_id        TEXT NOT NULL REFERENCES skills(id),
-    course_id       TEXT REFERENCES courses(id),
-    assessment_type TEXT NOT NULL DEFAULT 'quiz',  -- quiz|project|peer_review|exam
-    proficiency_level TEXT NOT NULL DEFAULT 'apply',
-    difficulty      REAL NOT NULL DEFAULT 0.50,
-    trust_factor    REAL NOT NULL DEFAULT 1.0,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS evidence_records (
-    id                    TEXT PRIMARY KEY,  -- blake2b(learner + assessment + timestamp)
-    skill_assessment_id   TEXT NOT NULL REFERENCES skill_assessments(id),
-    skill_id              TEXT NOT NULL REFERENCES skills(id),
-    proficiency_level     TEXT NOT NULL,
-    score                 REAL NOT NULL,     -- 0.0 to 1.0
-    difficulty            REAL NOT NULL,
-    trust_factor          REAL NOT NULL DEFAULT 1.0,
-    course_id             TEXT REFERENCES courses(id),
-    instructor_address    TEXT,              -- Cardano stake address
-    integrity_session_id  TEXT,
-    integrity_score       REAL,
-    cid                   TEXT,              -- content ID (BLAKE3 hash) of evidence document
-    signature             TEXT,              -- Ed25519 signature
-    created_at            TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Skill Proofs ----
-
-CREATE TABLE IF NOT EXISTS skill_proofs (
-    id                TEXT PRIMARY KEY,  -- blake2b(learner + skill + level)
-    skill_id          TEXT NOT NULL REFERENCES skills(id),
-    proficiency_level TEXT NOT NULL,
-    confidence        REAL NOT NULL,
-    evidence_count    INTEGER NOT NULL DEFAULT 0,
-    cid               TEXT,              -- content ID (BLAKE3 hash) of proof document
-    nft_policy_id     TEXT,              -- Cardano NFT policy ID
-    nft_asset_name    TEXT,              -- Cardano NFT asset name
-    nft_tx_hash       TEXT,              -- Minting transaction hash
-    computed_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS skill_proof_evidence (
-    proof_id    TEXT NOT NULL REFERENCES skill_proofs(id) ON DELETE CASCADE,
-    evidence_id TEXT NOT NULL REFERENCES evidence_records(id),
-    PRIMARY KEY (proof_id, evidence_id)
-);
-
--- ---- Reputation ----
-
-CREATE TABLE IF NOT EXISTS reputation_assertions (
-    id                TEXT PRIMARY KEY,
-    actor_address     TEXT NOT NULL,      -- Cardano stake address
-    role              TEXT NOT NULL,       -- instructor|learner|assessor|author|mentor
-    skill_id          TEXT REFERENCES skills(id),
-    proficiency_level TEXT,
-    score             REAL NOT NULL,
-    evidence_count    INTEGER NOT NULL DEFAULT 0,
-    median_impact     REAL,
-    impact_p25        REAL,
-    impact_p75        REAL,
-    learner_count     INTEGER,
-    impact_variance   REAL,
-    window_start      TEXT,
-    window_end        TEXT,
-    computation_spec  TEXT NOT NULL DEFAULT 'v2',
-    cid               TEXT,              -- content ID (BLAKE3 hash) of reputation proof
-    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Integrity (Sentinel) ----
-
-CREATE TABLE IF NOT EXISTS integrity_sessions (
-    id              TEXT PRIMARY KEY,
-    enrollment_id   TEXT REFERENCES enrollments(id),
-    status          TEXT NOT NULL DEFAULT 'active',  -- active|completed|flagged|suspended
-    integrity_score REAL,
-    started_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at        TEXT
-);
-
-CREATE TABLE IF NOT EXISTS integrity_snapshots (
-    id              TEXT PRIMARY KEY,
-    session_id      TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,
-    typing_score    REAL,
-    mouse_score     REAL,
-    human_score     REAL,
-    tab_score       REAL,
-    paste_score     REAL,
-    devtools_score  REAL,
-    camera_score    REAL,
-    composite_score REAL,
-    captured_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- P2P Network (local-only) ----
-
-CREATE TABLE IF NOT EXISTS peers (
-    peer_id       TEXT PRIMARY KEY,    -- libp2p PeerId
-    stake_address TEXT,                -- Cardano stake address (if known)
-    display_name  TEXT,
-    last_seen     TEXT NOT NULL,
-    addresses     TEXT NOT NULL,       -- JSON array of multiaddrs
-    roles         TEXT,                -- JSON array: ["instructor", "learner"]
-    reputation    REAL
-);
-
--- Content pinning state
-CREATE TABLE IF NOT EXISTS pins (
-    cid           TEXT PRIMARY KEY,
-    pin_type      TEXT NOT NULL,       -- course|evidence|profile|taxonomy
-    size_bytes    INTEGER,
-    last_accessed TEXT,
-    auto_unpin    INTEGER DEFAULT 0,   -- 1 = ok to unpin under storage pressure
-    pinned_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Sync log: track what's been broadcast / received
-CREATE TABLE IF NOT EXISTS sync_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL,         -- evidence|catalog|taxonomy|governance
-    entity_id   TEXT NOT NULL,
-    direction   TEXT NOT NULL,         -- sent|received
-    peer_id     TEXT,                  -- Which peer (null = broadcast)
-    signature   TEXT,
-    synced_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Course catalog from the P2P network
-CREATE TABLE IF NOT EXISTS catalog (
-    course_id       TEXT PRIMARY KEY,
-    title           TEXT NOT NULL,
-    description     TEXT,
-    author_address  TEXT NOT NULL,
-    content_cid     TEXT NOT NULL,
-    thumbnail_cid   TEXT,
-    tags            TEXT,              -- JSON array
-    skill_ids       TEXT,              -- JSON array of skill IDs
-    version         INTEGER NOT NULL DEFAULT 1,
-    published_at    TEXT NOT NULL,
-    received_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    pinned          INTEGER DEFAULT 0,
-    on_chain_tx     TEXT,
-    signature       TEXT NOT NULL       -- Author's signature over the record
-);
-
--- ---- Governance ----
-
-CREATE TABLE IF NOT EXISTS governance_daos (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT,
-    scope_type  TEXT NOT NULL,         -- subject_field|subject
-    scope_id    TEXT NOT NULL,         -- FK to subject_fields or subjects
-    status      TEXT NOT NULL DEFAULT 'active',
-    on_chain_tx TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS governance_proposals (
-    id          TEXT PRIMARY KEY,
-    dao_id      TEXT NOT NULL REFERENCES governance_daos(id),
-    title       TEXT NOT NULL,
-    description TEXT,
-    category    TEXT NOT NULL,         -- taxonomy_change|policy|funding|content_moderation
-    status      TEXT NOT NULL DEFAULT 'draft',
-    proposer    TEXT NOT NULL,         -- stake address
-    votes_for   INTEGER DEFAULT 0,
-    votes_against INTEGER DEFAULT 0,
-    on_chain_tx TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved_at TEXT
-);
-
--- ---- Indexes ----
-
-CREATE INDEX IF NOT EXISTS idx_courses_author ON courses(author_address);
-CREATE INDEX IF NOT EXISTS idx_courses_status ON courses(status);
-CREATE INDEX IF NOT EXISTS idx_enrollments_course ON enrollments(course_id);
-CREATE INDEX IF NOT EXISTS idx_element_progress_enrollment ON element_progress(enrollment_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_skill ON evidence_records(skill_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_course ON evidence_records(course_id);
-CREATE INDEX IF NOT EXISTS idx_skill_proofs_skill ON skill_proofs(skill_id);
-CREATE INDEX IF NOT EXISTS idx_reputation_actor ON reputation_assertions(actor_address);
-CREATE INDEX IF NOT EXISTS idx_reputation_skill ON reputation_assertions(skill_id);
-CREATE INDEX IF NOT EXISTS idx_catalog_author ON catalog(author_address);
-CREATE INDEX IF NOT EXISTS idx_peers_last_seen ON peers(last_seen);
-CREATE INDEX IF NOT EXISTS idx_sync_log_entity ON sync_log(entity_type, entity_id);
-"#;
-
-const MIGRATION_002: &str = r#"
--- ============================================================
--- Migration 002: Profile Hash
--- Stores the iroh BLAKE3 hash of the user's published profile
--- document. The profile is a signed JSON blob on iroh.
--- ============================================================
-
-ALTER TABLE local_identity ADD COLUMN profile_hash TEXT;
-"#;
-
-const MIGRATION_003: &str = r#"
--- ============================================================
--- Migration 003: Content Mappings
--- Maps an external identifier (a public URL) to the iroh BLAKE3 hash
--- of the content once fetched. When content is pulled from a public
--- URL origin, it's cached in iroh and the URL↔BLAKE3 mapping is
--- recorded here so future lookups resolve locally / from peers.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS content_mappings (
-    external_id    TEXT PRIMARY KEY,
-    blake3_hash TEXT NOT NULL,
-    size_bytes  INTEGER,
-    mapped_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_content_mappings_blake3 ON content_mappings(blake3_hash);
-"#;
-
-const MIGRATION_004: &str = r#"
--- ============================================================
--- Migration 004: Assessment Columns
--- Adds weight and source_element_id to skill_assessments.
--- weight: used in evidence weighting (default 1.0, matches v1)
--- source_element_id: enables (course, element, skill) lookups
---   for auto-creating assessments when elements are completed.
--- ============================================================
-
-ALTER TABLE skill_assessments ADD COLUMN weight REAL NOT NULL DEFAULT 1.0;
-ALTER TABLE skill_assessments ADD COLUMN source_element_id TEXT;
-"#;
-
-const MIGRATION_005: &str = r#"
--- ============================================================
--- Migration 005: Governance DAO Members
--- Tracks DAO committee members for authority checks on taxonomy
--- updates. Per spec §7.3: "For taxonomy updates, verify the
--- signer is a DAO committee member."
--- Also tracks the most recent taxonomy version applied locally.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS governance_dao_members (
-    dao_id          TEXT NOT NULL REFERENCES governance_daos(id),
-    stake_address   TEXT NOT NULL,           -- Cardano stake address (bech32)
-    role            TEXT NOT NULL DEFAULT 'member', -- member|committee|chair
-    joined_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (dao_id, stake_address)
-);
-
-CREATE INDEX IF NOT EXISTS idx_dao_members_address ON governance_dao_members(stake_address);
-"#;
-
-const MIGRATION_006: &str = r#"
--- ============================================================
--- Migration 006: Reputation Engine
--- Adds tables for full whitepaper reputation computation:
---   - reputation_evidence: links assertions to skill proofs
---   - reputation_impact_deltas: per-learner impact deltas for
---     distribution metrics (median, percentiles, variance)
--- Also adds an index on reputation_assertions for role+skill
--- lookups used by instructor ranking queries.
--- ============================================================
-
--- Links a reputation assertion to the skill proofs that contributed
--- to it, recording the delta confidence and attribution weight per §2.7.
-CREATE TABLE IF NOT EXISTS reputation_evidence (
-    assertion_id       TEXT NOT NULL REFERENCES reputation_assertions(id) ON DELETE CASCADE,
-    proof_id           TEXT NOT NULL REFERENCES skill_proofs(id),
-    delta_confidence   REAL NOT NULL DEFAULT 0.0,
-    attribution_weight REAL NOT NULL DEFAULT 1.0,
-    PRIMARY KEY (assertion_id, proof_id)
-);
-
--- Per-learner impact deltas for computing distribution metrics per §2.8.
--- Each row = one learner's proof update contributing to an instructor assertion.
--- Stored separately so we can compute median, p25, p75, variance.
-CREATE TABLE IF NOT EXISTS reputation_impact_deltas (
-    id              TEXT PRIMARY KEY,
-    assertion_id    TEXT NOT NULL REFERENCES reputation_assertions(id) ON DELETE CASCADE,
-    learner_address TEXT NOT NULL,
-    delta           REAL NOT NULL,
-    attribution     REAL NOT NULL,
-    proof_id        TEXT REFERENCES skill_proofs(id),
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_impact_deltas_assertion
-    ON reputation_impact_deltas(assertion_id);
-
-CREATE INDEX IF NOT EXISTS idx_impact_deltas_learner
-    ON reputation_impact_deltas(learner_address);
-
--- Composite index for instructor ranking queries:
--- GET /v1/skills/:id/instructors
-CREATE INDEX IF NOT EXISTS idx_reputation_role_skill
-    ON reputation_assertions(role, skill_id, proficiency_level);
-"#;
-
-const MIGRATION_007: &str = r#"
--- ============================================================
--- Migration 007: Governance Elections
--- Adds full election lifecycle tables (nomination → voting →
--- finalized), proposal voting, and extended DAO/proposal columns
--- matching the v1 schema and whitepaper §4.
--- ============================================================
-
--- ---- Elections ----
-
-CREATE TABLE IF NOT EXISTS governance_elections (
-    id                      TEXT PRIMARY KEY,
-    dao_id                  TEXT NOT NULL REFERENCES governance_daos(id),
-    title                   TEXT NOT NULL,
-    description             TEXT,
-    phase                   TEXT NOT NULL DEFAULT 'nomination',  -- nomination|voting|finalized|cancelled
-    seats                   INTEGER NOT NULL DEFAULT 5,
-    nominee_min_proficiency TEXT NOT NULL DEFAULT 'apply',       -- Bloom's level for nominees
-    voter_min_proficiency   TEXT NOT NULL DEFAULT 'remember',    -- Bloom's level for voters
-    nomination_start        TEXT NOT NULL DEFAULT (datetime('now')),
-    nomination_end          TEXT,
-    voting_end              TEXT,
-    on_chain_tx             TEXT,
-    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-    finalized_at            TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_elections_dao ON governance_elections(dao_id);
-CREATE INDEX IF NOT EXISTS idx_elections_phase ON governance_elections(phase);
-
--- ---- Election Nominees ----
-
-CREATE TABLE IF NOT EXISTS governance_election_nominees (
-    id              TEXT PRIMARY KEY,
-    election_id     TEXT NOT NULL REFERENCES governance_elections(id) ON DELETE CASCADE,
-    stake_address   TEXT NOT NULL,
-    accepted        INTEGER NOT NULL DEFAULT 0,   -- 0 = pending, 1 = accepted
-    votes_received  INTEGER NOT NULL DEFAULT 0,
-    is_winner       INTEGER NOT NULL DEFAULT 0,   -- 1 = elected
-    nominated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(election_id, stake_address)
-);
-
-CREATE INDEX IF NOT EXISTS idx_nominees_election ON governance_election_nominees(election_id);
-
--- ---- Election Votes ----
-
-CREATE TABLE IF NOT EXISTS governance_election_votes (
-    id           TEXT PRIMARY KEY,
-    election_id  TEXT NOT NULL REFERENCES governance_elections(id) ON DELETE CASCADE,
-    voter        TEXT NOT NULL,       -- stake address
-    nominee_id   TEXT NOT NULL REFERENCES governance_election_nominees(id),
-    on_chain_tx  TEXT,
-    voted_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(election_id, voter)        -- one vote per voter per election
-);
-
-CREATE INDEX IF NOT EXISTS idx_election_votes_election ON governance_election_votes(election_id);
-
--- ---- Proposal Votes ----
-
-CREATE TABLE IF NOT EXISTS governance_proposal_votes (
-    id           TEXT PRIMARY KEY,
-    proposal_id  TEXT NOT NULL REFERENCES governance_proposals(id) ON DELETE CASCADE,
-    voter        TEXT NOT NULL,       -- stake address
-    in_favor     INTEGER NOT NULL,    -- 1 = for, 0 = against
-    on_chain_tx  TEXT,
-    voted_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(proposal_id, voter)        -- one vote per voter per proposal
-);
-
-CREATE INDEX IF NOT EXISTS idx_proposal_votes_proposal ON governance_proposal_votes(proposal_id);
-
--- ---- Extended DAO columns ----
-
-ALTER TABLE governance_daos ADD COLUMN committee_size INTEGER NOT NULL DEFAULT 5;
-ALTER TABLE governance_daos ADD COLUMN election_interval_days INTEGER NOT NULL DEFAULT 365;
-
--- ---- Extended Proposal columns ----
-
-ALTER TABLE governance_proposals ADD COLUMN voting_deadline TEXT;
-ALTER TABLE governance_proposals ADD COLUMN min_vote_proficiency TEXT NOT NULL DEFAULT 'remember';
-"#;
-
-const MIGRATION_008: &str = r#"
--- ============================================================
--- Migration 008: Reputation Snapshots
--- Tracks CIP-68 soulbound token minting for on-chain reputation
--- anchoring. Each snapshot records the status of anchoring a
--- subject+role reputation to the Cardano blockchain.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS reputation_snapshots (
-    id              TEXT PRIMARY KEY,
-    actor_address   TEXT NOT NULL,
-    subject_id      TEXT NOT NULL,
-    role            TEXT NOT NULL,
-    skill_count     INTEGER NOT NULL DEFAULT 0,
-    tx_status       TEXT NOT NULL DEFAULT 'pending',  -- pending|building|submitted|confirmed|failed
-    tx_hash         TEXT,
-    policy_id       TEXT,
-    ref_asset_name  TEXT,   -- CIP-68 reference token asset name (hex)
-    user_asset_name TEXT,   -- CIP-68 user token asset name (hex)
-    error_message   TEXT,
-    snapshot_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    confirmed_at    TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_snapshots_actor ON reputation_snapshots(actor_address);
-CREATE INDEX IF NOT EXISTS idx_snapshots_status ON reputation_snapshots(tx_status);
-CREATE INDEX IF NOT EXISTS idx_snapshots_subject ON reputation_snapshots(subject_id);
-"#;
-
-const MIGRATION_009: &str = r#"
--- ============================================================
--- Migration 009: Taxonomy Ratification
--- Adds content_cid and taxonomy_version columns to governance
--- proposals, enabling the DAO taxonomy ratification workflow:
---   propose → gossip → submit → vote → resolve+publish → apply
--- content_cid stores the serialized taxonomy changes JSON
--- (replaced with the content ID on publish). taxonomy_version
--- records the target version number for the ratified taxonomy.
--- ============================================================
-
-ALTER TABLE governance_proposals ADD COLUMN content_cid TEXT;
-ALTER TABLE governance_proposals ADD COLUMN taxonomy_version INTEGER;
-"#;
-
-const MIGRATION_010: &str = r#"
--- ============================================================
--- Migration 010: Cross-Device Sync
--- Adds tables for multi-device synchronization:
---   - devices: registered devices sharing the same wallet
---   - sync_state: per-table last-synced timestamps (LWW vector)
---   - sync_queue: outbound changes queued for replication
--- Pairing = importing the same mnemonic on both devices.
--- Encryption: XChaCha20-Poly1305 with HKDF-derived key.
--- ============================================================
-
--- Known devices sharing this wallet identity.
--- Each device has a unique device_id (random UUID) and an
--- optional user-assigned name.
-CREATE TABLE IF NOT EXISTS devices (
-    id              TEXT PRIMARY KEY,      -- Random UUID per device
-    device_name     TEXT,                  -- User-assigned label
-    platform        TEXT,                  -- macos|windows|linux
-    first_seen      TEXT NOT NULL DEFAULT (datetime('now')),
-    last_synced     TEXT,
-    is_local        INTEGER NOT NULL DEFAULT 0,  -- 1 = this device
-    peer_id         TEXT                   -- libp2p PeerId (if known)
-);
-
-CREATE INDEX IF NOT EXISTS idx_devices_local ON devices(is_local);
-
--- Per-table sync state tracking (LWW vector clock).
--- Records the latest updated_at timestamp received from each
--- remote device per table, so we only send newer rows on sync.
-CREATE TABLE IF NOT EXISTS sync_state (
-    device_id       TEXT NOT NULL REFERENCES devices(id),
-    table_name      TEXT NOT NULL,         -- enrollments|element_progress|course_notes|evidence_records|skill_proof_evidence
-    last_synced_at  TEXT NOT NULL,          -- ISO 8601 timestamp of last sync
-    row_count       INTEGER NOT NULL DEFAULT 0,  -- Number of rows synced
-    PRIMARY KEY (device_id, table_name)
-);
-
--- Outbound sync queue — changes that need to be sent to peers.
--- Items are dequeued after successful delivery to all known devices.
-CREATE TABLE IF NOT EXISTS sync_queue (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    table_name      TEXT NOT NULL,
-    row_id          TEXT NOT NULL,          -- PK of the changed row
-    operation       TEXT NOT NULL,          -- insert|update|delete
-    row_data        TEXT,                   -- JSON snapshot of the row (null for delete)
-    updated_at      TEXT NOT NULL,          -- Timestamp of the change (LWW tiebreaker)
-    queued_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    delivered_to    TEXT DEFAULT '[]'       -- JSON array of device_ids that received it
-);
-
-CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON sync_queue(table_name);
-CREATE INDEX IF NOT EXISTS idx_sync_queue_queued ON sync_queue(queued_at);
-
--- Add device_id to local_identity so we know which device we are.
-ALTER TABLE local_identity ADD COLUMN device_id TEXT;
-"#;
-
-const MIGRATION_011: &str = r#"
--- ============================================================
--- Migration 011: Evidence Challenges
--- Adds tables for the evidence challenge mechanism. Any P2P
--- observer can dispute evidence or credentials by staking ADA.
--- DAO committee reviews; outcome is burn (upheld) or slash
--- (rejected). Challenges reuse the /alexandria/governance/1.0
--- gossip topic.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS evidence_challenges (
-    id              TEXT PRIMARY KEY,
-    challenger      TEXT NOT NULL,
-    target_type     TEXT NOT NULL,          -- evidence|skill_proof
-    target_ids      TEXT NOT NULL,          -- JSON array of IDs
-    evidence_cids   TEXT NOT NULL,          -- JSON array of content IDs
-    reason          TEXT NOT NULL,
-    stake_lovelace  INTEGER NOT NULL,
-    stake_tx_hash   TEXT,
-    status          TEXT NOT NULL DEFAULT 'pending',  -- pending|reviewing|upheld|rejected|expired
-    dao_id          TEXT NOT NULL,
-    learner_address TEXT NOT NULL,
-    reviewed_by     TEXT DEFAULT '[]',      -- JSON array of reviewer addresses
-    resolution_tx   TEXT,
-    signature       TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved_at     TEXT,
-    expires_at      TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_challenges_status ON evidence_challenges(status);
-CREATE INDEX IF NOT EXISTS idx_challenges_learner ON evidence_challenges(learner_address);
-CREATE INDEX IF NOT EXISTS idx_challenges_dao ON evidence_challenges(dao_id);
-CREATE INDEX IF NOT EXISTS idx_challenges_challenger ON evidence_challenges(challenger);
-
-CREATE TABLE IF NOT EXISTS challenge_votes (
-    id              TEXT PRIMARY KEY,
-    challenge_id    TEXT NOT NULL REFERENCES evidence_challenges(id) ON DELETE CASCADE,
-    voter           TEXT NOT NULL,
-    upheld          INTEGER NOT NULL,       -- 1 = uphold, 0 = reject
-    reason          TEXT,
-    voted_at        TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(challenge_id, voter)
-);
-
-CREATE INDEX IF NOT EXISTS idx_challenge_votes_challenge ON challenge_votes(challenge_id);
-"#;
-
-const MIGRATION_012: &str = r#"
--- ============================================================
--- Migration 012: Multi-Party Attestation
--- Adds governance-gated multi-party attestation for high-stakes
--- skills. When a skill is marked as high-stakes by the DAO,
--- evidence records require assessor co-signatures before they
--- count toward skill proof aggregation.
--- ============================================================
-
--- Skills that require multi-party attestation (set by DAO governance).
-CREATE TABLE IF NOT EXISTS attestation_requirements (
-    skill_id            TEXT NOT NULL REFERENCES skills(id),
-    proficiency_level   TEXT NOT NULL,
-    required_attestors  INTEGER NOT NULL DEFAULT 1,
-    dao_id              TEXT NOT NULL,
-    set_by_proposal     TEXT,
-    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (skill_id, proficiency_level)
-);
-
-CREATE INDEX IF NOT EXISTS idx_attest_req_dao ON attestation_requirements(dao_id);
-
--- Assessor attestations on evidence records.
-CREATE TABLE IF NOT EXISTS evidence_attestations (
-    id                  TEXT PRIMARY KEY,
-    evidence_id         TEXT NOT NULL REFERENCES evidence_records(id) ON DELETE CASCADE,
-    attestor_address    TEXT NOT NULL,
-    attestor_role       TEXT NOT NULL DEFAULT 'assessor',
-    attestation_type    TEXT NOT NULL DEFAULT 'co_sign',
-    integrity_score     REAL,
-    session_cid         TEXT,
-    signature           TEXT NOT NULL,
-    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(evidence_id, attestor_address)
-);
-
-CREATE INDEX IF NOT EXISTS idx_attestations_evidence ON evidence_attestations(evidence_id);
-CREATE INDEX IF NOT EXISTS idx_attestations_attestor ON evidence_attestations(attestor_address);
-"#;
-
-const MIGRATION_013: &str = r#"
--- ============================================================
--- Migration 013: Visual Assets
--- Adds columns for richer visual presentation:
---   - Course author display name and thumbnail SVG
---   - DAO and subject_field emoji icons
--- ============================================================
-
--- Course author display name (avoids showing raw addresses in the UI).
-ALTER TABLE courses ADD COLUMN author_name TEXT;
-
--- Inline SVG thumbnail stored as a data URI string.
--- Avoids the iroh dependency for seed thumbnails while keeping
--- the existing `thumbnail_cid` column for user-uploaded images.
-ALTER TABLE courses ADD COLUMN thumbnail_svg TEXT;
-
--- Emoji icon for governance DAOs (displayed in cards and headers).
-ALTER TABLE governance_daos ADD COLUMN icon_emoji TEXT;
-
--- Emoji icon for subject fields (displayed in taxonomy browser).
-ALTER TABLE subject_fields ADD COLUMN icon_emoji TEXT;
-"#;
-
-const MIGRATION_014: &str = r#"
--- ============================================================
--- Migration 014: Inline Content
--- Adds a content_inline column to course_elements for storing
--- text/HTML/JSON content directly in the database. This allows
--- content to be available without an iroh node (essential
--- for mobile and seed data).
--- ============================================================
-
-ALTER TABLE course_elements ADD COLUMN content_inline TEXT;
-"#;
-
-const MIGRATION_016: &str = r#"
--- ============================================================
--- Migration 016: Classrooms
--- Persistent group spaces (like Discord servers) with text
--- channels, message history, membership management, join
--- requests, and live A/V calls via the live crate.
--- ============================================================
-
--- ---- Classrooms ----
-
-CREATE TABLE IF NOT EXISTS classrooms (
-    id              TEXT PRIMARY KEY,  -- blake2b(owner_address + name + created_at_ms)
-    name            TEXT NOT NULL,
-    description     TEXT,
-    icon_emoji      TEXT,
-    owner_address   TEXT NOT NULL,     -- Cardano stake address (bech32)
-    invite_code     TEXT UNIQUE,       -- 8-char alphanumeric join code (optional)
-    status          TEXT NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active', 'archived')),
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Classroom Members ----
-
-CREATE TABLE IF NOT EXISTS classroom_members (
-    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
-    stake_address   TEXT NOT NULL,
-    role            TEXT NOT NULL DEFAULT 'member'
-                        CHECK (role IN ('owner', 'moderator', 'member')),
-    display_name    TEXT,
-    joined_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (classroom_id, stake_address)
-);
-
--- ---- Join Requests ----
-
-CREATE TABLE IF NOT EXISTS classroom_join_requests (
-    id              TEXT PRIMARY KEY,
-    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
-    stake_address   TEXT NOT NULL,
-    display_name    TEXT,
-    message         TEXT,
-    status          TEXT NOT NULL DEFAULT 'pending'
-                        CHECK (status IN ('pending', 'approved', 'denied')),
-    reviewed_by     TEXT,
-    requested_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    reviewed_at     TEXT
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_join_requests_unique_pending
-    ON classroom_join_requests(classroom_id, stake_address)
-    WHERE status = 'pending';
-
--- ---- Channels ----
-
-CREATE TABLE IF NOT EXISTS classroom_channels (
-    id              TEXT PRIMARY KEY,  -- blake2b(classroom_id + name)
-    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
-    name            TEXT NOT NULL,
-    description     TEXT,
-    channel_type    TEXT NOT NULL DEFAULT 'text'
-                        CHECK (channel_type IN ('text', 'announcement')),
-    position        INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (classroom_id, name)
-);
-
--- ---- Messages ----
-
-CREATE TABLE IF NOT EXISTS classroom_messages (
-    id              TEXT PRIMARY KEY,
-    channel_id      TEXT NOT NULL REFERENCES classroom_channels(id) ON DELETE CASCADE,
-    classroom_id    TEXT NOT NULL,
-    sender_address  TEXT NOT NULL,
-    sender_name     TEXT,
-    content         TEXT NOT NULL,
-    edited_at       TEXT,
-    deleted         INTEGER NOT NULL DEFAULT 0,
-    sent_at         TEXT NOT NULL,
-    received_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---- Calls ----
-
-CREATE TABLE IF NOT EXISTS classroom_calls (
-    id              TEXT PRIMARY KEY,
-    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
-    channel_id      TEXT REFERENCES classroom_channels(id),
-    title           TEXT NOT NULL,
-    ticket          TEXT,
-    started_by      TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active', 'ended')),
-    started_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at        TEXT
-);
-
--- ---- Indexes ----
-
-CREATE INDEX IF NOT EXISTS idx_classrooms_owner     ON classrooms(owner_address);
-CREATE INDEX IF NOT EXISTS idx_classrooms_status    ON classrooms(status);
-CREATE INDEX IF NOT EXISTS idx_members_address      ON classroom_members(stake_address);
-CREATE INDEX IF NOT EXISTS idx_members_classroom    ON classroom_members(classroom_id);
-CREATE INDEX IF NOT EXISTS idx_join_req_classroom   ON classroom_join_requests(classroom_id, status);
-CREATE INDEX IF NOT EXISTS idx_join_req_address     ON classroom_join_requests(stake_address);
-CREATE INDEX IF NOT EXISTS idx_channels_classroom   ON classroom_channels(classroom_id, position);
-CREATE INDEX IF NOT EXISTS idx_messages_channel     ON classroom_messages(channel_id, sent_at);
-CREATE INDEX IF NOT EXISTS idx_messages_classroom   ON classroom_messages(classroom_id, sent_at);
-CREATE INDEX IF NOT EXISTS idx_calls_classroom      ON classroom_calls(classroom_id, status);
-"#;
-
-const MIGRATION_017: &str = r#"
--- ============================================================
--- Migration 017: App Settings & Storage Management
--- Key-value store for persistent backend settings.
--- Seeds the storage_quota_bytes default (0 = unlimited).
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS app_settings (
-    key        TEXT PRIMARY KEY,
-    value      TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-INSERT OR IGNORE INTO app_settings (key, value)
-VALUES ('storage_quota_bytes', '0');
-"#;
-
-const MIGRATION_015: &str = r#"
--- ============================================================
--- Migration 015: Tutoring Sessions
--- Stores live tutoring session metadata. The live-crate room
--- ticket is persisted so sessions can be re-joined (while the
--- gossip topic is still alive) and for history/analytics.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS tutoring_sessions (
-    id          TEXT PRIMARY KEY,
-    title       TEXT NOT NULL,
-    ticket      TEXT,
-    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'cancelled')),
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at    TEXT
-);
-"#;
-
-const MIGRATION_018: &str = r#"
--- ============================================================
--- Migration 018: On-Chain Governance Queue
--- Persistent queue for async Plutus governance transactions.
--- Local DB writes happen instantly; on-chain submissions are
--- queued and retried until confirmed on Cardano.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS onchain_governance_queue (
-    id            TEXT PRIMARY KEY,
-    action_type   TEXT NOT NULL,
-    payload_json  TEXT NOT NULL,
-    target_table  TEXT NOT NULL,
-    target_id     TEXT NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'pending'
-                  CHECK (status IN ('pending', 'submitted', 'confirmed', 'failed')),
-    tx_hash       TEXT,
-    attempts      INTEGER NOT NULL DEFAULT 0,
-    last_error    TEXT,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_onchain_queue_status
-    ON onchain_governance_queue(status);
-"#;
-
-const MIGRATION_019: &str = r#"
--- ============================================================
--- Migration 019: Classroom End-to-End Encryption
--- Stores per-classroom group keys and member X25519 public keys
--- for encrypted message exchange.
--- ============================================================
-
--- Group keys: one per classroom, encrypted with the local vault key.
--- key_version increments on rotation (e.g., after a member is kicked).
-CREATE TABLE IF NOT EXISTS classroom_group_keys (
-    classroom_id  TEXT PRIMARY KEY,
-    group_key_enc BLOB NOT NULL,
-    key_version   INTEGER NOT NULL DEFAULT 1,
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- X25519 public keys for each member (used for ECDH key exchange).
-ALTER TABLE classroom_members ADD COLUMN x25519_public_key BLOB;
-
--- Local X25519 public key (derived from Ed25519 signing key).
-ALTER TABLE local_identity ADD COLUMN x25519_public_key BLOB;
-"#;
-
-const MIGRATION_020: &str = r#"
--- ============================================================
--- Migration 020: Tutorials + Video Chapters
--- Standalone video tutorials are structurally minimal courses.
--- Adds a `kind` discriminator to `courses` and `catalog` so they
--- can be filtered separately in the UI while reusing the entire
--- existing pipeline (publish, gossip, pin, evidence).
--- Also adds `video_chapters` for timestamp navigation within a
--- single video element.
--- ============================================================
-
--- Discriminator for course-vs-tutorial. Default preserves backward
--- compatibility: every existing row remains a 'course'.
-ALTER TABLE courses  ADD COLUMN kind TEXT NOT NULL DEFAULT 'course'
-    CHECK (kind IN ('course', 'tutorial'));
-ALTER TABLE catalog  ADD COLUMN kind TEXT NOT NULL DEFAULT 'course';
-
-CREATE INDEX IF NOT EXISTS idx_courses_kind ON courses(kind);
-CREATE INDEX IF NOT EXISTS idx_catalog_kind ON catalog(kind);
-
--- Timestamp-based chapter markers for a single video element. Lets a
--- long tutorial expose a table of contents without being broken into
--- multiple course_elements. Optional: tutorials without chapters work
--- just fine.
-CREATE TABLE IF NOT EXISTS video_chapters (
-    id            TEXT PRIMARY KEY,
-    element_id    TEXT NOT NULL REFERENCES course_elements(id) ON DELETE CASCADE,
-    title         TEXT NOT NULL,
-    start_seconds INTEGER NOT NULL,
-    position      INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_video_chapters_element
-    ON video_chapters(element_id, position);
-"#;
-
-const MIGRATION_021: &str = r#"
--- ============================================================
--- Migration 021: Opinions (Field Commentary)
--- Scoped, credentialed video commentary from educators who hold
--- at least one SkillProof (level >= apply) under the target
--- subject_field. Not a social feed — opinions are chronological
--- within a subject field, moderated by the subject's DAO via the
--- existing evidence_challenges mechanism.
---
--- The `evidence_challenges.target_type` column is already TEXT
--- with no CHECK constraint, so the new value 'opinion' requires
--- no schema change — only code-level handling.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS opinions (
-    id                    TEXT PRIMARY KEY,      -- blake2b(author_address + video_cid)
-    author_address        TEXT NOT NULL,          -- Cardano stake address
-    subject_field_id      TEXT NOT NULL REFERENCES subject_fields(id),
-    title                 TEXT NOT NULL,
-    summary               TEXT,                   -- soft limit 280 chars at app layer
-    video_cid             TEXT NOT NULL,          -- iroh BLAKE3 of video blob
-    thumbnail_cid         TEXT,
-    duration_seconds      INTEGER,
-    credential_proof_ids  TEXT NOT NULL,          -- JSON array of skill_proof IDs the author stakes
-    signature             TEXT NOT NULL,          -- Ed25519 over the canonical payload
-    public_key            TEXT,                   -- Ed25519 public key (hex) for verification
-    published_at          TEXT NOT NULL,
-    received_at           TEXT NOT NULL DEFAULT (datetime('now')),
-    withdrawn             INTEGER NOT NULL DEFAULT 0,
-    withdrawn_reason      TEXT,                   -- e.g. 'challenge_upheld'
-    on_chain_tx           TEXT                    -- optional: future DAO-attested anchor
-);
-
-CREATE INDEX IF NOT EXISTS idx_opinions_subject
-    ON opinions(subject_field_id, published_at DESC);
-CREATE INDEX IF NOT EXISTS idx_opinions_author
-    ON opinions(author_address);
-CREATE INDEX IF NOT EXISTS idx_opinions_withdrawn
-    ON opinions(withdrawn);
-
--- Pending-verification queue for opinions whose referenced
--- credential_proof_ids haven't synced to this node yet. When a new
--- skill_proof arrives, we re-check the queue and promote matching
--- opinions into the main `opinions` table.
-CREATE TABLE IF NOT EXISTS opinions_pending_verification (
-    id                    TEXT PRIMARY KEY,
-    author_address        TEXT NOT NULL,
-    subject_field_id      TEXT NOT NULL,
-    title                 TEXT NOT NULL,
-    summary               TEXT,
-    video_cid             TEXT NOT NULL,
-    thumbnail_cid         TEXT,
-    duration_seconds      INTEGER,
-    credential_proof_ids  TEXT NOT NULL,
-    signature             TEXT NOT NULL,
-    public_key            TEXT,
-    published_at          TEXT NOT NULL,
-    queued_at             TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_opinions_pending_author
-    ON opinions_pending_verification(author_address);
-
--- DAO-signed withdrawal list. When a challenge is upheld, the
--- subject-field DAO publishes a record here which every receiving
--- node honors by setting `opinions.withdrawn = 1` and unpinning the
--- video blob. Best-effort takedown on a content-addressed network.
-CREATE TABLE IF NOT EXISTS opinion_withdrawals (
-    opinion_id      TEXT PRIMARY KEY,
-    dao_id          TEXT NOT NULL REFERENCES governance_daos(id),
-    reason          TEXT NOT NULL,               -- e.g. 'challenge_upheld', 'author_request'
-    dao_signature   TEXT NOT NULL,               -- DAO committee signature over the record
-    withdrawn_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"#;
-
-const MIGRATION_022: &str = r#"
--- ============================================================
--- Migration 022: VC key registry
--- Historical public-key record per spec §5.3.
--- ============================================================
---
--- `did:key` is self-resolving — the DID string encodes the current
--- public key. But once an issuer rotates, credentials signed under
--- the previous key must still be verifiable. This table captures
--- every known (did, key_id) binding with a validity window so
--- verification at time t_v resolves to the key that was valid at t_v.
---
--- Rows are append-only except for `valid_until`, which is set on the
--- previous open entry when a rotation happens. `rotated_by` points to
--- the successor DID (or the same DID with a new key_id) so callers
--- can walk the rotation chain forward if needed.
-CREATE TABLE IF NOT EXISTS key_registry (
-    did              TEXT NOT NULL,
-    key_id           TEXT NOT NULL,                  -- '<did>#key-N' fragment
-    public_key_hex   TEXT NOT NULL,                  -- raw 32-byte Ed25519 pubkey, hex
-    valid_from       TEXT NOT NULL,                  -- ISO 8601 UTC
-    valid_until      TEXT,                           -- NULL while active
-    rotated_by       TEXT,                           -- DID of successor, if rotated
-    PRIMARY KEY (did, key_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_key_registry_did_valid_from
-    ON key_registry(did, valid_from);
-CREATE INDEX IF NOT EXISTS idx_key_registry_active
-    ON key_registry(did) WHERE valid_until IS NULL;
-"#;
-
-const MIGRATION_023: &str = r#"
--- ============================================================
--- Migration 023: VC storage + revocation status lists
--- Credentials layer per spec §7, §11.2, §12.1.
--- ============================================================
---
--- `credentials` stores every VC the node has issued or received.
--- The canonical record is `signed_vc_json` (the full signed VC),
--- with the most-queried fields hoisted into their own columns so
--- verification, aggregation, and UI don't have to re-parse the JSON
--- on every read. `integrity_hash` is the BLAKE3-hashed JCS bytes —
--- PR 8 anchors this hash to Cardano via `credential_anchors`.
-CREATE TABLE IF NOT EXISTS credentials (
-    id                TEXT PRIMARY KEY,           -- e.g. urn:uuid:...
-    issuer_did        TEXT NOT NULL,
-    subject_did       TEXT NOT NULL,
-    credential_type   TEXT NOT NULL,              -- FormalCredential, etc.
-    claim_kind        TEXT NOT NULL,              -- skill | role | custom
-    skill_id          TEXT,                       -- NULL for non-skill claims
-    issuance_date     TEXT NOT NULL,
-    expiration_date   TEXT,
-    signed_vc_json    TEXT NOT NULL,              -- full JSON-LD VC
-    integrity_hash    TEXT NOT NULL,              -- hex(blake3(JCS bytes))
-    status_list_id    TEXT,                       -- FK to credential_status_lists.list_id
-    status_list_index INTEGER,                    -- bit position in the list
-    revoked           INTEGER NOT NULL DEFAULT 0, -- cached from status list for fast queries
-    revoked_at        TEXT,
-    revocation_reason TEXT,
-    supersedes        TEXT,                       -- prior credential id, §11.4
-    received_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_credentials_subject ON credentials(subject_did);
-CREATE INDEX IF NOT EXISTS idx_credentials_issuer ON credentials(issuer_did);
-CREATE INDEX IF NOT EXISTS idx_credentials_skill ON credentials(skill_id) WHERE skill_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_credentials_status
-    ON credentials(status_list_id, status_list_index)
-    WHERE status_list_id IS NOT NULL;
-
--- `credential_status_lists` stores the versioned revocation bitmap per
--- issuer per list. Bit `status_list_index` = 1 means revoked. We keep
--- the raw `bits` blob so the list can be rebroadcast verbatim (same
--- bytes ⇒ same signature) and verified independently.
-CREATE TABLE IF NOT EXISTS credential_status_lists (
-    list_id         TEXT PRIMARY KEY,             -- issuer's list identifier
-    issuer_did      TEXT NOT NULL,
-    version         INTEGER NOT NULL DEFAULT 1,   -- monotonic; older versions ignored
-    status_purpose  TEXT NOT NULL DEFAULT 'revocation',
-    bits            BLOB NOT NULL,                -- packed little-endian bitmap
-    bit_length      INTEGER NOT NULL DEFAULT 0,
-    signature       TEXT,                         -- issuer signature over (list_id, version, bits)
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_status_lists_issuer
-    ON credential_status_lists(issuer_did);
-"#;
-
-const MIGRATION_024: &str = r#"
--- ============================================================
--- Migration 024: Cardano integrity anchor queue
--- One row per credential we want anchored on-chain (§12.3).
--- ============================================================
---
--- The queue processor (`cardano::anchor_queue::tick`) batches
--- pending rows, builds metadata-only Cardano txs that embed the
--- credential hash, submits, and writes the resulting tx_hash back.
--- Idle nodes (no Blockfrost project id, vault locked) silently skip
--- — anchoring is a survivability convenience, not a critical path.
-CREATE TABLE IF NOT EXISTS credential_anchors (
-    credential_id    TEXT PRIMARY KEY REFERENCES credentials(id),
-    anchor_tx_hash   TEXT,
-    anchor_status    TEXT NOT NULL DEFAULT 'pending',  -- pending|submitted|confirmed|failed
-    attempts         INTEGER NOT NULL DEFAULT 0,
-    last_error       TEXT,
-    next_attempt_at  TEXT,
-    enqueued_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    confirmed_at     TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_credential_anchors_status
-    ON credential_anchors(anchor_status, next_attempt_at);
-"#;
-
-const MIGRATION_025: &str = r#"
--- ============================================================
--- Migration 025: PinBoard observations
--- Backs both local declarations and remote observations of
--- per-subject pinning commitments per spec §12 + §20.4.
--- ============================================================
---
--- One row per (pinner_did, subject_did, scope, commitment_since).
--- Both `content_store::pinboard::declare_commitment` (local) and
--- `content_store::pinboard::record_observation` (remote, fed by
--- `p2p::pinboard::handle_pinboard_message`) write here. The 5-tier
--- eviction logic in `commands::pinning` reads this table to figure
--- out which content stays pinned even under storage pressure.
-CREATE TABLE IF NOT EXISTS pinboard_observations (
-    id                 TEXT PRIMARY KEY,
-    pinner_did         TEXT NOT NULL,
-    subject_did        TEXT NOT NULL,
-    scope              TEXT NOT NULL,            -- JSON array of strings
-    commitment_since   TEXT NOT NULL,
-    revoked_at         TEXT,
-    signature          TEXT NOT NULL,
-    public_key         TEXT NOT NULL,
-    received_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_pinboard_observations_subject
-    ON pinboard_observations(subject_did);
-CREATE INDEX IF NOT EXISTS idx_pinboard_observations_pinner
-    ON pinboard_observations(pinner_did);
-CREATE INDEX IF NOT EXISTS idx_pinboard_observations_active
-    ON pinboard_observations(subject_did) WHERE revoked_at IS NULL;
-"#;
-
-const MIGRATION_026: &str = r#"
--- ============================================================
--- Migration 026: Selective-disclosure presentation replay table
--- §18 + §23.3 — replay protection on (audience, nonce) pairs.
--- ============================================================
---
--- Every verified presentation logs its (audience, nonce) pair here.
--- Subsequent verifications with the same pair are rejected as
--- replays. The table is purely local — verifiers don't sync it
--- across the network; replay protection is a per-verifier guarantee
--- against the same attacker, not a global guarantee.
-CREATE TABLE IF NOT EXISTS presentations_seen (
-    audience    TEXT NOT NULL,
-    nonce       TEXT NOT NULL,
-    seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (audience, nonce)
-);
-
-CREATE INDEX IF NOT EXISTS idx_presentations_seen_audience
-    ON presentations_seen(audience);
-"#;
-
-const MIGRATION_027: &str = r#"
--- ============================================================
--- Migration 027: Persisted derived skill states (§14 + §16)
--- Per-(subject, skill, version) materialised aggregation output.
--- ============================================================
---
--- The aggregation engine in `src/aggregation/` is pure and
--- recomputes deterministically from `credentials`, but recruiter /
--- consumer queries (§17) want fast lookups by (subject, skill).
--- This table caches the most recent computation per
--- (subject_did, skill_id, calculation_version), refreshed by the
--- `commands::aggregation::recompute_all` IPC.
---
--- The full DerivedSkillState payload is stored as JSON so any
--- future field additions in the explainable output (§16) flow
--- through without a migration.
-CREATE TABLE IF NOT EXISTS derived_skill_states (
-    subject_did          TEXT NOT NULL,
-    skill_id             TEXT NOT NULL,
-    calculation_version  TEXT NOT NULL,
-    raw_score            REAL NOT NULL,
-    confidence           REAL NOT NULL,
-    trust_score          REAL NOT NULL,
-    level                INTEGER NOT NULL,
-    evidence_mass        REAL NOT NULL,
-    unique_issuer_clusters INTEGER NOT NULL,
-    active_evidence_count  INTEGER NOT NULL,
-    state_json           TEXT NOT NULL,                 -- full DerivedSkillState
-    computed_at          TEXT NOT NULL,
-    PRIMARY KEY (subject_did, skill_id, calculation_version)
-);
-
-CREATE INDEX IF NOT EXISTS idx_derived_skill_states_subject
-    ON derived_skill_states(subject_did);
-CREATE INDEX IF NOT EXISTS idx_derived_skill_states_skill
-    ON derived_skill_states(skill_id);
-"#;
-
-const MIGRATION_028: &str = r#"
--- ============================================================
--- Migration 028: Pending-verification queue for incoming VCs
--- A receiving node may ingest a credential whose issuer DID
--- isn't yet known locally. We queue those here until a DID
--- document arrives via `TOPIC_VC_DID`, at which point a sweeper
--- promotes matching rows into `credentials`.
--- ============================================================
-CREATE TABLE IF NOT EXISTS credentials_pending_verification (
-    id              TEXT PRIMARY KEY,
-    issuer_did      TEXT NOT NULL,
-    subject_did     TEXT NOT NULL,
-    signed_vc_json  TEXT NOT NULL,
-    received_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_credentials_pending_issuer
-    ON credentials_pending_verification(issuer_did);
-"#;
-
-const MIGRATION_029: &str = r#"
--- ============================================================
--- Migration 029: Credential suspension metadata (§11.3, §11.4)
--- Temporary invalidation + supersession tracking.
--- ============================================================
---
--- §11.3 Suspension: a credential MAY be temporarily invalidated.
--- We store suspension as local flags on the credential itself
--- rather than a separate status-list bitmap — callers can still
--- ingest a per-purpose status list from gossip and mirror the
--- bits here via `suspend_credential_impl`.
---
--- §11.4 Supersession: `credentials.supersedes` (added in migration
--- 023) already points from the newer credential back to the older.
--- We add an index so `is_superseded_by(old_id)` is O(1).
-ALTER TABLE credentials ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE credentials ADD COLUMN suspended_at TEXT;
-ALTER TABLE credentials ADD COLUMN suspended_until TEXT;
-ALTER TABLE credentials ADD COLUMN suspended_reason TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_credentials_supersedes
-    ON credentials(supersedes) WHERE supersedes IS NOT NULL;
-"#;
-
-const MIGRATION_030: &str = r#"
--- ============================================================
--- Migration 030: Per-credential vc-fetch allowlist
--- §10 + presentation policy: subjects opt-in to which DIDs may
--- pull a private credential via vc-fetch.
--- ============================================================
---
--- Without an allowlist row, the credential is private and only
--- the subject themselves can fetch it. Adding (credential_id,
--- requestor_did) opens that requestor up. A `(credential_id,
--- 'public')` row marks the credential as world-fetchable.
-CREATE TABLE IF NOT EXISTS credential_allowlist (
-    credential_id  TEXT NOT NULL,
-    requestor_did  TEXT NOT NULL,         -- or the literal 'public'
-    granted_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (credential_id, requestor_did)
-);
-
-CREATE INDEX IF NOT EXISTS idx_credential_allowlist_cred
-    ON credential_allowlist(credential_id);
-"#;
-
-const MIGRATION_031: &str = r#"
--- ============================================================
--- Migration 031: Content provenance
--- Distinguishes seeded / AI-generated example content from
--- real user-created content. Surfaced in the UI as a badge so
--- reviewers and demo audiences can tell demo data apart from
--- real work. Plain TEXT (no CHECK constraint) so future values
--- ('imported', 'seed_real', etc.) don't require a schema change.
--- NULL means "user-created" (the default).
--- ============================================================
-ALTER TABLE courses  ADD COLUMN provenance TEXT;
-ALTER TABLE opinions ADD COLUMN provenance TEXT;
-"#;
-
-const MIGRATION_032: &str = r#"
--- ============================================================
--- Migration 032: Community plugin system — Phase 1
--- See docs/plugins.md
---
--- Phase 1 ships: iframe-sandboxed interactive plugins, installed
--- from a local file (no P2P discovery yet), with a persistent
--- per-plugin capability consent table. WASM graders, attestations
--- and Plugin DAO tables arrive in Phases 2–3.
--- ============================================================
-
--- Add plugin binding columns to course_elements. All optional; an
--- element referencing a plugin has element_type = 'plugin' plus
--- a non-NULL plugin_cid. Built-in elements leave them NULL.
-ALTER TABLE course_elements ADD COLUMN plugin_cid TEXT;
-ALTER TABLE course_elements ADD COLUMN plugin_version TEXT;
-ALTER TABLE course_elements ADD COLUMN plugin_config_cid TEXT;
-
--- Installed plugins. One row per plugin CID — the bundle is
--- content-addressed so re-installing the same CID is a no-op.
-CREATE TABLE IF NOT EXISTS plugin_installed (
-    plugin_cid     TEXT PRIMARY KEY,
-    name           TEXT NOT NULL,
-    version        TEXT NOT NULL,
-    author_did     TEXT NOT NULL,
-    install_path   TEXT NOT NULL,   -- filesystem path under app_data/plugins/
-    source         TEXT NOT NULL,   -- 'local_file' | 'p2p' | 'builtin'
-    manifest_json  TEXT NOT NULL,   -- full manifest at install time
-    installed_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_plugin_installed_author
-    ON plugin_installed(author_did);
-
--- Per-plugin, per-capability consent. Scope is one of:
---   'once'    — granted for a single session (should be purged on exit,
---               kept here for audit trail)
---   'session' — granted for the current vault-unlock session
---   'always'  — persistent until user revokes
-CREATE TABLE IF NOT EXISTS plugin_permissions (
-    plugin_cid     TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
-    capability     TEXT NOT NULL,
-    scope          TEXT NOT NULL CHECK (scope IN ('once','session','always')),
-    granted_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    granted_until  TEXT,            -- NULL for 'always'
-    PRIMARY KEY (plugin_cid, capability)
-);
-"#;
-
-const MIGRATION_033: &str = r#"
--- ============================================================
--- Migration 033: Community plugin system — Phase 2
---
--- Stores the reproducibility bundle for every graded plugin submission.
--- A verifier — anywhere on the network, decades from now — fetches the
--- (content_cid, submission_cid, grader_cid) triple, re-runs the WASM
--- grader against those bytes, and confirms the score reproduces. That
--- mathematical reproducibility is the root of trust for credentials
--- produced by community plugins.
---
--- The signed_attestation column carries the host-side Ed25519 signature
--- over the bundle (using the learner's DID-Key), suitable for inclusion
--- in a Verifiable Credential. The later Plugin DAO attestation experiment was
--- retired; active issuance requires exact bundled manifest/grader bytes until
--- the policy-backed community grader path is implemented.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS element_submissions (
-    id                  TEXT PRIMARY KEY,
-    element_id          TEXT NOT NULL REFERENCES course_elements(id),
-    enrollment_id       TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
-    submission_cid      TEXT NOT NULL,   -- BLAKE3 of the submission bytes (in iroh store)
-    grader_cid          TEXT NOT NULL,   -- BLAKE3 of the grader.wasm
-    content_cid         TEXT NOT NULL,   -- BLAKE3 of the content bytes the grader saw
-    score               REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
-    score_details_json  TEXT,            -- plugin-defined `details` payload
-    learner_did         TEXT NOT NULL,
-    signed_attestation  BLOB,            -- Ed25519 signature over the bundle (NULL until signed)
-    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_element_submissions_element
-    ON element_submissions(element_id);
-
-CREATE INDEX IF NOT EXISTS idx_element_submissions_enrollment
-    ON element_submissions(enrollment_id);
-
-CREATE INDEX IF NOT EXISTS idx_element_submissions_grader
-    ON element_submissions(grader_cid);
-"#;
-
-const MIGRATION_034: &str = r#"
--- ============================================================
--- Migration 034: Plugin discovery catalog (Phase 3)
---
--- Caches plugin announcements seen on the /alexandria/plugins/1.0
--- gossip topic. Mirrors the existing course `catalog` table — discovery
--- is the same opinion-weighted browsing model, just over plugins.
---
--- A row here means "we have heard of this plugin"; it does NOT mean it
--- is installed. Cross-reference plugin_installed for that. Built-in
--- plugins also write rows here at startup with source='builtin' so the
--- browse UI surfaces them alongside community plugins.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS plugin_catalog (
-    plugin_cid          TEXT PRIMARY KEY,    -- BLAKE3 of manifest.json
-    name                TEXT NOT NULL,
-    version             TEXT NOT NULL,
-    author_did          TEXT NOT NULL,
-    description         TEXT,
-    api_version         TEXT NOT NULL,
-    kinds_json          TEXT NOT NULL,        -- JSON array
-    capabilities_json   TEXT NOT NULL,        -- JSON array
-    subject_tags_json   TEXT NOT NULL,        -- JSON array
-    platforms_json      TEXT NOT NULL,        -- JSON array
-    has_grader          INTEGER NOT NULL DEFAULT 0,
-    grader_cid          TEXT,                 -- NULL for interactive-only
-    source              TEXT NOT NULL,        -- 'gossip' | 'builtin' | 'local'
-    announced_at        TEXT NOT NULL,        -- author-stamped time from announcement
-    last_seen_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_plugin_catalog_author
-    ON plugin_catalog(author_did);
-CREATE INDEX IF NOT EXISTS idx_plugin_catalog_source
-    ON plugin_catalog(source);
-"#;
-
-const MIGRATION_035: &str = r#"
--- ============================================================
--- Migration 035: historical Alexandria Plugin DAO attestations (retired)
---
--- Retained pre-launch storage only. Rows do not grant credential authority.
---
--- Append-only by design: a captured DAO cannot retroactively invalidate
--- credentials issued in good faith. Advisory notes (deprecated /
--- known_flawed) ride on a separate column without affecting historical
--- recognition; the verifier UI surfaces them but does not act on them.
---
--- The signed_attestation_blob carries a serialized threshold signature
--- over BLAKE3(plugin_cid || grader_cid || attestation_terms). Verification
--- happens in plugins::attestation; the storage layer is opaque.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS plugin_attestations (
-    plugin_cid               TEXT NOT NULL,
-    grader_cid               TEXT NOT NULL,
-    attestation_terms        TEXT NOT NULL,        -- JSON, freeform terms
-    threshold_signature_blob BLOB NOT NULL,        -- serialized threshold sig
-    committee_pubkeys_json   TEXT NOT NULL,        -- JSON array of hex pubkeys
-    issued_at                TEXT NOT NULL,
-    advisory_kind            TEXT,                 -- NULL = not advisory
-    advisory_message         TEXT,
-    PRIMARY KEY (plugin_cid, grader_cid)
-);
-
-CREATE INDEX IF NOT EXISTS idx_plugin_attestations_plugin
-    ON plugin_attestations(plugin_cid);
-
--- A separate table for advisory-only notes that do NOT count as
--- attestations. Lets us add "we no longer recommend X" without inserting
--- into the canonical attestation log (which would imply continued
--- recognition).
-CREATE TABLE IF NOT EXISTS plugin_advisories (
-    id                       TEXT PRIMARY KEY,
-    plugin_cid               TEXT NOT NULL,
-    kind                     TEXT NOT NULL CHECK (kind IN ('deprecated','superseded','known_flawed')),
-    message                  TEXT NOT NULL,
-    issued_at                TEXT NOT NULL DEFAULT (datetime('now')),
-    threshold_signature_blob BLOB NOT NULL,
-    committee_pubkeys_json   TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_plugin_advisories_plugin
-    ON plugin_advisories(plugin_cid);
-"#;
-
-const MIGRATION_036: &str = r#"
--- ============================================================
--- Migration 036: Sentinel anomaly flags + outcome tracking
---
--- Adds the plumbing for server-side session outcome evaluation
--- (active → flagged → suspended) per docs/sentinel.md.
---
--- Per-snapshot anomaly_flags JSON lets the backend recompute
--- cumulative severity without shipping flag-parsing logic to
--- the client. The denormalized counts on integrity_sessions
--- give O(1) outcome checks on each submit_snapshot.
--- ============================================================
-
-ALTER TABLE integrity_snapshots ADD COLUMN anomaly_flags TEXT;
-
-ALTER TABLE integrity_sessions ADD COLUMN critical_count INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE integrity_sessions ADD COLUMN warning_count  INTEGER NOT NULL DEFAULT 0;
-
-CREATE INDEX IF NOT EXISTS idx_integrity_snapshots_session
-    ON integrity_snapshots(session_id);
-
-CREATE INDEX IF NOT EXISTS idx_evidence_integrity_session
-    ON evidence_records(integrity_session_id);
-"#;
-
-const MIGRATION_037: &str = r#"
--- ============================================================
--- Migration 037: Sentinel DAO seed
---
--- Seeds a single DAO row scoped to cheat-pattern governance for
--- Sentinel (scope_type='sentinel'). This is the curation body
--- for federated adversarial priors (Option B; see
--- docs/sentinel-federation.md and docs/sentinel-adversarial-priors.md).
---
--- Seed-only: no new DDL. Proposals use the existing
--- governance_proposals pipeline with category='sentinel_prior'.
--- Committee bootstrap (who sits on the Sentinel DAO initially) is
--- handled out-of-band — the main Alexandria DAO elects the first
--- committee before this pipeline goes live.
--- ============================================================
-
-INSERT OR IGNORE INTO governance_daos
-    (id, name, description, icon_emoji, scope_type, scope_id, status,
-     committee_size, election_interval_days)
-VALUES
-    ('sentinel-dao',
-     'Sentinel DAO',
-     'Curates labeled adversarial priors (cheat patterns) that every Sentinel client trains against. Open proposals, DAO-ratified.',
-     '🛡',
-     'sentinel',
-     'sentinel-global',
-     'active',
-     5,
-     365);
-"#;
-
-const MIGRATION_038: &str = r#"
--- ============================================================
--- Migration 038: Sentinel adversarial-prior library
---
--- Ratified cheat-pattern entries curated by the Sentinel DAO.
--- Each row references the governance_proposal that approved it
--- and the content-addressed blob (CID) holding the labeled
--- training samples. Clients pull these and fold them into their
--- local anomaly models as negative examples.
---
--- See docs/sentinel-adversarial-priors.md §2 phase 2.
--- Face model kind is forbidden by design (decision 2).
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS sentinel_priors (
-    id              TEXT PRIMARY KEY,  -- blake2b(cid + label + model_kind)
-    proposal_id     TEXT NOT NULL REFERENCES governance_proposals(id),
-    cid             TEXT NOT NULL,     -- BLAKE3 content hash of the labeled-samples blob
-    model_kind      TEXT NOT NULL,     -- 'keystroke' | 'mouse' (face is forbidden)
-    label           TEXT NOT NULL,     -- e.g. 'paste_macro', 'bot_script', 'teleport'
-    schema_version  INTEGER NOT NULL,
-    sample_count    INTEGER NOT NULL,
-    notes           TEXT,
-    ratified_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    signature       TEXT NOT NULL      -- placeholder: blake2b digest over (cid|label|model_kind|schema_version).
-                                       -- Replaced with Sentinel DAO threshold sig once that infra lands.
-);
-
-CREATE INDEX IF NOT EXISTS idx_sentinel_priors_kind
-    ON sentinel_priors(model_kind);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sentinel_priors_proposal
-    ON sentinel_priors(proposal_id);
-"#;
-
-const MIGRATION_039: &str = r#"
--- ============================================================
--- Migration 039: Sentinel DAO holdout evaluation set
---
--- A private labeled-samples blob used by the Sentinel DAO to
--- measure classifier accuracy / false-positive rate without
--- leaking the evaluation criteria to attackers.
---
--- The blob itself is AES-256-GCM encrypted under a random key.
--- That key is split into N shares via Shamir's Secret Sharing
--- over GF(256); each share is sealed to one DAO member's X25519
--- pubkey. Any `threshold` members can reconstruct the key.
---
--- Storage-side this table keeps only metadata + the sealed-share
--- policy JSON; the encrypted blob lives in the content store
--- (pinned under pin_type='sentinel_holdout').
---
--- Role separation (decision 7 in sentinel-federation.md): the
--- committee members holding decryption shares should not overlap
--- with the curators ratifying priors. Enforcement is at the
--- committee-election layer, not this schema.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS sentinel_holdout_refs (
-    id             TEXT PRIMARY KEY,
-    encrypted_cid  TEXT NOT NULL,
-    model_kind     TEXT NOT NULL,       -- 'keystroke' | 'mouse'
-    threshold      INTEGER NOT NULL,
-    key_policy     TEXT NOT NULL,       -- JSON: sealed-share envelope
-    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_sentinel_holdout_kind
-    ON sentinel_holdout_refs(model_kind);
-"#;
-
-const MIGRATION_040: &str = r#"
--- ============================================================
--- Migration 040: VC-first cutover (hard cut)
---
--- Retires the SkillProof/evidence_record pipeline. All credential
--- semantics move to W3C Verifiable Credentials (`credentials` table).
--- VCs are now auto-earned via Cardano smart-contract witness events
--- (self-signed by the learner, referencing a confirmed on-chain tx).
---
--- Hard cut: the project has not launched, so there is no compat
--- window. Downstream subsystems (reputation, attestation, challenge)
--- are scheduled for rebuild against `credentials` in subsequent
--- migrations and are dropped here rather than left with stale FKs.
--- ============================================================
-
--- ---- Drop dependent tables (FK roots dropped last) ----
-
-DROP TABLE IF EXISTS evidence_attestations;
-DROP TABLE IF EXISTS attestation_requirements;
-DROP TABLE IF EXISTS challenge_votes;
-DROP TABLE IF EXISTS evidence_challenges;
-DROP TABLE IF EXISTS reputation_impact_deltas;
-DROP TABLE IF EXISTS reputation_evidence;
-
--- ---- Drop the SkillProof pipeline ----
-
-DROP TABLE IF EXISTS skill_proof_evidence;
-DROP TABLE IF EXISTS skill_proofs;
-DROP TABLE IF EXISTS evidence_records;
-DROP TABLE IF EXISTS skill_assessments;
-
--- ---- Extend `credentials` with witness metadata ----
---
--- When a Cardano completion validator witnesses a learner's
--- element-completion tx, the observer auto-issues a self-signed
--- VC referencing that tx. These columns record the on-chain proof
--- so verifiers can check the witness independently.
-ALTER TABLE credentials ADD COLUMN witness_tx_hash TEXT;
-ALTER TABLE credentials ADD COLUMN witness_validator_script_hash TEXT;
-ALTER TABLE credentials ADD COLUMN witness_validator_name TEXT;
-ALTER TABLE credentials ADD COLUMN auto_issued INTEGER NOT NULL DEFAULT 0;
-
-CREATE INDEX IF NOT EXISTS idx_credentials_witness_tx
-    ON credentials(witness_tx_hash)
-    WHERE witness_tx_hash IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_credentials_auto_issued
-    ON credentials(auto_issued, subject_did);
-"#;
-
-const MIGRATION_041: &str = r#"
--- ============================================================
--- Migration 041: Completion-witness observer state
---
--- The observer in `cardano::completion` watches Blockfrost for mints
--- under the configured completion-validator policy ID. Each time a
--- new (policy_id, asset_name) pair is seen it's decoded into a
--- CompletionDatum and handed off to the auto-issuance pipeline which
--- writes a VC into `credentials`. This table is the observer's
--- persistent memo so we don't re-issue the same credential on every
--- tick and so we don't miss mints that happened while the app was
--- offline.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS completion_observations (
-    policy_id        TEXT NOT NULL,
-    asset_name_hex   TEXT NOT NULL,
-    tx_hash          TEXT NOT NULL,
-    subject_pubkey   TEXT NOT NULL,  -- hex, 64 chars (32-byte Ed25519 pubkey)
-    course_id        TEXT NOT NULL,  -- hex
-    completion_root  TEXT NOT NULL,  -- hex, 64 chars (32-byte blake2b-256)
-    completion_time  TEXT NOT NULL,  -- ISO 8601 from CompletionDatum.timestamp
-    credential_id    TEXT,           -- populated once the VC is issued
-    observed_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    issued_at        TEXT,
-    PRIMARY KEY (policy_id, asset_name_hex)
-);
-
-CREATE INDEX IF NOT EXISTS idx_completion_obs_subject
-    ON completion_observations(subject_pubkey);
-
-CREATE INDEX IF NOT EXISTS idx_completion_obs_pending
-    ON completion_observations(credential_id) WHERE credential_id IS NULL;
-"#;
-
-const MIGRATION_042: &str = r#"
--- ============================================================
--- Migration 042: Completion-attestation gating
---
--- Replaces the legacy evidence-cosigning tables (`attestation_requirements`
--- + `evidence_attestations`, both dropped by migration 040) with a
--- VC-first model. A DAO can require N attestor signatures on a
--- learner's completion-witness tx before the observer auto-issues a
--- Verifiable Credential. Assessors record their signature in
--- `completion_attestations`.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS completion_attestation_requirements (
-    course_id          TEXT PRIMARY KEY,
-    required_attestors INTEGER NOT NULL,
-    dao_id             TEXT NOT NULL,
-    set_by_proposal    TEXT,
-    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_completion_req_dao
-    ON completion_attestation_requirements(dao_id);
-
-CREATE TABLE IF NOT EXISTS completion_attestations (
-    id              TEXT PRIMARY KEY,
-    witness_tx_hash TEXT NOT NULL,
-    attestor_did    TEXT NOT NULL,
-    attestor_pubkey TEXT NOT NULL, -- hex, 64 chars
-    signature       TEXT NOT NULL, -- hex, 128 chars (Ed25519 signature)
-    note            TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(witness_tx_hash, attestor_did)
-);
-
-CREATE INDEX IF NOT EXISTS idx_completion_att_tx
-    ON completion_attestations(witness_tx_hash);
-"#;
-
-const MIGRATION_043: &str = r#"
--- ============================================================
--- Migration 043: historical credential challenge workflow (retired)
---
--- Replaced the legacy evidence-challenge tables during an experiment that was
--- later retired. These rows no longer drive credential status.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS credential_challenges (
-    id              TEXT PRIMARY KEY,
-    challenger      TEXT NOT NULL,
-    credential_id   TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
-    reason          TEXT NOT NULL,
-    stake_lovelace  INTEGER NOT NULL,
-    stake_tx_hash   TEXT,
-    status          TEXT NOT NULL DEFAULT 'pending',
-        -- pending | reviewing | upheld | rejected | expired
-    dao_id          TEXT NOT NULL,
-    resolution_tx   TEXT,
-    signature       TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved_at     TEXT,
-    expires_at      TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_cred_challenge_credential
-    ON credential_challenges(credential_id);
-CREATE INDEX IF NOT EXISTS idx_cred_challenge_status
-    ON credential_challenges(status);
-CREATE INDEX IF NOT EXISTS idx_cred_challenge_dao
-    ON credential_challenges(dao_id);
-CREATE INDEX IF NOT EXISTS idx_cred_challenge_challenger
-    ON credential_challenges(challenger);
-
-CREATE TABLE IF NOT EXISTS credential_challenge_votes (
-    id              TEXT PRIMARY KEY,
-    challenge_id    TEXT NOT NULL REFERENCES credential_challenges(id) ON DELETE CASCADE,
-    voter           TEXT NOT NULL,
-    upheld          INTEGER NOT NULL,  -- 1 = uphold, 0 = reject
-    reason          TEXT,
-    voted_at        TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(challenge_id, voter)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cred_challenge_votes_challenge
-    ON credential_challenge_votes(challenge_id);
-"#;
-
-const MIGRATION_044: &str = r#"
--- ============================================================
--- Migration 044: Sentinel paste-classifier anomaly column
---
--- Adds the per-snapshot output of the ONNX paste / typing-bot
--- classifier to integrity_snapshots. Nullable — older snapshots
--- and snapshots taken before the model artifact ships will leave
--- it NULL. See docs/sentinel.md §AI Models.
--- ============================================================
-
-ALTER TABLE integrity_snapshots ADD COLUMN ai_paste_anomaly REAL;
-"#;
-
-const MIGRATION_045: &str = r#"
--- ============================================================
--- Migration 045: Sentinel weights priors (paste-classifier model bundle)
---
--- Extends sentinel_priors to host DAO-ratified model weights, not
--- just labeled training samples. A weights row has:
---
---   model_kind = 'paste_classifier_weights'
---   cid        = BLAKE3 of the metadata blob (weights_cid + eval ref)
---   eval_cid   = BLAKE3 of the JSON eval report
---   eval_tpr   = macro TPR reported by the eval pipeline
---   eval_fpr   = macro FPR reported by the eval pipeline
---   version    = semver-ish tag ('paste-v1', 'paste-v2', …)
---
--- A client only auto-loads a weights row whose gate passes:
---   eval_tpr >= 0.92 AND eval_fpr <= 0.03
---
--- Columns are nullable so existing keystroke/mouse priors keep
--- their NULLs without a backfill. See docs/sentinel-adversarial-priors.md
--- §Phase 4.
--- ============================================================
-
-ALTER TABLE sentinel_priors ADD COLUMN weights_cid TEXT;
-ALTER TABLE sentinel_priors ADD COLUMN eval_cid    TEXT;
-ALTER TABLE sentinel_priors ADD COLUMN eval_tpr    REAL;
-ALTER TABLE sentinel_priors ADD COLUMN eval_fpr    REAL;
-ALTER TABLE sentinel_priors ADD COLUMN version     TEXT;
-"#;
-
-const MIGRATION_046: &str = r#"
--- ============================================================
--- Migration 046: Sentinel kill switch + version blocklist
---
--- Two operator-controlled safety valves for the paste-classifier
--- pipeline:
---
---   sentinel_kill_switch  — single-row table; when active=1, the
---     client treats the classifier as disabled for that model_kind
---     even if a ratified row exists.
---
---   sentinel_weights_blocklist — set of (model_kind, version) pairs
---     that the active-classifier selector must skip, regardless of
---     gate. Used to roll back from a faulty DAO-ratified model
---     without amending governance history.
---
--- Both tables are intended to be populated by DAO governance actions
--- (a future `governance_proposal` of category 'sentinel_killswitch')
--- but ship with raw IPC commands first so an operator can react to
--- an incident before the governance pipeline ratifies the response.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS sentinel_kill_switch (
-    model_kind  TEXT PRIMARY KEY,    -- e.g. 'paste_classifier_weights'
-    active      INTEGER NOT NULL DEFAULT 0,
-    reason      TEXT,
-    activated_at TEXT,
-    activated_by TEXT                 -- stake address of the operator
-);
-
-CREATE TABLE IF NOT EXISTS sentinel_weights_blocklist (
-    model_kind  TEXT NOT NULL,
-    version     TEXT NOT NULL,
-    reason      TEXT,
-    blocked_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    blocked_by  TEXT,
-    PRIMARY KEY (model_kind, version)
-);
-
-CREATE INDEX IF NOT EXISTS idx_sentinel_blocklist_kind
-    ON sentinel_weights_blocklist(model_kind);
-"#;
-
-const MIGRATION_047: &str = r#"
--- ============================================================
--- Migration 047: Per-user Sentinel model weights (backend-side)
---
--- The legacy frontend kept per-user keystroke autoencoder + mouse CNN
--- weights in browser `localStorage` (plaintext). With the backend ML
--- rewrite (tract + candle), per-user weights now persist in the
--- already sqlcipher-encrypted SQLite database.
---
--- Composite primary key (user_address, device_fp_prefix, model_kind)
--- mirrors the legacy localStorage key `sentinel_profile_{userId}_{deviceFp[0:16]}`,
--- so a single user with multiple devices keeps disjoint profiles.
---
--- model_kind values:
---   'keystroke_ae' — KeystrokeAutoencoder weights (JSON)
---   'mouse_cnn'    — MouseTrajectoryCnn dense-head weights (JSON)
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS sentinel_user_models (
-    user_address      TEXT NOT NULL,
-    device_fp_prefix  TEXT NOT NULL,
-    model_kind        TEXT NOT NULL,
-    weights_json      TEXT NOT NULL,
-    train_loss        REAL,
-    trained_epochs    INTEGER NOT NULL DEFAULT 0,
-    training_samples  INTEGER NOT NULL DEFAULT 0,
-    updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_address, device_fp_prefix, model_kind)
-);
-
-CREATE INDEX IF NOT EXISTS idx_sentinel_user_models_kind
-    ON sentinel_user_models(model_kind);
-"#;
-
-const MIGRATION_048: &str = r#"
--- ============================================================
--- Migration 048: App-settings scope discriminator
---
--- The single per-profile `app_settings` table is the unified home
--- for every user-controlled preference (theme, sidebar collapsed,
--- keyboard shortcuts, sentinel toggles, video defaults, ...).
--- A `scope` column distinguishes settings that MUST propagate to
--- every device of the same user (via the existing cross-device
--- sync) from settings that are inherently local to *this* device
--- (window geometry, device label).
---
--- scope:
---   'sync'   — replicated across the user's devices (LWW on
---              `updated_at`). Default for new keys.
---   'device' — stays on this device only; never enters the sync
---              feed. Used for window size, device label, etc.
---
--- Existing rows seeded at migration 017 (`storage_quota_bytes`)
--- are reclassified to 'device' because storage quotas depend on
--- per-device disk capacity.
--- ============================================================
-
-ALTER TABLE app_settings ADD COLUMN scope TEXT NOT NULL DEFAULT 'sync'
-    CHECK (scope IN ('sync', 'device'));
-
-UPDATE app_settings SET scope = 'device' WHERE key = 'storage_quota_bytes';
-
-CREATE INDEX IF NOT EXISTS idx_app_settings_scope_updated
-    ON app_settings(scope, updated_at);
-"#;
-
-const MIGRATION_049: &str = r#"
--- ============================================================
--- Migration 049: Explicit device pairing for cross-device sync
---
--- Cross-device sync moves PRIVATE per-profile data (settings,
--- enrollments, element progress) between a single user's own
--- devices. Devices no longer trust each other implicitly on a
--- shared stake address — a device must be *explicitly paired*
--- before any data is exchanged.
---
--- Pairing establishes a 32-byte symmetric `shared_key` known only
--- to the two paired devices. Every sync payload between them is
--- sealed with AES-256-GCM under that key (on top of the libp2p
--- Noise transport), so a peer that has not completed pairing —
--- even one presenting the same stake address — cannot read or
--- inject synced rows.
---
--- `devices` gains:
---   stake_address — the owning identity's stake address; sync only
---                   proceeds when it matches the local identity.
---   shared_key    — per-pair AES-256-GCM key (NULL until paired).
---   paired        — 1 once the two-way pairing handshake completed.
---
--- `pending_pairings` holds short-lived codes generated by this
--- device and awaiting acceptance by the other device.
--- ============================================================
-
-ALTER TABLE devices ADD COLUMN stake_address TEXT;
-ALTER TABLE devices ADD COLUMN shared_key BLOB;
-ALTER TABLE devices ADD COLUMN paired INTEGER NOT NULL DEFAULT 0;
-
-CREATE TABLE IF NOT EXISTS pending_pairings (
-    code_hash   TEXT PRIMARY KEY,   -- BLAKE2b hash of the pairing code
-    shared_key  BLOB NOT NULL,      -- 32-byte key offered to the acceptor
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at  TEXT NOT NULL
-);
-"#;
-
-const MIGRATION_050: &str = r#"
--- ============================================================
--- Migration 050: historical challenge stake lifecycle (retired)
---
--- Retained pre-launch columns from the removed challenge-escrow flow.
---
--- `credential_challenges` already carries `stake_lovelace` and the
--- lock `stake_tx_hash`. This migration adds the settlement lifecycle:
---   stake_status  — none | locked | returned | forfeited
---   settle_tx_hash — the Cardano tx that returned/forfeited the stake
--- ============================================================
-
-ALTER TABLE credential_challenges
-    ADD COLUMN stake_status TEXT NOT NULL DEFAULT 'none'
-    CHECK (stake_status IN ('none', 'locked', 'returned', 'forfeited'));
-
-ALTER TABLE credential_challenges ADD COLUMN settle_tx_hash TEXT;
-"#;
-
-const MIGRATION_051: &str = r#"
--- ============================================================
--- Migration 051: Persist grader version on element submissions
---
--- The completion Merkle leaf (domain::completion) folds in the
--- grader's self-declared version so the on-chain witness is
--- reproducible. Persist it at grade time (from the plugin manifest)
--- so the auto-earn assembler can rebuild the exact leaves from the
--- learner's recorded submissions. Existing rows default to '' and are
--- treated as version-less.
--- ============================================================
-
-ALTER TABLE element_submissions ADD COLUMN grader_version TEXT NOT NULL DEFAULT '';
-"#;
-
-const MIGRATION_052: &str = r#"
--- ============================================================
--- Migration 052: Stake-address → libp2p public-key registry
---
--- Replaces the in-memory TOFU binding in
--- `src-tauri/src/p2p/validation.rs:118-142` with a persistent,
--- evidence-backed registry. Each row asserts that during the
--- [valid_from, valid_until) window the named stake address signed
--- gossip envelopes with the named Ed25519 public key.
---
--- Rows are seeded from `bootstrap_registry.json` (multisig-signed by
--- the org founders) and reconciled in the background against on-chain
--- StakePubkeyRegistration txs. Chain entries authoritative on conflict.
--- See docs/stake-pubkey-registry.md for the full design.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS stake_pubkey_registry (
-    stake_address   TEXT NOT NULL,                       -- Cardano stake addr (bech32)
-    public_key_hex  TEXT NOT NULL,                       -- Ed25519 libp2p pubkey, lowercase hex
-    valid_from      INTEGER NOT NULL,                    -- unix secs
-    valid_until     INTEGER,                             -- unix secs, NULL = open-ended
-    source          TEXT NOT NULL CHECK (source IN ('chain', 'snapshot')),
-    on_chain_tx     TEXT,                                -- tx hash, NULL for snapshot-only
-    snapshot_sig    TEXT,                                -- multisig hex, NULL for chain rows
-    last_verified   INTEGER NOT NULL DEFAULT 0,          -- unix secs of last chain re-check
-    PRIMARY KEY (stake_address, public_key_hex, valid_from)
-);
-
-CREATE INDEX IF NOT EXISTS idx_registry_address_window
-    ON stake_pubkey_registry(stake_address, valid_from, valid_until);
-"#;
-
-const MIGRATION_053: &str = r#"
--- ============================================================
--- Migration 053: Plugin enable/disable flag + IRL Review inbox
---
--- Adds an `enabled` toggle on installed plugins so users can keep
--- a plugin installed without it being mountable. Player + Settings
--- page check this; disabled plugins refuse to mount.
---
--- Also introduces the IRL Review submission inbox — the local
--- instructor-review flow for the irl-review builtin plugin.
--- Submissions are queued here (no network), an instructor browses
--- pending rows in their own UI, and reviews land back with score +
--- per-skill ratings + freeform feedback.
--- ============================================================
-
-ALTER TABLE plugin_installed ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
-
-CREATE TABLE IF NOT EXISTS plugin_irl_submissions (
-    id                   TEXT PRIMARY KEY,
-    plugin_cid           TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
-    element_id           TEXT,
-    enrollment_id        TEXT,
-    learner_did          TEXT NOT NULL,
-    submission_json      TEXT NOT NULL,
-    skills_json          TEXT NOT NULL DEFAULT '[]',
-    status               TEXT NOT NULL CHECK (status IN ('pending','reviewed','rejected')) DEFAULT 'pending',
-    reviewer_did         TEXT,
-    score                REAL,
-    feedback             TEXT,
-    skill_ratings_json   TEXT,
-    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
-    reviewed_at          TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_irl_submissions_status
-    ON plugin_irl_submissions(status);
-CREATE INDEX IF NOT EXISTS idx_irl_submissions_learner
-    ON plugin_irl_submissions(learner_did);
-CREATE INDEX IF NOT EXISTS idx_irl_submissions_plugin
-    ON plugin_irl_submissions(plugin_cid);
-"#;
-
-const MIGRATION_054: &str = r#"
--- ============================================================
--- Migration 054: usernames, profile visibility, peer profile cache
--- ============================================================
-
--- Username is the user's stable @handle; display_name remains the
--- free-form name shown alongside it. Visibility gates what the
--- profile-fetch protocol serves to other peers.
-ALTER TABLE local_identity ADD COLUMN username TEXT;
-ALTER TABLE local_identity ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public';
-
--- Cache of other users' public profiles, filled by the
--- /alexandria/profile-fetch/1.0 protocol. Drives username display
--- across the UI without re-querying the network.
-CREATE TABLE IF NOT EXISTS peer_profiles (
-    did          TEXT PRIMARY KEY,
-    username     TEXT,
-    display_name TEXT,
-    bio          TEXT,
-    avatar_cid   TEXT,
-    visibility   TEXT NOT NULL DEFAULT 'public',
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_peer_profiles_username ON peer_profiles(username);
-"#;
-
-const MIGRATION_055: &str = r#"
--- ============================================================
--- Migration 055: username claim cache (DHT username registry)
--- ============================================================
-
--- Locally cached, signature-verified username claims resolved from
--- the DHT. One row per username — the deterministic winner.
-CREATE TABLE IF NOT EXISTS username_claims (
-    username   TEXT PRIMARY KEY,
-    did        TEXT NOT NULL,
-    claimed_at INTEGER NOT NULL,
-    tier       INTEGER NOT NULL DEFAULT 0,   -- 0 bare | 1 receipted | 2 anchored
-    claim_json TEXT NOT NULL,                -- full UsernameClaim
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_username_claims_did ON username_claims(did);
-"#;
-
-const MIGRATION_056: &str = r#"
--- ============================================================
--- Migration 056: anchor verification flag for username claims
--- ============================================================
-
--- Set when this node has confirmed the claim digest appears in the
--- anchoring Cardano tx (or when this node submitted the batch itself).
-ALTER TABLE username_claims ADD COLUMN anchor_verified INTEGER NOT NULL DEFAULT 0;
-"#;
-
-const MIGRATION_057: &str = r#"
--- ============================================================
--- Migration 057: local DHT record mirror (desktop DHT servers)
--- ============================================================
-
--- When p2p.dht_server is enabled (desktop only), inbound Kademlia
--- records are stored here and warm-loaded into the in-memory kad
--- store at startup, so this node's slice of the DHT survives
--- restarts — spreading durable registry storage beyond the relays.
-CREATE TABLE IF NOT EXISTS dht_records (
-    key        BLOB PRIMARY KEY,
-    value      BLOB NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"#;
-
-const MIGRATION_058: &str = r#"
--- ============================================================
--- Migration 058: signatures on governance votes
--- ============================================================
-
--- Governance votes are now signed by the voter's Cardano key and
--- gossiped on /alexandria/governance/1.0 so every node can build a
--- verifiable off-chain tally (the operator commits a Merkle root of
--- these signed votes on-chain at finalize/resolve). The signature is
--- the Ed25519 signature from the gossip envelope (covers the vote
--- payload); public_key is the voter's verifying key. NULL on legacy
--- rows cast before this migration.
-ALTER TABLE governance_election_votes ADD COLUMN signature TEXT;
-ALTER TABLE governance_election_votes ADD COLUMN public_key TEXT;
-ALTER TABLE governance_proposal_votes ADD COLUMN signature TEXT;
-ALTER TABLE governance_proposal_votes ADD COLUMN public_key TEXT;
-"#;
-
-const MIGRATION_059: &str = r#"
--- ============================================================
--- Migration 059: DAO ↔ on-chain link columns
--- ============================================================
-
--- Populated when a DAO is created on-chain (the operator mints its state
--- token). Governance tx builders need these to construct datums and to
--- locate the current DAO state UTxO to spend (committee install).
---
---   state_token_policy      dao_minting policy id (hex)
---   state_token_name         asset name = "dao" ++ scope_id (hex)
---   reputation_policy        reputation minting policy id (hex)
---   membership_subjects_json JSON array of 16-byte subject ids (hex) that
---                            qualify for membership (unused under the lean
---                            model where eligibility is off-chain, but
---                            stored for the Option-1 upgrade path)
---   dao_state_utxo           "txhash#index" of the live DAO state UTxO;
---                            updated each time it is spent (e.g. committee
---                            install) so the next spend can find it
-ALTER TABLE governance_daos ADD COLUMN state_token_policy TEXT;
-ALTER TABLE governance_daos ADD COLUMN state_token_name TEXT;
-ALTER TABLE governance_daos ADD COLUMN reputation_policy TEXT;
-ALTER TABLE governance_daos ADD COLUMN membership_subjects_json TEXT;
-ALTER TABLE governance_daos ADD COLUMN dao_state_utxo TEXT;
-"#;
-
-const MIGRATION_060: &str = r#"
--- ============================================================
--- Migration 060: Sentinel gaze off-screen ratio column
---
--- Adds the per-snapshot fraction of camera ticks in which the
--- learner's gaze was estimated off-screen (second-device / look-away
--- detection). Nullable — snapshots taken with the camera off, or
--- before the gaze pipeline ships, leave it NULL. See docs/sentinel.md
--- §Gaze. The actionable flags (gaze_wander / device_glance /
--- gaze_occluded) ride in anomaly_flags; this column is for dashboard
--- observability and offline analysis.
--- ============================================================
-
-ALTER TABLE integrity_snapshots ADD COLUMN gaze_offscreen_ratio REAL;
-"#;
-
-const MIGRATION_061: &str = r#"
--- ============================================================
--- Migration 061: Automated integrity attestation (Integrity→VC bridge P1)
---
--- Layered, fully-automated high-assurance for integrity sessions — no
--- human ever hand-signs. Two layers:
---   * Anchored  — the client folds each snapshot into a running
---     commitment chain; the terminal `commitment_root` is anchored
---     (DHT/chain, referenced by `anchor_ref`) for a timestamp +
---     immutability proof.
---   * High-assurance — committee-operated attestor nodes auto-counter-
---     sign the live commitment; a 2/3 supermajority of valid committee
---     co-signatures promotes the session.
--- `assurance_level` is the resolved ladder: 'local' | 'anchored' |
--- 'high_assurance'. See docs/sentinel.md §Attestation.
--- ============================================================
-
-ALTER TABLE integrity_sessions ADD COLUMN assurance_level TEXT NOT NULL DEFAULT 'local';
-ALTER TABLE integrity_sessions ADD COLUMN commitment_root TEXT;
-ALTER TABLE integrity_sessions ADD COLUMN anchor_ref TEXT;
-
--- Per-snapshot running commitment hash (chained with the prior). Lets
--- the terminal root be re-derived + audited from the snapshot stream.
-ALTER TABLE integrity_snapshots ADD COLUMN commitment_hash TEXT;
-
--- Committee co-signatures over a session's attestation payload. One row
--- per (session, attestor); the attestor is a Sentinel-DAO committee
--- member identified by stake address. public_key/signature are hex.
-CREATE TABLE IF NOT EXISTS integrity_attestations (
-    session_id        TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,
-    attestor_address  TEXT NOT NULL,
-    public_key        TEXT NOT NULL,
-    signature         TEXT NOT NULL,
-    signed_at         TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (session_id, attestor_address)
-);
-
-CREATE INDEX IF NOT EXISTS idx_integrity_attestations_session
-    ON integrity_attestations(session_id);
-"#;
-
-const MIGRATION_062: &str = r#"
--- ============================================================
--- Migration 062: Enterprise sponsors + role/JD assessments
---
--- The monetization layer (§ Integrity→VC bridge productization P2):
--- an organization sponsors a role-specific assessment tied to a job
--- description, with a per-role issuance policy (the P0 IssuancePolicy)
--- and required assurance level. Completing the backing assessment with
--- a satisfying integrity session yields a gated RoleCredential.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS organizations (
-    id            TEXT PRIMARY KEY,                 -- blake2b(name + owner_address)
-    name          TEXT NOT NULL,
-    owner_address TEXT NOT NULL,                    -- sponsor admin stake address
-    did           TEXT,                             -- optional org issuer DID
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_address);
-
-CREATE TABLE IF NOT EXISTS role_assessments (
-    id                       TEXT PRIMARY KEY,
-    org_id                   TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    role_title               TEXT NOT NULL,         -- e.g. "SRE L4"
-    job_description          TEXT,                  -- JD text
-    course_id                TEXT REFERENCES courses(id),  -- backing assessment
-    skill_ids                TEXT,                  -- JSON array of required skill ids
-    issuance_policy_json     TEXT,                  -- serialized IssuancePolicy (P0)
-    required_assurance_level TEXT,                  -- local|anchored|high_assurance
-    status                   TEXT NOT NULL DEFAULT 'draft',  -- draft|published|archived
-    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_role_assessments_org ON role_assessments(org_id);
-"#;
-
-const MIGRATION_063: &str = r#"
--- ============================================================
--- Migration 063: Plugin dependencies
---
--- A plugin manifest may declare other plugins as dependencies (by their
--- manifest id, `did:key:<author>#<slug>`). When a plugin is installed the
--- host resolves + installs its dependencies first, then records the edge
--- here so the UI can show "pulled in by" relationships and uninstall can
--- refuse to remove a plugin that others still depend on.
---
--- Edges are keyed by the *dependent's* CID; the dependency is recorded by
--- both its declared id (stable across reinstalls) and its resolved CID
--- (the concrete bundle that satisfied it at install time).
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS plugin_dependencies (
-    plugin_cid      TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
-    dependency_id   TEXT NOT NULL,                 -- manifest id: did:key:<author>#<slug>
-    dependency_cid  TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
-    PRIMARY KEY (plugin_cid, dependency_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_plugin_dependencies_dep
-    ON plugin_dependencies(dependency_cid);
-"#;
-
-const MIGRATION_064: &str = r#"
--- ============================================================
--- Migration 064: Plugin element state (durable persistState)
---
--- Opaque per-element state a plugin saves via `alex.persistState(blob)` —
--- e.g. a code editor's in-progress (unsubmitted) source. Keyed by the
--- course element; the host returns it in the plugin's `init` payload so work
--- survives navigating away and restarting the app. One row per element
--- (single-user local DB); the newest write wins.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS plugin_element_state (
-    element_id   TEXT PRIMARY KEY,
-    plugin_cid   TEXT NOT NULL,
-    state_json   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"#;
-
-const MIGRATION_065: &str = r#"
--- ============================================================
--- Migration 065: Built-in assessment responses (raw answers)
---
--- The reproducibility bundle in `element_submissions` was originally
--- written only by graded plugins. Built-in quiz/MCQ/assessment/essay
--- elements graded entirely in the UI and never persisted a row, so a
--- learner's responses vanished on reload and the completion-witness
--- assembler (which reads `element_submissions`) never saw them.
---
--- Built-in assessments now persist a row per submission too. This column
--- carries the learner's RAW chosen answers (component-defined JSON: the
--- selected option indices, short-answer text, essay body, per-question
--- result) so the player can restore and display the prior response when
--- the learner revisits the element. NULL for plugin submissions, whose
--- inputs live in the iroh-stored `submission_cid` bundle.
--- ============================================================
-
-ALTER TABLE element_submissions ADD COLUMN answers_json TEXT;
-"#;
-
-const MIGRATION_066: &str = r#"
--- ============================================================
--- Migration 066: Account role, birthdate, activation state
---
--- Onboarding now asks whether the node owner is a learner, an
--- instructor, or a parent/guardian of a learner. Learners supply a
--- birthdate (ISO-8601 date, self-asserted). Age is NEVER stored —
--- minority is recomputed from the birthdate at each unlock so turning
--- 18 resolves without a scheduled job.
---
--- A learner who is a minor starts in `pending_guardian`: the profile
--- is gated until a parent/guardian on their own device accepts a
--- guardian invite (cross-device P2P link, later migration). The
--- birthdate is local-only: it must never appear in the published
--- profile document or any gossip topic.
--- ============================================================
-
-ALTER TABLE local_identity ADD COLUMN account_role TEXT NOT NULL DEFAULT 'learner'
-    CHECK (account_role IN ('learner','instructor','parent'));
-ALTER TABLE local_identity ADD COLUMN birthdate TEXT;
-ALTER TABLE local_identity ADD COLUMN activation_state TEXT NOT NULL DEFAULT 'active'
-    CHECK (activation_state IN ('active','pending_guardian'));
-"#;
-
-const MIGRATION_067: &str = r#"
--- ============================================================
--- Migration 067: Guardian links (cross-device parental oversight)
---
--- A minor learner's profile activates only after a parent/guardian on
--- their own device accepts a guardian invite. The link is a mutual
--- record: the child holds a `ward` row, the parent a `guardian` row,
--- both sharing a 32-byte AEAD key (same trust model as device
--- pairing: possession of the key authorises the sealed
--- /alexandria/guardian/1.0 exchange, the Noise-authenticated PeerId
--- identifies the counterparty).
---
--- Privacy: none of these tables may ever join device sync
--- (SYNCABLE_TABLES) or any gossip topic. The child's activity reaches
--- the guardian exclusively as sealed payloads over the guardian
--- protocol.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS guardian_links (
-    id                 TEXT PRIMARY KEY,
-    side               TEXT NOT NULL CHECK (side IN ('ward','guardian')),
-    peer_did           TEXT NOT NULL,
-    peer_stake_address TEXT,
-    peer_peer_id       TEXT,          -- libp2p PeerId once known
-    peer_display_name  TEXT,
-    shared_key         BLOB NOT NULL, -- 32-byte AEAD key (profile DB is vault-scoped)
-    status             TEXT NOT NULL CHECK (status IN ('pending','active','revoked')),
-    guardian_vc_id     TEXT,          -- parent-issued RoleCredential(role='guardian')
-    invite_code_hash   TEXT,          -- guardian side: for retrying Link while pending
-    child_birthdate    TEXT,          -- guardian side only, from sealed payload
-    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
-    last_sync_at       TEXT
-);
-
--- Child-side single-use invites, mirroring `pending_pairings`.
-CREATE TABLE IF NOT EXISTS guardian_pending_invites (
-    code_hash  TEXT PRIMARY KEY,
-    shared_key BLOB NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Guardian-side mirror of the child's activity (one row per synced
--- entity, LWW on updated_at).
-CREATE TABLE IF NOT EXISTS guardian_activity_rows (
-    link_id      TEXT NOT NULL REFERENCES guardian_links(id) ON DELETE CASCADE,
-    table_name   TEXT NOT NULL,
-    entity_id    TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    updated_at   TEXT NOT NULL,
-    PRIMARY KEY (link_id, table_name, entity_id)
-);
-"#;
-
-const MIGRATION_068: &str = r#"
--- ============================================================
--- Migration 068: Skill-claim provenance
---
--- A skill claim's evidence quality now carries a provenance tier so
--- self-declared claims (bare resume) rank below document-backed ones,
--- which rank below accredited-institution documents, which rank below
--- credentials actually signed by a distinct issuer DID. The tier feeds
--- the aggregation quality weight (rubric/proctoring/traceability), which
--- already exists but was pinned to 1.0 for every claim.
---
--- `provenance` is a denormalized mirror of the authoritative value
--- inside the signed VC (credentialSubject.provenance); aggregation reads
--- the VC, this column is for fast filtering / UI. `dominant_provenance`
--- on the derived cache surfaces the highest tier backing a skill so the
--- UI can badge it.
--- ============================================================
-
-ALTER TABLE credentials ADD COLUMN provenance TEXT;
-ALTER TABLE derived_skill_states ADD COLUMN dominant_provenance TEXT;
-"#;
-
-const MIGRATION_069: &str = r#"
--- ============================================================
--- Migration 069: Goal templates (goal → ideal skill graph)
---
--- A learner goal (a nationalized exam, a K-12 board-grade curriculum, a
--- job role, or a parsed job description) resolves to a set of target
--- skill IDs — the "ideal skill graph". Exams / curricula / roles use
--- curated, DAO-ratified template maps stored here; free-text JDs are
--- parsed on-device against skill names + synonyms (no template needed).
---
--- These templates are community-contributed and ratified the same way
--- as the taxonomy: proposed via governance, published as a signed
--- version doc, distributed over /alexandria/goal-templates/1.0, then
--- applied locally. `taxonomy_version` stamps which skill-graph version a
--- template's skill_ids were authored against so stale references can be
--- flagged on taxonomy publish.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS goal_templates (
-    id               TEXT PRIMARY KEY,
-    kind             TEXT NOT NULL CHECK (kind IN ('exam','curriculum','job_role')),
-    key              TEXT NOT NULL,          -- stable slug, e.g. 'cbse.grade10', 'jee_main', 'engineering_manager'
-    label            TEXT NOT NULL,          -- human label, e.g. 'CBSE — Grade 10'
-    board            TEXT,                   -- curriculum only: 'CBSE' | 'ICSE' | 'IB' | ...
-    grade            TEXT,                   -- curriculum only: '10'
-    skill_ids        TEXT NOT NULL,          -- JSON array of target skill ids
-    taxonomy_version TEXT,                   -- skill-graph version these ids were authored against
-    dao_id           TEXT,                   -- ratifying DAO (NULL for genesis-seeded)
-    ratified         INTEGER NOT NULL DEFAULT 0,
-    content_cid      TEXT,                   -- published version doc CID (NULL for genesis)
-    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_goal_templates_kind ON goal_templates(kind);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_templates_key ON goal_templates(kind, key);
-
--- Signed version chain for ratified goal-template documents (mirrors
--- taxonomy_versions): each ratification publishes a new version.
-CREATE TABLE IF NOT EXISTS goal_template_versions (
-    version          INTEGER PRIMARY KEY,
-    content_cid      TEXT NOT NULL,
-    previous_cid     TEXT,
-    ratified_by      TEXT,                   -- DAO multisig / committee id
-    signature        TEXT,
-    taxonomy_version TEXT,
-    published_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Synonyms/aliases for on-device JD + resume/transcript skill matching
--- (e.g. skill_javascript → "js, ecmascript, node.js"). Comma-separated,
--- lowercased tokens; NULL means match on name only.
-ALTER TABLE skills ADD COLUMN synonyms TEXT;
-"#;
-
-const MIGRATION_070: &str = r#"
--- ============================================================
--- Migration 070: Dynamic assessment question banks
---
--- A learner verifies a claimed skill by taking an assessment. Question
--- banks are community-contributed and DAO-ratified (like the taxonomy);
--- each attempt draws a randomized, difficulty-stratified subset with
--- shuffled options (anti-gaming) and is graded HOST-SIDE — the correct
--- answers (`bank_questions.correct_indices`) are never sent to the client
--- and never leave the node over any command or gossip payload.
---
--- On pass, an `AssessmentCredential` VC is issued bound to the Sentinel
--- integrity session, which raises the skill's aggregated confidence
--- (assessment type weight 0.90 >> self-assertion 0.25).
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS question_banks (
-    id                 TEXT PRIMARY KEY,
-    skill_id           TEXT NOT NULL,
-    label              TEXT NOT NULL,
-    pass_threshold     REAL NOT NULL DEFAULT 0.7,   -- fraction correct to pass
-    draw_count         INTEGER NOT NULL DEFAULT 5,  -- questions per attempt
-    taxonomy_version   TEXT,
-    dao_id             TEXT,
-    ratified           INTEGER NOT NULL DEFAULT 0,
-    content_cid        TEXT,
-    created_at         TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_question_banks_skill ON question_banks(skill_id);
-
-CREATE TABLE IF NOT EXISTS bank_questions (
-    id               TEXT PRIMARY KEY,
-    bank_id          TEXT NOT NULL REFERENCES question_banks(id) ON DELETE CASCADE,
-    prompt           TEXT NOT NULL,
-    options          TEXT NOT NULL,   -- JSON array of option strings
-    correct_indices  TEXT NOT NULL,   -- JSON array of correct option indices — NEVER sent to client
-    difficulty       INTEGER NOT NULL DEFAULT 2,   -- 1 (easy) .. 5 (hard)
-    points           REAL NOT NULL DEFAULT 1.0
-);
-CREATE INDEX IF NOT EXISTS idx_bank_questions_bank ON bank_questions(bank_id);
-
--- Signed version chain for ratified question-bank documents (mirrors
--- taxonomy_versions / goal_template_versions).
-CREATE TABLE IF NOT EXISTS question_bank_versions (
-    version          INTEGER PRIMARY KEY,
-    content_cid      TEXT NOT NULL,
-    previous_cid     TEXT,
-    ratified_by      TEXT,
-    signature        TEXT,
-    taxonomy_version TEXT,
-    published_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- One attempt: the drawn question subset + seed + bound integrity session,
--- graded host-side. `question_ids` records exactly which questions were
--- served so grading is reproducible; the answer key is looked up server-side.
-CREATE TABLE IF NOT EXISTS assessment_attempts (
-    id                    TEXT PRIMARY KEY,
-    subject_did           TEXT NOT NULL,
-    bank_id               TEXT NOT NULL REFERENCES question_banks(id),
-    skill_id              TEXT NOT NULL,
-    seed                  INTEGER NOT NULL,
-    question_ids          TEXT NOT NULL,   -- JSON array of served question ids (in served order)
-    option_orders         TEXT NOT NULL,   -- JSON: per-question shuffled option index order
-    integrity_session_id  TEXT,
-    score                 REAL,
-    passed                INTEGER,
-    credential_id         TEXT,            -- issued AssessmentCredential, if passed
-    started_at            TEXT NOT NULL DEFAULT (datetime('now')),
-    graded_at             TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_assessment_attempts_subject ON assessment_attempts(subject_did, skill_id);
-"#;
-
-const MIGRATION_071: &str = r#"
--- ============================================================
--- Migration 071: course-scope the plugin review inbox
--- ============================================================
--- Generalize `plugin_irl_submissions` from the IRL-Review-specific table into
--- the shared submit-for-review store used by any plugin holding the
--- `instructor_review` capability. Adds a `course_id` so the instructor inbox
--- can be scoped to the courses an instructor owns (today it is unscoped).
-
-ALTER TABLE plugin_irl_submissions ADD COLUMN course_id TEXT;
-
--- Backfill existing rows: prefer the enrollment's course, else the element's
--- chapter/course. Legacy rows that resolve to neither stay NULL and remain
--- globally visible in the inbox (the pre-scope behaviour).
-UPDATE plugin_irl_submissions
-   SET course_id = (
-       SELECT e.course_id FROM enrollments e
-        WHERE e.id = plugin_irl_submissions.enrollment_id
-   )
- WHERE course_id IS NULL AND enrollment_id IS NOT NULL;
-
-UPDATE plugin_irl_submissions
-   SET course_id = (
-       SELECT ch.course_id
-         FROM course_elements ce
-         JOIN course_chapters ch ON ce.chapter_id = ch.id
-        WHERE ce.id = plugin_irl_submissions.element_id
-   )
- WHERE course_id IS NULL AND element_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_irl_submissions_course
-    ON plugin_irl_submissions(course_id);
-"#;
-
-const MIGRATION_072: &str = r#"
--- ============================================================
--- Migration 072: unified assessment items
---
--- Before this migration the app had three ways to grade something and
--- two implementations of MCQ:
---
---   * `bank_questions` graded host-side by `assessment/grader.rs`
---     (exact-set match, nothing reproducible afterwards)
---   * plugin elements graded by `grader.wasm` under ABI v1, which emits a
---     reproducible `(grader_cid, content_cid, submission_cid)` triple
---   * built-in course elements, whose "grade" is whatever the frontend
---     reported (`grader_cid = 'builtin:<type>'`)
---
--- This collapses the first onto the second. An *assessment item* is one
--- gradeable thing of any kind, and every kind is graded through the same
--- frozen wasm ABI. Consequences worth stating:
---
---   * a third party can re-derive any score from the recorded triple,
---     which is what makes an Alexandria credential checkable by someone
---     who does not trust the device that produced it;
---   * a new item kind is a new plugin, not new host code;
---   * MCQ gains the partial-credit scoring the wasm grader already
---     implements. Scores can therefore only rise relative to the old
---     exact-set grader, never fall — see the equivalence test in
---     `assessment::items`.
---
--- The answer key stays server-side. It moves from
--- `bank_questions.correct_indices` into `assessment_items.grader_private`,
--- a column deliberately separate from `content_public` so the boundary is
--- visible in the schema rather than living in a comment: `content_public`
--- is the only half anything may hand to a client.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS assessment_items (
-    id                TEXT PRIMARY KEY,
-    item_kind         TEXT NOT NULL CHECK (item_kind IN ('mcq', 'plugin')),
-    skill_id          TEXT NOT NULL,
-    -- Plugin providing the UI and grader. NULL for `mcq`, which resolves
-    -- the built-in mcq-grader at grade time (it is installed at startup,
-    -- so its CID is not knowable when this migration runs).
-    plugin_cid        TEXT,
-    -- Safe to send to a client: prompt, options, kind, starter code.
-    content_public    TEXT NOT NULL,
-    -- NEVER sent to a client. Answer keys, hidden test cases. Merged into
-    -- the grade envelope host-side as `content.grader_private`.
-    grader_private    TEXT,
-    difficulty        INTEGER NOT NULL DEFAULT 2,   -- 1 (easy) .. 5 (hard)
-    -- Populated in a follow-up once BloomLevel becomes a real enum;
-    -- orthogonal to difficulty (an easy "create" item is possible).
-    bloom_level       TEXT,
-    points            REAL NOT NULL DEFAULT 1.0,
-    -- Provenance: the bank this item came from, when it came from one.
-    bank_id           TEXT REFERENCES question_banks(id) ON DELETE CASCADE,
-    author_did        TEXT,
-    taxonomy_version  TEXT,
-    ratified          INTEGER NOT NULL DEFAULT 0,
-    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_assessment_items_skill ON assessment_items(skill_id, ratified);
-CREATE INDEX IF NOT EXISTS idx_assessment_items_bank ON assessment_items(bank_id);
-
--- An item may evidence more than one skill, with a weight, mirroring
--- `element_skill_tags`. `assessment_items.skill_id` remains the primary
--- skill so single-skill lookups stay a plain indexed read.
-CREATE TABLE IF NOT EXISTS assessment_item_skills (
-    item_id   TEXT NOT NULL REFERENCES assessment_items(id) ON DELETE CASCADE,
-    skill_id  TEXT NOT NULL,
-    weight    REAL NOT NULL DEFAULT 1.0,
-    PRIMARY KEY (item_id, skill_id)
-);
-CREATE INDEX IF NOT EXISTS idx_assessment_item_skills_skill ON assessment_item_skills(skill_id);
-
--- Per-item result within an attempt. Carries the reproducibility triple so
--- any individual item's score can be re-derived, not just the attempt
--- total. `theta_after` / `se_after` are written by adaptive delivery once
--- IRT lands; they stay NULL for fixed-form attempts.
-CREATE TABLE IF NOT EXISTS attempt_items (
-    attempt_id      TEXT NOT NULL REFERENCES assessment_attempts(id) ON DELETE CASCADE,
-    ordinal         INTEGER NOT NULL,   -- 0-based served order
-    item_id         TEXT NOT NULL,
-    option_order    TEXT,               -- JSON: served position -> original index
-    submission_json TEXT,               -- what the learner submitted
-    grader_cid      TEXT,               -- grader that actually produced `score`
-    content_cid     TEXT,
-    submission_cid  TEXT,
-    score           REAL,               -- [0,1] for this item
-    score_details   TEXT,               -- grader `details` blob
-    theta_after     REAL,
-    se_after        REAL,
-    graded_at       TEXT,
-    PRIMARY KEY (attempt_id, ordinal)
-);
-CREATE INDEX IF NOT EXISTS idx_attempt_items_item ON attempt_items(item_id);
-
--- ---- backfill ------------------------------------------------------
--- Existing bank questions become mcq items. The id is deliberately
--- preserved: `assessment_attempts.question_ids` stores these ids, so
--- in-flight and historical attempts stay resolvable.
---
--- `kind` is derived from the key's cardinality, matching how the wasm
--- grader distinguishes single from multi.
-INSERT OR IGNORE INTO assessment_items (
-    id, item_kind, skill_id, plugin_cid,
-    content_public, grader_private,
-    difficulty, points, bank_id, taxonomy_version, ratified, created_at
-)
-SELECT
-    q.id,
-    'mcq',
-    b.skill_id,
-    NULL,
-    json_object(
-        'kind',    CASE WHEN json_array_length(q.correct_indices) = 1
-                        THEN 'single' ELSE 'multi' END,
-        'prompt',  q.prompt,
-        'options', json(q.options)
-    ),
-    json_object('correct_indices', json(q.correct_indices)),
-    q.difficulty,
-    q.points,
-    q.bank_id,
-    b.taxonomy_version,
-    b.ratified,
-    b.created_at
-FROM bank_questions q
-JOIN question_banks b ON b.id = q.bank_id;
-
--- Primary skill also lands in the multi-skill table so a single query
--- shape serves both cases.
-INSERT OR IGNORE INTO assessment_item_skills (item_id, skill_id, weight)
-SELECT id, skill_id, 1.0 FROM assessment_items;
-"#;
-
-const MIGRATION_073: &str = r#"
--- ============================================================
--- Migration 073: Bloom levels become a real, ordered type
---
--- `skills.bloom_level` has been a free-text column since the initial
--- schema, documented in a trailing comment and read by nobody. Governance
--- separately carried its own `&[&str]` ordering to gate proposal and
--- election eligibility. Those are now one type — `domain::bloom::BloomLevel`
--- — so "at least analyze" means the same thing to a DAO gate, an assessment
--- blueprint, and a capability query.
---
--- This migration only reconciles the data. Two jobs:
---
---   1. Normalise any `skills.bloom_level` that is not one of the six known
---      tokens. The type parses leniently (unknown becomes 'apply'), so
---      leaving stray values would mean the row and the type disagree about
---      what the skill is.
---
---   2. Backfill `assessment_items.bloom_level`, which migration 072 added
---      but left NULL. An item inherits its skill's level as a starting
---      point; item-level overrides are authored later, and are the reason
---      the column lives on the item rather than being read through the join
---      every time.
---
--- No CHECK constraint is added. Every write now goes through `BloomLevel`'s
--- `ToSql`, which can only emit a known token, and adding one would require
--- rebuilding `skills` — a table with foreign keys pointing at it from
--- `skill_prerequisites`, `skill_relations`, `credentials` and more. The
--- constraint would buy defence against hand-written SQL at the cost of a
--- risky table rebuild; the type is the real guarantee.
--- ============================================================
-
-UPDATE skills
-   SET bloom_level = 'apply'
- WHERE bloom_level IS NULL
-    OR LOWER(TRIM(bloom_level)) NOT IN
-       ('remember', 'understand', 'apply', 'analyze', 'evaluate', 'create');
-
--- Fold case/whitespace variants onto the canonical token.
-UPDATE skills SET bloom_level = LOWER(TRIM(bloom_level));
-
-UPDATE assessment_items
-   SET bloom_level = COALESCE(
-       (SELECT s.bloom_level FROM skills s WHERE s.id = assessment_items.skill_id),
-       'apply'
-   )
- WHERE bloom_level IS NULL;
-"#;
-
-const MIGRATION_074: &str = r#"
--- ============================================================
--- Migration 074: attempt policy
---
--- A credential is issued only when an attempt passes, so a skill's
--- aggregated score is a weighted mean of successes only — failures leave no
--- trace. With unlimited attempts and a fresh random seed each time, a
--- learner could re-roll until a favourable draw and bank the one result that
--- counted. A passing score then measures persistence, not capability.
---
--- Two changes close that. Banks carry an attempt policy, and attempts record
--- which try they were.
---
--- The default is escalating cooldowns and *no* hard cap: waiting always
--- restores an attempt, and `attempt_window_days` means a learner returning
--- months later starts fresh. Learning is free and unlimited; only the
--- credential is rate-limited. A cap would punish the learner who genuinely
--- needs six tries without distinguishing them from someone farming draws,
--- which is what `attempt_ordinal` is for — it makes "passed on the seventh
--- attempt" visible to whoever reads the credential instead of hidden.
--- ============================================================
-
--- NULL max_attempts means unlimited. Cooldowns are a JSON array of hours
--- indexed by attempts already used; the last entry repeats, so escalation
--- plateaus rather than growing without bound.
-ALTER TABLE question_banks ADD COLUMN max_attempts INTEGER;
-ALTER TABLE question_banks ADD COLUMN cooldown_hours TEXT NOT NULL DEFAULT '[0,24,72,168]';
-ALTER TABLE question_banks ADD COLUMN attempt_window_days INTEGER NOT NULL DEFAULT 90;
-ALTER TABLE question_banks ADD COLUMN score_policy TEXT NOT NULL DEFAULT 'best';
-
--- 1-based index of this attempt within the policy window, copied onto the
--- issued claim.
-ALTER TABLE assessment_attempts ADD COLUMN attempt_ordinal INTEGER;
-
--- The policy reads a learner's recent attempts for one skill on every start,
--- ordered by time.
-CREATE INDEX IF NOT EXISTS idx_assessment_attempts_history
-    ON assessment_attempts(subject_did, skill_id, started_at DESC);
-"#;
-
-const MIGRATION_075: &str = r#"
--- ============================================================
--- Migration 075: adaptive delivery
---
--- A bank may be delivered fixed-form (the historical behaviour: draw a
--- stratified subset, grade it all) or adaptively (pick each next item from
--- the running ability estimate, stop when the estimate is precise enough).
--- Fixed is the default so every existing bank is unchanged.
---
--- Adaptive attempts reuse `assessment_attempts` as their container and
--- `attempt_items` for per-item results; `attempt_items.theta_after` /
--- `se_after` (added in migration 072) record how the ability estimate
--- evolved after each answer. No item-parameter table is added here: 2PL
--- parameters bootstrap from the existing `difficulty` column at runtime, and
--- storing calibrated parameters is a later, data-dependent change.
--- ============================================================
-
-ALTER TABLE question_banks ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'fixed'
-    CHECK (delivery_mode IN ('fixed', 'adaptive'));
-
--- Target standard error and item-count bounds for adaptive attempts. Ignored
--- for fixed-form banks. Defaults match assessment::adaptive::StopRule.
-ALTER TABLE question_banks ADD COLUMN adaptive_se_target REAL NOT NULL DEFAULT 0.3;
-ALTER TABLE question_banks ADD COLUMN adaptive_min_items INTEGER NOT NULL DEFAULT 5;
-ALTER TABLE question_banks ADD COLUMN adaptive_max_items INTEGER NOT NULL DEFAULT 20;
-"#;
-
-const MIGRATION_076: &str = r#"
--- ============================================================
--- Migration 076: derived skill-state history
---
--- Confidence decays with time (aggregation applies an exponential freshness
--- weight), but nothing recomputed on a schedule — the cache was only
--- refreshed after a passing assessment, so a learner's displayed confidence
--- was frozen at their last credential. Recompute now runs on profile unlock
--- and periodically, and each recompute records a dated snapshot here.
---
--- One row per (subject, skill, day): a daily granularity enough to draw a
--- decay curve and compute learning velocity (the slope of trust over time)
--- without unbounded growth. Append-only history — the live value stays in
--- `derived_skill_states`.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS derived_skill_state_history (
-    subject_did    TEXT NOT NULL,
-    skill_id       TEXT NOT NULL,
-    snapshot_date  TEXT NOT NULL,
-    raw_score      REAL NOT NULL,
-    confidence     REAL NOT NULL,
-    trust_score    REAL NOT NULL,
-    level          INTEGER NOT NULL,
-    evidence_mass  REAL NOT NULL,
-    computed_at    TEXT NOT NULL,
-    PRIMARY KEY (subject_did, skill_id, snapshot_date)
-);
-CREATE INDEX IF NOT EXISTS idx_dss_history_subject_skill
-    ON derived_skill_state_history(subject_did, skill_id, snapshot_date);
-"#;
-
-const MIGRATION_078: &str = r#"
--- ============================================================
--- Migration 078: Sentinel appeal evidence (learner-consented)
---
--- Sentinel persists derived scores only; raw behavioural capture and camera
--- frames are processed in memory and dropped (see docs/sentinel.md, Privacy
--- Guarantees). That leaves the appeal path in the same document unusable: a
--- learner asked to contest a flag has nothing to release, because nothing was
--- kept.
---
--- These tables close that gap without weakening the default. Nothing is
--- written here unless a learner is shown their flag and explicitly chooses to
--- preserve the evidence. Declining, or simply not answering, leaves the
--- guarantee exactly as it was: nothing persisted.
---
--- What may be stored is bounded three ways. Only flagged sessions qualify.
--- Only the snapshots that actually carried a flag are kept, not the session.
--- And every row carries an expiry, after which it is deleted whether or not
--- an appeal happened.
---
--- Retention is the learner's to end early: `sentinel_evidence_delete` drops
--- everything for a session at any time, and it is never a precondition of an
--- appeal being heard that the evidence still exists.
--- ============================================================
-
--- Consent state for a session's evidence. Absent row = never asked.
-CREATE TABLE IF NOT EXISTS integrity_evidence_consent (
-    session_id  TEXT PRIMARY KEY REFERENCES integrity_sessions(id) ON DELETE CASCADE,
-    -- 1 = learner chose to preserve, 0 = declined. There is no default:
-    -- a row exists only because a human answered.
-    granted     INTEGER NOT NULL CHECK (granted IN (0, 1)),
-    decided_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    -- NULL when declined. Absolute deadline, not a duration, so a device
-    -- that is offline for a month still expires the evidence on next open.
-    expires_at  TEXT
-);
-
--- The evidence itself. Rows exist only where consent.granted = 1.
-CREATE TABLE IF NOT EXISTS integrity_evidence (
-    id           TEXT PRIMARY KEY,
-    session_id   TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,
-    -- The flagged snapshot this evidence belongs to.
-    snapshot_id  TEXT REFERENCES integrity_snapshots(id) ON DELETE CASCADE,
-    -- camera_frame | keystroke | mouse | gaze
-    kind         TEXT NOT NULL,
-    -- Opaque payload. Camera frames are stored encoded, not as raw RGBA.
-    -- The database file is SQLCipher-encrypted at rest under the profile
-    -- vault key, so this inherits that protection and nothing weaker.
-    payload      BLOB NOT NULL,
-    captured_at  TEXT NOT NULL,
-    expires_at   TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_integrity_evidence_session
-    ON integrity_evidence(session_id);
-
--- Purge sweeps order by expiry, so index it.
-CREATE INDEX IF NOT EXISTS idx_integrity_evidence_expires
-    ON integrity_evidence(expires_at);
-"#;
-
-const MIGRATION_077: &str = r#"
--- ============================================================
--- Migration 077: submission evidence publication
---
--- A graded submission's reproducibility bytes (content + submission) are
--- pinned encrypted with a device-local key, so its content_cid/submission_cid
--- resolve only on this device — durable, but not verifiable by anyone else.
--- A learner may opt in, per submission, to publish those bytes unencrypted so
--- a third party can fetch the exact inputs a grader saw and re-derive the
--- score (the basis of independent verification). This flag records that
--- choice; it is 0 (private) by default. Publishing makes the submission
--- world-readable, so it is only ever set on an explicit opt-in.
--- ============================================================
-
-ALTER TABLE element_submissions ADD COLUMN evidence_published INTEGER NOT NULL DEFAULT 0;
-"#;
-
-const MIGRATION_079: &str = r#"
--- ============================================================
--- Migration 079: where evidence was released, and taking it back
---
--- Migration 078 gave a learner evidence to release and nowhere to release it
--- to. Contesting a flag means handing the frames to the service that raised
--- it, and that leaves a copy on somebody else's disk — so this records which
--- copies exist, in order to be able to end them.
---
--- The row is what makes deletion mean what a person thinks it means. Deleting
--- evidence locally has always dropped it from this device; a copy released to
--- an employer would have survived, expiring on its own two weeks later. A
--- learner who deletes and is told it is gone has been told something untrue.
--- So local deletion now withdraws the remote copy as well, and needs to know
--- where to send that withdrawal.
---
--- `revoke_wanted_at` is the queue. A device is often offline exactly when
--- somebody decides they want something taken down, and a withdrawal that
--- depends on connectivity at the moment of the decision is one that silently
--- does not happen. The row survives the local deletion of the evidence itself
--- and is retried whenever a profile is unlocked, until the service confirms.
---
--- Deliberately no foreign key to integrity_sessions. Everything else about a
--- session may be deleted while a withdrawal is still owed to a server, and a
--- cascade would drop the instruction to withdraw along with the reason for it.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS integrity_evidence_release (
-    session_id       TEXT NOT NULL,
-    -- The service it went to, as the learner's directory list spells it.
-    directory_url    TEXT NOT NULL,
-    -- Their identifier for the assessment, learned from that person's own
-    -- export. This device does not otherwise have a name for it.
-    run_id           TEXT NOT NULL,
-    released_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    item_count       INTEGER NOT NULL DEFAULT 0,
-    -- Set the moment the learner asks for it back. Cleared never; it is the
-    -- record that they asked.
-    revoke_wanted_at TEXT,
-    -- Set when the service confirmed. Until then the withdrawal is still owed.
-    revoked_at       TEXT,
-    PRIMARY KEY (session_id, directory_url, run_id)
-);
-
--- The retry sweep asks one question: what is still owed?
-CREATE INDEX IF NOT EXISTS idx_evidence_release_owed
-    ON integrity_evidence_release(revoke_wanted_at)
-    WHERE revoke_wanted_at IS NOT NULL AND revoked_at IS NULL;
-"#;
-
-const MIGRATION_080: &str = r#"
--- ============================================================
--- Migration 080: knowing you have been flagged
---
--- A service can mark an assessment as one it could not explain, open a review
--- case about it, and decide it — and until now the person it was about had no
--- way to find out except by opening a settings page and reading a list. The
--- right to contest a flag, which migrations 078 and 079 built the machinery
--- for, is worth what the chance of hearing about the flag is worth.
---
--- This records which flags this device has already told the learner about, so
--- that saying so once does not become saying so on every unlock. It is a
--- record of what was shown, not of what was read: there is deliberately no
--- "dismissed because it does not matter" state, because a person dismissing a
--- notice has not thereby agreed with the accusation.
---
--- Only flags this device has *seen* are here. Nothing is fetched in order to
--- populate it; it is written from the export that the Integrity screen and the
--- unlock check already read, and a learner with no directories configured
--- never has a row.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS integrity_flag_notice (
-    directory_url  TEXT NOT NULL,
-    -- The service's identifier for the assessment.
-    run_id         TEXT NOT NULL,
-    -- What it was for, kept so the notice can name it without another fetch.
-    organisation   TEXT NOT NULL DEFAULT '',
-    role_label     TEXT NOT NULL DEFAULT '',
-    first_seen_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    -- When the learner was shown it. NULL means they have not been yet.
-    told_at        TEXT,
-    PRIMARY KEY (directory_url, run_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_flag_notice_untold
-    ON integrity_flag_notice(told_at) WHERE told_at IS NULL;
-"#;
-
-const MIGRATION_081: &str = r#"
--- ============================================================
--- Migration 081: Everyone is a learner; the extra roles are a set
---
--- `account_role` held exactly one of learner / instructor / parent, and
--- the app treated the three as alternatives. They are not: an instructor
--- was already a learner underneath (the mode switch), and a parent who
--- wants to take a course themselves had no way to be both. Onboarding
--- now makes learner the fixed baseline and lets a person add instructor
--- and/or parent on top.
---
--- `account_roles` is a JSON array, canonical order, always containing
--- "learner". `account_role` is kept and written as the first extra role
--- (or "learner"), so a build from before this migration still reads a
--- sensible value; nothing new reads it.
---
--- Local-only, like the rest of the row: never published, never gossiped.
--- ============================================================
-
-ALTER TABLE local_identity ADD COLUMN account_roles TEXT NOT NULL DEFAULT '["learner"]';
-UPDATE local_identity SET account_roles = CASE account_role
-    WHEN 'learner' THEN '["learner"]'
-    ELSE '["learner","' || account_role || '"]'
-END;
-"#;
-
-const MIGRATION_082: &str = r#"
--- ============================================================
--- Migration 082: remember who the escrow datum names
---
--- `lock_challenge_stake` writes two payment key hashes into the escrow
--- datum — the challenger (paid on Refund) and the treasury (paid on
--- Forfeit) — and the on-chain validator enforces that settlement pays
--- the right one. Nothing local remembered them, so `settle` took the
--- recipient from the frontend. That was not fund theft (the validator
--- rejects a wrong recipient) but it meant a compromised webview could
--- build a doomed settle, and the correct value was always derivable
--- from state the app itself committed. Persist it at lock time; derive
--- it at settle time.
--- ============================================================
-
-ALTER TABLE credential_challenges ADD COLUMN escrow_challenger_pkh TEXT;
-ALTER TABLE credential_challenges ADD COLUMN escrow_treasury_pkh TEXT;
-"#;
-
-const MIGRATION_092: &str = r#"
--- ============================================================
--- Migration 092: local-first interview assistant
---
--- Interview content is deliberately separate from tutoring transport state.
--- It is private to the active profile, is never placed on gossip topics, and
--- has an explicit expiry date so transcript PII can be removed predictably.
--- ============================================================
-
-ALTER TABLE integrity_sessions ADD COLUMN purpose TEXT NOT NULL DEFAULT 'assessment'
-    CHECK (purpose IN ('assessment', 'interview'));
-
-CREATE TABLE IF NOT EXISTS interview_sessions (
-    id                       TEXT PRIMARY KEY,
-    title                    TEXT NOT NULL,
-    objective                TEXT,
-    role_assessment_id       TEXT REFERENCES role_assessments(id) ON DELETE SET NULL,
-    tutoring_session_id      TEXT,
-    status                   TEXT NOT NULL DEFAULT 'draft'
-                             CHECK (status IN ('draft', 'ready', 'live', 'completed')),
-    duration_minutes         INTEGER NOT NULL DEFAULT 45 CHECK (duration_minutes > 0),
-    retention_days           INTEGER NOT NULL DEFAULT 30 CHECK (retention_days BETWEEN 1 AND 365),
-    record_audio             INTEGER NOT NULL DEFAULT 0,
-    record_video             INTEGER NOT NULL DEFAULT 0,
-    sentinel_enabled         INTEGER NOT NULL DEFAULT 1,
-    integrity_session_id     TEXT REFERENCES integrity_sessions(id) ON DELETE SET NULL,
-    summary                  TEXT,
-    conclusion               TEXT,
-    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
-    started_at               TEXT,
-    ended_at                 TEXT,
-    expires_at               TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_interview_sessions_status
-    ON interview_sessions(status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_interview_sessions_expiry
-    ON interview_sessions(expires_at);
-
-CREATE TABLE IF NOT EXISTS interview_participants (
-    id                       TEXT PRIMARY KEY,
-    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
-    peer_id                  TEXT,
-    display_name             TEXT NOT NULL,
-    role                     TEXT NOT NULL CHECK (role IN ('interviewer', 'candidate', 'observer')),
-    pseudonym                TEXT NOT NULL,
-    consent_transcription    INTEGER NOT NULL DEFAULT 0,
-    consent_audio_recording  INTEGER NOT NULL DEFAULT 0,
-    consent_video_recording  INTEGER NOT NULL DEFAULT 0,
-    consent_sentinel         INTEGER NOT NULL DEFAULT 0,
-    consent_camera           INTEGER NOT NULL DEFAULT 0,
-    consented_at             TEXT,
-    revoked_at               TEXT,
-    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_interview_participants_session
-    ON interview_participants(session_id, created_at);
-
-CREATE TABLE IF NOT EXISTS interview_criteria (
-    id                       TEXT PRIMARY KEY,
-    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
-    label                    TEXT NOT NULL,
-    position                 INTEGER NOT NULL,
-    status                   TEXT NOT NULL DEFAULT 'not_covered'
-                             CHECK (status IN ('not_covered', 'partial', 'covered')),
-    notes                    TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_interview_criteria_session
-    ON interview_criteria(session_id, position);
-
-CREATE TABLE IF NOT EXISTS interview_transcript_segments (
-    id                       TEXT PRIMARY KEY,
-    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
-    participant_id           TEXT NOT NULL REFERENCES interview_participants(id) ON DELETE CASCADE,
-    speaker_label            TEXT NOT NULL,
-    text                     TEXT NOT NULL,
-    start_ms                 INTEGER NOT NULL DEFAULT 0,
-    end_ms                   INTEGER NOT NULL DEFAULT 0,
-    is_final                 INTEGER NOT NULL DEFAULT 1,
-    confidence               REAL,
-    source                   TEXT NOT NULL DEFAULT 'manual'
-                             CHECK (source IN ('local_stt', 'remote_stt', 'manual')),
-    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_interview_transcript_session
-    ON interview_transcript_segments(session_id, start_ms, created_at);
-
-CREATE TABLE IF NOT EXISTS interview_notes (
-    id                       TEXT PRIMARY KEY,
-    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
-    text                     TEXT NOT NULL,
-    is_private               INTEGER NOT NULL DEFAULT 1,
-    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_interview_notes_session
-    ON interview_notes(session_id, created_at);
-
-CREATE TABLE IF NOT EXISTS interview_followups (
-    id                       TEXT PRIMARY KEY,
-    session_id               TEXT NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
-    source_segment_id        TEXT REFERENCES interview_transcript_segments(id) ON DELETE SET NULL,
-    criterion_id             TEXT REFERENCES interview_criteria(id) ON DELETE SET NULL,
-    question                 TEXT NOT NULL,
-    reason                   TEXT NOT NULL,
-    status                   TEXT NOT NULL DEFAULT 'suggested'
-                             CHECK (status IN ('suggested', 'asked', 'dismissed')),
-    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_interview_followups_session
-    ON interview_followups(session_id, status, created_at DESC);
 "#;

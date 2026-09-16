@@ -1021,19 +1021,20 @@ mod tests {
                 r#"
                 INSERT INTO question_banks (id, skill_id, label, ratified, draw_count)
                 VALUES ('bank_t', 'skill_rust', 'T', 1, 2);
-                INSERT INTO bank_questions (id, bank_id, prompt, options, correct_indices)
+                INSERT INTO assessment_items
+                    (id, item_kind, skill_id, content_public, grader_private, bank_id, ratified)
                 VALUES
-                  ('q1', 'bank_t', 'one?', '["a","b","c"]', '[0]'),
-                  ('q2', 'bank_t', 'two?', '["a","b","c"]', '[1]');
+                  ('q1', 'mcq', 'skill_rust',
+                   json_object('kind', 'single', 'prompt', 'one?',
+                               'options', json('["a","b","c"]')),
+                   json_object('correct_indices', json('[0]')), 'bank_t', 1),
+                  ('q2', 'mcq', 'skill_rust',
+                   json_object('kind', 'single', 'prompt', 'two?',
+                               'options', json('["a","b","c"]')),
+                   json_object('correct_indices', json('[1]')), 'bank_t', 1);
                 "#,
             )
             .unwrap();
-
-        let (_, _, sql) = crate::db::schema::MIGRATIONS
-            .iter()
-            .find(|(v, _, _)| *v == 72)
-            .unwrap();
-        db.conn().execute_batch(sql).unwrap();
 
         let key = SigningKey::from_bytes(&[7u8; 32]);
         let did = derive_did_key(&key);
