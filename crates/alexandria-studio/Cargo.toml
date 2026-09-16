@@ -14,6 +14,8 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
+alexandria-verify = { path = "../alexandria-verify" }
+ed25519-dalek = { version = "2" }
 thiserror = "2"
 
 [target.'cfg(unix)'.dependencies]

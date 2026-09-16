@@ -25,10 +25,16 @@ impl Grants {
         if name.trim().is_empty()
             || name.len() > 100
             || scopes.is_empty()
-            || scopes.len() > 3
-            || scopes
-                .iter()
-                .any(|s| !["learning:read", "drafts:read", "drafts:propose"].contains(&s.as_str()))
+            || scopes.len() > 4
+            || scopes.iter().any(|s| {
+                ![
+                    "learning:read",
+                    "credentials:read",
+                    "drafts:read",
+                    "drafts:propose",
+                ]
+                .contains(&s.as_str())
+            })
         {
             return Err(Error::Invalid(
                 "Choose a client name and supported permissions".into(),

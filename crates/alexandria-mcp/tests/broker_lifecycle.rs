@@ -730,6 +730,157 @@ async fn learners_read_their_own_graph_progress_and_goals() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn credential_summaries_never_carry_the_signed_document() {
+    let a = Profile::new("A");
+    let _server = a.serve();
+    a.db.lock()
+        .unwrap()
+        .execute_batch(
+            r#"INSERT INTO app_settings(key,value) VALUES ('identity.local_did','did:key:me');
+               INSERT INTO subject_fields(id,name) VALUES ('field','Science');
+               INSERT INTO subjects(id,name,subject_field_id) VALUES ('sub','Computing','field');
+               INSERT INTO skills(id,name,bloom_level,subject_id) VALUES ('a','Alpha','apply','sub');
+               INSERT INTO credentials(id,issuer_did,subject_did,credential_type,claim_kind,skill_id,
+                   issuance_date,signed_vc_json,integrity_hash,revoked,received_at) VALUES
+                 ('mine','did:key:issuer','did:key:me','FormalCredential','skill','a','2026-01-01',
+                  '{"proof":"SECRET SIGNED DOCUMENT"}','hash-1',0,'2026-02-01'),
+                 ('gone','did:key:issuer','did:key:me','FormalCredential','skill','a','2026-01-02',
+                  '{"proof":"SECRET SIGNED DOCUMENT"}','hash-2',1,'2026-02-02'),
+                 ('theirs','did:key:issuer','did:key:other','FormalCredential','skill','a','2026-01-03',
+                  '{"proof":"SECRET SIGNED DOCUMENT"}','hash-3',0,'2026-02-03');"#,
+        )
+        .unwrap();
+    let (_, credentials_file) = a.grant("Credentials", &["credentials:read"]);
+    let (_, learning_file) = a.grant("Learning", &["learning:read"]);
+    let (holder, learner) = (
+        client(&credentials_file).await,
+        client(&learning_file).await,
+    );
+    let mut outputs = Vec::new();
+
+    let (error, page) = call(&holder, "list_my_credentials", json!({})).await;
+    assert!(!error, "{page}");
+    let items = page["structuredContent"]["items"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(items.len(), 1, "revoked and other subjects are left out");
+    assert_eq!(items[0]["credential_id"], "mine");
+    assert_eq!(items[0]["skill_name"], "Alpha");
+    assert_eq!(items[0]["integrity_hash"], "hash-1");
+    assert_eq!(page["structuredContent"]["subject_did"], "did:key:me");
+
+    let (_, revoked) = call(
+        &holder,
+        "list_my_credentials",
+        json!({"include_revoked": true}),
+    )
+    .await;
+    assert_eq!(
+        revoked["structuredContent"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let (error, one) = call(&holder, "get_credential", json!({"credential_id": "mine"})).await;
+    assert!(!error, "{one}");
+    assert_eq!(one["structuredContent"]["issuer_did"], "did:key:issuer");
+    let (error, foreign) = call(
+        &holder,
+        "get_credential",
+        json!({"credential_id": "theirs"}),
+    )
+    .await;
+    assert!(
+        error && foreign.to_string().contains("not_found"),
+        "another subject's credential is not readable: {foreign}"
+    );
+    outputs.extend([page, revoked, one, foreign]);
+
+    // A presentation for another audience, and one whose proof does not verify,
+    // are both refused — and neither records a nonce.
+    let envelope = |audience: &str, nonce: &str| {
+        let payload = json!({"audience": audience, "nonce": nonce, "bundle": []}).to_string();
+        json!({
+            "presentation_json": json!({
+                "id": "urn:presentation:test",
+                "payload_json": payload,
+                // Not a proof this device will accept. The audience and replay
+                // checks run before the proof is looked at.
+                "proof": "eyJhbGciOiJFZERTQSJ9..AAAA",
+                "subject": "did:key:not-a-real-key",
+            })
+            .to_string(),
+            "audience": "did:key:verifier",
+        })
+    };
+    let (error, mismatched) = call(
+        &holder,
+        "verify_presentation",
+        envelope("did:key:elsewhere", "nonce-1"),
+    )
+    .await;
+    assert!(!error, "{mismatched}");
+    assert_eq!(
+        mismatched["structuredContent"]["result"],
+        "audience_mismatch"
+    );
+    assert_eq!(mismatched["structuredContent"]["replay_checked"], true);
+
+    let (error, bad) = call(
+        &holder,
+        "verify_presentation",
+        envelope("did:key:verifier", "nonce-2"),
+    )
+    .await;
+    assert!(!error, "{bad}");
+    assert!(
+        ["malformed", "bad_signature"]
+            .contains(&bad["structuredContent"]["result"].as_str().unwrap()),
+        "an envelope without a usable proof is refused: {bad}"
+    );
+    let seen: i64 =
+        a.db.lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM presentations_seen", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+    assert_eq!(seen, 0, "a refused presentation records nothing");
+    outputs.extend([mismatched, bad]);
+
+    // A learning grant does not reach credentials.
+    for (tool, args) in [
+        ("list_my_credentials", json!({})),
+        ("get_credential", json!({"credential_id": "mine"})),
+        (
+            "verify_presentation",
+            json!({"presentation_json": "{}", "audience": "did:key:verifier"}),
+        ),
+    ] {
+        let (error, body) = call(&learner, tool, args).await;
+        assert!(
+            error && body.to_string().contains("permission_denied"),
+            "{tool}: {body}"
+        );
+        outputs.push(body);
+    }
+
+    for output in &outputs {
+        assert!(
+            !output.to_string().contains("SECRET"),
+            "signed document leaked: {output}"
+        );
+    }
+
+    for client in [holder, learner] {
+        client.cancel().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn revocation_expiry_and_lock_invalidate_connected_clients() {
     let profile = Profile::new("A");
     let _server = profile.serve();

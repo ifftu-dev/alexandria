@@ -17,6 +17,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::{
+    credentials,
     grants::{Grants, StudioGrant},
     learning, skills, store, Error, Result,
 };
@@ -90,6 +91,14 @@ pub struct Request {
     grade: String,
     #[serde(default)]
     goal_skill_ids: Vec<String>,
+    #[serde(default)]
+    credential_id: String,
+    #[serde(default)]
+    include_revoked: bool,
+    #[serde(default)]
+    audience: String,
+    #[serde(default)]
+    presentation_json: String,
 }
 
 /// A lesson body fetched between the two authorized phases of `read_lesson`.
@@ -217,6 +226,7 @@ fn dispatch(
         | "get_learning_progress"
         | "resolve_goal"
         | "compute_learning_path" => "learning:read",
+        "list_my_credentials" | "get_credential" | "verify_presentation" => "credentials:read",
         "list_course_drafts" | "read_lesson_draft" => "drafts:read",
         "propose_lesson_draft" => "drafts:propose",
         _ => return Err(Error::Permission),
@@ -279,6 +289,31 @@ fn dispatch(
         }
         "compute_learning_path" => {
             serde_json::to_value(skills::my_learning_path(db, &request.goal_skill_ids)?)?
+        }
+        "list_my_credentials" => credentials::list_credentials(
+            db,
+            &request.skill_id,
+            request.include_revoked,
+            request.limit,
+            &request.cursor,
+        )?,
+        "get_credential" => credentials::get_credential(db, &request.credential_id)?,
+        // Caller-supplied data, but the replay check reads and records device
+        // state, so it sits behind a grant like every other broker operation.
+        "verify_presentation" => {
+            if request.audience.is_empty() {
+                return Err(Error::Invalid("an expected audience is required".into()));
+            }
+            let envelope: credentials::PresentationEnvelope =
+                serde_json::from_str(&request.presentation_json)
+                    .map_err(|_| Error::Invalid("this is not a presentation envelope".into()))?;
+            let verdict = credentials::verify_presentation(db, &envelope, &request.audience)?;
+            json!({
+                "result": verdict.as_str(),
+                "presentation_id": envelope.id,
+                "audience": request.audience,
+                "replay_checked": true,
+            })
         }
         "list_course_drafts" => {
             let mut stmt = db.prepare(

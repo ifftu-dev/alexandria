@@ -10,6 +10,7 @@ const { invoke } = useLocalApi()
 const access = ref<StudioAssistantAccess | null>(null)
 const name = ref('')
 const learning = ref(true)
+const credentials = ref(false)
 const drafts = ref(false)
 const propose = ref(false)
 const connection = ref<StudioAssistantConnection | null>(null)
@@ -21,6 +22,7 @@ watch(propose, (on) => { if (on) drafts.value = true })
 
 const scopes = computed(() => [
   ...(learning.value ? ['learning:read'] : []),
+  ...(credentials.value ? ['credentials:read'] : []),
   ...(drafts.value ? ['drafts:read'] : []),
   ...(propose.value ? ['drafts:propose'] : []),
 ])
@@ -35,7 +37,7 @@ async function grant() {
   saving.value = true; error.value = ''
   try {
     connection.value = await invoke<StudioAssistantConnection>('studio_grant_assistant', { clientName: name.value, scopes: scopes.value })
-    name.value = ''; learning.value = true; drafts.value = false; propose.value = false
+    name.value = ''; learning.value = true; credentials.value = false; drafts.value = false; propose.value = false
     await load()
   } catch (e) { error.value = String(e) } finally { saving.value = false }
 }
@@ -51,6 +53,7 @@ async function revoke(id: string) {
 
 function scopeLabel(scope: string) {
   if (scope === 'learning:read') return t('settings.assistants.scopeLearning')
+  if (scope === 'credentials:read') return t('settings.assistants.scopeCredentials')
   if (scope === 'drafts:propose') return t('settings.assistants.scopePropose')
   return t('settings.assistants.scopeDrafts')
 }
@@ -71,6 +74,7 @@ onMounted(load)
       <fieldset class="space-y-3">
         <legend class="mb-2 text-sm font-medium">{{ t('settings.assistants.permissions') }}</legend>
         <label class="flex items-start gap-2 text-sm"><input v-model="learning" type="checkbox" class="mt-1">{{ t('settings.assistants.learningScope') }}</label>
+        <label class="flex items-start gap-2 text-sm"><input v-model="credentials" type="checkbox" class="mt-1">{{ t('settings.assistants.credentialsScope') }}</label>
         <label class="flex items-start gap-2 text-sm"><input v-model="drafts" type="checkbox" class="mt-1" :disabled="propose">{{ t('settings.assistants.draftsScope') }}</label>
         <label class="flex items-start gap-2 text-sm"><input v-model="propose" type="checkbox" class="mt-1">{{ t('settings.assistants.proposeScope') }}</label>
       </fieldset>

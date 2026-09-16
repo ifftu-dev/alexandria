@@ -147,6 +147,42 @@ struct PathInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct CredentialsInput {
+    /// Only credentials for this skill identifier.
+    #[serde(default)]
+    #[schemars(length(max = 200))]
+    skill_id: String,
+    /// Include revoked credentials; omitted they are left out.
+    #[serde(default)]
+    include_revoked: bool,
+    #[serde(default = "default_limit")]
+    #[schemars(range(min = 1, max = 50))]
+    limit: u32,
+    #[serde(default)]
+    #[schemars(length(max = 20))]
+    cursor: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CredentialInput {
+    #[schemars(length(min = 1, max = 300))]
+    credential_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PresentationInput {
+    /// The presentation envelope JSON exactly as it was given to you.
+    #[schemars(length(min = 1, max = 256000))]
+    presentation_json: String,
+    /// The verifier the presentation was meant for.
+    #[schemars(length(min = 1, max = 300))]
+    audience: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct LessonInput {
     #[schemars(length(min = 1, max = 200))]
     course_id: String,
@@ -417,6 +453,49 @@ struct LearningProgress {
     enrolments: Vec<Enrolment>,
 }
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct CredentialSummary {
+    credential_id: String,
+    issuer_did: String,
+    subject_did: String,
+    credential_type: String,
+    claim_kind: String,
+    #[schemars(with = "NullableString")]
+    skill_id: Option<String>,
+    #[schemars(with = "NullableString")]
+    skill_name: Option<String>,
+    issuance_date: String,
+    #[schemars(with = "NullableString")]
+    expiration_date: Option<String>,
+    revoked: bool,
+    #[schemars(with = "NullableString")]
+    revoked_at: Option<String>,
+    #[schemars(with = "NullableString")]
+    revocation_reason: Option<String>,
+    /// Whether the issuer publishes a status list for this credential.
+    has_status_list: bool,
+    #[schemars(with = "NullableString")]
+    supersedes: Option<String>,
+    received_at: String,
+    integrity_hash: String,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct CredentialPage {
+    items: Vec<CredentialSummary>,
+    #[schemars(with = "NullableString")]
+    next_cursor: Option<String>,
+    /// The subject these credentials belong to: the signed-in learner.
+    subject_did: String,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct PresentationResult {
+    /// `accepted`, `bad_signature`, `audience_mismatch`, `replayed` or `malformed`.
+    result: String,
+    presentation_id: String,
+    audience: String,
+    /// Always true: this device checked the nonce against ones it has seen.
+    replay_checked: bool,
+}
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct LessonQuestion {
     #[schemars(with = "NullableString")]
     id: Option<String>,
@@ -479,6 +558,9 @@ impl AlexandriaMcp {
                 "get_learning_progress",
                 "resolve_goal",
                 "compute_learning_path",
+                "list_my_credentials",
+                "get_credential",
+                "verify_presentation",
                 "list_course_drafts",
                 "read_lesson_draft",
                 "propose_lesson_draft",
@@ -658,6 +740,71 @@ impl AlexandriaMcp {
             return Err("invalid_input: invalid goal skills".into());
         }
         self.broker_request(serde_json::json!({"operation":"compute_learning_path","goal_skill_ids":input.goal_skill_ids})).await
+    }
+
+    #[tool(
+        description = "The signed-in learner's own credentials: issuer, skill, dates, revocation status and integrity hash. The signed credential document is never returned, because the document is the credential and anyone holding it can present it onward. Only this learner's credentials are listed. Requires a current credentials:read grant.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_my_credentials(
+        &self,
+        Parameters(input): Parameters<CredentialsInput>,
+    ) -> Result<Json<CredentialPage>, String> {
+        if input.skill_id.len() > 200 || input.cursor.len() > 20 || !(1..=50).contains(&input.limit)
+        {
+            return Err("invalid_input: invalid credential filter".into());
+        }
+        self.broker_request(serde_json::json!({"operation":"list_my_credentials","skill_id":input.skill_id,"include_revoked":input.include_revoked,"limit":input.limit,"cursor":input.cursor})).await
+    }
+
+    #[tool(
+        description = "One of the learner's own credentials by id, in the same summary form. A credential belonging to anyone else reports not found. Requires credentials:read.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_credential(
+        &self,
+        Parameters(input): Parameters<CredentialInput>,
+    ) -> Result<Json<CredentialSummary>, String> {
+        if input.credential_id.is_empty() || input.credential_id.len() > 300 {
+            return Err("invalid_input: invalid credential identifier".into());
+        }
+        self.broker_request(
+            serde_json::json!({"operation":"get_credential","credential_id":input.credential_id}),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Check a presentation against the verifier it was meant for: signature, audience binding, and whether it has been seen before. Accepting one records its nonce on this device so the same presentation cannot be accepted twice, which is a change to device state rather than a plain read. Requires credentials:read.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn verify_presentation(
+        &self,
+        Parameters(input): Parameters<PresentationInput>,
+    ) -> Result<Json<PresentationResult>, String> {
+        if input.presentation_json.is_empty()
+            || input.presentation_json.len() > 256_000
+            || input.audience.is_empty()
+            || input.audience.len() > 300
+        {
+            return Err("invalid_input: invalid presentation".into());
+        }
+        self.broker_request(serde_json::json!({"operation":"verify_presentation","presentation_json":input.presentation_json,"audience":input.audience})).await
     }
 
     #[tool(
