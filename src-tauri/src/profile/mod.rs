@@ -31,7 +31,7 @@ pub(crate) mod operations;
 pub mod scope;
 
 #[cfg(test)]
-mod lifecycle_tests;
+pub(crate) mod lifecycle_tests;
 
 #[cfg(test)]
 mod worker_tests;

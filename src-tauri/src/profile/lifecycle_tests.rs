@@ -8,7 +8,7 @@ use crate::crypto::keystore::Keystore;
 use crate::profile::{Avatar, ProfileManager};
 use crate::{ActiveProfile, AppState, ClassroomManager, TutoringManager};
 
-pub(super) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
+pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
     let db = Arc::new(std::sync::Mutex::new(None));
     Arc::new(AppState {
         app_data_dir: directory.to_path_buf(),

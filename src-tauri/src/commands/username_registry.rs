@@ -146,6 +146,28 @@ fn current_unix_seconds() -> Result<i64, String> {
 /// Gather every claim visible for a username: DHT records (when the
 /// node is up) plus the local cache, verified + deterministically
 /// ordered. Returns `(winner, dht_reachable)`.
+/// Claims for `username` published to the DHT, when a node is running, with
+/// receipts from untrusted relays stripped. The flag says whether the DHT
+/// answered at all.
+async fn dht_claims(state: &AppState, username: &str) -> (Vec<UsernameClaim>, bool) {
+    let node_guard = state.p2p_node.lock().await;
+    let Some(node) = node_guard.as_ref() else {
+        return (Vec::new(), false);
+    };
+    let Ok(Ok(records)) = timeout(DHT_OP_TIMEOUT, node.get_dht_records(dht_key(username))).await
+    else {
+        return (Vec::new(), false);
+    };
+    let claims = records
+        .into_iter()
+        .filter_map(|raw| serde_json::from_slice::<UsernameClaim>(&raw).ok())
+        .filter(|claim| claim.username == username)
+        // Receipts that aren't from a trusted relay must not inflate the tier.
+        .map(crate::p2p::username_reg::sanitize_claim)
+        .collect();
+    (claims, true)
+}
+
 pub(crate) async fn resolve_claims(
     state: &State<'_, AppState>,
     username: &str,
@@ -180,32 +202,15 @@ pub(crate) async fn resolve_claims(
         candidates.push(cached);
     }
 
-    let mut dht_reachable = false;
-    {
-        let node_guard = state.p2p_node.lock().await;
-        if let Some(node) = node_guard.as_ref() {
-            if let Ok(Ok(records)) =
-                timeout(DHT_OP_TIMEOUT, node.get_dht_records(dht_key(username))).await
-            {
-                dht_reachable = true;
-                for raw in records {
-                    if let Ok(c) = serde_json::from_slice::<UsernameClaim>(&raw) {
-                        if c.username == username {
-                            // Strip receipts that aren't from a trusted
-                            // relay — they must not inflate the tier.
-                            candidates.push(crate::p2p::username_reg::sanitize_claim(c));
-                        }
-                    }
-                }
-                // Anchors are only trusted once this node has verified
-                // the digest on-chain (anchor_verified, set by the
-                // username_anchor tick). An unverified anchor is
-                // stripped so a forged tx_hash can't fake tier 2.
-                for c in candidates.iter_mut() {
-                    if c.anchor.is_some() && verified_sig.as_deref() != Some(c.sig.as_str()) {
-                        c.anchor = None;
-                    }
-                }
+    let (published, dht_reachable) = dht_claims(state, username).await;
+    if dht_reachable {
+        candidates.extend(published);
+        // Anchors are only trusted once this node has verified the digest
+        // on-chain (anchor_verified, set by the username_anchor tick). An
+        // unverified anchor is stripped so a forged tx_hash can't fake tier 2.
+        for c in candidates.iter_mut() {
+            if c.anchor.is_some() && verified_sig.as_deref() != Some(c.sig.as_str()) {
+                c.anchor = None;
             }
         }
     }
@@ -227,9 +232,15 @@ pub(crate) async fn resolve_claims(
 }
 
 /// Check whether a username is free to claim.
+///
+/// Unscoped: signup asks this before any profile exists, so there is no
+/// profile session to admit it and no profile database to read. It consults the
+/// network only — the DHT when a node is running, otherwise the relays'
+/// registries. A scoped version was refused at dispatch during every signup,
+/// and the page could only ever say availability was unknown.
 #[tauri::command]
 pub async fn check_username_availability(
-    state: State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     username: String,
 ) -> Result<AvailabilityResult, String> {
     let username = crate::domain::identity::validate_username(&username)?;
@@ -241,7 +252,14 @@ pub async fn check_username_availability(
             authoritative: true,
         });
     }
-    let (winner, dht_reachable) = resolve_claims(&state, &username).await?;
+    let (mut published, dht_reachable) = dht_claims(&state, &username).await;
+    // Without a profile nothing on this device has verified an anchor, so
+    // none is trusted. Tiers only decide between claims; any valid claim means
+    // the name is taken.
+    for claim in published.iter_mut() {
+        claim.anchor = None;
+    }
+    let winner = best_claim(published);
     if dht_reachable || winner.is_some() {
         return Ok(AvailabilityResult {
             username,
@@ -780,5 +798,60 @@ mod tests {
             .unwrap();
         assert_eq!(username, "oldname");
         assert!(cached_claim(db.conn(), "newname").is_none());
+    }
+    /// Signup checks a name before any profile exists: no session header, no
+    /// profile database. The check must be dispatched and answer. A reserved
+    /// name answers without the network, so this runs offline.
+    #[tokio::test]
+    async fn availability_is_checked_before_any_profile_exists() {
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
+
+        let directory = tempfile::TempDir::new().expect("temporary app directory");
+        let state = crate::profile::lifecycle_tests::state_in(directory.path());
+        let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+        assert!(
+            state.db.lock().expect("db lock").is_none(),
+            "no profile is open"
+        );
+        let app = mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![check_username_availability])
+            .build(mock_context(noop_assets()))
+            .expect("mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview");
+
+        let response = tokio::task::spawn_blocking(move || {
+            get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: "check_username_availability".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: if cfg!(any(target_os = "windows", target_os = "android")) {
+                        "http://tauri.localhost"
+                    } else {
+                        "tauri://localhost"
+                    }
+                    .parse()
+                    .expect("local URL"),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({"username": "admin"})),
+                    headers: tauri::http::HeaderMap::new(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .map(|body| {
+                body.deserialize::<serde_json::Value>()
+                    .expect("JSON response")
+            })
+        })
+        .await
+        .expect("IPC task");
+
+        let result = response.expect("the check is dispatched without a profile session");
+        assert_eq!(result["available"], false);
+        assert_eq!(result["taken_by"], "reserved");
+        assert_eq!(result["authoritative"], true);
     }
 }
