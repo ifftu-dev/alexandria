@@ -143,9 +143,6 @@ fn current_unix_seconds() -> Result<i64, String> {
     i64::try_from(seconds).map_err(|_| "system time is outside the supported range".to_string())
 }
 
-/// Gather every claim visible for a username: DHT records (when the
-/// node is up) plus the local cache, verified + deterministically
-/// ordered. Returns `(winner, dht_reachable)`.
 /// Claims for `username` published to the DHT, when a node is running, with
 /// receipts from untrusted relays stripped. The flag says whether the DHT
 /// answered at all.
@@ -168,6 +165,9 @@ async fn dht_claims(state: &AppState, username: &str) -> (Vec<UsernameClaim>, bo
     (claims, true)
 }
 
+/// Gather every claim visible for a username: DHT records (when the
+/// node is up) plus the local cache, verified + deterministically
+/// ordered. Returns `(winner, dht_reachable)`.
 pub(crate) async fn resolve_claims(
     state: &State<'_, AppState>,
     username: &str,
