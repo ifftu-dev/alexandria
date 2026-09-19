@@ -544,27 +544,35 @@ struct AlexandriaMcp {
     broker: Option<broker::Broker>,
 }
 
+/// The one tool that needs no profile: it verifies a credential the caller
+/// supplies, with no local state at all.
+const OFFLINE_TOOL: &str = "verify_credential";
+
+/// Everything else goes through the app's broker, so it exists only while a
+/// profile is unlocked and has granted this assistant access.
+const BROKER_TOOLS: &[&str] = &[
+    "search_catalog",
+    "get_course",
+    "read_lesson",
+    "get_skill_graph",
+    "get_learning_progress",
+    "resolve_goal",
+    "compute_learning_path",
+    "list_my_credentials",
+    "get_credential",
+    "verify_presentation",
+    "list_course_drafts",
+    "read_lesson_draft",
+    "propose_lesson_draft",
+];
+
 #[tool_router]
 impl AlexandriaMcp {
     fn new() -> Self {
         let broker = broker::Broker::from_env();
         let mut tool_router = Self::tool_router();
         if broker.is_none() {
-            for name in [
-                "search_catalog",
-                "get_course",
-                "read_lesson",
-                "get_skill_graph",
-                "get_learning_progress",
-                "resolve_goal",
-                "compute_learning_path",
-                "list_my_credentials",
-                "get_credential",
-                "verify_presentation",
-                "list_course_drafts",
-                "read_lesson_draft",
-                "propose_lesson_draft",
-            ] {
+            for name in BROKER_TOOLS {
                 tool_router.remove_route(name);
             }
         }
@@ -933,9 +941,22 @@ impl ServerHandler for AlexandriaMcp {
         let modern = context
             .protocol_version()
             .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        // Offer the profile's tools only while the app is still offering the
+        // connection. After a lock, a profile switch, a revocation or expiry
+        // the file is gone and every one of them answers "unavailable", so
+        // listing them would tell an assistant it has access it does not have.
+        let tools = match self.broker.as_ref() {
+            Some(broker) if !broker.available() => self
+                .tool_router
+                .list_all()
+                .into_iter()
+                .filter(|tool| tool.name == OFFLINE_TOOL)
+                .collect(),
+            _ => self.tool_router.list_all(),
+        };
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
-            tools: self.tool_router.list_all(),
+            tools,
             meta: Some(server_meta()),
             next_cursor: None,
             // The list depends on the configured assistant grant, so shared caches must not reuse it.

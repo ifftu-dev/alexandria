@@ -114,6 +114,50 @@ async fn hostile_course_text_reaches_an_assistant_as_content_and_changes_nothing
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tools_are_offered_only_while_the_connection_is_offered() {
+    let a = Profile::new("A");
+    let _server = a.serve();
+    let (_, file) = a.grant("Learner", &["learning:read", "credentials:read"]);
+
+    let connected = client(&file).await;
+    let offered: Vec<String> = connected
+        .list_all_tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect();
+    assert!(
+        offered.len() > 1 && offered.iter().any(|name| name == "search_catalog"),
+        "a granted connection offers the profile's tools: {offered:?}"
+    );
+    connected.cancel().await.unwrap();
+
+    // Lock, profile switch, revocation and expiry all remove the file. A client
+    // started after that must not be told it has access it does not have.
+    std::fs::remove_file(&file).unwrap();
+    let after = client(&file).await;
+    let offered: Vec<String> = after
+        .list_all_tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect();
+    assert_eq!(
+        offered,
+        ["verify_credential"],
+        "without the connection only the offline verifier is offered"
+    );
+    let (error, refused) = call(&after, "search_catalog", serde_json::json!({"query": ""})).await;
+    assert!(
+        error,
+        "and the tools behind the broker do not answer: {refused}"
+    );
+    after.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_broker_that_goes_away_mid_session_fails_the_call_rather_than_hanging() {
     let a = Profile::new("A");
     let server = a.serve();

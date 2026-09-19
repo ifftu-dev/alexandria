@@ -23,6 +23,28 @@ impl Broker {
         })
     }
 
+    /// Whether the app is currently offering this connection: the file it
+    /// wrote is still there and still private to this user. Lock, profile
+    /// switch, revocation and expiry all remove it, and after any of those the
+    /// tools behind it cannot answer.
+    pub fn available(&self) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let Ok(metadata) = std::fs::symlink_metadata(&self.connection_file) else {
+                return false;
+            };
+            metadata.is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.permissions().mode() & 0o077 == 0
+                && metadata.len() <= 4096
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
     pub async fn call(&self, mut request: Value) -> Result<Value, String> {
         #[cfg(unix)]
         {
