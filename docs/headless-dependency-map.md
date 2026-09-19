@@ -7,8 +7,12 @@ to that revision.
 
 ## Decision
 
-**Extract a `crates/alexandria-core` crate.** A facade inside `app_lib` cannot
-produce a headless binary that runs on a Linux host without a desktop stack.
+**The Tauri-free runtime belongs behind a crate boundary, and that boundary
+already exists: `crates/alexandria-studio`.** Do not create a second one. A
+facade inside `app_lib` cannot produce a headless binary that runs on a Linux
+host without a desktop stack. (Reassessed 2026-09-19; the first version of this
+map proposed a new `crates/alexandria-core` before the Instructor Studio work
+was merged. See "Overlap with Instructor Studio" below.)
 
 This is the condition H01 step 4 names — "if APP's crate dependencies force
 GUI/native initialization/linkage" — and it is met on linkage alone:
@@ -25,14 +29,81 @@ GUI/native initialization/linkage" — and it is met on linkage alone:
 
 These are shared libraries resolved when the process loads. A binary that links
 `app_lib` fails in the dynamic linker on a host without them, before any of its
-own code runs, whether or not it ever touches a window. Cargo cannot drop a
-`[dependencies]` entry for one consumer, and gating `tauri` behind a feature
-would mean conditionalising every call site across 359 commands.
+own code runs, whether or not it ever touches a window.
+
+Three things would satisfy "a headless build must not need those libraries":
+
+1. Install them in the container image anyway. No code change, since nothing
+   initialises them; a larger image and attack surface, and not a genuinely
+   headless build.
+2. Make `tauri` and the media crates optional behind a default-on feature. One
+   `cfg` on the `commands` module covers most call sites, but the Tauri-free
+   helper functions live inside `commands/` and would have to move out — most
+   of the cost of option 3 — and a wrong `cfg` only shows in the headless build.
+3. Keep the Tauri-free runtime in a crate with no `tauri` in its manifest, so
+   the compiler refuses an accidental dependency.
+
+The first version of this map claimed only option 3 works and that option 2
+means conditionalising every call site across 359 commands. Both overstated.
+Option 3 is still preferred, because it is the only one the compiler enforces
+and because the crate now exists.
 
 Initialization is *not* the obstacle. The CLI already links `app_lib` and never
 opens a display, because nothing GUI- or media-related runs unless
-`app_lib::run()` is called. Linkage is the obstacle, and only a crate boundary
-removes it.
+`app_lib::run()` is called. Linkage is the obstacle.
+
+## Overlap with Instructor Studio
+
+Reassessed against `main` at `c80c667` on 2026-09-19, after the Instructor
+Studio and MCP work merged. That work built much of what H01 and H02 describe,
+under different names, so H01 must extend it rather than run beside it.
+
+- **`alexandria-studio` and `alexandria-mcp` link no Tauri and no `app_lib`**
+  (`cargo tree -e normal` shows neither, nor GTK or WebKit).
+- **`alexandria_studio::broker::BrokerHost` is a host boundary.** It gives a
+  host a lifecycle gate, grants, a profile epoch, a clock, database access and
+  blob fetch. Three hosts implement it: the app (`commands/studio_mcp.rs`), the
+  `fixture_host` example, and the MCP test profile. That is step 2's "node
+  interface with owned profile resources and a clock" for the operations it
+  covers, already proven with two profiles and real client processes.
+- **The crate already holds Tauri-free business reads**: skills, learning
+  progress and paths, credentials, goal resolution. These are operations H02
+  would expose.
+- **Duplication has already started.** `jd_parser.rs` exists in both
+  `src-tauri/src/goals/` and `crates/alexandria-studio/src/`, and the copies
+  have diverged by about 200 lines. A second core crate would multiply this.
+- **Two profile-lifecycle mechanisms now coexist**: the rebuild's
+  `ProfileOperations` leases with generation fencing, and the studio's epoch,
+  `blocked` flag and `broker_gate`. `publish_course` checks both. A headless
+  node needs one.
+- **`fixture_host.rs` `#[path]`-includes `src-tauri/src/db/schema.rs`**, the
+  pattern removed from the CLI because it breaks when a migration references
+  another crate. It works today only because migration 2 lives in the studio
+  crate itself.
+
+What this changes: no new `crates/alexandria-core`. The open design question is
+whether the shared core keeps the `alexandria-studio` name or the crate is
+renamed and the studio-specific parts split from the general ones. That is a
+decision for whoever owns the crate, made once.
+
+What H01 still adds that the studio work does not cover: two full persona nodes
+in one process with P2P and content stores, the event-sink trait for outward
+notifications, per-node ownership of the process globals below, and a CI job
+that builds and runs a node on Linux with no desktop libraries installed.
+
+Related overlaps outside H01, recorded so they are not rediscovered:
+
+- Authenticated addressed learner-to-instructor delivery is needed by T02 item
+  7 (endorsement requests) and by the studio plan (lesson feedback reaching
+  authors across devices). Neither has built it. Design it once.
+- The Cloud branch `codex/cloud-mcp-authz` (alexandria-cloud#1) changes
+  `src/auth/oidc.rs`, `tests/route_authorisation.rs`, CI and migrations, which
+  is the work list of rebuild packages C01 to C03. `alexandria-cloud-ux` also
+  holds uncommitted Cloud work. C01 has two lines to integrate, not one.
+- The studio plan records Keycloak 26.7.3 as the selected Cloud OAuth provider;
+  the rebuild plan's Q03 still records the provider as open. One is stale.
+- The studio plan labels its MCP milestones M0 to M9; the rebuild plan uses M0
+  to M6 for different milestones.
 
 ## What is already free of Tauri
 
@@ -123,6 +194,12 @@ Each slice compiles, passes the full gate, and is committed on its own. App and
 CLI import paths stay stable throughout by re-exporting moved modules from
 `app_lib`.
 
+**Status after the 2026-09-19 reassessment:** slice 1 touches nothing the
+studio work touches and can proceed. Slices 2 to 5 are on hold until ownership
+of the shared crate is agreed, because slice 2 edits the same `lib.rs` and
+`AppState` regions the studio hooks into, and slices 4 and 5 would otherwise
+build a parallel core.
+
 1. **Make the four blocking globals per-node**, inside `app_lib`, before any
    crate moves. Diagnostics mode, the relay set, the issuer set and the diag log
    path become fields owned by the node's runtime. This fixes the integrity
@@ -133,12 +210,15 @@ CLI import paths stay stable throughout by re-exporting moved modules from
    `state.app_data_dir` instead of asking Tauri again.
 3. **Introduce an event-sink trait** with a Tauri adapter, and route the gossip
    closure, tutoring manager and plugin-install progress through it.
-4. **Create `crates/alexandria-core`** and move leaf modules first — `domain`,
-   `db`, `crypto`, then `content_store`, `cardano` and `p2p` — checking before
-   each move that the module does not reach back into `commands`. Diagnostics
-   mode is the known case: assessment code consults a flag that lives in
-   `commands/`, which slice 1 relocates.
-5. **Add the headless `Node` facade** in core with owned profile resources,
+4. **Grow the existing Tauri-free crate rather than creating another.** Move
+   leaf modules into it first — `domain`, `db`, `crypto`, then `content_store`,
+   `cardano` and `p2p` — checking before each move that the module does not
+   reach back into `commands`, and retire duplicates such as the second
+   `jd_parser` as they are found. Diagnostics mode is the known case of a
+   reach-back: assessment code consults a flag that lives in `commands/`,
+   which slice 1 relocates.
+5. **Add the headless `Node` facade** beside `BrokerHost`, reusing its gate,
+   epoch and clock rather than defining new ones, with owned profile resources,
    executor, lifecycle, network configuration, clock and event sink, and prove
    two isolated nodes on Linux in a CI job that installs no GTK, WebKit or ALSA
    packages. That job is the only real proof that linkage is solved.
