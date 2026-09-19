@@ -1,6 +1,6 @@
 # Instructor Studio and MCP implementation
 
-Updated: 2026-09-17
+Updated: 2026-09-19
 
 ## Workspace and scope
 
@@ -112,7 +112,7 @@ M3 slice 1 (2026-09-16):
 - `learners_read_published_content_without_answers_or_drafts` drives real `alexandria-mcp` processes: catalog order, stored/announced courses, skill filter, literal wildcards; the profile's own course and another author's draft answer `not_found`; inline and fetched text, an unfetchable lesson reported unavailable, quiz and multiple-choice options without answers, a withheld assessment, video chapters; learning and draft grants refuse each other's tools; no output contains answers, explanations, assessment or draft text; a profile lock completes within 2 s while a fetch is held, and the held request then fails without returning the fetched text.
 - `cargo +1.91.0 clippy -p alexandria-node -p alexandria-studio -p alexandria-mcp --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed (existing warnings from the patched `tao` only).
 - `npx vue-tsc -b --noEmit`, `npm run build`, `npm test` (77), `i18n:parity` (8 locales, 2724 keys), `i18n:no-raw-text` and the Tauri command guard (389/306/83): passed. New strings are English in other locales until translated.
-- Not yet done: browser check of the Settings section, and a packaged-app run of the resolver-backed fetch against real peers. (Inspector against these tools: done 2026-09-17.)
+- Not yet done: a packaged-app run of the resolver-backed fetch against real peers. (Inspector against these tools: done 2026-09-17. Browser check of the Settings section: done 2026-09-17.)
 
 M3 slice 2 (2026-09-16):
 
@@ -129,7 +129,7 @@ M3 slice 3 (2026-09-16):
 - Regression check for the delegation: `cargo +1.91.0 test -p alexandria-node --lib` passed 1184 with 13 ignored, including the existing presentation suite now running against the shared implementation. The P2P resolver test that failed once during slice 2 passed here.
 - `cargo +1.91.0 clippy -p alexandria-node -p alexandria-studio -p alexandria-mcp --all-targets -- -D warnings` and `cargo +1.91.0 fmt --check`: passed (existing warnings from the patched `tao` only).
 - `npx vue-tsc -b --noEmit`, `npm test` (77), `i18n:parity` (8 locales, 2726 keys), `i18n:no-raw-text` and the Tauri command guard (389/306/83): passed. The fourth permission's strings are English in the other locales until translated.
-- Not yet done: a browser check of the four-permission panel. (Inspector against the credential tools: done 2026-09-17.)
+- Done 2026-09-17: the browser check of the four-permission panel, and Inspector against the credential tools.
 
 M5 slice 1 (2026-09-16, Cloud worktree):
 
@@ -139,6 +139,17 @@ M5 slice 1 (2026-09-16, Cloud worktree):
 - Cloud `docs/deployment.md` gained a tools-and-scopes section stating the three rules enforced in code; `README.md` updated to match.
 - `python3 scripts/mcp/e2e.py` against fixture Keycloak 26.7.3: passed, now exercising all five tools with a live token. It seeds a role, two listed people who both clear its bar and a candidate who is one of them, then checks that a name is shown for somebody who answered this organisation and withheld for somebody who has not, that the search is written to the organisation's log, that the candidate summary carries no contact address, that the comparison reads requirement by requirement (`skill_rust` met, `skill_sql` reachable) and reports `listed_in_index: false` for a candidate with no listing, and that a token holding only `candidates:read` is refused the comparison with a challenge naming `roles:read`. Seeded identities carry the run marker and are removed afterwards, because the talent index is not organisation-scoped.
 - Not yet done: the rest of M8 — ChatGPT, which can only reach a public HTTPS endpoint and so waits for an approved staging deployment. It will need a hosted pre-registration (`provision mcp client add --redirect`), whose confidential-client path has not been exercised by a real connector.
+
+Assistant access panel in a browser (2026-09-17, app worktree):
+
+- Driven with the real Vite dev server and Playwright's cached Chromium (the Chrome extension was not connected), with a mocked Tauri layer standing in for the backend; no harness was added to the repository. 22 checks passed with no page errors: four permissions with only published-course reading on by default; grant refused until the assistant is named and one permission is chosen; proposing drafts turns on reading drafts and locks it; granting sends exactly the chosen name and scopes, shows a client configuration naming the executable and that grant's connection file, resets the form and lists the grant with its permissions and expiry; revoking sends that grant's id, empties the list and clears the connection; an error from the app is shown as an alert; where access is unavailable there is no form and the reason is given; dark theme and 390px width render correctly.
+- Found outside this work, not changed: at 390px the application top bar overlaps itself (the ALPHA badge, search, its Ctrl+F hint and the Learner/Instructor toggle). Passed to the session that owns the shell.
+
+Signup could not check whether a username was free (2026-09-17, app worktree, fixing rebuild code now on `main`):
+
+- Every signup showed "Can't check availability right now", so a taken handle only surfaced later as a claim conflict. Two faults, both from the executor/profile-scope work: `check_username_availability` took the profile-scoped state, so with no profile — always, during signup — dispatch refused it before it ran ("profile session header is required"), and the frontend reports any error as unknown; behind that, its first step read a cached claim through the database executor, which fails with no profile open, so the relay fallback written for exactly this case was unreachable. The relays themselves answered in under half a second.
+- The check is now unscoped (listed in the profile command policy) and consults the network only — the DHT when a node is running, otherwise every relay's registry — and never touches the profile database. Anchors are not trusted without a profile; any valid claim still means taken. The DHT lookup moved into `dht_claims`, shared with `resolve_claims`, whose behaviour is unchanged.
+- `availability_is_checked_before_any_profile_exists` dispatches the command through Tauri's mock IPC with no session header and no profile database, using a reserved name so it runs offline. It fails with the old signature, with that exact dispatch error. `cargo test -p alexandria-node --lib`: 1338 passed; clippy, fmt and the Tauri command guard clean. Reviewed and taken onto `main` by the session that owns that code, with a follow-up fix to doc comments this change had displaced (`077d2a8`).
 
 Step 1 of the 2026-09-17 reassessment (both worktrees):
 
