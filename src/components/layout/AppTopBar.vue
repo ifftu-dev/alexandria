@@ -279,8 +279,14 @@ const avatarEmoji = computed(() => {
 
     <!-- Right: mode switch + P2P + theme + avatar -->
     <div class="topbar-right">
-      <!-- Learner ⇄ Instructor switch (instructor accounts only) -->
-      <ModeSwitcher class="hidden sm:flex" />
+      <!-- Learner ⇄ Instructor switch (instructor accounts only).
+           The utility sits on a plain wrapper: the component's own scoped
+           `.mode-switcher[data-v-…] { display: flex }` outranks `hidden`, so on
+           the component itself the class did nothing and the bar overflowed a
+           phone-width window. -->
+      <div class="hidden sm:flex">
+        <ModeSwitcher />
+      </div>
 
       <!-- Connection status — hidden on mobile -->
       <div class="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -700,6 +706,18 @@ const avatarEmoji = computed(() => {
 @media (min-width: 640px) {
   .topbar-search-placeholder {
     font-size: 0.8125rem;
+  }
+}
+
+/* On a phone there is no keyboard to press, and the hint takes the room the
+   placeholder needs — without this the placeholder truncates to one letter. */
+@media (max-width: 639px) {
+  .topbar-search-kbd {
+    display: none;
+  }
+
+  .topbar-search-placeholder {
+    padding-inline-end: 0.75rem;
   }
 }
 
