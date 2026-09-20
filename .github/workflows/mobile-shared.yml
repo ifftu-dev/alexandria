@@ -666,6 +666,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          # Name the packages, because this action's default list still asks
+          # for `tools`, which the SDK repository no longer publishes — the
+          # runner's cmdline-tools 20.0 answers "Failed to find package" and
+          # the whole release job fails in setup. CI's Android job already
+          # pins it this way; the release path did not.
+          packages: platform-tools
 
       - name: Install CMake
         run: |
