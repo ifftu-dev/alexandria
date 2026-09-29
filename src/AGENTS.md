@@ -8,7 +8,7 @@
 
 ## Overview
 
-Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pinia/Vuex), 30+ route views, and a 2049-line `types/index.ts`. Supports multiple user profiles on one device — the picker (`/profiles`, `pages/ProfileSelect.vue`) is the first screen on launch when at least one profile exists.
+Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pinia/Vuex), 30+ route views, and a 2049-line `types/index.ts`. Supports multiple user profiles on one device — the picker (`/profiles`, `pages/ProfileSelect.vue`) is the first screen on launch when at least one profile exists. If the backend refused the profile data on disk (older index version or another network), `useProfiles().initialize()` returns `'incompatible'` and `App.vue` routes to `/incompatible-data` (`pages/IncompatibleData.vue`) before anything else; boot redirects wait for `router.isReady()` so the initial navigation cannot cancel them.
 
 ## WHERE TO LOOK
 
@@ -20,7 +20,7 @@ Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pin
 | State | `composables/` | Module-level singleton refs (no Pinia/Vuex) |
 | UI design system | `components/ui/` | Barrel-exported primitives |
 | Profile picker UI | `components/profile/` | `ProfileTile`, `AddProfileTile`, `ProfileAvatar` |
-| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `Home`) + 13 feature dirs (`classrooms`, `courses`, `dashboard`, `goals`, `governance`, `guardian`, `instructor`, `learn`, `opinions`, `plugins`, `skills`, `tutoring`, `u` — public user profiles) + `ProfileMe.vue` (/profile) |
+| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `IncompatibleData`, `Home`) + 13 feature dirs (`classrooms`, `courses`, `dashboard`, `goals`, `governance`, `guardian`, `instructor`, `learn`, `opinions`, `plugins`, `skills`, `tutoring`, `u` — public user profiles) + `ProfileMe.vue` (/profile) |
 | Types | `types/index.ts` | All TS interfaces (mirrors Rust domain) |
 | Styling | `assets/css/` | Tailwind v4 + CSS custom properties |
 | Routing | `router/` | Vue Router config |
