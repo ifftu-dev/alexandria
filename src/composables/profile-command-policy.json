@@ -11,6 +11,8 @@
     "list_profiles": "Public profile picker metadata.",
     "get_active_profile_id": "Profile lifecycle bootstrap.",
     "get_profile_cleanup_required": "Profile cleanup recovery.",
+    "get_incompatible_profile_data": "Startup check before any profile can exist.",
+    "move_incompatible_profile_data": "Startup recovery before any profile can exist; moves, never deletes.",
     "get_profile_session_token": "Profile session bootstrap; not a credential.",
     "create_profile": "Serialized activation owner.",
     "check_username_availability": "Signup checks the public username registry before any profile exists.",

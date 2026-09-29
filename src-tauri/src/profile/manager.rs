@@ -132,6 +132,10 @@ pub enum ProfileError {
     },
     #[error("embedded network profile is invalid: {0}")]
     NetworkProfile(String),
+    #[error("profile data on this device is incompatible with this build: {0}")]
+    IncompatibleData(String),
+    #[error("no incompatible profile data to move aside")]
+    NoIncompatibleData,
     #[error("profile index error: {0}")]
     Index(#[from] IndexError),
     #[error("IO error: {0}")]
@@ -165,6 +169,10 @@ pub fn load_network_index(app_data_dir: &Path) -> Result<ProfileIndex, ProfileEr
 pub struct ProfileManager {
     app_data_dir: PathBuf,
     index: Mutex<ProfileIndex>,
+    /// Why the on-disk profile data was refused, while it is still in place.
+    /// The index is empty and profile creation is refused until the data is
+    /// moved aside, so nothing can overwrite it.
+    incompatible: Mutex<Option<String>>,
 }
 
 impl ProfileManager {
@@ -176,7 +184,77 @@ impl ProfileManager {
         Ok(Self {
             app_data_dir: app_data_dir.to_path_buf(),
             index: Mutex::new(index),
+            incompatible: Mutex::new(None),
         })
+    }
+
+    /// Open for the app. Profile data this build deliberately refuses (an
+    /// older index version, or a profile bound to another network) does not
+    /// fail the open: the manager starts empty and blocked, so the app can
+    /// ask the user what to do. Any other error still fails.
+    pub fn open_for_app(app_data_dir: &Path) -> Result<Self, ProfileError> {
+        match Self::open(app_data_dir) {
+            Err(
+                error @ (ProfileError::Index(IndexError::IncompatibleVersion { .. })
+                | ProfileError::NetworkMismatch { .. }),
+            ) => Ok(Self {
+                app_data_dir: app_data_dir.to_path_buf(),
+                index: Mutex::new(ProfileIndex::default()),
+                incompatible: Mutex::new(Some(error.to_string())),
+            }),
+            result => result,
+        }
+    }
+
+    /// Why the on-disk profile data was refused, if it still is.
+    pub fn incompatible_data(&self) -> Option<String> {
+        self.incompatible
+            .lock()
+            .expect("profile incompatible-data mutex poisoned")
+            .clone()
+    }
+
+    /// Move refused profile data into a new
+    /// `incompatible-profile-data-<timestamp>/` directory beside it, then
+    /// unblock the manager with an empty index. Nothing is deleted. Returns
+    /// the directory the data now lives in.
+    pub fn move_incompatible_data_aside(&self) -> Result<PathBuf, ProfileError> {
+        let mut incompatible = self
+            .incompatible
+            .lock()
+            .expect("profile incompatible-data mutex poisoned");
+        if incompatible.is_none() {
+            return Err(ProfileError::NoIncompatibleData);
+        }
+        let mut guard = self.index.lock().expect("profile index mutex poisoned");
+
+        let backup = self.app_data_dir.join(format!(
+            "incompatible-profile-data-{}",
+            Utc::now().format("%Y%m%dT%H%M%S%.3fZ")
+        ));
+        // Not create_dir_all: an existing directory must never be merged into.
+        std::fs::create_dir(&backup)?;
+        // The index goes last: until it moves, a relaunch is still blocked
+        // rather than starting fresh beside half-moved data.
+        for name in [PROFILES_DIRNAME, super::index::INDEX_FILENAME] {
+            let source = self.app_data_dir.join(name);
+            if source.exists() {
+                std::fs::rename(&source, backup.join(name))?;
+            }
+        }
+        std::fs::create_dir_all(self.app_data_dir.join(PROFILES_DIRNAME))?;
+
+        *guard = ProfileIndex::default();
+        *incompatible = None;
+        log::warn!("moved incompatible profile data to {}", backup.display());
+        Ok(backup)
+    }
+
+    fn ensure_compatible(&self) -> Result<(), ProfileError> {
+        match self.incompatible_data() {
+            Some(reason) => Err(ProfileError::IncompatibleData(reason)),
+            None => Ok(()),
+        }
     }
 
     pub fn app_data_dir(&self) -> &Path {
@@ -235,6 +313,7 @@ impl ProfileManager {
         avatar: Avatar,
         network_id: &str,
     ) -> Result<ProfilePaths, ProfileError> {
+        self.ensure_compatible()?;
         let display_name = display_name.trim();
         if display_name.is_empty() || display_name.chars().count() > 64 {
             return Err(ProfileError::InvalidDisplayName);
@@ -418,6 +497,108 @@ mod tests {
                 expected,
                 profile_id
             } if actual == "other-network" && expected == "preprod" && profile_id == paths.id.to_string()
+        ));
+    }
+
+    fn write_v1_index(tmp: &TempDir) -> (PathBuf, Vec<u8>) {
+        let index_path = tmp.path().join(super::super::index::INDEX_FILENAME);
+        let bytes = serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "profiles": [{
+                "id": "0dfad417-e3b4-4541-ac54-f2f088067faa",
+                "display_name": "Old",
+                "avatar": { "kind": "emoji", "value": "🙂" },
+                "color": "#f59e0b",
+                "created_at": "2026-08-23T17:18:20.325506Z",
+                "last_unlocked_at": null
+            }]
+        }))
+        .unwrap();
+        std::fs::write(&index_path, &bytes).unwrap();
+        let old_profile = tmp
+            .path()
+            .join(PROFILES_DIRNAME)
+            .join("0dfad417-e3b4-4541-ac54-f2f088067faa");
+        std::fs::create_dir_all(&old_profile).unwrap();
+        std::fs::write(old_profile.join("marker"), b"old").unwrap();
+        (index_path, bytes)
+    }
+
+    #[test]
+    fn open_for_app_blocks_on_an_older_index_without_touching_it() {
+        let tmp = TempDir::new().unwrap();
+        let (index_path, bytes) = write_v1_index(&tmp);
+
+        let m = ProfileManager::open_for_app(tmp.path()).unwrap();
+        let reason = m.incompatible_data().expect("older index should block");
+        assert!(reason.contains("version 1"), "{reason}");
+        assert_eq!(m.count(), 0);
+        assert!(matches!(
+            m.create("New", Avatar::default()),
+            Err(ProfileError::IncompatibleData(_))
+        ));
+        assert_eq!(std::fs::read(&index_path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn open_for_app_blocks_on_another_network() {
+        let (tmp, m) = manager();
+        m.create("Alice", Avatar::default()).unwrap();
+        drop(m);
+        let index_path = tmp.path().join(super::super::index::INDEX_FILENAME);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
+        value["profiles"][0]["network_id"] = serde_json::json!("other-network");
+        std::fs::write(&index_path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let m = ProfileManager::open_for_app(tmp.path()).unwrap();
+        assert!(m.incompatible_data().unwrap().contains("other-network"));
+    }
+
+    #[test]
+    fn open_for_app_still_fails_on_an_unreadable_index() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join(super::super::index::INDEX_FILENAME),
+            b"not json",
+        )
+        .unwrap();
+        assert!(matches!(
+            ProfileManager::open_for_app(tmp.path()),
+            Err(ProfileError::Index(IndexError::Parse(_)))
+        ));
+    }
+
+    #[test]
+    fn moving_incompatible_data_aside_keeps_it_and_unblocks() {
+        let tmp = TempDir::new().unwrap();
+        let (index_path, bytes) = write_v1_index(&tmp);
+        let m = ProfileManager::open_for_app(tmp.path()).unwrap();
+
+        let backup = m.move_incompatible_data_aside().unwrap();
+        assert!(backup.starts_with(tmp.path()));
+        assert_eq!(
+            std::fs::read(backup.join(super::super::index::INDEX_FILENAME)).unwrap(),
+            bytes
+        );
+        assert_eq!(
+            std::fs::read(
+                backup
+                    .join(PROFILES_DIRNAME)
+                    .join("0dfad417-e3b4-4541-ac54-f2f088067faa")
+                    .join("marker")
+            )
+            .unwrap(),
+            b"old"
+        );
+        assert!(!index_path.exists());
+        assert!(m.incompatible_data().is_none());
+
+        m.create("New", Avatar::default()).unwrap();
+        assert_eq!(ProfileManager::open(tmp.path()).unwrap().count(), 1);
+        assert!(matches!(
+            m.move_incompatible_data_aside(),
+            Err(ProfileError::NoIncompatibleData)
         ));
     }
 

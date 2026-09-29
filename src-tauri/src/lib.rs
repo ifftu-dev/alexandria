@@ -781,12 +781,21 @@ pub fn run() {
                 network_profile.network_id, network_profile.profile_revision
             ));
 
+            // Profile data this build refuses (an older index version, or a
+            // profile bound to another network) opens blocked rather than
+            // failing: the frontend shows it and lets the user move it aside.
+            let profile_manager = Arc::new(
+                profile::ProfileManager::open_for_app(&app_dir)
+                    .expect("failed to open profile manager"),
+            );
+            if let Some(reason) = profile_manager.incompatible_data() {
+                log::error!("{reason}");
+                diag::log(&format!("incompatible profile data: {reason}"));
+            }
+
             // The pre-profile single-vault layout is unsupported. It is never
             // migrated, converted or deleted: report it and continue into
             // onboarding, leaving the old files available to copy out by hand.
-            let profile_manager = Arc::new(
-                profile::ProfileManager::open(&app_dir).expect("failed to open profile manager"),
-            );
             let legacy_entries = profile::legacy_layout::detect(&app_dir);
             if !legacy_entries.is_empty() {
                 let report = profile::legacy_layout::report(&legacy_entries);
@@ -1261,6 +1270,8 @@ pub fn run() {
             commands::profile::list_profiles,
             commands::profile::get_active_profile_id,
             commands::profile::get_profile_cleanup_required,
+            commands::profile::get_incompatible_profile_data,
+            commands::profile::move_incompatible_profile_data,
             commands::profile::get_profile_session_token,
             commands::profile::create_profile,
             commands::profile::restore_profile_with_mnemonic,

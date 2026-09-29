@@ -46,6 +46,9 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Startup screen for profile data this build refuses. English-only pending
+  // a translate pass; renders in English via the i18n fallback.
+  'onboarding.incompatibleData.',
   // Explicit diagnostics entry/exit surface. English fallback is temporary
   // pending the next catalog translation and native-speaker review pass.
   'common.diagnostics.',

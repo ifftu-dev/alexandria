@@ -18,6 +18,14 @@ const router = createRouter({
       meta: { layout: 'blank' },
     },
     {
+      // Shown when the profile data on disk is from a build this one
+      // refuses to open. App.vue routes here from initialize().
+      path: '/incompatible-data',
+      name: 'incompatible-data',
+      component: () => import('@/pages/IncompatibleData.vue'),
+      meta: { layout: 'blank' },
+    },
+    {
       // Holding screen for minor learners whose profile awaits guardian
       // activation. The global guard below funnels gated profiles here.
       path: '/guardian-gate',
@@ -383,7 +391,7 @@ const router = createRouter({
 //    in the account's role set. Everybody is a learner; the check is for
 //    the roles added on top.
 router.beforeEach(async (to) => {
-  const openNames = new Set(['onboarding', 'profiles', 'guardian-gate'])
+  const openNames = new Set(['onboarding', 'profiles', 'guardian-gate', 'incompatible-data'])
   if (openNames.has(String(to.name))) return true
 
   const { useProfiles } = await import('@/composables/useProfiles')

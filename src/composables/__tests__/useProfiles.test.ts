@@ -67,6 +67,7 @@ describe('profile lock lifecycle', () => {
   it('restores the blocked cleanup screen when the frontend reloads', async () => {
     const service = (await freshProfiles()).useProfiles()
     mocks.invoke.mockImplementation(async command => {
+      if (command === 'get_incompatible_profile_data') return null
       if (command === 'get_profile_cleanup_required') return true
       if (command === 'list_profiles') return []
       throw new Error(`Unexpected command: ${command}`)
@@ -75,6 +76,37 @@ describe('profile lock lifecycle', () => {
     expect(service.lockState.value).toBe('failed')
     expect(service.initialized.value).toBe(true)
     expect(service.isUnlocked.value).toBe(false)
+  })
+
+  it('stops at the incompatible-data screen before reading any profiles', async () => {
+    const service = (await freshProfiles()).useProfiles()
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'get_incompatible_profile_data') return 'profiles index version 1 is incompatible'
+      throw new Error(`Unexpected command: ${command}`)
+    })
+    await expect(service.initialize()).resolves.toBe('incompatible')
+    await expect(service.initialize()).resolves.toBe('incompatible')
+    expect(service.incompatibleData.value).toContain('version 1')
+  })
+
+  it('continues to onboarding once incompatible data is moved aside', async () => {
+    const service = (await freshProfiles()).useProfiles()
+    let blocked = true
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'get_incompatible_profile_data') return blocked ? 'refused' : null
+      if (command === 'move_incompatible_profile_data') {
+        blocked = false
+        return '/data/incompatible-profile-data-x'
+      }
+      if (command === 'list_profiles') return []
+      if (command === 'get_profile_cleanup_required') return false
+      if (command === 'get_active_profile_id') return null
+      throw new Error(`Unexpected command: ${command}`)
+    })
+    await expect(service.initialize()).resolves.toBe('incompatible')
+    await expect(service.moveIncompatibleDataAside()).resolves.toBe('/data/incompatible-profile-data-x')
+    expect(service.incompatibleData.value).toBeNull()
+    await expect(service.initialize()).resolves.toBe('onboarding')
   })
 
   it('requires an explicit completed lock before switching an active profile', async () => {
