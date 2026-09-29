@@ -64,7 +64,9 @@ const { initialize, isUnlocked, isLockBlocked, lockState, lockProfile } = usePro
 const { refreshAccountStatus } = useAccountStatus()
 
 const ready = ref(false)
-const isPublicRoute = computed(() => route.name === 'profiles' || route.name === 'onboarding')
+const isPublicRoute = computed(
+  () => route.name === 'profiles' || route.name === 'onboarding' || route.name === 'incompatible-data',
+)
 const showLockScreen = computed(() => isLockBlocked.value || (ready.value && !isUnlocked.value && !isPublicRoute.value))
 
 watchEffect(() => {
@@ -173,11 +175,17 @@ onMounted(async () => {
 
   try {
     const state = await initialize()
+    // A boot redirect issued while the initial navigation is still resolving
+    // is cancelled by it, and the watchEffect above then sends the window to
+    // the picker instead.
+    await router.isReady()
 
-    if (state === 'onboarding' && route.name !== 'onboarding') {
-      router.replace('/onboarding')
+    if (state === 'incompatible') {
+      await router.replace('/incompatible-data')
+    } else if (state === 'onboarding' && route.name !== 'onboarding') {
+      await router.replace('/onboarding')
     } else if (state === 'picker' && route.name !== 'profiles' && route.name !== 'onboarding') {
-      router.replace('/profiles')
+      await router.replace('/profiles')
     } else if (state === 'ready') {
       await hydrateProfileScopedState()
       await diagnostics.initialize().catch(e => console.warn('[App] diagnostics hydration failed:', e))

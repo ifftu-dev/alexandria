@@ -22,7 +22,7 @@ async function exportMnemonic(password: string): Promise<string> {
   return invoke<string>('export_mnemonic', { password })
 }
 
-async function initialize(): Promise<'onboarding' | 'unlock' | 'ready'> {
+async function initialize(): Promise<'incompatible' | 'onboarding' | 'unlock' | 'ready'> {
   const state = await profilesApi.initialize()
   // Map the picker state back onto the legacy three-way enum so
   // existing callers (`App.vue`) keep routing correctly.

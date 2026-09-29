@@ -138,6 +138,27 @@ pub async fn get_profile_cleanup_required(state: State<'_, AppState>) -> Result<
     Ok(state.profile_operations.cleanup_required().await)
 }
 
+/// Why the on-disk profile data was refused at startup, if it still is.
+/// While this returns a reason the profile list is empty and no profile can
+/// be created.
+#[tauri::command]
+pub async fn get_incompatible_profile_data(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    Ok(state.profile_manager.incompatible_data())
+}
+
+/// Move refused profile data into a timestamped directory under the app data
+/// directory and unblock profile creation. Returns that directory's path.
+#[tauri::command]
+pub async fn move_incompatible_profile_data(state: State<'_, AppState>) -> Result<String, String> {
+    state
+        .profile_manager
+        .move_incompatible_data_aside()
+        .map(|path| path.display().to_string())
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn get_profile_session_token(
     state: State<'_, AppState>,

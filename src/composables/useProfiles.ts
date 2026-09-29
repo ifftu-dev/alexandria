@@ -22,6 +22,8 @@ const activeWallet = ref<WalletInfo | null>(null)
 const activeIdentity = ref<Identity | null>(null)
 const loading = ref(false)
 const initialized = ref(false)
+// Why the backend refused the profile data on disk, while it still does.
+const incompatibleData = ref<string | null>(null)
 const lockState = ref<'idle' | 'locking' | 'failed'>('idle')
 const lockError = ref<string | null>(null)
 const isLockBlocked = computed(() => lockState.value !== 'idle')
@@ -103,7 +105,8 @@ async function refreshActiveWallet(): Promise<void> {
   }
 }
 
-async function initialize(): Promise<'onboarding' | 'picker' | 'ready'> {
+async function initialize(): Promise<'incompatible' | 'onboarding' | 'picker' | 'ready'> {
+  if (incompatibleData.value) return 'incompatible'
   if (initialized.value) {
     if (isUnlocked.value) return 'ready'
     return profiles.value.length === 0 ? 'onboarding' : 'picker'
@@ -112,6 +115,8 @@ async function initialize(): Promise<'onboarding' | 'picker' | 'ready'> {
   loading.value = true
   const generation = profileGeneration
   try {
+    incompatibleData.value = await invoke<string | null>('get_incompatible_profile_data')
+    if (incompatibleData.value) return 'incompatible'
     await refreshProfiles()
     const cleanupRequired = await invoke<boolean>('get_profile_cleanup_required').catch(() => true)
     requireCurrentGeneration(generation)
@@ -140,6 +145,17 @@ async function initialize(): Promise<'onboarding' | 'picker' | 'ready'> {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * Move the refused profile data aside so a fresh profile can be created.
+ * Returns the directory it was moved to; nothing is deleted.
+ */
+async function moveIncompatibleDataAside(): Promise<string> {
+  const movedTo = await invoke<string>('move_incompatible_profile_data')
+  incompatibleData.value = null
+  initialized.value = false
+  return movedTo
 }
 
 async function createProfile(
@@ -323,6 +339,7 @@ export function useProfiles() {
     activeIdentity: readonly(activeIdentity),
     loading: readonly(loading),
     initialized: readonly(initialized),
+    incompatibleData: readonly(incompatibleData),
     lockState: readonly(lockState),
     lockError: readonly(lockError),
     isLockBlocked,
@@ -332,6 +349,7 @@ export function useProfiles() {
     stakeAddress,
 
     initialize,
+    moveIncompatibleDataAside,
     refreshProfiles,
     refreshActiveIdentity,
     refreshActiveWallet,

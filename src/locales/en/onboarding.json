@@ -186,5 +186,21 @@
     "checkActivation": "Check Activation",
     "backToProfiles": "Back to profiles"
   },
+  "incompatibleData": {
+    "heading": "Your profile data can't be opened",
+    "subtitle": "This version of Alexandria can't read the profiles saved on this device. They were created by an earlier or different build.",
+    "optionsHeading": "What you can do",
+    "moveAsideHint": "Move the old data into a backup folder and start fresh. Nothing is deleted, but the old profiles won't appear in this version.",
+    "quitHint": "Quit and install the version that created this data instead.",
+    "details": "Technical details",
+    "moveAside": "Move aside & start fresh",
+    "moving": "Moving…",
+    "moveFailed": "Couldn't move the data: {error}",
+    "movedTo": "Old data moved to {path}",
+    "quit": "Quit",
+    "continue": "Continue",
+    "movedHeading": "Old data moved aside",
+    "movedSubtitle": "Nothing was deleted. You can now set up a fresh profile."
+  },
   "stepOf": "Step {current} of {total}"
 }

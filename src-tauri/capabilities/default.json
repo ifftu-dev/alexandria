@@ -12,6 +12,7 @@
     "biometry:default",
     "updater:default",
     "process:allow-restart",
+    "process:allow-exit",
     "deep-link:default",
     "dialog:default",
     "os:allow-locale",
