@@ -72,4 +72,25 @@ ignore = [
     # the resolved graph.
     "RUSTSEC-2026-0119",
     "RUSTSEC-2026-0118",
+
+    # ringbuf 0.4.8 — `Consumer::skip` and `Consumer::clear` are not
+    # panic-safe: if an element's `Drop` panics mid-loop the read index is not
+    # advanced, and the ring buffer's own destructor drops those elements again
+    # (RUSTSEC-2026-0293, double free / use-after-free).
+    #
+    # Ignored because the upgrade is blocked: ringbuf 0.4 comes in through the
+    # firewheel 0.10 audio stack under the vendored moq-media crate, and
+    # firewheel only moves to ringbuf ^0.5 in 0.12, a two-release breaking port
+    # of moq-media's audio code.
+    #
+    # The bug needs execution to continue after a panicking `Drop`, and shipped
+    # builds cannot do that: the release profile sets `panic = "abort"`, so the
+    # first panic ends the process before any second drop. The only direct
+    # caller of `skip`/`clear` in the tree, fixed-resample's resampling channel,
+    # also holds `Sample` elements, which are `Copy` and have no `Drop` at all.
+    #
+    # Revisit when moq-media moves to firewheel >= 0.12. Remove this acceptance
+    # immediately if the release profile stops aborting on panic, or if code
+    # starts catching panics (`catch_unwind`) around the audio stack.
+    "RUSTSEC-2026-0293",
 ]
