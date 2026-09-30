@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "network_id": "preprod",
-  "profile_revision": 1,
+  "profile_revision": 2,
   "cardano_network": "preprod",
   "cardano_network_magic": 1,
   "relays": [
@@ -43,6 +43,7 @@
     "sha256": "4c7868f14ba85533a8f68da42af90c1596374f2057a919312bb0983454872c4c"
   },
   "subject_qualification_policy_digests": [],
+  "personhood_policy_digest": null,
   "cloud_https_origin": null,
   "cloud_service_id": null,
   "governance_locator": null,

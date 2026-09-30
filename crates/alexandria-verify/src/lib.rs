@@ -19,6 +19,7 @@ pub mod did;
 pub mod governance;
 pub mod hash;
 pub mod json;
+pub mod personhood;
 pub mod qualification;
 pub mod talent;
 pub mod trust;

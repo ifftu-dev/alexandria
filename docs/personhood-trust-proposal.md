@@ -1,11 +1,13 @@
 # Personhood issuer trust and account binding — proposal
 
-Status: proposed design, not implemented or activated. The current lab still uses
-fixed synthetic input and grants no authority. The user selected a private
-verification receipt as the first real-input outcome on 2026-09-30, with no
-account permissions change. The protocol and operational details below remain
-for review. Account-creation, voting, reputation, and other privileges are out
-of scope.
+Status (2026-09-30): account-bound private synthetic receipts are implemented and
+device-tested. The release-bundled real-document policy parser and issuer checks
+are implemented, but no production policy or issuer is activated and real input
+remains disabled. The selected first real-input outcome is a private receipt
+with no account permissions change. Reviewed app releases will carry policy
+updates. The agreed pilot limits are seven-day document freshness, five-minute
+future clock skew, and at most 24-hour receipts. Account-creation, voting,
+reputation, and other privileges remain out of scope.
 
 ## What the receipt would mean
 
@@ -28,39 +30,74 @@ data with another account.
 
 ## Trust configuration
 
-Introduce a versioned personhood policy document whose exact canonical bytes and
-digest are pinned through the network profile, following the existing
-qualification-policy pattern. No new trust fields are being added by this
-proposal. A future profile migration must define them explicitly and fail closed
-when a required policy is absent or inconsistent.
+`alexandria_verify::personhood::PinnedDocumentPolicy` loads a versioned policy
+whose exact JCS bytes must match `personhood_policy_digest` in the network
+profile. Preprod profile revision 2 sets this optional field to `null` and
+embeds no document: real-document policy is disabled. A missing field likewise
+means disabled for older profiles. A partial configuration, digest mismatch,
+wrong network, or malformed policy fails application setup. Policy expiry is
+checked whenever public signals are evaluated, including eventual acceptance.
+The checker is a foundation API; real-input challenge/receipt integration is
+still outstanding.
 
-The policy would contain:
+The implemented schema and remaining receipt authority boundary are:
 
-| Field | Proposed rule |
+| Field | Rule |
 | --- | --- |
-| `network_id`, `policy_version`, `policy_digest` | Match the active network and exact reviewed policy bytes. Never take these values from an untrusted proof. |
+| `schema_version`, `network_id`, `policy_version` | Schema 1, active network, nonzero policy version. The digest is computed over the document and pinned separately in the network profile. |
+| `kind`, `document_format` | Exactly `local_document_receipt` and `aadhaar_secure_qr_v2`. |
 | `circuit_id`, `verification_key_sha256` | Select a bundled verifier and exact key. Reject caller-supplied keys, URLs, and circuit substitutions. |
-| `document_issuers` | Reviewed issuer-key hashes with provenance, validity intervals, and disabled/revoked status. Test keys are a separate synthetic policy and are never production fallbacks. |
-| `verification_authorities` | Explicit identities allowed to sign challenges and receipts for this purpose. Document issuers and Alexandria receipt signers are different roles. |
+| `issuers` | Unique IDs, circuit-key hashes and certificate SHA-256 digests, official HTTPS source, validity intervals, and active/disabled/revoked status. The bundled synthetic issuer is rejected. Certificate provenance still requires release review. |
+| `valid_from`, `valid_until` | Required policy interval, start inclusive and end exclusive. Stale policy cannot accept a proof. |
 | `nullifier_scope`, `nullifier_seed` | A verifier-selected, fixed network-and-purpose scope; all accepting verifiers must require the exact seed. Do not let clients choose it. |
-| `max_document_age_seconds` | Proposed pilot value: 604800 (seven days), subject to product and issuer review. |
-| `max_future_skew_seconds` | Proposed pilot value: 300. |
-| `challenge_ttl_seconds` | Proposed value: 120, measured by the issuing verifier. |
-| `receipt_ttl_seconds` | Proposed ceiling: 86400, also bounded by document freshness and issuer/policy validity. |
-| `attributes` | All four disclosure outputs must be zero in this initial flow. No age, gender, postal code, or state claim. |
+| `max_document_age_seconds` | Pilot limit 604800 (seven days); the parser permits only positive values up to this ceiling. At the exact freshness expiry the document is rejected. |
+| `max_future_skew_seconds` | Pilot limit 300; larger allowances are rejected. |
+| `challenge_ttl_seconds` | Positive value at most 120, measured by the issuing verifier. |
+| `receipt_ttl_seconds` | Positive value at most 86400; actual expiry is the earliest of this deadline, document freshness expiry, issuer expiry, and policy expiry. |
+
+All four attribute outputs must be zero; this is enforced directly rather than
+configured by a policy field. The policy is capped at 32 KiB and 32 issuers;
+unknown fields, duplicate JSON keys, noncanonical bytes and scalar aliases fail.
+The issuer must be active and valid both now and at the document timestamp.
+No allowance extends issuer or policy validity. The public-signal check does
+not itself verify Groth16 proofs, account signatures, challenges, or replay state.
 
 Existing relay receipt keys are not implicitly authorized for personhood.
 Production issuer material must be obtained through a reviewed authoritative
-channel and its circuit key hash independently reproduced. We have not established
-that operational trust process yet. Unknown keys, unavailable required status,
-expired policies, and revoked issuers cannot produce an accepted receipt. A
+channel and its circuit key hash independently reproduced. Unknown keys,
+unavailable required status, expired policies, and revoked issuers cannot produce
+an accepted receipt. A
 document timestamp alone is not evidence that a compromised key signed before
 compromise; a revoked issuer must not be grandfathered solely on that timestamp.
 
-For the next synthetic implementation, the verifier is local, uses only a test
-policy, and issues a clearly marked diagnostic receipt. Local clock and database
-state are not an authority against a device owner. A remotely relied-on receipt
+Updates arrive only in reviewed app releases, with an explicit policy expiry.
+There is no remote fetch or fallback to synthetic trust. Revocation changes
+therefore reach existing installations only when they update; policy expiry
+bounds stale acceptance but cannot provide immediate revocation. A release must
+review certificate purpose, chain/status, DER fingerprint, validity, circuit key
+hash, policy lifetime and seed continuity before embedding canonical bytes and
+their digest together. No production expiry date or seed has yet been selected.
+
+The existing synthetic verifier is local, uses only a test policy, and issues a
+clearly marked diagnostic receipt. Local clock and database state are not an
+authority against a device owner. A remotely relied-on receipt
 requires a separately designated verifier with authoritative time and storage.
+That authority is not declared by the document-issuer policy. Document issuers
+and Alexandria receipt signers are separate roles.
+
+### Production certificate review still required
+
+The [UIDAI certificate catalogue](https://uidai.gov.in/en/data-and-download),
+checked on 2026-09-30, lists a 2026 certificate under Paperless Offline eKYC,
+while its Secure QR subsection lists certificates expiring in 2021 and 2020.
+The [2026 certificate](https://backend.uidai.gov.in/get/files/media/document/2026-07/uidai_offline_publickey_2026.cer)
+was downloaded and inspected with OpenSSL: RSA-2048, exponent 65537, validity
+2026-02-03 09:56:12 UTC through 2029-02-03 17:28:36 UTC, DER SHA-256 fingerprint
+`e0304b9e61ee3640ecddae2db4b617f2e2678f57dbc2826c2f86ac5c04f277df`.
+Inspection is not chain/status validation or evidence that this key signs the
+QR format accepted by the pinned circuit. Its production circuit hash has not
+been independently reproduced. No downloaded certificate is trusted or bundled
+by this change. Confirm those properties before enabling real input.
 
 ## Challenge and account binding
 
@@ -147,9 +184,18 @@ require a canonical shared registry/consensus design before any such guarantee.
 
 ## Next implementation slice and acceptance tests
 
-Continue with synthetic input only. Add policy parsing, canonical challenge and
-submission types, pure verification, and a transactional challenge store. Keep
-the real-input selector and all account privileges disabled. Use an injected test
+The synthetic challenge/submission protocol, pure Groth16 verification and
+transactional store are implemented; see [the lab guide](personhood-lab.md)
+for host and OnePlus results. The separate real-document policy foundation has
+six test groups covering pinning, malformed configuration, issuer status,
+expiry boundaries and signal restrictions. It is not yet connected to a real
+document parser or receipt issuance path.
+
+Next, complete the production certificate review, pin a reviewed policy and
+implement bounded real-input parsing with private temporary-data cleanup. Reuse
+the tested account/challenge protocol with the real policy, and recheck policy
+at receipt acceptance. Keep the real-input selector disabled until these gates
+pass. Use an injected test
 clock in unit tests; do not expose a caller-controlled verification time in
 production IPC or a service API.
 
@@ -171,7 +217,9 @@ The acceptance suite must cover:
 - Cancellation, backgrounding, profile locking, and process death leave no
   usable partial receipt or retained real-input material.
 
-Before the later real-input milestone, decide the receipt's intended relying
-party, the issuer update/revocation process, verifier operators, retention, and
-the proposed freshness windows. Account gating or global uniqueness would be an
-additional design decision, not a side effect of this receipt flow.
+Before real input, finish certificate and circuit-format validation, choose the
+policy lifetime and stable seed, specify real-input retention/cleanup, and test
+the integrated path. Release delivery and pilot freshness limits are agreed.
+External relying parties or verifier operators need a separate authority design.
+Account gating or global uniqueness would be an additional design decision,
+not a side effect of this private receipt flow.

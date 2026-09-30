@@ -14,8 +14,7 @@ pub use groth16::Groth16Proof;
 
 pub const PURPOSE: &str = "personhood-receipt-v1";
 pub const CIRCUIT: &str = "anon-aadhaar-v2.0.0-synthetic";
-pub const TEST_ISSUER: &str =
-    "15134874015316324267425466444584014077184337590635665158241104437045239495873";
+pub use alexandria_verify::personhood::SYNTHETIC_ISSUER as TEST_ISSUER;
 pub const FIXTURE_TIMESTAMP: u64 = 1713555000;
 const MAX_TIME: u64 = (1u64 << 53) - 1;
 

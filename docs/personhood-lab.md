@@ -34,7 +34,7 @@ This is a **synthetic diagnostic**, not an externally trusted attestation of
 personhood. Its clock and database belong to the device owner. Only the bundled
 test issuer and exact historical fixture timestamp are accepted. The synthetic
 policy permits that fixture for ten years from its timestamp; it is not the
-proposed seven-day freshness policy for a future real-input pilot. Receipt
+agreed seven-day freshness policy for a future real-input pilot. Receipt
 validity is at most 24 hours and is also bounded by document and policy expiry.
 All four optional attribute outputs must remain zero.
 
@@ -61,6 +61,60 @@ The implementation is in `crates/alexandria-personhood`, the profile-scoped
 `commands/personhood_receipts.rs`, and the existing Android lab worker bridge.
 No production issuer roots, real-input parser, network receipt service, or
 account privilege integration are enabled.
+
+## Real-document policy foundation
+
+The separate `alexandria_verify::personhood` module implements the issuer-policy
+boundary for the first real-input pilot. Updates will arrive through reviewed
+app releases. The network profile pins the SHA-256 of the exact canonical JCS
+policy bytes; startup rejects a missing document for a configured pin, an
+unpinned document, a mismatched network/digest, or invalid policy structure.
+Preprod profile revision 2 has `personhood_policy_digest: null` and no embedded
+policy, so production trust remains disabled. Older profiles that omit this
+optional field also remain disabled.
+
+The approved pilot ceilings are seven days of document age, five minutes of
+future clock skew, a 120-second challenge and 24 hours of receipt validity.
+These limits do not alter the historical synthetic fixture. A real-document
+receipt's expiry must also precede document freshness expiry and issuer/policy
+expiry. Time intervals end exclusively. The checker rejects unknown, disabled,
+revoked and expired issuers, the synthetic issuer, changed circuit/key/seed,
+noncanonical field values, and nonzero optional attribute outputs. Policy
+expiry is checked at verification, not merely at startup.
+
+This module checks policy and public signals only. Real-input parsing and
+challenge/receipt integration remain unimplemented; a caller must still verify
+the proof, account signature, challenge, current policy and replay state at
+acceptance. No account permissions change is planned for the pilot. There is no
+remote policy fetch, and release-only delivery cannot provide immediate
+revocation to installations that have not updated. Expiry fails closed using
+the verifier's clock; a local device clock is not authoritative against its
+owner.
+
+No production signing certificate has been approved. The authoritative-source
+inspection, candidate certificate fingerprint, and remaining purpose,
+chain/status and circuit-hash checks are recorded in the
+[trust proposal](personhood-trust-proposal.md#production-certificate-review-still-required).
+An official source URL in a policy is provenance metadata, not runtime
+certificate validation. Certificate expiry alone does not establish QR-circuit
+compatibility.
+
+Host checks for this foundation on 2026-09-30:
+
+```sh
+cargo test -p alexandria-verify -p alexandria-personhood
+cargo test -p alexandria-node --features personhood-lab network_profile
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --features personhood-lab -- -D warnings
+```
+
+The verifier/personhood suites passed, including six new policy test groups;
+all 15 network-profile tests passed. The policy tests use fabricated metadata,
+not production issuers or real documents. They cover pinning, bounded/ambiguous
+JSON, network/circuit separation, issuer status, freshness boundaries and
+receipt-expiry caps. Formatting and workspace Clippy passed. This foundation
+has not been installed or tested on the OnePlus; the device results below are
+for the synthetic receipt milestone.
 
 ## Build an isolated Android app
 
@@ -297,7 +351,8 @@ results.
 The real-input design is described in
 [Personhood issuer trust and account binding](personhood-trust-proposal.md).
 Its synthetic account-binding and private-receipt subset is implemented above;
-production issuer trust and real document input remain proposed and disabled.
+the real-document policy foundation is implemented separately, while production
+issuer trust and real document input remain disabled.
 
 This is a developer experiment, not a personhood credential implementation.
 Testing a simulated memory callback does not establish survival under a real

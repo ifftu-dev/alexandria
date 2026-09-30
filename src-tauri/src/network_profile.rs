@@ -3,6 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
 
 use alexandria_verify::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
+use alexandria_verify::personhood::PinnedDocumentPolicy;
 use alexandria_verify::qualification::QualificationPolicySet;
 use ed25519_dalek::VerifyingKey;
 use libp2p::PeerId;
@@ -33,6 +34,7 @@ const EMBEDDED_BOOTSTRAP_REGISTRY_JSON: &[u8] =
 /// `subject_qualification_policy_digests`, and every pinned digest must have
 /// its document here. None are pinned yet, so no opinion privilege applies.
 const EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS: &[&[u8]] = &[];
+const EMBEDDED_PERSONHOOD_POLICY_DOCUMENT: Option<&[u8]> = None;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -47,6 +49,8 @@ pub struct NetworkProfile {
     pub stake_registry_founder_keys: Vec<NamedVerifyingKey>,
     pub signed_bootstrap_registry_identity: ResourceIdentity,
     pub subject_qualification_policy_digests: Vec<String>,
+    #[serde(default)]
+    pub personhood_policy_digest: Option<String>,
     pub cloud_https_origin: Option<String>,
     pub cloud_service_id: Option<String>,
     pub governance_locator: Option<String>,
@@ -96,6 +100,8 @@ pub enum NetworkProfileError {
     BootstrapRegistryMismatch,
     #[error("subject qualification policies are invalid: {0}")]
     QualificationPolicy(String),
+    #[error("personhood issuer policy is invalid: {0}")]
+    PersonhoodPolicy(String),
 }
 
 static EMBEDDED_PREPROD: LazyLock<Result<NetworkProfile, NetworkProfileError>> =
@@ -235,6 +241,13 @@ impl NetworkProfile {
             &self.subject_qualification_policy_digests,
         )?;
 
+        if let Some(digest) = &self.personhood_policy_digest {
+            if digest.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                return invalid("personhood policy digest must be lowercase hexadecimal");
+            }
+            validate_unique_digests("personhood policy digest", std::slice::from_ref(digest))?;
+        }
+
         match (&self.cloud_https_origin, &self.cloud_service_id) {
             (None, None) => {}
             (Some(origin), Some(service_id)) => {
@@ -283,7 +296,20 @@ impl NetworkProfile {
             return Err(NetworkProfileError::BootstrapRegistryMismatch);
         }
         self.qualification_policies(EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS)?;
+        self.personhood_policy(EMBEDDED_PERSONHOOD_POLICY_DOCUMENT)?;
         Ok(())
+    }
+
+    pub fn personhood_policy(
+        &self,
+        document: Option<&[u8]>,
+    ) -> Result<PinnedDocumentPolicy, NetworkProfileError> {
+        PinnedDocumentPolicy::from_pinned(
+            document,
+            self.personhood_policy_digest.as_deref(),
+            &self.network_id,
+        )
+        .map_err(|error| NetworkProfileError::PersonhoodPolicy(error.to_string()))
     }
 
     /// Build the policy set from exact policy documents. Every pinned digest
@@ -476,6 +502,21 @@ mod tests {
             profile.verify_embedded_resources(),
             Err(NetworkProfileError::QualificationPolicy(_))
         ));
+    }
+
+    #[test]
+    fn real_personhood_policy_is_disabled_and_a_pin_requires_its_document() {
+        let mut profile = valid_profile();
+        assert!(!profile.personhood_policy(None).unwrap().is_configured());
+        assert!(profile.personhood_policy(Some(b"{}")).is_err());
+        profile.personhood_policy_digest = Some("ab".repeat(32));
+        profile.validate().unwrap();
+        assert!(matches!(
+            profile.verify_embedded_resources(),
+            Err(NetworkProfileError::PersonhoodPolicy(_))
+        ));
+        profile.personhood_policy_digest = Some("AB".repeat(32));
+        assert!(profile.validate().is_err());
     }
 
     #[test]

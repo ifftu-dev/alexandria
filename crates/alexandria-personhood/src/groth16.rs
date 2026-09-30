@@ -7,8 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{decode, Error, Result};
 
-pub const VERIFICATION_KEY_SHA256: &str =
-    "40f2ea24b56ffe2b6e6e3578053cbda15e773cb560697bac883a404077fcf177";
+pub use alexandria_verify::personhood::VERIFICATION_KEY_SHA256;
 const KEY: &[u8] = include_bytes!("../assets/vkey.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
