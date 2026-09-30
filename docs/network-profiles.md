@@ -1,8 +1,8 @@
 # Network Profiles
 
-**Status:** Version-1 preprod profile implemented in the main app; coordinated
+**Status:** Schema-version-1 preprod profile, revision 2, implemented in the main app; coordinated
 wire-protocol and service migration remains in progress (N01)
-**Last updated:** 2026-09-15
+**Last updated:** 2026-09-30
 
 ## Purpose
 
@@ -27,13 +27,14 @@ opens the profile manager or activates a user profile.
 |---|---|---|
 | `schema_version` | Parser compatibility version | `1` |
 | `network_id` | Immutable application-network identity | `preprod` |
-| `profile_revision` | Revision of this network's configuration | `1` |
+| `profile_revision` | Revision of this network's configuration | `2` |
 | `cardano_network` / `cardano_network_magic` | Ledger selection | Cardano preprod / `1` |
 | `relays` | Relay PeerId, DNS name, port, fallback IPs, and registry HTTPS origin | Mumbai and Frankfurt Fly.io relays |
 | `receipt_issuer_keys` | Relay PeerIds trusted to sign username receipts | Both configured relays |
 | `stake_registry_founder_keys` | Named Ed25519 keys that verify the bootstrap registry | Three founder public keys |
 | `signed_bootstrap_registry_identity` | Expected schema and SHA-256 of the bundled signed registry | Bound to `bootstrap_registry.json` |
 | `subject_qualification_policy_digests` | SHA-256 digests of the exact canonical subject qualification policies this network pins; each needs its document embedded in the build, and app setup refuses a missing, extra or overlapping policy | Empty: no pinned policy, so field-opinion posting is refused until reviewed demo policies are pinned |
+| `personhood_policy_digest` | Optional lowercase SHA-256 digest of the exact canonical JCS real-document issuer policy; a configured pin requires its matching document embedded in the build | Disabled (`null`), with no embedded policy or trusted production issuer |
 | `cloud_https_origin` / `cloud_service_id` | Optional Alexandria Cloud identity | Disabled (`null`) |
 | `governance_locator` / committee fields | Optional governance/committee service identity | Disabled |
 | `protocol_namespace` | Namespace intended for all network protocols | `/alexandria/preprod` |
@@ -65,6 +66,14 @@ The parser rejects:
 An invalid profile or resource identity prevents application setup. This is a
 network activation boundary, not a warning-only preference.
 
+For personhood policy, an omitted or `null` digest with no embedded document
+means disabled. A configured pin without its document, an unpinned document,
+a digest/network mismatch, or malformed policy prevents application setup.
+The policy checker also rejects expired policy when evaluating public signals;
+startup validation alone does not establish current trust. Real document input
+remains disabled. See the [Personhood Lab guide](personhood-lab.md#real-document-policy-foundation)
+for the implemented boundary and pilot limits.
+
 ## Immutable local profile binding
 
 `profiles_index.json` format version 2 stores `network_id` on every
@@ -90,6 +99,7 @@ The main app currently reads the profile for:
 - username receipt-issuer trust;
 - stake-registry founder verification keys;
 - the embedded bootstrap-registry digest;
+- the optional real-document issuer-policy pin and embedded-policy validation;
 - the optional governance anchor; and
 - DHT provider-record key namespacing.
 
@@ -133,3 +143,7 @@ the resources it names. At minimum:
 
 There is no signed remote profile-update mechanism yet. Changing an embedded
 trust root requires a new application release.
+Personhood issuer-policy updates likewise require reviewed app releases, with
+an explicit policy expiry that rejects stale policy at verification. There is
+no remote policy fetch or immediate revocation delivery to installations that
+have not updated.
