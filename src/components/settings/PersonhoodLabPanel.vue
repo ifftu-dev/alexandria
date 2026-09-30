@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 import { usePersonhoodLab } from '@/composables/usePersonhoodLab'
-import { onProfileLocked } from '@/composables/useProfiles'
+import { usePersonhoodReceipts } from '@/composables/usePersonhoodReceipts'
+import { useProfiles, onProfileLocked } from '@/composables/useProfiles'
 import { AppAlert, AppButton } from '@/components/ui'
 
 const lab = usePersonhoodLab()
+const privateReceipts = usePersonhoodReceipts()
+const { isUnlocked } = useProfiles()
 const { status, busy, pending, error } = lab
 const labels: Record<string, string> = {
   idle: 'Ready', downloading: 'Downloading test key', checking: 'Checking key integrity',
@@ -24,14 +27,14 @@ async function poll() {
 }
 
 function visibilityChanged() {
-  if (document.hidden) void lab.cancel()
+  if (document.hidden) { void privateReceipts.cancel(); void lab.cancel() }
 }
 
 onMounted(() => {
   mounted = true
   document.addEventListener('visibilitychange', visibilityChanged)
-  stopProfileHook = onProfileLocked(() => lab.cancel())
-  void poll()
+  stopProfileHook = onProfileLocked(async () => { await privateReceipts.cancel(true); await lab.cancel() })
+  void poll().then(() => { if (mounted && status.value?.enabled && isUnlocked.value) void privateReceipts.refresh() })
 })
 
 onUnmounted(() => {
@@ -39,6 +42,7 @@ onUnmounted(() => {
   clearTimeout(timer)
   stopProfileHook?.()
   document.removeEventListener('visibilitychange', visibilityChanged)
+  void privateReceipts.cancel(true)
   void lab.cancel()
 })
 </script>
@@ -68,12 +72,30 @@ onUnmounted(() => {
       Prover peak memory: {{ (status.result.peak_rss_bytes / 1048576).toFixed(0) }} MiB.
     </AppAlert>
     <div class="flex flex-wrap gap-2">
-      <AppButton v-if="status.key_status !== 'stored'" :disabled="busy || pending" @click="lab.act('download')">
+      <AppButton v-if="status.key_status !== 'stored'" :disabled="busy || pending || privateReceipts.pending.value" @click="lab.act('download')">
         {{ status.key_status === 'partial' ? 'Resume key download' : 'Download test key · 612 MB' }}
       </AppButton>
-      <AppButton v-else :disabled="busy || pending" @click="lab.act('prove')">Run synthetic test</AppButton>
-      <AppButton v-if="busy || pending" variant="outline" :disabled="status.phase === 'cancelling'" @click="lab.act('cancel')">Cancel</AppButton>
-      <AppButton v-if="status.key_status !== 'missing'" variant="outline" :disabled="busy || pending" @click="lab.act('remove_key')">Remove test key</AppButton>
+      <AppButton v-else :disabled="busy || pending || privateReceipts.pending.value" @click="lab.act('prove')">Run synthetic test</AppButton>
+      <AppButton v-if="busy || pending || privateReceipts.pending.value" variant="outline" :disabled="status.phase === 'cancelling'" @click="privateReceipts.cancel(); lab.act('cancel')">Cancel</AppButton>
+      <AppButton v-if="status.key_status !== 'missing'" variant="outline" :disabled="busy || pending || privateReceipts.pending.value" @click="lab.act('remove_key')">Remove test key</AppButton>
+    </div>
+    <div class="space-y-3 border-t border-border pt-4">
+      <h4 class="font-medium text-foreground">Private synthetic receipts</h4>
+      <p class="text-sm text-muted-foreground">
+        Bind a fresh synthetic proof to this unlocked profile and save a private diagnostic receipt.
+        This does not verify a real person or change account permissions. Receipts stay on this device.
+      </p>
+      <p v-if="!isUnlocked" class="text-sm text-muted-foreground">Create or unlock a profile to test account binding.</p>
+      <AppButton v-else :disabled="busy || pending || privateReceipts.pending.value || status.key_status !== 'stored'" @click="privateReceipts.start()">
+        {{ privateReceipts.pending.value ? 'Verifying private receipt…' : 'Create private synthetic receipt' }}
+      </AppButton>
+      <AppAlert v-if="privateReceipts.error.value" variant="error">{{ privateReceipts.error.value }}</AppAlert>
+      <ul v-if="isUnlocked" class="space-y-2 text-sm text-muted-foreground">
+        <li v-for="receipt in privateReceipts.receipts.value" :key="receipt.id">
+          Synthetic receipt · {{ new Date(receipt.created_at * 1000).toLocaleString() }}
+          · expires {{ new Date(receipt.expires_at * 1000).toLocaleString() }}
+        </li>
+      </ul>
     </div>
   </section>
 </template>

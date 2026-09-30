@@ -6,6 +6,7 @@ members = [
     "crates/alexandria-verify",
     "crates/alexandria-learning-contracts",
     "crates/alexandria-decisions",
+    "crates/alexandria-personhood",
     "crates/alexandria-studio",
     "crates/alexandria-mcp",
     "crates/iroh-moq",

@@ -28,12 +28,14 @@ DOC = ROOT / "docs" / "database-schema.md"
 # the MIGRATIONS list. An entry the generator cannot resolve is an error, not a
 # gap: a document missing a migration would describe a schema no build has.
 EXTERNAL_SOURCES = {
+    "MIGRATION_003_PERSONHOOD": ROOT / "crates" / "alexandria-personhood" / "src" / "schema.sql",
     "alexandria_studio::store::SCHEMA": ROOT / "crates" / "alexandria-studio" / "src" / "schema.sql",
 }
 
 # Domain assignment by name. Every table must match exactly one rule; the
 # generator fails otherwise, so a new table has to be placed deliberately.
 DOMAINS = [
+    ("Private synthetic receipts", r"^personhood_private_challenges$"),
     ("Identity", r"^local_identity$"),
     ("Guardianship", r"^guardian_"),
     ("Taxonomy", r"^(subject_fields|subjects|skills|skill_prerequisites|skill_relations|taxonomy_versions)$"),
@@ -61,7 +63,7 @@ def migrations():
     """Every (version, name, sql) in the order the runner applies them."""
     text = SCHEMA.read_text()
     listing = text.split("pub const MIGRATIONS", 1)[1].split("];", 1)[0]
-    entries = re.findall(r'\(\s*(\d+),\s*"([^"]+)",\s*([A-Za-z0-9_:]+)\s*\)', listing)
+    entries = re.findall(r'\(\s*(\d+),\s*"([^"]+)",\s*([A-Za-z0-9_:]+)\s*,?\s*\)', listing)
     if not entries:
         sys.exit("no migrations found in schema.rs")
     resolved = []

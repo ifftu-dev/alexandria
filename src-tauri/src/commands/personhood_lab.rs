@@ -27,7 +27,7 @@ pub struct PersonhoodLabStatus {
     pub result: Option<PersonhoodLabResult>,
 }
 
-fn enabled() -> bool {
+pub(super) fn enabled() -> bool {
     cfg!(all(
         feature = "personhood-lab",
         debug_assertions,
@@ -69,61 +69,68 @@ pub async fn personhood_lab_action(
 }
 
 #[cfg(not(target_os = "android"))]
-fn invoke_native(_action: &str) -> Result<PersonhoodLabStatus, String> {
+pub(super) fn invoke_native<T: serde::de::DeserializeOwned>(_action: &str) -> Result<T, String> {
     Err("Personhood Lab is only available on Android".into())
 }
 
 #[cfg(target_os = "android")]
-fn invoke_native(action: &str) -> Result<PersonhoodLabStatus, String> {
+pub(super) fn invoke_native<T: serde::de::DeserializeOwned>(action: &str) -> Result<T, String> {
     use jni::objects::{JClass, JObject, JString, JValue};
 
     let ctx = ndk_context::android_context();
     // ndk_context retains the VM and application global reference for process lifetime.
     let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-    let json = env
-        .with_local_frame(16, |env| -> jni::errors::Result<String> {
-            let raw = env.get_native_interface();
-            let local = unsafe {
-                let table = (*raw)
-                    .as_ref()
-                    .ok_or(jni::errors::Error::NullPtr("JNIEnv"))?;
-                let new_ref = table
-                    .NewLocalRef
-                    .ok_or(jni::errors::Error::JNIEnvMethodNotFound("NewLocalRef"))?;
-                new_ref(raw, ctx.context().cast())
-            };
-            if local.is_null() {
-                return Err(jni::errors::Error::NullPtr("Application"));
+    let response = env.with_local_frame(16, |env| -> jni::errors::Result<String> {
+        let raw = env.get_native_interface();
+        let local = unsafe {
+            let table = (*raw)
+                .as_ref()
+                .ok_or(jni::errors::Error::NullPtr("JNIEnv"))?;
+            let new_ref = table
+                .NewLocalRef
+                .ok_or(jni::errors::Error::JNIEnvMethodNotFound("NewLocalRef"))?;
+            new_ref(raw, ctx.context().cast())
+        };
+        if local.is_null() {
+            return Err(jni::errors::Error::NullPtr("Application"));
+        }
+        let app = unsafe { JObject::from_raw(local) };
+        let loader = env
+            .call_method(&app, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?
+            .l()?;
+        let name = env.new_string("org.alexandria.node.MainActivity")?;
+        let class = JClass::from(
+            env.call_method(
+                &loader,
+                "loadClass",
+                "(Ljava/lang/String;)Ljava/lang/Class;",
+                &[JValue::Object(&name)],
+            )?
+            .l()?,
+        );
+        let argument = env.new_string(action)?;
+        let response = JString::from(
+            env.call_static_method(
+                &class,
+                "personhoodLab",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&argument)],
+            )?
+            .l()?,
+        );
+        let result: String = env.get_string(&response)?.into();
+        Ok(result)
+    });
+    let json = match response {
+        Ok(json) => json,
+        Err(error) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_clear();
             }
-            let app = unsafe { JObject::from_raw(local) };
-            let loader = env
-                .call_method(&app, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?
-                .l()?;
-            let name = env.new_string("org.alexandria.node.MainActivity")?;
-            let class = JClass::from(
-                env.call_method(
-                    &loader,
-                    "loadClass",
-                    "(Ljava/lang/String;)Ljava/lang/Class;",
-                    &[JValue::Object(&name)],
-                )?
-                .l()?,
-            );
-            let argument = env.new_string(action)?;
-            let response = JString::from(
-                env.call_static_method(
-                    &class,
-                    "personhoodLab",
-                    "(Ljava/lang/String;)Ljava/lang/String;",
-                    &[JValue::Object(&argument)],
-                )?
-                .l()?,
-            );
-            let result: String = env.get_string(&response)?.into();
-            Ok(result)
-        })
-        .map_err(|e| format!("Personhood Lab bridge: {e}"))?;
+            return Err(format!("Personhood Lab bridge: {error}"));
+        }
+    };
     serde_json::from_str(&json).map_err(|e| format!("Invalid Personhood Lab status: {e}"))
 }
 

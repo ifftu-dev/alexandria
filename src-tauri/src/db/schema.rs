@@ -44,7 +44,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // policies, tutor threads and lesson feedback. Owned by the studio crate
     // so its tables and the code that reads them change together.
     (2, "instructor_studio", alexandria_studio::store::SCHEMA),
+    (3, "private_personhood_receipts", MIGRATION_003_PERSONHOOD),
 ];
+
+const MIGRATION_003_PERSONHOOD: &str =
+    include_str!("../../../crates/alexandria-personhood/src/schema.sql");
 
 const MIGRATION_001_BASELINE: &str = r#"
 CREATE TABLE app_settings (

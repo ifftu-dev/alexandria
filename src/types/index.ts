@@ -2137,3 +2137,12 @@ export interface LearningDecisionReview {
     decisions: { skill_id: string; relation: DecisionJudgment; bloom: DecisionJudgment; evidence: { start: number; end: number } | null }[]
   }
 }
+
+export interface PersonhoodPrivateReceipt {
+  id: string
+  kind: 'synthetic_diagnostic'
+  subject_did: string
+  network_id: string
+  created_at: number
+  expires_at: number
+}
