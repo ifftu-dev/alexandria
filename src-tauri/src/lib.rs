@@ -1254,6 +1254,8 @@ pub fn run() {
             plugins::asset_protocol::handle(&plugins_dir, request)
         })
         .invoke_handler(tauri::generate_handler![
+            commands::personhood_lab::personhood_lab_status,
+            commands::personhood_lab::personhood_lab_action,
             commands::health::check_health,
             commands::health::read_diag_log,
             commands::health::frontend_log,

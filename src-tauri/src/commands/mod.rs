@@ -27,6 +27,7 @@ pub mod instructor;
 pub mod integrity;
 pub mod interview;
 pub mod opinions;
+pub mod personhood_lab;
 pub mod pinning;
 pub mod plugins;
 pub mod presentation;

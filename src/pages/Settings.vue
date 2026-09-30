@@ -23,6 +23,7 @@ import {
 import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
+import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
@@ -955,6 +956,7 @@ function onSectionClick(id: SettingsSectionId) {
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->
                 <template v-else-if="activeSection === 'advanced'">
+                  <PersonhoodLabPanel />
                   <AdvancedSettingsPanel />
                 </template>
               </div>

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "aadhaar-verifier.wasm",
+    "url": "https://anon-aadhaar-artifacts.s3.eu-central-1.amazonaws.com/v2.0.0/aadhaar-verifier.wasm",
+    "bytes": 10469686,
+    "sha256": "4894923663fafda95beb70abca4112ea97a62058c9a46419a274f04236f10d4f"
+  },
+  {
+    "name": "circuit_final.zkey",
+    "url": "https://anon-aadhaar-artifacts.s3.eu-central-1.amazonaws.com/v2.0.0/circuit_final.zkey",
+    "bytes": 612082146,
+    "sha256": "0d443ea85279b0370b53202f5e768ca9098cfcb5bb14f8ca8323d2266822c492"
+  },
+  {
+    "name": "vkey.json",
+    "url": "https://anon-aadhaar-artifacts.s3.eu-central-1.amazonaws.com/v2.0.0/vkey.json",
+    "bytes": 4388,
+    "sha256": "40f2ea24b56ffe2b6e6e3578053cbda15e773cb560697bac883a404077fcf177"
+  },
+  {
+    "name": "testCertificate.pem",
+    "url": "https://anon-aadhaar.s3.ap-south-1.amazonaws.com/testCertificate.pem",
+    "bytes": 1442,
+    "sha256": "a025f6e83f50885299d91a881ab667fe08aa8206062ea560e81d06a59bfdaae6"
+  }
+]

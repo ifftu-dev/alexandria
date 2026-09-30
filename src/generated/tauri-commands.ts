@@ -202,6 +202,8 @@ export const TAURI_COMMANDS = [
   "p2p_stop",
   "pairing_accept_code",
   "pairing_generate_code",
+  "personhood_lab_action",
+  "personhood_lab_status",
   "plugin_browse_catalog",
   "plugin_clear_media_grants",
   "plugin_get_docs",

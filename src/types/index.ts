@@ -2104,3 +2104,20 @@ export interface StudioAssistantConnection {
   grant: StudioAssistantGrant
   connection_file: string
 }
+export interface PersonhoodLabResult {
+  elapsed_ms: number
+  peak_rss_bytes: number
+}
+
+export interface PersonhoodLabStatus {
+  enabled: boolean
+  phase: string
+  key_status: string
+  downloaded_bytes: number
+  total_bytes: number
+  elapsed_ms: number
+  error: string | null
+  result: PersonhoodLabResult | null
+}
+
+export type PersonhoodLabAction = 'download' | 'prove' | 'cancel' | 'remove_key'
