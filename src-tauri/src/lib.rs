@@ -1353,6 +1353,8 @@ pub fn run() {
             commands::studio_mcp::studio_grant_assistant,
             commands::studio_mcp::studio_revoke_assistant,
             commands::decisions::decision_settings,
+            commands::decisions::decision_export_shadow,
+            commands::decisions::decision_clear_shadow,
             commands::decisions::decision_save_settings,
             commands::decisions::decision_learning_review,
             commands::decisions::decision_content_review,

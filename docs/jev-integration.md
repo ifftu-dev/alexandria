@@ -10,11 +10,21 @@ Open **Instructor → AI settings → Optional Jev checks**. Configuration and t
 - Studio: check an editable output against selected course sources, outcomes, prerequisites, and worked-example expectations. Checks never apply a draft. Existing review/apply conflict checks still control writes.
 - Search: local results appear first. Optional relevance checks use up to 20 candidates per domain; local ordering remains on failure and once keyboard navigation begins. This cannot recover candidates absent from retrieval.
 - Tutor: an explicit check uses only the current locally available text lesson and the last two conversation messages. Existing tutor access rules and assessment exclusions apply. It neither generates a reply nor reads answer keys. CID-only lessons keep the existing tutor behavior without this optional check.
-- `decision_learning_review` also supports `learning_goal` for future callers, using the same typed contract. The current goal-picker surface checks pasted job descriptions; links retain the local flow.
+- **Goals → Add a goal → Learning goal** accepts a free-text learning objective, offers local matching and an explicit Jev review using the `learning_goal` rubric. Model suggestions remain unchecked until selected. Source, tab and profile changes discard pending local/model results. Job links retain the local flow.
 
 Assist requires a reviewed task-specific evaluation and the operator environment variable `ALEXANDRIA_JEV_APPROVED_TASKS` (comma-separated `job_description,learning_goal,document_claim,studio_review,search,tutor`). This is an operator attestation, not an automatic claim that evaluation passed. Enable only tasks and source languages covered by the approved report. No task is approved by this change. Shadow checks return no model-derived changes to the UI.
 
-Profile changes and settings revisions invalidate pending responses. Learning checks verify that candidate definitions still match the bundled snapshot before and after the provider call. Source edits invalidate the visible review. No database lock spans network I/O. Model input excludes credential records and assessment keys.
+Profile changes and settings revisions invalidate pending responses. Learning checks verify that candidate definitions still match the bundled snapshot before returning a provider result. Source edits invalidate the visible review. No database lock spans network I/O. Model input excludes credential records and assessment keys.
+
+## Local learning shadow comparisons
+
+Storage is a separate profile opt-in, off for existing and new settings. Enable **Keep local learning shadow comparisons** to retain JD, learning-goal and document-claim comparisons in the SQLCipher profile database (migration 4). Each sample includes submitted source text, candidate IDs, local matcher suggestions, validated provider response/usage, the source/taxonomy-bound record, and elapsed time. Search, Studio and tutor shadow results are not retained.
+
+At most 100 samples remain. Seven-day expiry is enforced on settings reads, decision preparation, saving and export; a locked or unused profile is not decrypted by a background retention worker. Turning mode off, disabling cloud permission or retention deletes the samples. **Delete learning comparisons** also invalidates pending checks so an old request cannot repopulate the table. Samples are local only, outside synced settings and the audit chain. Deleting the profile removes its database.
+
+**Export learning comparisons** produces a local JSON download with `schema_version: 1`, `independently_labelled: false` and `samples`. It contains source text. Exported files are outside app retention and must be deleted separately. They are review material, not a labelled evaluation corpus: preserve the taxonomy digest, add independent human labels and the evaluation split/manifest before converting to the evaluator's JSONL. Local matcher suggestions are raw baseline output, not ground truth. No hosted evaluation is triggered by export.
+
+The new goal entry and retention controls currently use English fallback pending translation review. Assist task/language approvals remain unchanged.
 
 ## Shared Cloud/app vocabulary
 

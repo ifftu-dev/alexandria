@@ -1934,13 +1934,13 @@ export interface Goal {
   source_did?: string | null
   goal_skill_ids: string[]
   created_at: string
-  /** How this goal was set: an exam/curriculum/job-role template, or a parsed JD. */
-  kind?: 'exam' | 'curriculum' | 'job_role' | 'jd'
+  /** How this goal was set: a curated template, parsed JD, or learning objective. */
+  kind?: 'exam' | 'curriculum' | 'job_role' | 'jd' | 'learning_goal'
   /** Template slug (e.g. 'cbse.grade10', 'engineering_manager') when kind is a template. */
   source_key?: string
   /** The JD link, when the goal came from a pasted/linked job description. */
   source_url?: string
-  resolution_provenance?: 'template' | 'jd_parsed'
+  resolution_provenance?: 'template' | 'jd_parsed' | 'goal_parsed'
   /** Skill-graph version the target ids were authored against. */
   taxonomy_version?: string
 }
@@ -1972,7 +1972,7 @@ export interface GoalResolution {
   goal_skill_ids: string[]
   suggestions: SkillSuggestion[]
   taxonomy_version?: string
-  resolution_provenance: 'template' | 'jd_parsed'
+  resolution_provenance: 'template' | 'jd_parsed' | 'goal_parsed'
 }
 
 /** A question as served during an assessment — options shuffled, no answer key. */
@@ -2036,6 +2036,7 @@ export type GoalInput =
   | { kind: 'curriculum'; board: string; grade: string }
   | { kind: 'job_role'; key: string }
   | { kind: 'jd_text'; text: string }
+  | { kind: 'learning_goal'; text: string }
   | { kind: 'jd_link'; url: string }
 export type CompletionWitnessStatus = 'not_requested' | 'pending' | 'submitted' | 'outcome_unknown' | 'confirmed' | 'failed_on_chain' | 'unavailable'
 
@@ -2125,7 +2126,7 @@ export type PersonhoodLabAction = 'download' | 'prove' | 'cancel' | 'remove_key'
 
 export type DecisionMode = 'off' | 'shadow' | 'assist'
 export type DecisionTask = 'job_description' | 'learning_goal' | 'document_claim' | 'studio_review' | 'search' | 'tutor'
-export interface DecisionSettings { mode: DecisionMode; cloud_allowed: boolean; tasks: DecisionTask[] }
+export interface DecisionSettings { mode: DecisionMode; cloud_allowed: boolean; tasks: DecisionTask[]; retain_learning_shadow: boolean }
 export interface DecisionJudgment { value: string; confidence: number; probabilities: Record<string, number> }
 export interface LearningDecisionReview {
   status: string

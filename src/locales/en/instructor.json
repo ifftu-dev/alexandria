@@ -407,6 +407,11 @@
     "decisionStudio": "Studio review",
     "decisionSearch": "Search ranking",
     "decisionTutor": "Tutor support",
-    "decisionClearKey": "Remove saved key"
+    "decisionClearKey": "Remove saved key",
+    "decisionRetainShadow": "Keep local learning shadow comparisons, including the text I submit",
+    "decisionShadowRetention": "Up to 100 comparisons stay in this encrypted profile. Comparisons older than seven days are removed on the next settings, export or learning-check access. Turning checks off or disabling retention deletes saved comparisons. Exports contain source text and must be handled separately.",
+    "decisionExportShadow": "Export learning comparisons",
+    "decisionClearShadow": "Delete learning comparisons",
+    "decisionShadowCleared": "Saved learning comparisons deleted."
   }
 }

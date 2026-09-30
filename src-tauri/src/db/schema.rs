@@ -45,6 +45,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // so its tables and the code that reads them change together.
     (2, "instructor_studio", alexandria_studio::store::SCHEMA),
     (3, "private_personhood_receipts", MIGRATION_003_PERSONHOOD),
+    (4, "decision_shadow_samples", "CREATE TABLE decision_shadow_samples (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, sample TEXT NOT NULL);"),
 ];
 
 const MIGRATION_003_PERSONHOOD: &str =

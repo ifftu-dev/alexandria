@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use alexandria_decisions::{learning, Client, Config, Question, Request};
 use alexandria_learning_contracts::{DecisionRecord, Judgment, Mode, Task, TaxonomySnapshot};
@@ -17,6 +18,8 @@ pub struct DecisionSettings {
     pub mode: Mode,
     pub cloud_allowed: bool,
     pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub retain_learning_shadow: bool,
 }
 
 fn settings(
@@ -35,7 +38,10 @@ fn settings(
 pub async fn decision_settings(
     state: State<'_, AppState>,
 ) -> Result<StudioDocument<DecisionSettings>, String> {
-    with_db(&state, settings)
+    with_db(&state, |db| {
+        prune_shadow(db, chrono::Utc::now().timestamp())?;
+        settings(db)
+    })
 }
 
 #[tauri::command]
@@ -56,13 +62,99 @@ pub async fn decision_save_settings(
             }
             tx.execute("INSERT INTO studio_secrets(connection_id,secret) VALUES('jev',?1) ON CONFLICT(connection_id) DO UPDATE SET secret=excluded.secret", [key])?;
         }
+        if !saved.value.retain_learning_shadow
+            || !saved.value.cloud_allowed
+            || saved.value.mode == Mode::Off
+        {
+            tx.execute("DELETE FROM decision_shadow_samples", [])?;
+        }
         tx.commit()?;
         Ok(saved)
     })
 }
 
+const SHADOW_RETENTION_SECONDS: i64 = 7 * 24 * 60 * 60;
+const MAX_SHADOW_SAMPLES: i64 = 100;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningShadowSample {
+    pub id: String,
+    pub created_at: i64,
+    pub source: String,
+    pub candidates: Vec<String>,
+    pub baseline: Vec<super::goal_templates::SkillSuggestion>,
+    pub response: alexandria_decisions::Response,
+    pub record: DecisionRecord,
+    pub latency_ms: u64,
+}
+
+fn prune_shadow(db: &rusqlite::Connection, now: i64) -> alexandria_studio::Result<()> {
+    db.execute(
+        "DELETE FROM decision_shadow_samples WHERE created_at <= ?1",
+        [now - SHADOW_RETENTION_SECONDS],
+    )?;
+    Ok(())
+}
+
+fn save_shadow(
+    db: &rusqlite::Connection,
+    revision: i64,
+    sample: &LearningShadowSample,
+) -> alexandria_studio::Result<()> {
+    let doc = settings(db)?;
+    if doc.revision != revision {
+        return Err(Error::Conflict);
+    }
+    if doc.value.mode != Mode::Shadow
+        || !doc.value.cloud_allowed
+        || !doc.value.retain_learning_shadow
+        || !doc.value.tasks.contains(&sample.record.task)
+    {
+        return Ok(());
+    }
+    let tx = db.unchecked_transaction()?;
+    prune_shadow(&tx, sample.created_at)?;
+    tx.execute(
+        "INSERT INTO decision_shadow_samples(id,created_at,sample) VALUES(?1,?2,?3)",
+        rusqlite::params![sample.id, sample.created_at, serde_json::to_string(sample)?],
+    )?;
+    tx.execute("DELETE FROM decision_shadow_samples WHERE rowid NOT IN (SELECT rowid FROM decision_shadow_samples ORDER BY created_at DESC,rowid DESC LIMIT ?1)", [MAX_SHADOW_SAMPLES])?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Explicit local export; raw source text never enters the synced settings or audit log.
+#[tauri::command]
+pub async fn decision_export_shadow(
+    state: State<'_, AppState>,
+) -> Result<Vec<LearningShadowSample>, String> {
+    with_db(&state, |db| {
+        prune_shadow(db, chrono::Utc::now().timestamp())?;
+        let mut stmt =
+            db.prepare("SELECT sample FROM decision_shadow_samples ORDER BY created_at,id")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    })
+}
+
+#[tauri::command]
+pub async fn decision_clear_shadow(state: State<'_, AppState>) -> Result<(), String> {
+    with_db(&state, clear_shadow)
+}
+
+fn clear_shadow(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
+    let tx = db.unchecked_transaction()?;
+    tx.execute("DELETE FROM decision_shadow_samples", [])?;
+    // Invalidate in-flight checks so clearing cannot be followed by a late save.
+    let doc = settings(&tx)?;
+    store::put(&tx, "settings", "jev", doc.revision, &doc.value)?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn prepare(state: &AppState, task: Task) -> Result<(Client, i64), String> {
     with_db(state, |db| {
+        prune_shadow(db, chrono::Utc::now().timestamp())?;
         let doc = settings(db)?;
         if !doc.value.tasks.contains(&task)
             || !doc.value.cloud_allowed
@@ -170,6 +262,7 @@ pub async fn decision_learning_review(
     let candidates = learning::shortlist(&source, &snapshot);
     let request =
         learning::request(&source, &snapshot, &candidates, task).map_err(|e| e.to_string())?;
+    let started = Instant::now();
     let response = client
         .evaluate("active-profile", &request)
         .await
@@ -184,6 +277,25 @@ pub async fn decision_learning_review(
         response.usage.output_tokens
     );
     if client.mode() == Mode::Shadow {
+        with_db(&state, |db| {
+            let baseline = super::goal_templates::parse_jd_text(db, &source)
+                .map_err(Error::Invalid)?
+                .suggestions;
+            save_shadow(
+                db,
+                revision,
+                &LearningShadowSample {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    created_at: chrono::Utc::now().timestamp(),
+                    source,
+                    candidates,
+                    baseline,
+                    response,
+                    record,
+                    latency_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                },
+            )
+        })?;
         return Ok(LearningReview {
             status: "shadow_complete".into(),
             record: None,
@@ -355,4 +467,101 @@ pub async fn decision_tutor_review(
         .into_iter()
         .map(|(id, a)| Ok((id, a.judgment().map_err(|e| e.to_string())?)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> crate::db::Database {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db
+    }
+    fn sample(created_at: i64) -> LearningShadowSample {
+        LearningShadowSample {
+            id: uuid::Uuid::new_v4().to_string(),
+            created_at,
+            source: "Learn Rust.".into(),
+            candidates: vec!["skill_rust".into()],
+            baseline: vec![],
+            response: alexandria_decisions::Response {
+                model: alexandria_decisions::MODEL.into(),
+                answers: BTreeMap::new(),
+                usage: alexandria_decisions::Usage {
+                    input_tokens: 3,
+                    output_tokens: 1,
+                },
+            },
+            record: DecisionRecord {
+                schema_version: 1,
+                task: Task::LearningGoal,
+                taxonomy_digest: "fixture".into(),
+                taxonomy_revision: "v1".into(),
+                source_hash: alexandria_learning_contracts::hash(b"Learn Rust."),
+                model: alexandria_decisions::MODEL.into(),
+                rubric_version: learning::RUBRIC.into(),
+                decisions: vec![],
+            },
+            latency_ms: 10,
+        }
+    }
+    fn enabled(db: &rusqlite::Connection) -> i64 {
+        store::put(
+            db,
+            "settings",
+            "jev",
+            0,
+            &DecisionSettings {
+                mode: Mode::Shadow,
+                cloud_allowed: true,
+                tasks: vec![Task::LearningGoal],
+                retain_learning_shadow: true,
+            },
+        )
+        .unwrap()
+        .revision
+    }
+    fn count(db: &rusqlite::Connection) -> i64 {
+        db.query_row("SELECT count(*) FROM decision_shadow_samples", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    }
+    #[test]
+    fn shadow_requires_retention_opt_in_and_is_profile_local() {
+        let a = db();
+        let b = db();
+        save_shadow(a.conn(), 0, &sample(100)).unwrap();
+        assert_eq!(count(a.conn()), 0);
+        let revision = enabled(a.conn());
+        save_shadow(a.conn(), revision, &sample(100)).unwrap();
+        assert_eq!(count(a.conn()), 1);
+        assert_eq!(count(b.conn()), 0);
+        let old: DecisionSettings = serde_json::from_str(
+            r#"{"mode":"shadow","cloud_allowed":true,"tasks":["learning_goal"]}"#,
+        )
+        .unwrap();
+        assert!(!old.retain_learning_shadow);
+    }
+    #[test]
+    fn shadow_expires_caps_and_clear_prevents_late_writes() {
+        let db = db();
+        let conn = db.conn();
+        let revision = enabled(conn);
+        for n in 0..105 {
+            save_shadow(conn, revision, &sample(n)).unwrap();
+        }
+        assert_eq!(count(conn), 100);
+        prune_shadow(conn, SHADOW_RETENTION_SECONDS + 104).unwrap();
+        assert_eq!(count(conn), 0);
+        save_shadow(conn, revision, &sample(200)).unwrap();
+        clear_shadow(conn).unwrap();
+        assert_eq!(count(conn), 0);
+        assert!(matches!(
+            save_shadow(conn, revision, &sample(201)),
+            Err(Error::Conflict)
+        ));
+        assert_eq!(count(conn), 0);
+    }
 }
