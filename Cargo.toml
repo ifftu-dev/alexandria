@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "cli",
     "crates/alexandria-verify",
+    "crates/alexandria-personhood",
     "crates/alexandria-studio",
     "crates/alexandria-mcp",
     "crates/iroh-moq",

@@ -1256,6 +1256,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::personhood_lab::personhood_lab_status,
             commands::personhood_lab::personhood_lab_action,
+            commands::personhood_receipts::personhood_receipt_prepare,
+            commands::personhood_receipts::personhood_receipt_prove,
+            commands::personhood_receipts::personhood_receipt_cancel,
+            commands::personhood_receipts::personhood_receipt_list,
             commands::health::check_health,
             commands::health::read_diag_log,
             commands::health::frontend_log,

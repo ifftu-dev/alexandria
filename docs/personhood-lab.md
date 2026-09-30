@@ -2,13 +2,65 @@
 
 Personhood Lab is an opt-in Android debug experiment that generates and verifies
 a proof from a bundled synthetic fixture. It does not accept identity documents,
-issue credentials, establish uniqueness, bind an account, or change permissions.
-Issuer validation and account binding must be designed before real inputs are
-introduced.
+issue credentials, establish uniqueness, or change permissions. An unlocked
+profile can also bind a fresh synthetic proof to its account and save a private
+diagnostic receipt. Production issuer trust and real document input remain
+disabled.
 
 The panel appears on the onboarding welcome screen and in Settings → Advanced.
 No profile is required for the onboarding test. Calls use the normal local IPC
-bridge, but these two device-level commands deliberately do not require a profile.
+bridge; `personhood_lab_status` and `personhood_lab_action` deliberately do not
+require a profile. All four `personhood_receipt_*` commands require the current
+unlocked profile session.
+
+## Private synthetic receipts
+
+With the test key cached, open Settings → Advanced and select **Create private
+synthetic receipt**. The app creates a signed 120-second challenge, runs the
+native synthetic prover, independently verifies the BN254 Groth16 proof in Rust,
+and atomically consumes the challenge while storing a signed local receipt.
+The UI lists the latest 20 receipts for the unlocked account and network.
+
+The challenge binds the account DID and current Ed25519 key, network, purpose,
+local verifier, policy digest, circuit, random challenge nonce, random session
+nonce, and issue/expiry times. Its JCS body is hashed with SHA-256 and then the
+pinned SDK's Keccak-256/right-shift convention. The native worker receives only
+the expected signal hash and nullifier seed; it still reads the bundled test
+fixture. The account signs the exact challenge, proof, and nine public signals.
+The backend selects the pinned verification key and policy independently.
+
+The local verifier key is domain-separated from the account key using HKDF.
+This is a **synthetic diagnostic**, not an externally trusted attestation of
+personhood. Its clock and database belong to the device owner. Only the bundled
+test issuer and exact historical fixture timestamp are accepted. The synthetic
+policy permits that fixture for ten years from its timestamp; it is not the
+proposed seven-day freshness policy for a future real-input pilot. Receipt
+validity is at most 24 hours and is also bounded by document and policy expiry.
+All four optional attribute outputs must remain zero.
+
+Cancellation, leaving the panel, backgrounding, and profile locking stop work.
+Acceptance rechecks expiry, the current key registry, pending challenge state,
+and the profile session. A session admission gate protects the final commit
+against locking. An accepted retry in the same unlock session returns the
+existing receipt. A changed submission cannot consume the same challenge again;
+old unlock sessions and other accounts cannot reuse it. Reopening the same
+profile can list its existing receipts.
+
+Migration 3 adds `personhood_private_challenges` to the encrypted profile DB.
+It is excluded from cross-device sync and gossip and writes no credentials,
+identity fields, reputation, or permission state. The row stores the signed
+challenge, consumption state, submission digest, and signed receipt. Raw proofs,
+public-signal arrays, witnesses, and synthetic input files are not retained for
+receipt runs. The separate benchmark still retains its successful output.
+The developer profile is limited to five preparations per minute and 100 stored
+receipts; cancelled/expired non-receipt rows are pruned on later preparations.
+Receipts are retained until the profile is deleted. Removing the test key does
+not delete the encrypted receipt history.
+
+The implementation is in `crates/alexandria-personhood`, the profile-scoped
+`commands/personhood_receipts.rs`, and the existing Android lab worker bridge.
+No production issuer roots, real-input parser, network receipt service, or
+account privilege integration are enabled.
 
 ## Build an isolated Android app
 
@@ -242,13 +294,82 @@ its code was not changed. Both edited workflow files passed `actionlint`. Hosted
 GitHub Actions execution is still pending a push; these are local validation
 results.
 
-The proposed next milestone is described in
+The real-input design is described in
 [Personhood issuer trust and account binding](personhood-trust-proposal.md).
-That proposal does not activate any policy or real-input flow.
+Its synthetic account-binding and private-receipt subset is implemented above;
+production issuer trust and real document input remain proposed and disabled.
 
 This is a developer experiment, not a personhood credential implementation.
 Testing a simulated memory callback does not establish survival under a real
 Android low-memory kill. Results on a 16 GB phone do not establish suitability
-for lower-memory phones. Real issuer trust, document validation, account and
-session binding, replay policy, uniqueness policy, privacy review, and a broader
-device matrix remain outside this version.
+for lower-memory phones. Real issuer trust, real document validation, production verification authority,
+uniqueness policy, privacy review for real inputs, and a broader device matrix
+remain outside this version. Account/session binding and one-use challenges are
+implemented only for the synthetic diagnostic flow.
+
+## Receipt protocol verification
+
+```sh
+cargo test -p alexandria-personhood
+cargo test -p alexandria-node --features personhood-lab profile::scope
+npm test -- src/composables/usePersonhoodReceipts.test.ts
+```
+
+The committed fixtures include a native challenge-bound proof and cross-language
+vector. With the feasibility benchmark's pinned Node dependencies available:
+
+```sh
+node scripts/verify-personhood-vector.cjs "$NODE_MODULES" \
+  crates/alexandria-personhood/tests/fixtures/bound.vector.json
+node scripts/verify-personhood-lab.cjs "$NODE_MODULES" \
+  crates/alexandria-personhood/assets/vkey.json \
+  crates/alexandria-personhood/tests/fixtures/bound
+```
+
+The independent JavaScript check covers JCS policy digest, the SDK signal hash,
+and Ed25519 challenge signature. Rust and snarkjs 0.7.6 both accept the native
+proof and reject mutations to all nine public signals. Rust tests also cover
+account/context substitution, strict field encodings, malformed points,
+ambiguous JSON, expiry/revocation, cancellation, transaction rollback, and
+idempotent consumption.
+
+The Android receipt instrumentation suite creates two disposable synthetic
+profiles and removes only those profiles during cleanup. Start with the lab key
+cached and any existing profile locked. Pass the network ID from the embedded
+network profile rather than choosing an arbitrary network:
+
+```sh
+adb -s "$PHONE" shell am instrument -w \
+  -e waitForActivitiesToComplete false \
+  -e networkId preprod \
+  -e class org.alexandria.node.PersonhoodReceiptDeviceTest \
+  org.alexandria.node.personhoodlab.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+It exercises the real WebView → Tauri IPC → native prover → Rust verifier →
+encrypted database path. The test checks unchanged account state, idempotent
+retry, cancellation before start, persistence after unlock, stale session
+rejection, lock during proving, and cross-profile isolation. It does not test
+real identity documents or establish production trust.
+
+Receipt implementation host checks on 2026-09-30:
+
+- Full workspace run with `--features personhood-lab -- --test-threads=4`:
+  1,718 passed, 4 ignored. Subsequent focused checks covered the final retry and
+  input-validation changes: 7 protocol/storage tests and 4 app personhood tests.
+- All 202 frontend tests, strict `vue-tsc -b --noEmit`, workspace formatting,
+  workspace Clippy with `--all-targets --features personhood-lab -- -D warnings`,
+  and a normal build without the lab feature passed.
+- Command registration: 354 registered, 309 invoked, 45 allowlisted. All four
+  receipt commands are profile-scoped. The generated schema check and i18n raw
+  text check also passed.
+- The Java 21 ARM64 debug APK and receipt instrumentation APK built successfully.
+
+On the OnePlus 11 5G (CPH2447, 16 GB RAM, OxygenOS 16.0.5), the integrated
+receipt instrumentation suite passed in 67.669 seconds. All eight checks listed
+above passed, and the final assertion confirmed that the receipt proof/witness
+working directory had been removed. The suite deleted its two disposable
+profiles. The proving key remains cached. The initial attempt stopped at the
+missing-key precondition; downloading and checksum-verifying the pinned key
+allowed the full run to complete. Evidence is retained locally under the ignored
+`target/personhood-lab-results/receipts/` directory.

@@ -4,7 +4,7 @@ import type { PersonhoodLabStatus } from '@/types'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), detach: vi.fn() }))
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
-vi.mock('@/composables/useProfiles', () => ({ onProfileLocked: () => mocks.detach }))
+vi.mock('@/composables/useProfiles', () => ({ onProfileLocked: () => mocks.detach, useProfiles: () => ({ isUnlocked: { value: false } }) }))
 
 function status(enabled: boolean, phase = 'idle'): PersonhoodLabStatus {
   return { enabled, phase, key_status: 'stored', downloaded_bytes: 612082146,

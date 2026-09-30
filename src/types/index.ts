@@ -2121,3 +2121,12 @@ export interface PersonhoodLabStatus {
 }
 
 export type PersonhoodLabAction = 'download' | 'prove' | 'cancel' | 'remove_key'
+
+export interface PersonhoodPrivateReceipt {
+  id: string
+  kind: 'synthetic_diagnostic'
+  subject_did: string
+  network_id: string
+  created_at: number
+  expires_at: number
+}
