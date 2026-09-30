@@ -4,7 +4,7 @@ use alexandria_verify::personhood::{
 };
 use sha2::{Digest, Sha256};
 
-const NOW: u64 = 1_800_000_000;
+const NOW: u64 = 1_800_005_400;
 
 fn policy() -> DocumentPolicy {
     DocumentPolicy {
@@ -199,7 +199,7 @@ fn policy_structure_rejects_duplicate_issuers_aliases_and_unreviewed_circuits() 
 #[test]
 fn issuer_status_and_time_are_rechecked_without_grandfathering_old_documents() {
     let base = policy();
-    let document = signals(NOW - 60);
+    let document = signals(NOW - 3600);
     load(&base)
         .unwrap()
         .check_public_signals(DOCUMENT_CIRCUIT, &document, NOW)
@@ -254,15 +254,19 @@ fn freshness_boundaries_and_receipt_expiry_are_bounded_by_every_trust_window() {
     let loaded = load(&base).unwrap();
     assert_eq!(
         loaded
-            .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW), NOW)
+            .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW - 3600), NOW)
             .unwrap()
             .receipt_expires_at,
         NOW + 86400
     );
     assert!(loaded
-        .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW + 300), NOW)
+        .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW - 3600), NOW - 300)
         .is_ok());
-    for timestamp in [NOW + 301, NOW - 604800] {
+    assert_eq!(
+        loaded.check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW - 3600), NOW - 301),
+        Err(PolicyError::DocumentTime)
+    );
+    for timestamp in [NOW, NOW - 604800, NOW - 3599] {
         assert_eq!(
             loaded.check_public_signals(DOCUMENT_CIRCUIT, &signals(timestamp), NOW),
             Err(PolicyError::DocumentTime)
@@ -270,10 +274,10 @@ fn freshness_boundaries_and_receipt_expiry_are_bounded_by_every_trust_window() {
     }
     assert_eq!(
         loaded
-            .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW - 604799), NOW)
+            .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW - 604800), NOW - 1)
             .unwrap()
             .receipt_expires_at,
-        NOW + 1
+        NOW
     );
     for narrow_policy in [true, false] {
         let mut limited = base.clone();
@@ -285,12 +289,32 @@ fn freshness_boundaries_and_receipt_expiry_are_bounded_by_every_trust_window() {
         assert_eq!(
             load(&limited)
                 .unwrap()
-                .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW), NOW)
+                .check_public_signals(DOCUMENT_CIRCUIT, &signals(NOW - 3600), NOW)
                 .unwrap()
                 .receipt_expires_at,
             NOW + 10
         );
     }
+    let mut partial_hour = base.clone();
+    partial_hour.issuers[0].valid_until = NOW - 1;
+    assert_eq!(
+        load(&partial_hour).unwrap().check_public_signals(
+            DOCUMENT_CIRCUIT,
+            &signals(NOW - 3600),
+            NOW - 300
+        ),
+        Err(PolicyError::DocumentTime)
+    );
+    partial_hour = base;
+    partial_hour.issuers[0].valid_from = NOW - 3599;
+    assert_eq!(
+        load(&partial_hour).unwrap().check_public_signals(
+            DOCUMENT_CIRCUIT,
+            &signals(NOW - 3600),
+            NOW
+        ),
+        Err(PolicyError::DocumentTime)
+    );
 }
 
 #[test]

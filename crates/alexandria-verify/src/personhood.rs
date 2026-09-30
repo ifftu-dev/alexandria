@@ -264,12 +264,19 @@ impl PinnedDocumentPolicy {
             return Err(PolicyError::Issuer);
         }
         let timestamp: u64 = signals[2].parse().map_err(|_| PolicyError::DocumentTime)?;
+        // The pinned circuit drops minutes/seconds from an IST timestamp. Treat
+        // its output as an hour interval; the entire interval must be eligible.
+        // This may delay fresh documents by 55 minutes with a 300-second skew.
+        let hour_end = timestamp
+            .checked_add(3600)
+            .ok_or(PolicyError::DocumentTime)?;
         let document_expiry = timestamp
             .checked_add(policy.max_document_age_seconds)
             .ok_or(PolicyError::DocumentTime)?;
-        if timestamp < issuer.valid_from
-            || timestamp >= issuer.valid_until
-            || timestamp > now.saturating_add(policy.max_future_skew_seconds)
+        if timestamp % 3600 != 1800
+            || timestamp < issuer.valid_from
+            || hour_end > issuer.valid_until
+            || hour_end > now.saturating_add(policy.max_future_skew_seconds)
             || now >= document_expiry
         {
             return Err(PolicyError::DocumentTime);

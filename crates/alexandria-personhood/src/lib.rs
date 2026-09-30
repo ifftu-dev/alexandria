@@ -1,4 +1,5 @@
 pub mod groth16;
+pub mod input;
 pub mod store;
 
 use alexandria_verify::did::did_from_verifying_key;
