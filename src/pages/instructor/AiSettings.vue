@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useStudio } from '@/composables/useStudio'
+import DecisionSettings from '@/components/DecisionSettings.vue'
 import { AppButton, AppInput, AppTextarea, AppTabs, ConfirmDialog } from '@/components/ui'
 import type { StudioConnection, StudioDocument, StudioSettings } from '@/types'
 
@@ -99,6 +100,7 @@ async function saveConnection() {
         <p v-if="!studio.connections.value.length" class="p-6 text-sm text-muted-foreground">{{ t('instructor.studio.noConnections') }}</p>
       </div>
     </div>
+    <DecisionSettings />
     <ConfirmDialog :open="leave" :title="t('instructor.studio.unsaved')" :message="t('instructor.studio.discardMessage')" :confirm-label="t('instructor.studio.discard')" @confirm="answerLeave(true)" @cancel="answerLeave(false)" />
   </div>
 </template>

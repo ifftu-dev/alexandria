@@ -10,6 +10,7 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 pub struct StudioRuntime {
+    pub decisions: Mutex<Option<(u64, i64, alexandria_decisions::Client)>>,
     pub grants: Mutex<alexandria_studio::grants::Grants>,
     pub broker_available: AtomicBool,
     pub broker_gate: tokio::sync::RwLock<()>,
@@ -21,6 +22,7 @@ pub struct StudioRuntime {
 impl Default for StudioRuntime {
     fn default() -> Self {
         Self {
+            decisions: Mutex::new(None),
             grants: Mutex::new(alexandria_studio::grants::Grants::default()),
             broker_available: AtomicBool::new(false),
             broker_gate: tokio::sync::RwLock::new(()),
@@ -37,6 +39,9 @@ impl StudioRuntime {
         self.blocked.store(false, Ordering::SeqCst);
     }
     pub fn invalidate(&self) {
+        if let Ok(mut client) = self.decisions.lock() {
+            *client = None;
+        }
         if let Ok(mut grants) = self.grants.lock() {
             grants.clear();
         }

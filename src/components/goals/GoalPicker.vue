@@ -6,6 +6,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useGoals } from '@/composables/useGoals'
+import LearningDecisionReview from '@/components/LearningDecisionReview.vue'
 import { AppButton, AppInput, AppBadge } from '@/components/ui'
 import type { GoalTemplate, SkillSuggestion } from '@/types'
 
@@ -35,6 +36,8 @@ const jdUrl = ref('')
 const suggestions = ref<SkillSuggestion[]>([])
 const chosen = ref<Set<string>>(new Set())
 const jdLabel = ref('')
+
+watch(jdText, () => { suggestions.value = []; chosen.value = new Set() })
 
 async function loadTemplates() {
   if (tab.value === 'jd') return
@@ -194,6 +197,7 @@ async function addJdGoal() {
         {{ $t('goals.picker.findSkills') }}
       </AppButton>
 
+      <LearningDecisionReview v-if="jdMode === 'paste'" :source="jdText" task="job_description" @suggestion="s => { if (!suggestions.some(item => item.skill_id === s.skill_id)) suggestions.push(s) }" />
       <div v-if="suggestions.length" class="space-y-2">
         <p class="text-sm text-muted-foreground">
           {{ $t('goals.picker.foundSkills') }}

@@ -68,3 +68,5 @@ pub mod tutoring_stubs;
 pub mod studio;
 
 pub mod studio_mcp;
+
+pub mod decisions;

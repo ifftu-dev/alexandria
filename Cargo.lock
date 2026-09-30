@@ -240,6 +240,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "alexandria-decisions"
+version = "0.1.0"
+dependencies = [
+ "alexandria-learning-contracts",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "alexandria-learning-contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "alexandria-mcp"
 version = "0.1.0"
 dependencies = [
@@ -264,6 +286,8 @@ name = "alexandria-node"
 version = "0.6.1-alpha"
 dependencies = [
  "aes-gcm",
+ "alexandria-decisions",
+ "alexandria-learning-contracts",
  "alexandria-studio",
  "alexandria-verify",
  "anyhow",
@@ -368,8 +392,9 @@ dependencies = [
 
 [[package]]
 name = "alexandria-verify"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "alexandria-learning-contracts",
  "base64 0.21.7",
  "blake2",
  "blake3",

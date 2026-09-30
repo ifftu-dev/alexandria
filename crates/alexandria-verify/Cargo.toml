@@ -1,6 +1,6 @@
 [package]
 name = "alexandria-verify"
-version = "0.1.0"
+version = "0.2.0"
 description = "Alexandria credential verification — W3C VCs, did:key, JCS canonicalization, detached Ed25519 JWS"
 edition = "2021"
 rust-version = "1.83.0"
@@ -36,6 +36,7 @@ categories = ["cryptography", "authentication"]
 # `tests/no_io_deps.rs` enforces that.
 
 [dependencies]
+alexandria-learning-contracts = { version = "0.1.0", path = "../alexandria-learning-contracts" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_json_canonicalizer = "0.3"

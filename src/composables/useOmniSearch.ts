@@ -1,7 +1,7 @@
 import { ref, computed, readonly } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked } from '@/composables/useProfiles'
-import type { Course, CatalogEntry, SkillInfo, Classroom } from '@/types'
+import type { Course, CatalogEntry, SkillInfo, Classroom, DecisionJudgment } from '@/types'
 
 /**
  * A single result surfaced by the omni search palette.
@@ -30,6 +30,7 @@ const GROUP_LABELS: Record<OmniSearchResult['type'], string> = {
 }
 
 const PER_DOMAIN_LIMIT = 5
+const CANDIDATE_LIMIT = 20
 const DEBOUNCE_MS = 150
 const RECENT_KEY = 'alexandria:omni-search-recents'
 const MAX_RECENTS = 8
@@ -44,6 +45,7 @@ const selectedIndex = ref(0)
 const recents = ref<OmniSearchResult[]>(loadRecents())
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let interactionToken = 0
 let activeQueryToken = 0
 let profileGeneration = 0
 
@@ -89,6 +91,7 @@ export function useOmniSearch() {
   }
 
   function setQuery(q: string) {
+    activeQueryToken += 1
     query.value = q
     selectedIndex.value = 0
     if (debounceTimer) clearTimeout(debounceTimer)
@@ -106,6 +109,7 @@ export function useOmniSearch() {
 
   /** Move the selected index by +1 or -1 with wrap-around. */
   function navigate(direction: 1 | -1) {
+    interactionToken += 1
     const total = visibleItems.value.length
     if (total === 0) return
     const next = (selectedIndex.value + direction + total) % total
@@ -138,7 +142,7 @@ export function useOmniSearch() {
       const [skills, courses, catalog, classrooms] = await Promise.all([
         invoke<SkillInfo[]>('list_skills', { search: q }).catch(() => []),
         invoke<Course[]>('list_courses').catch(() => []),
-        invoke<CatalogEntry[]>('search_catalog', { query: q, limit: PER_DOMAIN_LIMIT }).catch(() => []),
+        invoke<CatalogEntry[]>('search_catalog', { query: q, limit: CANDIDATE_LIMIT }).catch(() => []),
         invoke<Classroom[]>('classroom_list').catch(() => []),
       ])
 
@@ -146,20 +150,31 @@ export function useOmniSearch() {
 
       const lower = q.toLowerCase()
       const merged: OmniSearchResult[] = [
-        ...skills.slice(0, PER_DOMAIN_LIMIT).map(skillToResult),
+        ...skills.slice(0, CANDIDATE_LIMIT).map(skillToResult),
         ...courses
           .filter(c => matchesCourse(c, lower))
-          .slice(0, PER_DOMAIN_LIMIT)
+          .slice(0, CANDIDATE_LIMIT)
           .map(courseToResult),
-        ...catalog.slice(0, PER_DOMAIN_LIMIT).map(catalogToResult),
+        ...catalog.slice(0, CANDIDATE_LIMIT).map(catalogToResult),
         ...classrooms
           .filter(c => matchesClassroom(c, lower))
-          .slice(0, PER_DOMAIN_LIMIT)
+          .slice(0, CANDIDATE_LIMIT)
           .map(classroomToResult),
       ]
 
-      results.value = merged
+      const limit = (items: OmniSearchResult[]) => GROUP_ORDER.flatMap(type => items.filter(item => item.type === type).slice(0, PER_DOMAIN_LIMIT))
+      results.value = limit(merged)
       selectedIndex.value = 0
+      const interaction = interactionToken
+      // Local results stay usable while the optional provider runs. A keyboard
+      // interaction freezes their order for this query.
+      void invoke<Record<string, DecisionJudgment>>('decision_search', {
+        query: q, candidates: merged.map(item => ({ id: item.id, title: item.title, description: item.subtitle ?? '' })),
+      }).then(ranks => {
+        if (token !== activeQueryToken || generation !== profileGeneration || interaction !== interactionToken || query.value.trim() !== q) return
+        const score = (item: OmniSearchResult) => ranks[item.id]?.probabilities.relevant ?? 0
+        if (Object.keys(ranks).length) results.value = limit([...merged].sort((a, b) => score(b) - score(a)))
+      }).catch(() => { /* Keep local results when disabled, uncertain, or unavailable. */ })
     } finally {
       if (token === activeQueryToken && generation === profileGeneration) loading.value = false
     }

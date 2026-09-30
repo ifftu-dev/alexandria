@@ -2121,3 +2121,19 @@ export interface PersonhoodLabStatus {
 }
 
 export type PersonhoodLabAction = 'download' | 'prove' | 'cancel' | 'remove_key'
+
+
+export type DecisionMode = 'off' | 'shadow' | 'assist'
+export type DecisionTask = 'job_description' | 'learning_goal' | 'document_claim' | 'studio_review' | 'search' | 'tutor'
+export interface DecisionSettings { mode: DecisionMode; cloud_allowed: boolean; tasks: DecisionTask[] }
+export interface DecisionJudgment { value: string; confidence: number; probabilities: Record<string, number> }
+export interface LearningDecisionReview {
+  status: string
+  names: Record<string, string>
+  evidence: Record<string, string>
+  record: null | {
+    schema_version: number; task: DecisionTask; taxonomy_digest: string; taxonomy_revision: string
+    source_hash: string; model: string; rubric_version: string
+    decisions: { skill_id: string; relation: DecisionJudgment; bloom: DecisionJudgment; evidence: { start: number; end: number } | null }[]
+  }
+}

@@ -119,6 +119,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 alexandria-verify = { path = "../crates/alexandria-verify" }
+alexandria-decisions = { path = "../crates/alexandria-decisions" }
+alexandria-learning-contracts = { path = "../crates/alexandria-learning-contracts" }
 alexandria-studio = { path = "../crates/alexandria-studio" }
 log = "0.4"
 tracing = "0.1"
