@@ -1,10 +1,11 @@
 # Personhood issuer trust and account binding — proposal
 
-Status (2026-09-30): account-bound private synthetic receipts are implemented and
-device-tested. The release-bundled real-document policy parser and issuer checks
-are implemented, but no production policy or issuer is activated and real input
-remains disabled. The selected first real-input outcome is a private receipt
-with no account permissions change. Reviewed app releases will carry policy
+Status (2026-10-01): account-bound private synthetic receipts are implemented and
+device-tested. The release-bundled real-document policy parser, issuer checks
+and bounded QR input-preparation API are implemented, but no production policy
+or issuer is activated and real input remains disabled. The selected first
+real-input outcome is a private receipt with no account permissions change.
+Reviewed app releases will carry policy
 updates. The agreed pilot limits are seven-day document freshness, five-minute
 future clock skew, and at most 24-hour receipts. Account-creation, voting,
 reputation, and other privileges remain out of scope.
@@ -58,7 +59,7 @@ The implemented schema and remaining receipt authority boundary are:
 All four attribute outputs must be zero; this is enforced directly rather than
 configured by a policy field. The policy is capped at 32 KiB and 32 issuers;
 unknown fields, duplicate JSON keys, noncanonical bytes and scalar aliases fail.
-The issuer must be active and valid both now and at the document timestamp.
+The issuer must be active now and valid throughout the possible issuance hour.
 No allowance extends issuer or policy validity. The public-signal check does
 not itself verify Groth16 proofs, account signatures, challenges, or replay state.
 
@@ -66,9 +67,9 @@ Existing relay receipt keys are not implicitly authorized for personhood.
 Production issuer material must be obtained through a reviewed authoritative
 channel and its circuit key hash independently reproduced. Unknown keys,
 unavailable required status, expired policies, and revoked issuers cannot produce
-an accepted receipt. A
-document timestamp alone is not evidence that a compromised key signed before
-compromise; a revoked issuer must not be grandfathered solely on that timestamp.
+an accepted receipt. A document timestamp alone is not evidence that a
+compromised key signed before compromise; a revoked issuer must not be
+grandfathered solely on that timestamp.
 
 Updates arrive only in reviewed app releases, with an explicit policy expiry.
 There is no remote fetch or fallback to synthetic trust. Revocation changes
@@ -85,6 +86,24 @@ requires a separately designated verifier with authoritative time and storage.
 That authority is not declared by the document-issuer policy. Document issuers
 and Alexandria receipt signers are separate roles.
 
+### Approved handling of hour-level timestamps
+
+The pinned [timestamp extractor](https://github.com/anon-aadhaar/anon-aadhaar/blob/4dad918761cfb1d7d5ed9918dcd796d0cb23ae82/packages/circuits/src/helpers/extractor.circom)
+discards minutes and seconds before converting the IST date/hour to Unix time.
+The user approved retaining this circuit with conservative timing on 2026-10-01.
+Treat public timestamp `t` as the interval `[t, t + 3600)`, require
+`t % 3600 == 1800`, and accept only when `t + 3600 <= now + 300`. Issuer validity
+must contain that entire interval. Document freshness and its contribution to
+receipt expiry use `t + 604800`, the earliest possible freshness deadline.
+
+This preserves the five-minute future ceiling at the cost of a possible
+55-minute wait for fresh documents and up to an hour of early expiry. Exact
+minute-level proof verification would require a circuit/artifact change. The
+new input parser can read the precise issuance time to whole seconds locally,
+but this value is not an additional public signal and cannot strengthen a
+proof-only verifier's timing claim. The historical synthetic fixture is exempt
+from this real-input policy.
+
 ### Production certificate review still required
 
 The [UIDAI certificate catalogue](https://uidai.gov.in/en/data-and-download),
@@ -94,10 +113,31 @@ The [2026 certificate](https://backend.uidai.gov.in/get/files/media/document/202
 was downloaded and inspected with OpenSSL: RSA-2048, exponent 65537, validity
 2026-02-03 09:56:12 UTC through 2029-02-03 17:28:36 UTC, DER SHA-256 fingerprint
 `e0304b9e61ee3640ecddae2db4b617f2e2678f57dbc2826c2f86ac5c04f277df`.
-Inspection is not chain/status validation or evidence that this key signs the
-QR format accepted by the pinned circuit. Its production circuit hash has not
-been independently reproduced. No downloaded certificate is trusted or bundled
-by this change. Confirm those properties before enabling real input.
+
+The reproducible `scripts/inspect-personhood-certificate.cjs` tool now derives
+the circuit hash from the modulus using 17 little-endian 121-bit limbs, packed
+in adjacent pairs into nine Poseidon inputs, matching the pinned
+[signature circuit](https://github.com/anon-aadhaar/anon-aadhaar/blob/4dad918761cfb1d7d5ed9918dcd796d0cb23ae82/packages/circuits/src/helpers/signature.circom).
+Optimized and reference implementations in `circomlibjs@0.1.7` agree. Known
+synthetic and legacy SDK hashes serve as regression checks; agreement is not
+an independent security audit of Poseidon or the proving artifacts.
+
+| Inspected certificate | Circuit issuer-key hash | Finding |
+| --- | --- | --- |
+| Bundled public `testCertificate.pem` | `15134874015316324267425466444584014077184337590635665158241104437045239495873` | Matches the synthetic fixture; never a production fallback. |
+| UIDAI `uidai_offline_publickey_26022021.cer` | `18063425702624337643644061197836918910810808173893535653269228433734128853484` | Matches the legacy SDK production hash; certificate expired in February 2024. |
+| UIDAI `uidai_offline_publickey_2026.cer` | `19770349258225098911243612275321727303641256718510179842211794623059325011884` | Different key; requires explicit reviewed policy selection. |
+
+The 2021 certificate's DER SHA-256 is
+`e0f0f869d32efc7e80fae2223717a56dcf8b616f820b542a49e5bd5abf1c0f7d`.
+The 2026 leaf signature was separately verified against the published
+[(n)Code intermediate certificate](https://www.ncodesolutions.com/repository/CA-Services-2022/ncodeca22Subca1.der).
+That verifies one chain link, not a trusted root path, current revocation status,
+or authority to sign the QR format accepted by this circuit. Current-document
+compatibility has not been demonstrated. No production certificate is bundled
+or activated; the inspection tool always reports `trust_activated: false` and
+lists the checks it does not perform. Reproduction commands and test results
+are in the [lab guide](personhood-lab.md#bounded-qr-input-preparation).
 
 ## Challenge and account binding
 
@@ -188,16 +228,19 @@ The synthetic challenge/submission protocol, pure Groth16 verification and
 transactional store are implemented; see [the lab guide](personhood-lab.md)
 for host and OnePlus results. The separate real-document policy foundation has
 six test groups covering pinning, malformed configuration, issuer status,
-expiry boundaries and signal restrictions. It is not yet connected to a real
-document parser or receipt issuance path.
+expiry boundaries and signal restrictions, including conservative hour handling.
+The bounded input-preparation API verifies a supplied RSA key's signature and
+produces fixture-compatible witness inputs, with five parser tests. The caller
+must still select that key through reviewed issuer policy. This API and the
+real-document policy are not yet connected to native proving or receipt issuance.
 
 Next, complete the production certificate review, pin a reviewed policy and
-implement bounded real-input parsing with private temporary-data cleanup. Reuse
+integrate bounded input preparation with the native worker and private
+temporary-data cleanup. Reuse
 the tested account/challenge protocol with the real policy, and recheck policy
 at receipt acceptance. Keep the real-input selector disabled until these gates
-pass. Use an injected test
-clock in unit tests; do not expose a caller-controlled verification time in
-production IPC or a service API.
+pass. Use an injected test clock in unit tests; do not expose a caller-controlled
+verification time in production IPC or a service API.
 
 The acceptance suite must cover:
 

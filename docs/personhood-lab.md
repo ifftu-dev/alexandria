@@ -82,8 +82,17 @@ revoked and expired issuers, the synthetic issuer, changed circuit/key/seed,
 noncanonical field values, and nonzero optional attribute outputs. Policy
 expiry is checked at verification, not merely at startup.
 
-This module checks policy and public signals only. Real-input parsing and
-challenge/receipt integration remain unimplemented; a caller must still verify
+The pinned circuit exposes the start of the issuance hour in IST, represented
+as Unix seconds (`timestamp % 3600 == 1800`). The approved pilot keeps this
+circuit and uses a conservative interval: `timestamp + 3600 <= now + 300`.
+The whole issuance hour must fit inside issuer validity, and freshness expires
+at the hour's start plus seven days. A newly issued document may therefore wait
+up to about 55 minutes and become stale up to an hour early. This choice was
+confirmed on 2026-10-01; no circuit or proving-artifact regeneration is needed.
+
+This module checks policy and public signals only. Bounded input preparation is
+implemented separately below, but challenge/receipt integration with real input
+remains unimplemented; a caller must still verify
 the proof, account signature, challenge, current policy and replay state at
 acceptance. No account permissions change is planned for the pilot. There is no
 remote policy fetch, and release-only delivery cannot provide immediate
@@ -93,7 +102,7 @@ owner.
 
 No production signing certificate has been approved. The authoritative-source
 inspection, candidate certificate fingerprint, and remaining purpose,
-chain/status and circuit-hash checks are recorded in the
+chain/status and QR-compatibility checks are recorded in the
 [trust proposal](personhood-trust-proposal.md#production-certificate-review-still-required).
 An official source URL in a policy is provenance metadata, not runtime
 certificate validation. Certificate expiry alone does not establish QR-circuit
@@ -115,6 +124,58 @@ JSON, network/circuit separation, issuer status, freshness boundaries and
 receipt-expiry caps. Formatting and workspace Clippy passed. This foundation
 has not been installed or tested on the OnePlus; the device results below are
 for the synthetic receipt milestone.
+
+## Bounded QR input preparation
+
+Commit `9527038` adds `alexandria_personhood::input::prepare(decimal_qr,
+modulus, nullifier_seed, signal_hash)`. This library API accepts decoded numeric
+QR text and a 256-byte RSA modulus selected by its caller. It does not scan
+images, select trusted issuers, check policy freshness, issue receipts, or
+perform file/network I/O. No UI or IPC path accepts real documents yet.
+
+Preparation caps canonical decimal input at 4,933 digits and compressed input
+at 2,048 bytes. A single gzip or zlib stream may decode to at most 1,783 bytes,
+including the 256-byte signature. Truncated streams, bad checksums, trailing
+data, concatenated members, and decompression overflow are rejected. Before
+constructing witness inputs, it verifies RSA-2048 PKCS#1 v1.5/SHA-256 with
+exponent 65537 and validates the supported V2 structure, delimiters, dates and
+circuit field sizes. The current date parser supports issuance years 2000–2031.
+
+The output has 1,536 SHA-padded byte entries, 17 limbs of 121 bits for each RSA
+value, the selected binding values, and four zero disclosure flags.
+`PreparedInput::exact_timestamp()` returns the parsed timestamp at whole-second
+resolution; this does not increase the proof's hour-level precision.
+`PreparedInput::to_json()` returns a `Zeroizing<Vec<u8>>` for witness generation.
+Owned document buffers and sensitive output fields are zeroized on drop. This
+does not guarantee erasure of every library/internal allocation or caller copy;
+native-worker, file, UI and process-death cleanup still need integration review.
+
+Validation for this slice passed: five parser tests, seven protocol/storage
+tests, six policy test groups, five app personhood tests, three certificate-tool
+tests, workspace formatting and workspace Clippy with warnings denied. The
+broader verifier suite also passed. Parser tests reconstruct only the bundled
+synthetic document and match its pinned SDK witness exactly for gzip and zlib.
+These are host results, not a new OnePlus or real-document test.
+
+```sh
+cargo test -p alexandria-verify -p alexandria-personhood
+cargo test -p alexandria-node --features personhood-lab personhood
+PERSONHOOD_NODE_MODULES="$NODE_MODULES" \
+  node --test scripts/inspect-personhood-certificate.test.cjs
+node scripts/inspect-personhood-certificate.cjs "$NODE_MODULES" \
+  crates/alexandria-personhood/tests/fixtures/testCertificate.pem \
+  /path/to/reviewed-candidate.cer
+```
+
+`NODE_MODULES` must point to an existing installation containing
+`circomlibjs@0.1.7`. The inspection tool reads bounded local certificates,
+compares optimized and reference Poseidon calculations, and emits a JSON array
+with DER SHA-256 fingerprints, RSA parameters, dates and circuit key hashes.
+It performs no network fetch or trust activation. Its three tests cover the
+pinned public test certificate (stored with LF, reconstructing the original
+CRLF bytes for the artifact hash), malformed/oversized/concatenated input, and
+the known synthetic issuer hash. See the trust proposal for candidate results
+and the remaining production approval requirements.
 
 ## Build an isolated Android app
 
