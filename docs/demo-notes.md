@@ -2,11 +2,11 @@
 
 **Open:** Alexandria, unlocked demo profile; Cloud at <http://127.0.0.1:8787>.
 **Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
-Unlocking runs the bundled seeds. Use Big-O and JavaScript, which have question banks.
+Unlocking runs the bundled seeds. Instructor courses: **Instructor → My courses → Load example courses** (seven editable drafts).
 
 ## Start with live Requirements
 
-**Cloud → Hiring → Role requirements:** paste your job description → **Read it**.
+**Cloud → Hiring → Role requirements:** paste your job description, or **Load from link** with a public HTTPS URL → review the text → **Read it**.
 Review quotations and Bloom levels; preferred skills start unchecked. Enter code/title → **Create this role**. Show **Edit** and live coverage. Allow up to two minutes for the local model. **Create role manually** is the fallback.
 Say: “We review what the job requires before comparing anyone.” Coverage uses real published listings; it can be zero.
 
@@ -14,7 +14,7 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 
 1. **Goals → Engineering Manager → View path → Big-O → Assess.**
    Say: “The assessment runs on this device.”
-2. **Show Sentinel Dev:** click its assessment button or press **⌘⇧S**.
+2. **Show Sentinel Dev:** press **⌘⇧S → Start camera preview** and allow camera access.
    Say: “These are live local integrity signals.” Then answer and submit.
 3. **Open the earned credential.** Point out its ID, score, skill, issuer, and integrity summary.
 4. **My profile → Let employers find you:** choose Big-O Analysis, review and save consent.
@@ -38,6 +38,6 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 - “A perfect factual quiz earns **Remember**, not a higher Bloom level.”
 - “This is learner-issued evidence: a valid signature adds **no independent issuer corroboration**.”
 
-**If needed:** use the passive Sentinel button during an assessment. Full **Diagnostics → Sentinel live view** is for a separate camera-preview demonstration; exit diagnostics before assessing. Avoid reloading an open attempt—normal cooldowns apply. If sharing fails, retry the same preview promptly and refresh Cloud.
+**If needed:** idle means no assessment is running. Camera preview still works. Keep diagnostics off during assessments; avoid reloading an attempt because cooldowns apply. If sharing fails, retry the same preview promptly and refresh Cloud.
 
 [Setup and troubleshooting](assessment-demo.md)

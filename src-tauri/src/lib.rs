@@ -1166,13 +1166,9 @@ pub fn run() {
                             set_pref(c"mediaStreamEnabled", &yes);
                             set_pref(c"mediaCaptureRequiresSecureConnection", &no);
 
-                            // Install a UIDelegate that auto-grants
-                            // media-capture requests. WKWebView denies by
-                            // default when no UIDelegate implements
-                            // `_webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:`,
-                            // which blocks getUserMedia inside plugin iframes
-                            // even though the plugin's own consent flow has
-                            // already gone through PermissionPrompt.
+                            // The main app uses WebKit's media permission
+                            // prompt; plugin frames require the grants
+                            // recorded by PermissionPrompt in PluginHost.
                             crate::macos_media_delegate::install(wk);
                         }
 
@@ -1309,6 +1305,7 @@ pub fn run() {
             commands::courses::list_courses,
             commands::courses::get_course,
             commands::courses::create_course,
+            commands::demo_courses::import_demo_courses,
             commands::courses::update_course,
             commands::courses::delete_course,
             // Enrollment

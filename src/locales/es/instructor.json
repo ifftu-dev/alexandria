@@ -25,7 +25,9 @@
     "addTutorial": "+ Tutorial",
     "emptyTitle": "Aún no has creado nada",
     "emptyDesc": "Crea tu primer curso o tutorial con el editor.",
-    "updated": "Actualizado {date}"
+    "updated": "Actualizado {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "Progreso de los estudiantes",

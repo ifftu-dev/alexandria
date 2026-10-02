@@ -127,6 +127,6 @@
     "received": "Received; verification outcome",
     "shareNext": "Share or publish",
     "liveView": "Sentinel Dev · ⌘⇧S",
-    "liveNote": "Read-only live signals. Assessment monitoring remains active; camera diagnostics require diagnostics mode."
+    "liveNote": "Enable the camera below for a local live preview. During a skill assessment, it also supplies face and gaze signals. Closing this window stops its camera."
   }
 }

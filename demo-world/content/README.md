@@ -1,7 +1,10 @@
 # Demo course corpus
 
-Source material for the future demo world. Nothing here is loaded by the app,
-and nothing here is authoritative: there are no signed rows, identities,
+Non-authoritative source material. **Instructor → My courses → Load example
+courses** explicitly imports the seven full courses as profile-owned drafts,
+using inline text and quizzes only. Startup does not import them. Re-import
+preserves edits; external media and plugin/video tutorials are excluded.
+Nothing in this source corpus is authoritative: there are no signed rows, identities,
 credentials, enrolments, opinions or governance records.
 
 - `courses.json` — 15 example courses and tutorials with their chapters,

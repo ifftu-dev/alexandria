@@ -393,7 +393,8 @@
     "valIdle": "空闲",
     "valYes": "是",
     "valNo": "否",
-    "valNa": "不适用"
+    "valNa": "不适用",
+    "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

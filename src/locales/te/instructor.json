@@ -25,7 +25,9 @@
     "addTutorial": "+ ట్యుటోరియల్",
     "emptyTitle": "ఇంకా ఏమీ నిర్మించలేదు",
     "emptyDesc": "కంపోజర్‌తో మీ మొదటి కోర్సు లేదా ట్యుటోరియల్‌ను సృష్టించండి.",
-    "updated": "నవీకరించబడింది {date}"
+    "updated": "నవీకరించబడింది {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "అభ్యాసకుని పురోగతి",

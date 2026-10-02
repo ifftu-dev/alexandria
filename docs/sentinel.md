@@ -118,14 +118,23 @@ before persisting scores or counters; it cannot safely reconstruct a composite
 from an older client that included the retired term. Historical snapshots and
 their stored outcomes are preserved, not silently rescored.
 
-### Passive demo panel
+### Sentinel Dev live panel
 
-An unlocked app can open the passive Sentinel Dev panel with Command–Shift–S
+An unlocked app can open the Sentinel Dev panel with Command–Shift–S
 (Control–Shift–S on other desktop platforms), or the Sentinel Dev button in the
 standalone assessment runner. It displays the existing monitoring session's
-telemetry without entering diagnostics, starting a camera preview, or consuming
-the attempt. It is available in release builds. Profile lock closes the panel.
-The camera-preview controls remain part of explicit diagnostics mode below.
+telemetry without entering diagnostics or consuming the attempt. It is available
+in release builds. **Start camera preview** explicitly requests local camera
+access and displays face/gaze overlays. In a standalone skill assessment it also
+drives the session's face/gaze checks; stopping or closing releases that camera
+opt-in. Outside an assessment, scores show unavailable and the panel explains
+that monitoring is idle. Preview-only frames do not enter the assessment evidence
+staging buffer. Profile lock closes the panel and stops capture.
+
+On macOS, trusted main-frame capture uses the normal WebKit/OS permission prompt.
+Plugin frames still require the host's recorded media grants. Capture and
+inference failures are shown in the panel; late permission results after closing
+are stopped rather than leaving a hidden camera running.
 
 Standalone assessment submission freezes answers while monitoring is live, then
 persists a final snapshot and ends the session before grading. A failed final

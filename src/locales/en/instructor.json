@@ -25,7 +25,9 @@
     "addTutorial": "+ Tutorial",
     "emptyTitle": "Nothing built yet",
     "emptyDesc": "Create your first course or tutorial with the composer.",
-    "updated": "Updated {date}"
+    "updated": "Updated {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "Learner progress",

@@ -1,5 +1,5 @@
-//! macOS WKUIDelegate that auto-grants media-capture (microphone, camera)
-//! permission requests issued by plugin iframes.
+//! macOS media-capture permission routing. Trusted main-frame requests use
+//! WebKit/OS consent prompts; plugin frames require recorded host grants.
 //!
 //! `WKWebView` denies `getUserMedia` calls when no UIDelegate implements
 //! `_webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:`.
@@ -32,10 +32,12 @@ use std::sync::OnceLock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, NSObject, Sel};
 use objc2::{msg_send, sel, ClassType};
+use objc2_foundation::NSString;
 
 /// WKPermissionDecision values:
 ///   0 = prompt, 1 = grant, 2 = deny.
 const WK_PERMISSION_DECISION_GRANT: i64 = 1;
+const WK_PERMISSION_DECISION_PROMPT: i64 = 0;
 /// WKPermissionDecision: deny.
 const WK_PERMISSION_DECISION_DENY: i64 = 2;
 
@@ -86,8 +88,7 @@ fn current_grants() -> MediaGrants {
 /// `CameraAndMicrophone` needs both — a partial grant is a denial, because
 /// WebKit gives us one answer for the pair and answering "yes" would hand over
 /// the half that was never consented to.
-fn capture_is_granted(capture_type: i64) -> bool {
-    let g = current_grants();
+fn capture_is_granted(capture_type: i64, g: MediaGrants) -> bool {
     match capture_type {
         WK_CAPTURE_TYPE_CAMERA => g.camera,
         WK_CAPTURE_TYPE_MICROPHONE => g.microphone,
@@ -95,6 +96,34 @@ fn capture_is_granted(capture_type: i64) -> bool {
         // An unrecognised capture type is one this build does not know how to
         // ask consent for, so it cannot have been consented to.
         _ => false,
+    }
+}
+
+fn capture_decision(
+    main_frame: bool,
+    trusted_app_origin: bool,
+    capture_type: i64,
+    grants: MediaGrants,
+) -> i64 {
+    if !matches!(
+        capture_type,
+        WK_CAPTURE_TYPE_CAMERA | WK_CAPTURE_TYPE_MICROPHONE | WK_CAPTURE_TYPE_CAMERA_AND_MICROPHONE
+    ) {
+        return WK_PERMISSION_DECISION_DENY;
+    }
+    if main_frame {
+        // Sentinel/course camera controls live in the trusted main frame,
+        // outside PluginHost's grants. Ask WebKit/the OS for consent there.
+        return if trusted_app_origin {
+            WK_PERMISSION_DECISION_PROMPT
+        } else {
+            WK_PERMISSION_DECISION_DENY
+        };
+    }
+    if capture_is_granted(capture_type, grants) {
+        WK_PERMISSION_DECISION_GRANT
+    } else {
+        WK_PERMISSION_DECISION_DENY
     }
 }
 
@@ -145,17 +174,23 @@ fn delegate_class() -> &'static AnyClass {
             if decision_handler.is_null() {
                 return;
             }
-            // Answer from what the user actually consented to. A plugin that
-            // calls getUserMedia without going through the host's prompt now
-            // gets a denial rather than a camera.
-            let decision = if capture_is_granted(capture_type) {
-                WK_PERMISSION_DECISION_GRANT
-            } else {
+            if _origin.is_null() || _frame.is_null() {
+                unsafe { (*decision_handler).call((WK_PERMISSION_DECISION_DENY,)) };
+                return;
+            }
+            let main_frame: bool = unsafe { msg_send![&*_frame, isMainFrame] };
+            let protocol: Retained<NSString> = unsafe { msg_send![&*_origin, protocol] };
+            let host: Retained<NSString> = unsafe { msg_send![&*_origin, host] };
+            let protocol = protocol.to_string();
+            let host = host.to_string();
+            let trusted = (protocol == "tauri" && host == "localhost")
+                || (cfg!(debug_assertions) && protocol == "http" && matches!(host.as_str(), "localhost" | "127.0.0.1"));
+            let decision = capture_decision(main_frame, trusted, capture_type, current_grants());
+            if decision == WK_PERMISSION_DECISION_DENY {
                 log::warn!(
                     "macOS: denying media capture (type {capture_type}) — no matching user grant"
                 );
-                WK_PERMISSION_DECISION_DENY
-            };
+            }
             unsafe { (*decision_handler).call((decision,)) };
         }
         unsafe {
@@ -195,4 +230,42 @@ fn delegate_class() -> &'static AnyClass {
 
         builder.register()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trusted_main_frame_prompts_and_plugin_still_requires_grant() {
+        let none = MediaGrants::default();
+        assert_eq!(
+            capture_decision(true, true, WK_CAPTURE_TYPE_CAMERA, none),
+            WK_PERMISSION_DECISION_PROMPT
+        );
+        assert_eq!(
+            capture_decision(true, false, WK_CAPTURE_TYPE_CAMERA, none),
+            WK_PERMISSION_DECISION_DENY
+        );
+        assert_eq!(
+            capture_decision(false, true, WK_CAPTURE_TYPE_CAMERA, none),
+            WK_PERMISSION_DECISION_DENY
+        );
+        let camera = MediaGrants {
+            camera: true,
+            microphone: false,
+        };
+        assert_eq!(
+            capture_decision(false, true, WK_CAPTURE_TYPE_CAMERA, camera),
+            WK_PERMISSION_DECISION_GRANT
+        );
+        assert_eq!(
+            capture_decision(false, true, WK_CAPTURE_TYPE_CAMERA_AND_MICROPHONE, camera),
+            WK_PERMISSION_DECISION_DENY
+        );
+        assert_eq!(
+            capture_decision(true, true, 99, camera),
+            WK_PERMISSION_DECISION_DENY
+        );
+    }
 }

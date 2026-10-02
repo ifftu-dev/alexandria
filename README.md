@@ -260,7 +260,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. No personas, credentials, courses or governance rows are created.
+The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. No personas, credentials, courses or governance rows are created automatically. Instructors can explicitly load seven example course drafts from **My courses → Load example courses**.
 
 ### Building for iOS
 

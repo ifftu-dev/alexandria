@@ -25,7 +25,9 @@
     "addTutorial": "+ টিউটোরিয়াল",
     "emptyTitle": "এখনও কিছু তৈরি করা হয়নি",
     "emptyDesc": "কম্পোজার দিয়ে আপনার প্রথম কোর্স বা টিউটোরিয়াল তৈরি করুন।",
-    "updated": "আপডেট হয়েছে {date}"
+    "updated": "আপডেট হয়েছে {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "শিক্ষার্থীর অগ্রগতি",

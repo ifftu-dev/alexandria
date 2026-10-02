@@ -25,7 +25,9 @@
     "addTutorial": "+ Tutoriel",
     "emptyTitle": "Rien de créé pour l'instant",
     "emptyDesc": "Créez votre premier cours ou tutoriel avec le compositeur.",
-    "updated": "Mis à jour le {date}"
+    "updated": "Mis à jour le {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "Progression des apprenants",

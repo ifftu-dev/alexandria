@@ -110,7 +110,12 @@ async function save() {
   try {
     const updated = await invoke<Element>('update_element', {
       elementId: props.element.id,
-      req: { content_inline: JSON.stringify({ questions: questions.value }, null, 2) },
+      req: { content_inline: JSON.stringify({ questions: questions.value.map(q => ({
+        ...q,
+        prompt: q.question,
+        type: multi() ? 'multiple_choice' : 'single_choice',
+        correct_indices: multi() ? q.correct_indices : [q.correct_index],
+      })) }, null, 2) },
     })
     emit('updated', updated)
     dirty.value = false

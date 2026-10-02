@@ -25,7 +25,9 @@
     "addTutorial": "+ ٹیوٹوریل",
     "emptyTitle": "ابھی کچھ نہیں بنایا",
     "emptyDesc": "کمپوزر سے اپنا پہلا کورس یا ٹیوٹوریل بنائیں۔",
-    "updated": "{date} کو تازہ کیا گیا"
+    "updated": "{date} کو تازہ کیا گیا",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "سیکھنے والوں کی پیشرفت",

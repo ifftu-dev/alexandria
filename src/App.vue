@@ -267,7 +267,7 @@ onUnmounted(() => {
 
   <!-- Live Sentinel observability PiP. It is not mounted outside explicit
        diagnostics mode, so its listeners and camera cannot survive exit. -->
-  <SentinelDebugPip :key="String(diagnostics.enabled.value)" v-if="isUnlocked && (diagnostics.enabled.value || sentinelView.visible.value)" :read-only="!diagnostics.enabled.value" @close="sentinelView.close" />
+  <SentinelDebugPip :key="String(diagnostics.enabled.value)" v-if="isUnlocked && (diagnostics.enabled.value || sentinelView.visible.value)" :initially-open="!diagnostics.enabled.value" @close="sentinelView.close" />
 
   <!-- Shows what Sentinel can see while a session is running, so avoidable
        flags can be avoided. Self-hides when no session is active. -->

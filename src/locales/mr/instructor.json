@@ -25,7 +25,9 @@
     "addTutorial": "+ ट्युटोरियल",
     "emptyTitle": "अजून काहीही तयार केले नाही",
     "emptyDesc": "रचनाकाराने तुमचा पहिला अभ्यासक्रम किंवा ट्युटोरियल तयार करा.",
-    "updated": "अद्ययावत {date}"
+    "updated": "अद्ययावत {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "विद्यार्थी प्रगती",

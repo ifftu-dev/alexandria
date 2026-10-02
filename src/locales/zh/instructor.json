@@ -25,7 +25,9 @@
     "addTutorial": "+ 教程",
     "emptyTitle": "还什么都没构建",
     "emptyDesc": "使用编排器创建你的第一门课程或教程。",
-    "updated": "更新于 {date}"
+    "updated": "更新于 {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
   },
   "courseLearners": {
     "eyebrow": "学习者进度",

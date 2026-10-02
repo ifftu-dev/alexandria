@@ -393,7 +393,8 @@
     "valIdle": "idle",
     "valYes": "yes",
     "valNo": "no",
-    "valNa": "n/a"
+    "valNa": "n/a",
+    "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {
     "flaggedTitle": "This session was flagged",

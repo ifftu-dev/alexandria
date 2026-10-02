@@ -8,22 +8,23 @@ This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandri
 2. Start Docker Desktop. From the Cloud checkout run `scripts/demo-assessment.sh`. Open <http://127.0.0.1:8787> and choose **Continue**. This is a loopback-only development sign-in, not a production identity-provider deployment.
 3. In Alexandria, open **Settings → Directories** and add `http://127.0.0.1:8787`, named **Local demo**. Both applications use the exported bundled taxonomy. The launcher creates only an organization; it does not seed candidate assessment results.
 4. Use **JavaScript** (`skill_javascript`) or **Big-O Analysis** (`skill_big_o`). These have bundled MCQ banks. Each attempt draws three questions and requires at least 70%; with three equally weighted questions, all three must be correct. Questions/options are randomized.
-5. Use a fresh demo profile or a skill with no recent attempt when rehearsing. Normal attempt limits and cooldowns apply. An interrupted attempt counts; do not repeatedly reload to change the draw.
+5. For the instructor demo, switch to **Instructor → My courses → Load example courses**. This explicitly imports seven AI-generated course drafts with inline lessons and quizzes, owned by the current profile. Repeating it preserves edits. Open a draft in the composer; publishing uses the normal signed publication flow. External media, fabricated personas, and learner results are not imported.
+6. Use a fresh demo profile or a skill with no recent attempt when rehearsing. Normal attempt limits and cooldowns apply. An interrupted attempt counts; do not repeatedly reload to change the draw.
 
 The launcher keeps Postgres in the `alexandria-assessment-demo-db` Docker container on loopback port 5544. The database `alexandria_demo` is separate from `alexandria_demo_test`. Local session configuration and the taxonomy export live under the ignored `.demo/` directory. Stopping the server/container preserves the demo data. No other development database is reset.
 
 ## Show Sentinel Dev
 
-During an assessment, click **Sentinel Dev · ⌘⇧S**, or press **Command–Shift–S** while the unlocked app has keyboard focus. This passive panel is available in release builds, requires no developer setting, and displays the real active session's telemetry. Opening it neither ends the assessment nor starts a separate camera. Close it with its × button or the shortcut.
+Press **Command–Shift–S** in the unlocked app, or click **Sentinel Dev** during an assessment. Click **Start camera preview** and allow the normal camera permission prompt. The feed, face box, landmarks, and gaze overlay work without diagnostics. During a standalone skill assessment, this camera also supplies face/gaze signals to monitoring. Closing the panel or stopping the camera ends its capture.
 
-To demonstrate camera landmarks and gaze preview separately, enter **Diagnostics** from the profile menu, then use **Sentinel live view** in the diagnostics banner and start its camera preview. Exit diagnostics before starting a credential-bearing assessment. Diagnostics entry ends an open assessment; it is not the way to display the passive panel during the assessment. Camera preview requires the Mac's normal camera permission. Standalone MCQ assessments do not automatically request a camera.
+Outside an assessment, the panel explicitly reports idle; typing/mouse/integrity measurements begin with an assessment. Capture and inference errors appear in the panel. Do not enter diagnostics during an assessment: that consumes the open attempt under normal policy. Diagnostics is not needed to show the live feed.
 
 Low-data signals can show unavailable rather than a score. Three MCQ clicks do not supply sufficient typing data to train or demonstrate every behavioral model. Sentinel reports local integrity observations; it does not establish independent identity or an independently proctored result.
 
 ## Demo A — learner first
 
 1. In Alexandria, open **Goals → Engineering Manager → View path**, then **Assess** beside **Big-O Analysis**. To add a separate goal, use **Skills & Credentials → Browse → Big-O Analysis → 🎯 Goal**, then view its path. Big-O has no prerequisite; JavaScript’s goal path requires HTML & CSS first. Use JavaScript for the invitation-first path.
-2. Open the passive Sentinel Dev panel. Answer the questions and submit. Answers freeze before the last telemetry snapshot and session finalization; grading then issues one credential on a pass.
+2. Open Sentinel Dev and start the camera preview if wanted. Answer the questions and submit. Answers freeze before the last telemetry snapshot and session finalization; grading then issues one credential on a pass.
 3. Open the credential from the result. Show its issuer/subject DID, skill, score, Bloom level, terminal integrity assertion, and evidence references.
 4. In **My profile → Talent index**, select the earned skill and optional display name, review the exact record, and save consent.
 5. In **Settings → Directories**, publish the listing to **Local demo**.
@@ -61,7 +62,8 @@ The installed app is built from this worktree. Main checkouts and profile storag
 ## Live role requirements
 
 In Cloud, open **Hiring → Role requirements**. Paste the job description during
-the demo, click **Read it**, review the quoted skill proposals and Bloom levels,
+the demo, or use **Load from link** with a public HTTPS URL and review the loaded
+text. Click **Read it**, review the quoted skill proposals and Bloom levels,
 then supply a code/title and create the role. Preferred proposals start unchecked.
 The local Ollama model is configured by the Cloud demo launcher; allow up to two
 minutes. **Create role manually** is available as a fallback. Coverage reflects

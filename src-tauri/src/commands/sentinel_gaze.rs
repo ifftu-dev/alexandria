@@ -66,6 +66,9 @@ pub struct ScoreGazeRequest {
     pub frame: FaceFrame,
     pub user_address: String,
     pub device_fp_prefix: String,
+    /// A standalone preview must not supply evidence to an assessment.
+    #[serde(default)]
+    pub preview_only: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +95,7 @@ pub async fn sentinel_score_gaze(
         frame,
         user_address,
         device_fp_prefix,
+        preview_only,
     } = req;
     let (frame, dets) = tokio::task::spawn_blocking(move || {
         let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
@@ -103,12 +107,14 @@ pub async fn sentinel_score_gaze(
     // Park this frame in memory in case the snapshot about to be written turns
     // out to be flagged. Nothing is persisted here, and an unflagged snapshot
     // lets the next frame overwrite it — see `sentinel::evidence`.
-    state.evidence_staging.remember_frame(
-        frame.width,
-        frame.height,
-        &frame.rgba,
-        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-    );
+    if !preview_only {
+        state.evidence_staging.remember_frame(
+            frame.width,
+            frame.height,
+            &frame.rgba,
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        );
+    }
 
     let calib = load_user_model::<GazeCalibWeights>(
         &state,
