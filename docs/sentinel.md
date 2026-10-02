@@ -621,3 +621,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **No remote models**: No command accepts classifier weights. The only ONNX models the backend parses are embedded in the binary, so no peer or envelope can supply model bytes.
 9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.
+
+The live preview uses the unlocked profile and current device fingerprint when
+loading gaze calibration, just like assessment monitoring. Preview frames remain
+excluded from assessment evidence staging.

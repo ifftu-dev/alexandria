@@ -6,11 +6,13 @@ import SentinelDebugPip from './SentinelDebugPip.vue'
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), getUserMedia: vi.fn(), setCameraOptedIn: vi.fn(), scoreGaze: vi.fn(), verifyFace: vi.fn() }))
 const debug = reactive({ active: true, integrity: 0.85, consistency: 0.9, flags: [] as string[] })
 const optedIn = ref(false)
+const stakeAddress = ref('stake_test_active')
+vi.mock('@/composables/useProfiles', () => ({ useProfiles: () => ({ stakeAddress }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ path: '/assessment/skill_big_o' }) }))
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/composables/useSentinel', () => ({ useSentinel: () => ({ debug, cameraOptedIn: optedIn, getSessionId: () => 'session-1', setCameraOptedIn: mocks.setCameraOptedIn, scoreGaze: mocks.scoreGaze, verifyFace: mocks.verifyFace }) }))
+vi.mock('@/composables/useSentinel', () => ({ useSentinel: () => ({ debug, cameraOptedIn: optedIn, getSessionId: () => 'session-1', setCameraOptedIn: mocks.setCameraOptedIn, scoreGaze: mocks.scoreGaze, verifyFace: mocks.verifyFace, computeDeviceFingerprint: async () => '0123456789abcdef0123456789abcdef' }) }))
 
 const mountPanel = () => mount(SentinelDebugPip, { props: { initiallyOpen: true }, global: {
   stubs: { Teleport: true }, mocks: { $t: (key: string) => key },
@@ -103,7 +105,7 @@ describe('Sentinel Dev panel', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(700)
     expect(mocks.invoke).toHaveBeenCalledWith('sentinel_score_gaze', expect.objectContaining({
-      req: expect.objectContaining({ preview_only: true }),
+      req: expect.objectContaining({ preview_only: true, user_address: 'stake_test_active', device_fp_prefix: '0123456789abcdef' }),
     }))
     expect(wrapper.text()).toContain('Face model unavailable')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()

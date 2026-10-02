@@ -17,6 +17,7 @@ import { useRoute } from 'vue-router'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
+import { useProfiles } from '@/composables/useProfiles'
 import type { FaceDetection, ScoreGazeResponse } from '@/types'
 
 interface Props { initiallyOpen?: boolean }
@@ -27,6 +28,8 @@ const { t } = useI18n()
 const { invoke } = useLocalApi()
 const sentinel = useSentinel()
 const { debug } = sentinel
+const { stakeAddress } = useProfiles()
+let deviceFp = ''
 const route = useRoute()
 
 const open = ref(props.initiallyOpen)
@@ -65,6 +68,8 @@ async function startCamera() {
     })
     if (!current()) { acquired.getTracks().forEach(track => track.stop()); return }
     stream = acquired
+    deviceFp = (await sentinel.computeDeviceFingerprint()).substring(0, 16)
+    if (!current()) return
     cameraOn.value = true
     await nextTick()
     if (!current()) return
@@ -161,7 +166,7 @@ async function infer() {
   if (busy) return
   const v = videoRef.value
   // Skip work when the window/tab is hidden — nothing to observe.
-  if (!v || v.readyState < 2 || document.hidden) return
+  if (!v || v.readyState < 2 || document.hidden || !stakeAddress.value) return
   busy = true
   const generation = cameraGeneration
   try {
@@ -177,7 +182,7 @@ async function infer() {
     const t0 = performance.now()
     // One YuNet pass — score_gaze returns the best detection for overlay.
     const gaze = await invoke<ScoreGazeResponse>('sentinel_score_gaze', {
-      req: { frame, user_address: 'debug-pip', device_fp_prefix: 'debugpip', preview_only: true },
+      req: { frame, user_address: stakeAddress.value, device_fp_prefix: deviceFp, preview_only: true },
     })
     if (disposed || generation !== cameraGeneration) return
     inferenceError.value = null

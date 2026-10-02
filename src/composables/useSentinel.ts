@@ -1908,6 +1908,7 @@ function createSentinelService() {
     verifyFace,
     scoreGaze,
     extractGazeFeatures,
+    computeDeviceFingerprint,
     trainGazeCalibration,
     debug: readonly(sentinelDebug),
     getDebugState,
