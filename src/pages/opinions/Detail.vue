@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import ThreadVotes from '@/components/opinions/ThreadVotes.vue'
 import ThreadActions from '@/components/opinions/ThreadActions.vue'
 import ThreadComment from '@/components/opinions/ThreadComment.vue'
 import ThreadComposer from '@/components/opinions/ThreadComposer.vue'
-import type { DiscussionAccess, DiscussionItem, DiscussionAction, DiscussionContent, SubjectFieldInfo } from '@/types'
+import type { DiscussionAccess, DiscussionItem, DiscussionAction, DiscussionContent, OpinionRow, SubjectFieldInfo } from '@/types'
 const { invoke } = useLocalApi()
 const route = useRoute()
+const router = useRouter()
 const rows = ref<DiscussionItem[]>([])
 const access = ref<DiscussionAccess | null>(null)
 const fields = ref<SubjectFieldInfo[]>([])
@@ -36,6 +37,10 @@ async function load() {
       batch = await invoke<DiscussionItem[]>('list_discussions', { threadId: id, sort: 'new', offset: all.length })
       all.push(...batch)
     } while (batch.length === 200 && ticket === generation)
+    if (ticket === generation && !all.length) {
+      const legacy = await invoke<OpinionRow | null>('get_opinion', { opinionId: id })
+      if (legacy && ticket === generation) { await router.replace(`/opinions/legacy/${id}`); return }
+    }
     if (ticket === generation) { rows.value = all; error.value = '' }
   } catch (e) { if (ticket === generation) error.value = String(e) }
   finally { loading.value = false }
