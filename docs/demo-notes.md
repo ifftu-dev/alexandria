@@ -10,7 +10,7 @@ Every profile automatically receives the bundled seeds, seven example course dra
 
 - **Opinions:** show thumbnail threads, sorting, votes, replies, and author edit/delete. The seven bundled viewpoints are read-only examples, separate from peer-published threads.
 - **Posting/commenting:** requires an accepted credential in the same topic. The `demo` instructor is trusted for **Computer Science / Web Development, Apply or higher**. A learner's self-issued quiz credential alone does not unlock this. Use a genuinely issued credential or a course-completion credential endorsed by `demo`.
-- **Ready discussion:** open “Demo discussion: teach layout through a real page” → expand **Qualification evidence** → show its comment and nested reply. A second algorithms thread has another comment. These are real published actions by one demo learner, after the instructor endorsement; a live second-device receipt has not been rehearsed.
+- **Ready discussion:** open “Demo discussion: teach layout through a real page” → expand **Qualification evidence** → show its comment and nested reply. “Demo discussion: explain the trade-off before the notation” has a playable AI-generated video and another comment. These are real published actions by one demo learner, after the instructor endorsement; a live second-device receipt has not been rehearsed.
 - **Classrooms:** show edge-to-edge chat; on phone/tablet, open Channels and Members from the header.
 - **Live tutoring:** leave an empty room for five minutes; its status becomes Ended. Old ended invites do not restart it. Keep the app open for the live expiry demonstration.
 
