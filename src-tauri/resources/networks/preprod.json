@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "network_id": "preprod",
-  "profile_revision": 1,
+  "profile_revision": 2,
   "cardano_network": "preprod",
   "cardano_network_magic": 1,
   "relays": [
@@ -55,5 +55,9 @@
   "committee_instance_id": null,
   "committee_https_endpoints": [],
   "protocol_namespace": "/alexandria/preprod",
-  "optional_governance_anchor_address": null
+  "optional_governance_anchor_address": null,
+  "default_governance_anchor": {
+    "dao_id": "af785f1d14788f2d43c8ce8e29c15cd82c4c4cd0e3f56d1646df0dd116e0b671",
+    "envelope_blake3": "44961c11e052776f04f8b851b3a69a5a039b433690fd6fbd59bf4aa18cd23f3e"
+  }
 }

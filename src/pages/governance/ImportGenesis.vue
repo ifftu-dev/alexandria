@@ -6,6 +6,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput } from '@/components/ui'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type {
+  DefaultGenesisStatus,
   GovernanceGenesisLocator,
   PinGenesisResponse,
   RetrievedGenesisPreview,
@@ -27,6 +28,9 @@ const success = ref('')
 const reviewing = ref(false)
 const retrieving = ref(false)
 const pinning = ref(false)
+const defaultGenesis = ref<DefaultGenesisStatus | null>(null)
+const defaultError = ref('')
+const pinningDefault = ref(false)
 
 const canPin = computed(
   () =>
@@ -141,7 +145,34 @@ async function pinGenesis(): Promise<void> {
   }
 }
 
+async function loadDefault(): Promise<void> {
+  try {
+    defaultGenesis.value = await invoke<DefaultGenesisStatus | null>('governance_default_genesis_status')
+  } catch (reason) {
+    defaultError.value = message(reason)
+  }
+}
+
+async function pinDefault(): Promise<void> {
+  const current = defaultGenesis.value
+  if (!current || current.pinned) return
+  pinningDefault.value = true
+  defaultError.value = ''
+  try {
+    await invoke<PinGenesisResponse>('governance_pin_genesis', {
+      genesisJson: current.genesis_json,
+      expectedDaoId: current.preview.dao_id,
+    })
+    await loadDefault()
+  } catch (reason) {
+    defaultError.value = message(reason)
+  } finally {
+    pinningDefault.value = false
+  }
+}
+
 onMounted(() => {
+  void loadDefault()
   if (locatorInput.value) void reviewLocator()
 })
 </script>
@@ -156,6 +187,29 @@ onMounted(() => {
         {{ $t('common.governanceGenesisImport.subtitle') }}
       </p>
     </div>
+
+    <section v-if="defaultGenesis" class="rounded-xl border border-border bg-card p-5" data-testid="default-genesis">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <h2 class="text-base font-semibold text-foreground">{{ $t('common.governanceGenesisImport.defaultNetwork') }}</h2>
+        <span class="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          {{ $t(defaultGenesis.pinned ? 'common.governanceGenesisImport.defaultPinned' : 'common.governanceGenesisImport.defaultAvailable') }}
+        </span>
+      </div>
+      <p class="mt-3 text-sm text-foreground">{{ visible(defaultGenesis.preview.name) }}</p>
+      <p class="mt-2 text-sm text-muted-foreground">{{ $t('common.governanceGenesisImport.defaultHint') }}</p>
+      <details class="mt-4 text-sm text-foreground">
+        <summary class="cursor-pointer">{{ $t('common.governanceGenesisImport.trustFacts') }}</summary>
+        <dl class="mt-3 space-y-3">
+          <div><dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.daoId') }}</dt><dd class="break-all font-mono text-xs">{{ defaultGenesis.preview.dao_id }}</dd></div>
+          <div><dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.contentHash') }}</dt><dd class="break-all font-mono text-xs">{{ defaultGenesis.preview.envelope_hash }}</dd></div>
+        </dl>
+        <pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-3 text-xs">{{ JSON.stringify(JSON.parse(defaultGenesis.genesis_json), null, 2) }}</pre>
+      </details>
+      <AppButton v-if="!defaultGenesis.pinned" class="mt-4" :loading="pinningDefault" @click="pinDefault">
+        {{ $t('common.governanceGenesisImport.useDefault') }}
+      </AppButton>
+    </section>
+    <p v-if="defaultError" role="alert" class="text-sm text-destructive">{{ defaultError }}</p>
 
     <section class="rounded-xl bg-card p-5 shadow-sm">
       <label class="text-sm font-medium text-foreground" for="genesis-locator">

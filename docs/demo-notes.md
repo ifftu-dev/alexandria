@@ -16,7 +16,7 @@ Every profile automatically receives the bundled seeds, seven example course dra
 
 ## Governance
 
-**Community:** review a signed founding-genesis link, inspect its seven founders, trust policy, and 5-of-7 thresholds, then pin the expected DAO ID. This needs a valid signed artifact and reachable mirrors. Proposal creation, voting, and certified outcomes are not implemented yet; do not present them as working.
+**Community:** show **Default network governance → Pinned for this profile**. On an existing profile, use **Accept this default trust anchor** once; new profiles receive it automatically. Expand **Verified founding trust facts** to show the signed document. Say: “This demo has seven founder key sets controlled by one operator.” Proposal creation, voting and certified outcomes are still unavailable. [Public genesis and verification](default-network-genesis.md).
 
 ## Start with live Requirements
 

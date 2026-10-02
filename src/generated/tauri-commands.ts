@@ -131,6 +131,7 @@ export const TAURI_COMMANDS = [
   "get_snapshot",
   "get_talent_index_preview",
   "get_wallet_info",
+  "governance_default_genesis_status",
   "governance_get_pinned_genesis",
   "governance_pin_genesis",
   "governance_preview_genesis",

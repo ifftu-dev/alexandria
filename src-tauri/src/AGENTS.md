@@ -25,7 +25,7 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Cardano | `cardano/` | Pallas wallet/tx building; reference scripts deployed on preprod (UTxOs in `cardano/script_refs.rs`) |
 | Content storage | `content_store/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock; `ContentNode::shutdown` calls both `Router::shutdown` and `Store::shutdown` so the redb lock releases between profile switches. |
 | Cryptography | `crypto/` | Ed25519, Blake2b, per-profile keystore (Stronghold desktop / portable AES-256-GCM mobile) |
-| AppState lifecycle | `lib.rs` | `start_active_profile` / `stop_active_profile` bring per-profile services up and down on switch |
+| AppState lifecycle | `lib.rs` | `start_new_profile` initializes the bundled network governance anchor for creation/restoration; `start_active_profile` / `stop_active_profile` bring services up and down on switch without changing existing trust decisions |
 
 Credential revocation, suspension, and reinstatement are issuer-bound. The
 challenge/escrow command and builder paths are retired. Plugin credential

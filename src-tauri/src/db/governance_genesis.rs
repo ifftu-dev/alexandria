@@ -97,6 +97,21 @@ pub(crate) fn pin_genesis(
     })
 }
 
+/// Used only when initializing a new network-bound profile. Existing pins
+/// retain their exact bytes; opening an established profile never calls this.
+pub(crate) fn pin_default_genesis(
+    conn: &Connection,
+    profile: &crate::network_profile::NetworkProfile,
+) -> Result<(), String> {
+    if let Some(bytes) = profile
+        .embedded_governance_genesis()
+        .map_err(|error| error.to_string())?
+    {
+        pin_genesis(conn, bytes).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn load_pinned_genesis(
     conn: &Connection,
     dao_id: &str,

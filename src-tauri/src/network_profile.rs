@@ -36,6 +36,12 @@ const EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS: &[&[u8]] = &[include_bytes!(
     "../resources/networks/demo-opinions-policy.json"
 )];
 
+// Temporary single-operator demo governance, explicitly accepted for this
+// preprod build. Its exact public identity is pinned in preprod.json.
+const EMBEDDED_GOVERNANCE_GENESIS: Option<&[u8]> = Some(include_bytes!(
+    "../resources/networks/preprod-demo-genesis.json"
+));
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkProfile {
@@ -49,6 +55,8 @@ pub struct NetworkProfile {
     pub stake_registry_founder_keys: Vec<NamedVerifyingKey>,
     pub signed_bootstrap_registry_identity: ResourceIdentity,
     pub subject_qualification_policy_digests: Vec<String>,
+    #[serde(default)]
+    pub default_governance_anchor: Option<GovernanceAnchorIdentity>,
     pub cloud_https_origin: Option<String>,
     pub cloud_service_id: Option<String>,
     pub governance_locator: Option<String>,
@@ -82,6 +90,13 @@ pub struct ResourceIdentity {
     pub sha256: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GovernanceAnchorIdentity {
+    pub dao_id: String,
+    pub envelope_blake3: String,
+}
+
 #[derive(Debug, Error)]
 pub enum NetworkProfileError {
     #[error("network profile exceeds {MAX_NETWORK_PROFILE_BYTES} bytes")]
@@ -98,6 +113,8 @@ pub enum NetworkProfileError {
     BootstrapRegistryMismatch,
     #[error("subject qualification policies are invalid: {0}")]
     QualificationPolicy(String),
+    #[error("bundled governance trust anchor is invalid: {0}")]
+    GovernanceAnchor(String),
 }
 
 static EMBEDDED_PREPROD: LazyLock<Result<NetworkProfile, NetworkProfileError>> =
@@ -236,6 +253,13 @@ impl NetworkProfile {
             "subject qualification policy digest",
             &self.subject_qualification_policy_digests,
         )?;
+        if let Some(anchor) = &self.default_governance_anchor {
+            decode_32_byte_hex("default governance DAO id", &anchor.dao_id)?;
+            decode_32_byte_hex(
+                "default governance envelope BLAKE3",
+                &anchor.envelope_blake3,
+            )?;
+        }
 
         match (&self.cloud_https_origin, &self.cloud_service_id) {
             (None, None) => {}
@@ -285,7 +309,47 @@ impl NetworkProfile {
             return Err(NetworkProfileError::BootstrapRegistryMismatch);
         }
         self.qualification_policies(EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS)?;
+        self.governance_genesis(EMBEDDED_GOVERNANCE_GENESIS)?;
         Ok(())
+    }
+
+    pub(crate) fn embedded_governance_genesis(
+        &self,
+    ) -> Result<Option<&'static [u8]>, NetworkProfileError> {
+        self.governance_genesis(EMBEDDED_GOVERNANCE_GENESIS)
+    }
+
+    /// Verify the release document against both its exact bytes and network
+    /// scope. A configured-but-missing anchor is an error, never a manual-flow
+    /// fallback. No content is fetched and no keys are generated here.
+    pub(crate) fn governance_genesis<'a>(
+        &self,
+        document: Option<&'a [u8]>,
+    ) -> Result<Option<&'a [u8]>, NetworkProfileError> {
+        let fail = |message: &str| NetworkProfileError::GovernanceAnchor(message.into());
+        let (identity, bytes) = match (&self.default_governance_anchor, document) {
+            (None, None) => return Ok(None),
+            (Some(identity), Some(bytes)) => (identity, bytes),
+            _ => {
+                return Err(fail(
+                    "the network identity and bundled document must be supplied together",
+                ))
+            }
+        };
+        if blake3::hash(bytes).to_hex().as_str() != identity.envelope_blake3 {
+            return Err(fail("envelope digest does not match the network profile"));
+        }
+        let (envelope, _) = crate::domain::governance_certificate::decode_and_verify_genesis(
+            bytes,
+            Some(&identity.dao_id),
+        )
+        .map_err(|error| NetworkProfileError::GovernanceAnchor(error.to_string()))?;
+        if envelope.core.scope.scope_type != "network"
+            || envelope.core.scope.scope_id != self.network_id
+        {
+            return Err(fail("default genesis must govern this exact network"));
+        }
+        Ok(Some(bytes))
     }
 
     /// Build the policy set from exact policy documents. Every pinned digest
@@ -450,6 +514,38 @@ mod tests {
 
     fn valid_profile() -> NetworkProfile {
         NetworkProfile::parse(EMBEDDED_PREPROD_JSON).unwrap()
+    }
+
+    #[test]
+    fn default_genesis_requires_exact_document_dao_and_network() {
+        let profile = valid_profile();
+        let bytes = profile.embedded_governance_genesis().unwrap().unwrap();
+        assert!(profile.governance_genesis(None).is_err());
+        let mut unconfigured = profile.clone();
+        unconfigured.default_governance_anchor = None;
+        assert!(unconfigured.governance_genesis(Some(bytes)).is_err());
+        assert!(unconfigured.governance_genesis(None).unwrap().is_none());
+        let mut changed = bytes.to_vec();
+        changed.push(b' ');
+        assert!(profile.governance_genesis(Some(&changed)).is_err());
+        let mut wrong_dao = profile.clone();
+        wrong_dao.default_governance_anchor.as_mut().unwrap().dao_id = "ab".repeat(32);
+        assert!(wrong_dao.governance_genesis(Some(bytes)).is_err());
+        let mut wrong_network = profile.clone();
+        wrong_network.network_id = "other-network".into();
+        assert!(wrong_network.governance_genesis(Some(bytes)).is_err());
+        // A matching digest is insufficient: cryptographic proofs still verify.
+        let mut envelope: crate::domain::governance_certificate::FoundingGenesisEnvelope =
+            serde_json::from_slice(bytes).unwrap();
+        envelope.acceptances[0].governance_signature_hex = "00".repeat(64);
+        let corrupted = serde_json_canonicalizer::to_vec(&envelope).unwrap();
+        let mut bad_signature = profile.clone();
+        bad_signature
+            .default_governance_anchor
+            .as_mut()
+            .unwrap()
+            .envelope_blake3 = blake3::hash(&corrupted).to_hex().to_string();
+        assert!(bad_signature.governance_genesis(Some(&corrupted)).is_err());
     }
 
     #[test]

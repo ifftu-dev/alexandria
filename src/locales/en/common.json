@@ -39,8 +39,8 @@
   },
   "governanceGenesisImport": {
     "openImport": "Import trust anchor",
-    "title": "Import governance trust anchor",
-    "subtitle": "Review the locator, retrieve the exact canonical genesis, inspect every trust fact, then explicitly pin it on this device.",
+    "title": "Governance trust anchors",
+    "subtitle": "See the default network’s verified founding document, or review a genesis locator for another community.",
     "locatorLabel": "Genesis locator",
     "locatorPlaceholder": "alexandria://governance/genesis/…",
     "locatorHint": "Reviewing a locator does not fetch content or trust a DAO.",
@@ -79,9 +79,13 @@
     "coreHash": "Genesis core hash",
     "envelopeHash": "Signed envelope hash",
     "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
-    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept.",
+    "defaultNetwork": "Default network governance",
+    "defaultPinned": "Pinned for this profile",
+    "defaultAvailable": "Available for this profile",
+    "defaultHint": "New profiles automatically pin the verified genesis bundled with Alexandria. Existing profiles can review and accept it here. This anchor establishes trust; voting services are configured separately.",
+    "useDefault": "Accept this default trust anchor"
   },
-
   "status": {
     "connected": "Connected",
     "offline": "Offline",

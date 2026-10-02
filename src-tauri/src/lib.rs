@@ -175,6 +175,24 @@ impl AppState {
         paths: ProfilePaths,
         keystore: Keystore,
     ) -> Result<(), String> {
+        self.start_profile(paths, keystore, false).await
+    }
+
+    /// Initialize defaults only for profile creation and mnemonic restoration.
+    pub(crate) async fn start_new_profile(
+        &self,
+        paths: ProfilePaths,
+        keystore: Keystore,
+    ) -> Result<(), String> {
+        self.start_profile(paths, keystore, true).await
+    }
+
+    async fn start_profile(
+        &self,
+        paths: ProfilePaths,
+        keystore: Keystore,
+        initialize_defaults: bool,
+    ) -> Result<(), String> {
         // Refuse to switch into a profile while another is active —
         // callers must stop the prior one first.
         {
@@ -194,7 +212,7 @@ impl AppState {
 
         // 1. Open the encrypted DB and run migrations.
         let db_key = zeroize::Zeroizing::new(keystore.derive_db_key());
-        self.open_database(&paths, &db_key)?;
+        self.open_database(&paths, &db_key, initialize_defaults)?;
 
         // 2. Stash keystore in shared state so background workers see it.
         {
@@ -414,7 +432,12 @@ impl AppState {
     ///
     /// Runs migrations and installs bundled taxonomy, banks, and global plugins.
     /// Profile commands install owned demo courses after identity initialization.
-    fn open_database(&self, paths: &ProfilePaths, db_key: &[u8; 32]) -> Result<(), String> {
+    fn open_database(
+        &self,
+        paths: &ProfilePaths,
+        db_key: &[u8; 32],
+        initialize_defaults: bool,
+    ) -> Result<(), String> {
         {
             let guard = self.db.lock().map_err(|e| e.to_string())?;
             if guard.is_some() {
@@ -443,6 +466,20 @@ impl AppState {
         database
             .run_migrations()
             .map_err(|e| format!("database migrations failed: {e}"))?;
+
+        if initialize_defaults {
+            let profile = network_profile::embedded_preprod().map_err(|error| error.to_string())?;
+            let owner = self
+                .profile_manager
+                .get(&paths.id)
+                .ok_or_else(|| "new profile is missing from the profile index".to_string())?;
+            if owner.network_id != profile.network_id {
+                return Err(
+                    "new profile network does not match the bundled governance anchor".into(),
+                );
+            }
+            crate::db::governance_genesis::pin_default_genesis(database.conn(), profile)?;
+        }
 
         // Expire Sentinel appeal evidence whose window has closed. Done on
         // unlock rather than only on a timer, so evidence expires on schedule
@@ -1413,6 +1450,7 @@ pub fn run() {
             commands::governance_genesis::governance_retrieve_genesis,
             commands::governance_genesis::governance_pin_genesis,
             commands::governance_genesis::governance_get_pinned_genesis,
+            commands::governance_genesis::governance_default_genesis_status,
             // Reputation (VC-sourced engine — see commands::reputation).
             commands::reputation::list_reputation_rows,
             commands::reputation::get_reputation,

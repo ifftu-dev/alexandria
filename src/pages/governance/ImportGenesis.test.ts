@@ -103,6 +103,7 @@ function pinResponse(overrides: Partial<PinGenesisResponse> = {}): PinGenesisRes
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.invoke.mockImplementation(async command => {
+    if (command === 'governance_default_genesis_status') return null
     if (command === 'governance_preview_genesis_locator') return reviewed
     if (command === 'governance_retrieve_genesis') return retrieved
     if (command === 'governance_pin_genesis') return pinResponse()
@@ -130,6 +131,7 @@ describe('governance genesis import', () => {
     await flushPromises()
 
     expect(mocks.invoke.mock.calls).toEqual([
+      ['governance_default_genesis_status'],
       ['governance_preview_genesis_locator', { locatorUri }],
     ])
     expect(wrapper.text()).toContain(daoId)
@@ -195,7 +197,8 @@ describe('governance genesis import', () => {
   it('discards a review that finishes after the locator text changed', async () => {
     let resolveReview: (value: ReviewedGenesisLocator) => void = () => {}
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') {
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') {
         return new Promise<ReviewedGenesisLocator>(resolve => {
           resolveReview = resolve
         })
@@ -213,7 +216,8 @@ describe('governance genesis import', () => {
 
   it('refuses to show trust facts when retrieval answers for a different locator', async () => {
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') return reviewed
       if (command === 'governance_retrieve_genesis') {
         return {
           ...retrieved,
@@ -239,7 +243,8 @@ describe('governance genesis import', () => {
       ),
     })
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') return reviewed
       if (command === 'governance_retrieve_genesis') return spoofed
       throw new Error(`unexpected command: ${command}`)
     })
@@ -258,7 +263,8 @@ describe('governance genesis import', () => {
 
   it('reports an equivalent, differently signed pin without claiming a new anchor', async () => {
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') return reviewed
       if (command === 'governance_retrieve_genesis') return retrieved
       if (command === 'governance_pin_genesis') {
         return pinResponse({ newly_pinned: false, stored_envelope_differs: true })
@@ -275,5 +281,50 @@ describe('governance genesis import', () => {
 
     expect(wrapper.text()).toContain('common.governanceGenesisImport.equivalentAlreadyPinned')
     expect(wrapper.text()).not.toContain('common.governanceGenesisImport.pinned')
+  })
+})
+
+
+describe('bundled default genesis', () => {
+  it('shows a pinned default without asking for another trust decision', async () => {
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'governance_default_genesis_status') return { preview: retrieved.preview, genesis_json: retrieved.genesis_json, pinned: true }
+      if (command === 'governance_preview_genesis_locator') return reviewed
+      throw new Error(`unexpected command: ${command}`)
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="default-genesis"]').text()).toContain('common.governanceGenesisImport.defaultPinned')
+    expect(button(wrapper, 'common.governanceGenesisImport.useDefault')).toBeUndefined()
+    expect(mocks.invoke).not.toHaveBeenCalledWith('governance_pin_genesis', expect.anything())
+  })
+
+  it('pins an existing profile only after an explicit acceptance and refreshes the status', async () => {
+    let pinned = false
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'governance_default_genesis_status') return { preview: retrieved.preview, genesis_json: retrieved.genesis_json, pinned }
+      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_pin_genesis') { pinned = true; return pinResponse() }
+      throw new Error(`unexpected command: ${command}`)
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(pinned).toBe(false)
+    await button(wrapper, 'common.governanceGenesisImport.useDefault')!.trigger('click')
+    await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('governance_pin_genesis', { genesisJson: retrieved.genesis_json, expectedDaoId: daoId })
+    expect(wrapper.get('[data-testid="default-genesis"]').text()).toContain('common.governanceGenesisImport.defaultPinned')
+  })
+
+  it('surfaces a failed default verification without presenting an acceptance button', async () => {
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'governance_default_genesis_status') throw new Error('bundled genesis failed verification')
+      if (command === 'governance_preview_genesis_locator') return reviewed
+      throw new Error(`unexpected command: ${command}`)
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('failed verification')
+    expect(button(wrapper, 'common.governanceGenesisImport.useDefault')).toBeUndefined()
   })
 })

@@ -229,7 +229,7 @@ pub async fn create_profile(
 
             emit_progress(&app, "db", "Opening encrypted database...");
             state
-                .start_active_profile(paths.clone(), ks)
+                .start_new_profile(paths.clone(), ks)
                 .await
                 .map_err(|e| format!("failed to bring profile online: {e}"))?;
 
@@ -354,7 +354,7 @@ pub async fn restore_profile_with_mnemonic(
 
             emit_progress(&app, "db", "Opening encrypted database...");
             state
-                .start_active_profile(paths.clone(), ks)
+                .start_new_profile(paths.clone(), ks)
                 .await
                 .map_err(|e| format!("failed to bring profile online: {e}"))?;
 

@@ -473,6 +473,12 @@ export interface RetrievedGenesisPreview {
   preview: GenesisPreview
 }
 
+export interface DefaultGenesisStatus {
+  preview: GenesisPreview
+  genesis_json: string
+  pinned: boolean
+}
+
 export interface PinGenesisResponse {
   preview: GenesisPreview
   newly_pinned: boolean
