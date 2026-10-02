@@ -3,13 +3,15 @@ import { mount } from '@vue/test-utils'
 import OpinionExamples from './OpinionExamples.vue'
 import type { OpinionExample } from '@/types'
 
+vi.mock('./ThreadThumbnail.vue', () => ({ default: { template: '<div />' } }))
+
 vi.mock('@/components/course/VideoPlayer.vue', () => ({ default: {
   props: ['contentCid', 'title'], template: '<div data-video>{{ contentCid }}</div>',
 } }))
 
 const examples: OpinionExample[] = [
-  { id: 'one', subject_field_id: 'cs', title: 'First viewpoint', summary: 'A discussion prompt', video_cid: 'local-one', duration_seconds: 30 },
-  { id: 'two', subject_field_id: 'design', title: 'Second viewpoint', summary: 'Another prompt', video_cid: 'local-two', duration_seconds: 45 },
+  { id: 'one', subject_field_id: 'cs', title: 'First viewpoint', summary: 'A discussion prompt', thumbnail_cid: null, video_cid: 'local-one', duration_seconds: 30 },
+  { id: 'two', subject_field_id: 'design', title: 'Second viewpoint', summary: 'Another prompt', thumbnail_cid: null, video_cid: 'local-two', duration_seconds: 45 },
 ]
 
 describe('bundled opinion examples', () => {

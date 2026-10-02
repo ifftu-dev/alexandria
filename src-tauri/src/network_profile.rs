@@ -31,8 +31,10 @@ const EMBEDDED_BOOTSTRAP_REGISTRY_JSON: &[u8] =
 /// Exact canonical bytes of every reviewed subject qualification policy this
 /// build ships. Each must match a digest in
 /// `subject_qualification_policy_digests`, and every pinned digest must have
-/// its document here. None are pinned yet, so no opinion privilege applies.
-const EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS: &[&[u8]] = &[];
+/// its document here. This demo build pins a narrowly scoped instructor policy.
+const EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS: &[&[u8]] = &[include_bytes!(
+    "../resources/networks/demo-opinions-policy.json"
+)];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -464,7 +466,7 @@ mod tests {
     fn embedded_qualification_policies_are_complete_and_pinned_digests_need_documents() {
         let set = embedded_qualification_policies().unwrap();
         assert_eq!(set.network_id(), "preprod");
-        assert!(set.policies().is_empty());
+        assert_eq!(set.policies().len(), 1);
 
         let mut profile = valid_profile();
         profile.subject_qualification_policy_digests = vec!["ab".repeat(32)];

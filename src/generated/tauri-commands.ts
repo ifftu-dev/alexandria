@@ -2,6 +2,7 @@
 // Do not edit by hand; the source of truth is tauri::generate_handler!.
 
 export const TAURI_COMMANDS = [
+  "act_on_discussion",
   "allow_credential_fetch",
   "assessment_finalize_adaptive",
   "assessment_grade",
@@ -82,6 +83,8 @@ export const TAURI_COMMANDS = [
   "diagnostics_run_action",
   "diagnostics_status",
   "disallow_credential_fetch",
+  "discussion_access",
+  "discussion_add_media",
   "enroll",
   "exchange_credentials",
   "exchange_preview",
@@ -190,6 +193,7 @@ export const TAURI_COMMANDS = [
   "list_demo_opinions",
   "list_derived_states",
   "list_directories",
+  "list_discussions",
   "list_element_skill_tags",
   "list_elements",
   "list_eligible_subject_fields_for_posting",

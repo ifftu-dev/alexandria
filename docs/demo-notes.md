@@ -4,7 +4,14 @@
 **Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
 Every profile automatically receives the bundled seeds, seven example course drafts, **Plugins Showcase**, two **Video Lab** courses, seven Opinion examples, three example classrooms, and all nine bundled plugins when created, restored, or unlocked. Find courses under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**.
 
-**Content tour:** Opinions → Example viewpoints → pick a clip. Instructor → My courses → **Algorithm Essentials — Video Lab** or **Web Foundations — Video Lab** (four videos plus transcripts each). Classroom templates appear in the sidebar. All 15 clips are local.
+**Content tour:** Opinions → Example viewpoints → pick a clip. Instructor → My courses → **Algorithm Essentials — Video Lab** or **Web Foundations — Video Lab** (four videos plus transcripts each). Classroom templates appear in the sidebar. All 15 clips are local. Hover a long sidebar name to pause just that item and reveal its full title.
+
+## Community and live rooms
+
+- **Opinions:** show thumbnail threads, sorting, votes, replies, and author edit/delete. The seven bundled viewpoints are read-only examples, separate from peer-published threads.
+- **Posting/commenting:** requires an accepted credential in the same topic. The `demo` instructor is trusted for **Computer Science / Web Development, Apply or higher**. A learner's self-issued quiz credential alone does not unlock this. Use a genuinely issued credential or a course-completion credential endorsed by `demo`.
+- **Classrooms:** show edge-to-edge chat; on phone/tablet, open Channels and Members from the header.
+- **Live tutoring:** leave an empty room for five minutes; its status becomes Ended. Old ended invites do not restart it. Keep the app open for the live expiry demonstration.
 
 ## Start with live Requirements
 

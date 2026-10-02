@@ -2192,6 +2192,51 @@ export interface OpinionExample {
   subject_field_id: string
   title: string
   summary: string
+  thumbnail_cid: string | null
   video_cid: string
   duration_seconds: number
+}
+
+export interface DiscussionContent {
+  title: string
+  body: string
+  post_kind: 'text' | 'link' | 'video'
+  url: string | null
+  video_cid: string | null
+  thumbnail_cid: string | null
+}
+export type DiscussionAction =
+  | { kind: 'post' | 'edit_post'; content: DiscussionContent }
+  | { kind: 'comment' | 'edit_comment'; body: string }
+  | { kind: 'delete' }
+  | { kind: 'vote'; value: number }
+  | { kind: 'report'; reason: string }
+export interface DiscussionRequest {
+  entity_id?: string
+  thread_id?: string
+  parent_id?: string
+  subject_field_id: string
+  action: DiscussionAction
+}
+export interface DiscussionItem {
+  id: string
+  thread_id: string
+  parent_id: string | null
+  subject_field_id: string
+  author_did: string
+  content: DiscussionContent | null
+  body: string
+  created_at: number
+  edited: boolean
+  deleted: boolean
+  score: number
+  my_vote: number
+  comment_count: number
+  reported: boolean
+  credential_proof_ids: string[]
+}
+export interface DiscussionAccess {
+  actor_did: string
+  eligible_fields: string[]
+  governed_fields: string[]
 }

@@ -75,3 +75,5 @@ pub mod studio_mcp;
 pub mod decisions;
 
 pub mod exchange;
+
+pub mod discussions;

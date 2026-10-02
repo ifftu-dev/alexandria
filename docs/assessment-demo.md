@@ -115,3 +115,42 @@ FFmpeg, and `scripts/generate-demo-videos.py`.
 The seed inventory also contained fabricated credentials, reputation, chain
 observations, devices, sync history, and tutoring history. These are not
 content resources and remain excluded, as do retired governance records.
+
+## Community demo update
+
+Course thumbnails are backfilled on unlock only when both thumbnail fields are
+empty; user artwork is preserved. The temporary `AUTO_SEED_DEMO_CONTENT` switch
+in `commands/demo_courses.rs` controls profile-activation demo installation.
+Seven bundled Opinion previews now have local JPEG thumbnails. These remain
+read-only examples, not fabricated public posts or credentials.
+
+The new Opinions feed supports text/link/video threads, nested comments (eight
+levels), one up/down vote per DID, new/top/most-discussed sorting, author edits
+and tombstone deletion, and signed reports. Reports do not automatically remove
+posts. Both posting and commenting use the existing topic qualification checker.
+The pinned demo policy trusts `demo`'s public DID
+`did:key:z6MkrgAA1UeVKMFvnerXN4S4Z1cTnzY31Adih31whBp9KY5U`
+for `sf_cs` and `sf_web` at Apply (2) or above, through accepted issuer or
+accepted course endorsement routes. This does not grant eligibility merely for
+owning that profile and does not create any qualifying credentials.
+
+Before publishing, the UI discloses that post/comment content and the qualifying
+credential/endorsement evidence are shared with peers. Uploaded media is public
+content-addressed data (25 MiB limit), not a profile-encrypted private attachment.
+Connected nodes relay and independently validate signed events on the existing
+Opinions gossip topic. Offline delivery needs a connected peer retaining the
+history; there is no central archive. Older video opinions remain readable.
+
+Classrooms and live tutoring occupy the available content area without outer
+page padding. Phone/tablet classrooms use channel/member drawers; composer and
+bottom navigation remain separate. Sidebar name animations measure actual
+text overflow, pause independently, and show the full name on hover/focus.
+Reduced-motion preferences disable animation.
+
+Tutoring attendance uses signed room heartbeats, independent of camera/mic
+state. A local observer does not count as an attendee. Empty rooms expire after
+300 seconds, checked every ten seconds while unlocked; reopening reconciles
+stale records after a short reconnect window. A known ended invite is rejected;
+an unfamiliar invite needs a reachable participant before opening media.
+Network partitions cannot prove global absence: unreachable sessions show an
+availability explanation rather than claiming a remote host definitely ended.

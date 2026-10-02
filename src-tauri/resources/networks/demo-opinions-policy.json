@@ -1,0 +1,1 @@
+{"accepted_issuers":["did:key:z6MkrgAA1UeVKMFvnerXN4S4Z1cTnzY31Adih31whBp9KY5U"],"action":"opinion_posting","format_version":1,"minimum_accepted_attestors":1,"minimum_level":2,"network_id":"preprod","policy_id":"demo-opinions-2026-10","routes":["accepted_course_endorsement","accepted_issuer"],"subject_field_ids":["sf_cs","sf_web"]}

@@ -145,6 +145,11 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/opinions/legacy/:id',
+      name: 'legacy-opinion-detail',
+      component: () => import('@/pages/opinions/LegacyDetail.vue'),
+    },
+    {
       path: '/opinions/:id',
       name: 'opinion-detail',
       component: () => import('@/pages/opinions/Detail.vue'),

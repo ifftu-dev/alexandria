@@ -162,6 +162,7 @@ pub struct OpinionExample {
     pub title: String,
     pub summary: String,
     pub video_cid: String,
+    pub thumbnail_cid: Option<String>,
     pub duration_seconds: i64,
 }
 

@@ -32,6 +32,37 @@ media!(
     "op_civics_01"
 );
 
+const THUMBNAILS: &[(&str, &[u8])] = &[
+    (
+        "op_cs_01",
+        include_bytes!("../../../demo-world/content/thumbnails/op_cs_01.jpg"),
+    ),
+    (
+        "op_cs_02",
+        include_bytes!("../../../demo-world/content/thumbnails/op_cs_02.jpg"),
+    ),
+    (
+        "op_web_01",
+        include_bytes!("../../../demo-world/content/thumbnails/op_web_01.jpg"),
+    ),
+    (
+        "op_cyber_01",
+        include_bytes!("../../../demo-world/content/thumbnails/op_cyber_01.jpg"),
+    ),
+    (
+        "op_design_01",
+        include_bytes!("../../../demo-world/content/thumbnails/op_design_01.jpg"),
+    ),
+    (
+        "op_design_02",
+        include_bytes!("../../../demo-world/content/thumbnails/op_design_02.jpg"),
+    ),
+    (
+        "op_civics_01",
+        include_bytes!("../../../demo-world/content/thumbnails/op_civics_01.jpg"),
+    ),
+];
+
 #[derive(Deserialize)]
 struct Resources {
     media: Vec<Media>,
@@ -66,6 +97,7 @@ struct VideoCourse {
     title: String,
     description: String,
     lesson_ids: Vec<String>,
+    thumbnail_svg: String,
 }
 #[derive(Deserialize)]
 struct Classroom {
@@ -93,8 +125,8 @@ fn html(text: &str) -> String {
 
 pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> {
     use crate::content_store::content;
-    for (id, bytes) in MEDIA {
-        let cid = media_cid(id)?;
+    for (_id, bytes) in MEDIA.iter().chain(THUMBNAILS) {
+        let cid = blake3::hash(bytes).to_hex().to_string();
         if !content::has(&state.content_node, &cid)
             .await
             .map_err(|e| e.to_string())?
@@ -137,6 +169,22 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
             )
             .map_err(|e| e.to_string())?;
         }
+        for (id, bytes) in THUMBNAILS {
+            let cid = blake3::hash(bytes).to_hex().to_string();
+            crate::content_store::storage::upsert_pin(
+                conn,
+                &cid,
+                "opinion",
+                bytes.len() as u64,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE demo_opinion_examples SET thumbnail_cid=?2 WHERE id=?1",
+                params![id, cid],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         for opinion in &resources.opinions {
             let media = resources
                 .media
@@ -144,6 +192,13 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
                 .find(|m| m.id == opinion.media_id)
                 .ok_or("opinion media missing")?;
             conn.execute("INSERT OR IGNORE INTO demo_opinion_examples (id,subject_field_id,title,summary,video_cid,duration_seconds) VALUES (?1,?2,?3,?4,?5,?6)", params![opinion.id,opinion.subject_field_id,opinion.title,opinion.summary,media_cid(&media.id)?,media.duration_seconds]).map_err(|e| e.to_string())?;
+        }
+        for (id, bytes) in THUMBNAILS {
+            conn.execute(
+                "UPDATE demo_opinion_examples SET thumbnail_cid=?2 WHERE id=?1",
+                params![id, blake3::hash(bytes).to_hex().to_string()],
+            )
+            .map_err(|e| e.to_string())?;
         }
         for course in &resources.courses {
             let id = entity_id(&["example-video-course-v1", &author, &course.id]);
@@ -163,6 +218,11 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
                 .filter_map(|m| m.skill_id.as_deref())
                 .collect();
             let inserted = conn.execute("INSERT OR IGNORE INTO courses (id,title,description,author_address,tags,skill_ids,kind,status,provenance) VALUES (?1,?2,?3,?4,'[\"video\",\"bundled\"]',?5,'course','draft','ai_generated')", params![id,course.title,format!("AI-generated teaching videos with synthetic narration. {}",course.description),author,serde_json::to_string(&skills).map_err(|e|e.to_string())?]).map_err(|e| e.to_string())?;
+            crate::commands::demo_courses::backfill_thumbnail(
+                conn,
+                &id,
+                Some(&course.thumbnail_svg),
+            )?;
             if inserted == 0 {
                 continue;
             }
@@ -215,7 +275,7 @@ pub async fn list_demo_opinions(state: State<'_, AppState>) -> Result<Vec<Opinio
 }
 
 fn list_examples(conn: &rusqlite::Connection) -> Result<Vec<OpinionExample>, String> {
-    let mut stmt = conn.prepare("SELECT id,subject_field_id,title,summary,video_cid,duration_seconds FROM demo_opinion_examples ORDER BY subject_field_id,id").map_err(|e|e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id,subject_field_id,title,summary,video_cid,duration_seconds,thumbnail_cid FROM demo_opinion_examples ORDER BY subject_field_id,id").map_err(|e|e.to_string())?;
     let rows = stmt
         .query_map([], |r| {
             Ok(OpinionExample {
@@ -225,6 +285,7 @@ fn list_examples(conn: &rusqlite::Connection) -> Result<Vec<OpinionExample>, Str
                 summary: r.get(3)?,
                 video_cid: r.get(4)?,
                 duration_seconds: r.get(5)?,
+                thumbnail_cid: r.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -257,7 +318,7 @@ mod tests {
             assert_eq!(count("classroom_channels"), 7);
             assert_eq!(count("courses"), 2);
             assert_eq!(count("course_elements"), 16);
-            assert_eq!(count("pins"), 15);
+            assert_eq!(count("pins"), 22);
             for table in [
                 "opinions",
                 "credentials",
@@ -281,7 +342,32 @@ mod tests {
             db.conn()
                 .execute("UPDATE classrooms SET name='My edited room'", [])
                 .unwrap();
+            db.conn()
+                .execute("UPDATE courses SET thumbnail_svg=NULL", [])
+                .unwrap();
             install_rows(db.conn()).unwrap();
+            let thumbnails: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT count(*) FROM courses WHERE thumbnail_svg LIKE '<svg%'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(thumbnails, 2);
+            db.conn()
+                .execute("UPDATE courses SET thumbnail_svg='custom artwork'", [])
+                .unwrap();
+            install_rows(db.conn()).unwrap();
+            let custom: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT count(*) FROM courses WHERE thumbnail_svg='custom artwork'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(custom, 2);
             assert_eq!(count("courses"), 2);
             assert_eq!(count("classrooms"), 3);
             let edits: i64 = db

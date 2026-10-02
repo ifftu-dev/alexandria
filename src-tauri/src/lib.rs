@@ -277,6 +277,8 @@ impl AppState {
         }
 
         self.start_registry_refresh().await;
+        commands::discussions::start_relay(self).await?;
+        tutoring::presence::start(self).await?;
 
         // 8. Publish active profile metadata.
         {
@@ -485,17 +487,8 @@ impl AppState {
                     stats.failed
                 );
 
-                // Clean up any sessions stuck as 'active' from a previous crash.
-                match db.conn().execute(
-                    "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                    [],
-                ) {
-                    Ok(count) if count > 0 => {
-                        log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
-                    }
-                    Err(e) => log::warn!("tutoring: failed to clean up orphaned sessions: {e}"),
-                    _ => {}
-                }
+                // Tutoring presence reconciles after reconnecting; a profile
+                // restart alone must not end a room that peers still occupy.
                 if let Err(e) = db.conn().execute(
                     "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
                     [],
@@ -1390,6 +1383,10 @@ pub fn run() {
             commands::courses::get_course_completion_policy,
             commands::courses::set_course_completion_policy,
             // Opinions (Field Commentary)
+            commands::discussions::discussion_access,
+            commands::discussions::discussion_add_media,
+            commands::discussions::list_discussions,
+            commands::discussions::act_on_discussion,
             commands::opinions::publish_opinion,
             commands::opinions::list_opinions,
             commands::opinions::get_opinion,

@@ -496,3 +496,5 @@ mod tests {
             .expect("second migration should be idempotent");
     }
 }
+
+pub mod discussions;

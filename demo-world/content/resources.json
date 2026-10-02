@@ -329,7 +329,8 @@
         "binary-search",
         "merge-sort",
         "hash-tables"
-      ]
+      ],
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><rect width=\"640\" height=\"360\" fill=\"#0f172a\"/><circle cx=\"540\" cy=\"80\" r=\"190\" fill=\"#38bdf8\" opacity=\".12\"/><rect x=\"48\" y=\"44\" width=\"112\" height=\"32\" rx=\"16\" fill=\"#38bdf8\"/><text x=\"104\" y=\"66\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#0f172a\">VIDEO LAB</text><path d=\"M76 130v92l80-46z\" fill=\"#38bdf8\"/><path d=\"M210 142h220M210 177h160M210 212h190\" stroke=\"#38bdf8\" stroke-width=\"12\" stroke-linecap=\"round\" opacity=\".5\"/><text x=\"48\" y=\"285\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"28\" fill=\"#f8fafc\">ALGORITHM ESSENTIALS</text><text x=\"48\" y=\"320\" font-family=\"sans-serif\" font-size=\"18\" fill=\"#94a3b8\">4 lessons · Videos and transcripts</text></svg>"
     },
     {
       "id": "web-video-lab",
@@ -340,7 +341,8 @@
         "state",
         "validation",
         "sql"
-      ]
+      ],
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><rect width=\"640\" height=\"360\" fill=\"#0f172a\"/><circle cx=\"540\" cy=\"80\" r=\"190\" fill=\"#34d399\" opacity=\".12\"/><rect x=\"48\" y=\"44\" width=\"112\" height=\"32\" rx=\"16\" fill=\"#34d399\"/><text x=\"104\" y=\"66\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#0f172a\">VIDEO LAB</text><path d=\"M76 130v92l80-46z\" fill=\"#34d399\"/><path d=\"M210 142h220M210 177h160M210 212h190\" stroke=\"#34d399\" stroke-width=\"12\" stroke-linecap=\"round\" opacity=\".5\"/><text x=\"48\" y=\"285\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"28\" fill=\"#f8fafc\">WEB FOUNDATIONS</text><text x=\"48\" y=\"320\" font-family=\"sans-serif\" font-size=\"18\" fill=\"#94a3b8\">4 lessons · Videos and transcripts</text></svg>"
     }
   ],
   "classrooms": [

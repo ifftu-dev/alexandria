@@ -468,7 +468,7 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | `/alexandria/governance/1.0` | Governance events |
 | `/alexandria/profiles/1.0` | User profile updates |
-| `/alexandria/opinions/1.0` | Subjective ratings on courses, peers (Field Commentary, mig 21) |
+| `/alexandria/opinions/1.0` | Qualified field commentary and signed discussion threads/interactions |
 | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements (§14.5) |
 | `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas (§14.11.2) |
@@ -2129,3 +2129,25 @@ the §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 Pratyush Pundir for IFFTU
 GitHub: https://github.com/ifftu-dev
 Project: https://github.com/ifftu-dev/alexandria
+
+### Discussion events on the Opinions topic
+
+The `discussion_version: 1` payload is carried inside the existing signed gossip
+envelope. Its network-bound JCS payload has its own Ed25519 author signature,
+allowing another peer to relay the original event in a fresh outer envelope.
+Post/comment creation IDs bind author, network, topic, parent, nonce, timestamp,
+and content. Actions include post, comment, edit_post, edit_comment, delete,
+vote (-1/0/1), and report. The inner signature must resolve to `actor_did`.
+
+Creation and editing require topic-qualified, actor-subject credentials. Portable
+signed credential bytes and optional course policy/binding/endorsement evidence
+travel with the event and are independently verified by each receiving node.
+Missing dependencies remain invisible in a bounded pending queue. Votes use one
+row per item and DID, ordered by revision then event hash; identities are not
+proof of unique people. Edits are author-only; deletion is an absorbing tombstone
+and does not erase retained event history or other peers' copies. Reports are
+signed public signals, not automatic moderation decisions.
+
+The active profile relays batches of retained accepted events every 30 seconds.
+This provides eventual replay from connected retaining peers, not guaranteed
+centralized storage. Legacy OpinionPayload messages keep their existing path.

@@ -6,9 +6,15 @@ use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
+// Temporary demo rollout: disable this single switch when new profiles should start empty.
+const AUTO_SEED_DEMO_CONTENT: bool = true;
+
 const CORPUS: &str = include_str!("../../../demo-world/content/courses.json");
 
 pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> {
+    if !AUTO_SEED_DEMO_CONTENT {
+        return Ok(());
+    }
     let database = state.db.clone();
     let plugins_dir = state.plugins_dir()?;
     tokio::task::spawn_blocking(move || {
@@ -233,6 +239,7 @@ fn import_examples(conn: &rusqlite::Connection, plugin_only: bool) -> Result<usi
                 "INSERT OR IGNORE INTO courses (id,title,description,author_address,tags,skill_ids,thumbnail_svg,kind,status,provenance) VALUES (?1,?2,?3,?4,?5,?6,?7,'course','draft','ai_generated')",
                 params![id,course.title,description,author,serde_json::to_string(&course.tags).map_err(|e|e.to_string())?,serde_json::to_string(&course.skill_ids).map_err(|e|e.to_string())?,course.thumbnail_svg],
             ).map_err(|e|e.to_string())?;
+            backfill_thumbnail(conn, &id, course.thumbnail_svg.as_deref())?;
             if inserted == 0 {
                 continue;
             }
@@ -264,6 +271,15 @@ fn import_examples(conn: &rusqlite::Connection, plugin_only: bool) -> Result<usi
         }
         Ok(created)
     })
+}
+
+pub(crate) fn backfill_thumbnail(
+    conn: &rusqlite::Connection,
+    id: &str,
+    svg: Option<&str>,
+) -> Result<(), String> {
+    conn.execute("UPDATE courses SET thumbnail_svg=?2 WHERE id=?1 AND COALESCE(trim(thumbnail_svg),'')='' AND COALESCE(trim(thumbnail_cid),'')=''",params![id,svg]).map_err(|e|e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]
