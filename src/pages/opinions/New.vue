@@ -31,11 +31,11 @@ async function publish(content: DiscussionContent) {
 <template>
   <div class="mx-auto max-w-3xl space-y-6">
     <router-link to="/opinions" class="text-sm text-muted-foreground">← {{ $t('opinions.threads.back') }}</router-link>
-    <h1 class="text-3xl font-bold">{{ $t('opinions.threads.create') }}</h1>
+    <h1 class="text-xl font-bold">{{ $t('opinions.threads.create') }}</h1>
     <p v-if="error" role="alert" class="text-red-500">{{ error }}</p>
-    <p v-if="access && !fields.length" class="rounded-xl border border-border bg-card p-5 text-muted-foreground">{{ $t(access.governed_fields.length ? 'opinions.threads.gated' : 'opinions.threads.noPolicy') }}</p>
+    <p v-if="access && !fields.length" class="rounded-xl bg-card shadow-sm p-5 text-muted-foreground">{{ $t(access.governed_fields.length ? 'opinions.threads.gated' : 'opinions.threads.noPolicy') }}</p>
     <template v-if="fields.length">
-      <label class="block text-sm">{{ $t('opinions.threads.topic') }}<select v-model="field" class="mt-2 w-full rounded-xl border border-border bg-card p-3"><option v-for="f in fields" :key="f.id" :value="f.id">{{ f.icon_emoji }} {{ f.name }}</option></select></label>
+      <label class="block text-sm">{{ $t('opinions.threads.topic') }}<select v-model="field" class="mt-2 w-full rounded-xl bg-card shadow-sm p-3"><option v-for="f in fields" :key="f.id" :value="f.id">{{ f.icon_emoji }} {{ f.name }}</option></select></label>
       <ThreadComposer :busy="busy" @submit="publish" @cancel="router.push('/opinions')" />
     </template>
   </div>

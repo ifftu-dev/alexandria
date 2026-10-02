@@ -1,6 +1,6 @@
 # Alexandria demo — presenter notes
 
-**Open:** Alexandria, unlocked demo profile; Cloud at <http://127.0.0.1:8787>.
+**Open:** Alexandria, learner `demo_for_ashish`; trusted instructor `demo`; Cloud at <http://127.0.0.1:8787>.
 **Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
 Every profile automatically receives the bundled seeds, seven example course drafts, **Plugins Showcase**, two **Video Lab** courses, seven Opinion examples, three example classrooms, and all nine bundled plugins when created, restored, or unlocked. Find courses under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**.
 
@@ -12,6 +12,10 @@ Every profile automatically receives the bundled seeds, seven example course dra
 - **Posting/commenting:** requires an accepted credential in the same topic. The `demo` instructor is trusted for **Computer Science / Web Development, Apply or higher**. A learner's self-issued quiz credential alone does not unlock this. Use a genuinely issued credential or a course-completion credential endorsed by `demo`.
 - **Classrooms:** show edge-to-edge chat; on phone/tablet, open Channels and Members from the header.
 - **Live tutoring:** leave an empty room for five minutes; its status becomes Ended. Old ended invites do not restart it. Keep the app open for the live expiry demonstration.
+
+## Governance
+
+**Community:** review a signed founding-genesis link, inspect its seven founders, trust policy, and 5-of-7 thresholds, then pin the expected DAO ID. This needs a valid signed artifact and reachable mirrors. Proposal creation, voting, and certified outcomes are not implemented yet; do not present them as working.
 
 ## Start with live Requirements
 

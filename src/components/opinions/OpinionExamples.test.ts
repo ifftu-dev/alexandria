@@ -15,19 +15,14 @@ const examples: OpinionExample[] = [
 ]
 
 describe('bundled opinion examples', () => {
-  it('opens the selected local video and unmounts it when the topic changes', async () => {
-    const wrapper = mount(OpinionExamples, { props: { examples, subjectFieldId: '' }, global: { mocks: { $t: (key: string) => key } } })
+  it('links examples to their reading pages and filters by topic', async () => {
+    const wrapper = mount(OpinionExamples, { props: { examples, subjectFieldId: '' }, global: { mocks: { $t: (key: string) => key }, stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } })
     expect(wrapper.text()).toContain('opinions.examples.description')
     expect(wrapper.find('[data-video]').exists()).toBe(false)
-    await wrapper.findAll('button')[0]!.trigger('click')
-    expect(wrapper.get('[data-video]').text()).toBe('local-one')
+    expect(wrapper.findAll('a').map(a => a.attributes('href'))).toEqual(['/opinions/examples/one', '/opinions/examples/two'])
     await wrapper.setProps({ subjectFieldId: 'design' })
-    expect(wrapper.find('[data-video]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('First viewpoint')
-    await wrapper.findAll('button')[0]!.trigger('click')
-    expect(wrapper.get('[data-video]').text()).toBe('local-two')
-    await wrapper.findAll('button').find(b => b.text() === 'common.actions.close')!.trigger('click')
-    expect(wrapper.find('[data-video]').exists()).toBe(false)
+    expect(wrapper.get('a').attributes('href')).toBe('/opinions/examples/two')
     wrapper.unmount()
   })
 })

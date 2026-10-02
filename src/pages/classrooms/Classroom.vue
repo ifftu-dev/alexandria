@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ── Left sidebar: channels (desktop) ──────────────────── -->
-    <div class="hidden lg:flex w-52 xl:w-60 min-h-0 flex-shrink-0 flex-col bg-card border-e border-border">
+    <div class="hidden lg:flex w-52 xl:w-60 min-h-0 flex-shrink-0 flex-col bg-card/30 border-e border-border">
       <!-- Classroom header -->
       <div class="min-h-16 px-4 py-3 border-b border-border flex items-center justify-between gap-2">
         <div class="flex items-center gap-2 min-w-0">
@@ -448,7 +448,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ── Right sidebar: members (desktop) ──────────────────── -->
-    <div class="hidden xl:block w-52 flex-shrink-0 bg-card border-s border-border overflow-y-auto">
+    <div class="hidden xl:block w-52 flex-shrink-0 bg-card/30 border-s border-border overflow-y-auto">
       <MemberList :members="members" />
     </div>
 

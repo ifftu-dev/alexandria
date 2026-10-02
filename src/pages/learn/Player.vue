@@ -626,22 +626,26 @@ async function markInProgress() {
 
 async function markComplete(score?: number) {
   if (!enrollment.value || !activeElement.value) return
+  const elementId = activeElement.value
+  const enrollmentId = enrollment.value.id
+  const elementType = currentElement.value?.element_type
   try {
     const req: UpdateProgressRequest = {
-      element_id: activeElement.value,
+      element_id: elementId,
       status: 'completed',
       score: score ?? null,
     }
     await invoke('update_progress', {
-      enrollmentId: enrollment.value.id,
+      enrollmentId,
       req,
     })
+    if (enrollment.value?.id !== enrollmentId) return
     // Update local progress
-    progress.value[activeElement.value] = {
-      ...progress.value[activeElement.value],
-      id: progress.value[activeElement.value]?.id ?? '',
-      enrollment_id: enrollment.value.id,
-      element_id: activeElement.value,
+    progress.value[elementId] = {
+      ...progress.value[elementId],
+      id: progress.value[elementId]?.id ?? '',
+      enrollment_id: enrollmentId,
+      element_id: elementId,
       status: 'completed',
       score: score ?? null,
       time_spent: 0,
@@ -667,8 +671,10 @@ async function markComplete(score?: number) {
     // Auto-advance to next element after a short delay — but skip for
     // element types where staying put is more useful (replay results,
     // try again, review the score) than jumping ahead.
-    if (shouldAutoAdvance(currentElement.value?.element_type)) {
-      setTimeout(() => advanceToNext(), 500)
+    if (shouldAutoAdvance(elementType)) {
+      setTimeout(() => {
+        if (enrollment.value?.id === enrollmentId && activeElement.value === elementId) advanceToNext()
+      }, 500)
     }
   } catch (e) {
     console.error('Failed to update progress:', e)

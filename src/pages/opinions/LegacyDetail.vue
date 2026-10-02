@@ -120,7 +120,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="max-w-4xl">
+  <div class="mx-auto max-w-4xl">
     <button
       type="button"
       class="mb-4 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -135,8 +135,8 @@ onMounted(async () => {
     <AppSpinner v-if="loading" />
     <AppAlert v-else-if="error" type="error">{{ error }}</AppAlert>
 
-    <div v-else-if="opinion" class="space-y-6">
-      <header class="flex items-start justify-between gap-3">
+    <div v-else-if="opinion" class="overflow-hidden rounded-xl bg-card shadow-sm">
+      <header class="flex flex-wrap items-start justify-between gap-3 p-5 sm:p-7">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 mb-2 flex-wrap">
             <AppBadge v-if="subjectField" variant="secondary">
@@ -144,22 +144,22 @@ onMounted(async () => {
             </AppBadge>
             <ProvenanceBadge :provenance="opinion.provenance" />
           </div>
-          <h1 class="text-2xl font-bold text-foreground">{{ opinion.title }}</h1>
+          <h1 class="text-xl font-bold leading-snug text-foreground sm:text-2xl">{{ opinion.title }}</h1>
           <p v-if="opinion.summary" class="mt-2 text-sm text-muted-foreground">
             {{ opinion.summary }}
           </p>
-          <p class="mt-2 text-xs text-muted-foreground font-mono">
+          <p class="mt-3 break-all text-xs text-muted-foreground font-mono">
             {{ $t('opinions.detail.byLabel') }} {{ opinion.author_address }} · {{ formatDate(opinion.published_at) }}
           </p>
         </div>
         <AppButton v-if="isOwner" variant="ghost" @click="withdraw">{{ $t('opinions.detail.withdraw') }}</AppButton>
       </header>
 
-      <div v-if="opinion.video_cid" class="rounded-xl overflow-hidden bg-black">
+      <div v-if="opinion.video_cid" class="overflow-hidden bg-black">
         <VideoPlayer :content-cid="opinion.video_cid" :title="opinion.title" />
       </div>
 
-      <div class="rounded-xl border border-border bg-card p-5 space-y-3">
+      <div class="border-t border-border/60 p-5 space-y-3 sm:p-7">
         <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {{ $t('opinions.detail.credentialsHeading') }}
         </h3>

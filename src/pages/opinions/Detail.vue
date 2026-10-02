@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import ThreadVotes from '@/components/opinions/ThreadVotes.vue'
+import ThreadMeta from '@/components/opinions/ThreadMeta.vue'
+import { AppButton } from '@/components/ui'
 import ThreadActions from '@/components/opinions/ThreadActions.vue'
 import ThreadComment from '@/components/opinions/ThreadComment.vue'
 import ThreadComposer from '@/components/opinions/ThreadComposer.vue'
@@ -72,30 +74,38 @@ onMounted(async () => {
 onBeforeUnmount(() => { generation++; if (timer) clearInterval(timer) })
 </script>
 <template>
-  <div class="mx-auto max-w-3xl space-y-5">
-    <router-link to="/opinions" class="text-sm text-muted-foreground">← {{ $t('opinions.threads.back') }}</router-link>
-    <p v-if="error" role="alert" class="rounded-xl bg-red-500/10 p-4 text-sm text-red-500">{{ error }}</p>
-    <p v-if="loading" class="text-muted-foreground">{{ $t('opinions.threads.loading') }}</p>
-    <template v-else-if="post">
-      <article class="rounded-2xl border border-border bg-card p-4 sm:p-6">
-        <div class="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground"><span class="font-semibold text-primary">{{ topic }}</span><span>·</span><span :title="post.author_did">{{ post.author_did === access?.actor_did ? $t('opinions.threads.you') : post.author_did.slice(-10) }}</span><span>· {{ new Date(post.created_at * 1000).toLocaleString() }}</span><span v-if="post.edited">{{ $t('opinions.threads.edited') }}</span></div>
-        <h1 class="break-words text-2xl font-bold leading-tight">{{ post.deleted ? $t('opinions.threads.deletedPost') : post.content?.title }}</h1>
-        <ThreadComposer v-if="editing && post.content" class="mt-5" :initial="post.content" :busy="busy" @submit="edit" @cancel="editing = false" />
+  <div class="mx-auto max-w-4xl">
+    <router-link to="/opinions" class="mb-5 inline-flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">← {{ $t('opinions.threads.back') }}</router-link>
+    <p v-if="error" role="alert" class="mb-4 rounded-lg bg-error/10 p-3 text-sm text-error">{{ error }}</p>
+    <p v-if="loading" class="py-8 text-sm text-muted-foreground">{{ $t('opinions.threads.loading') }}</p>
+    <article v-else-if="post" class="overflow-hidden rounded-xl bg-card shadow-sm">
+      <div class="p-5 sm:p-7">
+        <ThreadMeta :author="post.author_did" :created-at="post.created_at" :topic="topic" :own="post.author_did === access?.actor_did" :edited="post.edited" />
+        <h1 class="mt-4 break-words text-xl font-bold leading-snug sm:text-2xl">{{ post.deleted ? $t('opinions.threads.deletedPost') : post.content?.title }}</h1>
+        <ThreadComposer v-if="editing && post.content" class="mt-6" :initial="post.content" :busy="busy" @submit="edit" @cancel="editing = false" />
         <template v-else-if="!post.deleted">
-          <p class="my-5 whitespace-pre-wrap break-words text-sm leading-7">{{ post.body }}</p>
-          <a v-if="post.content?.url" :href="post.content.url" target="_blank" rel="noopener noreferrer" class="mb-5 block break-all text-sm text-primary underline">{{ post.content.url }} ↗</a>
-          <VideoPlayer v-if="post.content?.video_cid" :content-cid="post.content.video_cid" :title="post.content.title" />
-          <div class="mt-5 flex items-center gap-4"><ThreadVotes :score="post.score" :vote="post.my_vote" :disabled="busy" @vote="act(post, { kind: 'vote', value: $event })" /><span class="text-xs text-muted-foreground">{{ $t('opinions.threads.comments', { count: post.comment_count }) }}</span></div>
+          <p class="my-5 whitespace-pre-wrap break-words text-sm leading-7 text-foreground/90">{{ post.body }}</p>
+          <a v-if="post.content?.url" :href="post.content.url" target="_blank" rel="noopener noreferrer" class="mb-5 block break-all rounded-lg bg-muted/40 p-3 text-sm text-primary hover:underline">{{ post.content.url }} ↗</a>
+          <div v-if="post.content?.video_cid" class="my-5 overflow-hidden rounded-lg"><VideoPlayer :content-cid="post.content.video_cid" :title="post.content.title" /></div>
         </template>
-        <ThreadActions class="mt-4" :item="post" :owner="post.author_did === access?.actor_did" :can-edit="eligible" :busy="busy" @edit="editing = true" @act="act(post, $event)" />
-        <details v-if="!post.deleted" class="mt-5 text-xs text-muted-foreground"><summary class="cursor-pointer">{{ $t('opinions.threads.proof') }}</summary><p class="mt-2">{{ $t('opinions.threads.proofBody') }}</p><p v-for="id in post.credential_proof_ids" :key="id" class="mt-1 break-all font-mono">{{ id }}</p></details>
-      </article>
-      <section v-if="!post.deleted" class="rounded-xl border border-border bg-card p-5">
-        <form v-if="eligible" class="space-y-3" @submit.prevent="addComment"><label class="block font-medium">{{ $t('opinions.threads.join') }}<textarea v-model="comment" maxlength="10000" required rows="3" class="mt-3 w-full rounded-xl border border-border bg-background p-3 text-sm font-normal" /></label><label class="flex gap-2 text-xs text-muted-foreground"><input v-model="consent" type="checkbox" />{{ $t('opinions.threads.commentDisclosure') }}</label><button type="submit" :disabled="busy || !comment.trim() || !consent" class="rounded-full bg-primary px-5 py-2 text-sm text-primary-foreground disabled:opacity-40">{{ $t('opinions.threads.comment') }}</button></form>
-        <p v-else class="text-sm text-muted-foreground">{{ $t(access?.governed_fields.includes(post.subject_field_id) ? 'opinions.threads.gated' : 'opinions.threads.noPolicy') }}</p>
+        <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+          <ThreadVotes v-if="!post.deleted" :score="post.score" :vote="post.my_vote" :disabled="busy" @vote="act(post, { kind: 'vote', value: $event })" />
+          <span class="text-xs text-muted-foreground">{{ $t('opinions.threads.comments', { count: post.comment_count }) }}</span>
+          <ThreadActions class="ms-auto" :item="post" :owner="post.author_did === access?.actor_did" :can-edit="eligible" :busy="busy" @edit="editing = true" @act="act(post, $event)" />
+        </div>
+        <details v-if="!post.deleted" class="mt-5 border-t border-border/50 pt-3 text-xs text-muted-foreground"><summary class="cursor-pointer">{{ $t('opinions.threads.proof') }}</summary><p class="mt-2 leading-relaxed">{{ $t('opinions.threads.proofBody') }}</p><p v-for="id in post.credential_proof_ids" :key="id" class="mt-1 break-all font-mono">{{ id }}</p></details>
+      </div>
+      <section class="border-t border-border/60 p-5 sm:p-7">
+        <div class="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 class="text-sm font-semibold">{{ $t('opinions.threads.discussion') }} <span class="ms-1 font-normal text-muted-foreground">{{ post.comment_count }}</span></h2><select v-model="sort" :aria-label="$t('opinions.threads.sort')" class="rounded-lg border border-input bg-background px-3 py-2 text-xs"><option value="top">{{ $t('opinions.threads.top') }}</option><option value="old">{{ $t('opinions.threads.oldest') }}</option></select></div>
+        <form v-if="eligible" class="mb-6 space-y-3" @submit.prevent="addComment">
+          <textarea v-model="comment" maxlength="10000" required rows="3" :placeholder="$t('opinions.threads.join')" :aria-label="$t('opinions.threads.commentLabel')" class="input w-full resize-y text-sm" />
+          <div class="flex flex-wrap items-start justify-between gap-3"><label class="flex max-w-lg items-start gap-2 text-xs leading-relaxed text-muted-foreground"><input v-model="consent" type="checkbox" class="mt-0.5" />{{ $t('opinions.threads.commentDisclosure') }}</label><AppButton type="submit" size="sm" :disabled="busy || !comment.trim() || !consent">{{ $t('opinions.threads.comment') }}</AppButton></div>
+        </form>
+        <p v-else-if="!post.deleted" class="mb-5 rounded-lg bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">{{ $t(access?.governed_fields.includes(post.subject_field_id) ? 'opinions.threads.gated' : 'opinions.threads.noPolicy') }}</p>
+        <ThreadComment v-for="item in comments" :key="item.id" :item="item" :items="rows" :actor="access?.actor_did ?? ''" :eligible="eligible" :busy="busy" :depth="1" :sort="sort" @act="act" />
+        <p v-if="!comments.length" class="py-6 text-center text-xs text-muted-foreground">{{ $t('opinions.threads.noComments') }}</p>
       </section>
-      <section><div class="flex items-center justify-between"><h2 class="font-semibold">{{ $t('opinions.threads.discussion') }}</h2><select v-model="sort" :aria-label="$t('opinions.threads.sort')" class="rounded-lg border border-border bg-card p-2 text-sm"><option value="top">{{ $t('opinions.threads.top') }}</option><option value="old">{{ $t('opinions.threads.oldest') }}</option></select></div><ThreadComment v-for="item in comments" :key="item.id" :item="item" :items="rows" :actor="access?.actor_did ?? ''" :eligible="eligible" :busy="busy" :depth="1" :sort="sort" @act="act" /><p v-if="!comments.length" class="py-8 text-center text-sm text-muted-foreground">{{ $t('opinions.threads.noComments') }}</p></section>
-    </template>
-    <p v-else class="text-muted-foreground">{{ $t('opinions.threads.notFound') }}</p>
+    </article>
+    <p v-else class="text-sm text-muted-foreground">{{ $t('opinions.threads.notFound') }}</p>
   </div>
 </template>

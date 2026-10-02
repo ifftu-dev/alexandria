@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ImportGenesis from './ImportGenesis.vue'
+import common from '@/locales/en/common.json'
 import type {
   PinGenesisResponse,
   RetrievedGenesisPreview,
@@ -110,6 +111,20 @@ beforeEach(() => {
 })
 
 describe('governance genesis import', () => {
+  it('resolves the visible governance labels from the English catalog', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
+    await flushPromises()
+    const labels = wrapper.findAll('h1, h2, button, dt, label').map(node => node.text())
+      .filter(text => text.startsWith('common.governanceGenesisImport.'))
+    expect(labels.length).toBeGreaterThan(5)
+    for (const key of labels) {
+      expect(common.governanceGenesisImport).toHaveProperty(key.split('.')[2]!)
+    }
+    expect(wrapper.text()).not.toMatch(/(?<!common\.)governanceGenesisImport\./)
+  })
+
   it('opens a deep link as locator review without fetching or pinning', async () => {
     const wrapper = render()
     await flushPromises()
@@ -125,13 +140,13 @@ describe('governance genesis import', () => {
     const wrapper = render()
     await flushPromises()
 
-    const retrieve = button(wrapper, 'governanceGenesisImport.retrieve')
+    const retrieve = button(wrapper, 'common.governanceGenesisImport.retrieve')
     expect(retrieve).toBeDefined()
     await retrieve!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Computing DAO')
 
-    const pin = button(wrapper, 'governanceGenesisImport.pin')
+    const pin = button(wrapper, 'common.governanceGenesisImport.pin')
     expect(pin).toBeDefined()
     expect((pin!.element as HTMLButtonElement).disabled).toBe(true)
 
@@ -143,7 +158,7 @@ describe('governance genesis import', () => {
       genesisJson: retrieved.genesis_json,
       expectedDaoId: daoId,
     })
-    expect(wrapper.text()).toContain('governanceGenesisImport.pinned')
+    expect(wrapper.text()).toContain('common.governanceGenesisImport.pinned')
   })
 
   it('retrieves and shares only the reviewed canonical locator, not the typed text', async () => {
@@ -153,7 +168,7 @@ describe('governance genesis import', () => {
     expect(wrapper.get('[data-qr="true"]').attributes('data-value')).toBe(canonicalUri)
     expect(wrapper.get('[data-testid="canonical-locator"]').text()).toBe(canonicalUri)
 
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('governance_retrieve_genesis', {
       locatorUri: canonicalUri,
@@ -164,7 +179,7 @@ describe('governance genesis import', () => {
   it('resets the review, retrieval and confirmation when the locator text changes', async () => {
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
     await wrapper.get('input').setValue(daoId)
     expect(wrapper.find('[data-testid="trust-facts"]').exists()).toBe(true)
@@ -173,8 +188,8 @@ describe('governance genesis import', () => {
     expect(wrapper.find('[data-testid="locator-facts"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="trust-facts"]').exists()).toBe(false)
     expect(wrapper.find('[data-qr="true"]').exists()).toBe(false)
-    expect(button(wrapper, 'governanceGenesisImport.retrieve')).toBeUndefined()
-    expect(button(wrapper, 'governanceGenesisImport.pin')).toBeUndefined()
+    expect(button(wrapper, 'common.governanceGenesisImport.retrieve')).toBeUndefined()
+    expect(button(wrapper, 'common.governanceGenesisImport.pin')).toBeUndefined()
   })
 
   it('discards a review that finishes after the locator text changed', async () => {
@@ -209,10 +224,10 @@ describe('governance genesis import', () => {
     })
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('governanceGenesisImport.retrievedMismatch')
+    expect(wrapper.text()).toContain('common.governanceGenesisImport.retrievedMismatch')
     expect(wrapper.find('[data-testid="trust-facts"]').exists()).toBe(false)
   })
 
@@ -230,7 +245,7 @@ describe('governance genesis import', () => {
     })
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
 
     const name = wrapper.get('[data-testid="genesis-name"]')
@@ -252,13 +267,13 @@ describe('governance genesis import', () => {
     })
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
     await wrapper.get('input').setValue(daoId)
-    await button(wrapper, 'governanceGenesisImport.pin')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.pin')!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('governanceGenesisImport.equivalentAlreadyPinned')
-    expect(wrapper.text()).not.toContain('governanceGenesisImport.pinned')
+    expect(wrapper.text()).toContain('common.governanceGenesisImport.equivalentAlreadyPinned')
+    expect(wrapper.text()).not.toContain('common.governanceGenesisImport.pinned')
   })
 })

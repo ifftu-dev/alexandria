@@ -19,6 +19,7 @@ interface Question {
   id: string
   question: string
   options: string[]
+  points?: number
   correct_index?: number
   correct_indices?: number[]
 }
@@ -112,6 +113,7 @@ async function save() {
       elementId: props.element.id,
       req: { content_inline: JSON.stringify({ questions: questions.value.map(q => ({
         ...q,
+        points: q.points ?? 1,
         prompt: q.question,
         type: multi() ? 'multiple_choice' : 'single_choice',
         correct_indices: multi() ? q.correct_indices : [q.correct_index],

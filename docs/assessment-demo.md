@@ -154,3 +154,11 @@ stale records after a short reconnect window. A known ended invite is rejected;
 an unfamiliar invite needs a reachable participant before opening media.
 Network partitions cannot prove global absence: unreachable sessions show an
 availability explanation rather than claiming a remote host definitely ended.
+
+### Opinions presentation and authored quizzes
+
+The feed, published thread, and bundled-video reading page share the app’s card and typography styles. Bundled examples remain read-only; published comments and votes must come from real profile actions after topic qualification. The classroom channel/member surfaces use the same card tint as the course sidebar.
+
+Quiz-editor questions now persist point weights. Older editor questions without weights count as one point each; invalid nonpositive weights are rejected. Failed quizzes can be retried until course completion. Completion updates remain bound to the lesson submitted even if the learner navigates while saving.
+
+Governance currently supports signed founding-genesis review and pinning. A live proposal/voting demo additionally needs committee services, qualified-voter admission, signed vote receipts/outcomes, verified ingestion and application, and the corresponding UI. The former local DAO/proposal implementation must not be used as a substitute.
