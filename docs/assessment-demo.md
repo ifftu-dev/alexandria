@@ -162,3 +162,5 @@ The feed, published thread, and bundled-video reading page share the app’s car
 Quiz-editor questions now persist point weights. Older editor questions without weights count as one point each; invalid nonpositive weights are rejected. Failed quizzes can be retried until course completion. Completion updates remain bound to the lesson submitted even if the learner navigates while saving.
 
 Governance currently supports signed founding-genesis review and pinning. A live proposal/voting demo additionally needs committee services, qualified-voter admission, signed vote receipts/outcomes, verified ingestion and application, and the corresponding UI. The former local DAO/proposal implementation must not be used as a substitute.
+
+The completion endorsement request includes the exact public signed course document so it can be reviewed on a different profile or offline device. Signing verifies its BLAKE3 CID and author signature, matches course ID/version, then enforces the document’s original attestor policy. Bare binding requests remain supported when the instructor already has the exact document locally.

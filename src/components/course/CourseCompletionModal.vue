@@ -8,6 +8,7 @@
 import { computed, watch, ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useLocalApi } from '@/composables/useLocalApi'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
@@ -23,9 +24,20 @@ const {
 
 const endorsementImportJson = ref('')
 const endorsementUiMessage = ref('')
-const endorsementRequestJson = computed(() => endorsementRequest.value
-  ? JSON.stringify(endorsementRequest.value, null, 2)
-  : '')
+const { invoke } = useLocalApi()
+const endorsementRequestJson = ref('')
+watch(endorsementRequest, async (binding, _previous, onCleanup) => {
+  endorsementRequestJson.value = ''
+  if (!binding) return
+  let current = true
+  onCleanup(() => { current = false })
+  try {
+    const document = await invoke<string>('content_resolve_text', { identifier: binding.course_document_cid })
+    if (current) endorsementRequestJson.value = JSON.stringify({ ...binding, course_document_json: document }, null, 2)
+  } catch (error) {
+    if (current) endorsementUiMessage.value = t('courses.completion.endorsementCopyFailed', { error: String(error) })
+  }
+}, { immediate: true })
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -377,7 +389,7 @@ function continueToDashboard() {
                 rows="4"
                 readonly
               />
-              <button class="endorsement-button" @click="copyEndorsementRequest">
+              <button class="endorsement-button" :disabled="!endorsementRequestJson" @click="copyEndorsementRequest">
                 {{ $t('courses.completion.endorsementCopyRequest') }}
               </button>
 

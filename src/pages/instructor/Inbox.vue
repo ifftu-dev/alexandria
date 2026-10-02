@@ -21,6 +21,7 @@ const loading = ref(true)
 const activeTab = ref('all')
 const endorsementRequestJson = ref('')
 const reviewedBinding = ref<CourseCompletionBinding | null>(null)
+const reviewedCourseDocument = ref<string | null>(null)
 const signedEndorsement = ref<CourseCompletionEndorsement | null>(null)
 const endorsementError = ref('')
 const endorsementMessage = ref('')
@@ -92,6 +93,7 @@ function isCompletionBinding(value: unknown): value is CourseCompletionBinding {
 
 watch(endorsementRequestJson, () => {
   reviewedBinding.value = null
+  reviewedCourseDocument.value = null
   signedEndorsement.value = null
   endorsementError.value = ''
   endorsementMessage.value = ''
@@ -105,7 +107,12 @@ function reviewEndorsementRequest() {
     if (!isCompletionBinding(parsed)) {
       throw new Error(t('instructor.inbox.endorsementInvalidRequest'))
     }
-    reviewedBinding.value = parsed
+    if (isRecord(parsed) && parsed.course_document_json !== undefined && typeof parsed.course_document_json !== 'string') {
+      throw new Error(t('instructor.inbox.endorsementInvalidRequest'))
+    }
+    const { course_document_json, ...binding } = parsed as CourseCompletionBinding & { course_document_json?: string }
+    reviewedCourseDocument.value = course_document_json ?? null
+    reviewedBinding.value = binding
   } catch (error) {
     endorsementError.value = String(error)
   }
@@ -119,7 +126,7 @@ async function signEndorsementRequest() {
   try {
     signedEndorsement.value = await invoke<CourseCompletionEndorsement>(
       'sign_course_completion_endorsement',
-      { binding: reviewedBinding.value },
+      { binding: reviewedBinding.value, courseDocumentJson: reviewedCourseDocument.value },
     )
     endorsementMessage.value = t('instructor.inbox.endorsementSigned')
   } catch (error) {
