@@ -205,7 +205,7 @@ WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) 
 )
 INSERT OR IGNORE INTO assessment_items
   (id, item_kind, skill_id, content_public, grader_private,
-   difficulty, points, bank_id, taxonomy_version, ratified)
+   difficulty, points, bank_id, taxonomy_version, ratified, bloom_level)
 SELECT
   q.id,
   'mcq',
@@ -221,7 +221,8 @@ SELECT
   q.points,
   q.bank_id,
   'bundled',
-  1
+  1,
+  'remember'
 FROM bundled q
 JOIN question_banks b ON b.id = q.bank_id;
 

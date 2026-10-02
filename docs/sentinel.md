@@ -118,6 +118,20 @@ before persisting scores or counters; it cannot safely reconstruct a composite
 from an older client that included the retired term. Historical snapshots and
 their stored outcomes are preserved, not silently rescored.
 
+### Passive demo panel
+
+An unlocked app can open the passive Sentinel Dev panel with Command–Shift–S
+(Control–Shift–S on other desktop platforms), or the Sentinel Dev button in the
+standalone assessment runner. It displays the existing monitoring session's
+telemetry without entering diagnostics, starting a camera preview, or consuming
+the attempt. It is available in release builds. Profile lock closes the panel.
+The camera-preview controls remain part of explicit diagnostics mode below.
+
+Standalone assessment submission freezes answers while monitoring is live, then
+persists a final snapshot and ends the session before grading. A failed final
+snapshot or session teardown prevents issuance and allows retry with the frozen
+answers. See [the assessment demo runbook](assessment-demo.md).
+
 ### Diagnostics transition
 
 The release workflow uses explicit diagnostics entry/exit from the profile menu;

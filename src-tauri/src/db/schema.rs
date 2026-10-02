@@ -46,7 +46,19 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (2, "instructor_studio", alexandria_studio::store::SCHEMA),
     (3, "private_personhood_receipts", MIGRATION_003_PERSONHOOD),
     (4, "decision_shadow_samples", "CREATE TABLE decision_shadow_samples (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, sample TEXT NOT NULL);"),
+    (5, "assessment_submission", MIGRATION_005_ASSESSMENT),
 ];
+
+const MIGRATION_005_ASSESSMENT: &str = r#"
+ALTER TABLE assessment_attempts ADD COLUMN submitted_answers_json TEXT CHECK (submitted_answers_json IS NULL OR json_valid(submitted_answers_json));
+ALTER TABLE assessment_attempts ADD COLUMN submitted_at TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN exchange_binding TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN item_fingerprints TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN assessed_bloom_level INTEGER CHECK (assessed_bloom_level BETWEEN 0 AND 5);
+ALTER TABLE assessment_attempts ADD COLUMN pass_threshold_snapshot REAL;
+UPDATE assessment_items SET bloom_level = 'remember'
+ WHERE taxonomy_version = 'bundled' AND id IN ('bq_js1','bq_js2','bq_js3','bq_js4','bq_bo1','bq_bo2','bq_bo3','bq_bo4');
+"#;
 
 const MIGRATION_003_PERSONHOOD: &str =
     include_str!("../../../crates/alexandria-personhood/src/schema.sql");

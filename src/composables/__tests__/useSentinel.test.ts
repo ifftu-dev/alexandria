@@ -44,6 +44,24 @@ afterEach(() => {
 })
 
 describe('Sentinel lifecycle ownership', () => {
+  it('requires a final snapshot even for a short session and preserves it on persistence failure', async () => {
+    const service = (await freshService())()
+    await service.start(null)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'integrity_submit_snapshot') throw new Error('snapshot unavailable')
+      return fallback(command, args)
+    })
+    await expect(service.stop()).rejects.toThrow('snapshot unavailable')
+    expect(service.isActive.value).toBe(true)
+    expect(mocks.invoke.mock.calls.some(([name]) => name === 'integrity_end_session')).toBe(false)
+    mocks.invoke.mockImplementation(fallback)
+    await service.stop()
+    const commands = mocks.invoke.mock.calls.map(([name]) => name)
+    expect(commands.lastIndexOf('integrity_submit_snapshot')).toBeLessThan(commands.indexOf('integrity_end_session'))
+    expect(service.sessionId.value).toBeNull()
+  })
+
   it('preserves camera evidence through failed teardown and clears opt-in only after success', async () => {
     const service = (await freshService())()
     await service.start('enrollment', true)

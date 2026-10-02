@@ -2147,3 +2147,42 @@ export interface PersonhoodPrivateReceipt {
   created_at: number
   expires_at: number
 }
+
+export interface CredentialRequest {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  skill_id: string
+  network_id: string
+  taxonomy_digest: string
+  purpose: string
+  role_label: string
+  require_new_assessment: boolean
+  created_at: number
+  expires_at: number
+}
+
+export interface DirectoryCredentialRequest {
+  directory_url: string
+  request: CredentialRequest
+}
+
+export interface SignedCredentialShare {
+  share: {
+    format: string
+    request: CredentialRequest
+    issued_at: number
+    expires_at: number
+    credential: unknown
+    issuer_state: unknown
+  }
+  signature: string
+}
+
+export interface ShareableCredential {
+  id: string
+  issuer: string
+  issued_at: string
+}

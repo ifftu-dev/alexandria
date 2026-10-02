@@ -112,5 +112,21 @@
     "grant": "అనుమతించు",
     "revoke": "వెనక్కి తీసుకో",
     "noDirectory": "ఆ డైరెక్టరీ ఇప్పుడు మీ జాబితాలో లేదు."
+  },
+  "exchange": {
+    "title": "Assessment and credential requests",
+    "note": "Requests come from your configured directories. You decide whether to assess or share. Silence is not reported as a refusal.",
+    "empty": "No open requests. Add your directory above, then refresh.",
+    "assess": "Take requested assessment",
+    "choose": "Choose a credential",
+    "noCredentials": "No matching credential yet. For a new assessment request, complete the assessment opened from this invitation.",
+    "preview": "Preview disclosure",
+    "disclosure": "This sends the complete selected credential, including its integrity summary, to the named organisation. It does not publish a talent listing or send raw monitoring captures. A learner-issued credential remains learner-issued evidence.",
+    "exact": "Exact disclosure",
+    "share": "Share with this organisation",
+    "received": "Received; verification outcome",
+    "shareNext": "Share or publish",
+    "liveView": "Sentinel Dev · ⌘⇧S",
+    "liveNote": "Read-only live signals. Assessment monitoring remains active; camera diagnostics require diagnostics mode."
   }
 }

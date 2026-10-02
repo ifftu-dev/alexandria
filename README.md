@@ -205,6 +205,8 @@ The P2P node auto-starts after the active profile is unlocked. Each device gets 
 
 The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay). Fresh peer discovery still depends on these hardcoded Alexandria relay nodes today; locally-held credentials and content survive the relay infrastructure disappearing, but bootstrapping new peers into the mesh would not — DNS seeds and user-pinned bootstrap lists are on the post-launch roadmap.
 
+For the local assessment-to-credential and Cloud candidate walkthrough, see [the demo runbook](docs/assessment-demo.md).
+
 ## Getting Started
 
 ### Prerequisites

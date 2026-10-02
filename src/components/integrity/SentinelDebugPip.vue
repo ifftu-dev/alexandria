@@ -8,20 +8,25 @@
  * Runs its own camera preview (independent of any course session) so it
  * works for tuning even outside an assessment; the numeric session
  * signals come from `useSentinel().debug`, populated by the real session.
- * Mounted only while the user has explicitly entered diagnostics mode.
+ * Passive mode displays session telemetry without enabling diagnostics or
+ * opening a separate camera. Full camera preview requires diagnostics mode.
  */
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
 import type { FaceDetection, ScoreGazeResponse } from '@/types'
 
+interface Props { readOnly?: boolean }
+const props = withDefaults(defineProps<Props>(), { readOnly: false })
+const emit = defineEmits<{ close: [] }>()
+
 const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { debug } = useSentinel()
 
-const open = ref(false)
+const open = ref(props.readOnly)
 const cameraOn = ref(false)
 const camError = ref<string | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -39,6 +44,7 @@ let busy = false
 const PREVIEW_W = 224
 
 async function startCamera() {
+  if (props.readOnly) return
   camError.value = null
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -149,7 +155,7 @@ async function infer() {
 
 function toggle() {
   open.value = !open.value
-  if (!open.value) stopCamera()
+  if (!open.value) { stopCamera(); emit('close') }
 }
 
 // Activation comes from the explicit diagnostics controls rather than an
@@ -157,7 +163,7 @@ function toggle() {
 let unlistenToggle: UnlistenFn | null = null
 onMounted(async () => {
   try {
-    unlistenToggle = await listen('develop://toggle-sentinel', () => toggle())
+    if (!props.readOnly) unlistenToggle = await listen('develop://toggle-sentinel', () => toggle())
   } catch { /* not in a Tauri context */ }
 })
 
@@ -170,6 +176,8 @@ function fmt(v?: number | null, d = 2) {
 function yn(v?: boolean | null) {
   return v == null ? '—' : v ? t('sentinel.debug.valYes') : t('sentinel.debug.valNo')
 }
+
+watch(() => props.readOnly, (value) => { if (value) { stopCamera(); open.value = true } })
 
 onBeforeUnmount(() => {
   stopCamera()
@@ -195,7 +203,8 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Camera + overlay -->
-      <div class="relative bg-black">
+      <p v-if="readOnly" class="px-3 py-2 text-xs text-muted-foreground">{{ $t('profile.exchange.liveNote') }}</p>
+      <div v-else class="relative bg-black">
         <video ref="videoRef" class="hidden" muted playsinline />
         <canvas ref="canvasRef" class="w-full" />
         <div v-if="!cameraOn" class="flex items-center justify-center py-8">

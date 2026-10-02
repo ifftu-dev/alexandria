@@ -29,6 +29,7 @@ import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
 import HolderDirectories from '@/components/profile/HolderDirectories.vue'
+import CredentialRequests from '@/components/profile/CredentialRequests.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
@@ -947,6 +948,7 @@ function onSectionClick(id: SettingsSectionId) {
                      one nobody uses. -->
                 <template v-else-if="activeSection === 'directories'">
                   <HolderDirectories />
+                  <CredentialRequests />
                 </template>
 
                 <!-- ──────────── Assistant access — external MCP clients ──────────── -->
