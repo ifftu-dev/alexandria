@@ -242,6 +242,7 @@ export const TAURI_COMMANDS = [
   "plugin_set_media_grants",
   "plugin_submit_and_grade",
   "plugin_uninstall",
+  "prepare_local_course",
   "preview_completion_root",
   "publish_course",
   "publish_listing",

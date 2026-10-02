@@ -44,7 +44,10 @@
       "subjective": "موضوعی",
       "essay": "مضمون",
       "interactive": "متعامل"
-    }
+    },
+    "prepareAndEnroll": "Prepare and enroll",
+    "localPreparationNote": "This is your draft. Enrollment creates a signed local version without publishing it to the course catalog.",
+    "awaitingPublication": "The author must publish this course before you can enroll."
   },
   "dashboard": {
     "title": "میرا سیکھنا",

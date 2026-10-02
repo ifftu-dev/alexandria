@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useProfiles } from '@/composables/useProfiles'
 import { AppButton, StatusBadge, EmptyState, ProvenanceBadge } from '@/components/ui'
 import EnrollPluginDialog, {
   type RequiredPlugin,
@@ -16,6 +17,7 @@ const { t } = useI18n()
 const { invoke } = useLocalApi()
 const route = useRoute()
 const router = useRouter()
+const { stakeAddress } = useProfiles()
 
 const course = ref<Course | null>(null)
 const chapters = ref<Chapter[]>([])
@@ -23,6 +25,9 @@ const elements = ref<Record<string, Element[]>>({})
 const enrollment = ref<Enrollment | null>(null)
 const loading = ref(true)
 const enrolling = ref(false)
+const enrollmentError = ref('')
+const needsDocument = computed(() => !!course.value && !course.value.content_cid)
+const ownDraft = computed(() => course.value?.status === 'draft' && course.value.author_address === stakeAddress.value)
 
 const totalElements = computed(() => {
   let count = 0
@@ -83,10 +88,15 @@ let unlistenProgress: UnlistenFn | null = null
 async function enroll() {
   if (!course.value) return
   enrolling.value = true
+  enrollmentError.value = ''
   try {
+    if (needsDocument.value && ownDraft.value) {
+      await invoke('prepare_local_course', { courseId: course.value.id })
+      course.value = await invoke<Course>('get_course', { courseId: course.value.id })
+    }
     const plugins = await invoke<RequiredPlugin[]>('course_required_plugins', {
       courseId: course.value.id,
-    }).catch(() => [] as RequiredPlugin[])
+    })
 
     // No plugins, or all already installed → enroll directly, no dialog.
     if (plugins.length === 0 || plugins.every(p => p.installed)) {
@@ -100,6 +110,7 @@ async function enroll() {
     installError.value = null
     pluginDialogOpen.value = true
   } catch (e) {
+    enrollmentError.value = String(e)
     console.error('Failed to enroll:', e)
   } finally {
     enrolling.value = false
@@ -247,6 +258,7 @@ function elementTypeLabel(elementType: string): string {
           <AppButton
             v-if="!enrollment"
             :loading="enrolling"
+            :disabled="needsDocument && !ownDraft"
             variant="primary"
             class="w-full sm:w-auto"
             @click="enroll"
@@ -254,7 +266,7 @@ function elementTypeLabel(elementType: string): string {
             <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            {{ $t('courses.detail.enroll') }}
+            {{ needsDocument && ownDraft ? $t('courses.detail.prepareAndEnroll') : $t('courses.detail.enroll') }}
           </AppButton>
           <AppButton
             v-else-if="enrollment.status === 'active'"
@@ -279,6 +291,9 @@ function elementTypeLabel(elementType: string): string {
           </AppButton>
         </div>
       </div>
+
+      <p v-if="enrollmentError" role="alert" class="mb-4 text-sm text-error">{{ enrollmentError }}</p>
+      <p v-if="needsDocument" class="mb-4 text-sm text-muted-foreground">{{ ownDraft ? $t('courses.detail.localPreparationNote') : $t('courses.detail.awaitingPublication') }}</p>
 
       <!-- Tags -->
       <div v-if="course.tags?.length" class="flex flex-wrap gap-2 mb-6">

@@ -76,5 +76,15 @@ In **Instructor → My courses**, choose **Load plugin showcase**. This imports
 one owned draft with six plugin lessons and installs their current bundled
 manifests, UI, and graders. Repeating it preserves course edits and retries
 plugin installation. Open **Plugins Showcase → Review → Preview** to view the
-course; enroll to run its lessons. Microphone access is requested only when a
+course; choose **Prepare and enroll** to create its signed local version, then
+**Continue learning** to run its lessons. Microphone access is requested only when a
 music lesson needs it. No scores, credentials, or reviews are seeded.
+
+### Local draft enrollment
+
+Owned drafts offer **Prepare and enroll**. This uses the same signed course
+document and blob preparation as publication, keeps the course in draft status,
+and skips the catalog entry and P2P announcement. Enrollment remains bound to
+the verified document CID/version; it does not accept unsigned seed data.
+The player redirects unenrolled learners through the same plugin pre-flight.
+Enrollment/preparation errors appear inline rather than only in the console.

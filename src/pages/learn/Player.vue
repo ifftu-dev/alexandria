@@ -38,7 +38,6 @@ const elements = ref<Record<string, Element[]>>({})
 const enrollment = ref<Enrollment | null>(null)
 const progress = ref<Record<string, ElementProgress>>({})
 const loading = ref(true)
-const enrolling = ref(false)
 const feedbackOpen = ref(false)
 const feedbackRating = ref(0)
 const feedbackComment = ref('')
@@ -589,16 +588,10 @@ function selectFromMobileNav(chapterId: string, elementId: string) {
   mobileNavOpen.value = false
 }
 
-async function enrollFromPlayer() {
+function enrollFromPlayer() {
   if (!course.value || enrollment.value) return
-  enrolling.value = true
-  try {
-    enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
-  } catch (e) {
-    console.error('Failed to enroll from player:', e)
-  } finally {
-    enrolling.value = false
-  }
+  // Use the detail page's signed-document preparation and plugin pre-flight.
+  router.push(`/courses/${course.value.id}`)
 }
 
 async function markInProgress() {
@@ -1389,7 +1382,6 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <AppButton
               v-if="!enrollment && course?.kind !== 'tutorial'"
               size="sm"
-              :loading="enrolling"
               @click="enrollFromPlayer"
             >
               {{ $t('learn.player.enrollToTrack') }}
