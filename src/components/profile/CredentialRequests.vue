@@ -85,7 +85,7 @@ onUnmounted(() => { revision++ })
   <section class="space-y-4 rounded-xl border border-border p-5">
     <div class="flex items-center justify-between gap-3">
       <h2 class="text-lg font-semibold">{{ t('profile.exchange.title') }}</h2>
-      <AppButton variant="outline" :disabled="busy" @click="refresh">{{ t('common.actions.refresh') }}</AppButton>
+      <AppButton variant="outline" :disabled="busy" @click="refresh">{{ t('credentials.page.refresh') }}</AppButton>
     </div>
     <p class="text-sm text-muted-foreground">{{ t('profile.exchange.note') }}</p>
     <p v-for="error in errors" :key="error" role="alert" class="text-sm text-error">{{ error }}</p>

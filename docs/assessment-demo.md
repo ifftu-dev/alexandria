@@ -22,7 +22,7 @@ Low-data signals can show unavailable rather than a score. Three MCQ clicks do n
 
 ## Demo A — learner first
 
-1. In Alexandria, open **Skills**, choose JavaScript (or Big-O), and start its assessment.
+1. In Alexandria, open **Goals → Engineering Manager → View path**, then **Assess** beside **Big-O Analysis**. To add a separate goal, use **Skills & Credentials → Browse → Big-O Analysis → 🎯 Goal**, then view its path. Big-O has no prerequisite; JavaScript’s goal path requires HTML & CSS first. Use JavaScript for the invitation-first path.
 2. Open the passive Sentinel Dev panel. Answer the questions and submit. Answers freeze before the last telemetry snapshot and session finalization; grading then issues one credential on a pass.
 3. Open the credential from the result. Show its issuer/subject DID, skill, score, Bloom level, terminal integrity assertion, and evidence references.
 4. In **My profile → Talent index**, select the earned skill and optional display name, review the exact record, and save consent.
@@ -57,3 +57,13 @@ If final telemetry persistence fails, the attempt stays ungraded and the same fr
 If sharing fails, keep the preview open and retry the same payload within its five-minute lifetime. After expiry, create a new preview if the request is still pending. Refresh Cloud before creating another request after a lost response. A durable offline send queue and continuously refreshed issuer-status fetching are follow-up work, not part of this demo.
 
 The installed app is built from this worktree. Main checkouts and profile storage are not replaced by the demo source setup. The installer preserves a copy of the previous application bundle; see the installation receipt for its location.
+
+## Live role requirements
+
+In Cloud, open **Hiring → Role requirements**. Paste the job description during
+the demo, click **Read it**, review the quoted skill proposals and Bloom levels,
+then supply a code/title and create the role. Preferred proposals start unchecked.
+The local Ollama model is configured by the Cloud demo launcher; allow up to two
+minutes. **Create role manually** is available as a fallback. Coverage reflects
+real published listings, and Remember evidence will not clear Apply/Analyze bars.
+See the Cloud runbook for model startup and configuration.
