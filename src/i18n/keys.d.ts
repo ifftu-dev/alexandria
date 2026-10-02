@@ -972,6 +972,8 @@ export type MessageKey =
   | 'instructor.myCourses.emptyTitle'
   | 'instructor.myCourses.examplesNote'
   | 'instructor.myCourses.loadExamples'
+  | 'instructor.myCourses.loadPluginShowcase'
+  | 'instructor.myCourses.pluginShowcaseNote'
   | 'instructor.myCourses.subtitle'
   | 'instructor.myCourses.title'
   | 'instructor.myCourses.updated'

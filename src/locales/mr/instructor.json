@@ -27,7 +27,9 @@
     "emptyDesc": "रचनाकाराने तुमचा पहिला अभ्यासक्रम किंवा ट्युटोरियल तयार करा.",
     "updated": "अद्ययावत {date}",
     "loadExamples": "Load example courses",
-    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results.",
+    "loadPluginShowcase": "Load plugin showcase",
+    "pluginShowcaseNote": "Adds the Plugins Showcase draft and installs its bundled music, IRL review, and JavaScript, TypeScript, C++, and Python editors. First load may take a minute."
   },
   "courseLearners": {
     "eyebrow": "विद्यार्थी प्रगती",

@@ -24,3 +24,7 @@ code. They are **unverified**. Some are known to be doubtful — for example,
 IETF RFC text is published under the IETF Trust's terms rather than placed in
 the public domain. Check each source's actual terms, and record the required
 attribution, before redistributing or embedding any of these files.
+
+The separate **Load plugin showcase** action imports `course_plugin_demo`,
+resolves its six lessons to the current embedded plugin CIDs/versions, repairs
+legacy starter-code newlines, and installs the bundled course plugins.

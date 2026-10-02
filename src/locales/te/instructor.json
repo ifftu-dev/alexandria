@@ -27,7 +27,9 @@
     "emptyDesc": "కంపోజర్‌తో మీ మొదటి కోర్సు లేదా ట్యుటోరియల్‌ను సృష్టించండి.",
     "updated": "నవీకరించబడింది {date}",
     "loadExamples": "Load example courses",
-    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results."
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results.",
+    "loadPluginShowcase": "Load plugin showcase",
+    "pluginShowcaseNote": "Adds the Plugins Showcase draft and installs its bundled music, IRL review, and JavaScript, TypeScript, C++, and Python editors. First load may take a minute."
   },
   "courseLearners": {
     "eyebrow": "అభ్యాసకుని పురోగతి",

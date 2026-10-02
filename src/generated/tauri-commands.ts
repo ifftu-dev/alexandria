@@ -151,6 +151,7 @@ export const TAURI_COMMANDS = [
   "import_credential_from_peer",
   "import_credentials",
   "import_demo_courses",
+  "import_plugin_demo_course",
   "install_course_plugins",
   "instructor_course_learners",
   "instructor_inbox",

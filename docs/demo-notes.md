@@ -2,7 +2,7 @@
 
 **Open:** Alexandria, unlocked demo profile; Cloud at <http://127.0.0.1:8787>.
 **Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
-Unlocking runs the bundled seeds. Instructor courses: **Instructor → My courses → Load example courses** (seven editable drafts).
+Unlocking runs the bundled seeds. Instructor courses: **Instructor → My courses → Load example courses** (seven editable drafts). **Load plugin showcase** adds the music, IRL review, and four code-editor exercises.
 
 ## Start with live Requirements
 

@@ -69,3 +69,12 @@ The local Ollama model is configured by the Cloud demo launcher; allow up to two
 minutes. **Create role manually** is available as a fallback. Coverage reflects
 real published listings, and Remember evidence will not clear Apply/Analyze bars.
 See the Cloud runbook for model startup and configuration.
+
+### Plugin showcase
+
+In **Instructor → My courses**, choose **Load plugin showcase**. This imports
+one owned draft with six plugin lessons and installs their current bundled
+manifests, UI, and graders. Repeating it preserves course edits and retries
+plugin installation. Open **Plugins Showcase → Review → Preview** to view the
+course; enroll to run its lessons. Microphone access is requested only when a
+music lesson needs it. No scores, credentials, or reviews are seeded.

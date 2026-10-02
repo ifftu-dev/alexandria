@@ -57,9 +57,62 @@ pub async fn import_demo_courses(state: State<'_, AppState>) -> Result<usize, St
             DatabaseWorkload::Instructor,
             state.profile_lease(),
             "courses.import_examples",
-            |db| import_examples(db.conn()),
+            |db| import_examples(db.conn(), false),
         )
         .await
+}
+
+#[tauri::command]
+pub async fn import_plugin_demo_course(state: State<'_, AppState>) -> Result<String, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.import_plugin_example",
+            |db| {
+                import_examples(db.conn(), true)?;
+                let author: String = db
+                    .conn()
+                    .query_row(
+                        "SELECT stake_address FROM local_identity WHERE id=1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(entity_id(&[
+                    "example-course-v1",
+                    &author,
+                    "course_plugin_demo",
+                ]))
+            },
+        )
+        .await
+}
+
+fn plugin_metadata(element: &ExampleElement) -> Result<Option<(String, String)>, String> {
+    if element.element_type != "plugin" {
+        return Ok(None);
+    }
+    let slug = match element.id.as_str() {
+        "el_plugin_demo_music_reviews" => "music-reviews",
+        "el_plugin_demo_irl_review" => "irl-review",
+        "el_plugin_demo_editor_js_double" => "editor-javascript",
+        "el_plugin_demo_editor_ts_sum" => "editor-typescript",
+        "el_plugin_demo_editor_cpp_double" => "editor-cpp",
+        "el_plugin_demo_editor_python_double" => "editor-python",
+        _ => return Err("Unknown example plugin element".into()),
+    };
+    let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+        .iter()
+        .find(|b| b.slug == slug)
+        .ok_or("Example plugin is not bundled")?;
+    let manifest = crate::plugins::manifest::parse_and_validate(bundle.manifest_json)
+        .map_err(|e| e.to_string())?;
+    Ok(Some((
+        crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json),
+        manifest.version,
+    )))
 }
 
 fn lesson_content(element: &ExampleElement) -> Result<Option<(&'static str, String)>, String> {
@@ -68,6 +121,17 @@ fn lesson_content(element: &ExampleElement) -> Result<Option<(&'static str, Stri
     };
     match element.element_type.as_str() {
         "text" => Ok(Some(("text", content.clone()))),
+        "plugin" => {
+            plugin_metadata(element)?;
+            let mut value: serde_json::Value =
+                serde_json::from_str(content).map_err(|e| e.to_string())?;
+            if let Some(code) = value["starter_code"].as_str() {
+                value["starter_code"] = code.replace("\\n", "\n").into();
+            }
+            serde_json::to_string(&value)
+                .map(|body| Some(("plugin", body)))
+                .map_err(|e| e.to_string())
+        }
         "quiz" => {
             // The retired corpus uses prompt/correct_indices. Convert it to
             // the current composer/player's single-choice quiz format.
@@ -104,7 +168,7 @@ fn lesson_content(element: &ExampleElement) -> Result<Option<(&'static str, Stri
     }
 }
 
-fn import_examples(conn: &rusqlite::Connection) -> Result<usize, String> {
+fn import_examples(conn: &rusqlite::Connection, plugin_only: bool) -> Result<usize, String> {
     let corpus: Corpus = serde_json::from_str(CORPUS).map_err(|e| e.to_string())?;
     let author: String = conn
         .query_row(
@@ -118,12 +182,20 @@ fn import_examples(conn: &rusqlite::Connection) -> Result<usize, String> {
         for course in corpus
             .courses
             .iter()
-            .filter(|c| c.kind == "course" && c.id != "course_plugin_demo")
+            .filter(|c| c.kind == "course" && (c.id == "course_plugin_demo") == plugin_only)
         {
             let id = entity_id(&["example-course-v1", &author, &course.id]);
+            let description = if plugin_only {
+                format!("Bundled plugin example for review. {}", course.description)
+            } else {
+                format!(
+                    "AI-generated example for review. Inline lessons and quizzes only. {}",
+                    course.description
+                )
+            };
             let inserted = conn.execute(
                 "INSERT OR IGNORE INTO courses (id,title,description,author_address,tags,skill_ids,thumbnail_svg,kind,status,provenance) VALUES (?1,?2,?3,?4,?5,?6,?7,'course','draft','ai_generated')",
-                params![id,course.title,format!("AI-generated example for review. Inline lessons and quizzes only. {}",course.description),author,serde_json::to_string(&course.tags).map_err(|e|e.to_string())?,serde_json::to_string(&course.skill_ids).map_err(|e|e.to_string())?,course.thumbnail_svg],
+                params![id,course.title,description,author,serde_json::to_string(&course.tags).map_err(|e|e.to_string())?,serde_json::to_string(&course.skill_ids).map_err(|e|e.to_string())?,course.thumbnail_svg],
             ).map_err(|e|e.to_string())?;
             if inserted == 0 {
                 continue;
@@ -146,7 +218,8 @@ fn import_examples(conn: &rusqlite::Connection) -> Result<usize, String> {
                     .enumerate()
                 {
                     let element_id = entity_id(&[&chapter_id, &element.id]);
-                    conn.execute("INSERT INTO course_elements (id,chapter_id,title,element_type,content_inline,position) VALUES (?1,?2,?3,?4,?5,?6)",params![element_id,chapter_id,element.title,body.as_ref().map(|(kind,_)|*kind),body.as_ref().map(|(_,content)|content),position as i64]).map_err(|e|e.to_string())?;
+                    let plugin = plugin_metadata(element)?;
+                    conn.execute("INSERT INTO course_elements (id,chapter_id,title,element_type,content_inline,position,plugin_cid,plugin_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![element_id,chapter_id,element.title,body.as_ref().map(|(kind,_)|*kind),body.as_ref().map(|(_,content)|content),position as i64,plugin.as_ref().map(|p| &p.0),plugin.as_ref().map(|p| &p.1)]).map_err(|e|e.to_string())?;
                     for tag in &element.skill_tags {
                         conn.execute("INSERT INTO element_skill_tags (element_id,skill_id,weight) VALUES (?1,?2,?3)",params![element_id,tag.skill_id,tag.weight]).map_err(|e|e.to_string())?;
                     }
@@ -162,12 +235,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn plugin_showcase_uses_current_bundles_and_preserves_edits() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        crate::db::bundled::install_bundled_data(db.conn()).unwrap();
+        db.conn().execute("INSERT INTO local_identity (id,stake_address,payment_address) VALUES (1,'plugin-owner','demo-key')", []).unwrap();
+        assert_eq!(import_examples(db.conn(), true).unwrap(), 1);
+        let mut query = db.conn().prepare("SELECT element_type,plugin_cid,plugin_version,content_inline FROM course_elements ORDER BY id").unwrap();
+        let elements = query
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(elements.len(), 6);
+        let mut editors = 0;
+        for (kind, cid, version, content) in elements {
+            assert_eq!(kind, "plugin");
+            let bundle =
+                crate::plugins::builtins::find_bundle_by_cid(&cid).expect("current bundled CID");
+            let manifest =
+                crate::plugins::manifest::parse_and_validate(bundle.manifest_json).unwrap();
+            assert_eq!(version, manifest.version);
+            let config: serde_json::Value = serde_json::from_str(&content).unwrap();
+            if let Some(code) = config["starter_code"].as_str() {
+                editors += 1;
+                assert!(code.contains('\n'));
+                assert!(!code.contains("\\n"));
+                assert!(!config["grader_private"]["tests"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty());
+                assert!(bundle.grader_wasm.is_some());
+            }
+        }
+        assert_eq!(editors, 4);
+        let id = entity_id(&["example-course-v1", "plugin-owner", "course_plugin_demo"]);
+        db.conn()
+            .execute("UPDATE courses SET title='My showcase' WHERE id=?1", [&id])
+            .unwrap();
+        assert_eq!(import_examples(db.conn(), true).unwrap(), 0);
+        let (title, author, status): (String, String, String) = db
+            .conn()
+            .query_row(
+                "SELECT title,author_address,status FROM courses WHERE id=?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (title.as_str(), author.as_str(), status.as_str()),
+            ("My showcase", "plugin-owner", "draft")
+        );
+    }
+
+    #[test]
     fn examples_are_owned_drafts_and_reimport_preserves_edits() {
         let db = crate::db::Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         crate::db::bundled::install_bundled_data(db.conn()).unwrap();
         db.conn().execute("INSERT INTO local_identity (id,stake_address,payment_address) VALUES (1,'demo-owner','demo-key')",[]).unwrap();
-        assert_eq!(import_examples(db.conn()).unwrap(), 7);
+        assert_eq!(import_examples(db.conn(), false).unwrap(), 7);
         let bad:i64=db.conn().query_row("SELECT count(*) FROM courses WHERE author_address!='demo-owner' OR status!='draft' OR provenance!='ai_generated' OR content_cid IS NOT NULL",[],|r|r.get(0)).unwrap();
         assert_eq!(bad, 0);
         let external:i64=db.conn().query_row("SELECT count(*) FROM course_elements WHERE element_type NOT IN ('text','quiz','objective_multi_mcq') OR content_cid IS NOT NULL",[],|r|r.get(0)).unwrap();
@@ -179,7 +313,7 @@ mod tests {
                 [&id],
             )
             .unwrap();
-        assert_eq!(import_examples(db.conn()).unwrap(), 0);
+        assert_eq!(import_examples(db.conn(), false).unwrap(), 0);
         let title: String = db
             .conn()
             .query_row("SELECT title FROM courses WHERE id=?1", [id], |r| r.get(0))
