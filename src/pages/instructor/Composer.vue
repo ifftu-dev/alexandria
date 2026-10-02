@@ -322,7 +322,7 @@ async function saveMeta() {
       description: metaDescription.value.trim() || null,
     }
     course.value = await invoke<Course>('update_course', { courseId: course.value.id, req })
-    if (courseStudio.value) courseStudio.value.value.tutor = structuredClone(metaTutor.value)
+    if (courseStudio.value) courseStudio.value.value.tutor = structuredClone(toRaw(metaTutor.value))
     if (await saveStudio()) editingMeta.value = false
   } catch (e) {
     error.value = String(e)

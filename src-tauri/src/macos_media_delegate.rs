@@ -30,7 +30,7 @@
 use std::sync::OnceLock;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, NSObject, Sel};
+use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, NSObject, Sel};
 use objc2::{msg_send, sel, ClassType};
 use objc2_foundation::NSString;
 
@@ -136,21 +136,45 @@ fn capture_decision(
 pub fn install(wk_webview: &AnyObject) {
     let cls = delegate_class();
     unsafe {
-        let alloc: *mut AnyObject = msg_send![cls, alloc];
-        let delegate: *mut AnyObject = msg_send![alloc, init];
-        if delegate.is_null() {
-            log::warn!("macOS: media-grant delegate alloc returned nil");
+        let original: *mut AnyObject = msg_send![wk_webview, UIDelegate];
+        if !original.is_null() && (*original).class() == cls {
             return;
         }
-        // Set as UIDelegate. WKWebView holds a weak reference so we must
-        // keep the delegate alive: we Box::leak the strong reference into
-        // a 'static.
-        let _: () = msg_send![wk_webview, setUIDelegate: delegate];
-        // Leak: app-lifetime delegate.
-        if let Some(retained) = Retained::<AnyObject>::from_raw(delegate) {
-            std::mem::forget(retained);
+        let Some(delegate) = make_delegate(original) else {
+            log::warn!("macOS: media-grant delegate alloc returned nil");
+            return;
+        };
+        let _: () = msg_send![wk_webview, setUIDelegate: &*delegate];
+        // WKWebView holds a weak reference. Keep the proxy and its original
+        // Wry delegate alive for the app lifetime.
+        std::mem::forget(delegate);
+    }
+}
+
+// The pointer is retained by the proxy and released in dealloc. Forwarding
+// preserves Wry's file pickers, JavaScript dialogs, and other UI callbacks.
+unsafe fn original_delegate(this: &AnyObject) -> *mut AnyObject {
+    let ivar = delegate_class()
+        .instance_variable(c"originalDelegate")
+        .expect("delegate ivar");
+    unsafe { *ivar.load::<*mut AnyObject>(this) }
+}
+
+unsafe fn make_delegate(original: *mut AnyObject) -> Option<Retained<AnyObject>> {
+    let cls = delegate_class();
+    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![cls, new] };
+    if let Some(delegate) = &delegate {
+        let original = unsafe { Retained::retain(original) };
+        let ivar = cls
+            .instance_variable(c"originalDelegate")
+            .expect("delegate ivar");
+        unsafe {
+            *ivar.load_ptr::<*mut AnyObject>(delegate) = original
+                .map(Retained::into_raw)
+                .unwrap_or(std::ptr::null_mut());
         }
     }
+    delegate
 }
 
 fn delegate_class() -> &'static AnyClass {
@@ -158,6 +182,33 @@ fn delegate_class() -> &'static AnyClass {
     CLASS.get_or_init(|| {
         let mut builder = ClassBuilder::new(c"AlexMediaGrantDelegate", NSObject::class())
             .expect("AlexMediaGrantDelegate class name collision");
+        builder.add_ivar::<*mut AnyObject>(c"originalDelegate");
+
+        unsafe extern "C-unwind" fn responds(this: &AnyObject, _cmd: Sel, selector: Sel) -> Bool {
+            if this.class().responds_to(selector) {
+                return Bool::YES;
+            }
+            let original = unsafe { original_delegate(this) };
+            if original.is_null() {
+                Bool::NO
+            } else {
+                unsafe { msg_send![original, respondsToSelector: selector] }
+            }
+        }
+        unsafe extern "C-unwind" fn forward(this: &AnyObject, _cmd: Sel, _selector: Sel) -> *mut AnyObject {
+            unsafe { original_delegate(this) }
+        }
+        unsafe extern "C-unwind" fn dealloc(this: &AnyObject, _cmd: Sel) {
+            unsafe {
+                drop(Retained::<AnyObject>::from_raw(original_delegate(this)));
+                let _: () = msg_send![super(this, NSObject::class()), dealloc];
+            }
+        }
+        unsafe {
+            builder.add_method(sel!(respondsToSelector:), responds as unsafe extern "C-unwind" fn(_, _, _) -> _);
+            builder.add_method(sel!(forwardingTargetForSelector:), forward as unsafe extern "C-unwind" fn(_, _, _) -> _);
+            builder.add_method(sel!(dealloc), dealloc as unsafe extern "C-unwind" fn(_, _) -> _);
+        }
 
         // -- requestMediaCapturePermissionForOrigin --
         // `webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:`
@@ -235,6 +286,46 @@ fn delegate_class() -> &'static AnyClass {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_proxy_preserves_optional_file_picker_callback() {
+        unsafe extern "C-unwind" fn open_panel(
+            _this: &AnyObject,
+            _cmd: Sel,
+            _webview: *mut AnyObject,
+            _parameters: *mut AnyObject,
+            _frame: *mut AnyObject,
+            completion: *mut block2::Block<dyn Fn(*mut AnyObject)>,
+        ) {
+            unsafe { (*completion).call((std::ptr::null_mut(),)) };
+        }
+        unsafe {
+            let mut builder =
+                ClassBuilder::new(c"AlexOriginalUIDelegateTest", NSObject::class()).unwrap();
+            let selector =
+                sel!(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:);
+            builder.add_method(
+                selector,
+                open_panel as unsafe extern "C-unwind" fn(_, _, _, _, _, _) -> _,
+            );
+            let original: Retained<AnyObject> = msg_send![builder.register(), new];
+            let proxy = make_delegate(Retained::as_ptr(&original).cast_mut()).unwrap();
+            drop(original);
+
+            let responds: bool = msg_send![&*proxy, respondsToSelector: selector];
+            assert!(responds);
+            let media: bool = msg_send![&*proxy, respondsToSelector: sel!(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:)];
+            assert!(media);
+            let unknown: bool = msg_send![&*proxy, respondsToSelector: sel!(alexUnknownCallback)];
+            assert!(!unknown);
+
+            let called = std::cell::Cell::new(false);
+            let completion = block2::RcBlock::new(|_urls: *mut AnyObject| called.set(true));
+            let nil = std::ptr::null_mut::<AnyObject>();
+            let _: () = msg_send![&*proxy, webView: nil, runOpenPanelWithParameters: nil, initiatedByFrame: nil, completionHandler: &*completion];
+            assert!(called.get());
+        }
+    }
 
     #[test]
     fn trusted_main_frame_prompts_and_plugin_still_requires_grant() {

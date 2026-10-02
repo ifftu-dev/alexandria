@@ -285,7 +285,7 @@ function elementTypeLabel(elementType: string): string {
           <AppButton
             variant="ghost"
             size="sm"
-            @click="router.push(`/instructor/courses/${course.id}`)"
+            @click="router.push({ name: 'composer', params: { id: course.id } })"
           >
             {{ $t('courses.detail.editCourse') }}
           </AppButton>
