@@ -7,7 +7,7 @@
 //! schema replaces that column. No personas, credentials, opinions, courses,
 //! classrooms or governance rows are installed; the demo course corpus lives
 //! in `demo-world/content/` as non-authoritative source material. Profile
-//! activation separately imports eight owned example drafts after identity
+//! activation separately imports owned example resources after identity
 //! initialization (see `commands::demo_courses`).
 //!
 //! Installation is one transaction and idempotent: taxonomy rows are written

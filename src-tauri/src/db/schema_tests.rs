@@ -181,7 +181,7 @@ fn the_view_set_is_exact() {
 /// drift detector that fails on any object added or removed without intent.
 /// They cover every migration: the baseline's 92 tables and 105 indexes, plus
 /// the instructor studio's 5 tables and 1 index, personhood's table and index,
-/// and the decision shadow sample table.
+/// the decision shadow sample table, and local opinion examples.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -189,7 +189,7 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 99, "table count changed");
+    assert_eq!(tables, 100, "table count changed");
     assert_eq!(names(db.conn(), "index").len(), 107, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),

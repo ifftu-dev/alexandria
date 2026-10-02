@@ -187,6 +187,7 @@ export const TAURI_COMMANDS = [
   "list_chapters",
   "list_courses",
   "list_credentials",
+  "list_demo_opinions",
   "list_derived_states",
   "list_directories",
   "list_element_skill_tags",

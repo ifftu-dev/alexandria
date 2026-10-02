@@ -1307,6 +1307,7 @@ pub fn run() {
             commands::courses::get_course,
             commands::courses::create_course,
             commands::demo_courses::import_demo_courses,
+            commands::demo_resources::list_demo_opinions,
             commands::demo_courses::import_plugin_demo_course,
             commands::courses::update_course,
             commands::courses::delete_course,

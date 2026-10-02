@@ -48,5 +48,11 @@
     "loadFailed": "无法加载主题：{error}",
     "publishFailed": "发布失败：{error}",
     "publish": "发布观点"
+  },
+  "examples": {
+    "title": "示例观点",
+    "description": "由 AI 生成并使用合成语音的讨论示例。本地样例，没有公开作者或凭证支持。",
+    "badge": "内置示例",
+    "watch": "观看示例"
   }
 }

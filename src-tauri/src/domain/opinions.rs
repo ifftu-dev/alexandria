@@ -154,6 +154,17 @@ pub struct OpinionWithdrawal {
     pub withdrawn_at: String,
 }
 
+/// Read-only bundled example, stored separately from signed network opinions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpinionExample {
+    pub id: String,
+    pub subject_field_id: String,
+    pub title: String,
+    pub summary: String,
+    pub video_cid: String,
+    pub duration_seconds: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

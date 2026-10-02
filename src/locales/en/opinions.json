@@ -48,5 +48,11 @@
     "loadFailed": "Couldn't load topics: {error}",
     "publishFailed": "Publish failed: {error}",
     "publish": "Publish Opinion"
+  },
+  "examples": {
+    "title": "Example viewpoints",
+    "description": "AI-generated discussion examples with synthetic narration. Local samples without a published author or credential backing.",
+    "badge": "Bundled example",
+    "watch": "Watch example"
   }
 }

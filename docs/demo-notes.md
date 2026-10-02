@@ -2,7 +2,9 @@
 
 **Open:** Alexandria, unlocked demo profile; Cloud at <http://127.0.0.1:8787>.
 **Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
-Every profile automatically receives the bundled seeds, seven example course drafts, **Plugins Showcase**, and all nine bundled plugins when created, restored, or unlocked. Find courses under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**.
+Every profile automatically receives the bundled seeds, seven example course drafts, **Plugins Showcase**, two **Video Lab** courses, seven Opinion examples, three example classrooms, and all nine bundled plugins when created, restored, or unlocked. Find courses under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**.
+
+**Content tour:** Opinions → Example viewpoints → pick a clip. Instructor → My courses → **Algorithm Essentials — Video Lab** or **Web Foundations — Video Lab** (four videos plus transcripts each). Classroom templates appear in the sidebar. All 15 clips are local.
 
 ## Start with live Requirements
 

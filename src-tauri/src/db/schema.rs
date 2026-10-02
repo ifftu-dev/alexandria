@@ -47,6 +47,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (3, "private_personhood_receipts", MIGRATION_003_PERSONHOOD),
     (4, "decision_shadow_samples", "CREATE TABLE decision_shadow_samples (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, sample TEXT NOT NULL);"),
     (5, "assessment_submission", MIGRATION_005_ASSESSMENT),
+    (6, "demo_opinion_examples", "CREATE TABLE demo_opinion_examples (id TEXT PRIMARY KEY, subject_field_id TEXT NOT NULL REFERENCES subject_fields(id), title TEXT NOT NULL, summary TEXT NOT NULL, video_cid TEXT NOT NULL, duration_seconds INTEGER NOT NULL);"),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"

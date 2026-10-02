@@ -48,5 +48,11 @@
     "loadFailed": "No se pudieron cargar los temas: {error}",
     "publishFailed": "La publicación falló: {error}",
     "publish": "Publicar opinión"
+  },
+  "examples": {
+    "title": "Puntos de vista de ejemplo",
+    "description": "Ejemplos de debate generados por IA con narración sintética. Muestras locales sin autor publicado ni respaldo de credenciales.",
+    "badge": "Ejemplo incluido",
+    "watch": "Ver ejemplo"
   }
 }

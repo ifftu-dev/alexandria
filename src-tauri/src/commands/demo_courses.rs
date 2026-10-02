@@ -16,10 +16,11 @@ pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> 
         let db = guard.as_ref().ok_or("database not initialized")?;
         let created = install_profile_content(db, &plugins_dir)?;
         log::info!("profile demo content ready: {created} new courses");
-        Ok(())
+        Ok::<_, String>(())
     })
     .await
-    .map_err(|e| format!("demo content install task failed: {e}"))?
+    .map_err(|e| format!("demo content install task failed: {e}"))??;
+    crate::commands::demo_resources::install_for_profile(state).await
 }
 
 fn install_profile_content(

@@ -2186,3 +2186,12 @@ export interface ShareableCredential {
   issuer: string
   issued_at: string
 }
+
+export interface OpinionExample {
+  id: string
+  subject_field_id: string
+  title: string
+  summary: string
+  video_cid: string
+  duration_seconds: number
+}

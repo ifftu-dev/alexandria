@@ -48,5 +48,11 @@
     "loadFailed": "Impossible de charger les sujets : {error}",
     "publishFailed": "Échec de la publication : {error}",
     "publish": "Publier l'avis"
+  },
+  "examples": {
+    "title": "Points de vue exemples",
+    "description": "Exemples de discussion générés par IA avec narration synthétique. Exemples locaux sans auteur publié ni justificatif de compétence.",
+    "badge": "Exemple inclus",
+    "watch": "Voir l’exemple"
   }
 }

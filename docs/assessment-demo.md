@@ -4,11 +4,11 @@ This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandri
 
 ## Prepare this Mac
 
-1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and eight profile-owned course drafts (seven examples plus Plugins Showcase). This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
+1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and ten profile-owned course drafts (seven examples, Plugins Showcase, and two video labs), seven local Opinion examples, and three classroom/channel templates. This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
 2. Start Docker Desktop. From the Cloud checkout run `scripts/demo-assessment.sh`. Open <http://127.0.0.1:8787> and choose **Continue**. This is a loopback-only development sign-in, not a production identity-provider deployment.
 3. In Alexandria, open **Settings → Directories** and add `http://127.0.0.1:8787`, named **Local demo**. Both applications use the exported bundled taxonomy. The launcher creates only an organization; it does not seed candidate assessment results.
 4. Use **JavaScript** (`skill_javascript`) or **Big-O Analysis** (`skill_big_o`). These have bundled MCQ banks. Each attempt draws three questions and requires at least 70%; with three equally weighted questions, all three must be correct. Questions/options are randomized.
-5. For the instructor demo, switch to **Instructor → My courses**. The seven AI-generated course drafts with inline lessons and quizzes and Plugins Showcase are already installed for the current profile. **Load example courses** and **Load plugin showcase** remain available to restore missing examples. Repeating an import or unlocking again preserves edits. Open a draft in the composer; publishing uses the normal signed publication flow. External media, fabricated personas, and learner results are not imported.
+5. For the instructor demo, switch to **Instructor → My courses**. The seven AI-generated course drafts with inline lessons and quizzes and Plugins Showcase are already installed for the current profile. **Load example courses** and **Load plugin showcase** remain available to restore missing examples. Repeating an import or unlocking again preserves edits. Open a draft in the composer; publishing uses the normal signed publication flow. Retired placeholder media, fabricated personas, and learner results are not imported.
 6. Use a fresh demo profile or a skill with no recent attempt when rehearsing. Normal attempt limits and cooldowns apply. An interrupted attempt counts; do not repeatedly reload to change the draw.
 
 The launcher keeps Postgres in the `alexandria-assessment-demo-db` Docker container on loopback port 5544. The database `alexandria_demo` is separate from `alexandria_demo_test`. Local session configuration and the taxonomy export live under the ignored `.demo/` directory. Stopping the server/container preserves the demo data. No other development database is reset.
@@ -88,3 +88,30 @@ and skips the catalog entry and P2P announcement. Enrollment remains bound to
 the verified document CID/version; it does not accept unsigned seed data.
 The player redirects unenrolled learners through the same plugin pre-flight.
 Enrollment/preparation errors appear inline rather than only in the console.
+
+### Opinion examples, classrooms, and video labs
+
+Every profile receives seven read-only examples under **Opinions → Example
+viewpoints**, each with a locally bundled narrated video. They use a separate
+`demo_opinion_examples` table and have no author, signature, credential claims,
+or network publication. Normal Opinion posting keeps its qualification rules.
+The text adapts the retired seed topics; fabricated identities and proofs are
+not restored.
+
+Three owned classrooms (Algorithms Study Group, Web Development Cohort, and
+Design Critique Circle) provide seven starter channels. Only the current user
+is a member; there are no invented conversations, participants, or past calls.
+Existing edits are preserved on subsequent unlocks.
+
+**Algorithm Essentials — Video Lab** and **Web Foundations — Video Lab** each
+contain four narrated teaching videos and four transcript lessons. Use
+**Prepare and enroll** as for the other drafts. The 15 original MP4s (eight
+lessons and seven Opinion examples) ship with the binary, copy into each
+profile’s content store, and are pinned for offline playback. They are clearly
+labelled AI-generated with synthetic narration. Sources/transcripts live in
+`demo-world/content/resources.json`; regenerate on macOS with Python + Pillow,
+FFmpeg, and `scripts/generate-demo-videos.py`.
+
+The seed inventory also contained fabricated credentials, reputation, chain
+observations, devices, sync history, and tutoring history. These are not
+content resources and remain excluded, as do retired governance records.

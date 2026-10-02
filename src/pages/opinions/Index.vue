@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, EmptyState, ProvenanceBadge } from '@/components/ui'
 import { useDisplayNames } from '@/composables/useDisplayNames'
-import type { OpinionRow, SubjectFieldInfo } from '@/types'
+import OpinionExamples from '@/components/opinions/OpinionExamples.vue'
+import type { OpinionExample, OpinionRow, SubjectFieldInfo } from '@/types'
 
 const { invoke } = useLocalApi()
 const router = useRouter()
@@ -19,6 +20,7 @@ function goToInstructor(address: string) {
 
 const loading = ref(true)
 const opinions = ref<OpinionRow[]>([])
+const examples = ref<OpinionExample[]>([])
 const fields = ref<SubjectFieldInfo[]>([])
 
 // Resolved thumbnail object URLs, keyed by thumbnail_cid. Revoked on unmount.
@@ -54,7 +56,7 @@ const grouped = computed(() => {
 
 const counts = computed(() => {
   const m = new Map<string, number>()
-  for (const o of opinions.value) m.set(o.subject_field_id, (m.get(o.subject_field_id) ?? 0) + 1)
+  for (const o of [...opinions.value, ...examples.value]) m.set(o.subject_field_id, (m.get(o.subject_field_id) ?? 0) + 1)
   return m
 })
 
@@ -89,7 +91,7 @@ async function resolveThumb(cid: string) {
 
 onMounted(async () => {
   try {
-    const [ops, f] = await Promise.all([
+    const [ops, f, samples] = await Promise.all([
       invoke<OpinionRow[]>('list_opinions', {
         subjectFieldId: null,
         authorAddress: null,
@@ -97,8 +99,10 @@ onMounted(async () => {
         limit: 200,
       }),
       invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
+      invoke<OpinionExample[]>('list_demo_opinions'),
     ])
     opinions.value = ops
+    examples.value = samples
     fields.value = f
     void ensureNames(ops.map((o) => o.author_address))
     for (const o of ops) if (o.thumbnail_cid) void resolveThumb(o.thumbnail_cid)
@@ -141,7 +145,7 @@ onBeforeUnmount(() => {
         ]"
         @click="setField('')"
       >
-        {{ $t('opinions.index.filterAll') }} <span class="ms-1 opacity-70">{{ opinions.length }}</span>
+        {{ $t('opinions.index.filterAll') }} <span class="ms-1 opacity-70">{{ opinions.length + examples.length }}</span>
       </button>
       <button
         v-for="f in fields"
@@ -169,13 +173,13 @@ onBeforeUnmount(() => {
 
     <!-- Empty state -->
     <EmptyState
-      v-else-if="grouped.length === 0"
+      v-else-if="grouped.length === 0 && !examples.some(e => !selectedField || e.subject_field_id === selectedField)"
       :title="$t('opinions.index.emptyTitle')"
       :description="selectedField ? $t('opinions.index.emptyFieldDescription') : $t('opinions.index.emptyAllDescription')"
     />
 
     <!-- Grouped thumbnail grid -->
-    <div v-else class="space-y-8">
+    <div v-else-if="grouped.length" class="space-y-8">
       <section v-for="group in grouped" :key="group.id">
         <h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           {{ group.name }}
@@ -230,6 +234,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </div>
+    <OpinionExamples v-if="!loading" :examples="examples" :subject-field-id="selectedField" />
   </div>
 </template>
 

@@ -11,6 +11,7 @@ pub mod completion;
 pub mod courses;
 pub mod credentials;
 pub mod demo_courses;
+pub mod demo_resources;
 pub mod diagnostics;
 pub mod elements;
 pub mod enrollment;
