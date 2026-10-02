@@ -6,10 +6,10 @@ Unlocking runs the bundled seeds. Use JavaScript and Big-O, which have question 
 
 ## 1. Learner first
 
-1. **Alexandria → Skills → JavaScript → assessment.** Answer and submit.
+1. **Alexandria → Skills → JavaScript → assessment.**
    Say: “The assessment runs on this device.”
 2. **Show Sentinel Dev:** click its assessment button or press **⌘⇧S**.
-   Say: “These are live local integrity signals.”
+   Say: “These are live local integrity signals.” Then answer and submit.
 3. **Open the earned credential.** Point out its ID, score, skill, issuer, and integrity summary.
 4. **My profile → Let employers find you:** choose JavaScript, review and save consent.
    **Settings → Directories:** publish to Local demo.
