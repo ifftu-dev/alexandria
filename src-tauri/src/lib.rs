@@ -410,7 +410,8 @@ impl AppState {
 
     /// Open the encrypted database for the given profile.
     ///
-    /// Runs migrations, installs builtin plugins, and seeds dev fixtures.
+    /// Runs migrations and installs bundled taxonomy, banks, and global plugins.
+    /// Profile commands install owned demo courses after identity initialization.
     fn open_database(&self, paths: &ProfilePaths, db_key: &[u8; 32]) -> Result<(), String> {
         {
             let guard = self.db.lock().map_err(|e| e.to_string())?;

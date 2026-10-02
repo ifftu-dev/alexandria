@@ -8,6 +8,41 @@ use crate::AppState;
 
 const CORPUS: &str = include_str!("../../../demo-world/content/courses.json");
 
+pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> {
+    let database = state.db.clone();
+    let plugins_dir = state.plugins_dir()?;
+    tokio::task::spawn_blocking(move || {
+        let guard = database.lock().map_err(|e| e.to_string())?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        let created = install_profile_content(db, &plugins_dir)?;
+        log::info!("profile demo content ready: {created} new courses");
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("demo content install task failed: {e}"))?
+}
+
+fn install_profile_content(
+    db: &crate::db::Database,
+    plugins_dir: &std::path::Path,
+) -> Result<usize, String> {
+    let created = import_examples(db.conn(), false)? + import_examples(db.conn(), true)?;
+    // Install in bundle dependency order, including the editors collection.
+    // Refresh existing files too, so each profile receives this build's bytes.
+    for bundle in crate::plugins::builtins::BUILTIN_PLUGINS {
+        let cid = crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json);
+        crate::plugins::registry::install_builtin(db, plugins_dir, bundle)?;
+        let manifest = crate::plugins::manifest::parse_and_validate(bundle.manifest_json)?;
+        let announcement = crate::plugins::catalog::announcement_from_manifest(
+            &cid,
+            &manifest,
+            &chrono::Utc::now().to_rfc3339(),
+        );
+        crate::plugins::catalog::upsert_announcement(db, &announcement, "builtin")?;
+    }
+    Ok(created)
+}
+
 #[derive(Deserialize)]
 struct Corpus {
     courses: Vec<ExampleCourse>,
@@ -233,6 +268,53 @@ fn import_examples(conn: &rusqlite::Connection, plugin_only: bool) -> Result<usi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_profile_gets_owned_content_and_plugins_without_learner_results() {
+        let mut course_ids = Vec::new();
+        for author in ["profile-one", "profile-two"] {
+            let db = crate::db::Database::open_in_memory().unwrap();
+            db.run_migrations().unwrap();
+            crate::db::bundled::install_bundled_data(db.conn()).unwrap();
+            db.conn().execute("INSERT INTO local_identity (id,stake_address,payment_address) VALUES (1,?1,'key')", [author]).unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            assert_eq!(install_profile_content(&db, dir.path()).unwrap(), 8);
+            let id = entity_id(&["example-course-v1", author, "course_algo_101"]);
+            db.conn()
+                .execute("UPDATE courses SET title='Keep my edit' WHERE id=?1", [&id])
+                .unwrap();
+            assert_eq!(install_profile_content(&db, dir.path()).unwrap(), 0);
+            let title: String = db
+                .conn()
+                .query_row("SELECT title FROM courses WHERE id=?1", [&id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(title, "Keep my edit");
+            let owned: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT count(*) FROM courses WHERE author_address=?1 AND status='draft'",
+                    [author],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(owned, 8);
+            for bundle in crate::plugins::builtins::BUILTIN_PLUGINS {
+                let cid = crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json);
+                let plugin = crate::plugins::registry::get_installed(&db, &cid)
+                    .unwrap()
+                    .unwrap();
+                assert!(std::path::Path::new(&plugin.install_path).starts_with(dir.path()));
+                assert_eq!(
+                    std::fs::read(dir.path().join(&cid).join("manifest.json")).unwrap(),
+                    bundle.manifest_json
+                );
+            }
+            let results: i64 = db.conn().query_row("SELECT (SELECT count(*) FROM credentials) + (SELECT count(*) FROM enrollments)", [], |r| r.get(0)).unwrap();
+            assert_eq!(results, 0);
+            course_ids.push(id);
+        }
+        assert_ne!(course_ids[0], course_ids[1]);
+    }
 
     #[test]
     fn plugin_showcase_uses_current_bundles_and_preserves_edits() {

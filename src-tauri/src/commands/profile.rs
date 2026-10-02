@@ -264,6 +264,9 @@ pub async fn create_profile(
                 }
             }
 
+            emit_progress(&app, "content", "Preparing bundled courses and plugins...");
+            crate::commands::demo_courses::install_for_profile(&state).await?;
+
             state
                 .profile_manager
                 .touch_unlocked(&paths.id)
@@ -382,6 +385,9 @@ pub async fn restore_profile_with_mnemonic(
                 }
             }
 
+            emit_progress(&app, "content", "Preparing bundled courses and plugins...");
+            crate::commands::demo_courses::install_for_profile(&state).await?;
+
             state
                 .profile_manager
                 .touch_unlocked(&paths.id)
@@ -466,6 +472,9 @@ pub async fn unlock_profile(
                         .map_err(|e| e.to_string())?;
                 }
             }
+
+            emit_progress(&app, "content", "Preparing bundled courses and plugins...");
+            crate::commands::demo_courses::install_for_profile(&state).await?;
 
             state
                 .profile_manager

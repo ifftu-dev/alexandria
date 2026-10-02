@@ -4,11 +4,11 @@ This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandri
 
 ## Prepare this Mac
 
-1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, and bundled plugins. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
+1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and eight profile-owned course drafts (seven examples plus Plugins Showcase). This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
 2. Start Docker Desktop. From the Cloud checkout run `scripts/demo-assessment.sh`. Open <http://127.0.0.1:8787> and choose **Continue**. This is a loopback-only development sign-in, not a production identity-provider deployment.
 3. In Alexandria, open **Settings → Directories** and add `http://127.0.0.1:8787`, named **Local demo**. Both applications use the exported bundled taxonomy. The launcher creates only an organization; it does not seed candidate assessment results.
 4. Use **JavaScript** (`skill_javascript`) or **Big-O Analysis** (`skill_big_o`). These have bundled MCQ banks. Each attempt draws three questions and requires at least 70%; with three equally weighted questions, all three must be correct. Questions/options are randomized.
-5. For the instructor demo, switch to **Instructor → My courses → Load example courses**. This explicitly imports seven AI-generated course drafts with inline lessons and quizzes, owned by the current profile. Repeating it preserves edits. Open a draft in the composer; publishing uses the normal signed publication flow. External media, fabricated personas, and learner results are not imported.
+5. For the instructor demo, switch to **Instructor → My courses**. The seven AI-generated course drafts with inline lessons and quizzes and Plugins Showcase are already installed for the current profile. **Load example courses** and **Load plugin showcase** remain available to restore missing examples. Repeating an import or unlocking again preserves edits. Open a draft in the composer; publishing uses the normal signed publication flow. External media, fabricated personas, and learner results are not imported.
 6. Use a fresh demo profile or a skill with no recent attempt when rehearsing. Normal attempt limits and cooldowns apply. An interrupted attempt counts; do not repeatedly reload to change the draw.
 
 The launcher keeps Postgres in the `alexandria-assessment-demo-db` Docker container on loopback port 5544. The database `alexandria_demo` is separate from `alexandria_demo_test`. Local session configuration and the taxonomy export live under the ignored `.demo/` directory. Stopping the server/container preserves the demo data. No other development database is reset.
@@ -72,10 +72,10 @@ See the Cloud runbook for model startup and configuration.
 
 ### Plugin showcase
 
-In **Instructor → My courses**, choose **Load plugin showcase**. This imports
-one owned draft with six plugin lessons and installs their current bundled
-manifests, UI, and graders. Repeating it preserves course edits and retries
-plugin installation. Open **Plugins Showcase → Review → Preview** to view the
+In **Instructor → My courses**, open **Plugins Showcase**. Profile activation
+imports this owned draft with six plugin lessons and installs the bundled
+manifests, UI, and graders automatically. **Load plugin showcase** can restore
+a missing course or retry plugin installation; existing course edits are preserved. Open **Plugins Showcase → Review → Preview** to view the
 course; choose **Prepare and enroll** to create its signed local version, then
 **Continue learning** to run its lessons. Microphone access is requested only when a
 music lesson needs it. No scores, credentials, or reviews are seeded.

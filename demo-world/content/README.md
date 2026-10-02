@@ -1,9 +1,11 @@
 # Demo course corpus
 
-Non-authoritative source material. **Instructor → My courses → Load example
-courses** explicitly imports the seven full courses as profile-owned drafts,
-using inline text and quizzes only. Startup does not import them. Re-import
-preserves edits; external media and plugin/video tutorials are excluded.
+Non-authoritative source material. Profile creation, mnemonic restore, and
+unlock import the seven full courses as profile-owned drafts using inline
+text and quizzes, plus Plugins Showcase and all nine bundled plugins.
+Existing course edits are preserved. The seven video tutorials and external
+placeholder media are excluded. **Instructor → My courses → Load example
+courses** remains available to restore missing example drafts.
 Nothing in this source corpus is authoritative: there are no signed rows, identities,
 credentials, enrolments, opinions or governance records.
 
@@ -25,6 +27,6 @@ IETF RFC text is published under the IETF Trust's terms rather than placed in
 the public domain. Check each source's actual terms, and record the required
 attribution, before redistributing or embedding any of these files.
 
-The separate **Load plugin showcase** action imports `course_plugin_demo`,
+Automatic profile seeding and the **Load plugin showcase** action import `course_plugin_demo`,
 resolves its six lessons to the current embedded plugin CIDs/versions, repairs
 legacy starter-code newlines, and installs the bundled course plugins.

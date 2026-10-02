@@ -309,7 +309,7 @@ const EDITOR_PYTHON_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
 /// per-language editor plugins as `dependencies`, so installing it pulls them
 /// in. Must be registered AFTER its dependencies in `BUILTIN_PLUGINS` so
 /// dependency resolution finds them already installed. Interactive landing UI.
-/// Course-scoped (like its editor deps): it is not installed at startup.
+/// Course-scoped (like its editor deps): installed during profile content setup.
 const EDITORS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     slug: "editors",
     manifest_json: include_bytes!("../../../plugins/builtin/editors/manifest.json"),
@@ -391,8 +391,9 @@ pub fn find_bundle_by_id(id: &str) -> Option<&'static BuiltinBundle<'static>> {
 /// migrated.
 ///
 /// Course-scoped builtins (the code editors + the `editors` collection) are
-/// **not** installed here — they install on first enrollment in a course that
-/// requires them (see `commands::plugins::install_course_plugins`).
+/// **not** installed here — profile content setup installs them after identity
+/// initialization. Enrollment also repairs missing course dependencies (see
+/// `commands::plugins::install_course_plugins`).
 ///
 /// Errors on individual builtins are logged but do not fail the call —
 /// a corrupt embedded bundle should not block app startup.
