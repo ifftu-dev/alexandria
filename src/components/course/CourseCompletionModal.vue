@@ -8,6 +8,7 @@
 import { computed, watch, ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useLocalApi } from '@/composables/useLocalApi'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
@@ -23,9 +24,20 @@ const {
 
 const endorsementImportJson = ref('')
 const endorsementUiMessage = ref('')
-const endorsementRequestJson = computed(() => endorsementRequest.value
-  ? JSON.stringify(endorsementRequest.value, null, 2)
-  : '')
+const { invoke } = useLocalApi()
+const endorsementRequestJson = ref('')
+watch(endorsementRequest, async (binding, _previous, onCleanup) => {
+  endorsementRequestJson.value = ''
+  if (!binding) return
+  let current = true
+  onCleanup(() => { current = false })
+  try {
+    const document = await invoke<string>('content_resolve_text', { identifier: binding.course_document_cid })
+    if (current) endorsementRequestJson.value = JSON.stringify({ ...binding, course_document_json: document }, null, 2)
+  } catch (error) {
+    if (current) endorsementUiMessage.value = t('courses.completion.endorsementCopyFailed', { error: String(error) })
+  }
+}, { immediate: true })
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -276,7 +288,7 @@ function continueToDashboard() {
                   </svg>
                 </span>
                 <span class="mint-item-label">{{ it.label }}</span>
-                <span class="mint-item-kind">{{ kindMeta(it.kind).label }}</span>
+                <span class="mint-item-kind">{{ $t(kindMeta(it.kind).label) }}</span>
                 <span class="mint-status" :class="{ done: it.status === 'minted' }">
                   <svg v-if="it.status === 'minted'" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
                   <span v-else class="spinner" />
@@ -377,7 +389,7 @@ function continueToDashboard() {
                 rows="4"
                 readonly
               />
-              <button class="endorsement-button" @click="copyEndorsementRequest">
+              <button class="endorsement-button" :disabled="!endorsementRequestJson" @click="copyEndorsementRequest">
                 {{ $t('courses.completion.endorsementCopyRequest') }}
               </button>
 

@@ -131,6 +131,24 @@ afterEach(async () => {
 })
 
 describe('course player monitoring ownership', () => {
+  it('records completion for the submitted lesson if navigation wins the save race', async () => {
+    const saved = deferred<null>()
+    const original = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation((command, args) => command === 'update_progress' && (args?.req as { status?: string })?.status === 'completed' ? saved.promise : original(command, args))
+    const wrapper = render()
+    await flushPromises()
+    await leaveAssessment()
+    await wrapper.findAll('button').find(button => button.text() === 'learn.player.markComplete')!.trigger('click')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }))
+    await flushPromises()
+    saved.resolve(null)
+    await flushPromises()
+    expect(wrapper.find('h1')?.text()).toContain('Quiz')
+    expect(wrapper.text()).not.toContain('learn.player.completed')
+    await vi.advanceTimersByTimeAsync(600)
+    expect(wrapper.find('h1')?.text()).toContain('Quiz')
+  })
+
   it('loads current-element skill tags from their typed command', async () => {
     elementSkillTags = [{
       skill_id: 'skill-1',

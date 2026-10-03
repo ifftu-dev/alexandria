@@ -44,7 +44,28 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // policies, tutor threads and lesson feedback. Owned by the studio crate
     // so its tables and the code that reads them change together.
     (2, "instructor_studio", alexandria_studio::store::SCHEMA),
+    (3, "private_personhood_receipts", MIGRATION_003_PERSONHOOD),
+    (4, "decision_shadow_samples", "CREATE TABLE decision_shadow_samples (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, sample TEXT NOT NULL);"),
+    (5, "assessment_submission", MIGRATION_005_ASSESSMENT),
+    (6, "demo_opinion_examples", "CREATE TABLE demo_opinion_examples (id TEXT PRIMARY KEY, subject_field_id TEXT NOT NULL REFERENCES subject_fields(id), title TEXT NOT NULL, summary TEXT NOT NULL, video_cid TEXT NOT NULL, duration_seconds INTEGER NOT NULL);"),
+    (7, "opinion_threads", include_str!("discussions.sql")),
+    (8, "tutoring_presence", "ALTER TABLE tutoring_sessions ADD COLUMN room_id TEXT; ALTER TABLE tutoring_sessions ADD COLUMN last_occupied_at INTEGER; CREATE TABLE tutoring_presence (room_id TEXT NOT NULL,node_id TEXT NOT NULL,present INTEGER NOT NULL,seen_at INTEGER NOT NULL,PRIMARY KEY(room_id,node_id)); CREATE INDEX idx_tutoring_room ON tutoring_sessions(room_id);"),
+    (9, "developer_discussion_drafts", "CREATE TABLE developer_discussion_drafts (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);"),
 ];
+
+const MIGRATION_005_ASSESSMENT: &str = r#"
+ALTER TABLE assessment_attempts ADD COLUMN submitted_answers_json TEXT CHECK (submitted_answers_json IS NULL OR json_valid(submitted_answers_json));
+ALTER TABLE assessment_attempts ADD COLUMN submitted_at TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN exchange_binding TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN item_fingerprints TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN assessed_bloom_level INTEGER CHECK (assessed_bloom_level BETWEEN 0 AND 5);
+ALTER TABLE assessment_attempts ADD COLUMN pass_threshold_snapshot REAL;
+UPDATE assessment_items SET bloom_level = 'remember'
+ WHERE taxonomy_version = 'bundled' AND id IN ('bq_js1','bq_js2','bq_js3','bq_js4','bq_bo1','bq_bo2','bq_bo3','bq_bo4');
+"#;
+
+const MIGRATION_003_PERSONHOOD: &str =
+    include_str!("../../../crates/alexandria-personhood/src/schema.sql");
 
 const MIGRATION_001_BASELINE: &str = r#"
 CREATE TABLE app_settings (

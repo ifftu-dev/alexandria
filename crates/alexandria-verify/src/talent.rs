@@ -61,14 +61,7 @@ pub struct PublishedSkill {
 /// permissively-licensed verification surface and must not depend on the
 /// application. The ordering is a published fact about the wire format, so a
 /// divergence between the two is a wire-format break — the test below pins it.
-pub const BLOOM_LEVELS: [&str; 6] = [
-    "remember",
-    "understand",
-    "apply",
-    "analyze",
-    "evaluate",
-    "create",
-];
+pub use alexandria_learning_contracts::BLOOM_LEVELS;
 
 /// The canonical name for a Bloom rank, or `None` if out of range.
 pub fn bloom_name(rank: u8) -> Option<&'static str> {

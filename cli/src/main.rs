@@ -16,7 +16,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
 use commands::{
-    clean, credentials, db, doctor, presentation, role_assessment, run, synth_sentinel,
+    clean, credentials, db, doctor, governance, presentation, role_assessment, run, synth_sentinel,
 };
 use context::ProjectContext;
 
@@ -70,6 +70,10 @@ enum Commands {
     /// Organizations, role assessments, and role credential issuance
     #[command(subcommand, name = "role-assessment", alias = "ra")]
     RoleAssessment(role_assessment::RoleAssessmentCommand),
+
+    /// Create a single-operator demo genesis or verify a public genesis offline
+    #[command(subcommand)]
+    Governance(governance::GovernanceCommand),
 
     /// Launch the interactive terminal UI
     Tui,
@@ -155,6 +159,10 @@ fn run(cli: Cli) -> Result<()> {
         output::banner();
     }
 
+    if let Commands::Governance(command) = &cli.command {
+        return governance::execute(command);
+    }
+
     let ctx = ProjectContext::detect(cli.profile.as_deref())?;
     let password_file = cli.password_file.as_deref();
 
@@ -170,6 +178,6 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Clean(cmd) => clean::execute(cmd, &ctx),
         Commands::SynthSentinel(cmd) => synth_sentinel::execute(cmd),
         // Handled above, before project detection.
-        Commands::Completions { .. } => unreachable!(),
+        Commands::Completions { .. } | Commands::Governance(_) => unreachable!(),
     }
 }

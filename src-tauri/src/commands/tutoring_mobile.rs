@@ -121,6 +121,7 @@ pub async fn tutoring_create_room(
                         params![persisted_session_id, persisted_title, persisted_ticket],
                     )
                     .map_err(|e| e.to_string())?;
+                crate::tutoring::presence::register(db.conn(), &persisted_session_id, &persisted_ticket)?;
                 Ok(())
             },
         )
@@ -152,6 +153,7 @@ pub async fn tutoring_join_room(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    crate::tutoring::presence::check_join(&state, &ticket).await?;
     let content_node = &state.content_node;
 
     let endpoint = content_node
@@ -202,6 +204,7 @@ pub async fn tutoring_join_room(
                         params![persisted_session_id, persisted_title, persisted_ticket],
                     )
                     .map_err(|e| e.to_string())?;
+                crate::tutoring::presence::register(db.conn(), &persisted_session_id, &persisted_ticket)?;
                 Ok(())
             },
         )
@@ -236,7 +239,7 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
                 move |db| {
                     db.conn()
                         .execute(
-                            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
+                            "UPDATE tutoring_sessions SET last_occupied_at = unixepoch() WHERE id = ?1",
                             params![id],
                         )
                         .map_err(|e| e.to_string())?;

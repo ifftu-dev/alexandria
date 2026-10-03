@@ -14,6 +14,29 @@ const { stakeAddress } = useProfiles()
 
 const courses = ref<Course[]>([])
 const loading = ref(true)
+const importing = ref(false)
+const importError = ref('')
+
+async function loadExamples() {
+  importing.value = true
+  importError.value = ''
+  try {
+    await invoke<number>('import_demo_courses')
+    courses.value = await invoke<Course[]>('list_courses', { status: null })
+  } catch (e) { importError.value = String(e) }
+  finally { importing.value = false }
+}
+
+async function loadPluginShowcase() {
+  importing.value = true
+  importError.value = ''
+  try {
+    const courseId = await invoke<string>('import_plugin_demo_course')
+    await invoke('install_course_plugins', { courseId })
+    courses.value = await invoke<Course[]>('list_courses', { status: null })
+  } catch (e) { importError.value = String(e) }
+  finally { importing.value = false }
+}
 
 const mine = computed(() =>
   courses.value
@@ -47,6 +70,14 @@ onMounted(async () => {
           {{ $t('instructor.myCourses.addTutorial') }}
         </AppButton>
       </div>
+    </div>
+
+    <div class="rounded-xl border border-border bg-card p-4">
+      <p class="mb-3 text-sm text-muted-foreground">{{ $t('instructor.myCourses.examplesNote') }}</p>
+      <AppButton variant="outline" size="sm" :disabled="importing" @click="loadExamples">{{ importing ? $t('common.actions.loading') : $t('instructor.myCourses.loadExamples') }}</AppButton>
+      <AppButton class="ms-2" variant="outline" size="sm" :disabled="importing" @click="loadPluginShowcase">{{ importing ? $t('common.actions.loading') : $t('instructor.myCourses.loadPluginShowcase') }}</AppButton>
+      <p class="mt-2 text-sm text-muted-foreground">{{ $t('instructor.myCourses.pluginShowcaseNote') }}</p>
+      <p v-if="importError" role="alert" class="mt-2 text-sm text-error">{{ importError }}</p>
     </div>
 
     <div v-if="loading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

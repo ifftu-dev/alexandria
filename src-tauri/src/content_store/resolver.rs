@@ -738,7 +738,16 @@ mod tests {
         provider.start(None).await.expect("start provider");
         let data = b"resolver p2p path: served by a peer, not the origin";
         let add = content::add_bytes(&provider, data).await.expect("add");
-        let provider_addr = provider.endpoint_addr().await.expect("provider addr");
+        // Keep this local transfer test independent of relay/discovery readiness.
+        let endpoint = provider.endpoint().await.expect("provider endpoint");
+        let port = endpoint
+            .bound_sockets()
+            .iter()
+            .find(|addr| addr.is_ipv4())
+            .expect("IPv4 socket")
+            .port();
+        let provider_addr = iroh::EndpointAddr::new(endpoint.id())
+            .with_ip_addr((std::net::Ipv4Addr::LOCALHOST, port).into());
 
         // Resolver's own node starts empty; seed discovery with the provider.
         let (resolver_base, _tmp) = make_resolver().await;

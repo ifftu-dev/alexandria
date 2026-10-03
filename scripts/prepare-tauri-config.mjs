@@ -33,10 +33,16 @@ function applyDesktopValidationConfig() {
 
   config.bundle ??= {};
   config.bundle.createUpdaterArtifacts = false;
+  config.bundle.macOS ??= {};
+  config.bundle.macOS.signingIdentity = "-";
 
-  if (config.plugins && Object.prototype.hasOwnProperty.call(config.plugins, "updater")) {
-    delete config.plugins.updater;
-  }
+  // The desktop updater plugin still initializes at startup and requires a
+  // config object with a public key, even when update checks are disabled.
+  config.plugins ??= {};
+  config.plugins.updater = {
+    pubkey: config.plugins.updater?.pubkey ?? "",
+    endpoints: [],
+  };
 
   writeJson(configPath, config);
 }
@@ -47,6 +53,13 @@ function syncVersionAcrossReleaseMetadata(rawVersion) {
   const packagePath = path.resolve("package.json");
   const packageLockPath = path.resolve("package-lock.json");
   const cargoPath = path.resolve("src-tauri/Cargo.toml");
+  const cargoLockPath = path.resolve("Cargo.lock");
+  const cargoLock = fs.readFileSync(cargoLockPath, "utf8");
+  const appPackageVersion = /(\[\[package\]\]\r?\nname = "alexandria-node"\r?\nversion = ")[^"]+("[^\n]*)/g;
+  if ([...cargoLock.matchAll(appPackageVersion)].length !== 1) {
+    throw new Error("Expected exactly one alexandria-node package in Cargo.lock");
+  }
+  const updatedCargoLock = cargoLock.replace(appPackageVersion, (_match, before, after) => `${before}${version}${after}`);
 
   const packageJson = readJson(packagePath);
   packageJson.version = version;
@@ -72,6 +85,7 @@ function syncVersionAcrossReleaseMetadata(rawVersion) {
     `version = "${version}"`,
   );
   fs.writeFileSync(cargoPath, updatedCargoToml);
+  fs.writeFileSync(cargoLockPath, updatedCargoLock);
 }
 
 switch (mode) {

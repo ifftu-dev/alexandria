@@ -76,10 +76,30 @@ pub(crate) fn check_opinion_credential(
             NotQualifiedReason::InvalidCredential,
         ));
     };
+    let evidence = stored_completion_evidence(conn, credential_id)?;
+    evaluate_opinion_credential(
+        conn,
+        policies,
+        &credential,
+        author_did,
+        subject_field_id,
+        verification_time,
+        evidence.as_ref().map(StoredCompletionEvidence::as_evidence),
+    )
+}
+
+pub(crate) fn evaluate_opinion_credential(
+    conn: &Connection,
+    policies: &QualificationPolicySet,
+    credential: &VerifiableCredential,
+    author_did: &Did,
+    subject_field_id: &str,
+    verification_time: &str,
+    endorsement: Option<alexandria_verify::trust::CourseEndorsementEvidence<'_>>,
+) -> Result<OpinionCredentialEligibility, String> {
     let verification_policy = VerificationPolicy::default();
     let verification =
-        verify_credential_db(conn, &credential, verification_time, &verification_policy);
-    let evidence = stored_completion_evidence(conn, credential_id)?;
+        verify_credential_db(conn, credential, verification_time, &verification_policy);
     let skill_subject_field = match SkillClaim::extract(&credential.credential_subject) {
         Some(claim) => skill_subject_field(conn, &claim.skill_id)?,
         None => None,
@@ -88,16 +108,14 @@ pub(crate) fn check_opinion_credential(
         action: QualificationAction::OpinionPosting,
         actor_did: author_did,
         subject_field_id,
-        credential: &credential,
+        credential,
         verification: &verification,
         verification_policy: &verification_policy,
-        endorsement: evidence.as_ref().map(StoredCompletionEvidence::as_evidence),
+        endorsement,
         skill_subject_field_id: skill_subject_field.as_deref(),
     });
     Ok(match decision {
-        QualificationDecision::Qualified(qualification) => {
-            OpinionCredentialEligibility::Qualified(Box::new(qualification))
-        }
+        QualificationDecision::Qualified(q) => OpinionCredentialEligibility::Qualified(Box::new(q)),
         QualificationDecision::Pending { reasons } => {
             OpinionCredentialEligibility::Pending(reasons)
         }

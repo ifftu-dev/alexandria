@@ -103,7 +103,10 @@
     "backToLobby": "लॉबी पर वापस जाएँ",
     "dismiss": "खारिज करें",
     "selfPreviewAlt": "आपका पूर्वावलोकन",
-    "peerVideoAlt": "{name} का वीडियो"
+    "peerVideoAlt": "{name} का वीडियो",
+    "endedDescription": "This session has ended. Empty rooms close automatically after five minutes. Ask the host for a new session invite.",
+    "notJoinedTitle": "You are not in this session",
+    "notJoinedDescription": "Join with a current invite to take part. Your camera and microphone turn on when you join."
   },
   "controls": {
     "mute": "म्यूट करें",

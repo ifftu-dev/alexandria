@@ -45,11 +45,12 @@ pub enum GoalInput {
     Curriculum { board: String, grade: String },
     JobRole { key: String },
     JdText { text: String },
+    LearningGoal { text: String },
     JdLink { url: String },
 }
 
 /// One extracted candidate skill for the confirm-suggestions step.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillSuggestion {
     pub skill_id: String,
     pub name: String,
@@ -67,7 +68,7 @@ pub struct GoalResolution {
     pub suggestions: Vec<SkillSuggestion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taxonomy_version: Option<String>,
-    /// `template` when resolved from a curated map, `jd_parsed` for a JD.
+    /// `template` for a curated map, `jd_parsed` for a JD, or `goal_parsed` for an objective.
     pub resolution_provenance: String,
 }
 
@@ -135,7 +136,7 @@ fn load_skill_entries(conn: &Connection) -> Result<Vec<SkillEntry>, String> {
     alexandria_studio::skills::skill_entries(conn).map_err(|error| error.to_string())
 }
 
-fn parse_jd_text(conn: &Connection, text: &str) -> Result<GoalResolution, String> {
+pub(super) fn parse_jd_text(conn: &Connection, text: &str) -> Result<GoalResolution, String> {
     let entries = load_skill_entries(conn)?;
     let by_name: std::collections::HashMap<&str, &str> = entries
         .iter()
@@ -301,6 +302,12 @@ pub async fn resolve_goal(
                         resolve_template(conn, "curriculum", &key)
                     }
                     GoalInput::JdText { text } => parse_jd_text(conn, &text),
+                    GoalInput::LearningGoal { text } => {
+                        let mut result = parse_jd_text(conn, &text)?;
+                        result.label = text.trim().chars().take(160).collect();
+                        result.resolution_provenance = "goal_parsed".into();
+                        Ok(result)
+                    }
                     GoalInput::JdLink { .. } => unreachable!("handled above"),
                 }
             },

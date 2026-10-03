@@ -689,17 +689,13 @@ function createSentinelService() {
   // Snapshot scheduling (random interval 15-45s)
   // =========================================================================
 
-  const scheduleNextSnapshot = () => {
-    if (!isActive.value || !sessionId.value) return
+  let snapshotWork: Promise<void> | null = null
+
+  const captureSnapshot = async (strict: boolean) => {
     const generation = lifecycleGeneration
     const snapshotSessionId = sessionId.value
-    const isCurrent = () => isActive.value
+    const isCurrent = () => isActive.value && !!snapshotSessionId
       && generation === lifecycleGeneration && sessionId.value === snapshotSessionId
-
-    const delay = 15000 + Math.random() * 30000
-    if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
-
-    snapshotTimer = setTimeout(async () => {
       if (!isCurrent()) return
 
       // Run the ONNX paste classifier before the (sync) score path so the
@@ -852,7 +848,7 @@ function createSentinelService() {
             anomaly_flags: deduped,
           },
         })
-      } catch { /* best effort */ }
+      } catch (error) { if (strict) throw error }
       if (!isCurrent()) return
 
       // Reset per-snapshot accumulators
@@ -877,8 +873,17 @@ function createSentinelService() {
       gazeDownGlances = 0
       snapshotWindowStartMs = Date.now()
 
-      scheduleNextSnapshot()
-    }, delay)
+  }
+
+  const scheduleNextSnapshot = () => {
+    if (!isActive.value || !sessionId.value) return
+    if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
+    snapshotTimer = setTimeout(() => {
+      snapshotWork = captureSnapshot(false).finally(() => {
+        snapshotWork = null
+        scheduleNextSnapshot()
+      })
+    }, 15000 + Math.random() * 30000)
   }
 
   // =========================================================================
@@ -1225,13 +1230,16 @@ function createSentinelService() {
   const stopSession = async () => {
     if (!sessionId.value) return
 
+    if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
+    await snapshotWork
+    if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
+    if (isActive.value) await captureSnapshot(true)
     isActive.value = false
     sentinelDebug.active = false
     detachMonitoringListeners()
 
-    const { integrity, consistency } = computeScores()
-    integrityScore.value = integrity
-    consistencyScore.value = consistency
+    const integrity = integrityScore.value
+    const consistency = consistencyScore.value
 
     const deviceFp = await computeDeviceFingerprint()
     await updateProfile(deviceFp)
@@ -1900,6 +1908,7 @@ function createSentinelService() {
     verifyFace,
     scoreGaze,
     extractGazeFeatures,
+    computeDeviceFingerprint,
     trainGazeCalibration,
     debug: readonly(sentinelDebug),
     getDebugState,

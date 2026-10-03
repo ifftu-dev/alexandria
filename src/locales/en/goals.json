@@ -43,6 +43,8 @@
     "strongMatch": "strong",
     "matched": "matched “{term}”",
     "noMatchingSkills": "No matching skills found — try a different description.",
-    "addAsGoal": "Add {count} skill as goal | Add {count} skills as goal"
+    "addAsGoal": "Add {count} skill as goal | Add {count} skills as goal",
+    "learningGoal": "Learning goal",
+    "goalPlaceholder": "Describe what you want to learn…"
   }
 }

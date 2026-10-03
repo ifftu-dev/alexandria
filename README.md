@@ -45,7 +45,7 @@ The capabilities below describe how each of these works — the underlying techn
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
 - **Usernames & Public Profiles** — decentralized @handles backed by a DHT registry (relay-receipted, optionally Cardano-anchored under metadata label 1698), public/private profiles and skill graphs fetched over P2P, and learner goals with computed paths. See [docs/username-registry.md](docs/username-registry.md).
 - **Cardano's role** — VC integrity anchoring, DAO governance, completion-witness minting, and historical reputation-token experiments. The active app no longer exposes the challenge escrow flow. Reference scripts exist on **preprod testnet** only; no shipped build submits by default.
-- **Governance** — DAOs mirror the knowledge taxonomy. The current release build can verify and explicitly pin a seven-founder genesis, but rejects inbound governance mutations until committee outcome certificates are implemented. Older Aiken/Plutus governance reference scripts remain deployed on **preprod testnet**; deployment alone does not make their flows part of the release authority path.
+- **Governance** — DAOs mirror the knowledge taxonomy. This demo build automatically pins the [bundled preprod demo genesis](docs/default-network-genesis.md) when creating or restoring a profile. Its seven founder key sets belong to one operator. Existing profiles can explicitly accept it in Community; custom genesis import remains available. Inbound governance mutations are rejected until committee outcome certificates are implemented. Older Aiken/Plutus governance reference scripts remain deployed on **preprod testnet**; deployment alone does not make their flows part of the release authority path.
 - **Assessment Integrity** — Sentinel anti-cheat fuses six on-device signals: a keystroke autoencoder and mouse-trajectory CNN (Rust + `candle`, trained per-user on-device), a paste/typing-bot classifier and YuNet face detector (Rust, frozen ONNX via `tract`), gaze/second-device detection (head-pose proxies + per-user calibration MLP), and frontmost-application detection. Only the LBP face embedder remains in TypeScript. `tract` is pure Rust, so every model compiles for all targets including iOS and Android. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics. There is exactly one path off the device and the learner is the only one who can use it: a flagged session's evidence may be kept on-device for 14 days at their explicit choice, and released by them to contest the flag. Nothing can request it, the reviewer it reaches is one named person, and deleting it locally withdraws the copy they were sent. See [`docs/sentinel.md`](docs/sentinel.md#review-and-adjudication).
 - **Peer-to-Peer** — Two stacks. The mesh runs on libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR; content blobs and live tutoring media run on iroh. There is no application server and no account server, but connectivity does rely on relays: the libp2p relays are self-hosted, listed in an on-chain registry, and anyone can run one, while iroh currently falls back to relays and DNS discovery operated by [N0, INC](https://n0.computer) when a direct connection can't be made. Traffic is end-to-end encrypted either way, so a relay can see connection metadata but never content. See [`docs/architecture.md`](docs/architecture.md#relay-and-discovery-dependency).
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
@@ -205,6 +205,8 @@ The P2P node auto-starts after the active profile is unlocked. Each device gets 
 
 The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay). Fresh peer discovery still depends on these hardcoded Alexandria relay nodes today; locally-held credentials and content survive the relay infrastructure disappearing, but bootstrapping new peers into the mesh would not — DNS seeds and user-pinned bootstrap lists are on the post-launch roadmap.
 
+For the local assessment-to-credential and Cloud candidate walkthrough, see [the demo runbook](docs/assessment-demo.md).
+
 ## Getting Started
 
 ### Prerequisites
@@ -258,7 +260,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. No personas, credentials, courses or governance rows are created.
+The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
 
 ### Building for iOS
 
@@ -615,3 +617,7 @@ Use `alexandria path` to print the active profile's directory on any platform, a
 ## License
 
 Alexandria is free software under the [GNU Affero General Public License v3 or later](LICENSE.md). You may use, study, modify and redistribute it; if you modify it and offer it to others — including over a network — your changes must be published under the same licence. Vendored third-party crates keep their own licences (`crates/iroh-moq` and `crates/moq-media` are Copyright (C) 2025 N0, INC, MIT OR Apache-2.0, as is `crates/live`).
+
+## Optional Jev checks
+
+See [configuration, shared Cloud/app contracts, and evaluation](docs/jev-integration.md). Features default to off and require explicit hosted-processing consent.

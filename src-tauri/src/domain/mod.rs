@@ -20,3 +20,5 @@ pub mod sync;
 pub mod talent_index;
 pub mod username_claim;
 pub mod vc;
+
+pub mod discussions;

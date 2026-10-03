@@ -1,0 +1,27 @@
+[package]
+name = "alexandria-personhood"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+alexandria-verify = { path = "../alexandria-verify" }
+ark-bn254 = { version = "=0.5.0", default-features = false, features = ["curve"] }
+ark-ec = { version = "=0.5.0", default-features = false }
+ark-ff = { version = "=0.5.0", default-features = false }
+ark-groth16 = { version = "=0.5.0", default-features = false }
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+hex = "0.4"
+hkdf = "0.12"
+num-bigint = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_json_canonicalizer = "0.3"
+sha2 = "0.10"
+sha3 = "0.10"
+thiserror = "2"
+zeroize = "1"
+rusqlite = { version = "0.38", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

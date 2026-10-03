@@ -1,314 +1,81 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, EmptyState, ProvenanceBadge } from '@/components/ui'
-import { useDisplayNames } from '@/composables/useDisplayNames'
-import type { OpinionRow, SubjectFieldInfo } from '@/types'
-
+import ThreadThumbnail from '@/components/opinions/ThreadThumbnail.vue'
+import ThreadVotes from '@/components/opinions/ThreadVotes.vue'
+import ThreadMeta from '@/components/opinions/ThreadMeta.vue'
+import { AppButton } from '@/components/ui'
+import type { DiscussionItem, OpinionRow, SubjectFieldInfo } from '@/types'
 const { invoke } = useLocalApi()
-const router = useRouter()
-const { displayName, ensureNames } = useDisplayNames()
-
-// Open an opinion author's public instructor profile. The card is itself a
-// router-link, so stop propagation / prevent default to avoid navigating to
-// the opinion at the same time.
-function goToInstructor(address: string) {
-  if (address) router.push(`/u/${address}`)
-}
-
-const loading = ref(true)
-const opinions = ref<OpinionRow[]>([])
+const threads = ref<DiscussionItem[]>([])
+const legacy = ref<OpinionRow[]>([])
 const fields = ref<SubjectFieldInfo[]>([])
-
-// Resolved thumbnail object URLs, keyed by thumbnail_cid. Revoked on unmount.
-const thumbs = ref<Record<string, string>>({})
-
-const selectedField = ref<string>(sessionStorage.getItem('opinions-field-filter') || '')
-
-function setField(id: string) {
-  selectedField.value = id
-  sessionStorage.setItem('opinions-field-filter', id)
-}
-
-const fieldById = computed(() => {
-  const m = new Map<string, SubjectFieldInfo>()
-  for (const f of fields.value) m.set(f.id, f)
-  return m
-})
-
-// Opinions grouped by subject field (filtered), newest-first within a group.
-const grouped = computed(() => {
-  const filtered = selectedField.value
-    ? opinions.value.filter((o) => o.subject_field_id === selectedField.value)
-    : opinions.value
-  const groups = new Map<string, OpinionRow[]>()
-  for (const op of filtered) {
-    if (!groups.has(op.subject_field_id)) groups.set(op.subject_field_id, [])
-    groups.get(op.subject_field_id)!.push(op)
-  }
-  return Array.from(groups.entries())
-    .map(([id, ops]) => ({ id, name: fieldById.value.get(id)?.name || id, opinions: ops }))
-    .sort((a, b) => a.name.localeCompare(b.name))
-})
-
-const counts = computed(() => {
-  const m = new Map<string, number>()
-  for (const o of opinions.value) m.set(o.subject_field_id, (m.get(o.subject_field_id) ?? 0) + 1)
-  return m
-})
-
-function formatDate(iso: string): string {
+const field = ref('')
+const sort = ref('new')
+const error = ref('')
+const loading = ref(true)
+const busy = ref(false)
+const more = ref(false)
+let generation = 0
+let timer: ReturnType<typeof setInterval> | undefined
+const names = computed(() => new Map(fields.value.map(f => [f.id, f.name])))
+const filteredLegacy = computed(() => legacy.value.filter(p => !field.value || p.subject_field_id === field.value))
+async function load(append = false) {
+  const ticket = ++generation
   try {
-    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-  } catch {
-    return iso
-  }
+    const rows = await invoke<DiscussionItem[]>('list_discussions', { subjectFieldId: field.value || null, sort: sort.value, offset: append ? threads.value.length : 0 })
+    if (ticket !== generation) return
+    threads.value = append ? [...threads.value, ...rows] : rows
+    more.value = rows.length === 200
+    error.value = ''
+  } catch (e) { if (ticket === generation) error.value = String(e) }
+  finally { loading.value = false }
 }
-
-function durationLabel(seconds: number | null): string | null {
-  if (!seconds) return null
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
+async function vote(item: DiscussionItem, value: number) {
+  busy.value = true
+  try { await invoke('act_on_discussion', { req: { entity_id: item.id, thread_id: item.thread_id, subject_field_id: item.subject_field_id, action: { kind: 'vote', value } } }); await load() }
+  catch (e) { error.value = String(e) }
+  finally { busy.value = false }
 }
-
-// Best-effort thumbnail resolution — the CSP blocks `asset:` for <img>, so we
-// pull the bytes through the backend and hand the tag a blob: URL. A missing
-// or unresolvable thumbnail just falls back to the gradient placeholder.
-async function resolveThumb(cid: string) {
-  if (thumbs.value[cid]) return
-  try {
-    const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: cid })
-    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]))
-    thumbs.value = { ...thumbs.value, [cid]: url }
-  } catch {
-    /* keep placeholder */
-  }
-}
-
+watch([field, sort], () => load())
 onMounted(async () => {
   try {
-    const [ops, f] = await Promise.all([
-      invoke<OpinionRow[]>('list_opinions', {
-        subjectFieldId: null,
-        authorAddress: null,
-        includeWithdrawn: false,
-        limit: 200,
-      }),
-      invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
-    ])
-    opinions.value = ops
-    fields.value = f
-    void ensureNames(ops.map((o) => o.author_address))
-    for (const o of ops) if (o.thumbnail_cid) void resolveThumb(o.thumbnail_cid)
-  } catch (e) {
-    console.error('Failed to load opinions:', e)
-  } finally {
-    loading.value = false
-  }
+    const [f, l] = await Promise.all([invoke<SubjectFieldInfo[]>('list_subject_fields'), invoke<OpinionRow[]>('list_opinions')])
+    fields.value = f; legacy.value = l
+    await load()
+    timer = setInterval(() => { if (!busy.value && threads.value.length <= 200) void load() }, 10000)
+  } catch (e) { error.value = String(e); loading.value = false }
 })
-
-onBeforeUnmount(() => {
-  for (const url of Object.values(thumbs.value)) URL.revokeObjectURL(url)
-})
+onBeforeUnmount(() => { generation++; if (timer) clearInterval(timer) })
 </script>
-
 <template>
-  <div>
-    <div class="mb-6 flex items-center justify-between">
-      <div>
-        <h1 class="text-xl font-bold">{{ $t('opinions.index.title') }}</h1>
-        <p class="text-sm text-muted-foreground">
-          {{ $t('opinions.index.subtitle') }}
-        </p>
-      </div>
-      <AppButton variant="primary" size="sm" @click="$router.push('/opinions/new')">
-        <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-        {{ $t('opinions.index.post') }}
-      </AppButton>
+  <div class="mx-auto max-w-5xl">
+    <header class="mb-5 flex items-center justify-between gap-3">
+      <div><h1 class="text-xl font-bold">{{ $t('opinions.threads.heading') }}</h1><p class="mt-1 hidden text-sm text-muted-foreground sm:block">{{ $t('opinions.threads.intro') }}</p></div>
+      <AppButton size="sm" @click="$router.push('/discussions/new')">+ {{ $t('opinions.threads.create') }}</AppButton>
+    </header>
+    <div class="mb-5 flex flex-wrap items-center gap-3">
+      <select v-model="field" :aria-label="$t('opinions.threads.topic')" class="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm sm:flex-none"><option value="">{{ $t('opinions.threads.allTopics') }}</option><option v-for="f in fields" :key="f.id" :value="f.id">{{ f.icon_emoji }} {{ f.name }}</option></select>
+      <select v-model="sort" :aria-label="$t('opinions.threads.sort')" class="w-24 rounded-lg border border-input bg-background px-3 py-2 text-sm sm:w-auto"><option value="new">{{ $t('opinions.threads.new') }}</option><option value="top">{{ $t('opinions.threads.top') }}</option><option value="discussed">{{ $t('opinions.threads.discussed') }}</option></select>
+      <AppButton variant="ghost" size="sm" :aria-label="$t('opinions.threads.refresh')" class="sm:ms-auto" @click="load()"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" /></svg><span class="hidden sm:inline">{{ $t('opinions.threads.refresh') }}</span></AppButton>
     </div>
-
-    <!-- Subject field filter chips -->
-    <div v-if="fields.length" class="mb-6 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        :class="[
-          'text-xs font-medium px-3 py-1.5 rounded-full transition-colors',
-          selectedField === '' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
-        ]"
-        @click="setField('')"
-      >
-        {{ $t('opinions.index.filterAll') }} <span class="ms-1 opacity-70">{{ opinions.length }}</span>
-      </button>
-      <button
-        v-for="f in fields"
-        :key="f.id"
-        type="button"
-        :class="[
-          'text-xs font-medium px-3 py-1.5 rounded-full transition-colors',
-          selectedField === f.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
-        ]"
-        @click="setField(f.id)"
-      >
-        {{ f.icon_emoji ? f.icon_emoji + ' ' : '' }}{{ f.name }}
-        <span class="ms-1 opacity-70">{{ counts.get(f.id) ?? 0 }}</span>
-      </button>
-    </div>
-
-    <!-- Loading skeleton grid -->
-    <div v-if="loading" class="op-grid">
-      <div v-for="i in 8" :key="i" class="animate-pulse">
-        <div class="aspect-video rounded-xl bg-muted" />
-        <div class="mt-2 h-4 w-3/4 rounded bg-muted" />
-        <div class="mt-2 h-3 w-1/2 rounded bg-muted" />
-      </div>
-    </div>
-
-    <!-- Empty state -->
-    <EmptyState
-      v-else-if="grouped.length === 0"
-      :title="$t('opinions.index.emptyTitle')"
-      :description="selectedField ? $t('opinions.index.emptyFieldDescription') : $t('opinions.index.emptyAllDescription')"
-    />
-
-    <!-- Grouped thumbnail grid -->
-    <div v-else class="space-y-8">
-      <section v-for="group in grouped" :key="group.id">
-        <h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          {{ group.name }}
-          <span class="ms-1 text-xs font-normal opacity-60">
-            · {{ $t('opinions.index.opinionCount', { count: group.opinions.length }, group.opinions.length) }}
-          </span>
-        </h2>
-
-        <div class="op-grid">
-          <router-link v-for="op in group.opinions" :key="op.id" :to="`/opinions/${op.id}`" class="op-card group">
-            <!-- Thumbnail -->
-            <div class="op-card__thumb">
-              <img
-                v-if="op.thumbnail_cid && thumbs[op.thumbnail_cid]"
-                :src="thumbs[op.thumbnail_cid]"
-                :alt="op.title"
-                class="h-full w-full object-cover"
-                loading="lazy"
-              />
-              <div v-else class="op-card__ph">
-                <svg class="h-9 w-9 text-primary/60" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-              </div>
-              <span v-if="durationLabel(op.duration_seconds)" class="op-card__dur">
-                {{ durationLabel(op.duration_seconds) }}
-              </span>
-            </div>
-
-            <!-- Meta below -->
-            <div class="mt-2.5 min-w-0">
-              <div class="flex items-start gap-1.5">
-                <h3 class="line-clamp-2 flex-1 text-sm font-semibold leading-snug text-foreground group-hover:text-primary">
-                  {{ op.title }}
-                </h3>
-                <ProvenanceBadge :provenance="op.provenance" />
-              </div>
-              <button
-                v-if="op.author_address"
-                type="button"
-                class="op-card__author"
-                @click.stop.prevent="goToInstructor(op.author_address)"
-              >
-                {{ displayName(op.author_address) }}
-              </button>
-              <div v-else class="mt-1 truncate text-xs text-muted-foreground">
-                {{ displayName(op.author_address) }}
-              </div>
-              <div class="text-xs text-muted-foreground/80">
-                {{ formatDate(op.published_at) }}
-              </div>
-            </div>
-          </router-link>
+    <details class="mb-5 rounded-lg bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+      <summary class="cursor-pointer font-medium text-foreground">{{ $t('opinions.threads.gateTitle') }}</summary>
+      <p class="mt-2 leading-relaxed">{{ $t('opinions.threads.gateBody') }}</p><p class="mt-2 leading-relaxed">{{ $t('opinions.threads.voteNote') }}</p>
+    </details>
+    <div>
+        <p v-if="error" role="alert" class="mb-4 rounded-xl bg-red-500/10 p-4 text-sm text-red-500">{{ error }}</p>
+        <p v-if="loading" class="p-6 text-muted-foreground">{{ $t('opinions.threads.loading') }}</p>
+        <div v-if="threads.length" class="divide-y divide-border/60 overflow-hidden rounded-xl bg-card shadow-sm">
+          <article v-for="item in threads" :key="item.id" class="px-4 py-5 transition-colors hover:bg-muted/20 sm:px-5">
+            <ThreadMeta class="mb-3" :author="item.author_did" :created-at="item.created_at" :topic="names.get(item.subject_field_id)" />
+            <router-link :to="`/discussions/${item.id}`" class="flex items-start justify-between gap-4"><div class="min-w-0"><h2 class="break-words text-base font-semibold leading-snug">{{ item.content?.title }}</h2><p class="mt-2 line-clamp-2 text-sm text-muted-foreground">{{ item.body }}</p><p v-if="item.content?.url" class="mt-1 truncate text-xs text-primary">{{ item.content.url }}</p></div><ThreadThumbnail :cid="item.content?.thumbnail_cid" :kind="item.content?.post_kind" :topic="item.subject_field_id" /></router-link>
+            <div class="mt-3 flex flex-wrap items-center gap-3"><ThreadVotes :score="item.score" :vote="item.my_vote" :disabled="busy" @vote="vote(item, $event)" /><router-link :to="`/discussions/${item.id}`" class="text-xs font-medium text-muted-foreground">{{ $t('opinions.threads.comments', { count: item.comment_count }) }}</router-link><span class="ms-auto text-[11px] text-muted-foreground">{{ $t('opinions.threads.qualified') }}</span></div>
+          </article>
         </div>
-      </section>
+        <p v-if="!loading && !threads.length" class="py-5 text-sm text-muted-foreground">{{ $t('opinions.threads.empty') }}</p>
+        <button v-if="more" class="my-4 text-sm text-primary" @click="load(true)">{{ $t('opinions.threads.loadMore') }}</button>
+        <article v-for="item in filteredLegacy" :key="item.id" class="mb-2 rounded-xl bg-card p-4 shadow-sm"><router-link :to="`/discussions/legacy/${item.id}`" class="flex items-center gap-4"><ThreadThumbnail :cid="item.thumbnail_cid" kind="video" :topic="item.subject_field_id" /><div><p class="text-xs text-muted-foreground">{{ names.get(item.subject_field_id) }}</p><h2 class="font-semibold">{{ item.title }}</h2><p class="mt-1 text-xs text-muted-foreground">{{ $t('opinions.threads.legacy') }}</p></div></router-link></article>
     </div>
   </div>
 </template>
-
-<style scoped>
-/* Match the Home page "Courses" grid exactly so opinion cards render at the
-   same size: Tailwind gap-6 (1.5rem) and sm/lg/xl → 2/3/4 columns. */
-.op-grid {
-  display: grid;
-  gap: 1.5rem;
-  grid-template-columns: 1fr;
-}
-@media (min-width: 640px) {
-  .op-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (min-width: 1024px) {
-  .op-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (min-width: 1280px) {
-  .op-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-.op-card {
-  display: block;
-  text-decoration: none;
-  color: inherit;
-}
-.op-card__thumb {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  border-radius: 0.75rem;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--app-primary) 8%, var(--app-card));
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-.op-card:hover .op-card__thumb {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -14px rgb(0 0 0 / 0.4);
-}
-.op-card__ph {
-  display: flex;
-  height: 100%;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent);
-}
-.op-card__author {
-  display: block;
-  margin-top: 0.25rem;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: none;
-  border: 0;
-  padding: 0;
-  font-size: 0.75rem;
-  color: var(--app-muted-foreground);
-  cursor: pointer;
-  text-align: start;
-}
-.op-card__author:hover {
-  color: var(--app-primary);
-  text-decoration: underline;
-}
-.op-card__dur {
-  position: absolute;
-  inset-inline-end: 0.375rem;
-  inset-block-end: 0.375rem;
-  padding: 0.05rem 0.35rem;
-  border-radius: 0.25rem;
-  background: rgb(0 0 0 / 0.72);
-  color: #fff;
-  font-size: 0.6875rem;
-  font-variant-numeric: tabular-nums;
-}
-</style>

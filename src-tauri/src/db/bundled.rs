@@ -6,7 +6,9 @@
 //! banks, and `ratified = 1` only marks those rows usable until the baseline
 //! schema replaces that column. No personas, credentials, opinions, courses,
 //! classrooms or governance rows are installed; the demo course corpus lives
-//! in `demo-world/content/` as non-authoritative source material.
+//! in `demo-world/content/` as non-authoritative source material. Profile
+//! activation separately imports owned example resources after identity
+//! initialization (see `commands::demo_courses`).
 //!
 //! Installation is one transaction and idempotent: taxonomy rows are written
 //! only into an empty taxonomy, and the rest use `INSERT OR IGNORE` and keyed
@@ -84,7 +86,18 @@ pub fn install_bundled_data(conn: &Connection) -> Result<i64, String> {
     })
 }
 
-fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
+pub(crate) fn install_foundation(conn: &Connection) -> Result<i64, String> {
+    crate::db::with_transaction(conn, || {
+        let count = install_taxonomy(conn)?;
+        let (synonyms, _) = GOAL_TEMPLATES_SQL
+            .split_once("INSERT OR IGNORE INTO goal_templates")
+            .ok_or("Bundled synonyms boundary missing")?;
+        conn.execute_batch(synonyms).map_err(|e| e.to_string())?;
+        Ok(count)
+    })
+}
+
+pub(crate) fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
     let existing_skills: i64 = conn
         .query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
@@ -205,7 +218,7 @@ WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) 
 )
 INSERT OR IGNORE INTO assessment_items
   (id, item_kind, skill_id, content_public, grader_private,
-   difficulty, points, bank_id, taxonomy_version, ratified)
+   difficulty, points, bank_id, taxonomy_version, ratified, bloom_level)
 SELECT
   q.id,
   'mcq',
@@ -221,7 +234,8 @@ SELECT
   q.points,
   q.bank_id,
   'bundled',
-  1
+  1,
+  'remember'
 FROM bundled q
 JOIN question_banks b ON b.id = q.bank_id;
 

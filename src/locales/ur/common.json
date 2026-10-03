@@ -67,9 +67,13 @@
     "coreHash": "Genesis core hash",
     "envelopeHash": "Signed envelope hash",
     "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
-    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept.",
+    "defaultNetwork": "ڈیفالٹ نیٹ ورک کی حکمرانی",
+    "defaultPinned": "اس پروفائل کے لیے پن کیا گیا",
+    "defaultAvailable": "اس پروفائل کے لیے دستیاب",
+    "defaultHint": "نئے پروفائل Alexandria کے ساتھ فراہم کردہ تصدیق شدہ جینیسس کو خودکار طور پر پن کرتے ہیں۔ موجودہ پروفائل یہاں اس کا جائزہ لے کر اسے قبول کر سکتے ہیں۔ یہ بنیاد اعتماد قائم کرتی ہے؛ ووٹنگ کی خدمات الگ سے ترتیب دی جاتی ہیں۔",
+    "useDefault": "اس ڈیفالٹ اعتماد کی بنیاد کو قبول کریں"
   },
-
   "status": {
     "connected": "منسلک",
     "offline": "آف لائن",

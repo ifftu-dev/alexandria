@@ -99,3 +99,25 @@ The signing input is **raw payload bytes**, not base64url — RFC 7797 with
 ## Licence
 
 MIT OR Apache-2.0, at your option.
+
+## Holder-authorized credential exchange
+
+`exchange` defines `alexandria-credential-exchange/1`: an organization request
+and a holder-signed disclosure of one complete credential. The signature covers
+a domain prefix, a zero byte, and JCS-canonical share bytes. It binds the exact
+request, audience, nonce, subject, skill, network, taxonomy digest, and validity
+window. Shares expire within five minutes. Receiving applications must load the
+expected request from their own store and enforce atomic replay handling.
+
+A new-assessment request additionally requires an `AssessmentCredential` with
+`assessment-items-bloom-v1`, terminal integrity, and an evidence reference
+`request:<id>:<nonce>`. The receiver must check issuance after invitation and
+apply its configured taxonomy policy. This is an authenticity and binding
+contract, not proof that the holder-controlled device is tamper-proof.
+
+Only a holder who is also the credential issuer may include `IssuerState` in
+the signed disclosure. It represents that issuer's current lifecycle assertion;
+it does not turn self-issued evidence into independent corroboration. Third-party
+status not supplied through a trusted verification store remains pending.
+`verify_share` returns the ordinary accept/pending/reject result. Receivers must
+preserve that distinction and record the verification time.

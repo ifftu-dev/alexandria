@@ -118,6 +118,29 @@ before persisting scores or counters; it cannot safely reconstruct a composite
 from an older client that included the retired term. Historical snapshots and
 their stored outcomes are preserved, not silently rescored.
 
+### Sentinel Dev live panel
+
+An unlocked app can open the Sentinel Dev panel with Command–Shift–S
+(Control–Shift–S on other desktop platforms), or the Sentinel Dev button in the
+standalone assessment runner. It displays the existing monitoring session's
+telemetry without entering diagnostics or consuming the attempt. It is available
+in release builds. **Start camera preview** explicitly requests local camera
+access and displays face/gaze overlays. In a standalone skill assessment it also
+drives the session's face/gaze checks; stopping or closing releases that camera
+opt-in. Outside an assessment, scores show unavailable and the panel explains
+that monitoring is idle. Preview-only frames do not enter the assessment evidence
+staging buffer. Profile lock closes the panel and stops capture.
+
+On macOS, trusted main-frame capture uses the normal WebKit/OS permission prompt.
+Plugin frames still require the host's recorded media grants. Capture and
+inference failures are shown in the panel; late permission results after closing
+are stopped rather than leaving a hidden camera running.
+
+Standalone assessment submission freezes answers while monitoring is live, then
+persists a final snapshot and ends the session before grading. A failed final
+snapshot or session teardown prevents issuance and allows retry with the frozen
+answers. See [the assessment demo runbook](assessment-demo.md).
+
 ### Diagnostics transition
 
 The release workflow uses explicit diagnostics entry/exit from the profile menu;
@@ -598,3 +621,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **No remote models**: No command accepts classifier weights. The only ONNX models the backend parses are embedded in the binary, so no peer or envelope can supply model bytes.
 9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.
+
+The live preview uses the unlocked profile and current device fingerprint when
+loading gaze calibration, just like assessment monitoring. Preview frames remain
+excluded from assessment evidence staging.

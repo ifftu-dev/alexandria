@@ -80,6 +80,49 @@ pub struct PinGenesisResponse {
     pub stored_envelope_differs: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DefaultGenesisStatus {
+    pub preview: GenesisPreview,
+    pub genesis_json: String,
+    pub pinned: bool,
+}
+
+/// Read the bundled trust decision and this profile's pin without changing it.
+#[tauri::command]
+pub async fn governance_default_genesis_status(
+    state: State<'_, AppState>,
+) -> Result<Option<DefaultGenesisStatus>, String> {
+    let profile = crate::network_profile::embedded_preprod().map_err(|error| error.to_string())?;
+    let Some(bytes) = profile
+        .embedded_governance_genesis()
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let (envelope, verified) =
+        decode_and_verify_genesis(bytes, None).map_err(|error| error.to_string())?;
+    let preview = preview(&envelope, &verified, bytes);
+    let dao_id = verified.dao_id().to_owned();
+    let pinned = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "governance.default-genesis-status",
+            move |db| {
+                load_pinned_genesis(db.conn(), &dao_id)
+                    .map(|value| value.is_some())
+                    .map_err(|error| error.to_string())
+            },
+        )
+        .await?;
+    Ok(Some(DefaultGenesisStatus {
+        preview,
+        genesis_json: String::from_utf8(bytes.to_vec()).map_err(|error| error.to_string())?,
+        pinned,
+    }))
+}
+
 /// A parsed locator plus its canonical encoding. Retrieval and sharing use
 /// `canonical_uri`, never the text the user typed.
 #[derive(Debug, Clone, Serialize)]

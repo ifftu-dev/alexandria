@@ -3,9 +3,11 @@
 // templates that resolve directly to target skills; a job
 // description (link or pasted text) is parsed on-device into skill
 // *suggestions* the learner confirms before they become a goal.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { onProfileLocked } from '@/composables/useProfiles'
 import { useGoals } from '@/composables/useGoals'
+import LearningDecisionReview from '@/components/LearningDecisionReview.vue'
 import { AppButton, AppInput, AppBadge } from '@/components/ui'
 import type { GoalTemplate, SkillSuggestion } from '@/types'
 
@@ -14,12 +16,13 @@ const emit = defineEmits<{ (e: 'added'): void }>()
 const { t } = useI18n()
 const { listGoalTemplates, resolveGoal, addGoal } = useGoals()
 
-type Tab = 'exam' | 'curriculum' | 'job_role' | 'jd'
+type Tab = 'exam' | 'curriculum' | 'job_role' | 'jd' | 'learning_goal'
 const tab = ref<Tab>('job_role')
 const tabs = computed<{ id: Tab; label: string }[]>(() => [
   { id: 'job_role', label: t('goals.picker.jobRole') },
   { id: 'exam', label: t('goals.picker.exam') },
   { id: 'curriculum', label: t('goals.picker.curriculum') },
+  { id: 'learning_goal', label: t('goals.picker.learningGoal') },
   { id: 'jd', label: t('goals.picker.jobDescription') },
 ])
 
@@ -36,8 +39,17 @@ const suggestions = ref<SkillSuggestion[]>([])
 const chosen = ref<Set<string>>(new Set())
 const jdLabel = ref('')
 
+let generation = 0
+function clearSuggestions() {
+  generation++
+  suggestions.value = []; chosen.value = new Set(); jdLabel.value = ''; error.value = ''; busy.value = false
+}
+watch([jdText, jdUrl, jdMode, tab], clearSuggestions)
+const removeProfileListener = onProfileLocked(() => { clearSuggestions(); jdText.value = ''; jdUrl.value = '' })
+onBeforeUnmount(() => { generation++; removeProfileListener() })
+
 async function loadTemplates() {
-  if (tab.value === 'jd') return
+  if (tab.value === 'jd' || tab.value === 'learning_goal') return
   templates.value = await listGoalTemplates(tab.value)
   selectedKey.value = ''
 }
@@ -64,7 +76,7 @@ async function addTemplateGoal() {
     await addGoal({
       label: res.label,
       goalSkillIds: res.goal_skill_ids,
-      kind: tab.value as Exclude<Tab, 'jd'>,
+      kind: tab.value as Exclude<Tab, 'jd' | 'learning_goal'>,
       sourceKey: tpl.key,
       resolutionProvenance: res.resolution_provenance,
       taxonomyVersion: res.taxonomy_version,
@@ -78,24 +90,28 @@ async function addTemplateGoal() {
 }
 
 async function parseJd() {
+  const requestGeneration = ++generation
   busy.value = true
   error.value = ''
   suggestions.value = []
   try {
     const res = await resolveGoal(
-      jdMode.value === 'link'
+      tab.value === 'learning_goal'
+        ? { kind: 'learning_goal', text: jdText.value }
+        : jdMode.value === 'link'
         ? { kind: 'jd_link', url: jdUrl.value.trim() }
         : { kind: 'jd_text', text: jdText.value },
     )
+    if (requestGeneration !== generation) return
     suggestions.value = res.suggestions
     jdLabel.value = res.label
     // Pre-check strong matches (score >= 0.6).
     chosen.value = new Set(res.suggestions.filter((s) => s.score >= 0.6).map((s) => s.skill_id))
     if (!res.suggestions.length) error.value = t('goals.picker.noMatchingSkills')
   } catch (e) {
-    error.value = String(e)
+    if (requestGeneration === generation) error.value = String(e)
   } finally {
-    busy.value = false
+    if (requestGeneration === generation) busy.value = false
   }
 }
 
@@ -112,11 +128,11 @@ async function addJdGoal() {
   busy.value = true
   try {
     await addGoal({
-      label: jdLabel.value,
+      label: jdLabel.value || jdText.value.trim().slice(0, 160),
       goalSkillIds: ids,
-      kind: 'jd',
-      sourceUrl: jdMode.value === 'link' ? jdUrl.value.trim() : undefined,
-      resolutionProvenance: 'jd_parsed',
+      kind: tab.value === 'learning_goal' ? 'learning_goal' : 'jd',
+      sourceUrl: tab.value === 'jd' && jdMode.value === 'link' ? jdUrl.value.trim() : undefined,
+      resolutionProvenance: tab.value === 'learning_goal' ? 'goal_parsed' : 'jd_parsed',
     })
     suggestions.value = []
     jdText.value = ''
@@ -145,7 +161,7 @@ async function addJdGoal() {
     </div>
 
     <!-- Curated template picker -->
-    <div v-if="tab !== 'jd'" class="space-y-3">
+    <div v-if="tab !== 'jd' && tab !== 'learning_goal'" class="space-y-3">
       <select
         v-model="selectedKey"
         class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
@@ -160,7 +176,7 @@ async function addJdGoal() {
 
     <!-- Job-description parser -->
     <div v-else class="space-y-3">
-      <div class="flex gap-2 text-sm">
+      <div v-if="tab === 'jd'" class="flex gap-2 text-sm">
         <button
           class="rounded px-2 py-1"
           :class="jdMode === 'paste' ? 'text-primary' : 'text-muted-foreground'"
@@ -173,7 +189,7 @@ async function addJdGoal() {
         >{{ $t('goals.picker.fromLink') }}</button>
       </div>
       <AppInput
-        v-if="jdMode === 'link'"
+        v-if="tab === 'jd' && jdMode === 'link'"
         v-model="jdUrl"
         :label="$t('goals.picker.jobPostingUrl')"
         placeholder="https://…"
@@ -183,17 +199,18 @@ async function addJdGoal() {
         v-model="jdText"
         rows="6"
         class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
-        :placeholder="$t('goals.picker.jdPlaceholder')"
+        :placeholder="$t(tab === 'learning_goal' ? 'goals.picker.goalPlaceholder' : 'goals.picker.jdPlaceholder')"
       />
       <AppButton
         variant="outline"
         :loading="busy"
-        :disabled="jdMode === 'link' ? !jdUrl.trim() : !jdText.trim()"
+        :disabled="tab === 'jd' && jdMode === 'link' ? !jdUrl.trim() : !jdText.trim()"
         @click="parseJd"
       >
         {{ $t('goals.picker.findSkills') }}
       </AppButton>
 
+      <LearningDecisionReview v-if="tab === 'learning_goal' || jdMode === 'paste'" :source="jdText" :task="tab === 'learning_goal' ? 'learning_goal' : 'job_description'" @suggestion="s => { if (!suggestions.some(item => item.skill_id === s.skill_id)) suggestions.push(s) }" />
       <div v-if="suggestions.length" class="space-y-2">
         <p class="text-sm text-muted-foreground">
           {{ $t('goals.picker.foundSkills') }}

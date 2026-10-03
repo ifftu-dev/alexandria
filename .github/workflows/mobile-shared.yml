@@ -6,6 +6,11 @@ on:
       mode:
         required: true
         type: string
+      dev_seeding:
+        description: 'Enable the development-only test data picker (validation only)'
+        required: false
+        type: boolean
+        default: false
       tag:
         required: true
         type: string
@@ -550,7 +555,7 @@ jobs:
         env:
           IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
         run: |
-          npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
+          npx tauri ios build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --config src-tauri/tauri.ios.conf.json --target aarch64-sim
 
       # Manual signing. Given IOS_CERTIFICATE and IOS_MOBILE_PROVISION the Tauri
       # CLI imports the certificate into a keychain and emits a manual-signing
@@ -569,7 +574,7 @@ jobs:
           # IOS_MOBILE_PROVISION is exported by "Ensure an App Store
           # provisioning profile".
         run: |
-          npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
+          npx tauri ios build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
 
       - name: Upload iOS validation artifacts
         if: inputs.mode == 'validate'
@@ -874,7 +879,7 @@ jobs:
             "CC_aarch64-linux-android=${ANDROID_AARCH64_CC}" \
             "CFLAGS_aarch64_linux_android=${ANDROID_AARCH64_CFLAGS}" \
             "CFLAGS_aarch64-linux-android=${ANDROID_AARCH64_CFLAGS}" \
-            npx tauri android build --target aarch64 --config src-tauri/tauri.android.conf.json
+            npx tauri android build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64 --config src-tauri/tauri.android.conf.json
 
       - name: Upload Android validation artifacts
         if: inputs.mode == 'validate'

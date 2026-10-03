@@ -1,0 +1,378 @@
+{
+  "format_version": 1,
+  "provenance": "AI-generated examples with synthetic narration; opinion topics adapted from the retired seed, without its fabricated authors or proofs.",
+  "media": [
+    {
+      "id": "counting",
+      "title": "Counting operations",
+      "skill_id": "skill_big_o",
+      "scenes": [
+        {
+          "title": "Start with a cost model",
+          "body": "Count the operation that repeats. A loop that visits each of n items performs n visits."
+        },
+        {
+          "title": "One loop versus two",
+          "body": "Two separate loops take about 2 n visits. Two nested loops over all pairs take n squared visits."
+        },
+        {
+          "title": "Describe growth",
+          "body": "Big O describes an upper bound on growth. Drop fixed factors, but keep the dominant term. Predict how work changes when n doubles."
+        }
+      ],
+      "duration_seconds": 26
+    },
+    {
+      "id": "binary-search",
+      "title": "Binary search step by step",
+      "skill_id": "skill_big_o",
+      "scenes": [
+        {
+          "title": "Begin with sorted data",
+          "body": "Binary search requires sorted data and efficient access to the middle item. Compare the target with the middle value."
+        },
+        {
+          "title": "Discard half",
+          "body": "If the target is smaller, keep the left half. If it is larger, keep the right half. Repeat until you find the target or the range is empty."
+        },
+        {
+          "title": "Count the halvings",
+          "body": "A range of 16 items shrinks to 8, 4, 2, then 1. Doubling the input adds roughly one comparison. This is logarithmic growth."
+        }
+      ],
+      "duration_seconds": 30
+    },
+    {
+      "id": "merge-sort",
+      "title": "How merge sort scales",
+      "skill_id": "skill_sorting",
+      "scenes": [
+        {
+          "title": "Divide the input",
+          "body": "Split the list into two halves. Keep splitting until each list contains zero or one item, which is already sorted."
+        },
+        {
+          "title": "Merge in order",
+          "body": "Compare the first remaining item in each half. Move the smaller item into the output. Continue until both halves are consumed."
+        },
+        {
+          "title": "Combine the costs",
+          "body": "Each merge level processes about n items. There are about log base 2 of n levels. Total work grows as n log n. A typical array implementation needs extra storage."
+        }
+      ],
+      "duration_seconds": 30
+    },
+    {
+      "id": "hash-tables",
+      "title": "Hash tables and collisions",
+      "skill_id": "skill_hashing",
+      "scenes": [
+        {
+          "title": "Choose a bucket",
+          "body": "A hash function maps a key to a bucket. A lookup starts in that bucket rather than scanning the entire collection."
+        },
+        {
+          "title": "Handle collisions",
+          "body": "Different keys can map to the same bucket. Chaining stores several entries per bucket. Open addressing searches other positions."
+        },
+        {
+          "title": "State your assumptions",
+          "body": "With a suitable hash function and controlled load, operations are expected constant time. Bad collisions can make a lookup linear. Expected cost is not a worst case guarantee."
+        }
+      ],
+      "duration_seconds": 30
+    },
+    {
+      "id": "http",
+      "title": "A request and response",
+      "skill_id": "skill_rest_api",
+      "scenes": [
+        {
+          "title": "Make a request",
+          "body": "A client sends a method, a path, headers, and sometimes a body. The server interprets these according to an agreed interface."
+        },
+        {
+          "title": "Return a response",
+          "body": "A response contains a status, headers, and possibly a body. Success and failure should both have a clear, documented shape."
+        },
+        {
+          "title": "Trace one operation",
+          "body": "For a to do list, the client requests the items. The server reads storage and returns structured data. The client renders that data and handles errors."
+        }
+      ],
+      "duration_seconds": 31
+    },
+    {
+      "id": "state",
+      "title": "State and derived views",
+      "skill_id": "skill_javascript",
+      "scenes": [
+        {
+          "title": "Keep a source of truth",
+          "body": "Store the information that changes, such as a list of tasks and the current filter. Derive the visible list from that state."
+        },
+        {
+          "title": "Avoid duplicate state",
+          "body": "A count of completed tasks can be calculated from the task list. Storing both separately creates two values that can disagree."
+        },
+        {
+          "title": "Make changes explicit",
+          "body": "Use clear actions to add, update, or remove tasks. Recompute the view from the updated state. Test the action and its visible result together."
+        }
+      ],
+      "duration_seconds": 31
+    },
+    {
+      "id": "validation",
+      "title": "Validate at the boundary",
+      "skill_id": "skill_rest_api",
+      "scenes": [
+        {
+          "title": "Check the shape",
+          "body": "Validate required fields, types, lengths, and supported values when data enters your application. Give errors that help the caller correct the request."
+        },
+        {
+          "title": "Separate authorization",
+          "body": "A valid identifier does not prove permission. Check whether the current user is allowed to access or change the referenced resource."
+        },
+        {
+          "title": "Keep storage consistent",
+          "body": "Apply related database changes in a transaction. If any required change fails, roll the operation back. Report failure instead of partial success."
+        }
+      ],
+      "duration_seconds": 33
+    },
+    {
+      "id": "sql",
+      "title": "Use parameterized queries",
+      "skill_id": "skill_sql",
+      "scenes": [
+        {
+          "title": "Separate code from data",
+          "body": "Build a query with placeholders for values. Pass the values separately to the database driver instead of concatenating user input into SQL."
+        },
+        {
+          "title": "Bind a value",
+          "body": "For a task lookup, keep the query structure fixed and bind the requested task identifier. The driver treats the bound value as data."
+        },
+        {
+          "title": "Constrain dynamic structure",
+          "body": "Placeholders usually represent values, not column names. When a caller selects a sort column, map it through a fixed allowlist of supported columns."
+        }
+      ],
+      "duration_seconds": 33
+    },
+    {
+      "id": "op_cs_01",
+      "title": "Teach arrays before objects. Always.",
+      "scenes": [
+        {
+          "title": "Start with a visible model",
+          "body": "Arrays make indexing, iteration, and data layout concrete. This example argues for starting there, then introducing objects once learners can explain the underlying operations."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 27
+    },
+    {
+      "id": "op_cs_02",
+      "title": "Big-O is the wrong thing to test freshmen on",
+      "scenes": [
+        {
+          "title": "Reason before naming",
+          "body": "This example argues for counting operations before grading asymptotic notation. Ask learners to predict the effect of doubling an input and explain their assumptions."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 26
+    },
+    {
+      "id": "op_web_01",
+      "title": "Why I stopped teaching flexbox first",
+      "scenes": [
+        {
+          "title": "Teach the layout model",
+          "body": "This example favors teaching two-dimensional layout with Grid before one-dimensional Flexbox. The useful debate is which mental model best fits the first exercise, not which tool is universally better."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 28
+    },
+    {
+      "id": "op_cyber_01",
+      "title": "The block cipher zoo is too big",
+      "scenes": [
+        {
+          "title": "Prioritize correct use",
+          "body": "This example favors teaching established authenticated encryption and key handling before surveying many algorithms. AES is a block cipher; ChaCha20 is a stream cipher. Production code should use vetted libraries."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 30
+    },
+    {
+      "id": "op_design_01",
+      "title": "UX research is not optional",
+      "scenes": [
+        {
+          "title": "Observe before polishing",
+          "body": "This example argues for small, early usability studies. Ask people to try a task, observe where they struggle, and revise the design before committing to a large implementation."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 27
+    },
+    {
+      "id": "op_design_02",
+      "title": "Stop calling it \"lo-fi wireframes\"",
+      "scenes": [
+        {
+          "title": "Explain the purpose",
+          "body": "This example favors plain language when introducing design. Start with a sketch, describe the decision it helps you make, and add terminology only when it improves the conversation."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 27
+    },
+    {
+      "id": "op_civics_01",
+      "title": "Teach budget literacy before the constitution",
+      "scenes": [
+        {
+          "title": "Make institutions tangible",
+          "body": "This example proposes public budgets as a concrete entry point to civics. Discuss revenue, spending, and trade-offs, then connect those choices to constitutional institutions and accountability."
+        },
+        {
+          "title": "Discuss the trade-off",
+          "body": "This is an AI-generated sample viewpoint for discussion, with synthetic narration. It is not a published or credential-backed opinion. Consider a counterexample and decide what evidence would change your mind."
+        }
+      ],
+      "duration_seconds": 29
+    }
+  ],
+  "opinions": [
+    {
+      "id": "op_cs_01",
+      "subject_field_id": "sf_cs",
+      "title": "Teach arrays before objects. Always.",
+      "summary": "Arrays make indexing, iteration, and data layout concrete. This example argues for starting there, then introducing objects once learners can explain the underlying operations.",
+      "media_id": "op_cs_01"
+    },
+    {
+      "id": "op_cs_02",
+      "subject_field_id": "sf_cs",
+      "title": "Big-O is the wrong thing to test freshmen on",
+      "summary": "This example argues for counting operations before grading asymptotic notation. Ask learners to predict the effect of doubling an input and explain their assumptions.",
+      "media_id": "op_cs_02"
+    },
+    {
+      "id": "op_web_01",
+      "subject_field_id": "sf_web",
+      "title": "Why I stopped teaching flexbox first",
+      "summary": "This example favors teaching two-dimensional layout with Grid before one-dimensional Flexbox. The useful debate is which mental model best fits the first exercise, not which tool is universally better.",
+      "media_id": "op_web_01"
+    },
+    {
+      "id": "op_cyber_01",
+      "subject_field_id": "sf_cyber",
+      "title": "The block cipher zoo is too big",
+      "summary": "This example favors teaching established authenticated encryption and key handling before surveying many algorithms. AES is a block cipher; ChaCha20 is a stream cipher. Production code should use vetted libraries.",
+      "media_id": "op_cyber_01"
+    },
+    {
+      "id": "op_design_01",
+      "subject_field_id": "sf_design",
+      "title": "UX research is not optional",
+      "summary": "This example argues for small, early usability studies. Ask people to try a task, observe where they struggle, and revise the design before committing to a large implementation.",
+      "media_id": "op_design_01"
+    },
+    {
+      "id": "op_design_02",
+      "subject_field_id": "sf_design",
+      "title": "Stop calling it \"lo-fi wireframes\"",
+      "summary": "This example favors plain language when introducing design. Start with a sketch, describe the decision it helps you make, and add terminology only when it improves the conversation.",
+      "media_id": "op_design_02"
+    },
+    {
+      "id": "op_civics_01",
+      "subject_field_id": "sf_civics",
+      "title": "Teach budget literacy before the constitution",
+      "summary": "This example proposes public budgets as a concrete entry point to civics. Discuss revenue, spending, and trade-offs, then connect those choices to constitutional institutions and accountability.",
+      "media_id": "op_civics_01"
+    }
+  ],
+  "courses": [
+    {
+      "id": "algorithm-video-lab",
+      "title": "Algorithm Essentials — Video Lab",
+      "description": "Four narrated video lessons with readable transcripts: operation counts, binary search, merge sort, and hash tables.",
+      "lesson_ids": [
+        "counting",
+        "binary-search",
+        "merge-sort",
+        "hash-tables"
+      ],
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><rect width=\"640\" height=\"360\" fill=\"#0f172a\"/><circle cx=\"540\" cy=\"80\" r=\"190\" fill=\"#38bdf8\" opacity=\".12\"/><rect x=\"48\" y=\"44\" width=\"112\" height=\"32\" rx=\"16\" fill=\"#38bdf8\"/><text x=\"104\" y=\"66\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#0f172a\">VIDEO LAB</text><path d=\"M76 130v92l80-46z\" fill=\"#38bdf8\"/><path d=\"M210 142h220M210 177h160M210 212h190\" stroke=\"#38bdf8\" stroke-width=\"12\" stroke-linecap=\"round\" opacity=\".5\"/><text x=\"48\" y=\"285\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"28\" fill=\"#f8fafc\">ALGORITHM ESSENTIALS</text><text x=\"48\" y=\"320\" font-family=\"sans-serif\" font-size=\"18\" fill=\"#94a3b8\">4 lessons · Videos and transcripts</text></svg>"
+    },
+    {
+      "id": "web-video-lab",
+      "title": "Web Foundations — Video Lab",
+      "description": "Four narrated video lessons with readable transcripts: request/response, state, validation, and SQL parameters.",
+      "lesson_ids": [
+        "http",
+        "state",
+        "validation",
+        "sql"
+      ],
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><rect width=\"640\" height=\"360\" fill=\"#0f172a\"/><circle cx=\"540\" cy=\"80\" r=\"190\" fill=\"#34d399\" opacity=\".12\"/><rect x=\"48\" y=\"44\" width=\"112\" height=\"32\" rx=\"16\" fill=\"#34d399\"/><text x=\"104\" y=\"66\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#0f172a\">VIDEO LAB</text><path d=\"M76 130v92l80-46z\" fill=\"#34d399\"/><path d=\"M210 142h220M210 177h160M210 212h190\" stroke=\"#34d399\" stroke-width=\"12\" stroke-linecap=\"round\" opacity=\".5\"/><text x=\"48\" y=\"285\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"28\" fill=\"#f8fafc\">WEB FOUNDATIONS</text><text x=\"48\" y=\"320\" font-family=\"sans-serif\" font-size=\"18\" fill=\"#94a3b8\">4 lessons · Videos and transcripts</text></svg>"
+    }
+  ],
+  "classrooms": [
+    {
+      "id": "algorithms",
+      "name": "Algorithms Study Group",
+      "description": "Example classroom for discussing algorithms and practicing problem solving.",
+      "channels": [
+        "general",
+        "help"
+      ]
+    },
+    {
+      "id": "web",
+      "name": "Web Development Cohort",
+      "description": "Example classroom for web projects, reviews, and study updates.",
+      "channels": [
+        "general",
+        "code-review",
+        "standups"
+      ]
+    },
+    {
+      "id": "design",
+      "name": "Design Critique Circle",
+      "description": "Example classroom for sketches, usability observations, and constructive feedback.",
+      "channels": [
+        "general",
+        "critique"
+      ]
+    }
+  ]
+}

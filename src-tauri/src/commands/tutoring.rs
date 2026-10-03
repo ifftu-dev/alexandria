@@ -171,6 +171,7 @@ pub async fn tutoring_create_room(
                 log::error!("[cmd] tutoring_create_room: DB insert failed: {e}");
                 e.to_string()
             })?;
+                crate::tutoring::presence::register(db.conn(), &persisted_session_id, &persisted_ticket)?;
                 Ok(())
             },
         )
@@ -200,6 +201,7 @@ pub async fn tutoring_join_room(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    crate::tutoring::presence::check_join(&state, &ticket).await?;
     log::info!("[cmd] tutoring_join_room: start");
     // First consumption of the camera and microphone on this path: ask now,
     // not at app launch, and refuse cleanly rather than abort inside cpal.
@@ -260,6 +262,7 @@ pub async fn tutoring_join_room(
                 log::error!("[cmd] tutoring_join_room: DB insert failed: {e}");
                 e.to_string()
             })?;
+                crate::tutoring::presence::register(db.conn(), &persisted_session_id, &persisted_ticket)?;
                 Ok(())
             },
         )
@@ -295,7 +298,7 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
                 move |db| {
                     db.conn()
                         .execute(
-                            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
+                            "UPDATE tutoring_sessions SET last_occupied_at = unixepoch() WHERE id = ?1",
                             params![id],
                         )
                         .map_err(|e| e.to_string())?;

@@ -6,6 +6,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput } from '@/components/ui'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type {
+  DefaultGenesisStatus,
   GovernanceGenesisLocator,
   PinGenesisResponse,
   RetrievedGenesisPreview,
@@ -27,6 +28,9 @@ const success = ref('')
 const reviewing = ref(false)
 const retrieving = ref(false)
 const pinning = ref(false)
+const defaultGenesis = ref<DefaultGenesisStatus | null>(null)
+const defaultError = ref('')
+const pinningDefault = ref(false)
 
 const canPin = computed(
   () =>
@@ -106,7 +110,7 @@ async function retrieveGenesis(): Promise<void> {
     })
     if (locator.value !== reviewed) return
     if (!sameLocator(result.locator, reviewed) || result.preview.dao_id !== reviewed.dao_id) {
-      error.value = t('governanceGenesisImport.retrievedMismatch')
+      error.value = t('common.governanceGenesisImport.retrievedMismatch')
       return
     }
     retrieved.value = result
@@ -130,10 +134,10 @@ async function pinGenesis(): Promise<void> {
     })
     if (retrieved.value !== current) return
     success.value = result.newly_pinned
-      ? t('governanceGenesisImport.pinned')
+      ? t('common.governanceGenesisImport.pinned')
       : result.stored_envelope_differs
-        ? t('governanceGenesisImport.equivalentAlreadyPinned')
-        : t('governanceGenesisImport.alreadyPinned')
+        ? t('common.governanceGenesisImport.equivalentAlreadyPinned')
+        : t('common.governanceGenesisImport.alreadyPinned')
   } catch (reason) {
     error.value = message(reason)
   } finally {
@@ -141,7 +145,34 @@ async function pinGenesis(): Promise<void> {
   }
 }
 
+async function loadDefault(): Promise<void> {
+  try {
+    defaultGenesis.value = await invoke<DefaultGenesisStatus | null>('governance_default_genesis_status')
+  } catch (reason) {
+    defaultError.value = message(reason)
+  }
+}
+
+async function pinDefault(): Promise<void> {
+  const current = defaultGenesis.value
+  if (!current || current.pinned) return
+  pinningDefault.value = true
+  defaultError.value = ''
+  try {
+    await invoke<PinGenesisResponse>('governance_pin_genesis', {
+      genesisJson: current.genesis_json,
+      expectedDaoId: current.preview.dao_id,
+    })
+    await loadDefault()
+  } catch (reason) {
+    defaultError.value = message(reason)
+  } finally {
+    pinningDefault.value = false
+  }
+}
+
 onMounted(() => {
+  void loadDefault()
   if (locatorInput.value) void reviewLocator()
 })
 </script>
@@ -150,29 +181,52 @@ onMounted(() => {
   <div class="mx-auto max-w-4xl space-y-6">
     <div>
       <h1 class="text-2xl font-bold text-foreground">
-        {{ $t('governanceGenesisImport.title') }}
+        {{ $t('common.governanceGenesisImport.title') }}
       </h1>
       <p class="mt-2 text-sm text-muted-foreground">
-        {{ $t('governanceGenesisImport.subtitle') }}
+        {{ $t('common.governanceGenesisImport.subtitle') }}
       </p>
     </div>
 
+    <section v-if="defaultGenesis" class="rounded-xl border border-border bg-card p-5" data-testid="default-genesis">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <h2 class="text-base font-semibold text-foreground">{{ $t('common.governanceGenesisImport.defaultNetwork') }}</h2>
+        <span class="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          {{ $t(defaultGenesis.pinned ? 'common.governanceGenesisImport.defaultPinned' : 'common.governanceGenesisImport.defaultAvailable') }}
+        </span>
+      </div>
+      <p class="mt-3 text-sm text-foreground">{{ visible(defaultGenesis.preview.name) }}</p>
+      <p class="mt-2 text-sm text-muted-foreground">{{ $t('common.governanceGenesisImport.defaultHint') }}</p>
+      <details class="mt-4 text-sm text-foreground">
+        <summary class="cursor-pointer">{{ $t('common.governanceGenesisImport.trustFacts') }}</summary>
+        <dl class="mt-3 space-y-3">
+          <div><dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.daoId') }}</dt><dd class="break-all font-mono text-xs">{{ defaultGenesis.preview.dao_id }}</dd></div>
+          <div><dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.contentHash') }}</dt><dd class="break-all font-mono text-xs">{{ defaultGenesis.preview.envelope_hash }}</dd></div>
+        </dl>
+        <pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-3 text-xs">{{ JSON.stringify(JSON.parse(defaultGenesis.genesis_json), null, 2) }}</pre>
+      </details>
+      <AppButton v-if="!defaultGenesis.pinned" class="mt-4" :loading="pinningDefault" @click="pinDefault">
+        {{ $t('common.governanceGenesisImport.useDefault') }}
+      </AppButton>
+    </section>
+    <p v-if="defaultError" role="alert" class="text-sm text-destructive">{{ defaultError }}</p>
+
     <section class="rounded-xl bg-card p-5 shadow-sm">
       <label class="text-sm font-medium text-foreground" for="genesis-locator">
-        {{ $t('governanceGenesisImport.locatorLabel') }}
+        {{ $t('common.governanceGenesisImport.locatorLabel') }}
       </label>
       <textarea
         id="genesis-locator"
         v-model="locatorInput"
         class="input mt-2 min-h-28 w-full resize-y font-mono text-xs"
         dir="ltr"
-        :placeholder="$t('governanceGenesisImport.locatorPlaceholder')"
+        :placeholder="$t('common.governanceGenesisImport.locatorPlaceholder')"
       />
       <p class="mt-2 text-xs text-muted-foreground">
-        {{ $t('governanceGenesisImport.locatorHint') }}
+        {{ $t('common.governanceGenesisImport.locatorHint') }}
       </p>
       <AppButton class="mt-4" :loading="reviewing" @click="reviewLocator">
-        {{ $t('governanceGenesisImport.reviewLocator') }}
+        {{ $t('common.governanceGenesisImport.reviewLocator') }}
       </AppButton>
     </section>
 
@@ -185,20 +239,20 @@ onMounted(() => {
 
     <section v-if="locator" class="rounded-xl bg-card p-5 shadow-sm" data-testid="locator-facts">
       <h2 class="text-base font-semibold text-foreground">
-        {{ $t('governanceGenesisImport.locatorFacts') }}
+        {{ $t('common.governanceGenesisImport.locatorFacts') }}
       </h2>
       <dl class="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.daoId') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.daoId') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(locator.dao_id) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.contentHash') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.contentHash') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(locator.content_hash) }}</dd>
         </div>
       </dl>
       <h3 class="mt-5 text-sm font-medium text-foreground">
-        {{ $t('governanceGenesisImport.sources') }}
+        {{ $t('common.governanceGenesisImport.sources') }}
       </h3>
       <ul class="mt-2 space-y-2">
         <li v-for="source in locator.locations" :key="source" class="break-all rounded bg-background p-2 font-mono text-xs text-foreground" dir="ltr">
@@ -206,101 +260,101 @@ onMounted(() => {
         </li>
       </ul>
       <h3 class="mt-5 text-sm font-medium text-foreground">
-        {{ $t('governanceGenesisImport.canonicalLocator') }}
+        {{ $t('common.governanceGenesisImport.canonicalLocator') }}
       </h3>
       <p class="mt-2 break-all rounded bg-background p-2 font-mono text-xs text-foreground" dir="ltr" data-testid="canonical-locator">
         {{ visible(locator.canonical_uri) }}
       </p>
       <details class="mt-4 rounded border border-border p-3">
         <summary class="cursor-pointer text-sm font-medium text-foreground">
-          {{ $t('governanceGenesisImport.qr') }}
+          {{ $t('common.governanceGenesisImport.qr') }}
         </summary>
         <QrCodeDisplay class="mt-3" :value="locator.canonical_uri" :size="240" />
       </details>
       <p class="mt-4 text-xs text-muted-foreground">
-        {{ $t('governanceGenesisImport.retrieveHint') }}
+        {{ $t('common.governanceGenesisImport.retrieveHint') }}
       </p>
       <AppButton class="mt-3" :loading="retrieving" @click="retrieveGenesis">
-        {{ $t('governanceGenesisImport.retrieve') }}
+        {{ $t('common.governanceGenesisImport.retrieve') }}
       </AppButton>
     </section>
 
     <section v-if="locator && retrieved" class="rounded-xl bg-card p-5 shadow-sm" data-testid="trust-facts">
       <h2 class="text-base font-semibold text-foreground">
-        {{ $t('governanceGenesisImport.trustFacts') }}
+        {{ $t('common.governanceGenesisImport.trustFacts') }}
       </h2>
       <dl class="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.name') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.name') }}</dt>
           <dd class="mt-1 text-sm text-foreground" data-testid="genesis-name"><bdi>{{ visible(retrieved.preview.name) }}</bdi></dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.scope') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.scope') }}</dt>
           <dd class="mt-1 text-sm text-foreground" dir="ltr">{{ visible(retrieved.preview.scope_type) }} / {{ visible(retrieved.preview.scope_id) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.daoId') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.daoId') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(retrieved.preview.dao_id) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.coreHash') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.coreHash') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(retrieved.preview.core_hash) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.envelopeHash') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.envelopeHash') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(retrieved.preview.envelope_hash) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.rulesHash') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.rulesHash') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(retrieved.preview.rules_hash) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.versions') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.versions') }}</dt>
           <dd class="mt-1 text-sm text-foreground" dir="ltr">{{ retrieved.preview.protocol_version }} / {{ visible(retrieved.preview.rules_version) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.thresholds') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.thresholds') }}</dt>
           <dd class="mt-1 text-sm text-foreground" dir="ltr">
             {{ retrieved.preview.committee_size }} / {{ retrieved.preview.receipt_threshold }} / {{ retrieved.preview.outcome_threshold }}
           </dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.turnout') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.turnout') }}</dt>
           <dd class="mt-1 text-sm text-foreground" dir="ltr">{{ retrieved.preview.minimum_turnout_count }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.approvalRule') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.approvalRule') }}</dt>
           <dd class="mt-1 text-sm text-foreground" dir="ltr">{{ retrieved.preview.proposal_approval_numerator }} / {{ retrieved.preview.proposal_approval_denominator }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.activation') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.activation') }}</dt>
           <dd class="mt-1 break-all text-sm text-foreground" dir="ltr">
             {{ visible(retrieved.preview.cometbft_chain_id) }} / {{ retrieved.preview.initial_epoch }} / {{ retrieved.preview.initial_height }}
           </dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.activationTime') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.activationTime') }}</dt>
           <dd class="mt-1 text-sm text-foreground">{{ new Date(retrieved.preview.activation_time_unix * 1000).toLocaleString() }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.policyVersion') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.policyVersion') }}</dt>
           <dd class="mt-1 text-sm text-foreground" dir="ltr">{{ visible(retrieved.preview.qualification_policy_version) }}</dd>
         </div>
         <div>
-          <dt class="text-xs text-muted-foreground">{{ $t('governanceGenesisImport.resolvedFrom') }}</dt>
+          <dt class="text-xs text-muted-foreground">{{ $t('common.governanceGenesisImport.resolvedFrom') }}</dt>
           <dd class="mt-1 break-all font-mono text-xs text-foreground" dir="ltr">{{ visible(retrieved.resolved_from) }}</dd>
         </div>
       </dl>
 
       <div class="mt-5 grid gap-5 sm:grid-cols-2">
         <div>
-          <h3 class="text-sm font-medium text-foreground">{{ $t('governanceGenesisImport.issuers') }}</h3>
+          <h3 class="text-sm font-medium text-foreground">{{ $t('common.governanceGenesisImport.issuers') }}</h3>
           <ul class="mt-2 space-y-1">
             <li v-for="issuer in retrieved.preview.accepted_issuers" :key="issuer" class="break-all font-mono text-xs text-muted-foreground" dir="ltr">{{ visible(issuer) }}</li>
           </ul>
         </div>
         <div>
-          <h3 class="text-sm font-medium text-foreground">{{ $t('governanceGenesisImport.evidence') }}</h3>
+          <h3 class="text-sm font-medium text-foreground">{{ $t('common.governanceGenesisImport.evidence') }}</h3>
           <ul class="mt-2 space-y-1">
             <li v-for="item in retrieved.preview.accepted_assessment_evidence" :key="item" class="break-all font-mono text-xs text-muted-foreground" dir="ltr">{{ visible(item) }}</li>
           </ul>
@@ -308,15 +362,15 @@ onMounted(() => {
       </div>
 
       <h3 class="mt-5 text-sm font-medium text-foreground">
-        {{ $t('governanceGenesisImport.founders') }}
+        {{ $t('common.governanceGenesisImport.founders') }}
       </h3>
       <div class="mt-2 space-y-3">
         <details v-for="member in retrieved.preview.members" :key="member.member_id" class="rounded border border-border p-3">
           <summary class="cursor-pointer break-all font-mono text-sm font-medium text-foreground" dir="ltr">{{ visible(member.member_id) }}</summary>
           <dl class="mt-3 space-y-2 font-mono text-xs text-muted-foreground" dir="ltr">
-            <div><dt>{{ $t('governanceGenesisImport.identityKey') }}</dt><dd class="break-all">{{ visible(member.identity_public_key_hex) }}</dd></div>
-            <div><dt>{{ $t('governanceGenesisImport.consensusKey') }}</dt><dd class="break-all">{{ visible(member.consensus_public_key_hex) }}</dd></div>
-            <div><dt>{{ $t('governanceGenesisImport.governanceKey') }}</dt><dd class="break-all">{{ visible(member.governance_public_key_hex) }}</dd></div>
+            <div><dt>{{ $t('common.governanceGenesisImport.identityKey') }}</dt><dd class="break-all">{{ visible(member.identity_public_key_hex) }}</dd></div>
+            <div><dt>{{ $t('common.governanceGenesisImport.consensusKey') }}</dt><dd class="break-all">{{ visible(member.consensus_public_key_hex) }}</dd></div>
+            <div><dt>{{ $t('common.governanceGenesisImport.governanceKey') }}</dt><dd class="break-all">{{ visible(member.governance_public_key_hex) }}</dd></div>
           </dl>
         </details>
       </div>
@@ -324,14 +378,14 @@ onMounted(() => {
       <div class="mt-6 border-t border-border pt-5">
         <AppInput
           v-model="confirmation"
-          :label="$t('governanceGenesisImport.confirmLabel')"
+          :label="$t('common.governanceGenesisImport.confirmLabel')"
           :placeholder="retrieved.preview.dao_id"
         />
         <p class="mt-2 text-xs text-muted-foreground">
-          {{ $t('governanceGenesisImport.confirmHint') }}
+          {{ $t('common.governanceGenesisImport.confirmHint') }}
         </p>
         <AppButton class="mt-4" variant="governance" :loading="pinning" :disabled="!canPin" @click="pinGenesis">
-          {{ $t('governanceGenesisImport.pin') }}
+          {{ $t('common.governanceGenesisImport.pin') }}
         </AppButton>
       </div>
     </section>
