@@ -33,6 +33,8 @@ function applyDesktopValidationConfig() {
 
   config.bundle ??= {};
   config.bundle.createUpdaterArtifacts = false;
+  config.bundle.macOS ??= {};
+  config.bundle.macOS.signingIdentity = "-";
 
   if (config.plugins && Object.prototype.hasOwnProperty.call(config.plugins, "updater")) {
     delete config.plugins.updater;

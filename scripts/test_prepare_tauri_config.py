@@ -31,6 +31,21 @@ class PrepareTauriConfigTests(unittest.TestCase):
             self.assertIn(f'version = "{version}"', (root / 'src-tauri/Cargo.toml').read_text())
             self.assertEqual(json.loads((root / 'src-tauri/tauri.conf.json').read_text())['version'], version)
 
+    def test_validation_uses_ad_hoc_signing_without_public_updater(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / 'src-tauri/tauri.conf.json'
+            config_path.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT / 'src-tauri/tauri.conf.json', config_path)
+            original = json.loads(config_path.read_text())
+            subprocess.run(['node', str(ROOT / 'scripts/prepare-tauri-config.mjs'),
+                            'desktop-validation'], cwd=root, check=True, capture_output=True)
+            config = json.loads(config_path.read_text())
+            self.assertEqual(config['bundle']['macOS']['signingIdentity'], '-')
+            self.assertFalse(config['bundle']['createUpdaterArtifacts'])
+            self.assertNotIn('updater', config['plugins'])
+            self.assertEqual(config['bundle']['macOS']['entitlements'], original['bundle']['macOS']['entitlements'])
+
     def test_bad_version_leaves_files_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(['node', str(ROOT / 'scripts/prepare-tauri-config.mjs'),
