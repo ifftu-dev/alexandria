@@ -531,8 +531,8 @@ const classroomPreviews = computed(() =>
   background: linear-gradient(135deg, var(--app-accent), var(--app-primary));
 }
 
-.sb-preview-title {
-  font-size: 0.8125rem;
+.sb-preview-title-slot :deep(.sb-preview-title) {
+  font-size: 0.875rem;
   font-weight: 500;
   color: var(--app-foreground);
   line-height: 1.3;
@@ -543,7 +543,7 @@ const classroomPreviews = computed(() =>
   overflow: hidden;
 }
 
-.sb-preview-card:hover .sb-preview-title {
+.sb-preview-card:hover :deep(.sb-preview-title) {
   color: var(--app-primary);
 }
 
