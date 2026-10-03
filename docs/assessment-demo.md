@@ -185,3 +185,46 @@ personas, votes, or qualification exceptions were added. Other profiles receive
 these publications through the normal connected-peer exchange; profile seeding
 does not publish under a new user's identity. Live second-device receipt remains
 unverified.
+
+
+### Development test-data picker
+
+In debug builds or optimized builds compiled with Cargo feature `dev-seeding`,
+**Settings → Developer → Test data** lists the actual bundled resources:
+eight example course drafts, two video courses, nine plugins, two question banks,
+individual goal templates, three classrooms, fifteen videos, seven thumbnails,
+and six local discussion prompts. Required taxonomy/synonyms and global plugins
+remain available on startup. Optional content is no longer automatically added
+on each development-profile unlock; existing content is preserved.
+
+Choose individual resources across categories or **Seed everything**. Review
+includes dependencies in installation order, then one run reports added, kept,
+and failed resources. Retry is idempotent and preserves edited existing rows.
+**Reset selected** and **Reset all seeds** preview local records to remove,
+including edits, enrollments, progress, notes, assessment attempts, and classroom
+messages. A confirmation checkbox is required. The backend binds confirmation
+to a digest of the affected records and rejects a stale review. Reset runs in
+one transaction; required global plugins, active assessments/calls, and shared
+dependencies outside the reset are retained with an explanation. Issued
+credentials, completion evidence, integrity history, learner goals, and public
+P2P copies remain. Enrollment/course links from retained history are cleared
+as listed in the review. Media pins/plugin registrations are removed while
+immutable cached files remain available for reuse. Seeds can then be added again.
+
+Commands require the active profile session lease and reject writes in normal
+release builds. Media bytes stay in that profile's content store. No attempts,
+credentials, enrollments, votes, or signed public discussions are synthesized.
+Discussion prompts open in the normal composer and retain its credential gate
+and publication consent.
+
+For CI artifacts, dispatch **Validate (Desktop)** and **Validate (Mobile)** with
+an immutable semver tag that does not start with `v` (for example,
+`0.6.1-dev-seeds.20261003.1`), `dev_seeding=true`, and every platform enabled.
+Desktop validation covers macOS ARM64, Linux x86_64/ARM64, and Windows x86_64;
+mobile validation covers Android ARM64 and the iOS ARM64 simulator using
+`ios_export_method=debugging`. Artifacts are attached to the workflow runs;
+validation does not publish a public release or upload to app stores. Normal
+release workflows do not enable `dev-seeding`. Test installers use the existing
+application identity, so installation can replace an existing app; profile data
+is retained. A successful build is not evidence of on-device camera/P2P behavior;
+record those checks separately.

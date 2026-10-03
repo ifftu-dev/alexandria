@@ -2,7 +2,9 @@
 
 **Open:** Alexandria, learner `demo_for_ashish`; trusted instructor `demo`; Cloud at <http://127.0.0.1:8787>.
 **Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
-Every profile automatically receives the bundled seeds, seven example course drafts, **Plugins Showcase**, two **Video Lab** courses, three example classrooms, and all nine bundled plugins when created, restored, or unlocked. Find courses under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**.
+**Development/test builds:** open **Settings → Developer → Test data**. Choose resources → **Review selection → Seed these resources**, or use **Seed everything** for one reviewed run. Seeds apply only to the unlocked profile; repeat runs keep existing work. **Reset selected** or **Reset all seeds** shows affected records before removing local seeds, edits, and progress; confirm only after reviewing. Issued credentials and published discussions remain. New development profiles receive the required taxonomy/global plugins automatically, while optional content is opt-in. Standard release builds retain the temporary automatic demo rollout.
+
+Courses appear under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**. Seeded discussion prompts are local drafts: **Open draft**, edit, then publish with an accepted topic credential.
 
 **Content tour:** Discussions → pick a thread. Instructor → My courses → **Algorithm Essentials — Video Lab** or **Web Foundations — Video Lab** (four videos plus transcripts each). Classroom templates appear in the sidebar. All 15 clips are local. Hover a long sidebar name to pause just that item and reveal its full title.
 

@@ -3,6 +3,11 @@ name: Validate (Desktop)
 on:
   workflow_dispatch:
     inputs:
+      dev_seeding:
+        description: 'Enable the development-only test data picker (validation only)'
+        required: false
+        type: boolean
+        default: false
       tag:
         description: 'Immutable tag to validate'
         required: true
@@ -36,6 +41,7 @@ jobs:
     uses: ./.github/workflows/desktop-shared.yml
     with:
       mode: validate
+      dev_seeding: ${{ inputs.dev_seeding }}
       tag: ${{ inputs.tag }}
       sign_updater: false
       include_linux: ${{ inputs.include_linux }}

@@ -67,9 +67,13 @@
     "coreHash": "Genesis core hash",
     "envelopeHash": "Signed envelope hash",
     "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
-    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept.",
+    "defaultNetwork": "Gobernanza de la red predeterminada",
+    "defaultPinned": "Fijado para este perfil",
+    "defaultAvailable": "Disponible para este perfil",
+    "defaultHint": "Los perfiles nuevos fijan automáticamente el génesis verificado incluido con Alexandria. Los perfiles existentes pueden revisarlo y aceptarlo aquí. Este anclaje establece la confianza; los servicios de votación se configuran por separado.",
+    "useDefault": "Aceptar este anclaje de confianza predeterminado"
   },
-
   "status": {
     "connected": "Conectado",
     "offline": "Sin conexión",

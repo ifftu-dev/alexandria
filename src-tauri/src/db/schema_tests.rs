@@ -189,7 +189,7 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 105, "table count changed");
+    assert_eq!(tables, 106, "table count changed");
     assert_eq!(names(db.conn(), "index").len(), 110, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),

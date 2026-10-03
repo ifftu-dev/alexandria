@@ -22,6 +22,7 @@ import {
 } from '@/composables/useBiometricVault'
 import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
+import DeveloperSeedsPanel from '@/components/settings/DeveloperSeedsPanel.vue'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
 import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
@@ -33,7 +34,7 @@ import CredentialRequests from '@/components/profile/CredentialRequests.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
-import type { Identity } from '@/types'
+import type { Identity, SeedCatalog } from '@/types'
 
 const { t } = useI18n()
 const { invoke } = useLocalApi()
@@ -54,11 +55,13 @@ interface SectionMeta {
   /** Free-text terms the search box matches against, beyond label/desc. */
   keywords: string[]
 }
+const developerEnabled = ref(false)
 const SECTION_IDS: SettingsSectionId[] = [
   'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity',
-  'directories', 'assistants', 'advanced',
+  'directories', 'assistants', 'advanced', 'developer',
 ]
 const SECTIONS = computed<SectionMeta[]>(() => [
+  ...(developerEnabled.value ? [{ id: 'developer' as const, label: 'Developer', desc: 'Test data and selective seeding', keywords: ['seed', 'test', 'demo', 'resources'] }] : []),
   { id: 'account', label: t('settings.nav.sections.account.label'), desc: t('settings.nav.sections.account.desc'),
     keywords: ['display name', 'bio', 'stake address', 'payment address', 'peer id', 'profile hash', 'publish', 'did'] },
   { id: 'security', label: t('settings.nav.sections.security.label'), desc: t('settings.nav.sections.security.desc'),
@@ -121,7 +124,7 @@ function onSearchEnter() {
 // (e.g. /settings/security) and the browser back button works.
 const activeSection = computed<SettingsSectionId>(() => {
   const s = route.params.section as string | undefined
-  return (s && (SECTION_IDS as string[]).includes(s))
+  return (s && (SECTION_IDS as string[]).includes(s) && (s !== 'developer' || developerEnabled.value))
     ? (s as SettingsSectionId)
     : 'account'
 })
@@ -287,6 +290,7 @@ async function hydrate() {
 }
 
 onMounted(() => {
+  void invoke<SeedCatalog>('dev_seed_catalog').then(c => { developerEnabled.value = c.enabled }).catch(() => { developerEnabled.value = false })
   void hydrate()
 })
 
@@ -957,7 +961,8 @@ function onSectionClick(id: SettingsSectionId) {
                 </template>
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->
-                <template v-else-if="activeSection === 'advanced'">
+                <template v-else-if="activeSection === 'developer' && developerEnabled"><DeveloperSeedsPanel /></template>
+          <template v-else-if="activeSection === 'advanced'">
                   <PersonhoodLabPanel />
                   <AdvancedSettingsPanel />
                 </template>

@@ -86,7 +86,18 @@ pub fn install_bundled_data(conn: &Connection) -> Result<i64, String> {
     })
 }
 
-fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
+pub(crate) fn install_foundation(conn: &Connection) -> Result<i64, String> {
+    crate::db::with_transaction(conn, || {
+        let count = install_taxonomy(conn)?;
+        let (synonyms, _) = GOAL_TEMPLATES_SQL
+            .split_once("INSERT OR IGNORE INTO goal_templates")
+            .ok_or("Bundled synonyms boundary missing")?;
+        conn.execute_batch(synonyms).map_err(|e| e.to_string())?;
+        Ok(count)
+    })
+}
+
+pub(crate) fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
     let existing_skills: i64 = conn
         .query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;

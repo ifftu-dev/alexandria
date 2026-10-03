@@ -2246,3 +2246,43 @@ export interface DiscussionAccess {
   eligible_fields: string[]
   governed_fields: string[]
 }
+
+export interface SeedResource {
+  id: string
+  title: string
+  category: string
+  description: string
+  dependencies: string[]
+  installed: boolean
+}
+export interface SeedCatalog {
+  enabled: boolean
+  resources: SeedResource[]
+}
+export interface SeedResult {
+  id: string
+  status: 'added' | 'kept' | 'failed' | 'removed'
+  error: string | null
+}
+export interface SeedDraft {
+  id: string
+  title: string
+  body: string
+}
+
+export interface SeedResetEffect {
+  label: string
+  count: number
+  action: 'remove' | 'detach'
+}
+export interface SeedResetItem {
+  id: string
+  title: string
+  can_reset: boolean
+  reason: string | null
+  effects: SeedResetEffect[]
+}
+export interface SeedResetPlan {
+  resources: SeedResetItem[]
+  token: string
+}

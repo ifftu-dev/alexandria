@@ -12,6 +12,7 @@ default-run = "alexandria-node"
 
 [features]
 default = []
+dev-seeding = []
 personhood-lab = ["dep:alexandria-personhood"]
 
 # Enable desktop tutoring video without acoustic echo cancellation.

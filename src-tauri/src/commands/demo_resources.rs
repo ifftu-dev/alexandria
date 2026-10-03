@@ -98,15 +98,22 @@ struct Classroom {
     channels: Vec<String>,
 }
 
-fn media_bytes(id: &str) -> Result<&'static [u8], String> {
+pub(super) fn media_bytes(id: &str) -> Result<&'static [u8], String> {
     MEDIA
         .iter()
         .find(|(key, _)| *key == id)
         .map(|(_, bytes)| *bytes)
         .ok_or_else(|| format!("missing bundled video: {id}"))
 }
-fn media_cid(id: &str) -> Result<String, String> {
+pub(super) fn media_cid(id: &str) -> Result<String, String> {
     Ok(blake3::hash(media_bytes(id)?).to_hex().to_string())
+}
+pub(super) fn thumbnail_bytes(id: &str) -> Result<&'static [u8], String> {
+    THUMBNAILS
+        .iter()
+        .find(|(key, _)| *key == id)
+        .map(|(_, bytes)| *bytes)
+        .ok_or_else(|| format!("Missing bundled thumbnail: {id}"))
 }
 fn html(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -140,6 +147,13 @@ pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> 
 }
 
 fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
+    install_selected_rows(conn, None)
+}
+
+pub(super) fn install_selected_rows(
+    conn: &rusqlite::Connection,
+    selected: Option<&str>,
+) -> Result<(), String> {
     let resources: Resources = serde_json::from_str(RESOURCES).map_err(|e| e.to_string())?;
     let author: String = conn
         .query_row(
@@ -149,7 +163,11 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     crate::db::with_transaction(conn, || {
-        for item in &resources.media {
+        for item in resources
+            .media
+            .iter()
+            .filter(|m| selected.is_none_or(|s| s == format!("media:{}", m.id)))
+        {
             let cid = media_cid(&item.id)?;
             crate::content_store::storage::upsert_pin(
                 conn,
@@ -160,7 +178,10 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
             )
             .map_err(|e| e.to_string())?;
         }
-        for (_, bytes) in THUMBNAILS {
+        for (_, bytes) in THUMBNAILS
+            .iter()
+            .filter(|(id, _)| selected.is_none_or(|s| s == format!("thumbnail:{id}")))
+        {
             let cid = blake3::hash(bytes).to_hex().to_string();
             crate::content_store::storage::upsert_pin(
                 conn,
@@ -177,7 +198,11 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
             conn.execute("DELETE FROM demo_opinion_examples WHERE id=?1", [id])
                 .map_err(|e| e.to_string())?;
         }
-        for course in &resources.courses {
+        for course in resources
+            .courses
+            .iter()
+            .filter(|c| selected.is_none_or(|s| s == format!("video:{}", c.id)))
+        {
             let id = entity_id(&["example-video-course-v1", &author, &course.id]);
             let lessons = course
                 .lesson_ids
@@ -221,7 +246,11 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
                 conn.execute("INSERT INTO course_elements (id,chapter_id,title,element_type,content_inline,position) VALUES (?1,?2,?3,'text',?4,?5)",params![transcript_id,chapter_id,format!("{} — transcript",lesson.title),transcript,(position*2+1) as i64]).map_err(|e|e.to_string())?;
             }
         }
-        for room in &resources.classrooms {
+        for room in resources
+            .classrooms
+            .iter()
+            .filter(|r| selected.is_none_or(|s| s == format!("classroom:{}", r.id)))
+        {
             let id = entity_id(&["example-classroom-v1", &author, &room.id]);
             let invite = format!("{:08X}", rand::random::<u32>());
             let inserted = conn.execute("INSERT OR IGNORE INTO classrooms (id,name,description,owner_address,invite_code) VALUES (?1,?2,?3,?4,?5)",params![id,format!("{} (Example)",room.name),room.description,author,invite]).map_err(|e|e.to_string())?;

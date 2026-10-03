@@ -505,8 +505,12 @@ impl AppState {
         // Install the labelled built-in taxonomy, goal templates and question
         // banks. No personas, credentials, courses or governance rows are
         // created, and nothing is downloaded.
-        crate::db::bundled::install_bundled_data(database.conn())
-            .map_err(|e| format!("bundled data install failed: {e}"))?;
+        (if commands::dev_seeds::enabled() {
+            crate::db::bundled::install_foundation(database.conn())
+        } else {
+            crate::db::bundled::install_bundled_data(database.conn())
+        })
+        .map_err(|e| format!("bundled data install failed: {e}"))?;
 
         {
             let mut guard = self.db.lock().map_err(|e| e.to_string())?;
@@ -1337,6 +1341,12 @@ pub fn run() {
             commands::courses::get_course,
             commands::courses::create_course,
             commands::demo_courses::import_demo_courses,
+            commands::dev_seeds::dev_seed_catalog,
+            commands::dev_seeds::dev_seed_plan,
+            commands::dev_seeds::dev_seed_run,
+            commands::dev_seeds::dev_seed_drafts,
+            commands::dev_seed_reset::dev_seed_reset_plan,
+            commands::dev_seed_reset::dev_seed_reset_run,
             commands::demo_resources::list_demo_opinions,
             commands::demo_courses::import_plugin_demo_course,
             commands::courses::update_course,

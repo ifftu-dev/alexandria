@@ -12,7 +12,7 @@ const AUTO_SEED_DEMO_CONTENT: bool = true;
 const CORPUS: &str = include_str!("../../../demo-world/content/courses.json");
 
 pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> {
-    if !AUTO_SEED_DEMO_CONTENT {
+    if !AUTO_SEED_DEMO_CONTENT || super::dev_seeds::enabled() {
         return Ok(());
     }
     let database = state.db.clone();
@@ -211,6 +211,14 @@ fn lesson_content(element: &ExampleElement) -> Result<Option<(&'static str, Stri
 }
 
 fn import_examples(conn: &rusqlite::Connection, plugin_only: bool) -> Result<usize, String> {
+    import_selected(conn, plugin_only, None)
+}
+
+pub(super) fn import_selected(
+    conn: &rusqlite::Connection,
+    plugin_only: bool,
+    selected: Option<&str>,
+) -> Result<usize, String> {
     let corpus: Corpus = serde_json::from_str(CORPUS).map_err(|e| e.to_string())?;
     let author: String = conn
         .query_row(
@@ -221,11 +229,11 @@ fn import_examples(conn: &rusqlite::Connection, plugin_only: bool) -> Result<usi
         .map_err(|e| e.to_string())?;
     crate::db::with_transaction(conn, || {
         let mut created = 0;
-        for course in corpus
-            .courses
-            .iter()
-            .filter(|c| c.kind == "course" && (c.id == "course_plugin_demo") == plugin_only)
-        {
+        for course in corpus.courses.iter().filter(|c| {
+            c.kind == "course"
+                && (c.id == "course_plugin_demo") == plugin_only
+                && selected.is_none_or(|id| c.id == id)
+        }) {
             let id = entity_id(&["example-course-v1", &author, &course.id]);
             let description = if plugin_only {
                 format!("Bundled plugin example for review. {}", course.description)

@@ -12,6 +12,8 @@ pub mod courses;
 pub mod credentials;
 pub mod demo_courses;
 pub mod demo_resources;
+pub mod dev_seed_reset;
+pub mod dev_seeds;
 pub mod diagnostics;
 pub mod elements;
 pub mod enrollment;

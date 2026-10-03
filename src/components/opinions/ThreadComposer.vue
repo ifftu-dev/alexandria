@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { AppButton } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
 import type { DiscussionContent } from '@/types'
-const props = defineProps<{ initial?: DiscussionContent; busy?: boolean }>()
+const props = defineProps<{ initial?: DiscussionContent; busy?: boolean; submitLabel?: string }>()
 const emit = defineEmits<{ submit: [content: DiscussionContent]; cancel: [] }>()
 const { invoke } = useLocalApi()
 const kind = ref<DiscussionContent['post_kind']>(props.initial?.post_kind ?? 'text')
@@ -46,6 +46,6 @@ function submit() {
     <label class="block text-sm">{{ $t('opinions.threads.thumbnailLabel') }}<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="!consent || uploading" class="mt-2 block" @change="upload($event, 'image')" /><span v-if="thumbnail" class="text-primary">{{ $t('opinions.threads.uploaded') }}</span></label>
     <p v-if="uploading" role="status" class="text-sm text-muted-foreground">{{ $t('opinions.threads.uploading') }}</p>
     <p v-if="error" role="alert" class="text-sm text-red-500">{{ error }}</p>
-    <div class="flex gap-3"><AppButton type="submit" size="sm" :disabled="!valid">{{ $t(initial ? 'opinions.threads.save' : 'opinions.threads.publish') }}</AppButton><button type="button" class="px-4 text-sm" @click="emit('cancel')">{{ $t('common.actions.cancel') }}</button></div>
+    <div class="flex gap-3"><AppButton type="submit" size="sm" :disabled="!valid">{{ submitLabel ?? $t(initial ? 'opinions.threads.save' : 'opinions.threads.publish') }}</AppButton><button type="button" class="px-4 text-sm" @click="emit('cancel')">{{ $t('common.actions.cancel') }}</button></div>
   </form>
 </template>

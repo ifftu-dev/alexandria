@@ -193,7 +193,7 @@ jobs:
       - name: Run Clippy (lint)
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
-        run: cargo clippy --workspace --all-targets --features tutoring-video-static,personhood-lab -- -D warnings
+        run: cargo clippy --workspace --all-targets --features tutoring-video-static,personhood-lab,dev-seeding -- -D warnings
 
       - name: Run Rust tests
         if: needs.changes.outputs.backend == 'true'
@@ -206,7 +206,7 @@ jobs:
         env:
           CARGO_PROFILE_TEST_DEBUG: "0"
           CARGO_BUILD_JOBS: "2"
-        run: cargo test --workspace --features tutoring-video-static,personhood-lab
+        run: cargo test --workspace --features tutoring-video-static,personhood-lab,dev-seeding
 
       - name: Tauri command guard
         # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
@@ -300,11 +300,11 @@ jobs:
           - label: iOS
             os: macos-15
             target: aarch64-apple-ios
-            features: tutoring-video-ios
+            features: tutoring-video-ios,dev-seeding
           - label: Android
             os: ubuntu-latest
             target: aarch64-linux-android
-            features: tutoring-video-android,personhood-lab
+            features: tutoring-video-android,personhood-lab,dev-seeding
 
     steps:
       - name: Checkout alexandria

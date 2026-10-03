@@ -16,3 +16,4 @@ export type SettingsSectionId =
   | 'integrity'
   | 'assistants'
   | 'advanced'
+  | 'developer'

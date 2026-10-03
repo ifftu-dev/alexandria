@@ -50,6 +50,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (6, "demo_opinion_examples", "CREATE TABLE demo_opinion_examples (id TEXT PRIMARY KEY, subject_field_id TEXT NOT NULL REFERENCES subject_fields(id), title TEXT NOT NULL, summary TEXT NOT NULL, video_cid TEXT NOT NULL, duration_seconds INTEGER NOT NULL);"),
     (7, "opinion_threads", include_str!("discussions.sql")),
     (8, "tutoring_presence", "ALTER TABLE tutoring_sessions ADD COLUMN room_id TEXT; ALTER TABLE tutoring_sessions ADD COLUMN last_occupied_at INTEGER; CREATE TABLE tutoring_presence (room_id TEXT NOT NULL,node_id TEXT NOT NULL,present INTEGER NOT NULL,seen_at INTEGER NOT NULL,PRIMARY KEY(room_id,node_id)); CREATE INDEX idx_tutoring_room ON tutoring_sessions(room_id);"),
+    (9, "developer_discussion_drafts", "CREATE TABLE developer_discussion_drafts (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);"),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"

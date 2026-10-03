@@ -46,5 +46,6 @@
   "assessment_finalize_adaptive": "adaptive delivery; turn-by-turn runner UI pending",
   "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending",
   "list_eligible_subject_fields_for_posting": "Legacy video-opinion API; thread UI uses discussion_access",
-  "publish_opinion": "Legacy signed video-opinion API; new UI uses act_on_discussion"
+  "publish_opinion": "Legacy signed video-opinion API; new UI uses act_on_discussion",
+  "list_demo_opinions": "Legacy read compatibility for retired local viewpoints; current Discussions feed uses signed threads."
 }
