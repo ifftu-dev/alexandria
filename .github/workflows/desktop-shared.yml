@@ -176,7 +176,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -261,7 +261,7 @@ jobs:
           LIBRARY_PATH: /opt/homebrew/lib
         with:
           projectPath: alexandria
-          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.desktop.macos.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.desktop.macos.conf.json
           includeUpdaterJson: false
 
       - name: Build unsigned macOS release
@@ -475,7 +475,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -659,7 +659,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -821,7 +821,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
