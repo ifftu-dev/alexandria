@@ -89,7 +89,7 @@ async function withdraw() {
   }
   try {
     await invoke('withdraw_own_opinion', { opinionId: opinion.value.id })
-    router.push('/opinions')
+    router.push('/discussions')
   } catch (e) {
     error.value = t('opinions.detail.withdrawFailed', { error: String(e) })
   }

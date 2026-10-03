@@ -260,7 +260,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins, Opinion examples and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
+The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
 
 ### Building for iOS
 

@@ -18,6 +18,7 @@ const { sessions: tutoringSessionsList, refreshSessions } = useTutoringRoom()
 const { invoke } = useLocalApi()
 
 const isActive = (path: string) => {
+  if (path === '/discussions' && route.path.startsWith('/opinions')) return true
   if (path === '/home') return route.path === '/home'
   if (path === '/instructor') return route.path === '/instructor'
   return route.path.startsWith(path)
@@ -38,7 +39,7 @@ interface NavItem {
 
 const LEARNER_NAV: NavItem[] = [
   { path: '/home', labelKey: 'nav.primary.home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-  { path: '/opinions', labelKey: 'nav.primary.opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
+  { path: '/discussions', labelKey: 'nav.primary.opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
   { path: '/community', labelKey: 'nav.primary.community', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
   { path: '/skills', labelKey: 'nav.primary.skillsAndCredentials', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
   { path: '/goals', labelKey: 'nav.primary.goals', icon: '' }, // circles drawn separately below

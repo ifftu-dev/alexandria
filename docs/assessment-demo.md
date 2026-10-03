@@ -4,7 +4,7 @@ This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandri
 
 ## Prepare this Mac
 
-1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and ten profile-owned course drafts (seven examples, Plugins Showcase, and two video labs), seven local Opinion examples, and three classroom/channel templates. This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
+1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and ten profile-owned course drafts (seven examples, Plugins Showcase, and two video labs), and three classroom/channel templates. This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
 2. Start Docker Desktop. From the Cloud checkout run `scripts/demo-assessment.sh`. Open <http://127.0.0.1:8787> and choose **Continue**. This is a loopback-only development sign-in, not a production identity-provider deployment.
 3. In Alexandria, open **Settings → Directories** and add `http://127.0.0.1:8787`, named **Local demo**. Both applications use the exported bundled taxonomy. The launcher creates only an organization; it does not seed candidate assessment results.
 4. Use **JavaScript** (`skill_javascript`) or **Big-O Analysis** (`skill_big_o`). These have bundled MCQ banks. Each attempt draws three questions and requires at least 70%; with three equally weighted questions, all three must be correct. Questions/options are randomized.
@@ -89,14 +89,14 @@ the verified document CID/version; it does not accept unsigned seed data.
 The player redirects unenrolled learners through the same plugin pre-flight.
 Enrollment/preparation errors appear inline rather than only in the console.
 
-### Opinion examples, classrooms, and video labs
+### Discussions, classrooms, and video labs
 
-Every profile receives seven read-only examples under **Opinions → Example
-viewpoints**, each with a locally bundled narrated video. They use a separate
-`demo_opinion_examples` table and have no author, signature, credential claims,
-or network publication. Normal Opinion posting keeps its qualification rules.
-The text adapts the retired seed topics; fabricated identities and proofs are
-not restored.
+The **Discussions** feed contains credential-qualified peer publications. The
+seven read-only Example viewpoints have been removed; profile activation deletes
+only those known bundled rows and no longer seeds them. Existing signed threads,
+comments, credentials, course content, and media remain intact. Old `/opinions`
+thread links still work; new navigation uses `/discussions`. Old example links
+return to the feed.
 
 Three owned classrooms (Algorithms Study Group, Web Development Cohort, and
 Design Critique Circle) provide seven starter channels. Only the current user
@@ -106,7 +106,7 @@ Existing edits are preserved on subsequent unlocks.
 **Algorithm Essentials — Video Lab** and **Web Foundations — Video Lab** each
 contain four narrated teaching videos and four transcript lessons. Use
 **Prepare and enroll** as for the other drafts. The 15 original MP4s (eight
-lessons and seven Opinion examples) ship with the binary, copy into each
+lessons and seven retained discussion clips) ship with the binary, copy into each
 profile’s content store, and are pinned for offline playback. They are clearly
 labelled AI-generated with synthetic narration. Sources/transcripts live in
 `demo-world/content/resources.json`; regenerate on macOS with Python + Pillow,
@@ -121,10 +121,10 @@ content resources and remain excluded, as do retired governance records.
 Course thumbnails are backfilled on unlock only when both thumbnail fields are
 empty; user artwork is preserved. The temporary `AUTO_SEED_DEMO_CONTENT` switch
 in `commands/demo_courses.rs` controls profile-activation demo installation.
-Seven bundled Opinion previews now have local JPEG thumbnails. These remain
-read-only examples, not fabricated public posts or credentials.
+The retained discussion clips and JPEG thumbnails remain available for existing
+published attachments; they no longer appear as standalone sample viewpoints.
 
-The new Opinions feed supports text/link/video threads, nested comments (eight
+The Discussions feed supports text/link/video threads, nested comments (eight
 levels), one up/down vote per DID, new/top/most-discussed sorting, author edits
 and tombstone deletion, and signed reports. Reports do not automatically remove
 posts. Both posting and commenting use the existing topic qualification checker.
@@ -155,9 +155,9 @@ an unfamiliar invite needs a reachable participant before opening media.
 Network partitions cannot prove global absence: unreachable sessions show an
 availability explanation rather than claiming a remote host definitely ended.
 
-### Opinions presentation and authored quizzes
+### Discussions presentation and authored quizzes
 
-The feed, published thread, and bundled-video reading page share the app’s card and typography styles. Bundled examples remain read-only; published comments and votes must come from real profile actions after topic qualification. The classroom channel/member surfaces use the same card tint as the course sidebar.
+The feed and published threads share the app’s card and typography styles. Published comments use real profile actions after topic qualification; votes are signed profile actions. The classroom channel/member surfaces use the same card tint as the course sidebar.
 
 Quiz-editor questions now persist point weights. Older editor questions without weights count as one point each; invalid nonpositive weights are rejected. Failed quizzes can be retried until course completion. Completion updates remain bound to the lesson submitted even if the learner navigates while saving.
 
@@ -172,3 +172,16 @@ On macOS, the media permission delegate forwards other optional UI callbacks to 
 Build `41e9c6c` was installed and verified on the Mac: native thumbnail and MP4 uploads, published video playback, persisted discussion interactions, and Sentinel live camera/face/gaze preview all worked. Course settings saved successfully through **Instructor → My Courses**. Switch to Instructor mode before editing; the mode guard still redirects the learner-mode Edit Course entry to Home. The learner profile was left unlocked on Opinions with camera/video stopped.
 
 The subsequent installed build `d998ec63` includes the signed default-network demo genesis. In the native app, `demo_for_ashish` shows **Pinned for this profile**; its displayed DAO ID and envelope hash match the bundled public document. The status persisted after navigating away and returning. The app was left unlocked on Community, ready to show the temporary single-operator label and expand the verified founding facts.
+
+### Additional published discussions
+
+The qualified `demo_for_ashish` learner published six further text threads through
+the normal composer: algorithm explanations, edge-case testing, hash-table
+trade-offs, form recovery, mobile layout, and loading/empty/error states. Three
+have signed author starter replies, bringing the rehearsal to eight threads and
+six comments in total. They are labelled demo prompts, all authored by the same
+learner, and use its existing independently endorsed credential. No credentials,
+personas, votes, or qualification exceptions were added. Other profiles receive
+these publications through the normal connected-peer exchange; profile seeding
+does not publish under a new user's identity. Live second-device receipt remains
+unverified.

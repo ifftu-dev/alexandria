@@ -1,6 +1,6 @@
 {
   "index": {
-    "title": "అభిప్రాయాలు",
+    "title": "చర్చలు",
     "subtitle": "ప్రతి అంశంలో క్రెడెన్షియల్‌లు ఉన్న విద్యావేత్తల అభిప్రాయాలు. కొత్తవి ముందుగా, ఎప్పుడూ ర్యాంక్ చేయబడవు.",
     "post": "అభిప్రాయాన్ని పోస్ట్ చేయి",
     "filterAll": "అన్నీ",
@@ -56,11 +56,11 @@
     "watch": "ఉదాహరణ చూడండి"
   },
   "threads": {
-    "heading": "Opinions",
+    "heading": "చర్చలు",
     "eyebrow": "THE COMMON ROOM",
     "intro": "Ideas worth discussing. Perspectives backed by experience.",
     "create": "Create a post",
-    "back": "All opinions",
+    "back": "All discussions",
     "topic": "Topic",
     "allTopics": "All topics",
     "sort": "Sort by",
@@ -71,17 +71,17 @@
     "refresh": "Refresh",
     "loading": "Loading discussions…",
     "loadMore": "Load more",
-    "empty": "No published threads in this topic yet. Explore the example viewpoints below.",
+    "empty": "No published threads in this topic yet. Start a discussion when you have a qualifying credential.",
     "about": "A place for informed discussion",
     "aboutBody": "Share a perspective, ask a thoughtful question, or explore another point of view. Threads and interactions sync between connected Alexandria peers.",
     "gateTitle": "Experience earns a voice",
     "gateBody": "Posting and commenting both require a credential accepted by the topic’s qualification policy. Your node checks the author’s proof before accepting a contribution.",
-    "voteNote": "Votes reflect community opinion. They do not increase credential reputation. One vote per identity; identities are not verified unique people.",
+    "voteNote": "Votes reflect community preferences. They do not increase credential reputation. One vote per identity; identities are not verified unique people.",
     "upvote": "Upvote",
     "downvote": "Downvote",
     "comments": "{count} comments",
     "qualified": "Credential-qualified",
-    "legacy": "Original video opinion",
+    "legacy": "Original video discussion",
     "postType": "Post type",
     "text": "Text",
     "link": "Link",
@@ -126,6 +126,6 @@
     "noComments": "No comments yet. Start the conversation.",
     "notFound": "This thread has not arrived on this device yet. Return to the feed and refresh after connecting to peers.",
     "proof": "Qualification evidence",
-    "proofBody": "At receipt, a credential for this author satisfied the topic’s pinned qualification policy. This is a posting qualification, not an endorsement of the opinion."
+    "proofBody": "At receipt, a credential for this author satisfied the topic’s pinned qualification policy. This qualifies the author to post; it does not endorse the content."
   }
 }

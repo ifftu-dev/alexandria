@@ -396,7 +396,7 @@ const relationLabels: Record<string, string> = {
             <router-link
               v-for="op in relatedOpinions"
               :key="op.id"
-              :to="`/opinions/legacy/${op.id}`"
+              :to="`/discussions/legacy/${op.id}`"
               class="flex items-center gap-2 rounded-lg px-3 py-2.5 transition-all hover:bg-muted/40"
             >
               <svg class="w-4 h-4 text-primary/60 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>

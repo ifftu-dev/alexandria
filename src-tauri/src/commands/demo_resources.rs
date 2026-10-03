@@ -66,7 +66,6 @@ const THUMBNAILS: &[(&str, &[u8])] = &[
 #[derive(Deserialize)]
 struct Resources {
     media: Vec<Media>,
-    opinions: Vec<ExampleOpinion>,
     courses: Vec<VideoCourse>,
     classrooms: Vec<Classroom>,
 }
@@ -82,14 +81,6 @@ struct Media {
 struct Scene {
     title: String,
     body: String,
-}
-#[derive(Deserialize)]
-struct ExampleOpinion {
-    id: String,
-    subject_field_id: String,
-    title: String,
-    summary: String,
-    media_id: String,
 }
 #[derive(Deserialize)]
 struct VideoCourse {
@@ -143,7 +134,7 @@ pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> 
         let guard = database.lock().map_err(|e| e.to_string())?;
         let db = guard.as_ref().ok_or("database not initialized")?;
         install_rows(db.conn())?;
-        log::info!("profile resources ready: 7 opinion examples, 3 classrooms, 2 video courses, 15 local videos");
+        log::info!("profile resources ready: 3 classrooms, 2 video courses, 15 local videos; retired viewpoints removed");
         Ok::<_, String>(())
     }).await.map_err(|e| format!("resource install task failed: {e}"))?
 }
@@ -169,7 +160,7 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
             )
             .map_err(|e| e.to_string())?;
         }
-        for (id, bytes) in THUMBNAILS {
+        for (_, bytes) in THUMBNAILS {
             let cid = blake3::hash(bytes).to_hex().to_string();
             crate::content_store::storage::upsert_pin(
                 conn,
@@ -179,26 +170,12 @@ fn install_rows(conn: &rusqlite::Connection) -> Result<(), String> {
                 false,
             )
             .map_err(|e| e.to_string())?;
-            conn.execute(
-                "UPDATE demo_opinion_examples SET thumbnail_cid=?2 WHERE id=?1",
-                params![id, cid],
-            )
-            .map_err(|e| e.to_string())?;
         }
-        for opinion in &resources.opinions {
-            let media = resources
-                .media
-                .iter()
-                .find(|m| m.id == opinion.media_id)
-                .ok_or("opinion media missing")?;
-            conn.execute("INSERT OR IGNORE INTO demo_opinion_examples (id,subject_field_id,title,summary,video_cid,duration_seconds) VALUES (?1,?2,?3,?4,?5,?6)", params![opinion.id,opinion.subject_field_id,opinion.title,opinion.summary,media_cid(&media.id)?,media.duration_seconds]).map_err(|e| e.to_string())?;
-        }
-        for (id, bytes) in THUMBNAILS {
-            conn.execute(
-                "UPDATE demo_opinion_examples SET thumbnail_cid=?2 WHERE id=?1",
-                params![id, blake3::hash(bytes).to_hex().to_string()],
-            )
-            .map_err(|e| e.to_string())?;
+        // Retire only the seven bundled viewpoints. Keep their media pinned:
+        // existing signed discussions can reference these same public clips.
+        for (id, _) in THUMBNAILS {
+            conn.execute("DELETE FROM demo_opinion_examples WHERE id=?1", [id])
+                .map_err(|e| e.to_string())?;
         }
         for course in &resources.courses {
             let id = entity_id(&["example-video-course-v1", &author, &course.id]);
@@ -312,7 +289,7 @@ mod tests {
                     })
                     .unwrap()
             };
-            assert_eq!(list_examples(db.conn()).unwrap().len(), 7);
+            assert!(list_examples(db.conn()).unwrap().is_empty());
             assert_eq!(count("classrooms"), 3);
             assert_eq!(count("classroom_members"), 3);
             assert_eq!(count("classroom_channels"), 7);
@@ -379,12 +356,16 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(edits, 2);
-            for example in list_examples(db.conn()).unwrap() {
-                assert!(example.duration_seconds > 10);
-                assert!(MEDIA
-                    .iter()
-                    .any(|(_, bytes)| blake3::hash(bytes).to_hex().as_str() == example.video_cid));
+            // Upgrading a previously seeded profile removes retired rows and
+            // preserves independently added data and all existing media pins.
+            for id in ["op_cs_01", "custom-example"] {
+                db.conn().execute("INSERT INTO demo_opinion_examples (id,subject_field_id,title,summary,video_cid,duration_seconds) VALUES (?1,'sf_cs','Saved example','Summary','saved-video',30)", [id]).unwrap();
             }
+            install_rows(db.conn()).unwrap();
+            let remaining = list_examples(db.conn()).unwrap();
+            assert_eq!(remaining.len(), 1);
+            assert_eq!(remaining[0].id, "custom-example");
+            assert_eq!(count("pins"), 22);
         }
     }
 }

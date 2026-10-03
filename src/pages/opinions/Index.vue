@@ -4,12 +4,10 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import ThreadThumbnail from '@/components/opinions/ThreadThumbnail.vue'
 import ThreadVotes from '@/components/opinions/ThreadVotes.vue'
 import ThreadMeta from '@/components/opinions/ThreadMeta.vue'
-import OpinionExamples from '@/components/opinions/OpinionExamples.vue'
 import { AppButton } from '@/components/ui'
-import type { DiscussionItem, OpinionExample, OpinionRow, SubjectFieldInfo } from '@/types'
+import type { DiscussionItem, OpinionRow, SubjectFieldInfo } from '@/types'
 const { invoke } = useLocalApi()
 const threads = ref<DiscussionItem[]>([])
-const examples = ref<OpinionExample[]>([])
 const legacy = ref<OpinionRow[]>([])
 const fields = ref<SubjectFieldInfo[]>([])
 const field = ref('')
@@ -42,8 +40,8 @@ async function vote(item: DiscussionItem, value: number) {
 watch([field, sort], () => load())
 onMounted(async () => {
   try {
-    const [f, e, l] = await Promise.all([invoke<SubjectFieldInfo[]>('list_subject_fields'), invoke<OpinionExample[]>('list_demo_opinions'), invoke<OpinionRow[]>('list_opinions')])
-    fields.value = f; examples.value = e; legacy.value = l
+    const [f, l] = await Promise.all([invoke<SubjectFieldInfo[]>('list_subject_fields'), invoke<OpinionRow[]>('list_opinions')])
+    fields.value = f; legacy.value = l
     await load()
     timer = setInterval(() => { if (!busy.value && threads.value.length <= 200) void load() }, 10000)
   } catch (e) { error.value = String(e); loading.value = false }
@@ -54,7 +52,7 @@ onBeforeUnmount(() => { generation++; if (timer) clearInterval(timer) })
   <div class="mx-auto max-w-5xl">
     <header class="mb-5 flex items-center justify-between gap-3">
       <div><h1 class="text-xl font-bold">{{ $t('opinions.threads.heading') }}</h1><p class="mt-1 hidden text-sm text-muted-foreground sm:block">{{ $t('opinions.threads.intro') }}</p></div>
-      <AppButton size="sm" @click="$router.push('/opinions/new')">+ {{ $t('opinions.threads.create') }}</AppButton>
+      <AppButton size="sm" @click="$router.push('/discussions/new')">+ {{ $t('opinions.threads.create') }}</AppButton>
     </header>
     <div class="mb-5 flex flex-wrap items-center gap-3">
       <select v-model="field" :aria-label="$t('opinions.threads.topic')" class="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm sm:flex-none"><option value="">{{ $t('opinions.threads.allTopics') }}</option><option v-for="f in fields" :key="f.id" :value="f.id">{{ f.icon_emoji }} {{ f.name }}</option></select>
@@ -71,14 +69,13 @@ onBeforeUnmount(() => { generation++; if (timer) clearInterval(timer) })
         <div v-if="threads.length" class="divide-y divide-border/60 overflow-hidden rounded-xl bg-card shadow-sm">
           <article v-for="item in threads" :key="item.id" class="px-4 py-5 transition-colors hover:bg-muted/20 sm:px-5">
             <ThreadMeta class="mb-3" :author="item.author_did" :created-at="item.created_at" :topic="names.get(item.subject_field_id)" />
-            <router-link :to="`/opinions/${item.id}`" class="flex items-start justify-between gap-4"><div class="min-w-0"><h2 class="break-words text-base font-semibold leading-snug">{{ item.content?.title }}</h2><p class="mt-2 line-clamp-2 text-sm text-muted-foreground">{{ item.body }}</p><p v-if="item.content?.url" class="mt-1 truncate text-xs text-primary">{{ item.content.url }}</p></div><ThreadThumbnail :cid="item.content?.thumbnail_cid" :kind="item.content?.post_kind" :topic="item.subject_field_id" /></router-link>
-            <div class="mt-3 flex flex-wrap items-center gap-3"><ThreadVotes :score="item.score" :vote="item.my_vote" :disabled="busy" @vote="vote(item, $event)" /><router-link :to="`/opinions/${item.id}`" class="text-xs font-medium text-muted-foreground">{{ $t('opinions.threads.comments', { count: item.comment_count }) }}</router-link><span class="ms-auto text-[11px] text-muted-foreground">{{ $t('opinions.threads.qualified') }}</span></div>
+            <router-link :to="`/discussions/${item.id}`" class="flex items-start justify-between gap-4"><div class="min-w-0"><h2 class="break-words text-base font-semibold leading-snug">{{ item.content?.title }}</h2><p class="mt-2 line-clamp-2 text-sm text-muted-foreground">{{ item.body }}</p><p v-if="item.content?.url" class="mt-1 truncate text-xs text-primary">{{ item.content.url }}</p></div><ThreadThumbnail :cid="item.content?.thumbnail_cid" :kind="item.content?.post_kind" :topic="item.subject_field_id" /></router-link>
+            <div class="mt-3 flex flex-wrap items-center gap-3"><ThreadVotes :score="item.score" :vote="item.my_vote" :disabled="busy" @vote="vote(item, $event)" /><router-link :to="`/discussions/${item.id}`" class="text-xs font-medium text-muted-foreground">{{ $t('opinions.threads.comments', { count: item.comment_count }) }}</router-link><span class="ms-auto text-[11px] text-muted-foreground">{{ $t('opinions.threads.qualified') }}</span></div>
           </article>
         </div>
         <p v-if="!loading && !threads.length" class="py-5 text-sm text-muted-foreground">{{ $t('opinions.threads.empty') }}</p>
         <button v-if="more" class="my-4 text-sm text-primary" @click="load(true)">{{ $t('opinions.threads.loadMore') }}</button>
-        <article v-for="item in filteredLegacy" :key="item.id" class="mb-2 rounded-xl bg-card p-4 shadow-sm"><router-link :to="`/opinions/legacy/${item.id}`" class="flex items-center gap-4"><ThreadThumbnail :cid="item.thumbnail_cid" kind="video" :topic="item.subject_field_id" /><div><p class="text-xs text-muted-foreground">{{ names.get(item.subject_field_id) }}</p><h2 class="font-semibold">{{ item.title }}</h2><p class="mt-1 text-xs text-muted-foreground">{{ $t('opinions.threads.legacy') }}</p></div></router-link></article>
-        <OpinionExamples :examples="examples" :subject-field-id="field" />
+        <article v-for="item in filteredLegacy" :key="item.id" class="mb-2 rounded-xl bg-card p-4 shadow-sm"><router-link :to="`/discussions/legacy/${item.id}`" class="flex items-center gap-4"><ThreadThumbnail :cid="item.thumbnail_cid" kind="video" :topic="item.subject_field_id" /><div><p class="text-xs text-muted-foreground">{{ names.get(item.subject_field_id) }}</p><h2 class="font-semibold">{{ item.title }}</h2><p class="mt-1 text-xs text-muted-foreground">{{ $t('opinions.threads.legacy') }}</p></div></router-link></article>
     </div>
   </div>
 </template>

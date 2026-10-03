@@ -1,30 +1,30 @@
 {
   "index": {
-    "title": "Opiniones",
-    "subtitle": "Opiniones de educadores con credenciales en cada tema. Las más recientes primero, nunca clasificadas.",
-    "post": "Publicar opinión",
+    "title": "Debates",
+    "subtitle": "Discusiones de educadores con credenciales en cada tema. Las más recientes primero, nunca clasificadas.",
+    "post": "Publicar discusión",
     "filterAll": "Todas",
-    "emptyTitle": "Aún no hay opiniones",
-    "emptyFieldDescription": "Aún no hay opiniones en este tema.",
-    "emptyAllDescription": "Los educadores con credenciales en un tema pueden publicar aquí videos de opinión. Sé el primero.",
-    "opinionCount": "ninguna | {count} opinión | {count} opiniones",
+    "emptyTitle": "Aún no hay discusiones",
+    "emptyFieldDescription": "Aún no hay discusiones en este tema.",
+    "emptyAllDescription": "Los educadores con credenciales en un tema pueden publicar aquí videos de discusión. Sé el primero.",
+    "opinionCount": "ninguna | {count} discusión | {count} discusiones",
     "minutes": "{count} min"
   },
   "detail": {
     "notFound": "Opinión no encontrada.",
     "withdraw": "Retirar",
-    "withdrawConfirm": "¿Retirar esta opinión? El video se eliminará de este dispositivo y la publicación quedará oculta.",
+    "withdrawConfirm": "¿Retirar esta discusión? El video se eliminará de este dispositivo y la publicación quedará oculta.",
     "withdrawFailed": "No se pudo retirar: {error}",
     "byLabel": "por",
-    "credentialsHeading": "Credenciales que respaldan esta opinión",
+    "credentialsHeading": "Credenciales que respaldan esta discusión",
     "noCredentials": "No hay credenciales referenciadas.",
     "verifiedProof": "Prueba verificada",
     "unsyncedLabel": "Aún sincronizando de otros estudiantes:"
   },
   "new": {
-    "title": "Publicar una opinión",
-    "intro": "Las opiniones pertenecen a un tema. Para publicar en un tema necesitas al menos una credencial de nivel de aplicación o superior en una habilidad de ese tema.",
-    "noEligibleWarning": "Aún no tienes una credencial que califique. Obtén una credencial de nivel de aplicación o superior en cualquier habilidad y podrás publicar opiniones en el tema de esa habilidad.",
+    "title": "Publicar una discusión",
+    "intro": "Las discusiones pertenecen a un tema. Para publicar en un tema necesitas al menos una credencial de nivel de aplicación o superior en una habilidad de ese tema.",
+    "noEligibleWarning": "Aún no tienes una credencial que califique. Obtén una credencial de nivel de aplicación o superior en cualquier habilidad y podrás publicar discusiones en el tema de esa habilidad.",
     "topicHeading": "Tema",
     "contentHeading": "Contenido",
     "titleLabel": "Título",
@@ -41,13 +41,13 @@
     "thumbnailUploadFailed": "La subida de la miniatura falló: {error}",
     "uploadedPrefix": "Subido:",
     "credentialsHeading": "Credenciales",
-    "credentialsHelp": "Elige cuáles de tus credenciales respaldan esta opinión. Al menos una debe habilitarte para publicar en este tema; hemos preseleccionado esas. Puedes añadir o quitar credenciales abajo.",
+    "credentialsHelp": "Elige cuáles de tus credenciales respaldan esta discusión. Al menos una debe habilitarte para publicar en este tema; hemos preseleccionado esas. Puedes añadir o quitar credenciales abajo.",
     "noQualifying": "No tienes una credencial que califique para este tema. Elige otro tema.",
     "verified": "Verificada",
     "credentialMeta": "puntuación {score}% · emitida {date}",
     "loadFailed": "No se pudieron cargar los temas: {error}",
     "publishFailed": "La publicación falló: {error}",
-    "publish": "Publicar opinión"
+    "publish": "Publicar discusión"
   },
   "examples": {
     "title": "Puntos de vista de ejemplo",
@@ -56,11 +56,11 @@
     "watch": "Ver ejemplo"
   },
   "threads": {
-    "heading": "Opinions",
+    "heading": "Debates",
     "eyebrow": "THE COMMON ROOM",
     "intro": "Ideas worth discussing. Perspectives backed by experience.",
     "create": "Create a post",
-    "back": "All opinions",
+    "back": "All discussions",
     "topic": "Topic",
     "allTopics": "All topics",
     "sort": "Sort by",
@@ -71,17 +71,17 @@
     "refresh": "Refresh",
     "loading": "Loading discussions…",
     "loadMore": "Load more",
-    "empty": "No published threads in this topic yet. Explore the example viewpoints below.",
+    "empty": "No published threads in this topic yet. Start a discussion when you have a qualifying credential.",
     "about": "A place for informed discussion",
     "aboutBody": "Share a perspective, ask a thoughtful question, or explore another point of view. Threads and interactions sync between connected Alexandria peers.",
     "gateTitle": "Experience earns a voice",
     "gateBody": "Posting and commenting both require a credential accepted by the topic’s qualification policy. Your node checks the author’s proof before accepting a contribution.",
-    "voteNote": "Votes reflect community opinion. They do not increase credential reputation. One vote per identity; identities are not verified unique people.",
+    "voteNote": "Votes reflect community preferences. They do not increase credential reputation. One vote per identity; identities are not verified unique people.",
     "upvote": "Upvote",
     "downvote": "Downvote",
     "comments": "{count} comments",
     "qualified": "Credential-qualified",
-    "legacy": "Original video opinion",
+    "legacy": "Original video discussion",
     "postType": "Post type",
     "text": "Text",
     "link": "Link",
@@ -126,6 +126,6 @@
     "noComments": "No comments yet. Start the conversation.",
     "notFound": "This thread has not arrived on this device yet. Return to the feed and refresh after connecting to peers.",
     "proof": "Qualification evidence",
-    "proofBody": "At receipt, a credential for this author satisfied the topic’s pinned qualification policy. This is a posting qualification, not an endorsement of the opinion."
+    "proofBody": "At receipt, a credential for this author satisfied the topic’s pinned qualification policy. This qualifies the author to post; it does not endorse the content."
   }
 }

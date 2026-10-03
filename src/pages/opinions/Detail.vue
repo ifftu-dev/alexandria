@@ -41,7 +41,7 @@ async function load() {
     } while (batch.length === 200 && ticket === generation)
     if (ticket === generation && !all.length) {
       const legacy = await invoke<OpinionRow | null>('get_opinion', { opinionId: id })
-      if (legacy && ticket === generation) { await router.replace(`/opinions/legacy/${id}`); return }
+      if (legacy && ticket === generation) { await router.replace(`/discussions/legacy/${id}`); return }
     }
     if (ticket === generation) { rows.value = all; error.value = '' }
   } catch (e) { if (ticket === generation) error.value = String(e) }
@@ -75,7 +75,7 @@ onBeforeUnmount(() => { generation++; if (timer) clearInterval(timer) })
 </script>
 <template>
   <div class="mx-auto max-w-4xl">
-    <router-link to="/opinions" class="mb-5 inline-flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">← {{ $t('opinions.threads.back') }}</router-link>
+    <router-link to="/discussions" class="mb-5 inline-flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">← {{ $t('opinions.threads.back') }}</router-link>
     <p v-if="error" role="alert" class="mb-4 rounded-lg bg-error/10 p-3 text-sm text-error">{{ error }}</p>
     <p v-if="loading" class="py-8 text-sm text-muted-foreground">{{ $t('opinions.threads.loading') }}</p>
     <article v-else-if="post" class="overflow-hidden rounded-xl bg-card shadow-sm">
