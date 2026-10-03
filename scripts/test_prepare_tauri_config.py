@@ -43,7 +43,8 @@ class PrepareTauriConfigTests(unittest.TestCase):
             config = json.loads(config_path.read_text())
             self.assertEqual(config['bundle']['macOS']['signingIdentity'], '-')
             self.assertFalse(config['bundle']['createUpdaterArtifacts'])
-            self.assertNotIn('updater', config['plugins'])
+            self.assertEqual(config['plugins']['updater']['endpoints'], [])
+            self.assertEqual(config['plugins']['updater']['pubkey'], original['plugins']['updater']['pubkey'])
             self.assertEqual(config['bundle']['macOS']['entitlements'], original['bundle']['macOS']['entitlements'])
 
     def test_bad_version_leaves_files_untouched(self):

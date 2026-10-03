@@ -226,5 +226,8 @@ mobile validation covers Android ARM64 and the iOS ARM64 simulator using
 validation does not publish a public release or upload to app stores. Normal
 release workflows do not enable `dev-seeding`. Test installers use the existing
 application identity, so installation can replace an existing app; profile data
-is retained. A successful build is not evidence of on-device camera/P2P behavior;
+is retained. Desktop validation retains the updater configuration required for
+startup but disables its endpoints and updater artifacts. The Mac validation
+job also launches the packaged app and checks that it survives startup.
+A successful build is not evidence of on-device camera/P2P behavior;
 record those checks separately.

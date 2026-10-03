@@ -326,6 +326,33 @@ jobs:
           rename_asset '*_aarch64.dmg' "Alexandria-${VERSION}-macOS-Apple-Silicon.dmg"
           rename_asset '*_aarch64.dmg.sig' "Alexandria-${VERSION}-macOS-Apple-Silicon.dmg.sig"
 
+      - name: Smoke-test macOS validation startup
+        if: inputs.mode == 'validate'
+        working-directory: alexandria
+        run: |
+          python3 - <<'PYTHON'
+          import pathlib, plistlib, subprocess, tempfile
+          app = pathlib.Path("target/aarch64-apple-darwin/release/bundle/macos/Alexandria.app")
+          info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+          binary = app / "Contents/MacOS" / info["CFBundleExecutable"]
+          with tempfile.TemporaryFile() as output:
+              process = subprocess.Popen([str(binary.resolve())], stdout=output, stderr=output)
+              try:
+                  code = process.wait(timeout=15)
+              except subprocess.TimeoutExpired:
+                  process.terminate()
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
+                  print("Packaged app remained running through startup")
+              else:
+                  output.seek(0)
+                  print(output.read().decode(errors="replace"))
+                  raise SystemExit(f"Packaged app exited during startup ({code})")
+          PYTHON
+
       - name: Collect macOS artifacts
         id: macos-artifacts
         run: |

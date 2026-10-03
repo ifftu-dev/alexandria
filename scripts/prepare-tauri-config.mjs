@@ -36,9 +36,13 @@ function applyDesktopValidationConfig() {
   config.bundle.macOS ??= {};
   config.bundle.macOS.signingIdentity = "-";
 
-  if (config.plugins && Object.prototype.hasOwnProperty.call(config.plugins, "updater")) {
-    delete config.plugins.updater;
-  }
+  // The desktop updater plugin still initializes at startup and requires a
+  // config object with a public key, even when update checks are disabled.
+  config.plugins ??= {};
+  config.plugins.updater = {
+    pubkey: config.plugins.updater?.pubkey ?? "",
+    endpoints: [],
+  };
 
   writeJson(configPath, config);
 }
