@@ -280,14 +280,21 @@ mod tests {
         let receiver_dir = TempDir::new().expect("receiver temp dir");
         let receiver = ContentNode::new(receiver_dir.path());
         receiver.start(None).await.expect("start receiver");
-        let result = fetch_from_peer_unretained_bounded(
-            &receiver,
-            provider.endpoint_addr().await.expect("provider address"),
-            hash,
-            256 * 1024,
-        )
-        .await;
-        assert!(matches!(result, Err(FetchError::TooLarge { .. })));
+        // This tests local blob transfer bounds, not public address discovery.
+        let endpoint = provider.endpoint().await.expect("provider endpoint");
+        let port = endpoint
+            .bound_sockets()
+            .iter()
+            .find(|addr| addr.is_ipv4())
+            .expect("IPv4 socket")
+            .port();
+        let address = EndpointAddr::new(endpoint.id())
+            .with_ip_addr((std::net::Ipv4Addr::LOCALHOST, port).into());
+        let result = fetch_from_peer_unretained_bounded(&receiver, address, hash, 256 * 1024).await;
+        assert!(
+            matches!(result, Err(FetchError::TooLarge { .. })),
+            "unexpected fetch result: {result:?}"
+        );
 
         receiver.shutdown().await.expect("shutdown receiver");
         provider.shutdown().await.expect("shutdown provider");
