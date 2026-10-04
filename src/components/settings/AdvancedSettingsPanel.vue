@@ -49,11 +49,11 @@ async function setString(entry: SettingEntry, value: string) {
         <div
           v-for="entry in group"
           :key="entry.key"
-          class="flex items-start justify-between gap-4"
+          class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 border-b border-border/50 pb-4 last:border-0 last:pb-0"
         >
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-foreground">{{ entry.label }}</span>
+            <div class="flex flex-wrap items-center gap-2">
+              <label :for="`setting-${entry.key}`" class="text-sm font-medium text-foreground">{{ entry.label }}</label>
               <span
                 class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5"
                 :class="entry.scope === 'sync'
@@ -65,16 +65,17 @@ async function setString(entry: SettingEntry, value: string) {
               >
                 {{ entry.scope }}
               </span>
-              <code class="text-[10px] text-muted-foreground/70">{{ entry.key }}</code>
+              <code class="basis-full break-all text-xs text-muted-foreground/70">{{ entry.key }}</code>
             </div>
             <p class="text-xs text-muted-foreground mt-0.5">{{ entry.description }}</p>
           </div>
 
-          <div class="shrink-0 flex items-center gap-2">
+          <div class="flex w-full md:w-auto shrink-0 items-center gap-2">
             <!-- bool -->
-            <label v-if="entry.kind === 'bool'" class="inline-flex items-center cursor-pointer">
+            <label v-if="entry.kind === 'bool'" class="inline-flex min-h-11 min-w-11 items-center cursor-pointer">
               <input
                 type="checkbox"
+                :id="`setting-${entry.key}`"
                 :checked="asBool(entry)"
                 @change="setBool(entry, ($event.target as HTMLInputElement).checked)"
               >
@@ -83,17 +84,19 @@ async function setString(entry: SettingEntry, value: string) {
             <!-- string -->
             <AppInput
               v-else-if="entry.kind === 'string'"
+              :id="`setting-${entry.key}`"
               :model-value="entry.current_value"
-              class="w-48"
+              class="min-w-0 flex-1 md:w-48"
               @update:model-value="(v: string) => setString(entry, v)"
             />
 
             <!-- int / float -->
             <AppInput
               v-else-if="entry.kind === 'int' || entry.kind === 'float'"
+              :id="`setting-${entry.key}`"
               :model-value="entry.current_value"
               type="number"
-              class="w-32"
+              class="min-w-0 flex-1 md:w-32"
               @update:model-value="(v: string) => setString(entry, v)"
             />
 

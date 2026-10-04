@@ -16,6 +16,20 @@ storage quota, window geometry — lives in one place: the per-profile
 - **`device`** — stays on this device only. Use sparingly: storage
   quota, window geometry, per-device API key overrides.
 
+## Navigation on phones
+
+Below 768px, Settings opens a searchable list of sections. Tap a section to
+open it, then use **Settings** in its header to return to the list. Section
+URLs and browser back navigation still work. Wider screens retain the sidebar.
+Forms use touch-sized controls and readable input text; advanced setting
+controls stack below their descriptions on phones.
+
+In development builds, **Developer → Test data** provides search, a category
+selector, and individual resource checkboxes. Selections persist across filters;
+**Clear** removes the selection. Seed/reset review actions stay visible below
+the scrolling content, above the app's bottom navigation. Results are expandable,
+and resetting still requires reviewing affected data and checking confirmation.
+
 ## How it works
 
 ```

@@ -35,9 +35,9 @@ describe('Developer seed picker', () => {
   })
   it('retains selections across categories and reviews dependencies before writing', async () => {
     const wrapper = render(); await flushPromises()
-    await button(wrapper, 'Courses').trigger('click')
+    await wrapper.find('select').setValue('Courses')
     await wrapper.find('input[type=checkbox]').setValue(true)
-    await button(wrapper, 'Assessments').trigger('click')
+    await wrapper.find('select').setValue('Assessments')
     await wrapper.find('input[type=checkbox]').setValue(true)
     await button(wrapper, 'Review selection').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_plan', { selected: ['video:lab', 'bank:js'] })
@@ -73,6 +73,21 @@ describe('Developer seed picker', () => {
     await button(wrapper, 'Remove these seeds').trigger('click'); await flushPromises()
     expect(wrapper.text()).toContain('Affected data changed')
     expect(wrapper.findAll('button').some(b => b.text() === 'Remove these seeds')).toBe(false)
+  })
+
+  it('keeps hidden selections when filters change and clears them explicitly', async () => {
+    const wrapper = render(); await flushPromises()
+    await wrapper.find('select').setValue('Courses')
+    await wrapper.find('input[type=checkbox]').setValue(true)
+    await wrapper.find('input[type=search]').setValue('no matching resource')
+    expect(wrapper.text()).toContain('No resources match these filters')
+    expect(wrapper.text()).toContain('1 selected')
+    await button(wrapper, 'Clear filters').trigger('click')
+    expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(3)
+    expect((wrapper.find('input[type=checkbox]').element as HTMLInputElement).checked).toBe(true)
+    await button(wrapper, 'Clear').trigger('click')
+    expect(button(wrapper, 'Review selection').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'Reset selected').attributes('disabled')).toBeDefined()
   })
 
 })

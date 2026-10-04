@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -130,9 +130,20 @@ const activeSection = computed<SettingsSectionId>(() => {
 })
 
 function setSection(id: SettingsSectionId) {
-  if (id === activeSection.value) return
+  if (route.params.section === id) return
   void router.push(`/settings/${id}`)
 }
+
+const showingSection = computed(() => typeof route.params.section === 'string' && SECTION_IDS.includes(route.params.section as SettingsSectionId))
+const contentScroll = ref<HTMLElement | null>(null)
+const sectionHeading = ref<HTMLElement | null>(null)
+const navigationHeading = ref<HTMLElement | null>(null)
+watch(() => route.params.section, async () => {
+  await nextTick()
+  contentScroll.value?.scrollTo?.({ top: 0 })
+  if (showingSection.value) sectionHeading.value?.focus({ preventScroll: true })
+  else navigationHeading.value?.focus({ preventScroll: true })
+})
 
 // ---- Profile ----
 const displayName = ref('')
@@ -470,11 +481,11 @@ function onSectionClick(id: SettingsSectionId) {
 </script>
 
 <template>
-  <div class="settings-page flex w-full flex-1 min-h-0 flex-col sm:flex-row gap-0 overflow-hidden bg-background">
+  <div class="settings-page flex w-full flex-1 min-h-0 flex-col md:flex-row overflow-hidden bg-background" :class="{ 'settings-page--detail': showingSection }">
             <!-- Sidebar nav -->
-            <aside class="settings-sidebar shrink-0 sm:w-64 border-b sm:border-b-0 sm:border-e border-border bg-muted/20 flex flex-col">
+            <aside class="settings-sidebar min-h-0 md:w-64 md:border-e border-border bg-muted/20 flex flex-col">
               <div class="px-4 pt-5 pb-3">
-                <h2 class="text-sm font-semibold tracking-wide uppercase text-muted-foreground mb-3">
+                <h2 ref="navigationHeading" tabindex="-1" class="text-2xl md:text-sm font-semibold md:tracking-wide md:uppercase text-foreground md:text-muted-foreground mb-4">
                   {{ $t('settings.nav.heading') }}
                 </h2>
                 <!-- Search -->
@@ -484,14 +495,15 @@ function onSectionClick(id: SettingsSectionId) {
                   </svg>
                   <input
                     v-model="searchQuery"
-                    type="text"
+                    type="search"
+                    :aria-label="$t('settings.nav.searchPlaceholder')"
                     :placeholder="$t('settings.nav.searchPlaceholder')"
-                    class="w-full rounded-lg border border-border bg-background py-1.5 ps-8 pe-7 text-sm text-foreground outline-none focus:border-primary"
+                    class="w-full rounded-lg border border-border bg-background min-h-11 py-2 ps-8 pe-11 text-base md:text-sm text-foreground outline-none focus:border-primary"
                     @keyup.enter="onSearchEnter"
                   >
                   <button
                     v-if="searchQuery"
-                    class="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    class="absolute end-0 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center text-muted-foreground hover:text-foreground"
                     :aria-label="$t('settings.nav.clearSearch')"
                     @click="searchQuery = ''"
                   >
@@ -502,7 +514,7 @@ function onSectionClick(id: SettingsSectionId) {
                 </div>
               </div>
 
-              <nav class="flex-1 overflow-y-auto px-2 pb-4 flex sm:block overflow-x-auto sm:overflow-visible gap-1 sm:gap-0">
+              <nav class="min-h-0 flex-1 overflow-y-auto px-3 pb-4 md:px-2" :aria-label="$t('settings.nav.heading')">
                 <p v-if="filteredSections.length === 0" class="px-3 py-4 text-xs text-muted-foreground">
                   {{ $t('settings.nav.noMatch', { query: searchQuery }) }}
                 </p>
@@ -510,7 +522,8 @@ function onSectionClick(id: SettingsSectionId) {
                   v-for="s in filteredSections"
                   :key="s.id"
                   class="settings-nav-item"
-                  :class="{ 'settings-nav-item--active': activeSection === s.id }"
+                  :class="{ 'settings-nav-item--active': activeSection === s.id && showingSection }"
+                  :aria-current="activeSection === s.id && showingSection ? 'page' : undefined"
                   @click="onSectionClick(s.id)"
                 >
                   <span class="settings-nav-icon" aria-hidden="true">
@@ -535,10 +548,10 @@ function onSectionClick(id: SettingsSectionId) {
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16" />
                     </svg>
                   </span>
-                  <span class="flex flex-col text-start min-w-0">
+                  <span class="flex flex-1 flex-col text-start min-w-0">
                     <span class="text-sm font-medium truncate">{{ s.label }}</span>
-                    <span class="hidden sm:block text-[11px] text-muted-foreground truncate">{{ s.desc }}</span>
-                    <span v-if="matchedKeywords(s).length" class="hidden sm:flex flex-wrap gap-1 mt-1">
+                    <span class="mt-1 text-xs leading-relaxed text-muted-foreground md:truncate md:text-[11px]">{{ s.desc }}</span>
+                    <span v-if="matchedKeywords(s).length" class="flex flex-wrap gap-1 mt-1">
                       <span
                         v-for="kw in matchedKeywords(s)"
                         :key="kw"
@@ -546,19 +559,24 @@ function onSectionClick(id: SettingsSectionId) {
                       >{{ kw }}</span>
                     </span>
                   </span>
+                  <svg class="h-4 w-4 shrink-0 text-muted-foreground md:hidden rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
                 </button>
               </nav>
             </aside>
 
             <!-- Content panel -->
             <section class="settings-content flex-1 flex flex-col min-w-0 min-h-0">
-              <header class="flex items-center justify-between px-6 py-4 border-b border-border">
-                <h3 class="text-base font-semibold text-foreground">
+              <header class="settings-section-header shrink-0 border-b border-border px-4 py-3 md:px-6 md:py-4">
+                <router-link to="/settings" class="mb-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary md:hidden">
+                  <svg class="h-5 w-5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+                  {{ $t('settings.nav.heading') }}
+                </router-link>
+                <h3 ref="sectionHeading" tabindex="-1" class="text-xl md:text-base font-semibold text-foreground outline-none">
                   {{ SECTIONS.find(s => s.id === activeSection)?.label }}
                 </h3>
               </header>
 
-              <div class="flex-1 overflow-y-auto px-6 py-5 space-y-8">
+              <div ref="contentScroll" class="settings-body min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6 space-y-7" :class="{ 'settings-body--developer': activeSection === 'developer' && developerEnabled }">
                 <!-- ──────────── Account & Identity ──────────── -->
                 <template v-if="activeSection === 'account'">
                   <div>
@@ -566,7 +584,7 @@ function onSectionClick(id: SettingsSectionId) {
                     <div class="space-y-4">
                       <div>
                         <label class="label text-xs text-muted-foreground">{{ $t('settings.profile.usernameLabel') }}</label>
-                        <div v-if="!editingUsername" class="flex items-center gap-2">
+                        <div v-if="!editingUsername" class="flex flex-wrap items-center gap-2">
                           <span class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
                             @{{ identity?.username ?? '—' }}
                           </span>
@@ -575,7 +593,7 @@ function onSectionClick(id: SettingsSectionId) {
                           </AppButton>
                           <span class="text-xs text-muted-foreground">{{ $t('settings.profile.findYou') }}</span>
                         </div>
-                        <div v-else class="flex items-center gap-2">
+                        <div v-else class="flex flex-wrap items-center gap-2">
                           <AppInput v-model="newUsername" :placeholder="$t('settings.profile.newHandlePlaceholder')" />
                           <AppButton size="sm" :loading="usernameSaving" @click="saveUsername">{{ $t('common.actions.save') }}</AppButton>
                           <AppButton variant="ghost" size="sm" @click="editingUsername = false">{{ $t('common.actions.cancel') }}</AppButton>
@@ -682,7 +700,7 @@ function onSectionClick(id: SettingsSectionId) {
                   <div>
                     <h4 class="settings-group-title">{{ $t('settings.security.accountTitle') }}</h4>
                     <div class="divide-y divide-border/50 rounded-lg border border-border">
-                      <div class="flex items-center justify-between gap-4 p-4">
+                      <div class="settings-action-row flex items-center justify-between gap-4 p-4">
                         <div>
                           <p class="text-sm font-medium text-foreground">{{ $t('settings.security.recoveryPhrase') }}</p>
                           <p class="text-xs text-muted-foreground">{{ $t('settings.security.recoveryPhraseDesc') }}</p>
@@ -691,7 +709,7 @@ function onSectionClick(id: SettingsSectionId) {
                           {{ $t('settings.security.export') }}
                         </AppButton>
                       </div>
-                      <div class="flex items-center justify-between gap-4 p-4">
+                      <div class="settings-action-row flex items-center justify-between gap-4 p-4">
                         <div>
                           <p class="text-sm font-medium text-foreground">{{ $t('settings.security.lockTitle') }}</p>
                           <p class="text-xs text-muted-foreground">{{ $t('settings.security.lockDesc') }}</p>
@@ -706,7 +724,7 @@ function onSectionClick(id: SettingsSectionId) {
                   <div>
                     <h4 class="settings-group-title">{{ $t('settings.security.deviceTitle') }}</h4>
                     <div class="rounded-lg border border-border p-4">
-                      <div class="flex items-center justify-between gap-4">
+                      <div class="settings-action-row flex items-center justify-between gap-4">
                         <div>
                           <p class="text-sm font-medium text-foreground">{{ $t('settings.security.biometricTitle') }}</p>
                           <p class="text-xs text-muted-foreground">{{ $t('settings.security.biometricDesc') }}</p>
@@ -880,7 +898,7 @@ function onSectionClick(id: SettingsSectionId) {
                         </div>
                       </div>
 
-                      <div class="flex items-center gap-3">
+                      <div class="flex flex-wrap items-center gap-3">
                         <AppButton
                           variant="outline"
                           size="sm"
@@ -901,7 +919,7 @@ function onSectionClick(id: SettingsSectionId) {
                   <div>
                     <h4 class="settings-group-title">{{ $t('settings.network.title') }}</h4>
                     <div class="rounded-lg border border-border p-4">
-                      <div class="flex items-center justify-between gap-4">
+                      <div class="settings-action-row flex items-center justify-between gap-4">
                         <div>
                           <p class="text-sm font-medium text-foreground">{{ $t('settings.network.nodeLabel') }}</p>
                           <p class="text-xs text-muted-foreground">
@@ -1046,16 +1064,20 @@ function onSectionClick(id: SettingsSectionId) {
   min-height: 0;
 }
 
-.settings-sidebar {
-  flex-shrink: 0;
-}
+.settings-sidebar { flex-shrink: 0; }
+.settings-sidebar h2:focus, .settings-section-header h3:focus { box-shadow: none; }
+.settings-body { overscroll-behavior: contain; overflow-wrap: anywhere; }
+.settings-body--developer { display: flex; flex-direction: column; overflow: hidden; padding-block: 0; }
+.settings-nav-item:focus-visible { outline: 2px solid var(--app-primary); outline-offset: -2px; }
+
 
 .settings-nav-item {
   display: flex;
   align-items: center;
   gap: 0.625rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: 0.75rem;
+  min-height: 3.25rem;
   border-radius: 0.5rem;
   color: var(--app-foreground);
   background: transparent;
@@ -1199,4 +1221,22 @@ function onSectionClick(id: SettingsSectionId) {
   font-weight: 400;
   color: var(--app-muted-foreground);
 }
+@media (max-width: 767px) {
+  .settings-sidebar { flex: 1; width: 100%; }
+  .settings-content, .settings-page--detail .settings-sidebar { display: none; }
+  .settings-page--detail .settings-content { display: flex; }
+  .settings-nav-item { padding: 1rem 0.75rem; border-bottom: 1px solid var(--app-border); border-radius: 0; }
+  .settings-nav-icon { width: 2.5rem; height: 2.5rem; border-radius: 0.75rem; background: var(--app-muted); }
+  .settings-body :deep(.btn), .settings-body :deep(summary), .settings-copy-btn { min-height: 44px; }
+  .settings-body :deep(.btn) { white-space: normal; }
+  .settings-body :deep(input:not([type="checkbox"]):not([type="radio"]):not([type="range"])),
+  .settings-body :deep(textarea), .settings-body :deep(select) { font-size: 16px; min-height: 44px; }
+  .settings-body :deep(input[type="checkbox"]) { width: 20px; height: 20px; flex-shrink: 0; }
+  .settings-action-row { flex-wrap: wrap; }
+  .settings-action-row > div { flex: 1 1 12rem; }
+  .settings-section-header { display: flex; align-items: center; gap: 1rem; padding-block: 0.5rem; }
+  .settings-section-header > a { margin: 0; flex-shrink: 0; }
+  .settings-section-header > h3 { font-size: 1.125rem; line-height: 1.5rem; }
+}
+
 </style>
