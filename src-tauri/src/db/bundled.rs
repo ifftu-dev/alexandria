@@ -14,8 +14,27 @@
 //! only into an empty taxonomy, and the rest use `INSERT OR IGNORE` and keyed
 //! updates.
 
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use rusqlite::{params, Connection};
+
+use super::Database;
 use serde::Deserialize;
+
+pub(crate) fn bundled_snapshot() -> Result<MutexGuard<'static, Database>, String> {
+    static SNAPSHOT: OnceLock<Result<Mutex<Database>, String>> = OnceLock::new();
+    SNAPSHOT
+        .get_or_init(|| {
+            let db = Database::open_in_memory().map_err(|e| e.to_string())?;
+            db.run_migrations().map_err(|e| e.to_string())?;
+            install_bundled_data(db.conn())?;
+            Ok(Mutex::new(db))
+        })
+        .as_ref()
+        .map_err(Clone::clone)?
+        .lock()
+        .map_err(|e| e.to_string())
+}
 
 const PUBLIC_TAXONOMY_JSON: &str = include_str!("../../../bootstrap/public_taxonomy.json");
 

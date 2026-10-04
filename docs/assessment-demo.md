@@ -194,7 +194,11 @@ In debug builds or optimized builds compiled with Cargo feature `dev-seeding`,
 eight example course drafts, two video courses, nine plugins, two question banks,
 individual goal templates, three classrooms, fifteen videos, seven thumbnails,
 and six local discussion prompts. Required taxonomy/synonyms and global plugins
-remain available on startup. Optional content is no longer automatically added
+remain available on startup. Onboarding and the Goals picker also read the
+bundled role/exam/curriculum catalog offline, even when no goal-template rows
+have been seeded (or those seeds were reset). Existing profile templates take
+precedence; reading these choices does not restore reset rows or create learner
+goals. Optional content is no longer automatically added
 on each development-profile unlock; existing content is preserved.
 
 Choose individual resources across categories or **Seed everything**. Review

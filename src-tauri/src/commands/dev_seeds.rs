@@ -1,11 +1,10 @@
 use std::collections::BTreeSet;
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
-use crate::db::{executor::DatabaseWorkload, Database};
+use crate::db::{bundled::bundled_snapshot, executor::DatabaseWorkload, Database};
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -54,21 +53,6 @@ const DRAFTS: &[(&str, &str, &str)] = &[
     ("cryptography", "How should applications explain key recovery?", "Testing prompt: discuss the usability and security tradeoffs of account recovery without sharing keys or recovery phrases."),
     ("learning", "What evidence demonstrates understanding?", "Testing prompt: compare recall questions, projects, and explanations. What would convince you that someone can apply a concept?"),
 ];
-
-fn bundled_snapshot() -> Result<MutexGuard<'static, Database>, String> {
-    static SNAPSHOT: OnceLock<Result<Mutex<Database>, String>> = OnceLock::new();
-    SNAPSHOT
-        .get_or_init(|| {
-            let db = Database::open_in_memory().map_err(|e| e.to_string())?;
-            db.run_migrations().map_err(|e| e.to_string())?;
-            crate::db::bundled::install_bundled_data(db.conn())?;
-            Ok(Mutex::new(db))
-        })
-        .as_ref()
-        .map_err(Clone::clone)?
-        .lock()
-        .map_err(|e| e.to_string())
-}
 
 fn exists(conn: &Connection, table: &str, column: &str, id: &str) -> Result<bool, String> {
     conn.query_row(

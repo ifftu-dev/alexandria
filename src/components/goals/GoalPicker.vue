@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Set a learning goal. Exam / curriculum / job-role pick from seeded
+// Set a learning goal. Exam / curriculum / job-role pick from offline
 // templates that resolve directly to target skills; a job
 // description (link or pasted text) is parsed on-device into skill
 // *suggestions* the learner confirms before they become a goal.
@@ -30,6 +30,9 @@ const templates = ref<GoalTemplate[]>([])
 const selectedKey = ref('')
 const busy = ref(false)
 const error = ref('')
+const templatesLoading = ref(true)
+const templatesError = ref('')
+let templateGeneration = 0
 
 // JD path
 const jdMode = ref<'link' | 'paste'>('paste')
@@ -45,13 +48,26 @@ function clearSuggestions() {
   suggestions.value = []; chosen.value = new Set(); jdLabel.value = ''; error.value = ''; busy.value = false
 }
 watch([jdText, jdUrl, jdMode, tab], clearSuggestions)
-const removeProfileListener = onProfileLocked(() => { clearSuggestions(); jdText.value = ''; jdUrl.value = '' })
-onBeforeUnmount(() => { generation++; removeProfileListener() })
+const removeProfileListener = onProfileLocked(() => { clearSuggestions(); templateGeneration++; templates.value = []; selectedKey.value = ''; templatesLoading.value = false; templatesError.value = ''; jdText.value = ''; jdUrl.value = '' })
+onBeforeUnmount(() => { generation++; templateGeneration++; removeProfileListener() })
 
 async function loadTemplates() {
-  if (tab.value === 'jd' || tab.value === 'learning_goal') return
-  templates.value = await listGoalTemplates(tab.value)
+  const requestGeneration = ++templateGeneration
+  const kind = tab.value
+  templates.value = []
   selectedKey.value = ''
+  templatesError.value = ''
+  templatesLoading.value = false
+  if (kind === 'jd' || kind === 'learning_goal') return
+  templatesLoading.value = true
+  try {
+    const loaded = await listGoalTemplates(kind)
+    if (requestGeneration === templateGeneration) templates.value = loaded
+  } catch (e) {
+    if (requestGeneration === templateGeneration) templatesError.value = String(e)
+  } finally {
+    if (requestGeneration === templateGeneration) templatesLoading.value = false
+  }
 }
 onMounted(loadTemplates)
 watch(tab, () => {
@@ -150,7 +166,9 @@ async function addJdGoal() {
       <button
         v-for="t in tabs"
         :key="t.id"
-        class="rounded-full border px-3 py-1.5 text-sm transition-colors"
+        class="min-h-11 rounded-full border px-3 py-1.5 text-sm transition-colors"
+        :aria-pressed="tab === t.id"
+        :disabled="busy"
         :class="tab === t.id
           ? 'border-primary bg-primary/10 text-primary'
           : 'border-border text-muted-foreground hover:border-primary/40'"
@@ -162,14 +180,23 @@ async function addJdGoal() {
 
     <!-- Curated template picker -->
     <div v-if="tab !== 'jd' && tab !== 'learning_goal'" class="space-y-3">
+      <p v-if="templatesLoading" role="status" class="text-sm text-muted-foreground">{{ $t('common.actions.loading') }}</p>
+      <div v-else-if="templatesError" class="space-y-2">
+        <p role="alert" class="text-sm text-error">{{ templatesError }}</p>
+        <AppButton variant="outline" @click="loadTemplates">{{ $t('common.actions.retry') }}</AppButton>
+      </div>
+      <p v-else-if="!templates.length" role="status" class="text-sm text-muted-foreground">{{ $t('goals.picker.noTemplates') }}</p>
       <select
+        v-else
         v-model="selectedKey"
-        class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
+        :disabled="busy"
+        :aria-label="$t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label })"
+        class="min-h-11 w-full rounded-lg border border-border bg-input px-3 py-2 text-base sm:text-sm text-foreground"
       >
-        <option value="" disabled>{{ $t('goals.picker.selectPrompt', { type: tab.replace('_', ' ') }) }}</option>
+        <option value="" disabled>{{ $t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label }) }}</option>
         <option v-for="tpl in templates" :key="tpl.key" :value="tpl.key">{{ tpl.label }}</option>
       </select>
-      <AppButton :disabled="!selectedKey" :loading="busy" @click="addTemplateGoal">
+      <AppButton :disabled="!selectedKey || templatesLoading || !!templatesError" :loading="busy" @click="addTemplateGoal">
         {{ $t('goals.picker.setAsGoal') }}
       </AppButton>
     </div>
@@ -198,7 +225,7 @@ async function addJdGoal() {
         v-else
         v-model="jdText"
         rows="6"
-        class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
+        class="w-full rounded-lg border border-border bg-input px-3 py-2 text-base sm:text-sm text-foreground"
         :placeholder="$t(tab === 'learning_goal' ? 'goals.picker.goalPlaceholder' : 'goals.picker.jdPlaceholder')"
       />
       <AppButton

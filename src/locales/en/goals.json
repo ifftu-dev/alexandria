@@ -45,6 +45,7 @@
     "noMatchingSkills": "No matching skills found — try a different description.",
     "addAsGoal": "Add {count} skill as goal | Add {count} skills as goal",
     "learningGoal": "Learning goal",
-    "goalPlaceholder": "Describe what you want to learn…"
+    "goalPlaceholder": "Describe what you want to learn…",
+    "noTemplates": "No goal options are available in this category. Try another category or describe a learning goal."
   }
 }
