@@ -473,7 +473,7 @@ path within the same process hangs indefinitely.
 | Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, peers |
 | Peer Exchange | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 | VC DID | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements |
-| VC Status | `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas |
+| VC Status | `/alexandria/vc-status/1.0` | Bitstring Status List snapshots and deltas |
 | VC Presentation | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes |
 | PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
 | Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
@@ -821,9 +821,9 @@ skill-proof + NFT pipeline it replaced has been deleted (no
    `key_registry` so credentials signed under a pre-rotation key
    still verify.
 2. **Credential** — W3C-style Verifiable Credentials with
-   `Ed25519Signature2020` detached JWS proofs over JCS-canonical
+   W3C Data Integrity `eddsa-jcs-2022` proofs over JCS-canonical
    bytes (`domain::vc`, PR 4). Stored in `credentials` (PR 5).
-3. **Status** — RevocationList2020-style bitmap per issuer in
+3. **Status** — Bitstring Status List bitmap per issuer in
    `credential_status_lists`. Versioned to prevent rollback on
    gossip propagation. PR 5 + PR 9.
 4. **Anchoring** — Per-credential integrity anchor queue

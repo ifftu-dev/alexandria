@@ -312,15 +312,32 @@ pub async fn get_course_completion_endorsement_request(
         .await
 }
 
+fn verify_portable_course_document(
+    json: &str,
+    expected_cid: &str,
+) -> Result<crate::domain::course_document::SignedCourseDocument, String> {
+    let document = content_course::decode_course_document(json.as_bytes())
+        .map_err(|error| error.to_string())?;
+    if blake3::hash(json.as_bytes()).to_hex().as_str() != expected_cid {
+        return Err("portable course document does not match the requested content hash".into());
+    }
+    content_course::verify_course_document(&document).map_err(|error| error.to_string())?;
+    Ok(document)
+}
+
 #[tauri::command]
 pub async fn sign_course_completion_endorsement(
     state: State<'_, AppState>,
     binding: CourseCompletionBinding,
+    course_document_json: Option<String>,
 ) -> Result<CourseCompletionEndorsement, String> {
-    let document =
+    let document = if let Some(json) = course_document_json {
+        verify_portable_course_document(&json, &binding.course_document_cid)?
+    } else {
         content_course::resolve_course_document(&state.content_node, &binding.course_document_cid)
             .await
-            .map_err(|error| format!("resolve exact course document: {error}"))?;
+            .map_err(|error| format!("resolve exact course document: {error}"))?
+    };
     if document.course_id != binding.course_id
         || document.version != binding.course_document_version
     {
@@ -389,6 +406,37 @@ mod tests {
     };
     use alexandria_verify::did::did_from_verifying_key;
     use ed25519_dalek::SigningKey;
+
+    #[test]
+    fn portable_course_requires_exact_bytes_and_author_signature() {
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let payload = crate::domain::course_document::CourseDocumentPayload {
+            version: 2,
+            course_id: "demo-course".into(),
+            author_address: "demo-author".into(),
+            author_did: Some(did_from_verifying_key(&key.verifying_key())),
+            title: "Public demo course".into(),
+            description: None,
+            thumbnail_hash: None,
+            tags: vec![],
+            skill_ids: vec![],
+            chapters: vec![],
+            created_at: 1,
+            updated_at: 1,
+            kind: "course".into(),
+            completion_policy: None,
+            tutor_policy: Default::default(),
+        };
+        let mut signed = content_course::sign_course_document(&payload, &key).unwrap();
+        let json = serde_json::to_string(&signed).unwrap();
+        let cid = blake3::hash(json.as_bytes()).to_hex().to_string();
+        assert!(verify_portable_course_document(&json, &cid).is_ok());
+        assert!(verify_portable_course_document(&json, &"00".repeat(32)).is_err());
+        signed.title = "Tampered".into();
+        let tampered = serde_json::to_string(&signed).unwrap();
+        let tampered_cid = blake3::hash(tampered.as_bytes()).to_hex().to_string();
+        assert!(verify_portable_course_document(&tampered, &tampered_cid).is_err());
+    }
 
     fn fixture() -> (
         crate::db::Database,
@@ -543,7 +591,6 @@ mod tests {
     const NOW: &str = "2026-09-15T00:00:00Z";
 
     fn store_self_claim(db: &crate::db::Database, binding: &CourseCompletionBinding) {
-        use alexandria_verify::did::VerificationMethodRef;
         use alexandria_verify::trust::{
             completion_root_evidence_ref, course_document_evidence_ref,
         };
@@ -580,16 +627,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
-            proof: Proof {
-                type_: "Ed25519Signature2020".into(),
-                created: "2026-01-01T00:00:00Z".into(),
-                verification_method: VerificationMethodRef(format!(
-                    "{}#key-1",
-                    subject_did.as_str()
-                )),
-                proof_purpose: "assertionMethod".into(),
-                jws: String::new(),
-            },
+            proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         let credential = sign_credential(
             UnsignedCredential {

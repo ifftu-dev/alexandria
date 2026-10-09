@@ -25,7 +25,11 @@
     "addTutorial": "+ টিউটোরিয়াল",
     "emptyTitle": "এখনও কিছু তৈরি করা হয়নি",
     "emptyDesc": "কম্পোজার দিয়ে আপনার প্রথম কোর্স বা টিউটোরিয়াল তৈরি করুন।",
-    "updated": "আপডেট হয়েছে {date}"
+    "updated": "আপডেট হয়েছে {date}",
+    "loadExamples": "Load example courses",
+    "examplesNote": "Adds seven AI-generated example courses as editable drafts on this profile. Includes inline lessons and quizzes; no external media or learner results.",
+    "loadPluginShowcase": "Load plugin showcase",
+    "pluginShowcaseNote": "Adds the Plugins Showcase draft and installs its bundled music, IRL review, and JavaScript, TypeScript, C++, and Python editors. First load may take a minute."
   },
   "courseLearners": {
     "eyebrow": "শিক্ষার্থীর অগ্রগতি",
@@ -345,6 +349,29 @@
     "tutorPromptHelp": "This prompt is published with the course so every learner's model follows your teaching approach. Do not put secrets in it.",
     "emptyLesson": "This lesson is empty.",
     "assistantMoved": "Access for external MCP assistants is now in Settings.",
-    "openAssistantAccess": "Open assistant access"
+    "openAssistantAccess": "Open assistant access",
+    "decisionTitle": "Optional AI checks",
+    "decisionDisclosure": "Selected text is sent to TypeSafe AI when a task is enabled, including in shadow mode. Checks are suggestions and never establish proficiency.",
+    "decisionCloud": "Allow hosted processing for this profile",
+    "decisionSave": "Save decision settings",
+    "decisionKey": "AI provider API key (leave blank to keep saved key)",
+    "decisionMode": "Mode",
+    "decisionOff": "Off",
+    "decisionShadow": "Shadow comparison",
+    "decisionAssist": "Reviewed suggestions",
+    "decisionTasks": "Tasks",
+    "decisionRun": "Check with AI",
+    "decisionEvidence": "Source evidence",
+    "decisionAdd": "Add suggestion for review",
+    "decisionShadowComplete": "Shadow check completed; local suggestions are unchanged.",
+    "decisionNoResult": "No reviewable suggestions. Local results remain available.",
+    "decisionStatus": "Check result",
+    "decisionJob": "Job description",
+    "decisionGoal": "Learning goal",
+    "decisionDocument": "Document claims",
+    "decisionStudio": "Studio review",
+    "decisionSearch": "Search ranking",
+    "decisionTutor": "Tutor support",
+    "decisionClearKey": "Remove saved key"
   }
 }

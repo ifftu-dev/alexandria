@@ -21,8 +21,8 @@ function choose(code: Choice) {
 
 <template>
   <div
-    class="grid gap-2"
-    :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }"
+    class="locale-grid grid gap-2"
+    :style="{ '--locale-columns': columns }"
   >
     <button
       class="locale-card"
@@ -61,6 +61,8 @@ function choose(code: Choice) {
 </template>
 
 <style scoped>
+.locale-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 768px) { .locale-grid { grid-template-columns: repeat(var(--locale-columns), minmax(0, 1fr)); } }
 .locale-card {
   display: flex;
   flex-direction: row;

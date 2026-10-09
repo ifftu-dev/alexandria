@@ -6,6 +6,11 @@ on:
       mode:
         required: true
         type: string
+      dev_seeding:
+        description: 'Enable the development-only test data picker (validation only)'
+        required: false
+        type: boolean
+        default: false
       tag:
         required: true
         type: string
@@ -550,7 +555,7 @@ jobs:
         env:
           IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
         run: |
-          npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
+          npx tauri ios build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --config src-tauri/tauri.ios.conf.json --target aarch64-sim
 
       # Manual signing. Given IOS_CERTIFICATE and IOS_MOBILE_PROVISION the Tauri
       # CLI imports the certificate into a keychain and emits a manual-signing
@@ -569,7 +574,7 @@ jobs:
           # IOS_MOBILE_PROVISION is exported by "Ensure an App Store
           # provisioning profile".
         run: |
-          npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
+          npx tauri ios build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
 
       - name: Upload iOS validation artifacts
         if: inputs.mode == 'validate'
@@ -679,9 +684,25 @@ jobs:
           sudo env TMPDIR="$TMPDIR" apt-get update
           sudo env TMPDIR="$TMPDIR" apt-get install -y cmake
 
-      - name: Use preinstalled Android NDK
+      # The runner image now ships only NDK r30, whose sysroot rejects the
+      # unversioned target triple that the bindgen run inside
+      # ffmpeg-sys-next's build script passes ("Unversioned target triples
+      # are not supported"), so the Android build fails before compiling
+      # anything. r26.3 is the release the local Android recipe and the
+      # personhood-lab job build with; install it and use it. Drop this once
+      # ffmpeg-sys-next passes a versioned triple to clang.
+      - name: Install Android NDK r26
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: 'ndk;26.3.11579264'
+
+      - name: Use Android NDK r26
         run: |
-          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          NDK_DIR="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+          if [ ! -d "$NDK_DIR" ]; then
+            NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+            echo "NDK r26.3 was not installed; falling back to $NDK_DIR" >&2
+          fi
           if [ -z "$NDK_DIR" ]; then
             echo "No Android NDK installation was found under $ANDROID_SDK_ROOT/ndk." >&2
             exit 1
@@ -874,7 +895,7 @@ jobs:
             "CC_aarch64-linux-android=${ANDROID_AARCH64_CC}" \
             "CFLAGS_aarch64_linux_android=${ANDROID_AARCH64_CFLAGS}" \
             "CFLAGS_aarch64-linux-android=${ANDROID_AARCH64_CFLAGS}" \
-            npx tauri android build --target aarch64 --config src-tauri/tauri.android.conf.json
+            npx tauri android build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64 --config src-tauri/tauri.android.conf.json
 
       - name: Upload Android validation artifacts
         if: inputs.mode == 'validate'

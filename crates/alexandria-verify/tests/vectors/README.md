@@ -11,40 +11,47 @@ access anywhere in the verification path.
 
 ## What a verifier needs
 
-Two primitives, and no more:
+Three primitives, and no more:
 
 - **JCS** — JSON Canonicalization Scheme, [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)
+- **SHA-256**
 - **Ed25519** — [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)
 
-In particular you do **not** need JSON-LD tooling. Canonicalization is JCS over
-the credential's JSON document, not RDF Dataset Canonicalization. `@context` is
-declarative — it is covered by the signature like any other field, and nothing
-expands or dereferences it. See §14.12a of the protocol specification.
+The proof is a W3C Data Integrity proof using the `eddsa-jcs-2022`
+cryptosuite ([VC Data Integrity 1.0](https://www.w3.org/TR/vc-data-integrity/),
+[VC-DI-EdDSA 1.0 §3.3](https://www.w3.org/TR/vc-di-eddsa/#eddsa-jcs-2022)),
+so any conforming Data Integrity verifier accepts it as-is. You do **not** need
+JSON-LD tooling: the suite canonicalizes JSON, not RDF. `@context` is covered
+by the signature like any other field, and nothing expands or dereferences it.
 
 ## The algorithm, in short
 
-1. Copy the credential and set `proof.jws` to the empty string.
-2. Canonicalize that copy with JCS. These are the signing bytes.
-3. Split `proof.jws` on `.` — it is a *detached* JWS, so it has the form
-   `<protected-header>..<signature>` with an empty middle segment. Both outer
-   segments are base64url, unpadded.
-4. Build the signing input as
-   `<protected-header> || "." || <signing bytes>` — the **raw** canonical bytes,
-   not base64url-encoded.
-5. Verify that Ed25519 signature against the issuer's public key.
-
-   Step 4 is the one to read twice. The protected header is
-   `{"alg":"EdDSA","b64":false,"crit":["b64"]}`, which is
-   [RFC 7797](https://www.rfc-editor.org/rfc/rfc7797) unencoded-payload mode:
-   with `b64:false` the payload is appended raw rather than base64url-encoded.
-   A verifier that assumes ordinary JWS will base64url the canonical bytes,
-   produce a different signing input, and reject every credential ever issued —
-   with no clue as to why, because every other check passes.
+1. Take the credential without its `proof`. Canonicalize it with JCS.
+2. Take the `proof` without `proofValue`, add the credential's `@context` to
+   it, and canonicalize that with JCS. This is the proof configuration.
+3. `hashData = SHA-256(canonical proof configuration) || SHA-256(canonical document)` — 64 bytes.
+4. `proofValue` is multibase base58btc (`z` prefix) of the 64-byte Ed25519
+   signature over `hashData`. Decode it and verify against the issuer's key.
+5. Check the proof options: `type` is `DataIntegrityProof`, `cryptosuite` is
+   `eddsa-jcs-2022`, `proofPurpose` is `assertionMethod`, and
+   `verificationMethod` is `<issuer DID>#<fragment>` — a method the issuer
+   controls. For `did:key` the fragment is the key's own multibase identifier.
 6. Apply the remaining checks: expiry, subject binding, status list, local
    suspension, supersession, and the supplied verification policy.
 7. Return `accept`, `pending`, or `reject`. Missing issuer-key or referenced
    status-list evidence is pending. A failed cryptographic/policy check or an
    invalid status reference is rejected.
+
+## Presentations
+
+A holder presents credentials as a W3C Verifiable Presentation secured the
+same way: `proof.type` `DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`,
+`proofPurpose` `authentication`, `challenge` = the verifier's nonce, `domain`
+= the verifier's audience, `created` and `expires` at most 300 seconds apart,
+`verificationMethod` = `<holder DID>#<fragment>`. The hash data is computed
+exactly as for a credential (steps 1–4 above) over the presentation document.
+Verify the holder's signature first, then each credential inside
+`verifiableCredential` on its own terms.
 
 ## Resolving the issuer key
 
@@ -73,15 +80,25 @@ defects:
 
 Neither requires contacting Alexandria. Both require having been given the data,
 which is what a credential *bundle* is for: it carries the key registry and the
-status lists next to the credentials, and verifies entirely offline.
+status lists next to the credentials, and verifies entirely offline. A status
+list named by an `https` URL (`{origin}/status-lists/{issuer}/{n}`) can also be
+fetched from that URL: the document served there is the signed
+`BitstringStatusListCredential` whose `id` is the URL. A verifier that fetches
+one checks `id`, issuer and signature before reading a bit — the reference
+implementation is `verify_fetched_list` in `src/vc/status.rs`, and
+`scripts/demo/verify-credential.mjs` in the app shows the same check in Node.
+The vectors themselves stay offline: their lists are supplied in `store`.
 
 ## Status lists
 
-`credentialStatus.statusListIndex` is a bit index into the list named by
-`statusListCredential`. Bit *n* is byte `n / 8`, bit `n % 8`, **little-endian
-within the byte** — so index 9 is byte 1, mask `0x02`. Getting this backwards is
-the single most common interoperability bug, which is why
-`07-revoked.json` exists.
+`credentialStatus` is a [Bitstring Status List](https://www.w3.org/TR/vc-bitstring-status-list/)
+entry (`BitstringStatusListEntry`). `statusListIndex` is a bit index into the
+list named by `statusListCredential`. Bit *n* is byte `n / 8`, bit `n % 8`
+counted **from the most significant bit** — so index 9 is byte 1, mask `0x40`.
+Getting this backwards is the single most common interoperability bug, which
+is why `07-revoked.json` exists. The published list is a
+`BitstringStatusListCredential` whose subject carries the bitstring GZIP-compressed
+and multibase base64url encoded (`u…`); the vectors supply the decoded bytes as hex.
 
 A status list the verifier does not have is not evidence of revocation or active
 status. The verifier returns `pending` with `status_list_missing`; it does not
@@ -120,7 +137,7 @@ in what the policy does about it.
 | `01-valid` | The happy path: signature, self-resolution, acceptance |
 | `02-tampered-payload` | A claim altered after signing. The sharpest test of a JCS implementation — a verifier that canonicalizes differently may wrongly accept |
 | `03-wrong-signing-key` | Signed by a key the issuer DID does not name |
-| `04-malformed-jws` | `proof.jws` is not a JWS. Must reject, not error |
+| `04-malformed-proof-value` | `proof.proofValue` is not a multibase Ed25519 signature. Must reject, not error |
 | `05-expired` | `validUntil` precedes the verification time |
 | `06-non-did-subject` | Subject id is not a DID, so nothing is bound |
 | `07-revoked` | Status-list bit set. Pins the bit-order convention |

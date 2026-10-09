@@ -7,7 +7,9 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSentinel } from '@/composables/useSentinel'
+import { useLocalApi } from '@/composables/useLocalApi'
 import { useAssessment } from '@/composables/useAssessment'
+import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 import { AppButton } from '@/components/ui'
 import type { StartedAttempt, GradeResult } from '@/types'
@@ -15,8 +17,10 @@ import type { StartedAttempt, GradeResult } from '@/types'
 const route = useRoute()
 const router = useRouter()
 const sentinel = useSentinel()
-const { startAttempt, saveDraft, grade } = useAssessment()
+const sentinelView = useSentinelView()
+const { startAttempt, saveDraft, submitAnswers, grade } = useAssessment()
 const diagnostics = useDiagnostics()
+const { invoke } = useLocalApi()
 
 const skillId = String(route.params.skillId ?? '')
 const attempt = ref<StartedAttempt | null>(null)
@@ -24,11 +28,13 @@ const attempt = ref<StartedAttempt | null>(null)
 const selected = ref<Record<string, Set<number>>>({})
 const loading = ref(true)
 const grading = ref(false)
+const submitted = ref(false)
 const error = ref('')
 const result = ref<GradeResult | null>(null)
 const closing = ref(false)
 const cleanupError = ref('')
 let disposed = false
+let monitoringClosed = false
 let cleanupTask: Promise<void> | null = null
 let unregisterDiagnostics: (() => void) | null = null
 
@@ -41,9 +47,10 @@ function currentAnswers() {
 }
 
 function stopMonitoring(): Promise<void> {
+  if (monitoringClosed) return Promise.resolve()
   if (cleanupTask) return cleanupTask
   closing.value = true
-  cleanupTask = sentinel.stop().then(() => { cleanupError.value = '' }).catch((e: unknown) => {
+  cleanupTask = sentinel.stop().then(() => { cleanupError.value = ''; monitoringClosed = true }).catch((e: unknown) => {
     if (!disposed) cleanupError.value = String(e)
     else console.warn('Assessment monitoring cleanup failed', e)
   }).finally(() => {
@@ -55,12 +62,17 @@ function stopMonitoring(): Promise<void> {
 
 onMounted(async () => {
   try {
+    const recovered = await invoke<GradeResult | null>('assessment_recover', { skillId, requestId: typeof route.query.request === 'string' ? route.query.request : null })
+    if (disposed) return
+    if (recovered) { result.value = recovered; monitoringClosed = true; return }
     // Auto-activate Sentinel for the assessment (standalone, no enrollment).
     await sentinel.start(null)
     if (disposed) return
     const sessionId = sentinel.getSessionId()
     if (!sessionId || !sentinel.isActive.value) throw new Error('Assessment monitoring is not active')
-    const started = await startAttempt(skillId, sessionId)
+    const started = typeof route.query.request === 'string' && typeof route.query.directory === 'string'
+      ? await invoke<StartedAttempt>('exchange_start_assessment', { directoryUrl: route.query.directory, requestId: route.query.request, integritySessionId: sessionId })
+      : await startAttempt(skillId, sessionId)
     if (disposed) return
     attempt.value = started
     for (const q of attempt.value.questions) selected.value[q.id] = new Set()
@@ -68,7 +80,7 @@ onMounted(async () => {
       selected.value[answer.question_id] = new Set(answer.selected)
     }
     unregisterDiagnostics = diagnostics.registerEntryPreparation(async () => {
-      if (attempt.value && !result.value) {
+      if (attempt.value && !result.value && !submitted.value) {
         await saveDraft(attempt.value.attempt_id, currentAnswers())
       }
     })
@@ -90,6 +102,7 @@ onUnmounted(() => {
 })
 
 function toggle(qid: string, pos: number) {
+  if (submitted.value || grading.value) return
   const set = selected.value[qid] ?? new Set<number>()
   set.has(pos) ? set.delete(pos) : set.add(pos)
   selected.value = { ...selected.value, [qid]: set }
@@ -100,10 +113,15 @@ async function submit() {
   grading.value = true
   error.value = ''
   try {
-    const graded = await grade(attempt.value.attempt_id, currentAnswers())
+    const answers = currentAnswers()
+    await submitAnswers(attempt.value.attempt_id, answers)
+    submitted.value = true
+    await stopMonitoring()
+    if (disposed) return
+    if (cleanupError.value) throw new Error(cleanupError.value)
+    const graded = await grade(attempt.value.attempt_id, answers)
     if (disposed) return
     result.value = graded
-    await stopMonitoring()
   } catch (e) {
     if (!disposed) error.value = String(e)
   } finally {
@@ -114,6 +132,7 @@ async function submit() {
 
 <template>
   <div class="mx-auto max-w-2xl space-y-5 py-6">
+    <div class="flex justify-end"><AppButton variant="outline" @click="sentinelView.toggle">{{ $t('profile.exchange.liveView') }}</AppButton></div>
     <!-- Sentinel notice (always shown during an attempt) -->
     <div v-if="sentinel.isActive.value" class="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm">
       <span
@@ -154,6 +173,8 @@ async function submit() {
           : $t('learn.assessment.retryNote') }}
       </p>
       <div class="flex justify-center gap-2">
+        <AppButton v-if="result.credential_id" @click="router.push('/credentials/' + encodeURIComponent(result.credential_id))">{{ $t('credentials.title') }}</AppButton>
+        <AppButton v-if="result.credential_id" variant="outline" @click="router.push('/settings/directories')">{{ $t('profile.exchange.shareNext') }}</AppButton>
         <AppButton @click="router.push('/skills')">{{ $t('learn.assessment.viewSkills') }}</AppButton>
         <AppButton v-if="!result.passed" variant="outline" :disabled="closing || !!cleanupError" @click="router.go(0)">{{ $t('learn.assessment.retake') }}</AppButton>
       </div>
@@ -175,7 +196,7 @@ async function submit() {
         >
           <input
             type="checkbox"
-            :disabled="grading"
+            :disabled="grading || submitted"
             :checked="selected[q.id]?.has(pi)"
             @change="toggle(q.id, pi)"
           />

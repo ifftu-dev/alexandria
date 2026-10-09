@@ -1,5 +1,5 @@
 {
-  "description": "proof.jws is not a detached JWS. A verifier must reject rather than error out — malformed input is a verification failure, not a crash.",
+  "description": "proof.proofValue is not a multibase Ed25519 signature. A verifier must reject rather than error out — malformed input is a verification failure, not a crash.",
   "verificationTime": "2026-06-01T00:00:00Z",
   "policy": {
     "reject_expired": true,
@@ -17,8 +17,7 @@
   },
   "credential": {
     "@context": [
-      "https://www.w3.org/ns/credentials/v2",
-      "https://alexandria.protocol/context/v1"
+      "https://www.w3.org/ns/credentials/v2"
     ],
     "id": "urn:uuid:vector-credential",
     "type": [
@@ -35,11 +34,12 @@
       "skillId": "skill_vector"
     },
     "proof": {
-      "type": "Ed25519Signature2020",
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-01T00:00:00Z",
-      "verificationMethod": "",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
       "proofPurpose": "assertionMethod",
-      "jws": "not-a-jws"
+      "proofValue": "not-multibase"
     }
   },
   "store": {

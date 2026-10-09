@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 2 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 97 tables, 106 indexes, 1 view, 3 triggers.
+**Schema**: 12 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 107 tables, 110 indexes, 1 view, 3 triggers.
 
 ---
 
@@ -23,6 +23,16 @@ and requires a database's history to be an exact prefix of this list:
 
 1. `baseline`
 2. `instructor_studio`
+3. `private_personhood_receipts`
+4. `decision_shadow_samples`
+5. `assessment_submission`
+6. `demo_opinion_examples`
+7. `opinion_threads`
+8. `tutoring_presence`
+9. `developer_discussion_drafts`
+10. `developer_draft_subject_field`
+11. `hiring_responses`
+12. `status_list_publication`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -82,6 +92,21 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 ---
 
 ## Tables by domain
+
+### Private synthetic receipts (1)
+
+#### `personhood_private_challenges`
+
+- `nonce` TEXT PK
+- `session_id` TEXT NOT NULL
+- `subject_did` TEXT NOT NULL
+- `network_id` TEXT NOT NULL
+- `challenge_json` TEXT NOT NULL
+- `created_at` INTEGER NOT NULL
+- `expires_at` INTEGER NOT NULL
+- `state` TEXT NOT NULL
+- `submission_digest` TEXT
+- `receipt_json` TEXT
 
 ### Identity (1)
 
@@ -330,6 +355,12 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `ended_at` TEXT
 - `end_reason` TEXT
 - `draft_answers_json` TEXT
+- `submitted_answers_json` TEXT
+- `submitted_at` TEXT
+- `exchange_binding` TEXT
+- `item_fingerprints` TEXT
+- `assessed_bloom_level` INTEGER
+- `pass_threshold_snapshot` REAL
 
 #### `assessment_item_skills`
 
@@ -532,10 +563,11 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `issuer_did` TEXT NOT NULL
 - `version` INTEGER NOT NULL default `1` — monotonic; older versions ignored
 - `status_purpose` TEXT NOT NULL default `'revocation'`
-- `bits` BLOB NOT NULL — packed little-endian bitmap
+- `bits` BLOB NOT NULL — Bitstring Status List bitmap, most significant bit first
 - `bit_length` INTEGER NOT NULL default `0`
 - `signature` TEXT — issuer signature over (list_id, version, bits)
 - `updated_at` TEXT NOT NULL default `datetime('now')`
+- `published_version` INTEGER NOT NULL default `0`
 
 #### `credentials`
 
@@ -674,7 +706,46 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `endorsement_json` TEXT NOT NULL
 - `created_at` TEXT NOT NULL default `datetime('now')`
 
-### Opinions (2)
+### Discussions (6)
+
+#### `discussion_events`
+
+- `id` TEXT PK
+- `entity_id` TEXT NOT NULL
+- `actor_did` TEXT NOT NULL
+- `signed_json` TEXT NOT NULL
+- `accepted` INTEGER NOT NULL default `0`
+- `received_at` INTEGER NOT NULL default `unixepoch()`
+- `last_shared` INTEGER NOT NULL default `0`
+
+#### `discussion_items`
+
+- `id` TEXT PK
+- `thread_id` TEXT NOT NULL
+- `parent_id` TEXT
+- `subject_field_id` TEXT NOT NULL → `subject_fields.id`
+- `author_did` TEXT NOT NULL
+- `content_json` TEXT
+- `body` TEXT NOT NULL
+- `created_at` INTEGER NOT NULL
+- `revision` INTEGER NOT NULL
+- `event_id` TEXT NOT NULL
+- `deleted` INTEGER NOT NULL default `0`
+- `credential_proof_ids` TEXT NOT NULL
+
+#### `discussion_reports`
+
+- `item_id` TEXT PK → `discussion_items.id`
+- `actor_did` TEXT PK
+- `reason` TEXT NOT NULL
+
+#### `discussion_votes`
+
+- `item_id` TEXT PK → `discussion_items.id`
+- `actor_did` TEXT PK
+- `value` INTEGER NOT NULL
+- `revision` INTEGER NOT NULL
+- `event_id` TEXT NOT NULL
 
 #### `opinions`
 
@@ -711,6 +782,33 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `public_key` TEXT
 - `published_at` TEXT NOT NULL
 - `queued_at` TEXT NOT NULL default `datetime('now')`
+
+### Development test data (2)
+
+#### `demo_opinion_examples`
+
+- `id` TEXT PK
+- `subject_field_id` TEXT NOT NULL → `subject_fields.id`
+- `title` TEXT NOT NULL
+- `summary` TEXT NOT NULL
+- `video_cid` TEXT NOT NULL
+- `duration_seconds` INTEGER NOT NULL
+- `thumbnail_cid` TEXT
+
+#### `developer_discussion_drafts`
+
+- `id` TEXT PK
+- `title` TEXT NOT NULL
+- `body` TEXT NOT NULL
+- `subject_field_id` TEXT → `subject_fields.id`
+
+### Decision diagnostics (1)
+
+#### `decision_shadow_samples`
+
+- `id` TEXT PK
+- `created_at` INTEGER NOT NULL
+- `sample` TEXT NOT NULL
 
 ### Reputation (5)
 
@@ -959,6 +1057,21 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `source` TEXT NOT NULL default `'manual'`
 - `created_at` TEXT NOT NULL default `datetime('now')`
 
+### Hiring answers (1)
+
+#### `hiring_responses`
+
+- `id` TEXT PK
+- `kind` TEXT NOT NULL
+- `directory_url` TEXT NOT NULL
+- `organization` TEXT NOT NULL
+- `role_label` TEXT NOT NULL
+- `decision` TEXT NOT NULL
+- `chosen_slot` INTEGER
+- `meeting_url` TEXT
+- `responded_at` TEXT NOT NULL
+- `payload_json` TEXT NOT NULL
+
 ### Organizations and role assessments (2)
 
 #### `organizations`
@@ -983,7 +1096,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `created_at` TEXT NOT NULL default `datetime('now')`
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 
-### Classrooms and tutoring (8)
+### Classrooms and tutoring (9)
 
 #### `classroom_calls`
 
@@ -1060,6 +1173,13 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `created_at` TEXT NOT NULL default `datetime('now')`
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 
+#### `tutoring_presence`
+
+- `room_id` TEXT PK
+- `node_id` TEXT PK
+- `present` INTEGER NOT NULL
+- `seen_at` INTEGER NOT NULL
+
 #### `tutoring_sessions`
 
 - `id` TEXT PK
@@ -1068,6 +1188,8 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `status` TEXT NOT NULL default `'active'`
 - `created_at` TEXT NOT NULL default `datetime('now')`
 - `ended_at` TEXT
+- `room_id` TEXT
+- `last_occupied_at` INTEGER
 
 ### Genesis trust (1)
 
@@ -1291,6 +1413,11 @@ erDiagram
     enrollments ||--o{ course_notes : enrollment_id
     courses ||--o{ course_tutor_policies : course_id
     credentials ||--o{ credential_anchors : credential_id
+    subject_fields ||--o{ demo_opinion_examples : subject_field_id
+    subject_fields ||--o{ developer_discussion_drafts : subject_field_id
+    subject_fields ||--o{ discussion_items : subject_field_id
+    discussion_items ||--o{ discussion_reports : item_id
+    discussion_items ||--o{ discussion_votes : item_id
     course_elements ||--o{ element_progress : element_id
     enrollments ||--o{ element_progress : enrollment_id
     skills ||--o{ element_skill_tags : skill_id

@@ -1,11 +1,12 @@
 //! Verify a signed VC per spec §13.2 and §22.1.
 //!
 //! Procedure:
-//! 1. Canonicalize the envelope with `proof.jws = ""`.
+//! 1. Recompute the `eddsa-jcs-2022` hash data: SHA-256 of the JCS proof
+//!    configuration and SHA-256 of the JCS document without its proof.
 //! 2. Resolve the issuer DID. For `did:key` this is self-resolving;
 //!    if the current DID document doesn't match (e.g. the key was
 //!    rotated), fall back to the `key_registry` via `resolve_key_at`.
-//! 3. Verify the detached JWS signature.
+//! 3. Verify the Ed25519 `proofValue` over that hash data.
 //! 4. Check subject binding (subject.id is a well-formed DID).
 //! 5. Check expiration against `verification_time`.
 //! 6. Resolve referenced status and local lifecycle state.
@@ -17,7 +18,7 @@
 
 use ed25519_dalek::{Signature, VerifyingKey};
 
-use super::sign::{b64url_decode, canonicalize_credential};
+use super::sign::{hash_data, multibase_base58btc_decode};
 use super::{
     AcceptanceDecision, VerifiableCredential, VerificationPendingReason, VerificationPolicy,
     VerificationResult,
@@ -77,12 +78,10 @@ pub fn verify_credential(
         match status.status_list_index.parse::<usize>() {
             Ok(idx) => match db.status_list_bits(&status.status_list_credential) {
                 StoreLookup::Found(bits) => {
-                    let byte = idx / 8;
-                    let bit = (idx % 8) as u8;
-                    if byte >= bits.len() {
-                        result.status_valid = false;
-                    } else if (bits[byte] & (1 << bit)) != 0 {
-                        result.revoked = true;
+                    // Bitstring Status List: most significant bit first.
+                    match super::status::get_bit(&bits, idx) {
+                        Some(set) => result.revoked = set,
+                        None => result.status_valid = false,
                     }
                 }
                 StoreLookup::Missing => result
@@ -164,9 +163,7 @@ pub fn verify_credential(
     };
 
     // -- signature verification --------------------------------------------
-    // Rebuild the canonical bytes with jws emptied, reconstruct signing
-    // input, verify.
-    result.valid_signature = verify_detached_jws(&issuer_pk, credential).unwrap_or(false);
+    result.valid_signature = verify_data_integrity_proof(&issuer_pk, credential).unwrap_or(false);
 
     finalize(result, credential, policy)
 }
@@ -223,41 +220,39 @@ fn verifying_key_from_slice(bytes: &[u8]) -> Result<VerifyingKey, String> {
     VerifyingKey::from_bytes(&arr).map_err(|e| format!("bad ed25519 pk: {e}"))
 }
 
-/// Verify the detached JWS in `credential.proof.jws` against
-/// the canonical bytes of the credential envelope (with proof.jws
-/// emptied). Returns `Ok(true)` iff the signature is cryptographically
-/// valid; any failure (parse, decode, verify) yields `Ok(false)` —
-/// we don't distinguish failure modes at this layer. The `Err`
-/// variant is reserved for canonicalization / serde failures on
-/// otherwise well-formed inputs.
-fn verify_detached_jws(
+/// Verify the `eddsa-jcs-2022` Data Integrity proof against `issuer_pk`.
+///
+/// `Ok(true)` iff the proof is well-formed for this suite, names a
+/// verification method the issuer controls, and its Ed25519 signature over
+/// the recomputed hash data verifies. Any malformation yields `Ok(false)`;
+/// `Err` is reserved for canonicalisation failures on well-formed input.
+fn verify_data_integrity_proof(
     issuer_pk: &VerifyingKey,
     credential: &VerifiableCredential,
 ) -> Result<bool, String> {
-    let parts: Vec<&str> = credential.proof.jws.split('.').collect();
-    // Detached JWS: header..signature → 3 segments, middle empty.
-    if parts.len() != 3 || !parts[1].is_empty() {
+    let proof = &credential.proof;
+    if proof.type_ != super::DATA_INTEGRITY_PROOF
+        || proof.cryptosuite != super::EDDSA_JCS_2022
+        || proof.proof_purpose != "assertionMethod"
+    {
         return Ok(false);
     }
-    let sig_bytes = match b64url_decode(parts[2]) {
-        Some(b) if b.len() == 64 => b,
-        _ => return Ok(false),
+    // The method must belong to the issuer: `<issuer DID>#<fragment>`.
+    let method = &proof.verification_method.0;
+    let Some((controller, fragment)) = method.split_once('#') else {
+        return Ok(false);
     };
-    let mut sig_arr = [0u8; 64];
-    sig_arr.copy_from_slice(&sig_bytes);
-    let sig = Signature::from_bytes(&sig_arr);
-
-    // Recompute canonical bytes with jws cleared.
-    let mut clone = credential.clone();
-    clone.proof.jws.clear();
-    let canonical = canonicalize_credential(&clone).map_err(|e| format!("canonicalize: {e}"))?;
-
-    // Signing input: header_b64 || '.' || canonical_bytes.
-    let mut signing_input = Vec::with_capacity(parts[0].len() + 1 + canonical.len());
-    signing_input.extend_from_slice(parts[0].as_bytes());
-    signing_input.push(b'.');
-    signing_input.extend_from_slice(&canonical);
-    Ok(issuer_pk.verify_strict(&signing_input, &sig).is_ok())
+    if controller != credential.issuer.as_str() || fragment.is_empty() {
+        return Ok(false);
+    }
+    let Some(sig_bytes) = multibase_base58btc_decode(&proof.proof_value) else {
+        return Ok(false);
+    };
+    let Ok(sig) = Signature::from_slice(&sig_bytes) else {
+        return Ok(false);
+    };
+    let hash = hash_data(credential).map_err(|e| format!("hash data: {e}"))?;
+    Ok(issuer_pk.verify_strict(&hash, &sig).is_ok())
 }
 
 /// Whether `credential`'s `type` array names a class this policy accepts.
@@ -323,7 +318,7 @@ fn finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::did::{derive_did_key, KeyRegistryEntry, VerificationMethodRef};
+    use crate::did::{derive_did_key, KeyRegistryEntry};
     use crate::vc::sign::{sign_credential, UnsignedCredential};
     use crate::vc::{
         Claim, CredentialStatus, CredentialType, Proof, SkillClaim, VerifiableCredential,
@@ -364,13 +359,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
-            proof: Proof {
-                type_: "Ed25519Signature2020".into(),
-                created: "2026-01-01T00:00:00Z".into(),
-                verification_method: VerificationMethodRef("did:key:z...#key-1".into()),
-                proof_purpose: "assertionMethod".into(),
-                jws: String::new(),
-            },
+            proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         }
     }
 
@@ -519,7 +508,7 @@ mod tests {
         let mut credential = skeleton(issuer.clone(), subject, None);
         credential.credential_status = Some(CredentialStatus {
             id: "urn:uuid:entry".into(),
-            type_: "RevocationList2020Status".into(),
+            type_: "BitstringStatusListEntry".into(),
             status_purpose: "revocation".into(),
             status_list_index: "0".into(),
             status_list_credential: "urn:uuid:missing-list".into(),
@@ -596,7 +585,7 @@ mod tests {
         let mut credential = skeleton(issuer.clone(), subject, None);
         credential.credential_status = Some(CredentialStatus {
             id: "urn:uuid:entry".into(),
-            type_: "RevocationList2020Status".into(),
+            type_: "BitstringStatusListEntry".into(),
             status_purpose: "revocation".into(),
             status_list_index: "9".into(),
             status_list_credential: "urn:uuid:short-list".into(),
@@ -630,7 +619,7 @@ mod tests {
         let issuer = derive_did_key(&key);
         let subject = derive_did_key(&test_signing_key("subject"));
         let mut vc = skeleton(issuer, subject, None);
-        vc.proof.jws = "invalid-not-a-jws".into();
+        vc.proof.proof_value = "zNotASignature".into();
         let result = verify_credential(
             &db,
             &vc,

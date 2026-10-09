@@ -144,3 +144,46 @@ async fn failed_profile_start_reclaims_database_keystore_and_content_key() {
         "rollback preserves the vault"
     );
 }
+
+#[test]
+fn default_genesis_initializes_each_new_profile_but_not_existing_profile_unlocks() {
+    let directory = tempfile::TempDir::new().unwrap();
+    let state = state_in(directory.path());
+    let profile = crate::network_profile::embedded_preprod().unwrap();
+    let expected = profile.embedded_governance_genesis().unwrap().unwrap();
+    let dao_id = &profile.default_governance_anchor.as_ref().unwrap().dao_id;
+    for (name, initialize) in [("new", true), ("restored", true), ("existing", false)] {
+        let paths = state
+            .profile_manager
+            .create(name, Avatar::default())
+            .unwrap();
+        state.open_database(&paths, &[81; 32], initialize).unwrap();
+        {
+            let db = state.db.lock().unwrap();
+            let bytes = crate::db::governance_genesis::load_pinned_genesis(
+                db.as_ref().unwrap().conn(),
+                dao_id,
+            )
+            .unwrap();
+            assert_eq!(
+                bytes.as_deref(),
+                if initialize { Some(expected) } else { None }
+            );
+        }
+        state.db.lock().unwrap().take();
+        state.open_database(&paths, &[81; 32], false).unwrap();
+        {
+            let db = state.db.lock().unwrap();
+            let bytes = crate::db::governance_genesis::load_pinned_genesis(
+                db.as_ref().unwrap().conn(),
+                dao_id,
+            )
+            .unwrap();
+            assert_eq!(
+                bytes.as_deref(),
+                if initialize { Some(expected) } else { None }
+            );
+        }
+        state.db.lock().unwrap().take();
+    }
+}

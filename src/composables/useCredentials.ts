@@ -12,6 +12,7 @@ import type {
   QuotaBreakdown,
   VerifiableCredential,
   VerificationResult,
+  StatusPublishReport,
 } from '@/types'
 
 /**
@@ -76,6 +77,14 @@ export function useCredentials() {
     return run(() =>
       invoke<void>('revoke_credential', { credentialId, reason }),
     )
+  }
+
+  /**
+   * Push every status list that is ahead of what its host serves. Revocation
+   * already does this inline; this is the retry when that push failed.
+   */
+  async function publishStatusLists() {
+    return run(() => invoke<StatusPublishReport>('publish_status_lists'))
   }
 
   async function verify(credential: VerifiableCredential) {
@@ -182,6 +191,7 @@ export function useCredentials() {
     get,
     issue,
     revoke,
+    publishStatusLists,
     verify,
     trust,
     exportBundle,

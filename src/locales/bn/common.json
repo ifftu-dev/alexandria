@@ -67,9 +67,13 @@
     "coreHash": "Genesis core hash",
     "envelopeHash": "Signed envelope hash",
     "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
-    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept.",
+    "defaultNetwork": "ডিফল্ট নেটওয়ার্ক পরিচালনা",
+    "defaultPinned": "এই প্রোফাইলের জন্য পিন করা হয়েছে",
+    "defaultAvailable": "এই প্রোফাইলের জন্য উপলব্ধ",
+    "defaultHint": "নতুন প্রোফাইলগুলি Alexandria-র সঙ্গে দেওয়া যাচাইকৃত জেনেসিস স্বয়ংক্রিয়ভাবে পিন করে। বিদ্যমান প্রোফাইলগুলি এখানে এটি পর্যালোচনা ও গ্রহণ করতে পারে। এই ভিত্তি আস্থা প্রতিষ্ঠা করে; ভোটদান পরিষেবাগুলি আলাদাভাবে কনফিগার করা হয়।",
+    "useDefault": "এই ডিফল্ট আস্থার ভিত্তি গ্রহণ করুন"
   },
-
   "status": {
     "connected": "সংযুক্ত",
     "offline": "অফলাইন",

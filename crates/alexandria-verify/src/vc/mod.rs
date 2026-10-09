@@ -4,11 +4,17 @@
 //! **canonical credential is a signed W3C VC**, not a Cardano NFT.
 //! This module defines the types; sub-modules handle canonicalization,
 //! signing, and verification for the local-first VC implementation.
+//!
+//! The envelope is a W3C VC Data Model 2.0 credential secured with a Data
+//! Integrity proof (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`) and,
+//! when revocable, a Bitstring Status List entry.
 
 pub mod canonicalize;
 pub mod context;
 pub mod id;
+pub mod presentation;
 pub mod sign;
+pub mod status;
 pub mod verify;
 
 use serde::{Deserialize, Serialize};
@@ -419,16 +425,78 @@ pub struct VerifiableCredential {
     pub proof: Proof,
 }
 
-/// Ed25519Signature2020 proof block.
+/// `proof.type` for every credential this crate signs: W3C Data Integrity.
+pub const DATA_INTEGRITY_PROOF: &str = "DataIntegrityProof";
+/// The cryptosuite: Ed25519 over SHA-256 of JCS-canonical JSON (VC-DI-EdDSA §3.3).
+pub const EDDSA_JCS_2022: &str = "eddsa-jcs-2022";
+/// `credentialStatus.type` (Bitstring Status List v1.0).
+pub const BITSTRING_STATUS_LIST_ENTRY: &str = "BitstringStatusListEntry";
+/// The type of the credential that carries a status list.
+pub const BITSTRING_STATUS_LIST_CREDENTIAL: &str = "BitstringStatusListCredential";
+/// The type of that credential's subject.
+pub const BITSTRING_STATUS_LIST: &str = "BitstringStatusList";
+
+/// A W3C Data Integrity proof (VC Data Integrity 1.0 §2.1).
+///
+/// `proof_value` is empty on an unsigned credential; `sign_credential` fills
+/// it and sets `type_`/`cryptosuite`. It is omitted from JSON while empty so
+/// an unsigned document never carries a lying `proofValue`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Proof {
     #[serde(rename = "type")]
     pub type_: String,
+    #[serde(default)]
+    pub cryptosuite: String,
     pub created: String,
     pub verification_method: VerificationMethodRef,
     pub proof_purpose: String,
-    pub jws: String,
+    /// Presentation proofs only: the verifier's nonce and audience (Data
+    /// Integrity §2.1 `challenge` / `domain`) and an expiry for the proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proof_value: String,
+}
+
+impl Proof {
+    /// Proof options for a credential about to be signed. The verification
+    /// method is filled by `sign_credential` from the signing key unless the
+    /// caller sets one (a rotated registry key, for instance).
+    pub fn unsigned(created: impl Into<String>) -> Self {
+        Proof {
+            type_: DATA_INTEGRITY_PROOF.into(),
+            cryptosuite: EDDSA_JCS_2022.into(),
+            created: created.into(),
+            verification_method: VerificationMethodRef(String::new()),
+            proof_purpose: "assertionMethod".into(),
+            challenge: None,
+            domain: None,
+            expires: None,
+            proof_value: String::new(),
+        }
+    }
+
+    /// Proof options for a holder's presentation: purpose `authentication`,
+    /// bound to the verifier's `challenge` and `domain`, with an expiry.
+    pub fn for_presentation(
+        created: impl Into<String>,
+        expires: impl Into<String>,
+        challenge: impl Into<String>,
+        domain: impl Into<String>,
+    ) -> Self {
+        Proof {
+            proof_purpose: "authentication".into(),
+            challenge: Some(challenge.into()),
+            domain: Some(domain.into()),
+            expires: Some(expires.into()),
+            ..Proof::unsigned(created)
+        }
+    }
 }
 
 /// Output of the verification algorithm (§13.1).

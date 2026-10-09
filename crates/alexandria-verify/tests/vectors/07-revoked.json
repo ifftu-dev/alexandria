@@ -1,5 +1,5 @@
 {
-  "description": "The status list has the credential's index bit set. Index 9 is byte 1, bit 1 — little-endian within the byte, which is the detail an independent implementation most often gets backwards.",
+  "description": "The status list has the credential's index bit set. Index 9 is byte 1, second from the left (mask 0x40): Bitstring Status List counts from the most significant bit, which is the detail an independent implementation most often gets backwards.",
   "verificationTime": "2026-06-01T00:00:00Z",
   "policy": {
     "reject_expired": true,
@@ -17,8 +17,7 @@
   },
   "credential": {
     "@context": [
-      "https://www.w3.org/ns/credentials/v2",
-      "https://alexandria.protocol/context/v1"
+      "https://www.w3.org/ns/credentials/v2"
     ],
     "id": "urn:uuid:vector-credential",
     "type": [
@@ -36,23 +35,24 @@
     },
     "credentialStatus": {
       "id": "urn:uuid:status-entry",
-      "type": "RevocationList2020Status",
+      "type": "BitstringStatusListEntry",
       "statusPurpose": "revocation",
       "statusListIndex": "9",
       "statusListCredential": "urn:uuid:status-list-1"
     },
     "proof": {
-      "type": "Ed25519Signature2020",
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-01T00:00:00Z",
-      "verificationMethod": "",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
       "proofPurpose": "assertionMethod",
-      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..fH9G3TOhPvR0Ih7wm0Ee0ipOs6Ufmz8USlX30KRJnP1cv4kGMUaElMLtbLUxvkQlnUjxIDgMSR0rK5Ct9MrvAg"
+      "proofValue": "z4uJYB4ZGVAFXMzUdxrNgAPcrKAhjWaTxeWxsdrtiX4wJURMSS55ogpHTxz1J62QCjY9vpXQR7dF3SQM4qTJFfqZM"
     }
   },
   "store": {
     "keyRegistry": [],
     "statusLists": {
-      "urn:uuid:status-list-1": "0002000000000000"
+      "urn:uuid:status-list-1": "0040000000000000"
     },
     "suspended": {},
     "superseded": []

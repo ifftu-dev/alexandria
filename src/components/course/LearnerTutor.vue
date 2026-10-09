@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, AppModal, AppTextarea } from '@/components/ui'
 import type {
+  DecisionJudgment,
   StudioConnection,
   StudioDocument,
   TutorPolicy,
@@ -23,6 +24,9 @@ const open = ref(false)
 const loading = ref(true)
 const sending = ref(false)
 const error = ref('')
+const checks = ref<Record<string, DecisionJudgment>>({})
+const checking = ref(false)
+let decisionEpoch = 0
 const question = ref('')
 const addingConnection = ref(false)
 const savingConnection = ref(false)
@@ -150,6 +154,17 @@ async function saveConnection() {
   }
 }
 
+watch(() => [props.courseId, props.elementId, selectedConnection.value, thread.value], () => { decisionEpoch++; checks.value = {}; checking.value = false })
+onBeforeUnmount(() => { decisionEpoch++ })
+async function checkReply() {
+  const epoch = ++decisionEpoch
+  checking.value = true; error.value = ''
+  try {
+    const result = await invoke<Record<string, DecisionJudgment>>('decision_tutor_review', { courseId: props.courseId, elementId: props.elementId, connectionId: selectedConnection.value })
+    if (epoch === decisionEpoch) checks.value = result
+  } catch (e) { if (epoch === decisionEpoch) error.value = String(e) }
+  finally { if (epoch === decisionEpoch) checking.value = false }
+}
 onMounted(load)
 </script>
 
@@ -211,6 +226,11 @@ onMounted(load)
           </div>
 
           <p v-if="error" role="alert" class="text-sm text-error">{{ error }}</p>
+          <div v-if="thread?.messages.length" class="space-y-2">
+            <p class="text-xs text-muted-foreground">{{ t('instructor.studio.decisionDisclosure') }}</p>
+            <AppButton variant="secondary" size="sm" :loading="checking" :disabled="sending" @click="checkReply">{{ t('instructor.studio.decisionRun') }}</AppButton>
+            <p v-for="(check, name) in checks" :key="name" class="text-sm" role="status">{{ name }} · {{ check.value }} · {{ Math.round(check.confidence * 100) }}%</p>
+          </div>
           <form class="space-y-3" @submit.prevent="ask">
             <AppTextarea
               v-model="question"

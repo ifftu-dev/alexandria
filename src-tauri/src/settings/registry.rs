@@ -422,6 +422,22 @@ pub mod keys {
     /// enrolled at one institution and applying to three employers, and a
     /// design that assumed one server would push everybody towards a single
     /// one.
+    /// Where this identity's revocation lists are served from. When set, a
+    /// credential issued here names `<host>/status-lists/<issuer>/<n>` as its
+    /// `statusListCredential`, and the list is pushed there whenever it
+    /// changes, so a verifier anywhere can fetch the current list without
+    /// this device or a bundle. Empty means lists are named by URN and travel
+    /// only in exported bundles. The network profile's cloud origin, then the
+    /// first configured directory, stand in when this is empty.
+    pub const CREDENTIAL_STATUS_HOST: SettingKey<String> = SettingKey {
+        key: "credentials.status_host",
+        scope: Scope::Sync,
+        category: "Privacy",
+        label: "Status list host",
+        description: "Service that serves the revocation lists for credentials you issue. Leave empty to publish lists only in exported bundles.",
+        default: String::new,
+    };
+
     pub const HOLDER_DIRECTORIES: SettingKey<JsonSetting> = SettingKey {
         key: "holder.directories",
         scope: Scope::Sync,
@@ -563,6 +579,7 @@ pub fn all_entries(
         entry!(P2P_RELAY_REGISTRY_CACHE),
         entry!(INSTRUCTOR_GRAPH_PREFS),
         entry!(TALENT_INDEX_CONSENT),
+        entry!(CREDENTIAL_STATUS_HOST),
         entry!(HOLDER_DIRECTORIES),
         entry!(LEARNER_TARGETS),
         entry!(IDENTITY_LOCAL_DID),
@@ -608,6 +625,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(P2P_RELAY_REGISTRY_CACHE);
     check!(INSTRUCTOR_GRAPH_PREFS);
     check!(TALENT_INDEX_CONSENT);
+    check!(CREDENTIAL_STATUS_HOST);
     check!(HOLDER_DIRECTORIES);
     check!(LEARNER_TARGETS);
     check!(IDENTITY_LOCAL_DID);

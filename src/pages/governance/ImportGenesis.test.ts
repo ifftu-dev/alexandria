@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ImportGenesis from './ImportGenesis.vue'
+import common from '@/locales/en/common.json'
 import type {
   PinGenesisResponse,
   RetrievedGenesisPreview,
@@ -102,6 +103,7 @@ function pinResponse(overrides: Partial<PinGenesisResponse> = {}): PinGenesisRes
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.invoke.mockImplementation(async command => {
+    if (command === 'governance_default_genesis_status') return null
     if (command === 'governance_preview_genesis_locator') return reviewed
     if (command === 'governance_retrieve_genesis') return retrieved
     if (command === 'governance_pin_genesis') return pinResponse()
@@ -110,11 +112,26 @@ beforeEach(() => {
 })
 
 describe('governance genesis import', () => {
+  it('resolves the visible governance labels from the English catalog', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
+    await flushPromises()
+    const labels = wrapper.findAll('h1, h2, button, dt, label').map(node => node.text())
+      .filter(text => text.startsWith('common.governanceGenesisImport.'))
+    expect(labels.length).toBeGreaterThan(5)
+    for (const key of labels) {
+      expect(common.governanceGenesisImport).toHaveProperty(key.split('.')[2]!)
+    }
+    expect(wrapper.text()).not.toMatch(/(?<!common\.)governanceGenesisImport\./)
+  })
+
   it('opens a deep link as locator review without fetching or pinning', async () => {
     const wrapper = render()
     await flushPromises()
 
     expect(mocks.invoke.mock.calls).toEqual([
+      ['governance_default_genesis_status'],
       ['governance_preview_genesis_locator', { locatorUri }],
     ])
     expect(wrapper.text()).toContain(daoId)
@@ -125,13 +142,13 @@ describe('governance genesis import', () => {
     const wrapper = render()
     await flushPromises()
 
-    const retrieve = button(wrapper, 'governanceGenesisImport.retrieve')
+    const retrieve = button(wrapper, 'common.governanceGenesisImport.retrieve')
     expect(retrieve).toBeDefined()
     await retrieve!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Computing DAO')
 
-    const pin = button(wrapper, 'governanceGenesisImport.pin')
+    const pin = button(wrapper, 'common.governanceGenesisImport.pin')
     expect(pin).toBeDefined()
     expect((pin!.element as HTMLButtonElement).disabled).toBe(true)
 
@@ -143,7 +160,7 @@ describe('governance genesis import', () => {
       genesisJson: retrieved.genesis_json,
       expectedDaoId: daoId,
     })
-    expect(wrapper.text()).toContain('governanceGenesisImport.pinned')
+    expect(wrapper.text()).toContain('common.governanceGenesisImport.pinned')
   })
 
   it('retrieves and shares only the reviewed canonical locator, not the typed text', async () => {
@@ -153,7 +170,7 @@ describe('governance genesis import', () => {
     expect(wrapper.get('[data-qr="true"]').attributes('data-value')).toBe(canonicalUri)
     expect(wrapper.get('[data-testid="canonical-locator"]').text()).toBe(canonicalUri)
 
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('governance_retrieve_genesis', {
       locatorUri: canonicalUri,
@@ -164,7 +181,7 @@ describe('governance genesis import', () => {
   it('resets the review, retrieval and confirmation when the locator text changes', async () => {
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
     await wrapper.get('input').setValue(daoId)
     expect(wrapper.find('[data-testid="trust-facts"]').exists()).toBe(true)
@@ -173,14 +190,15 @@ describe('governance genesis import', () => {
     expect(wrapper.find('[data-testid="locator-facts"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="trust-facts"]').exists()).toBe(false)
     expect(wrapper.find('[data-qr="true"]').exists()).toBe(false)
-    expect(button(wrapper, 'governanceGenesisImport.retrieve')).toBeUndefined()
-    expect(button(wrapper, 'governanceGenesisImport.pin')).toBeUndefined()
+    expect(button(wrapper, 'common.governanceGenesisImport.retrieve')).toBeUndefined()
+    expect(button(wrapper, 'common.governanceGenesisImport.pin')).toBeUndefined()
   })
 
   it('discards a review that finishes after the locator text changed', async () => {
     let resolveReview: (value: ReviewedGenesisLocator) => void = () => {}
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') {
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') {
         return new Promise<ReviewedGenesisLocator>(resolve => {
           resolveReview = resolve
         })
@@ -198,7 +216,8 @@ describe('governance genesis import', () => {
 
   it('refuses to show trust facts when retrieval answers for a different locator', async () => {
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') return reviewed
       if (command === 'governance_retrieve_genesis') {
         return {
           ...retrieved,
@@ -209,10 +228,10 @@ describe('governance genesis import', () => {
     })
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('governanceGenesisImport.retrievedMismatch')
+    expect(wrapper.text()).toContain('common.governanceGenesisImport.retrievedMismatch')
     expect(wrapper.find('[data-testid="trust-facts"]').exists()).toBe(false)
   })
 
@@ -224,13 +243,14 @@ describe('governance genesis import', () => {
       ),
     })
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') return reviewed
       if (command === 'governance_retrieve_genesis') return spoofed
       throw new Error(`unexpected command: ${command}`)
     })
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
 
     const name = wrapper.get('[data-testid="genesis-name"]')
@@ -243,7 +263,8 @@ describe('governance genesis import', () => {
 
   it('reports an equivalent, differently signed pin without claiming a new anchor', async () => {
     mocks.invoke.mockImplementation(async command => {
-      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_default_genesis_status') return null
+    if (command === 'governance_preview_genesis_locator') return reviewed
       if (command === 'governance_retrieve_genesis') return retrieved
       if (command === 'governance_pin_genesis') {
         return pinResponse({ newly_pinned: false, stored_envelope_differs: true })
@@ -252,13 +273,58 @@ describe('governance genesis import', () => {
     })
     const wrapper = render()
     await flushPromises()
-    await button(wrapper, 'governanceGenesisImport.retrieve')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.retrieve')!.trigger('click')
     await flushPromises()
     await wrapper.get('input').setValue(daoId)
-    await button(wrapper, 'governanceGenesisImport.pin')!.trigger('click')
+    await button(wrapper, 'common.governanceGenesisImport.pin')!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('governanceGenesisImport.equivalentAlreadyPinned')
-    expect(wrapper.text()).not.toContain('governanceGenesisImport.pinned')
+    expect(wrapper.text()).toContain('common.governanceGenesisImport.equivalentAlreadyPinned')
+    expect(wrapper.text()).not.toContain('common.governanceGenesisImport.pinned')
+  })
+})
+
+
+describe('bundled default genesis', () => {
+  it('shows a pinned default without asking for another trust decision', async () => {
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'governance_default_genesis_status') return { preview: retrieved.preview, genesis_json: retrieved.genesis_json, pinned: true }
+      if (command === 'governance_preview_genesis_locator') return reviewed
+      throw new Error(`unexpected command: ${command}`)
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="default-genesis"]').text()).toContain('common.governanceGenesisImport.defaultPinned')
+    expect(button(wrapper, 'common.governanceGenesisImport.useDefault')).toBeUndefined()
+    expect(mocks.invoke).not.toHaveBeenCalledWith('governance_pin_genesis', expect.anything())
+  })
+
+  it('pins an existing profile only after an explicit acceptance and refreshes the status', async () => {
+    let pinned = false
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'governance_default_genesis_status') return { preview: retrieved.preview, genesis_json: retrieved.genesis_json, pinned }
+      if (command === 'governance_preview_genesis_locator') return reviewed
+      if (command === 'governance_pin_genesis') { pinned = true; return pinResponse() }
+      throw new Error(`unexpected command: ${command}`)
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(pinned).toBe(false)
+    await button(wrapper, 'common.governanceGenesisImport.useDefault')!.trigger('click')
+    await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('governance_pin_genesis', { genesisJson: retrieved.genesis_json, expectedDaoId: daoId })
+    expect(wrapper.get('[data-testid="default-genesis"]').text()).toContain('common.governanceGenesisImport.defaultPinned')
+  })
+
+  it('surfaces a failed default verification without presenting an acceptance button', async () => {
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'governance_default_genesis_status') throw new Error('bundled genesis failed verification')
+      if (command === 'governance_preview_genesis_locator') return reviewed
+      throw new Error(`unexpected command: ${command}`)
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('failed verification')
+    expect(button(wrapper, 'common.governanceGenesisImport.useDefault')).toBeUndefined()
   })
 })

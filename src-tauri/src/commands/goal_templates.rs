@@ -1,7 +1,8 @@
 //! Goal templates + goal → ideal-skill-graph resolution.
 //!
 //! Curated exam / curriculum / job-role templates map a goal to a set of
-//! target skill IDs (DAO-ratified, seeded genesis set works offline). A
+//! target skill IDs. Stored templates take precedence over the bundled offline
+//! catalog; reading the catalog does not seed the active profile. A
 //! free-text job description is matched on-device against the taxonomy by
 //! [`crate::goals::jd_parser`] and returned as *suggestions* the user
 //! confirms. The resolved skill IDs then feed the existing learning-path
@@ -45,11 +46,12 @@ pub enum GoalInput {
     Curriculum { board: String, grade: String },
     JobRole { key: String },
     JdText { text: String },
+    LearningGoal { text: String },
     JdLink { url: String },
 }
 
 /// One extracted candidate skill for the confirm-suggestions step.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillSuggestion {
     pub skill_id: String,
     pub name: String,
@@ -67,7 +69,7 @@ pub struct GoalResolution {
     pub suggestions: Vec<SkillSuggestion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taxonomy_version: Option<String>,
-    /// `template` when resolved from a curated map, `jd_parsed` for a JD.
+    /// `template` for a curated map, `jd_parsed` for a JD, or `goal_parsed` for an objective.
     pub resolution_provenance: String,
 }
 
@@ -96,7 +98,7 @@ fn map_template_row(r: &rusqlite::Row) -> rusqlite::Result<GoalTemplate> {
     })
 }
 
-pub fn list_goal_templates_impl(
+fn list_stored_templates(
     conn: &Connection,
     kind: Option<&str>,
 ) -> Result<Vec<GoalTemplate>, String> {
@@ -116,18 +118,31 @@ pub fn list_goal_templates_impl(
         .map_err(|e| e.to_string())
 }
 
+pub fn list_goal_templates_impl(
+    conn: &Connection,
+    kind: Option<&str>,
+) -> Result<Vec<GoalTemplate>, String> {
+    let mut templates = list_stored_templates(conn, kind)?;
+    let source = crate::db::bundled::bundled_snapshot()?;
+    for template in list_stored_templates(source.conn(), kind)? {
+        if !templates.iter().any(|stored| {
+            stored.id == template.id || (stored.kind == template.kind && stored.key == template.key)
+        }) {
+            templates.push(template);
+        }
+    }
+    templates.sort_by(|a, b| a.label.cmp(&b.label));
+    Ok(templates)
+}
+
 fn get_template_by_key(
     conn: &Connection,
     kind: &str,
     key: &str,
 ) -> Result<Option<GoalTemplate>, String> {
-    let sql = format!("SELECT {TEMPLATE_COLS} FROM goal_templates WHERE kind = ?1 AND key = ?2");
-    conn.query_row(&sql, params![kind, key], map_template_row)
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other.to_string()),
-        })
+    Ok(list_goal_templates_impl(conn, Some(kind))?
+        .into_iter()
+        .find(|template| template.key == key))
 }
 
 /// Load every skill's matchable surface for on-device JD/document matching.
@@ -135,7 +150,7 @@ fn load_skill_entries(conn: &Connection) -> Result<Vec<SkillEntry>, String> {
     alexandria_studio::skills::skill_entries(conn).map_err(|error| error.to_string())
 }
 
-fn parse_jd_text(conn: &Connection, text: &str) -> Result<GoalResolution, String> {
+pub(super) fn parse_jd_text(conn: &Connection, text: &str) -> Result<GoalResolution, String> {
     let entries = load_skill_entries(conn)?;
     let by_name: std::collections::HashMap<&str, &str> = entries
         .iter()
@@ -221,14 +236,9 @@ pub async fn get_goal_template(
             state.profile_lease(),
             "goal_templates.get",
             move |db| {
-                let sql = format!("SELECT {TEMPLATE_COLS} FROM goal_templates WHERE id = ?1");
-                db.conn()
-                    .query_row(&sql, params![id], map_template_row)
-                    .map(Some)
-                    .or_else(|error| match error {
-                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                        other => Err(other.to_string()),
-                    })
+                Ok(list_goal_templates_impl(db.conn(), None)?
+                    .into_iter()
+                    .find(|template| template.id == id))
             },
         )
         .await
@@ -301,6 +311,12 @@ pub async fn resolve_goal(
                         resolve_template(conn, "curriculum", &key)
                     }
                     GoalInput::JdText { text } => parse_jd_text(conn, &text),
+                    GoalInput::LearningGoal { text } => {
+                        let mut result = parse_jd_text(conn, &text)?;
+                        result.label = text.trim().chars().take(160).collect();
+                        result.resolution_provenance = "goal_parsed".into();
+                        Ok(result)
+                    }
                     GoalInput::JdLink { .. } => unreachable!("handled above"),
                 }
             },
@@ -365,9 +381,64 @@ mod tests {
     fn list_filters_by_kind() {
         let conn = setup();
         let jobs = list_goal_templates_impl(&conn, Some("job_role")).unwrap();
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].key, "engineering_manager");
-        assert_eq!(list_goal_templates_impl(&conn, None).unwrap().len(), 2);
+        assert!(jobs.iter().all(|template| template.kind == "job_role"));
+        let managers: Vec<_> = jobs
+            .iter()
+            .filter(|template| template.key == "engineering_manager")
+            .collect();
+        assert_eq!(managers.len(), 1);
+        assert_eq!(managers[0].id, "t2");
+        assert_eq!(managers[0].skill_ids, vec!["skill_algo"]);
+        assert!(list_goal_templates_impl(&conn, None).unwrap().len() > jobs.len());
+    }
+
+    #[test]
+    fn fresh_development_profile_can_choose_and_resolve_goals_without_seeding() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        crate::db::bundled::install_foundation(db.conn()).unwrap();
+        let count = || {
+            db.conn()
+                .query_row("SELECT COUNT(*) FROM goal_templates", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(count(), 0);
+        for kind in ["job_role", "exam", "curriculum"] {
+            let templates = list_goal_templates_impl(db.conn(), Some(kind)).unwrap();
+            assert!(!templates.is_empty(), "missing {kind} onboarding choices");
+            for template in templates {
+                let resolved = resolve_template(db.conn(), kind, &template.key).unwrap();
+                assert!(!resolved.goal_skill_ids.is_empty());
+                assert_eq!(resolved.taxonomy_version.as_deref(), Some("bundled"));
+                for skill in resolved.goal_skill_ids {
+                    assert!(db
+                        .conn()
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM skills WHERE id=?1)",
+                            [skill],
+                            |r| r.get::<_, bool>(0)
+                        )
+                        .unwrap());
+                }
+            }
+        }
+        assert_eq!(count(), 0, "reading choices must not seed the profile");
+        crate::db::bundled::install_bundled_data(db.conn()).unwrap();
+        assert_eq!(
+            list_goal_templates_impl(db.conn(), None).unwrap().len() as i64,
+            count()
+        );
+        db.conn().execute("DELETE FROM goal_templates", []).unwrap();
+        assert!(!list_goal_templates_impl(db.conn(), Some("job_role"))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            count(),
+            0,
+            "reset templates must stay removed from the profile"
+        );
     }
 
     #[tokio::test]

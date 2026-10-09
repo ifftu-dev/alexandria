@@ -2,7 +2,9 @@
 //
 // It exists as evidence rather than as shipped code: it uses no Alexandria
 // library, imports nothing but Node's standard crypto, and implements JCS by
-// hand in a dozen lines. If this file passes every vector — and it does — then
+// hand in a dozen lines. The proof is the W3C Data Integrity `eddsa-jcs-2022`
+// cryptosuite, so the only primitives are JCS, SHA-256 and Ed25519.
+// If this file passes every vector — and it does — then
 // the format is documented well enough for somebody else to implement, which is
 // the whole claim. It also implements the strict bounded JSON limits by hand
 // and checks them against the exact bytes in `limits/`.
@@ -17,7 +19,7 @@
 // Note what is absent: no network, no JSON-LD processor, no DID resolver
 // service, no Alexandria anything. It is intentionally small and auditable.
 import { readFileSync, readdirSync } from 'node:fs'
-import { createPublicKey, verify } from 'node:crypto'
+import { createHash, createPublicKey, verify } from 'node:crypto'
 
 const ALPHA = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 function b58decode(s) {
@@ -54,11 +56,15 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   const v = JSON.parse(readFileSync(f, 'utf8'))
   const vc = v.credential
 
-  // 1-2: canonicalize with proof.jws emptied
-  const copy = JSON.parse(JSON.stringify(vc)); copy.proof.jws = ''
-  const signingBytes = Buffer.from(jcs(copy), 'utf8')
+  // 1-2: eddsa-jcs-2022 hash data = SHA-256(JCS(proof config)) || SHA-256(JCS(document))
+  const document = JSON.parse(JSON.stringify(vc)); delete document.proof
+  const proofConfig = { ...vc.proof, '@context': vc['@context'] }; delete proofConfig.proofValue
+  const hashData = Buffer.concat([
+    createHash('sha256').update(Buffer.from(jcs(proofConfig), 'utf8')).digest(),
+    createHash('sha256').update(Buffer.from(jcs(document), 'utf8')).digest(),
+  ])
 
-  // 3-5: detached JWS, RFC 7797 raw payload
+  // 3-5: the issuer's key, then the multibase proofValue over the hash data
   let validSignature = false
   let issuerResolved = false
   const pendingReasons = []
@@ -85,12 +91,16 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   }
   if (key) {
     try {
-      const parts = vc.proof.jws.split('.')
-      if (parts.length !== 3 || parts[1] !== '') throw new Error('not detached')
-      const [hdr, , sigB64] = parts
-      const sig = Buffer.from(sigB64, 'base64url')
-      const input = Buffer.concat([Buffer.from(hdr, 'utf8'), Buffer.from('.'), signingBytes])
-      validSignature = verify(null, input, key, sig)
+      const p = vc.proof
+      if (p.type !== 'DataIntegrityProof' || p.cryptosuite !== 'eddsa-jcs-2022' ||
+          p.proofPurpose !== 'assertionMethod') throw new Error('unsupported proof')
+      // The verification method must be the issuer's: `<issuer DID>#<fragment>`.
+      const [controller, fragment] = String(p.verificationMethod).split('#')
+      if (controller !== vc.issuer || !fragment) throw new Error('method not controlled by issuer')
+      if (!String(p.proofValue).startsWith('z')) throw new Error('not multibase base58btc')
+      const sig = b58decode(p.proofValue.slice(1))
+      if (sig.length !== 64) throw new Error('not an Ed25519 signature')
+      validSignature = verify(null, hashData, key, sig)
     } catch { validSignature = false }
   }
 
@@ -110,8 +120,9 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
       } else {
         const n = Number(indexText)
         const byte = Math.floor(n / 8)
+        // Bitstring Status List: bit 0 of each byte is the most significant.
         if (!Number.isSafeInteger(n) || byte >= bits.length) statusValid = false
-        else revoked = (bits[byte] & (1 << (n % 8))) !== 0
+        else revoked = ((bits[byte] >> (7 - (n % 8))) & 1) === 1
       }
     } else {
       pendingReasons.push('status_list_missing')

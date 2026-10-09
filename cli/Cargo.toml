@@ -30,6 +30,7 @@ rand = "0.8"
 rand_chacha = "0.3"
 rand_distr = "0.4"
 blake2 = "0.10"
+blake3 = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Must stay on the same major as src-tauri's ed25519-dalek: the CLI hands a
 # `SigningKey` straight to `issue_credential_impl`, so the two crates have to
@@ -48,3 +49,6 @@ crossterm = "0.29"
 # CLI builds, but it's the correctness vs ergonomics trade we're
 # explicitly making per the `alexandria credentials` design.
 alexandria-node = { path = "../src-tauri" }
+
+[dev-dependencies]
+tempfile = "3"

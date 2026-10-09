@@ -67,9 +67,13 @@
     "coreHash": "Genesis core hash",
     "envelopeHash": "Signed envelope hash",
     "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
-    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept.",
+    "defaultNetwork": "默认网络治理",
+    "defaultPinned": "已为此个人资料固定",
+    "defaultAvailable": "此个人资料可用",
+    "defaultHint": "新个人资料会自动固定 Alexandria 附带的已验证创世文档。现有个人资料可在此查看并接受它。此信任锚用于建立信任；投票服务需单独配置。",
+    "useDefault": "接受此默认信任锚"
   },
-
   "status": {
     "connected": "已连接",
     "offline": "离线",

@@ -13,6 +13,7 @@ Only the Python standard library is needed. SQLCipher is not: the baseline is
 plain SQL and the encryption is applied per profile at open time.
 """
 
+import json
 import re
 import sqlite3
 import sys
@@ -28,12 +29,14 @@ DOC = ROOT / "docs" / "database-schema.md"
 # the MIGRATIONS list. An entry the generator cannot resolve is an error, not a
 # gap: a document missing a migration would describe a schema no build has.
 EXTERNAL_SOURCES = {
+    "MIGRATION_003_PERSONHOOD": ROOT / "crates" / "alexandria-personhood" / "src" / "schema.sql",
     "alexandria_studio::store::SCHEMA": ROOT / "crates" / "alexandria-studio" / "src" / "schema.sql",
 }
 
 # Domain assignment by name. Every table must match exactly one rule; the
 # generator fails otherwise, so a new table has to be placed deliberately.
 DOMAINS = [
+    ("Private synthetic receipts", r"^personhood_private_challenges$"),
     ("Identity", r"^local_identity$"),
     ("Guardianship", r"^guardian_"),
     ("Taxonomy", r"^(subject_fields|subjects|skills|skill_prerequisites|skill_relations|taxonomy_versions)$"),
@@ -44,12 +47,15 @@ DOMAINS = [
     ("Verifiable credentials", r"^(key_registry|credentials|credential_status_lists|credential_anchors|credentials_pending_verification|credential_allowlist|presentations_seen|pinboard_observations)$"),
     ("Chain journal", r"^chain_submission"),
     ("Completion and endorsements", r"^(completion_|course_completion_endorsements$)"),
-    ("Opinions", r"^opinions"),
+    ("Discussions", r"^(opinions|discussion_)"),
+    ("Development test data", r"^(demo_opinion_examples|developer_discussion_drafts)$"),
+    ("Decision diagnostics", r"^decision_shadow_samples$"),
     ("Reputation", r"^(reputation_|derived_skill_)"),
     ("Integrity (Sentinel)", r"^(integrity_|sentinel_)"),
     ("Interviews", r"^interview_"),
+    ("Hiring answers", r"^hiring_responses$"),
     ("Organizations and role assessments", r"^(organizations|role_assessments)$"),
-    ("Classrooms and tutoring", r"^(classroom|tutoring_sessions$)"),
+    ("Classrooms and tutoring", r"^(classroom|tutoring_)"),
     ("Genesis trust", r"^governance_genesis_trust_anchors$"),
     ("P2P, content and sync", r"^(peers|pins|sync_log|devices|sync_state|sync_queue|pending_pairings|dht_records|peer_profiles|username_claims|content_mappings|stake_pubkey_registry)$"),
     ("Settings", r"^app_settings$"),
@@ -61,19 +67,37 @@ def migrations():
     """Every (version, name, sql) in the order the runner applies them."""
     text = SCHEMA.read_text()
     listing = text.split("pub const MIGRATIONS", 1)[1].split("];", 1)[0]
-    entries = re.findall(r'\(\s*(\d+),\s*"([^"]+)",\s*([A-Za-z0-9_:]+)\s*\)', listing)
-    if not entries:
-        sys.exit("no migrations found in schema.rs")
+    listing = re.sub(r"^\s*//.*$", "", listing, flags=re.M)
+    quoted = r'"(?:[^"\\]|\\.)*"'
+    entry = re.compile(
+        rf'\s*\(\s*(\d+),\s*({quoted}),\s*'
+        rf'(include_str!\(\s*{quoted}\s*\)|{quoted}|[A-Za-z_][A-Za-z0-9_:]*)'
+        r'\s*,?\s*\)\s*,?'
+    )
     resolved = []
-    for version, name, source in entries:
+    remaining = listing.split("= &[", 1)[1]
+    while remaining.strip():
+        match = entry.match(remaining)
+        if not match:
+            sys.exit(f"unsupported migration entry: {remaining.strip()[:160]}")
+        version, encoded_name, source = match.groups()
+        name = json.loads(encoded_name)
         local = re.search(rf'const {re.escape(source)}: &str = r#"(.*?)"#;', text, re.S)
-        if local:
+        if source.startswith('"'):
+            sql = json.loads(source)
+        elif source.startswith("include_str!"):
+            path = json.loads(re.search(quoted, source).group())
+            sql = (SCHEMA.parent / path).read_text()
+        elif local:
             sql = local.group(1)
         elif source in EXTERNAL_SOURCES:
             sql = EXTERNAL_SOURCES[source].read_text()
         else:
             sys.exit(f"migration {version} ({name}) uses {source}, which this generator cannot resolve")
         resolved.append((int(version), name, sql))
+        remaining = remaining[match.end():]
+    if not resolved:
+        sys.exit("no migrations found in schema.rs")
     return resolved
 
 

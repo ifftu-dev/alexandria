@@ -104,11 +104,12 @@ describe('profile-scoped media and classroom caches', () => {
         validFrom: '2026-09-14T00:00:00Z',
         credentialSubject: { id: 'did:key:z6MkLearnerPrivate' },
         proof: {
-          type: 'Ed25519Signature2020',
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
           created: '2026-09-14T00:00:00Z',
           verificationMethod: 'did:key:issuer-private#key-1',
           proofPurpose: 'assertionMethod',
-          jws: 'signature-private',
+          proofValue: 'zsignature-private',
         },
       },
     ]

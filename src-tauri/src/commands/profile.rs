@@ -229,7 +229,7 @@ pub async fn create_profile(
 
             emit_progress(&app, "db", "Opening encrypted database...");
             state
-                .start_active_profile(paths.clone(), ks)
+                .start_new_profile(paths.clone(), ks)
                 .await
                 .map_err(|e| format!("failed to bring profile online: {e}"))?;
 
@@ -263,6 +263,9 @@ pub async fn create_profile(
                     issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
                 }
             }
+
+            emit_progress(&app, "content", "Preparing bundled courses and plugins...");
+            crate::commands::demo_courses::install_for_profile(&state).await?;
 
             state
                 .profile_manager
@@ -351,7 +354,7 @@ pub async fn restore_profile_with_mnemonic(
 
             emit_progress(&app, "db", "Opening encrypted database...");
             state
-                .start_active_profile(paths.clone(), ks)
+                .start_new_profile(paths.clone(), ks)
                 .await
                 .map_err(|e| format!("failed to bring profile online: {e}"))?;
 
@@ -381,6 +384,9 @@ pub async fn restore_profile_with_mnemonic(
                     issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
                 }
             }
+
+            emit_progress(&app, "content", "Preparing bundled courses and plugins...");
+            crate::commands::demo_courses::install_for_profile(&state).await?;
 
             state
                 .profile_manager
@@ -466,6 +472,9 @@ pub async fn unlock_profile(
                         .map_err(|e| e.to_string())?;
                 }
             }
+
+            emit_progress(&app, "content", "Preparing bundled courses and plugins...");
+            crate::commands::demo_courses::install_for_profile(&state).await?;
 
             state
                 .profile_manager

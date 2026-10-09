@@ -709,13 +709,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
-            proof: crate::domain::vc::Proof {
-                type_: "Ed25519Signature2020".into(),
-                created: NOW.into(),
-                verification_method: crate::crypto::did::VerificationMethodRef("x".into()),
-                proof_purpose: "assertionMethod".into(),
-                jws: String::new(),
-            },
+            proof: crate::domain::vc::Proof::unsigned(NOW),
         };
         assert_eq!(
             parse_credential_type(&vc),

@@ -393,7 +393,8 @@
     "valIdle": "నిష్క్రియం",
     "valYes": "అవును",
     "valNo": "కాదు",
-    "valNa": "n/a"
+    "valNa": "n/a",
+    "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

@@ -27,6 +27,7 @@ const trust = ref<CredentialTrust | null>(null)
 const loading = ref(true)
 const verifying = ref(false)
 const revoking = ref(false)
+const statusPublish = ref<{ variant: 'success' | 'warning'; message: string } | null>(null)
 const revokeReason = ref('')
 const showRevoke = ref(false)
 const error = ref<string | null>(null)
@@ -61,6 +62,14 @@ async function revoke() {
   if (!credential.value?.id) return
   revoking.value = true
   await api.revoke(credential.value.id, revokeReason.value || t('credentials.detail.revokeDefaultReason'))
+  // The backend pushes the list inline; this reports the outcome and retries
+  // anything that stayed pending.
+  const report = await api.publishStatusLists()
+  if (report && report.errors.length > 0) {
+    statusPublish.value = { variant: 'warning', message: t('credentials.detail.statusPublishFailed', { detail: report.errors[0] }) }
+  } else if (report && report.published[0]) {
+    statusPublish.value = { variant: 'success', message: t('credentials.detail.statusPublished', { host: new URL(report.published[0]).origin }) }
+  }
   revoking.value = false
   showRevoke.value = false
   // Re-verify to surface the revoked flag.
@@ -218,6 +227,8 @@ const decisionVariant = computed(() => {
           <AppButton variant="danger" @click="showRevoke = true">{{ $t('credentials.detail.revoke') }}</AppButton>
         </div>
       </div>
+
+      <AppAlert v-if="statusPublish" class="mb-6" :variant="statusPublish.variant" :message="statusPublish.message" />
 
       <!-- Provenance: typed trust classification, never a privilege grant -->
       <section v-if="trust" class="mb-6 rounded-xl bg-card shadow-sm p-6">

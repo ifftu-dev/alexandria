@@ -43,6 +43,7 @@
     "strongMatch": "高度匹配",
     "matched": "匹配“{term}”",
     "noMatchingSkills": "未找到匹配的技能——换一段描述试试。",
-    "addAsGoal": "将 {count} 项技能设为目标 | 将 {count} 项技能设为目标"
+    "addAsGoal": "将 {count} 项技能设为目标 | 将 {count} 项技能设为目标",
+    "noTemplates": "此类别暂无目标选项。请选择其他类别，或描述一个学习目标。"
   }
 }

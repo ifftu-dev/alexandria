@@ -1,8 +1,9 @@
 # alexandria-verify
 
 Verify [Alexandria](https://github.com/ifftu-dev/alexandria) credentials: W3C
-Verifiable Credentials 2.0, `did:key` resolution, JCS canonicalization
-(RFC 8785), and detached Ed25519 JWS (RFC 7797, `b64:false`).
+Verifiable Credentials Data Model 2.0 secured with Data Integrity proofs
+(`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`), Bitstring Status List
+revocation, `did:key` resolution, and JCS canonicalization (RFC 8785).
 
 `MIT OR Apache-2.0`, while the Alexandria application itself is
 AGPL-3.0-or-later. That split is deliberate. Alexandria promises that checking a
@@ -93,9 +94,48 @@ twelve credential vectors, the exact-byte limit vectors in
 endorsement import consumes the same endorsement bytes. If you are writing your own verifier in another language, start there:
 the vectors are the contract, and this crate is one implementation of it.
 
-The signing input is **raw payload bytes**, not base64url — RFC 7797 with
-`b64:false`. This is the detail most independent implementations get wrong.
+Presentations (`vc::presentation`) are W3C Verifiable Presentations with a
+holder `DataIntegrityProof` of purpose `authentication`, bound to the
+verifier's `challenge` and `domain` and valid for at most five minutes; the
+credential exchange (`exchange`) is built on them.
+
+The proof is the standard `eddsa-jcs-2022` cryptosuite, so a general-purpose
+Data Integrity verifier (for example `@digitalbazaar/data-integrity` with
+`@digitalbazaar/eddsa-jcs-2022-cryptosuite`) verifies an Alexandria credential
+without any Alexandria code. The one detail independent implementations get
+wrong is the status list bit order: Bitstring Status List counts from the most
+significant bit of each byte.
+
+A credential's `statusListCredential` is either a `urn:` (the list travels in
+the issuer's export bundle) or the URL a host serves it at,
+`{origin}/status-lists/{issuer}/{n}` — `vc::status::list_url` and
+`parse_list_url` go between the two. A verifier that fetches such a URL hands
+the document to `vc::status::verify_fetched_list(document, url, issuer,
+purpose)`, which accepts it only as that list, issued and signed by that
+issuer, and returns the bitstring; the crate does no I/O itself.
 
 ## Licence
 
 MIT OR Apache-2.0, at your option.
+
+## Holder-authorized credential exchange
+
+`exchange` defines `alexandria-credential-exchange/1`: an organization request
+and a holder-signed disclosure of one complete credential. The signature covers
+a domain prefix, a zero byte, and JCS-canonical share bytes. It binds the exact
+request, audience, nonce, subject, skill, network, taxonomy digest, and validity
+window. Shares expire within five minutes. Receiving applications must load the
+expected request from their own store and enforce atomic replay handling.
+
+A new-assessment request additionally requires an `AssessmentCredential` with
+`assessment-items-bloom-v1`, terminal integrity, and an evidence reference
+`request:<id>:<nonce>`. The receiver must check issuance after invitation and
+apply its configured taxonomy policy. This is an authenticity and binding
+contract, not proof that the holder-controlled device is tamper-proof.
+
+Only a holder who is also the credential issuer may include `IssuerState` in
+the signed disclosure. It represents that issuer's current lifecycle assertion;
+it does not turn self-issued evidence into independent corroboration. Third-party
+status not supplied through a trusted verification store remains pending.
+`verify_share` returns the ordinary accept/pending/reject result. Receivers must
+preserve that distinction and record the verification time.

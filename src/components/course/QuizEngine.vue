@@ -46,7 +46,14 @@ const currentAnswer = computed(() => {
 })
 
 function parseAndResetQuiz(json: string) {
-  quiz.value = JSON.parse(json) as QuizDefinition
+  const parsed = JSON.parse(json) as QuizDefinition
+  if (!Array.isArray(parsed.questions) || !parsed.questions.length) throw new Error('Quiz has no questions')
+  parsed.questions = parsed.questions.map(question => {
+    const points = question.points ?? 1
+    if (!Number.isFinite(points) || points <= 0) throw new Error('Question points must be positive')
+    return { ...question, points }
+  })
+  quiz.value = parsed
   currentIndex.value = 0
   answers.value = {}
   submitted.value = false
@@ -115,7 +122,7 @@ function prevQuestion() {
 }
 
 async function gradeQuiz() {
-  if (!quiz.value || submitted.value) return
+  if (!quiz.value || submitted.value || props.readOnly) return
 
   const questionResults: { question_id: string; correct: boolean; points: number }[] = []
   let totalPoints = 0
@@ -226,7 +233,7 @@ function questionResult(questionId: string): boolean | null {
 }
 
 onMounted(init)
-watch(() => props.contentCid, init)
+watch(() => [props.contentCid, props.contentInline, props.elementId], init)
 </script>
 
 <template>
@@ -259,6 +266,7 @@ watch(() => props.contentCid, init)
       </div>
 
       <!-- Results banner -->
+      <AppButton v-if="submitted && !readOnly && !result?.passed" size="sm" variant="secondary" @click="submitted = false; result = null; answers = {}; currentIndex = 0; startTime = Date.now()">{{ $t('common.actions.retry') }}</AppButton>
       <AppAlert v-if="submitted && result" :variant="result.passed ? 'success' : 'warning'">
         <template #title>{{ result.passed ? $t('courses.quiz.passed') : $t('courses.quiz.notYet') }}</template>
         {{ $t('courses.quiz.scoreLine', { pct: Math.round(result.score * 100), earned: result.earned_points, total: result.total_points }) }}

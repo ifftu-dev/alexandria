@@ -17,8 +17,7 @@
   },
   "credential": {
     "@context": [
-      "https://www.w3.org/ns/credentials/v2",
-      "https://alexandria.protocol/context/v1"
+      "https://www.w3.org/ns/credentials/v2"
     ],
     "id": "urn:uuid:vector-credential",
     "type": [
@@ -36,17 +35,18 @@
     },
     "credentialStatus": {
       "id": "urn:uuid:missing-status-entry",
-      "type": "RevocationList2020Status",
+      "type": "BitstringStatusListEntry",
       "statusPurpose": "revocation",
       "statusListIndex": "0",
       "statusListCredential": "urn:uuid:missing-status-list"
     },
     "proof": {
-      "type": "Ed25519Signature2020",
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-01T00:00:00Z",
-      "verificationMethod": "",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
       "proofPurpose": "assertionMethod",
-      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..SDew-sX7x0VqbJQhr_lIHtevFuNku74KUpQB73siiJT97ye7hWsyyw9KcH7oOPIxQnWPzdmBQfVaZfOo8egMCA"
+      "proofValue": "z61YiWF8mU7iD5VU4QqhSiHhN36U1523jhwnuPiEDRAuD85mCS2BjqiSBeuEna6dSrFtgRTmLsn8rfoHLd3fLT7pC"
     }
   },
   "store": {

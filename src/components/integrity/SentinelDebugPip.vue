@@ -8,21 +8,37 @@
  * Runs its own camera preview (independent of any course session) so it
  * works for tuning even outside an assessment; the numeric session
  * signals come from `useSentinel().debug`, populated by the real session.
- * Mounted only while the user has explicitly entered diagnostics mode.
+ * Camera preview is explicitly enabled in either mode. During a standalone
+ * assessment it also drives the consented face/gaze monitoring loops.
  */
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
+import { useProfiles } from '@/composables/useProfiles'
 import type { FaceDetection, ScoreGazeResponse } from '@/types'
+
+interface Props { initiallyOpen?: boolean }
+const props = withDefaults(defineProps<Props>(), { initiallyOpen: false })
+const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
 const { invoke } = useLocalApi()
-const { debug } = useSentinel()
+const sentinel = useSentinel()
+const { debug } = sentinel
+const { stakeAddress } = useProfiles()
+let deviceFp = ''
+const route = useRoute()
 
-const open = ref(false)
+const open = ref(props.initiallyOpen)
 const cameraOn = ref(false)
+const cameraStarting = ref(false)
+const inferenceError = ref<string | null>(null)
+let cameraGeneration = 0
+let disposed = false
+let monitoredSession: string | null = null
 const camError = ref<string | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
@@ -39,29 +55,59 @@ let busy = false
 const PREVIEW_W = 224
 
 async function startCamera() {
+  if (cameraStarting.value || cameraOn.value || disposed) return
+  const generation = ++cameraGeneration
+  const current = () => !disposed && open.value && generation === cameraGeneration
+  cameraStarting.value = true
   camError.value = null
+  inferenceError.value = null
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
+    const acquired = await navigator.mediaDevices.getUserMedia({
       video: { width: 320, height: 240, facingMode: 'user' },
       audio: false,
     })
+    if (!current()) { acquired.getTracks().forEach(track => track.stop()); return }
+    stream = acquired
+    deviceFp = (await sentinel.computeDeviceFingerprint()).substring(0, 16)
+    if (!current()) return
     cameraOn.value = true
-    await Promise.resolve()
+    await nextTick()
+    if (!current()) return
     if (videoRef.value) {
       videoRef.value.srcObject = stream
-      await videoRef.value.play().catch(() => {})
+      await videoRef.value.play()
     }
+    if (!current()) return
+    attachMonitoring()
     drawTimer = setInterval(draw, 100)
     inferTimer = setInterval(infer, 700)
   } catch (e) {
-    camError.value = e instanceof Error ? e.message : t('sentinel.debug.cameraUnavailable')
+    if (current()) {
+      camError.value = e instanceof Error ? e.message : t('sentinel.debug.cameraUnavailable')
+      stopCamera()
+    }
+  } finally {
+    if (generation === cameraGeneration) cameraStarting.value = false
+  }
+}
+
+function attachMonitoring() {
+  const id = sentinel.getSessionId()
+  if (cameraOn.value && debug.active && route.path.startsWith('/assessment/') && !sentinel.cameraOptedIn.value) {
+    sentinel.setCameraOptedIn(true)
+    monitoredSession = id
   }
 }
 
 function stopCamera() {
+  cameraGeneration++
+  cameraStarting.value = false
+  if (monitoredSession && sentinel.getSessionId() === monitoredSession) sentinel.setCameraOptedIn(false)
+  monitoredSession = null
   if (drawTimer) { clearInterval(drawTimer); drawTimer = null }
   if (inferTimer) { clearInterval(inferTimer); inferTimer = null }
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null }
+  if (videoRef.value) videoRef.value.srcObject = null
   cameraOn.value = false
   lastGaze.value = null
   lastDetections.value = []
@@ -120,8 +166,9 @@ async function infer() {
   if (busy) return
   const v = videoRef.value
   // Skip work when the window/tab is hidden — nothing to observe.
-  if (!v || v.readyState < 2 || document.hidden) return
+  if (!v || v.readyState < 2 || document.hidden || !stakeAddress.value) return
   busy = true
+  const generation = cameraGeneration
   try {
     const { w, h } = frameSize()
     const off = document.createElement('canvas')
@@ -135,13 +182,19 @@ async function infer() {
     const t0 = performance.now()
     // One YuNet pass — score_gaze returns the best detection for overlay.
     const gaze = await invoke<ScoreGazeResponse>('sentinel_score_gaze', {
-      req: { frame, user_address: 'debug-pip', device_fp_prefix: 'debugpip' },
+      req: { frame, user_address: stakeAddress.value, device_fp_prefix: deviceFp, preview_only: true },
     })
+    if (disposed || generation !== cameraGeneration) return
+    inferenceError.value = null
     inferMs.value = Math.round(performance.now() - t0)
     lastDetections.value = gaze?.detection ? [gaze.detection] : []
     lastGaze.value = gaze?.estimate ?? null
-  } catch {
-    /* dev tool — ignore transient IPC errors */
+    if (monitoredSession && sentinel.getSessionId() === monitoredSession && debug.active) {
+      sentinel.verifyFace(v)
+      await sentinel.scoreGaze(v)
+    }
+  } catch (e) {
+    if (!disposed && generation === cameraGeneration) inferenceError.value = String(e)
   } finally {
     busy = false
   }
@@ -149,7 +202,7 @@ async function infer() {
 
 function toggle() {
   open.value = !open.value
-  if (!open.value) stopCamera()
+  if (!open.value) { stopCamera(); emit('close') }
 }
 
 // Activation comes from the explicit diagnostics controls rather than an
@@ -157,7 +210,11 @@ function toggle() {
 let unlistenToggle: UnlistenFn | null = null
 onMounted(async () => {
   try {
-    unlistenToggle = await listen('develop://toggle-sentinel', () => toggle())
+    if (!props.initiallyOpen) {
+      const unlisten = await listen('develop://toggle-sentinel', () => toggle())
+      if (disposed) unlisten()
+      else unlistenToggle = unlisten
+    }
   } catch { /* not in a Tauri context */ }
 })
 
@@ -171,7 +228,14 @@ function yn(v?: boolean | null) {
   return v == null ? '—' : v ? t('sentinel.debug.valYes') : t('sentinel.debug.valNo')
 }
 
+watch(() => props.initiallyOpen, (value) => { if (value) open.value = true })
+watch(() => debug.active, (active) => {
+  if (!active) monitoredSession = null
+  else attachMonitoring()
+})
+
 onBeforeUnmount(() => {
+  disposed = true
   stopCamera()
   if (unlistenToggle) { unlistenToggle(); unlistenToggle = null }
 })
@@ -182,7 +246,7 @@ onBeforeUnmount(() => {
     <!-- Panel (toggled from Develop → Sentinel Live View, ⌘⇧S) -->
     <div
       v-if="open"
-      class="fixed bottom-16 end-4 z-[200] w-72 overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      class="fixed bottom-16 end-4 z-[200] flex max-h-[calc(100vh-6rem)] w-72 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
     >
       <div class="flex items-center justify-between border-b border-border px-3 py-2">
         <span class="text-xs font-semibold text-foreground">{{ $t('sentinel.debug.title') }}</span>
@@ -195,12 +259,14 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Camera + overlay -->
-      <div class="relative bg-black">
+      <p v-if="initiallyOpen" class="px-3 py-2 text-xs text-muted-foreground">{{ $t('profile.exchange.liveNote') }}</p>
+      <p v-if="!debug.active" class="px-3 pb-2 text-xs text-muted-foreground">{{ $t('sentinel.debug.idleNote') }}</p>
+      <div class="relative shrink-0 bg-black">
         <video ref="videoRef" class="hidden" muted playsinline />
         <canvas ref="canvasRef" class="w-full" />
         <div v-if="!cameraOn" class="flex items-center justify-center py-8">
-          <button class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground" @click="startCamera">
-            {{ $t('sentinel.debug.startPreview') }}
+          <button class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground" :disabled="cameraStarting" @click="startCamera">
+            {{ cameraStarting ? $t('common.actions.loading') : $t('sentinel.debug.startPreview') }}
           </button>
         </div>
         <span v-if="cameraOn && lastGaze" class="absolute start-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium"
@@ -210,17 +276,19 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="camError" class="px-3 py-1 text-[11px] text-red-500">{{ camError }}</p>
 
+      <p v-if="inferenceError" role="alert" class="px-3 py-1 text-[11px] text-red-500">{{ inferenceError }}</p>
+
       <!-- Readout — full tracked signal set -->
-      <div class="max-h-[46vh] overflow-y-auto px-3 py-2">
+      <div class="min-h-0 max-h-[46vh] overflow-y-auto px-3 py-2">
         <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
           <!-- Outcome -->
           <p class="col-span-2 mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionOutcome') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSession') }}</span>
           <span class="text-end font-mono" :class="debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.active ? $t('sentinel.debug.valActive') : $t('sentinel.debug.valIdle') }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowIntegrity') }}</span>
-          <span class="text-end font-mono text-foreground">{{ pct(debug.integrity) }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.active ? pct(debug.integrity) : '—' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowConsistency') }}</span>
-          <span class="text-end font-mono text-foreground">{{ pct(debug.consistency) }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.active ? pct(debug.consistency) : '—' }}</span>
 
           <!-- Typing -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionTyping') }}</p>

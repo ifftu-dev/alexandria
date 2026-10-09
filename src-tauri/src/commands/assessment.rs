@@ -50,7 +50,7 @@ pub struct StartedAttempt {
 }
 
 /// One submitted answer: the served option POSITIONS the learner selected.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmittedAnswer {
     pub question_id: String,
     pub selected: Vec<usize>,
@@ -174,7 +174,10 @@ pub(crate) fn end_interrupted_attempts(
             SET ended_at = ?1, end_reason = 'interrupted' \
           WHERE subject_did = ?2 AND skill_id = ?3 \
             AND graded_at IS NULL AND ended_at IS NULL \
-            AND integrity_session_id IS NOT ?4",
+            AND integrity_session_id IS NOT ?4
+            AND NOT (submitted_at IS NOT NULL AND EXISTS (
+                SELECT 1 FROM integrity_sessions s WHERE s.id=assessment_attempts.integrity_session_id
+                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')))",
         params![now, subject_did, skill_id, current_integrity_session_id],
     )
     .map(|changed| changed as u32)
@@ -301,7 +304,47 @@ pub async fn assessment_start_attempt(
         .await
 }
 
-fn start_attempt_db(
+fn item_fingerprint(db: &crate::db::Database, id: &str) -> Result<String, String> {
+    let item = items::load_item(db, id)?.ok_or("assessment item disappeared")?;
+    let value = serde_json::json!([
+        item.item_kind,
+        item.skill_id,
+        item.plugin_cid,
+        item.content_public,
+        item.grader_private,
+        item.points
+    ]);
+    Ok(blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string())
+}
+
+#[tauri::command]
+pub async fn assessment_recover(
+    state: State<'_, AppState>,
+    skill_id: String,
+    request_id: Option<String>,
+) -> Result<Option<GradeResult>, String> {
+    let pending = state.db_executor.execute(DatabaseWorkload::Learner, state.profile_lease(), "assessment.recover", move |db| {
+        let did = SettingsStore::get(db.conn(), keys::IDENTITY_LOCAL_DID);
+        let binding = request_id.map(|id| format!("request:{id}:%"));
+        db.conn().query_row(
+            "SELECT a.id,a.submitted_answers_json FROM assessment_attempts a JOIN integrity_sessions s ON s.id=a.integrity_session_id
+             WHERE a.subject_did=?1 AND a.skill_id=?2 AND a.submitted_at IS NOT NULL AND a.graded_at IS NULL AND a.ended_at IS NULL
+             AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')
+             AND ((?3 IS NULL AND a.exchange_binding IS NULL) OR a.exchange_binding LIKE ?3)
+             ORDER BY a.started_at DESC LIMIT 1",
+            params![did, skill_id, binding], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))
+            .optional().map_err(|e| e.to_string())
+    }).await?;
+    let Some((id, json)) = pending else {
+        return Ok(None);
+    };
+    let answers = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    assessment_grade(state, id, answers).await.map(Some)
+}
+
+pub(crate) fn start_attempt_db(
     db: &crate::db::Database,
     skill_id: String,
     integrity_session_id: Option<String>,
@@ -404,16 +447,19 @@ fn start_attempt_db(
                     })
                     .unwrap_or_default(),
                 difficulty: r.get::<_, i64>(2)? as u8,
-                // NULL for items authored before the Bloom axis existed;
-                // `FromSql` normalises those to the default level.
-                bloom: r
-                    .get::<_, Option<crate::domain::bloom::BloomLevel>>(3)?
-                    .unwrap_or_default(),
+                // Credential-bearing assessments require an explicit cognitive level.
+                bloom: r.get::<_, String>(3)?.parse().map_err(|e: String| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        e.into(),
+                    )
+                })?,
             })
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|x| x.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("assessment items require explicit Bloom metadata: {e}"))?;
     if all.is_empty() {
         return Err("assessment bank is empty".into());
     }
@@ -482,12 +528,23 @@ fn start_attempt_db(
         });
     }
 
+    let assessed_bloom = drawn
+        .question_ids
+        .iter()
+        .filter_map(|id| by_id.get(id.as_str()).map(|q| q.bloom.rank()))
+        .min()
+        .ok_or("assessment has no items")?;
     if !is_resumed {
+        let fingerprints = drawn
+            .question_ids
+            .iter()
+            .map(|id| item_fingerprint(db, id))
+            .collect::<Result<Vec<_>, _>>()?;
         conn.execute(
             "INSERT INTO assessment_attempts \
              (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
-              integrity_session_id, started_at, attempt_ordinal) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+              integrity_session_id, started_at, attempt_ordinal, assessed_bloom_level, pass_threshold_snapshot, item_fingerprints) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 attempt_id,
                 subject_did,
@@ -499,6 +556,9 @@ fn start_attempt_db(
                 integrity_session_id,
                 now,
                 attempt_ordinal as i64,
+                assessed_bloom,
+                pass_threshold,
+                serde_json::to_string(&fingerprints).map_err(|e| e.to_string())?,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -545,7 +605,7 @@ pub(crate) fn save_draft_impl(
     let (question_ids_json, option_orders_json): (String, String) = conn
         .query_row(
             "SELECT question_ids, option_orders FROM assessment_attempts \
-              WHERE id = ?1 AND graded_at IS NULL AND ended_at IS NULL",
+              WHERE id = ?1 AND graded_at IS NULL AND ended_at IS NULL AND submitted_at IS NULL",
             params![attempt_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -596,6 +656,63 @@ pub(crate) fn save_draft_impl(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn assessment_submit_answers(
+    state: State<'_, AppState>,
+    attempt_id: String,
+    answers: Vec<SubmittedAnswer>,
+) -> Result<(), String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.submit",
+            move |db| {
+                let actor = SettingsStore::get(db.conn(), keys::IDENTITY_LOCAL_DID);
+                ensure_attempt_owner(db.conn(), &attempt_id, &actor)?;
+                submit_answers_impl(db.conn(), &attempt_id, &answers)
+            },
+        )
+        .await
+}
+
+pub(crate) fn submit_answers_impl(
+    conn: &rusqlite::Connection,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let (frozen, session): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT submitted_answers_json, integrity_session_id FROM assessment_attempts WHERE id=?1 AND ended_at IS NULL",
+        [attempt_id], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|e| e.to_string())?;
+    let mut normalized = answers.to_vec();
+    for answer in &mut normalized {
+        answer.selected.sort_unstable();
+        answer.selected.dedup();
+    }
+    normalized.sort_by(|a, b| a.question_id.cmp(&b.question_id));
+    let json = serde_json::to_string(&normalized).map_err(|e| e.to_string())?;
+    if let Some(frozen) = frozen {
+        if frozen != json {
+            return Err("answers are already submitted and cannot be changed".into());
+        }
+        return Ok(());
+    }
+    require_live_integrity_session(conn, session.as_deref())?;
+    save_draft_impl(conn, attempt_id, &normalized)?;
+    conn.execute(
+        "UPDATE assessment_attempts SET submitted_answers_json=?2, submitted_at=?3 WHERE id=?1",
+        params![
+            attempt_id,
+            json,
+            crate::commands::credentials::now_rfc3339()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
 // ---- grade attempt ------------------------------------------------------
 
 pub(crate) fn ensure_attempt_owner(
@@ -631,7 +748,7 @@ pub async fn assessment_grade(
     let now = crate::commands::credentials::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
-    state
+    let graded = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
@@ -656,7 +773,13 @@ pub async fn assessment_grade(
                 )
             },
         )
-        .await
+        .await?;
+    // A passed attempt may have issued a credential into a list its host has
+    // not seen yet; a verifier fetching that list next minute must find it.
+    if let Err(e) = crate::commands::credentials::publish_status_lists_for(&state).await {
+        log::warn!("status list publication after grading: {e}");
+    }
+    Ok(graded)
 }
 
 /// Grading core, separated from Tauri state so it is directly testable.
@@ -681,10 +804,37 @@ pub fn grade_attempt_impl(
         .map_err(|e| e.to_string())?;
     ensure_attempt_owner(conn, attempt_id, issuer_did.as_str())?;
 
+    let completed = conn.query_row(
+        "SELECT score, passed, credential_id FROM assessment_attempts WHERE id=?1 AND graded_at IS NOT NULL",
+        [attempt_id], |r| Ok(GradeResult { score:r.get(0)?, passed:r.get(1)?, credential_id:r.get(2)? }))
+        .optional().map_err(|e|e.to_string())?;
+    if let Some(result) = completed {
+        return Ok(result);
+    }
+    let (frozen, bloom, threshold): (Option<String>, Option<u8>, Option<f64>) = conn.query_row(
+        "SELECT submitted_answers_json, assessed_bloom_level, pass_threshold_snapshot FROM assessment_attempts WHERE id=?1 AND ended_at IS NULL",
+        [attempt_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|"attempt not found or already graded".to_string())?;
+    let frozen = frozen.ok_or("submit answers before grading")?;
+    let frozen_answers: Vec<SubmittedAnswer> =
+        serde_json::from_str(&frozen).map_err(|e| e.to_string())?;
+    let mut submitted = answers.to_vec();
+    for answer in &mut submitted {
+        answer.selected.sort_unstable();
+        answer.selected.dedup();
+    }
+    submitted.sort_by(|a, b| a.question_id.cmp(&b.question_id));
+    if frozen_answers != submitted {
+        return Err("grading answers differ from the frozen submission".into());
+    }
+    let bloom = bloom.ok_or("assessment has no explicit Bloom metadata; start a new attempt")?;
+    let threshold = threshold
+        .filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0)
+        .ok_or("assessment has no valid pass threshold")?;
+
     // Load attempt.
     #[allow(clippy::type_complexity)]
     let (
-        bank_id,
+        _bank_id,
         skill_id,
         question_ids_json,
         option_orders_json,
@@ -715,13 +865,32 @@ pub fn grade_attempt_impl(
 
     let question_ids: Vec<String> = parse_json_vec(&question_ids_json);
     let option_orders: Vec<Vec<usize>> = parse_json_vec(&option_orders_json);
-    let threshold: f64 = conn
+    let fingerprint_json: Option<String> = conn
         .query_row(
-            "SELECT pass_threshold FROM question_banks WHERE id = ?1",
-            params![bank_id],
+            "SELECT item_fingerprints FROM assessment_attempts WHERE id=?1",
+            [attempt_id],
             |r| r.get(0),
         )
-        .unwrap_or(0.7);
+        .map_err(|e| e.to_string())?;
+    let fingerprints: Vec<String> = serde_json::from_str(
+        &fingerprint_json.ok_or("assessment predates item snapshots; start a new attempt")?,
+    )
+    .map_err(|e| e.to_string())?;
+    if fingerprints.len() != question_ids.len()
+        || question_ids
+            .iter()
+            .zip(&fingerprints)
+            .any(|(id, expected)| item_fingerprint(db, id).as_ref() != Ok(expected))
+    {
+        return Err("assessment items changed during the attempt; answers were not graded".into());
+    }
+    let finalized: bool = conn.query_row(
+        "SELECT ended_at IS NOT NULL AND status IN ('completed','flagged','suspended') FROM integrity_sessions WHERE id=?1",
+        [integrity_session_id.as_deref().ok_or("assessment has no integrity session")?], |r|r.get(0))
+        .map_err(|e|e.to_string())?;
+    if !finalized {
+        return Err("finalize assessment monitoring before grading".into());
+    }
 
     // Grade each item through the unified grader. The key is read inside
     // `items::grade_item` and never reaches a payload.
@@ -800,6 +969,16 @@ pub fn grade_attempt_impl(
         // verifier holding only the VC can re-run the graders and confirm the
         // score without access to this device's database.
         let mut evidence_refs = vec![attempt_id.to_string()];
+        let request_binding: Option<String> = conn
+            .query_row(
+                "SELECT exchange_binding FROM assessment_attempts WHERE id=?1",
+                [attempt_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if let Some(binding) = request_binding {
+            evidence_refs.push(binding);
+        }
         for g in &graded {
             evidence_refs.push(format!(
                 "grade:{}:{}:{}",
@@ -817,10 +996,10 @@ pub fn grade_attempt_impl(
 
         let claim = SkillClaim {
             skill_id: skill_id.clone(),
-            level: crate::aggregation::level::map_level(score),
+            level: bloom,
             score,
             evidence_refs: evidence_refs.clone(),
-            rubric_version: None,
+            rubric_version: Some("assessment-items-bloom-v1".into()),
             assessment_method: Some("proctored_quiz".into()),
             provenance: None, // AssessmentCredential type weight already dominates
         };
@@ -1021,6 +1200,7 @@ mod tests {
                 r#"
                 INSERT INTO question_banks (id, skill_id, label, ratified, draw_count)
                 VALUES ('bank_t', 'skill_rust', 'T', 1, 2);
+                INSERT INTO integrity_sessions (id,status) VALUES ('test-session','active');
                 INSERT INTO assessment_items
                     (id, item_kind, skill_id, content_public, grader_private, bank_id, ratified)
                 VALUES
@@ -1042,8 +1222,8 @@ mod tests {
             .execute(
                 "INSERT INTO assessment_attempts \
                  (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
-                  started_at, attempt_ordinal) \
-                 VALUES ('att_1', ?1, 'bank_t', 'skill_rust', 1, ?2, ?3, ?4, 1)",
+                  started_at, attempt_ordinal, integrity_session_id, assessed_bloom_level, pass_threshold_snapshot) \
+                 VALUES ('att_1', ?1, 'bank_t', 'skill_rust', 1, ?2, ?3, ?4, 1, 'test-session', 0, 0.7)",
                 params![
                     did.0,
                     r#"["q1","q2"]"#,
@@ -1054,6 +1234,16 @@ mod tests {
             )
             .unwrap();
 
+        let fingerprints = ["q1", "q2"]
+            .iter()
+            .map(|id| item_fingerprint(&db, id).unwrap())
+            .collect::<Vec<_>>();
+        db.conn()
+            .execute(
+                "UPDATE assessment_attempts SET item_fingerprints=?1 WHERE id='att_1'",
+                [serde_json::to_string(&fingerprints).unwrap()],
+            )
+            .unwrap();
         Ctx {
             db,
             runtime: GraderRuntime::new().unwrap(),
@@ -1063,6 +1253,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn edited_item_cannot_change_a_frozen_assessment_result() {
+        let ctx = setup();
+        let answers = vec![answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        ctx.db
+            .conn()
+            .execute("UPDATE assessment_items SET points=99 WHERE id='q1'", [])
+            .unwrap();
+        let error = grade_attempt_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.key,
+            &ctx.did,
+            "att_1",
+            &answers,
+            NOW,
+        )
+        .unwrap_err();
+        assert!(error.contains("items changed"));
+    }
+
     fn answer(q: &str, selected: &[usize]) -> SubmittedAnswer {
         SubmittedAnswer {
             question_id: q.to_string(),
@@ -1070,7 +1282,13 @@ mod tests {
         }
     }
 
+    fn prepare(ctx: &Ctx, answers: &[SubmittedAnswer]) {
+        submit_answers_impl(ctx.db.conn(), "att_1", answers).unwrap();
+        ctx.db.conn().execute("UPDATE integrity_sessions SET ended_at=?1, status='completed', integrity_score=0.9 WHERE id='test-session'", [NOW]).unwrap();
+    }
+
     fn grade(ctx: &Ctx, answers: &[SubmittedAnswer]) -> GradeResult {
+        prepare(ctx, answers);
         grade_attempt_impl(
             &ctx.db,
             &ctx.engine(),
@@ -1093,6 +1311,133 @@ mod tests {
             r.credential_id.is_some(),
             "a passing attempt must credential"
         );
+    }
+
+    #[test]
+    fn issuance_uses_assessed_bloom_and_final_integrity() {
+        let ctx = setup();
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        let json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [result.credential_id.unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            vc.pointer("/credentialSubject/level"),
+            Some(&serde_json::json!(0))
+        );
+        assert_eq!(
+            vc.pointer("/integrity/status"),
+            Some(&serde_json::json!("completed"))
+        );
+    }
+
+    #[test]
+    fn native_assessment_is_discoverable_and_verifies_as_a_bound_share() {
+        use alexandria_verify::exchange::{
+            present_credential, verify_share, CredentialRequest, IssuerState,
+        };
+        let ctx = setup();
+        ctx.db.conn().execute("UPDATE assessment_attempts SET exchange_binding='request:demo:nonce' WHERE id='att_1'", []).unwrap();
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        let preview = super::super::talent_index::get_talent_index_preview_impl(
+            ctx.db.conn(),
+            ctx.did.as_str(),
+            NOW,
+        )
+        .unwrap();
+        let skill = preview
+            .candidates
+            .iter()
+            .find(|s| s.skill_id == "skill_rust")
+            .expect("earned skill can be published");
+        assert_eq!(skill.bloom_level, 0);
+        assert_eq!(skill.issuer_clusters, 0);
+        let json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [result.credential_id.unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339(NOW)
+            .unwrap()
+            .timestamp();
+        let request = CredentialRequest {
+            id: "demo".into(),
+            audience: "urn:demo".into(),
+            nonce: "nonce".into(),
+            organization: "Demo".into(),
+            subject_did: ctx.did.0.clone(),
+            skill_id: "skill_rust".into(),
+            network_id: "preprod".into(),
+            taxonomy_digest: "test-digest".into(),
+            purpose: "Assessment demo".into(),
+            role_label: "Engineer".into(),
+            require_new_assessment: true,
+            created_at: now,
+            expires_at: now + 900,
+        };
+        let signed = present_credential(
+            request.clone(),
+            serde_json::from_str(&json).unwrap(),
+            Some(IssuerState {
+                revoked: false,
+                suspended: false,
+                suspended_until: None,
+                superseded: false,
+            }),
+            now,
+            &ctx.key,
+        )
+        .unwrap();
+        let verdict = verify_share(&signed, &request, now, NOW).unwrap();
+        assert_eq!(
+            verdict.acceptance_decision,
+            alexandria_verify::vc::AcceptanceDecision::Accept
+        );
+    }
+
+    #[test]
+    fn submission_freezes_answers_and_requires_terminal_monitoring() {
+        let ctx = setup();
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        submit_answers_impl(ctx.db.conn(), "att_1", &answers).unwrap();
+        assert!(submit_answers_impl(ctx.db.conn(), "att_1", &[])
+            .unwrap_err()
+            .contains("cannot be changed"));
+        assert!(save_draft_impl(ctx.db.conn(), "att_1", &[]).is_err());
+        assert!(grade_attempt_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.key,
+            &ctx.did,
+            "att_1",
+            &answers,
+            NOW
+        )
+        .unwrap_err()
+        .contains("finalize assessment monitoring"));
+        prepare(&ctx, &answers);
+        assert!(grade_attempt_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.key,
+            &ctx.did,
+            "att_1",
+            &[],
+            NOW
+        )
+        .unwrap_err()
+        .contains("frozen submission"));
+        assert!(grade(&ctx, &answers).passed);
     }
 
     #[test]
@@ -1123,6 +1468,7 @@ mod tests {
     #[test]
     fn failed_grading_rolls_back_items_credential_status_and_derived_state_before_retry() {
         let ctx = setup();
+        prepare(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
         let tables = [
             "attempt_items",
             "credentials",
@@ -1302,7 +1648,13 @@ mod tests {
             &[answer("q1", &[0]), answer("q2", &[1])],
             NOW,
         );
-        assert!(second.is_err(), "a graded attempt must not regrade");
+        assert!(second.unwrap().passed);
+        let count: i64 = ctx
+            .db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

@@ -43,6 +43,7 @@
     "strongMatch": "forte",
     "matched": "correspond à « {term} »",
     "noMatchingSkills": "Aucune compétence correspondante trouvée — essayez une autre description.",
-    "addAsGoal": "Ajouter {count} compétence comme objectif | Ajouter {count} compétences comme objectif"
+    "addAsGoal": "Ajouter {count} compétence comme objectif | Ajouter {count} compétences comme objectif",
+    "noTemplates": "Aucun objectif n’est disponible dans cette catégorie. Essayez une autre catégorie ou décrivez un objectif d’apprentissage."
   }
 }

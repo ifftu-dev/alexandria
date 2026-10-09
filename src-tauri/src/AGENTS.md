@@ -20,12 +20,12 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
 | P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), profile-fetch, username-reg (registry receipts), sync, stress. `sync.rs` also fans settings rows out/in. |
-| Database | `db/` | SQLite + 94 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks; no startup seed creates personas, credentials or courses. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
+| Database | `db/` | SQLite + 94 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks; standard release profile activation also installs ten labelled, profile-owned course drafts, all bundled plugins, and three owned classroom templates through `commands/demo_courses.rs` and `commands/demo_resources.rs`; development builds instead offer the opt-in, profile-scoped picker in `commands/dev_seeds.rs`; no content seed creates personas, credentials or enrollments. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
 | Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
 | Cardano | `cardano/` | Pallas wallet/tx building; reference scripts deployed on preprod (UTxOs in `cardano/script_refs.rs`) |
 | Content storage | `content_store/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock; `ContentNode::shutdown` calls both `Router::shutdown` and `Store::shutdown` so the redb lock releases between profile switches. |
 | Cryptography | `crypto/` | Ed25519, Blake2b, per-profile keystore (Stronghold desktop / portable AES-256-GCM mobile) |
-| AppState lifecycle | `lib.rs` | `start_active_profile` / `stop_active_profile` bring per-profile services up and down on switch |
+| AppState lifecycle | `lib.rs` | `start_new_profile` initializes the bundled network governance anchor for creation/restoration; `start_active_profile` / `stop_active_profile` bring services up and down on switch without changing existing trust decisions |
 
 Credential revocation, suspension, and reinstatement are issuer-bound. The
 challenge/escrow command and builder paths are retired. Plugin credential

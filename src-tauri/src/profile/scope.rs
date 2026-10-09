@@ -139,6 +139,28 @@ pub struct ProfileLease {
 }
 
 impl ProfileLease {
+    #[cfg(feature = "personhood-lab")]
+    pub(crate) fn session_id(&self) -> &str {
+        &self.inner.session
+    }
+
+    #[cfg(feature = "personhood-lab")]
+    pub(crate) fn with_current<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let state = self
+            .inner
+            .admission
+            .state
+            .lock()
+            .map_err(|_| "profile admission poisoned")?;
+        if !state.accepting || state.session != self.inner.session {
+            return Err("profile session is locked or has changed".into());
+        }
+        operation()
+    }
+
     pub(crate) fn is_current(&self) -> bool {
         let state = self
             .inner
@@ -365,6 +387,25 @@ mod tests {
             .expect("new session admitted");
         assert_eq!(probe.calls.load(Ordering::SeqCst), 2);
         operations.lock(async { Ok(()) }).await.expect("final lock");
+    }
+
+    #[cfg(feature = "personhood-lab")]
+    #[test]
+    fn receipt_commit_gate_refuses_a_closed_session() {
+        let admission = Admission::default();
+        let session = admission.close();
+        assert!(admission.open(&session));
+        let lease = admission.admit(&session).unwrap();
+        assert_eq!(lease.with_current(|| Ok(42)).unwrap(), 42);
+        admission.close();
+        let calls = AtomicUsize::new(0);
+        assert!(lease
+            .with_current(|| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+            .is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

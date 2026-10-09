@@ -267,11 +267,11 @@ mod tests {
                 "evidenceRefs": [],
             },
             "proof": {
-                "type": "Ed25519Signature2020",
+                "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
                 "created": "2026-04-13T00:00:00Z",
                 "verificationMethod": "did:key:zIssuer#key-1",
                 "proofPurpose": "assertionMethod",
-                "jws": "fake..jws"
+                "proofValue": "zfake..jws"
             }
         })
         .to_string();

@@ -15,11 +15,10 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
-// The learning player owns its own full-bleed layout (edge-to-edge
-// video, internal sidebar). Skip the shell's content padding for it so
-// the player can reach the screen edges.
+// Players, settings, classrooms, and sessions own their internal layout.
+// Let these views reach the content edges and manage their own scrolling.
 const route = useRoute()
-const isImmersiveRoute = computed(() => route.name === 'learn' || route.name === 'settings')
+const isImmersiveRoute = computed(() => route.name === 'learn' || route.name === 'settings' || route.name === 'classroom' || route.name === 'tutoring-session')
 // The player is full-bleed *and* owns a pinned prev/next footer that must sit
 // directly on top of the mobile tab bar. The shell's mobile-content-padding
 // (tab-bar clearance for scrolling pages) would instead float the whole
@@ -121,8 +120,8 @@ function toggleSidebar() {
       </div>
 
       <!-- Content area -->
-      <main class="flex-1 overflow-y-auto" :class="{ 'mobile-content-padding': !isPlayerRoute }">
-        <div :class="isImmersiveRoute ? 'h-full flex flex-col' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
+      <main class="flex-1 min-w-0 min-h-0" :class="[isImmersiveRoute ? 'overflow-hidden' : 'overflow-y-auto', { 'mobile-content-padding': !isPlayerRoute }]">
+        <div :class="isImmersiveRoute ? 'h-full min-h-0 flex flex-col' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
           <slot />
         </div>
       </main>

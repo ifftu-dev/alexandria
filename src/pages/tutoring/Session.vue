@@ -14,6 +14,9 @@ const route = useRoute()
 const router = useRouter()
 const {
   sessionStatus,
+  sessions,
+  refreshSessions,
+  joinRoom,
   lastError,
   videoFrames,
   chatMessages,
@@ -67,7 +70,7 @@ let durationInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
   await setupEventListeners()
-  refreshStatus()
+  await Promise.all([refreshStatus(), refreshSessions()])
   startPolling(2000)
   // Update elapsed time every second
   durationInterval = setInterval(() => {
@@ -99,7 +102,15 @@ watch(() => lastError.value, () => {
 })
 
 const isActive = computed(() => sessionStatus.value?.session_id === sessionId.value)
-const sessionTitle = computed(() => sessionStatus.value?.session_title || 'Session')
+const sessionRecord = computed(() => sessions.value.find(s => s.id === sessionId.value))
+const sessionEnded = computed(() => sessionRecord.value?.status === 'ended')
+const sessionTitle = computed(() => isActive.value ? sessionStatus.value?.session_title ?? '' : sessionRecord.value?.title ?? t('tutoring.header.title'))
+const joining = ref(false)
+async function rejoin() {
+  if (!sessionRecord.value?.ticket || sessionEnded.value) return
+  joining.value = true
+  try { const joined = await joinRoom(sessionRecord.value.ticket, sessionRecord.value.title); await router.replace(`/tutoring/${joined.id}`) } catch { /* useTutoringRoom exposes the error in lastError. */ } finally { joining.value = false }
+}
 const peers = computed(() => sessionStatus.value?.peers ?? [])
 const peerCount = computed(() => peers.value.length)
 const connectedPeerCount = computed(() => peers.value.filter(p => p.connected).length)
@@ -400,7 +411,7 @@ function peerInitials(nodeId: string): string {
           </span>
           <span v-else class="h-2.5 w-2.5 rounded-full bg-muted-foreground/30 shrink-0" />
           <span class="text-xs sm:text-sm font-medium text-foreground truncate max-w-[120px] sm:max-w-[200px]" :title="sessionTitle">
-            {{ isActive ? sessionTitle : $t('tutoring.session.ended') }}
+            {{ sessionTitle }}
           </span>
           <!-- Duration timer -->
           <span v-if="isActive" class="rounded bg-muted px-1 sm:px-1.5 py-0.5 text-[0.65rem] sm:text-xs font-mono text-muted-foreground tabular-nums">
@@ -855,17 +866,18 @@ function peerInitials(nodeId: string): string {
         </div>
 
         <!-- Not in active session -->
-        <div v-else class="flex-1 flex items-center justify-center">
-          <div class="text-center py-16">
+        <div v-else class="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-6">
+          <div class="max-w-md text-center py-10">
             <div class="flex h-16 w-16 items-center justify-center rounded-full bg-muted/30 mx-auto mb-4">
               <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
             </div>
-            <h3 class="text-sm font-medium text-foreground">{{ $t('tutoring.session.notFoundTitle') }}</h3>
-            <p class="mt-1 text-xs text-muted-foreground">{{ $t('tutoring.session.notFoundDesc') }}</p>
+            <h3 class="text-sm font-medium text-foreground">{{ $t(sessionEnded ? 'tutoring.session.ended' : 'tutoring.session.notJoinedTitle') }}</h3>
+            <p class="mt-1 text-xs text-muted-foreground">{{ $t(sessionEnded ? 'tutoring.session.endedDescription' : 'tutoring.session.notJoinedDescription') }}</p>
+            <button v-if="sessionRecord?.ticket && !sessionEnded" :disabled="joining" class="mt-5 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50" @click="rejoin">{{ $t(joining ? 'tutoring.device.joining' : 'tutoring.join.join') }}</button>
             <button
-              class="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              class="mt-4 mx-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               @click="router.push('/tutoring')"
             >
               {{ $t('tutoring.session.backToLobby') }}

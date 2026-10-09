@@ -4,9 +4,11 @@ import AssessmentRunner from './AssessmentRunner.vue'
 import type { GradeResult, StartedAttempt, SubmittedAnswer } from '@/types'
 
 const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
   start: vi.fn<(enrollment: string | null) => Promise<void>>(),
   stop: vi.fn<() => Promise<string | undefined>>(),
   startAttempt: vi.fn<(skill: string, session: string) => Promise<StartedAttempt>>(),
+  submitAnswers: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   saveDraft: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   grade: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<GradeResult>>(),
   active: { value: false },
@@ -14,8 +16,10 @@ const mocks = vi.hoisted(() => ({
   go: vi.fn(),
 }))
 
+vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { skillId: 'skill_test' } }),
+  useRoute: () => ({ params: { skillId: 'skill_test' }, query: {} }),
   useRouter: () => ({ push: mocks.push, go: mocks.go }),
 }))
 vi.mock('@/composables/useSentinel', () => ({
@@ -28,7 +32,7 @@ vi.mock('@/composables/useSentinel', () => ({
   }),
 }))
 vi.mock('@/composables/useAssessment', () => ({
-  useAssessment: () => ({ startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, grade: mocks.grade }),
+  useAssessment: () => ({ startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade }),
 }))
 vi.mock('@/composables/useDiagnostics', () => ({
   useDiagnostics: () => ({ registerEntryPreparation: () => () => undefined }),
@@ -59,6 +63,7 @@ function render() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.active.value = false
   mocks.start.mockReset().mockImplementation(async () => { mocks.active.value = true })
   mocks.stop.mockReset().mockImplementation(async () => { mocks.active.value = false; return 'session-1' })
@@ -73,18 +78,27 @@ afterEach(async () => {
 })
 
 describe('standalone assessment monitoring', () => {
-  it('keeps monitoring and selected answers on grading failure, then closes on successful retry', async () => {
+  it('recovers a finalized submission without starting another monitoring session', async () => {
+    mocks.invoke.mockResolvedValueOnce({ score: 1, passed: true, credential_id: 'credential-1' })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('learn.assessment.passed')
+    expect(mocks.start).not.toHaveBeenCalled()
+    expect(mocks.startAttempt).not.toHaveBeenCalled()
+  })
+
+  it('keeps frozen answers on grading failure and retries without reopening monitoring', async () => {
     mocks.grade.mockRejectedValueOnce(new Error('grading unavailable'))
     const wrapper = render()
     await flushPromises()
     await wrapper.get('input').setValue(true)
-    await wrapper.get('button').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('grading unavailable')
-    expect(mocks.stop).not.toHaveBeenCalled()
-    expect(mocks.active.value).toBe(true)
+    expect(mocks.stop).toHaveBeenCalledOnce()
+    expect(mocks.active.value).toBe(false)
     expect((wrapper.get('input').element as HTMLInputElement).checked).toBe(true)
-    await wrapper.get('button').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
     expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1')
     expect(mocks.grade.mock.calls).toEqual([
@@ -155,7 +169,8 @@ describe('standalone assessment monitoring', () => {
     mocks.grade.mockReturnValueOnce(grading.promise)
     const wrapper = render()
     await flushPromises()
-    await wrapper.get('button').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
+    await flushPromises()
     wrapper.unmount()
     await flushPromises()
     mocks.active.value = true
@@ -170,7 +185,7 @@ describe('standalone assessment monitoring', () => {
     mocks.grade.mockReturnValueOnce(grading.promise)
     const wrapper = render()
     await flushPromises()
-    const submit = wrapper.getComponent({ name: 'AppButton' })
+    const submit = wrapper.findAllComponents({ name: 'AppButton' }).find(button => button.text() === 'learn.assessment.submit')!
     submit.vm.$emit('click')
     submit.vm.$emit('click')
     await flushPromises()
@@ -181,21 +196,23 @@ describe('standalone assessment monitoring', () => {
     expect(mocks.stop).toHaveBeenCalledOnce()
   })
 
-  it('retains a successful grade when cleanup fails and retries only cleanup', async () => {
+  it('freezes answers and waits for cleanup before grading', async () => {
     mocks.stop.mockRejectedValueOnce(new Error('cleanup unavailable'))
     const wrapper = render()
     await flushPromises()
-    await wrapper.get('button').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('learn.assessment.notPassedYet')
+    expect(mocks.submitAnswers).toHaveBeenCalledOnce()
+    expect(mocks.grade).not.toHaveBeenCalled()
     expect(wrapper.get('[role="alert"]').text()).toContain('cleanup unavailable')
-    const retake = () => wrapper.findAll('button').find(button => button.text() === 'learn.assessment.retake')!
-    expect((retake().element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('input').element as HTMLInputElement).disabled).toBe(true)
     await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+    const submit = wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!
+    await submit.trigger('click')
     await flushPromises()
     expect(mocks.grade).toHaveBeenCalledOnce()
     expect(mocks.stop).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect((retake().element as HTMLButtonElement).disabled).toBe(false)
+    expect(wrapper.text()).toContain('learn.assessment.notPassedYet')
   })
 })

@@ -57,17 +57,18 @@ async fn presentation_reveals_only_requested_fields() {
         nonce: "n-fields".into(),
     };
     let env = create_presentation_impl(db.conn(), &subject_key, &subject, &req).expect("create");
+    let payload = serde_json::to_string(&env.verifiable_credential).unwrap();
     assert!(
-        !env.payload_json.contains("\"score\""),
-        "score field leaked: {}",
-        env.payload_json
+        !payload.contains("\"score\""),
+        "score field leaked: {payload}"
     );
     assert!(
-        !env.payload_json.contains("evidenceRefs"),
-        "evidenceRefs leaked: {}",
-        env.payload_json
+        !payload.contains("evidenceRefs"),
+        "evidenceRefs leaked: {payload}"
     );
-    assert!(env.payload_json.contains("\"level\""), "level missing");
+    assert!(payload.contains("\"level\""), "level missing");
+    assert_eq!(env.type_, vec!["VerifiablePresentation".to_string()]);
+    assert_eq!(env.proof.domain.as_deref(), Some("did:web:hirer.example"));
     // The verifier can still validate the envelope end-to-end.
     let outcome = verify_presentation_impl(db.conn(), &env, "did:web:hirer.example").unwrap();
     assert_eq!(outcome, PresentationVerification::Accepted);

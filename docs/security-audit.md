@@ -615,7 +615,7 @@ reviewed**:
 
 - `crypto/did.rs` — `did:key` derivation, parsing, key registry
 - `domain/vc/{mod,canonicalize,context,sign,verify}.rs` — JCS
-  canonicalisation, Ed25519Signature2020 detached JWS, §13.2
+  canonicalisation, Data Integrity `eddsa-jcs-2022` proofs, §13.2
   acceptance predicate
 - `aggregation/{mod,weights,level,independence,antigaming,config}.rs`
   — §14 trust aggregation + §15 anti-gaming

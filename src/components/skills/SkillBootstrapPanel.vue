@@ -3,9 +3,10 @@
 // evidence) or paste its text, confirm the extracted skills, and claim them as
 // provenance-tagged self-asserted credentials. Emits `claimed` with the count.
 // Used both in onboarding and on the standalone /skills/bootstrap page.
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillBootstrap, type DocType } from '@/composables/useSkillBootstrap'
+import LearningDecisionReview from '@/components/LearningDecisionReview.vue'
 import { AppButton, AppBadge } from '@/components/ui'
 import type { SkillSuggestion } from '@/types'
 
@@ -28,6 +29,8 @@ const suggestions = ref<SkillSuggestion[]>([])
 const chosen = ref<Set<string>>(new Set())
 const busy = ref(false)
 const error = ref('')
+
+watch(text, () => { suggestions.value = []; chosen.value = new Set() })
 
 async function chooseFile() {
   error.value = ''
@@ -114,6 +117,7 @@ async function claim() {
       {{ $t('skills.bootstrap.findSkills') }}
     </AppButton>
 
+    <LearningDecisionReview :source="text" task="document_claim" @suggestion="s => { if (!suggestions.some(item => item.skill_id === s.skill_id)) suggestions.push(s) }" />
     <div v-if="suggestions.length" class="space-y-2">
       <p class="text-sm text-muted-foreground">{{ $t('skills.bootstrap.confirmPrompt') }}</p>
       <label

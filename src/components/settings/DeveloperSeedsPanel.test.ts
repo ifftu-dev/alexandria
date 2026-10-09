@@ -1,0 +1,110 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import DeveloperSeedsPanel from './DeveloperSeedsPanel.vue'
+import type { SeedResource } from '@/types'
+
+const mocks = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
+vi.mock('@/composables/useProfiles', () => ({ useProfiles: () => ({ profiles: { value: [{ id: 'one', display_name: 'Test learner' }] }, activeProfileId: { value: 'one' } }) }))
+const resources: SeedResource[] = [
+  { id: 'video:lab', title: 'Video lab', category: 'Courses', description: 'Local course', dependencies: ['media:clip'], installed: false },
+  { id: 'media:clip', title: 'Clip', category: 'Media', description: 'Local video', dependencies: [], installed: false },
+  { id: 'bank:js', title: 'JS questions', category: 'Assessments', description: 'Questions', dependencies: [], installed: true },
+]
+const render = () => mount(DeveloperSeedsPanel, { global: { stubs: { RouterLink: true } } })
+function button(wrapper: ReturnType<typeof render>, label: string) {
+  const b = wrapper.findAll('button').find(b => b.text() === label)
+  if (!b) throw new Error(`Missing button ${label}`)
+  return b
+}
+beforeEach(() => {
+  mocks.invoke.mockReset().mockImplementation(async (command: string) => {
+    if (command === 'dev_seed_catalog') return { enabled: true, resources }
+    if (command === 'dev_seed_plan') return resources
+    if (command === 'dev_seed_reset_plan') return { token: 'reviewed-data', resources: [{ id: 'bank:js', title: 'JS questions', can_reset: true, reason: null, effects: [{ label: 'Assessment attempts and results', count: 3, action: 'remove' }] }] }
+    if (command === 'dev_seed_reset_run') return [{ id: 'bank:js', status: 'removed', error: null }]
+    if (command === 'dev_seed_run') return resources.map(r => ({ id: r.id, status: r.installed ? 'kept' : 'added', error: null }))
+    throw new Error(command)
+  })
+})
+describe('Developer seed picker', () => {
+  it('hides the picker when the backend disables it', async () => {
+    mocks.invoke.mockResolvedValue({ enabled: false, resources: [] })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.find('section').exists()).toBe(false)
+  })
+  it('retains selections across categories and reviews dependencies before writing', async () => {
+    const wrapper = render(); await flushPromises()
+    await wrapper.find('select').setValue('Courses')
+    await wrapper.find('input[type=checkbox]').setValue(true)
+    await wrapper.find('select').setValue('Assessments')
+    await wrapper.find('input[type=checkbox]').setValue(true)
+    await button(wrapper, 'Review selection').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_plan', { selected: ['video:lab', 'bank:js'] })
+    expect(wrapper.text()).toContain('required dependency')
+    expect(mocks.invoke.mock.calls.some(c => c[0] === 'dev_seed_run')).toBe(false)
+  })
+  it('seeds everything in one reviewed run and displays per-resource results', async () => {
+    const wrapper = render(); await flushPromises()
+    await button(wrapper, 'Seed everything').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_plan', { selected: resources.map(r => r.id) })
+    await button(wrapper, 'Seed these resources').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_run', { selected: resources.map(r => r.id) })
+    expect(wrapper.text()).toContain('2 added · 1 kept · 0 failed')
+    expect(mocks.invoke.mock.calls.filter(c => c[0] === 'dev_seed_run')).toHaveLength(1)
+  })
+  it('reviews affected data and requires confirmation before resetting all installed seeds', async () => {
+    const wrapper = render(); await flushPromises()
+    await button(wrapper, 'Reset all seeds').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_reset_plan', { selected: ['bank:js'] })
+    expect(wrapper.text()).toContain('3 × Assessment attempts and results')
+    expect(button(wrapper, 'Remove these seeds').attributes('disabled')).toBeDefined()
+    expect(mocks.invoke.mock.calls.some(c => c[0] === 'dev_seed_reset_run')).toBe(false)
+    await wrapper.find('input[type=checkbox]').setValue(true)
+    await button(wrapper, 'Remove these seeds').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_reset_run', { selected: ['bank:js'], token: 'reviewed-data' })
+    expect(wrapper.text()).toContain('1 removed')
+  })
+  it('requires a fresh review if data changes before reset', async () => {
+    const wrapper = render(); await flushPromises()
+    await button(wrapper, 'Reset all seeds').trigger('click'); await flushPromises()
+    await wrapper.find('input[type=checkbox]').setValue(true)
+    mocks.invoke.mockRejectedValueOnce('Affected data changed. Review the reset again before continuing.')
+    await button(wrapper, 'Remove these seeds').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('Affected data changed')
+    expect(wrapper.findAll('button').some(b => b.text() === 'Remove these seeds')).toBe(false)
+  })
+
+  it('opens seeded discussion and proposal drafts by their draft row id', async () => {
+    const drafts: SeedResource[] = [
+      { id: 'draft:testing', title: 'Which tests earn their maintenance cost?', category: 'Discussions', description: 'Prompt', dependencies: [], installed: true },
+      { id: 'proposal:civics', title: 'Proposal: require a source list', category: 'Proposals', description: 'Civic Engagement · Prompt', dependencies: [], installed: true },
+      { id: 'bank:js', title: 'JS questions', category: 'Assessments', description: 'Questions', dependencies: [], installed: true },
+    ]
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'dev_seed_catalog') return { enabled: true, resources: drafts }
+      throw new Error(command)
+    })
+    const RouterLink = defineComponent({ props: { to: { type: Object as () => { query: { seedDraft: string } }, required: true } }, setup: (p) => () => h('a', { 'data-seed': p.to.query.seedDraft }) })
+    const wrapper = mount(DeveloperSeedsPanel, { global: { stubs: { RouterLink } } }); await flushPromises()
+    expect(wrapper.findAll('a[data-seed]').map(a => a.attributes('data-seed'))).toEqual(['testing', 'proposal-civics'])
+    expect(wrapper.findAll('option').map(o => o.text())).toContain('Proposals')
+  })
+
+  it('keeps hidden selections when filters change and clears them explicitly', async () => {
+    const wrapper = render(); await flushPromises()
+    await wrapper.find('select').setValue('Courses')
+    await wrapper.find('input[type=checkbox]').setValue(true)
+    await wrapper.find('input[type=search]').setValue('no matching resource')
+    expect(wrapper.text()).toContain('No resources match these filters')
+    expect(wrapper.text()).toContain('1 selected')
+    await button(wrapper, 'Clear filters').trigger('click')
+    expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(3)
+    expect((wrapper.find('input[type=checkbox]').element as HTMLInputElement).checked).toBe(true)
+    await button(wrapper, 'Clear').trigger('click')
+    expect(button(wrapper, 'Review selection').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'Reset selected').attributes('disabled')).toBeDefined()
+  })
+
+})

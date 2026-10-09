@@ -110,7 +110,7 @@ pub(crate) async fn directories(state: &State<'_, AppState>) -> Result<Vec<Direc
         .await
 }
 
-fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
+pub(crate) fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
     let JsonSetting(raw) = SettingsStore::get(conn, keys::HOLDER_DIRECTORIES);
     serde_json::from_value(raw).map_err(|e| format!("the directory list is unreadable: {e}"))
 }
