@@ -315,12 +315,22 @@ jobs:
       # cargo check still runs build scripts, which compile C (e.g. the
       # SystemConfiguration stubs), so Android needs a working NDK toolchain
       # even though nothing is linked.
-      - name: Use preinstalled Android NDK
+      # The runner image ships only NDK r30 now, whose sysroot rejects the
+      # unversioned target triple that ffmpeg-sys-next's bindgen passes to
+      # clang ("Unversioned target triples are not supported"). r26.3 is what
+      # the local Android recipe and the personhood-lab job build with.
+      - name: Install Android NDK r26
+        if: matrix.label == 'Android'
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: 'ndk;26.3.11579264'
+
+      - name: Use Android NDK r26
         if: matrix.label == 'Android'
         run: |
-          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          if [ -z "$NDK_DIR" ]; then
-            echo "No Android NDK installation was found under $ANDROID_SDK_ROOT/ndk." >&2
+          NDK_DIR="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+          if [ ! -d "$NDK_DIR" ]; then
+            echo "Android NDK r26.3 was not installed under $ANDROID_SDK_ROOT/ndk." >&2
             exit 1
           fi
           SYSROOT_DIR="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
