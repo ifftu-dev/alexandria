@@ -23,7 +23,11 @@ onMounted(async () => {
     if (typeof route.query.seedDraft === 'string') {
       const drafts = await invoke<SeedDraft[]>('dev_seed_drafts')
       const draft = drafts.find(d => d.id === route.query.seedDraft)
-      if (draft) seedContent.value = { title: draft.title, body: draft.body, post_kind: 'text', url: null, video_cid: null, thumbnail_cid: null }
+      if (draft) {
+        seedContent.value = { title: draft.title, body: draft.body, post_kind: 'text', url: null, video_cid: null, thumbnail_cid: null }
+        // Proposal drafts are bound to a subject field; preselect it when this profile may post there.
+        if (draft.subject_field_id && fields.value.some(f => f.id === draft.subject_field_id)) field.value = draft.subject_field_id
+      }
     }
   } catch (e) { error.value = String(e) }
   finally { ready.value = true }

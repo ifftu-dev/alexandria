@@ -262,6 +262,13 @@ fn mutations(conn: &Connection, item: &SeedResource) -> Result<Vec<Mutation>, St
             "Local discussion draft",
             None,
         ),
+        "proposal" => add(
+            "developer_discussion_drafts",
+            "id=?1",
+            &format!("proposal-{key}"),
+            "Local proposal draft",
+            None,
+        ),
         "media" | "thumbnail" => {
             let bytes = if kind == "media" {
                 super::demo_resources::media_bytes(key)?

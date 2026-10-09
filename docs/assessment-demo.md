@@ -193,7 +193,10 @@ In debug builds or optimized builds compiled with Cargo feature `dev-seeding`,
 **Settings → Developer → Test data** lists the actual bundled resources:
 eight example course drafts, two video courses, nine plugins, two question banks,
 individual goal templates, three classrooms, fifteen videos, seven thumbnails,
-and six local discussion prompts. Required taxonomy/synonyms and global plugins
+six local discussion prompts, and seven proposal-style discussion drafts (one
+per bundled subject field, bound to that field so the composer preselects it).
+No governance proposal, ballot or tally rows exist to seed; the local DAO tables
+were retired and only the pinned demo genesis remains. Required taxonomy/synonyms and global plugins
 remain available on startup. Onboarding and the Goals picker also read the
 bundled role/exam/curriculum catalog offline, even when no goal-template rows
 have been seeded (or those seeds were reset). Existing profile templates take

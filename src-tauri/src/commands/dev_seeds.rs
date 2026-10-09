@@ -44,6 +44,7 @@ pub struct SeedDraft {
     pub id: String,
     pub title: String,
     pub body: String,
+    pub subject_field_id: Option<String>,
 }
 const DRAFTS: &[(&str, &str, &str)] = &[
     ("algorithms", "When is a simple algorithm the better choice?", "Testing prompt: compare a straightforward solution with an optimized one. What input size makes the added complexity worthwhile? Replace this prompt with your own analysis before publishing."),
@@ -53,6 +54,32 @@ const DRAFTS: &[(&str, &str, &str)] = &[
     ("cryptography", "How should applications explain key recovery?", "Testing prompt: discuss the usability and security tradeoffs of account recovery without sharing keys or recovery phrases."),
     ("learning", "What evidence demonstrates understanding?", "Testing prompt: compare recall questions, projects, and explanations. What would convince you that someone can apply a concept?"),
 ];
+
+/// Proposal-style discussion drafts: one per bundled subject field, keyed by
+/// the field so the composer preselects it. These are local drafts in the same
+/// table as `DRAFTS`; there is no proposal, ballot or tally table to seed since
+/// local governance was retired, and publishing still requires an accepted
+/// topic credential. Row id is `proposal-{key}`; seed id is `proposal:{key}`.
+pub(super) const PROPOSALS: &[(&str, &str, &str, &str)] = &[
+    ("cs", "sf_cs", "Proposal: require a complexity note on every algorithm lesson", "Testing proposal: every published Computer Science lesson that introduces an algorithm should state its time and space complexity and one input size where it matters. Argue for or against, and say who reviews compliance. Replace this prompt with your own proposal before publishing."),
+    ("cyber", "sf_cyber", "Proposal: add a responsible-disclosure module to every security course", "Testing proposal: Cybersecurity courses should include a short module on coordinated disclosure, legal boundaries and safe lab practice before any hands-on exploitation content. Describe what the module must cover and how instructors would show it."),
+    ("data", "sf_data", "Proposal: publish the dataset provenance for graded data exercises", "Testing proposal: graded Data Science exercises should name their dataset source, licence and collection date. Discuss the burden on instructors and what to do with synthetic data."),
+    ("design", "sf_design", "Proposal: adopt a shared accessibility checklist for design critiques", "Testing proposal: Design critiques and graded design submissions should use one shared checklist covering contrast, focus order, target size and copy. Propose the checklist items and who maintains them."),
+    ("math", "sf_math", "Proposal: accept multiple valid proof styles in graded mathematics items", "Testing proposal: Mathematics graders should accept direct, contrapositive and inductive proofs where each is valid, with a published rubric for partial credit. Discuss how graders would be calibrated."),
+    ("web", "sf_web", "Proposal: set a performance budget for published web development projects", "Testing proposal: Web Development capstone submissions should ship under an agreed performance budget measured on a mid-range phone. Propose the budget, the measurement tool and the exceptions process."),
+    ("civics", "sf_civics", "Proposal: require a source list on civic engagement discussion posts", "Testing proposal: posts in Civic Engagement that make factual claims should link their sources, with moderators able to request them before a post is promoted. Discuss the trade-off between rigour and participation."),
+];
+
+fn subject_field_name(conn: &Connection, id: &str) -> Result<Option<String>, String> {
+    conn.query_row("SELECT name FROM subject_fields WHERE id=?1", [id], |r| {
+        r.get(0)
+    })
+    .map(Some)
+    .or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        e => Err(e.to_string()),
+    })
+}
 
 fn exists(conn: &Connection, table: &str, column: &str, id: &str) -> Result<bool, String> {
     conn.query_row(
@@ -257,6 +284,22 @@ pub(super) fn catalog(db: &Database) -> Result<Vec<SeedResource>, String> {
             exists(db.conn(), "developer_discussion_drafts", "id", id)?,
         );
     }
+    for (key, field, title, body) in PROPOSALS {
+        let field_name = subject_field_name(db.conn(), field)?.unwrap_or_else(|| (*field).into());
+        add(
+            format!("proposal:{key}"),
+            (*title).into(),
+            "Proposals",
+            format!("{field_name} · {body}"),
+            vec![],
+            exists(
+                db.conn(),
+                "developer_discussion_drafts",
+                "id",
+                &format!("proposal-{key}"),
+            )?,
+        );
+    }
     Ok(items)
 }
 pub(super) fn plan(
@@ -385,6 +428,16 @@ pub(super) fn install(
         "draft" => {
             let (_, title, body) = DRAFTS.iter().find(|d| d.0 == id).ok_or("Unknown draft")?;
             db.conn().execute("INSERT OR IGNORE INTO developer_discussion_drafts (id,title,body) VALUES (?1,?2,?3)", params![id,title,body]).map_err(|e| e.to_string())?;
+        }
+        "proposal" => {
+            let (_, field, title, body) = PROPOSALS
+                .iter()
+                .find(|p| p.0 == id)
+                .ok_or("Unknown proposal")?;
+            if !exists(db.conn(), "subject_fields", "id", field)? {
+                return Err(format!("Subject field {field} is not installed"));
+            }
+            db.conn().execute("INSERT OR IGNORE INTO developer_discussion_drafts (id,title,body,subject_field_id) VALUES (?1,?2,?3,?4)", params![format!("proposal-{id}"),title,body,field]).map_err(|e| e.to_string())?;
         }
         _ => return Err("Unknown seed kind".into()),
     }
@@ -527,7 +580,7 @@ pub async fn dev_seed_drafts(state: State<'_, AppState>) -> Result<Vec<SeedDraft
             |db| {
                 let mut stmt = db
                     .conn()
-                    .prepare("SELECT id,title,body FROM developer_discussion_drafts ORDER BY title")
+                    .prepare("SELECT id,title,body,subject_field_id FROM developer_discussion_drafts ORDER BY title")
                     .map_err(|e| e.to_string())?;
                 let rows = stmt
                     .query_map([], |r| {
@@ -535,6 +588,7 @@ pub async fn dev_seed_drafts(state: State<'_, AppState>) -> Result<Vec<SeedDraft
                             id: r.get(0)?,
                             title: r.get(1)?,
                             body: r.get(2)?,
+                            subject_field_id: r.get(3)?,
                         })
                     })
                     .map_err(|e| e.to_string())?;
@@ -644,11 +698,66 @@ mod tests {
         assert_eq!(count(&db, "classrooms"), 3);
         assert_eq!(count(&db, "plugin_installed"), 9);
         assert_eq!(count(&db, "question_banks"), 2);
-        assert_eq!(count(&db, "developer_discussion_drafts"), 6);
+        assert_eq!(count(&db, "developer_discussion_drafts"), 13);
         assert_eq!(count(&db, "discussion_events"), 0);
         assert_eq!(count(&db, "assessment_attempts"), 0);
         assert_eq!(count(&db, "credentials"), 0);
         assert_eq!(count(&db, "enrollments"), 0);
         assert!(catalog(&db).unwrap().iter().all(|i| i.installed));
+    }
+    #[test]
+    fn proposal_drafts_cover_every_bundled_subject_field_and_bind_to_it() {
+        let db = profile("proposals");
+        let dir = tempfile::tempdir().unwrap();
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT id FROM subject_fields ORDER BY id")
+            .unwrap();
+        let fields: BTreeSet<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let covered: BTreeSet<String> = PROPOSALS.iter().map(|p| p.1.to_string()).collect();
+        assert_eq!(
+            covered, fields,
+            "every bundled subject field needs one proposal seed"
+        );
+        assert_eq!(
+            PROPOSALS.len(),
+            fields.len(),
+            "one proposal per subject field"
+        );
+        let items = catalog(&db).unwrap();
+        let proposals: Vec<_> = items.iter().filter(|r| r.category == "Proposals").collect();
+        assert_eq!(proposals.len(), PROPOSALS.len());
+        assert!(proposals
+            .iter()
+            .all(|r| !r.installed && r.dependencies.is_empty()));
+        assert!(proposals
+            .iter()
+            .any(|r| r.id == "proposal:cs" && r.description.starts_with("Computer Science · ")));
+        for item in plan(&items, &["proposal:cs".into(), "proposal:civics".into()]).unwrap() {
+            install(&db, dir.path(), &item).unwrap();
+        }
+        assert_eq!(count(&db, "developer_discussion_drafts"), 2);
+        let bound: String = db
+            .conn()
+            .query_row(
+                "SELECT subject_field_id FROM developer_discussion_drafts WHERE id='proposal-civics'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(bound, "sf_civics");
+        assert_eq!(count(&db, "discussion_events"), 0);
+        assert_eq!(count(&db, "opinions"), 0);
+        let installed: Vec<_> = catalog(&db)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.installed)
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(installed, vec!["proposal:cs", "proposal:civics"]);
     }
 }

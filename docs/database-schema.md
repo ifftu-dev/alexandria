@@ -7,7 +7,7 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 9 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Schema**: 10 migrations from a baseline, family `alexandria.profile`, epoch 1.
 **Objects**: 106 tables, 110 indexes, 1 view, 3 triggers.
 
 ---
@@ -30,6 +30,7 @@ and requires a database's history to be an exact prefix of this list:
 7. `opinion_threads`
 8. `tutoring_presence`
 9. `developer_discussion_drafts`
+10. `developer_draft_subject_field`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -796,6 +797,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `id` TEXT PK
 - `title` TEXT NOT NULL
 - `body` TEXT NOT NULL
+- `subject_field_id` TEXT → `subject_fields.id`
 
 ### Decision diagnostics (1)
 
@@ -1394,6 +1396,7 @@ erDiagram
     courses ||--o{ course_tutor_policies : course_id
     credentials ||--o{ credential_anchors : credential_id
     subject_fields ||--o{ demo_opinion_examples : subject_field_id
+    subject_fields ||--o{ developer_discussion_drafts : subject_field_id
     subject_fields ||--o{ discussion_items : subject_field_id
     discussion_items ||--o{ discussion_reports : item_id
     discussion_items ||--o{ discussion_votes : item_id

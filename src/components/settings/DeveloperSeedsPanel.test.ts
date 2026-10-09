@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DeveloperSeedsPanel from './DeveloperSeedsPanel.vue'
 import type { SeedResource } from '@/types'
@@ -73,6 +74,22 @@ describe('Developer seed picker', () => {
     await button(wrapper, 'Remove these seeds').trigger('click'); await flushPromises()
     expect(wrapper.text()).toContain('Affected data changed')
     expect(wrapper.findAll('button').some(b => b.text() === 'Remove these seeds')).toBe(false)
+  })
+
+  it('opens seeded discussion and proposal drafts by their draft row id', async () => {
+    const drafts: SeedResource[] = [
+      { id: 'draft:testing', title: 'Which tests earn their maintenance cost?', category: 'Discussions', description: 'Prompt', dependencies: [], installed: true },
+      { id: 'proposal:civics', title: 'Proposal: require a source list', category: 'Proposals', description: 'Civic Engagement · Prompt', dependencies: [], installed: true },
+      { id: 'bank:js', title: 'JS questions', category: 'Assessments', description: 'Questions', dependencies: [], installed: true },
+    ]
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'dev_seed_catalog') return { enabled: true, resources: drafts }
+      throw new Error(command)
+    })
+    const RouterLink = defineComponent({ props: { to: { type: Object as () => { query: { seedDraft: string } }, required: true } }, setup: (p) => () => h('a', { 'data-seed': p.to.query.seedDraft }) })
+    const wrapper = mount(DeveloperSeedsPanel, { global: { stubs: { RouterLink } } }); await flushPromises()
+    expect(wrapper.findAll('a[data-seed]').map(a => a.attributes('data-seed'))).toEqual(['testing', 'proposal-civics'])
+    expect(wrapper.findAll('option').map(o => o.text())).toContain('Proposals')
   })
 
   it('keeps hidden selections when filters change and clears them explicitly', async () => {

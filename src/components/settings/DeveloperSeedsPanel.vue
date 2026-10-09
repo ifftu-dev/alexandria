@@ -32,6 +32,9 @@ const visible = computed(() => catalog.value.resources.filter(r => (category.val
 const additions = computed(() => review.value?.filter(r => !r.installed).length ?? 0)
 const resultCounts = computed(() => ({ removed: results.value.filter(r => r.status === 'removed').length, added: results.value.filter(r => r.status === 'added').length, kept: results.value.filter(r => r.status === 'kept').length, failed: results.value.filter(r => r.status === 'failed').length }))
 const title = (id: string) => catalog.value.resources.find(r => r.id === id)?.title ?? id
+// Discussion and proposal seeds are local drafts the composer can open. The row id
+// mirrors the backend: `draft:{key}` → `{key}`, `proposal:{key}` → `proposal-{key}`.
+const draftKey = (id: string) => id.startsWith('draft:') ? id.slice(6) : id.startsWith('proposal:') ? `proposal-${id.slice(9)}` : null
 async function load() { catalog.value = await invoke<SeedCatalog>('dev_seed_catalog') }
 onMounted(async () => { try { await load() } catch (e) { error.value = String(e) } })
 function toggleVisible() {
@@ -103,7 +106,7 @@ async function reset() {
             <li v-for="r in results" :key="r.id" class="py-3 space-y-1">
               <div class="flex items-start justify-between gap-3"><span>{{ title(r.id) }}</span><span class="shrink-0 text-muted-foreground">{{ r.status }}</span></div>
               <p v-if="r.error" :class="r.status === 'failed' ? 'text-red-500' : 'text-muted-foreground'">{{ r.error }}</p>
-              <router-link v-if="r.id.startsWith('draft:') && (r.status === 'added' || r.status === 'kept')" :to="{ path: '/discussions/new', query: { seedDraft: r.id.slice(6) } }" class="inline-flex min-h-11 items-center text-primary underline">Open draft</router-link>
+              <router-link v-if="draftKey(r.id) && (r.status === 'added' || r.status === 'kept')" :to="{ path: '/discussions/new', query: { seedDraft: draftKey(r.id) } }" class="inline-flex min-h-11 items-center text-primary underline">Open draft</router-link>
             </li>
           </ul>
         </details>
@@ -165,7 +168,7 @@ async function reset() {
                 <span class="mt-2 block text-sm leading-relaxed text-muted-foreground">{{ r.description }}</span>
               </span>
             </label>
-            <router-link v-if="r.installed && r.id.startsWith('draft:')" :to="{ path: '/discussions/new', query: { seedDraft: r.id.slice(6) } }" class="ms-12 mb-2 inline-flex min-h-11 items-center px-2 text-sm text-primary underline">Open draft</router-link>
+            <router-link v-if="r.installed && draftKey(r.id)" :to="{ path: '/discussions/new', query: { seedDraft: draftKey(r.id) } }" class="ms-12 mb-2 inline-flex min-h-11 items-center px-2 text-sm text-primary underline">Open draft</router-link>
           </div>
         </div>
         <div v-else class="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">

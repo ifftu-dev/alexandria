@@ -2268,6 +2268,7 @@ export interface SeedDraft {
   id: string
   title: string
   body: string
+  subject_field_id: string | null
 }
 
 export interface SeedResetEffect {
