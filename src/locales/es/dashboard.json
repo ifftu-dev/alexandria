@@ -137,7 +137,15 @@
       "submitting": "Emitiendo…",
       "issued": "Credencial emitida",
       "assurance": "garantía:",
-      "integrity": "integridad {value}"
+      "integrity": "integridad {value}",
+      "attemptsTitle": "Intentos para este puesto",
+      "attemptsLoading": "Cargando intentos…",
+      "attemptsEmpty": "Ningún aprendiz ha intentado este puesto todavía.",
+      "attemptPassed": "Aprobado",
+      "attemptFailed": "No aprobado",
+      "attemptOpen": "En curso",
+      "attemptScore": "puntuación {value}%",
+      "attemptUse": "Usar"
     },
     "orgModal": {
       "title": "Nueva organización",

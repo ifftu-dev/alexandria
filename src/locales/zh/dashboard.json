@@ -137,7 +137,15 @@
       "submitting": "正在签发…",
       "issued": "凭证已签发",
       "assurance": "保障级别：",
-      "integrity": "诚信度 {value}"
+      "integrity": "诚信度 {value}",
+      "attemptsTitle": "该职位的测评记录",
+      "attemptsLoading": "正在加载测评记录…",
+      "attemptsEmpty": "尚无学习者参加该职位的测评。",
+      "attemptPassed": "已通过",
+      "attemptFailed": "未通过",
+      "attemptOpen": "进行中",
+      "attemptScore": "得分 {value}%",
+      "attemptUse": "使用"
     },
     "orgModal": {
       "title": "新建组织",

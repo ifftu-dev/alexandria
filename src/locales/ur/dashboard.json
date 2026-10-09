@@ -137,7 +137,15 @@
       "submitting": "جاری کی جا رہی ہے…",
       "issued": "سند جاری ہو گئی",
       "assurance": "یقین دہانی:",
-      "integrity": "سالمیت {value}"
+      "integrity": "سالمیت {value}",
+      "attemptsTitle": "اس کردار کے لیے کوششیں",
+      "attemptsLoading": "کوششیں لوڈ ہو رہی ہیں…",
+      "attemptsEmpty": "اس کردار کے لیے ابھی کسی سیکھنے والے نے کوشش نہیں کی۔",
+      "attemptPassed": "کامیاب",
+      "attemptFailed": "ناکام",
+      "attemptOpen": "جاری",
+      "attemptScore": "اسکور {value}%",
+      "attemptUse": "استعمال کریں"
     },
     "orgModal": {
       "title": "نیا ادارہ",

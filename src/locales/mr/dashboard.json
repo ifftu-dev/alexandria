@@ -137,7 +137,15 @@
       "submitting": "जारी करत आहे…",
       "issued": "प्रमाणपत्र जारी केले",
       "assurance": "आश्वासन:",
-      "integrity": "सचोटी {value}"
+      "integrity": "सचोटी {value}",
+      "attemptsTitle": "या भूमिकेसाठीचे प्रयत्न",
+      "attemptsLoading": "प्रयत्न लोड होत आहेत…",
+      "attemptsEmpty": "या भूमिकेसाठी अजून कोणत्याही शिकणाऱ्याने प्रयत्न केलेला नाही.",
+      "attemptPassed": "उत्तीर्ण",
+      "attemptFailed": "अनुत्तीर्ण",
+      "attemptOpen": "सुरू",
+      "attemptScore": "गुण {value}%",
+      "attemptUse": "वापरा"
     },
     "orgModal": {
       "title": "नवीन संस्था",

@@ -1438,6 +1438,7 @@ pub fn run() {
             commands::skill_bootstrap::bootstrap_extract_text,
             // Dynamic assessments
             commands::assessment::assessment_start_attempt,
+            commands::assessment::assessment_open_roles,
             commands::assessment::assessment_save_draft,
             commands::assessment::assessment_grade,
             commands::assessment::assessment_plan_goal,
@@ -1499,6 +1500,7 @@ pub fn run() {
             commands::role_assessment::get_role_assessment,
             commands::role_assessment::set_role_assessment_status,
             commands::role_assessment::issue_role_credential,
+            commands::role_assessment::list_role_attempts,
             // Local-first interview assistant (tutoring media + private record)
             commands::interview::interview_create,
             commands::interview::interview_list,

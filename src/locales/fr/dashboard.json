@@ -137,7 +137,15 @@
       "submitting": "Délivrance…",
       "issued": "Justificatif délivré",
       "assurance": "assurance :",
-      "integrity": "intégrité {value}"
+      "integrity": "intégrité {value}",
+      "attemptsTitle": "Tentatives pour ce poste",
+      "attemptsLoading": "Chargement des tentatives…",
+      "attemptsEmpty": "Aucun apprenant n'a encore tenté ce poste.",
+      "attemptPassed": "Réussi",
+      "attemptFailed": "Non réussi",
+      "attemptOpen": "En cours",
+      "attemptScore": "score {value} %",
+      "attemptUse": "Utiliser"
     },
     "orgModal": {
       "title": "Nouvelle organisation",

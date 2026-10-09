@@ -1613,6 +1613,21 @@ export interface RoleAssessment {
   updated_at: string
 }
 
+/** One learner attempt made for a role (sponsor issuance picker). */
+export interface RoleAttemptSummary {
+  attempt_id: string
+  subject_did: string
+  skill_id: string
+  integrity_session_id?: string | null
+  score?: number | null
+  passed?: boolean | null
+  credential_id?: string | null
+  started_at: string
+  graded_at?: string | null
+  ended_at?: string | null
+  end_reason?: string | null
+}
+
 export interface CreateRoleAssessmentRequest {
   org_id: string
   role_title: string
@@ -2077,6 +2092,18 @@ export interface StartedAttempt {
   pass_threshold: number
   questions: ServedQuestion[]
   draft_answers: SubmittedAnswer[]
+  /** The sponsor role the attempt is for, when the learner chose one. */
+  role?: AttemptRoleTarget | null
+}
+
+/** A published sponsor role a learner can assess a skill for. */
+export interface AttemptRoleTarget {
+  role_assessment_id: string
+  role_title: string
+  org_name: string
+  /** The role's policy sets `min_camera_coverage > 0`: camera on for the whole attempt. */
+  camera_required: boolean
+  min_camera_coverage?: number | null
 }
 
 /** One submitted answer: the served option positions the learner selected. */

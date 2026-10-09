@@ -6,12 +6,12 @@
  * policy + required assurance level, and issues gated RoleCredentials to
  * candidates from a completed integrity session.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton, AppBadge, AppModal, AppInput, AppTextarea, AppTabs, EmptyState, AppAlert } from '@/components/ui'
 import { useSponsor } from '@/composables/useSponsor'
 import { useAuth } from '@/composables/useAuth'
-import type { IssuancePolicy, VerifiableCredential } from '@/types'
+import type { IssuancePolicy, RoleAttemptSummary, VerifiableCredential } from '@/types'
 
 const { t } = useI18n()
 const sponsor = useSponsor()
@@ -125,6 +125,30 @@ async function issue() {
 
 const publishedRoles = computed(() => sponsor.roleAssessments.value.filter(r => r.status !== 'archived'))
 
+// Attempts learners made for the selected role, so issuance starts from a
+// real attempt rather than a hand-typed session id.
+const roleAttempts = ref<RoleAttemptSummary[]>([])
+const roleAttemptsBusy = ref(false)
+watch(() => issueForm.value.role_assessment_id, async id => {
+  roleAttempts.value = []
+  if (!id) return
+  roleAttemptsBusy.value = true
+  const list = await sponsor.listRoleAttempts(id)
+  roleAttemptsBusy.value = false
+  if (issueForm.value.role_assessment_id === id && list) roleAttempts.value = list
+})
+
+function useAttempt(a: RoleAttemptSummary) {
+  issueForm.value.subject = a.subject_did
+  issueForm.value.integrity_session_id = a.integrity_session_id ?? ''
+}
+
+function attemptState(a: RoleAttemptSummary): 'passed' | 'failed' | 'open' {
+  if (a.passed === true) return 'passed'
+  if (a.passed === false) return 'failed'
+  return 'open'
+}
+
 function assuranceTone(level?: string | null): 'success' | 'accent' | 'secondary' {
   if (level === 'high_assurance') return 'success'
   if (level === 'anchored') return 'accent'
@@ -213,6 +237,22 @@ onMounted(async () => {
             <option v-for="ra in publishedRoles" :key="ra.id" :value="ra.id">{{ ra.role_title }} — {{ orgName_(ra.org_id) }}</option>
           </select>
         </label>
+        <div v-if="issueForm.role_assessment_id" class="rounded-md border border-border/70 p-3" data-testid="role-attempts">
+          <p class="text-xs font-medium text-muted-foreground">{{ $t('dashboard.sponsor.issue.attemptsTitle') }}</p>
+          <p v-if="roleAttemptsBusy" class="mt-1 text-xs text-muted-foreground">{{ $t('dashboard.sponsor.issue.attemptsLoading') }}</p>
+          <p v-else-if="roleAttempts.length === 0" class="mt-1 text-xs text-muted-foreground">{{ $t('dashboard.sponsor.issue.attemptsEmpty') }}</p>
+          <ul v-else class="mt-2 space-y-1.5">
+            <li v-for="a in roleAttempts" :key="a.attempt_id" class="flex flex-wrap items-center gap-2 text-xs">
+              <span class="font-mono text-muted-foreground">{{ a.subject_did.slice(0, 20) }}…</span>
+              <AppBadge :variant="attemptState(a) === 'passed' ? 'success' : attemptState(a) === 'failed' ? 'warning' : 'secondary'">
+                {{ $t(`dashboard.sponsor.issue.attempt${attemptState(a) === 'passed' ? 'Passed' : attemptState(a) === 'failed' ? 'Failed' : 'Open'}`) }}
+              </AppBadge>
+              <span v-if="a.score != null" class="text-muted-foreground">{{ $t('dashboard.sponsor.issue.attemptScore', { value: Math.round(a.score * 100) }) }}</span>
+              <span class="text-muted-foreground">{{ a.started_at.slice(0, 10) }}</span>
+              <AppButton v-if="a.integrity_session_id" variant="ghost" size="sm" @click="useAttempt(a)">{{ $t('dashboard.sponsor.issue.attemptUse') }}</AppButton>
+            </li>
+          </ul>
+        </div>
         <AppInput v-model="issueForm.subject" :label="$t('dashboard.sponsor.issue.candidateLabel')" placeholder="did:key:z6Mk…" />
         <AppInput v-model="issueForm.integrity_session_id" :label="$t('dashboard.sponsor.issue.sessionLabel')" placeholder="isess_…" />
         <div>

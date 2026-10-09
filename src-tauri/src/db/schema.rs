@@ -44,7 +44,18 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // policies, tutor threads and lesson feedback. Owned by the studio crate
     // so its tables and the code that reads them change together.
     (2, "instructor_studio", alexandria_studio::store::SCHEMA),
+    // A learner may choose the sponsor role they are assessing for before an
+    // attempt starts, so the role's camera requirement is enforced up front
+    // rather than discovered at issuance. Also gives sponsors a per-role
+    // attempt list to issue from.
+    (3, "attempt_role_target", MIGRATION_003_ATTEMPT_ROLE_TARGET),
 ];
+
+const MIGRATION_003_ATTEMPT_ROLE_TARGET: &str = r#"
+ALTER TABLE assessment_attempts
+    ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
+CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
 
 const MIGRATION_001_BASELINE: &str = r#"
 CREATE TABLE app_settings (

@@ -137,7 +137,15 @@
       "submitting": "जारी किया जा रहा है…",
       "issued": "प्रमाण-पत्र जारी किया गया",
       "assurance": "आश्वासन:",
-      "integrity": "अखंडता {value}"
+      "integrity": "अखंडता {value}",
+      "attemptsTitle": "इस भूमिका के प्रयास",
+      "attemptsLoading": "प्रयास लोड हो रहे हैं…",
+      "attemptsEmpty": "इस भूमिका के लिए अभी किसी शिक्षार्थी ने प्रयास नहीं किया है।",
+      "attemptPassed": "उत्तीर्ण",
+      "attemptFailed": "अनुत्तीर्ण",
+      "attemptOpen": "जारी",
+      "attemptScore": "स्कोर {value}%",
+      "attemptUse": "उपयोग करें"
     },
     "orgModal": {
       "title": "नया संगठन",

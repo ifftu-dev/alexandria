@@ -137,7 +137,15 @@
       "submitting": "Issuing…",
       "issued": "Credential issued",
       "assurance": "assurance:",
-      "integrity": "integrity {value}"
+      "integrity": "integrity {value}",
+      "attemptsTitle": "Attempts for this role",
+      "attemptsLoading": "Loading attempts…",
+      "attemptsEmpty": "No learner has attempted this role yet.",
+      "attemptPassed": "Passed",
+      "attemptFailed": "Not passed",
+      "attemptOpen": "In progress",
+      "attemptScore": "score {value}%",
+      "attemptUse": "Use"
     },
     "orgModal": {
       "title": "New organization",

@@ -251,6 +251,59 @@ pub fn set_role_assessment_status_impl(
     get_role_assessment_impl(conn, id)?.ok_or_else(|| "role assessment not found".into())
 }
 
+/// One learner attempt made for a role, for the sponsor's issuance picker.
+/// Carries the identifiers `issue_role_credential` needs and the grade
+/// outcome; no Sentinel detail beyond the session id.
+#[derive(Debug, Clone, Serialize)]
+pub struct RoleAttemptSummary {
+    pub attempt_id: String,
+    pub subject_did: String,
+    pub skill_id: String,
+    pub integrity_session_id: Option<String>,
+    pub score: Option<f64>,
+    pub passed: Option<bool>,
+    pub credential_id: Option<String>,
+    pub started_at: String,
+    pub graded_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub end_reason: Option<String>,
+}
+
+/// Attempts learners made for `role_assessment_id`, newest first.
+pub fn list_role_attempts_impl(
+    conn: &Connection,
+    role_assessment_id: &str,
+) -> Result<Vec<RoleAttemptSummary>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, subject_did, skill_id, integrity_session_id, score, passed, \
+                    credential_id, started_at, graded_at, ended_at, end_reason \
+               FROM assessment_attempts \
+              WHERE role_assessment_id = ?1 \
+              ORDER BY started_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![role_assessment_id], |r| {
+            Ok(RoleAttemptSummary {
+                attempt_id: r.get(0)?,
+                subject_did: r.get(1)?,
+                skill_id: r.get(2)?,
+                integrity_session_id: r.get(3)?,
+                score: r.get(4)?,
+                passed: r.get::<_, Option<i64>>(5)?.map(|p| p != 0),
+                credential_id: r.get(6)?,
+                started_at: r.get(7)?,
+                graded_at: r.get(8)?,
+                ended_at: r.get(9)?,
+                end_reason: r.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 fn map_role_assessment(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleAssessment> {
     let skill_ids_json: Option<String> = r.get(5)?;
     let policy_json: Option<String> = r.get(6)?;
@@ -461,6 +514,24 @@ pub async fn list_role_assessments(
         .await
 }
 
+/// Attempts made for a role, so a sponsor issues from a real attempt rather
+/// than a hand-typed session id.
+#[tauri::command]
+pub async fn list_role_attempts(
+    state: State<'_, AppState>,
+    role_assessment_id: String,
+) -> Result<Vec<RoleAttemptSummary>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.list_attempts",
+            move |db| list_role_attempts_impl(db.conn(), &role_assessment_id),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn get_role_assessment(
     state: State<'_, AppState>,
@@ -583,6 +654,62 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn role_attempts_list_newest_first_and_only_for_that_role() {
+        let (db, ..) = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        let mk = |title: &str| {
+            create_role_assessment_impl(
+                conn,
+                &CreateRoleAssessmentRequest {
+                    org_id: org.id.clone(),
+                    role_title: title.into(),
+                    job_description: None,
+                    course_id: None,
+                    skill_ids: vec!["skill_rust".into()],
+                    issuance_policy: None,
+                    required_assurance_level: None,
+                },
+                NOW,
+            )
+            .unwrap()
+            .id
+        };
+        let a = mk("A");
+        let b = mk("B");
+        conn.execute_batch(
+            "INSERT INTO question_banks (id, skill_id, label, ratified) VALUES ('bank', 'skill_rust', 'T', 1);",
+        )
+        .unwrap();
+        for (id, role, started, passed) in [
+            ("att_old", &a, "2026-10-01T00:00:00Z", Some(0i64)),
+            ("att_new", &a, "2026-10-02T00:00:00Z", Some(1)),
+            ("att_b", &b, "2026-10-03T00:00:00Z", None),
+        ] {
+            conn.execute(
+                "INSERT INTO assessment_attempts \
+                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+                  integrity_session_id, started_at, role_assessment_id, passed) \
+                 VALUES (?1, 'did:key:zL', 'bank', 'skill_rust', 1, '[]', '[]', 'isess', ?2, ?3, ?4)",
+                params![id, started, role, passed],
+            )
+            .unwrap();
+        }
+        let listed = list_role_attempts_impl(conn, &a).unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|x| x.attempt_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["att_new", "att_old"]
+        );
+        assert_eq!(listed[0].passed, Some(true));
+        assert_eq!(listed[1].passed, Some(false));
+        assert_eq!(listed[0].integrity_session_id.as_deref(), Some("isess"));
+        assert_eq!(list_role_attempts_impl(conn, &b).unwrap().len(), 1);
     }
 
     #[test]

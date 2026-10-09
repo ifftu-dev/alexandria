@@ -137,7 +137,15 @@
       "submitting": "జారీ చేస్తోంది…",
       "issued": "క్రెడెన్షియల్ జారీ చేయబడింది",
       "assurance": "హామీ:",
-      "integrity": "సమగ్రత {value}"
+      "integrity": "సమగ్రత {value}",
+      "attemptsTitle": "ఈ పాత్రకు ప్రయత్నాలు",
+      "attemptsLoading": "ప్రయత్నాలు లోడ్ అవుతున్నాయి…",
+      "attemptsEmpty": "ఈ పాత్రకు ఇంకా ఏ అభ్యాసకుడూ ప్రయత్నించలేదు.",
+      "attemptPassed": "ఉత్తీర్ణత",
+      "attemptFailed": "ఉత్తీర్ణత సాధించలేదు",
+      "attemptOpen": "కొనసాగుతోంది",
+      "attemptScore": "స్కోరు {value}%",
+      "attemptUse": "ఉపయోగించు"
     },
     "orgModal": {
       "title": "కొత్త సంస్థ",

@@ -137,7 +137,15 @@
       "submitting": "প্রদান করা হচ্ছে…",
       "issued": "ক্রেডেনশিয়াল প্রদান করা হয়েছে",
       "assurance": "নিশ্চয়তা:",
-      "integrity": "সততা {value}"
+      "integrity": "সততা {value}",
+      "attemptsTitle": "এই ভূমিকার প্রয়াসগুলি",
+      "attemptsLoading": "প্রয়াস লোড হচ্ছে…",
+      "attemptsEmpty": "এই ভূমিকার জন্য এখনও কোনো শিক্ষার্থী প্রয়াস করেনি।",
+      "attemptPassed": "উত্তীর্ণ",
+      "attemptFailed": "অনুত্তীর্ণ",
+      "attemptOpen": "চলছে",
+      "attemptScore": "স্কোর {value}%",
+      "attemptUse": "ব্যবহার করুন"
     },
     "orgModal": {
       "title": "নতুন সংস্থা",
