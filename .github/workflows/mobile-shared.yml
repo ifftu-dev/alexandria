@@ -686,7 +686,18 @@ jobs:
 
       - name: Use preinstalled Android NDK
         run: |
-          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          # The newest NDK below r30. r30 ships a sysroot whose cdefs.h
+          # rejects unversioned target triples, and the bindgen run inside
+          # ffmpeg-sys-next's build script still emits one, so bindings fail
+          # to generate. The runner image added r30 in October 2026; picking
+          # "newest" started selecting it. Drop the cap once ffmpeg-sys-next
+          # (or the clang bindgen invokes) passes a versioned triple.
+          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d \
+            | awk -F/ '{ split($NF, v, "."); if (v[1] + 0 < 30) print }' | sort -V | tail -1)"
+          if [ -z "$NDK_DIR" ]; then
+            NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+            echo "No Android NDK below r30 is installed; using $NDK_DIR" >&2
+          fi
           if [ -z "$NDK_DIR" ]; then
             echo "No Android NDK installation was found under $ANDROID_SDK_ROOT/ndk." >&2
             exit 1
