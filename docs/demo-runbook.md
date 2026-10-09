@@ -255,8 +255,6 @@ scoring, agreement and completion measured, published without identifiers."
   invitation.
 - **Interview answer refused:** the invitation expired or was already
   answered; the app only lists open ones after a refresh.
-- **Inbox still empty after Refresh:** open another settings section and come
-  back to **Directories**; the panel fetches again when it opens.
 - **Pilot enrol disabled:** sign-off not recorded, or consent box unticked.
 - **Nothing in Talent:** the listing was not published, or expired; republish.
 - **Cloud 401 on `/for/{did}` routes:** the proof is single-use and five

@@ -53,6 +53,18 @@ describe('HiringInbox', () => {
     expect(wrapper.find('[data-testid=interview] a').attributes('href')).toBe('https://meet.example/room')
   })
 
+  it('refresh fetches again and shows an invitation that arrived after the panel opened', async () => {
+    arm([], [], [])
+    const wrapper = mount(HiringInbox); await flushPromises()
+    expect(wrapper.text()).toContain('profile.hiring.empty')
+    arm([invite], [], [])
+    const refresh = wrapper.findAll('button').find(b => b.text() === 'credentials.page.refresh')!
+    await refresh.trigger('click'); await flushPromises()
+    expect(mocks.invoke.mock.calls.filter(c => c[0] === 'hiring_interviews')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid=interview]')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('profile.hiring.empty')
+  })
+
   it('accepts only with a chosen time and sends the exact invitation back signed', async () => {
     arm([invite], [], [])
     const wrapper = mount(HiringInbox); await flushPromises()
