@@ -89,7 +89,7 @@ async fn requests(
     serde_json::from_value(response_json(response).await?).map_err(|e| e.to_string())
 }
 
-fn validate_request(request: &CredentialRequest, did: &str) -> Result<(), String> {
+pub(crate) fn validate_request(request: &CredentialRequest, did: &str) -> Result<(), String> {
     let profile = crate::network_profile::embedded_preprod().map_err(|e| e.to_string())?;
     let snapshot = TaxonomySnapshot::from_reference(
         &profile.network_id,

@@ -677,7 +677,7 @@ pub async fn assessment_submit_answers(
         .await
 }
 
-fn submit_answers_impl(
+pub(crate) fn submit_answers_impl(
     conn: &rusqlite::Connection,
     attempt_id: &str,
     answers: &[SubmittedAnswer],

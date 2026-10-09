@@ -30,6 +30,8 @@ pub mod import;
 pub mod instructor;
 pub mod integrity;
 pub mod interview;
+#[cfg(test)]
+mod live_demo;
 pub mod opinions;
 pub mod personhood_lab;
 pub mod personhood_receipts;

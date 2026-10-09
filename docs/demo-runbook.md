@@ -48,6 +48,20 @@ attempt cooldown applies.
 4. Optional: **Settings → Developer → Test data → Seed everything** for courses,
    discussions and proposals to show around the assessment. Seeds never create
    credentials, attempts, votes or posts.
+5. Rehearse the whole path in one command, from the app worktree, with Cloud
+   up. It drives the same functions the app's buttons call, against the live
+   Cloud, with a throwaway learner key, and prints one line per step:
+
+   ```
+   ALEXANDRIA_DEMO_CLOUD=http://127.0.0.1:8787 \
+   cargo test --manifest-path src-tauri/Cargo.toml --lib live_demo -- --ignored --nocapture
+   ```
+
+   Eight lines ending `test result: ok` means every step below works on this
+   machine right now. It leaves a "Live demo learner" candidate, one recorded
+   assessment, one interview, one offer and one pilot in the demo
+   organisation; to start the audience from an empty console, stop the server,
+   `docker rm -f alexandria-assessment-demo-db`, and run the launcher again.
 5. Have a terminal open in the app worktree for §6.
 
 ## 1. Learner earns a credential (app)
@@ -265,4 +279,6 @@ scoring, agreement and completion measured, published without identifiers."
 | Cloud console | `web/src/**/*.test.ts` (`npm test` in `web/`) |
 | Pilot arithmetic | Cloud `src/pilot.rs` tests (balanced arms, κ, agreement, overlooked) |
 | Pilot protocol end to end | Cloud `tests/pilot.rs` |
-| Independent verifier | `node --test scripts/demo/verify-credential.test.mjs` against all twelve vectors |
+| Independent verifier | `node --test scripts/demo/verify-credential.test.mjs` against all twelve vectors, plus a served status list |
+| Hosted status lists | app `credentials.rs` tests (host, URL ids, pending, push); Cloud `tests/status_lists.rs` (publish, serve, forgery, rollback, share refusal) |
+| The whole path, live | `src-tauri/src/commands/live_demo.rs` — see §0 step 5 |
