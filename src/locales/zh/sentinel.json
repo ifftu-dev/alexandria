@@ -376,6 +376,8 @@
     "rowAppFocusLost": "应用失去焦点",
     "rowSwitchedTo": "切换到",
     "rowDisplays": "显示器",
+    "rowAndroidEnv": "安卓环境",
+    "rowOverlays": "隐藏悬浮窗",
     "rowFaces": "人脸（实时）",
     "rowFacePresent": "人脸在场",
     "rowFaceConsistency": "人脸匹配",

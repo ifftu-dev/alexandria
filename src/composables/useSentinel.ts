@@ -28,6 +28,8 @@ import type {
   GazeCalibSample,
   TrainGazeCalibResponse,
   DisplayTopology,
+  AndroidEnvironment,
+  OverlayScan,
 } from '@/types'
 
 const { invoke: tauriInvoke } = useLocalApi()
@@ -120,6 +122,16 @@ function emptySentinelDebug() {
     screenCaptured: false,
     displayChanges: 0,
     displaySource: '' as string,
+    // Android environment (latest sample this window).
+    foreignAccessibility: [] as string[],
+    adbEnabled: false,
+    shieldRequested: false,
+    shieldActive: false,
+    obscuredTouches: 0,
+    // Desktop hidden-overlay scan (latest sample this window).
+    overlayScanned: 0,
+    overlayAllowlisted: 0,
+    overlaySuspicious: [] as string[],
     // Full rule + AI signal snapshot (computed each window).
     signals: null as SignalData | null,
     // Live session-gaze mirror (every camera tick, not just at snapshot) —
@@ -289,6 +301,35 @@ const displayAnomalies = (): string[] => {
   if (displayChangeCount > 0) out.push('display_change')
   return out
 }
+
+// Android environment — sampled per snapshot window from the Rust
+// `sentinel_android_environment` IPC (null everywhere else). The
+// obscured-touch counter is drained with it. The assessment shield
+// (FLAG_SECURE + setHideOverlayWindows) is engaged only while an
+// assessment element is current, so course reading stays screenshot-able.
+let androidEnvLatest: AndroidEnvironment | null = null
+let obscuredTouchesWindow = 0
+let shieldRequested = false
+let sessionPurpose: SentinelSessionPurpose = 'assessment'
+
+const environmentAnomalies = (): string[] => {
+  const out: string[] = []
+  const e = androidEnvLatest
+  if (e) {
+    if (e.foreign_accessibility.length > 0) out.push('foreign_accessibility_service')
+    if (e.adb_enabled) out.push('debug_bridge_enabled')
+  }
+  if (obscuredTouchesWindow > 0) out.push('obscured_touch')
+  return out
+}
+
+// Desktop hidden-overlay scan — windows excluded from screen capture
+// (Cluely-style), override-redirect (X11) or click-through topmost
+// (Windows), minus our own and an allowlist. Sampled per snapshot window.
+let overlayLatest: OverlayScan | null = null
+
+const overlayAnomalies = (): string[] =>
+  overlayLatest && overlayLatest.suspicious.length > 0 ? ['hidden_overlay'] : []
 
 // Gaze / second-device tracking, accumulated per snapshot window by
 // scoreGaze() and drained in the snapshot dispatch. All gaze inference
@@ -580,6 +621,20 @@ function createSentinelService() {
     }
     anomalies.push(...displayAnomalies())
 
+    if (androidEnvLatest) {
+      signals.foreign_accessibility_services = androidEnvLatest.foreign_accessibility.length
+      signals.adb_enabled = androidEnvLatest.adb_enabled
+    }
+    if (obscuredTouchesWindow > 0) signals.obscured_touches = obscuredTouchesWindow
+    anomalies.push(...environmentAnomalies())
+
+    if (overlayLatest) {
+      signals.hidden_overlays = overlayLatest.suspicious.length
+      signals.overlay_windows_scanned = overlayLatest.scanned
+      signals.overlay_windows_allowlisted = overlayLatest.allowlisted
+    }
+    anomalies.push(...overlayAnomalies())
+
     if (cameraOptedIn.value && facePresent !== undefined) {
       signals.face_present = facePresent
       signals.face_count = faceCount
@@ -848,6 +903,24 @@ function createSentinelService() {
         console.warn('[sentinel] display topology IPC failed', err)
       }
 
+      // Android environment + obscured-touch drain (both inert off Android).
+      if (!isCurrent()) return
+      try {
+        androidEnvLatest = await tauriInvoke<AndroidEnvironment | null>('sentinel_android_environment')
+        if (!isCurrent()) return
+        obscuredTouchesWindow = await tauriInvoke<number>('sentinel_take_obscured_touches')
+      } catch (err) {
+        console.warn('[sentinel] android environment IPC failed', err)
+      }
+
+      // Desktop hidden-overlay scan (null on mobile / Wayland).
+      if (!isCurrent()) return
+      try {
+        overlayLatest = await tauriInvoke<OverlayScan | null>('sentinel_hidden_overlay')
+      } catch (err) {
+        console.warn('[sentinel] hidden overlay IPC failed', err)
+      }
+
       if (!isCurrent()) return
       const { signals, integrity, consistency, anomalies } = computeScores({
         aiPasteAnomaly: pasteAnomaly,
@@ -904,6 +977,14 @@ function createSentinelService() {
       sentinelDebug.screenCaptured = displayLatest?.mirrored ?? false
       sentinelDebug.displayChanges = displayChangeCount
       sentinelDebug.displaySource = displayLatest?.source ?? ''
+      sentinelDebug.foreignAccessibility = androidEnvLatest?.foreign_accessibility ?? []
+      sentinelDebug.adbEnabled = androidEnvLatest?.adb_enabled ?? false
+      sentinelDebug.shieldRequested = shieldRequested
+      sentinelDebug.shieldActive = androidEnvLatest?.shield_active ?? false
+      sentinelDebug.obscuredTouches = obscuredTouchesWindow
+      sentinelDebug.overlayScanned = overlayLatest?.scanned ?? 0
+      sentinelDebug.overlayAllowlisted = overlayLatest?.allowlisted ?? 0
+      sentinelDebug.overlaySuspicious = overlayLatest?.suspicious.map(w => `${w.owner}:${w.reason}`) ?? []
       sentinelDebug.appFocusLostCount = appFocusLostCount
       sentinelDebug.appFocusLostMs = appFocusLostMs
       sentinelDebug.lastApp = lastFocusApp
@@ -939,6 +1020,7 @@ function createSentinelService() {
       appFocusLostCount = 0
       appFocusLostMs = 0
       displayChangeCount = 0
+      obscuredTouchesWindow = 0
       keystrokeBuffer = []
       mouseBuffer = []
       tabSwitchCount = 0
@@ -1093,6 +1175,15 @@ function createSentinelService() {
       }
       if (generation !== lifecycleGeneration) return
 
+      // Shield: a standalone assessment (no enrollment) is an assessment
+      // from the first frame; the course player engages it via setElement.
+      sessionPurpose = purpose
+      androidEnvLatest = null
+      obscuredTouchesWindow = 0
+      overlayLatest = null
+      if (purpose === 'assessment' && enrollmentId === null) void setAssessmentShield(true)
+      if (generation !== lifecycleGeneration) return
+
       // Display-topology baseline, so the first snapshot can tell a
       // pre-existing second monitor from one plugged in mid-session.
       displayBaseline = null
@@ -1124,10 +1215,25 @@ function createSentinelService() {
   const setElement = (elementId: string, elementType: string) => {
     currentElementId = elementId
     currentElementType = elementType
+    if (isActive.value && sessionPurpose === 'assessment') {
+      void setAssessmentShield(isAssessmentElement(elementType))
+    }
   }
 
   const isAssessmentElement = (elementType: string): boolean => {
     return ['quiz', 'assessment', 'interactive'].includes(elementType)
+  }
+
+  // Engage / release the Android assessment shield. Idempotent on our
+  // side (skips no-ops) and best effort: a failure is logged, never thrown.
+  const setAssessmentShield = async (on: boolean) => {
+    if (shieldRequested === on) return
+    shieldRequested = on
+    try {
+      await tauriInvoke('sentinel_set_assessment_shield', { on })
+    } catch (err) {
+      console.warn('[sentinel] assessment shield IPC failed', err)
+    }
   }
 
   const reportFaceDetection = (present: boolean, count: number, consistency: number, similarity?: number, match?: boolean) => {
@@ -1319,6 +1425,7 @@ function createSentinelService() {
     isActive.value = false
     sentinelDebug.active = false
     detachMonitoringListeners()
+    void setAssessmentShield(false)
 
     const { integrity, consistency } = computeScores()
     integrityScore.value = integrity
@@ -1428,6 +1535,9 @@ function createSentinelService() {
       displayBaseline = null
       displayLatest = null
       displayChangeCount = 0
+      androidEnvLatest = null
+      obscuredTouchesWindow = 0
+      overlayLatest = null
       facePresent = undefined
       faceCount = undefined
       faceConsistency = undefined

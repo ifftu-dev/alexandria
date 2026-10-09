@@ -93,7 +93,9 @@ fn flag_severity(flag: &str) -> Severity {
         | "paste_classifier_critical"
         | "device_glance"
         | "split_screen"
-        | "screen_captured" => Severity::Critical,
+        | "screen_captured"
+        | "obscured_touch"
+        | "hidden_overlay" => Severity::Critical,
         "behavior_shift"
         | "paste_detected"
         | "multiple_faces"
@@ -103,7 +105,9 @@ fn flag_severity(flag: &str) -> Severity {
         | "gaze_wander"
         | "gaze_occluded"
         | "app_switch"
-        | "display_change" => Severity::Warning,
+        | "display_change"
+        | "foreign_accessibility_service"
+        | "debug_bridge_enabled" => Severity::Warning,
         "tab_switching" | "no_face" | "frequent_absence" | "external_display" => Severity::Info,
         _ => Severity::Info,
     }
@@ -721,6 +725,17 @@ mod tests {
         assert_eq!(flag_severity("screen_captured"), Severity::Critical);
         assert_eq!(flag_severity("display_change"), Severity::Warning);
         assert_eq!(flag_severity("external_display"), Severity::Info);
+
+        // Android environment (docs/sentinel.md §Flagging Logic 21–23).
+        assert_eq!(flag_severity("obscured_touch"), Severity::Critical);
+        assert_eq!(
+            flag_severity("foreign_accessibility_service"),
+            Severity::Warning
+        );
+        assert_eq!(flag_severity("debug_bridge_enabled"), Severity::Warning);
+
+        // Desktop hidden-overlay scan (docs/sentinel.md §Flagging Logic 24).
+        assert_eq!(flag_severity("hidden_overlay"), Severity::Critical);
 
         assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
         assert_eq!(

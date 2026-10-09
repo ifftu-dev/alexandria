@@ -193,6 +193,10 @@ rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid", "functio
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
+# Hidden-overlay scan (Sentinel): CGWindowListCopyWindowInfo + kCGWindowSharingState.
+# Both crates are already in the lock via tao / wry.
+objc2-core-graphics = { version = "0.3", features = ["CGWindow", "CGGeometry"] }
+objc2-core-foundation = "0.3"
 
 # Windows: GetForegroundWindow → process image name.
 [target.'cfg(target_os = "windows")'.dependencies]

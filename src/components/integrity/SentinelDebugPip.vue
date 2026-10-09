@@ -30,6 +30,15 @@ const displaySummary = computed(() => {
   if (debug.displayChanges) tells.push(`Δ${debug.displayChanges}`)
   return `${debug.displayCount}·${debug.displaySource}${tells.length ? ' ' + tells.join(' ') : ''}`
 })
+// Android environment, compact: shield state plus any active tells.
+const androidEnvSummary = computed(() => {
+  const tells: string[] = []
+  tells.push(debug.shieldRequested ? (debug.shieldActive ? 'shield' : 'shield?') : 'no-shield')
+  if (debug.foreignAccessibility.length) tells.push(`a11y×${debug.foreignAccessibility.length}`)
+  if (debug.adbEnabled) tells.push('adb')
+  if (debug.obscuredTouches) tells.push(`obscured×${debug.obscuredTouches}`)
+  return tells.join(' ')
+})
 
 const open = ref(false)
 const cameraOn = ref(false)
@@ -271,6 +280,10 @@ onBeforeUnmount(() => {
           <span class="text-end font-mono text-foreground truncate">{{ debug.lastApp || '—' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDisplays') }}</span>
           <span class="text-end font-mono truncate" :class="debug.splitScreen || debug.screenCaptured || debug.displayChanges ? 'text-red-500' : 'text-foreground'">{{ displaySummary }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowAndroidEnv') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.obscuredTouches || debug.adbEnabled || debug.foreignAccessibility.length ? 'text-red-500' : 'text-foreground'">{{ androidEnvSummary }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowOverlays') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.overlaySuspicious.length ? 'text-red-500' : 'text-foreground'">{{ debug.overlaySuspicious.length ? debug.overlaySuspicious.join(', ') : `0/${debug.overlayScanned}` }}</span>
 
           <!-- Camera -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>

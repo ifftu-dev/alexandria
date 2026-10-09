@@ -2,6 +2,8 @@
 //!
 //! - `features` — paste-classifier feature extractor (12-dim)
 //! - `paste_classifier` — frozen ONNX inference via tract
+//! - `hidden_overlay` — capture-excluded / override-redirect window scan
+//!   (desktop; the Cluely-class overlay tell)
 //! - `keystroke_ae` — per-user autoencoder, candle backprop
 //! - `mouse_cnn` — reservoir-style trajectory CNN, candle dense head
 //! - `face_detect` — YuNet face detector (5 landmarks) via tract
@@ -11,6 +13,8 @@
 //!   encrypted holdout set
 //! - `types` — shared input shapes (keystroke events, mouse points,
 //!   digraphs, camera frames) mirrored from the legacy TS structs
+//! - `android_environment` — Android assessment shield (FLAG_SECURE +
+//!   hide-overlay-windows), obscured-touch counter, accessibility / ADB report
 //! - `display_topology` — monitor count, external / mirrored display,
 //!   mobile split-screen (native per-OS probes)
 //! - `evidence` — learner-consented retention of appeal evidence for
@@ -21,11 +25,13 @@
 //! crate.
 
 pub mod active_app;
+pub mod android_environment;
 pub mod display_topology;
 pub mod evidence;
 pub mod face_detect;
 pub mod features;
 pub mod gaze;
+pub mod hidden_overlay;
 pub mod keystroke_ae;
 pub mod mouse_cnn;
 pub mod paste_classifier;

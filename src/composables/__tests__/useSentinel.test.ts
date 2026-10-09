@@ -384,3 +384,156 @@ describe('Display topology signal', () => {
     await service.stop()
   })
 })
+
+describe('Android environment signal and assessment shield', () => {
+  const env = (overrides: Partial<{
+    foreign_accessibility: string[]; adb_enabled: boolean; shield_active: boolean; obscured_touches: number
+  }> = {}) => ({
+    accessibility_services: [], foreign_accessibility: [], adb_enabled: false, development_settings_enabled: false,
+    shield_active: true, overlay_hiding_supported: true, obscured_touches: 0, sdk_int: 36, source: 'android', ...overrides,
+  })
+
+  const withEnv = (report: ReturnType<typeof env> | null, obscured: number[] = [0]) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_android_environment') return report
+      if (command === 'sentinel_take_obscured_touches') return obscured[Math.min(i++, obscured.length - 1)]
+      return fallback(command, args)
+    })
+  }
+
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  const shieldCalls = () =>
+    mocks.invoke.mock.calls.filter(([name]) => name === 'sentinel_set_assessment_shield').map(([, args]) => (args as { on: boolean }).on)
+
+  it('off Android (null report, zero touches) adds no flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('foreign accessibility service and adb are warnings; obscured touches are critical', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withEnv(env({ foreign_accessibility: ['com.evil/.Reader'], adb_enabled: true }), [3, 0])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([
+      ['foreign_accessibility_service', 'debug_bridge_enabled', 'obscured_touch'],
+      ['foreign_accessibility_service', 'debug_bridge_enabled'],
+    ])
+    await service.stop()
+  })
+
+  it('a standalone assessment engages the shield at start and releases it at stop', async () => {
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start(null)
+    expect(shieldCalls()).toEqual([true])
+    await service.stop()
+    expect(shieldCalls()).toEqual([true, false])
+  })
+
+  it('in a course the shield follows assessment elements only', async () => {
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    expect(shieldCalls()).toEqual([])
+    service.setElement('e1', 'video')
+    expect(shieldCalls()).toEqual([])
+    service.setElement('e2', 'quiz')
+    expect(shieldCalls()).toEqual([true])
+    service.setElement('e3', 'quiz')      // idempotent
+    expect(shieldCalls()).toEqual([true])
+    service.setElement('e4', 'reading')
+    expect(shieldCalls()).toEqual([true, false])
+    await service.stop()
+    expect(shieldCalls()).toEqual([true, false])
+  })
+
+  it('an interview session never engages the shield', async () => {
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start(null, false, 'interview')
+    service.setElement('e', 'quiz')
+    await service.stop()
+    expect(shieldCalls()).toEqual([])
+  })
+
+  it('a failing shield IPC is tolerated', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_set_assessment_shield') throw new Error('no activity')
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await expect(service.start(null)).resolves.toBeUndefined()
+    await service.stop()
+  })
+})
+
+describe('Hidden overlay signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  const withScan = (scan: unknown) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_hidden_overlay') return scan
+      return fallback(command, args)
+    })
+  }
+
+  it('a clean scan adds no flag but records counts in signals', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ suspicious: [], allowlisted: 1, scanned: 17, source: 'cgwindow' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    const signals = service.getDebugState().signals
+    expect(signals?.hidden_overlays).toBe(0)
+    expect(signals?.overlay_windows_scanned).toBe(17)
+    expect(signals?.overlay_windows_allowlisted).toBe(1)
+    await service.stop()
+  })
+
+  it('a capture-excluded window is a critical hidden_overlay every window it persists', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({
+      suspicious: [{ pid: 42, owner: 'Cluely', title: null, width: 800, height: 300, on_screen: true, reason: 'capture_excluded' }],
+      allowlisted: 0, scanned: 12, source: 'cgwindow',
+    })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['hidden_overlay'], ['hidden_overlay']])
+    expect(service.debug.overlaySuspicious).toEqual(['Cluely:capture_excluded'])
+    await service.stop()
+  })
+
+  it('a null scan (mobile / Wayland) is silent', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan(null)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+})

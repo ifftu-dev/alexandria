@@ -376,6 +376,8 @@
     "rowAppFocusLost": "ऐप फ़ोकस खोया",
     "rowSwitchedTo": "स्विच किया",
     "rowDisplays": "डिस्प्ले",
+    "rowAndroidEnv": "एंड्रॉइड परिवेश",
+    "rowOverlays": "छिपे ओवरले",
     "rowFaces": "चेहरे (लाइव)",
     "rowFacePresent": "चेहरा मौजूद",
     "rowFaceConsistency": "चेहरा मिलान",

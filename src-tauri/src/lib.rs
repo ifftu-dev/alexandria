@@ -1520,6 +1520,10 @@ pub fn run() {
             commands::sentinel_gaze::sentinel_train_gaze_calib,
             commands::sentinel_gaze::sentinel_frontmost_app,
             commands::sentinel_display::sentinel_display_topology,
+            commands::sentinel_environment::sentinel_android_environment,
+            commands::sentinel_environment::sentinel_set_assessment_shield,
+            commands::sentinel_environment::sentinel_take_obscured_touches,
+            commands::sentinel_overlay::sentinel_hidden_overlay,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

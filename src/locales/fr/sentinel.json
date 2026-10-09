@@ -376,6 +376,8 @@
     "rowAppFocusLost": "focus de l'application perdu",
     "rowSwitchedTo": "basculé vers",
     "rowDisplays": "écrans",
+    "rowAndroidEnv": "env. android",
+    "rowOverlays": "superpositions masquées",
     "rowFaces": "visages (en direct)",
     "rowFacePresent": "visage présent",
     "rowFaceConsistency": "correspondance du visage",

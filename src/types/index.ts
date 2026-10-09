@@ -885,6 +885,12 @@ export interface SignalData {
   split_screen?: boolean
   screen_captured?: boolean
   display_changes?: number
+  foreign_accessibility_services?: number
+  adb_enabled?: boolean
+  obscured_touches?: number
+  hidden_overlays?: number
+  overlay_windows_scanned?: number
+  overlay_windows_allowlisted?: number
   ai_keystroke_anomaly?: number
   ai_mouse_human_prob?: number
   ai_face_similarity?: number
@@ -898,6 +904,36 @@ export interface DisplayTopology {
   external_display: boolean
   mirrored: boolean
   split_screen: boolean
+  source: string
+}
+
+/** Android-only environment report from `sentinel_android_environment`. */
+export interface AndroidEnvironment {
+  accessibility_services: Array<{ id: string; system: boolean }>
+  foreign_accessibility: string[]
+  adb_enabled: boolean
+  development_settings_enabled: boolean
+  shield_active: boolean
+  overlay_hiding_supported: boolean
+  obscured_touches: number
+  sdk_int: number
+  source: string
+}
+
+/** Desktop hidden-overlay scan from `sentinel_hidden_overlay`. */
+export interface OverlayWindow {
+  pid: number
+  owner: string
+  title: string | null
+  width: number
+  height: number
+  on_screen: boolean
+  reason: string
+}
+export interface OverlayScan {
+  suspicious: OverlayWindow[]
+  allowlisted: number
+  scanned: number
   source: string
 }
 

@@ -376,6 +376,8 @@
     "rowAppFocusLost": "অ্যাপ ফোকাস হারিয়েছে",
     "rowSwitchedTo": "যেখানে স্যুইচ করা হয়েছে",
     "rowDisplays": "ডিসপ্লে",
+    "rowAndroidEnv": "অ্যান্ড্রয়েড পরিবেশ",
+    "rowOverlays": "লুকানো ওভারলে",
     "rowFaces": "মুখ (লাইভ)",
     "rowFacePresent": "মুখ উপস্থিত",
     "rowFaceConsistency": "মুখ মিল",

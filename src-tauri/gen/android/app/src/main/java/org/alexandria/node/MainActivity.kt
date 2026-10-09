@@ -2,17 +2,25 @@ package org.alexandria.node
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.view.MotionEvent
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityManager
+import android.accessibilityservice.AccessibilityServiceInfo
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : TauriActivity() {
   companion object {
@@ -104,6 +112,113 @@ class MainActivity : TauriActivity() {
       json.put("picture_in_picture", a.isInPictureInPictureMode)
       return json.toString()
     }
+
+    /**
+     * Whether the assessment shield is engaged. Remembered here so a
+     * recreated activity (rotation, process restore) re-applies it in
+     * `onCreate`; Rust owns the on/off decisions.
+     */
+    @Volatile private var shieldOn = false
+
+    /**
+     * Touches that arrived while another window was drawn over ours
+     * (`FLAG_WINDOW_IS_OBSCURED` / `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`).
+     * Counted in `dispatchTouchEvent`; drained by `takeObscuredTouches`.
+     */
+    private val obscuredTouches = AtomicInteger(0)
+
+    /**
+     * Engage or release the assessment shield.
+     *
+     * On: `FLAG_SECURE` keeps the window out of screenshots, screen
+     * recordings, casts and the recents thumbnail; on API 31+
+     * `setHideOverlayWindows(true)` hides every non-system overlay drawn
+     * over the app (needs `HIDE_OVERLAY_WINDOWS`, a normal permission).
+     * Off reverses both. Idempotent; safe from any thread.
+     */
+    @JvmStatic
+    fun setAssessmentShield(on: Boolean) {
+      shieldOn = on
+      val a = current ?: return
+      a.runOnUiThread { a.applyShield(on) }
+    }
+
+    /**
+     * Returns the obscured-touch count accumulated since the last call and
+     * resets it. Rust decides what a non-zero count means for the window.
+     */
+    @JvmStatic
+    fun takeObscuredTouches(): Int = obscuredTouches.getAndSet(0)
+
+    /**
+     * Environment facts Sentinel cannot see from the WebView, as JSON. Each
+     * read is isolated: a failing one leaves its key out, and the Rust side
+     * treats every key as optional.
+     *
+     * `accessibility_services` lists enabled services as
+     * `{"id": "<package>/<class>", "system": bool}`; a non-system service
+     * can read the screen on the app's behalf. `obscured_touches` is the
+     * running count (not reset here).
+     */
+    @JvmStatic
+    fun environmentReport(): String {
+      val a = current ?: return "{}"
+      val json = JSONObject()
+      try {
+        val am = a.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val services = JSONArray()
+        for (info in am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)) {
+          val si = info.resolveInfo?.serviceInfo ?: continue
+          val flags = si.applicationInfo?.flags ?: 0
+          val system =
+            flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+          services.put(JSONObject().put("id", si.packageName + "/" + si.name).put("system", system))
+        }
+        json.put("accessibility_services", services)
+      } catch (_: Exception) {
+        // AccessibilityManager unavailable: leave the list out.
+      }
+      try {
+        json.put("adb_enabled", Settings.Global.getInt(a.contentResolver, Settings.Global.ADB_ENABLED, 0) == 1)
+      } catch (_: Exception) {
+      }
+      try {
+        json.put(
+          "development_settings_enabled",
+          Settings.Global.getInt(a.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1,
+        )
+      } catch (_: Exception) {
+      }
+      json.put("shield_active", shieldOn)
+      json.put("overlay_hiding_supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+      try {
+        json.put("multi_window", a.isInMultiWindowMode)
+      } catch (_: Exception) {
+      }
+      json.put("obscured_touches", obscuredTouches.get())
+      json.put("sdk_int", Build.VERSION.SDK_INT)
+      return json.toString()
+    }
+  }
+
+  /** UI-thread half of [setAssessmentShield]. */
+  private fun applyShield(on: Boolean) {
+    if (on) {
+      window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    } else {
+      window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      window.setHideOverlayWindows(on)
+    }
+  }
+
+  override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+    val obscured = MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED
+    if (event.actionMasked == MotionEvent.ACTION_DOWN && event.flags and obscured != 0) {
+      obscuredTouches.incrementAndGet()
+    }
+    return super.dispatchTouchEvent(event)
   }
 
   override fun onRequestPermissionsResult(
@@ -119,6 +234,9 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     current = this
+    // A recreated activity (rotation, process restore) must keep the
+    // assessment shield the Rust side asked for.
+    if (shieldOn) applyShield(true)
     // Hide the native OS status bar (clock/battery) so the app owns the full
     // screen height. It can still be revealed with a swipe from the top edge.
     WindowCompat.getInsetsController(window, window.decorView).apply {

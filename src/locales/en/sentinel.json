@@ -376,6 +376,8 @@
     "rowAppFocusLost": "app focus lost",
     "rowSwitchedTo": "switched to",
     "rowDisplays": "displays",
+    "rowAndroidEnv": "android env",
+    "rowOverlays": "hidden overlays",
     "rowFaces": "faces (live)",
     "rowFacePresent": "face present",
     "rowFaceConsistency": "face match",
