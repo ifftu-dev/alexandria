@@ -95,7 +95,9 @@ fn flag_severity(flag: &str) -> Severity {
         | "split_screen"
         | "screen_captured"
         | "obscured_touch"
-        | "hidden_overlay" => Severity::Critical,
+        | "hidden_overlay"
+        | "cheat_tool_process"
+        | "phantom_hotkey_repeated" => Severity::Critical,
         "behavior_shift"
         | "paste_detected"
         | "multiple_faces"
@@ -108,8 +110,15 @@ fn flag_severity(flag: &str) -> Severity {
         | "display_change"
         | "foreign_accessibility_service"
         | "debug_bridge_enabled"
-        | "virtual_camera" => Severity::Warning,
-        "tab_switching" | "no_face" | "frequent_absence" | "external_display" => Severity::Info,
+        | "virtual_camera"
+        | "unauthorized_process"
+        | "phantom_hotkey" => Severity::Warning,
+        "tab_switching"
+        | "no_face"
+        | "frequent_absence"
+        | "external_display"
+        | "ai_assistant_running"
+        | "screen_share_running" => Severity::Info,
         _ => Severity::Info,
     }
 }
@@ -740,6 +749,16 @@ mod tests {
 
         // Virtual-camera label heuristic (docs/sentinel.md §Flagging Logic 25).
         assert_eq!(flag_severity("virtual_camera"), Severity::Warning);
+
+        // Process watchlist (docs/sentinel.md §Flagging Logic 26–29).
+        assert_eq!(flag_severity("cheat_tool_process"), Severity::Critical);
+        assert_eq!(flag_severity("unauthorized_process"), Severity::Warning);
+        assert_eq!(flag_severity("ai_assistant_running"), Severity::Info);
+        assert_eq!(flag_severity("screen_share_running"), Severity::Info);
+
+        // Phantom hotkeys (docs/sentinel.md §Flagging Logic 30–31).
+        assert_eq!(flag_severity("phantom_hotkey"), Severity::Warning);
+        assert_eq!(flag_severity("phantom_hotkey_repeated"), Severity::Critical);
 
         assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
         assert_eq!(

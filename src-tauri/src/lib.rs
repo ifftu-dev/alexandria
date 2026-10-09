@@ -1543,6 +1543,12 @@ pub fn run() {
             commands::sentinel_environment::sentinel_set_assessment_shield,
             commands::sentinel_environment::sentinel_take_obscured_touches,
             commands::sentinel_overlay::sentinel_hidden_overlay,
+            commands::sentinel_processes::sentinel_process_scan,
+            commands::sentinel_hotkeys::sentinel_hotkeys_status,
+            commands::sentinel_hotkeys::sentinel_hotkeys_request_permission,
+            commands::sentinel_hotkeys::sentinel_hotkeys_start,
+            commands::sentinel_hotkeys::sentinel_hotkeys_stop,
+            commands::sentinel_hotkeys::sentinel_hotkeys_drain,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

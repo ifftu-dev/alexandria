@@ -892,6 +892,11 @@ export interface SignalData {
   overlay_windows_scanned?: number
   overlay_windows_allowlisted?: number
   camera_device_virtual?: boolean
+  watched_processes?: number
+  processes_scanned?: number
+  watched_categories?: WatchCategory[]
+  global_hotkeys?: number
+  phantom_hotkeys?: number
   ai_keystroke_anomaly?: number
   ai_mouse_human_prob?: number
   ai_face_similarity?: number
@@ -937,6 +942,36 @@ export interface OverlayScan {
   allowlisted: number
   scanned: number
   source: string
+}
+
+/** Desktop process watchlist scan from `sentinel_process_scan`. */
+export type WatchCategory =
+  | 'ai_assistant' | 'interview_cheat' | 'remote_desktop' | 'virtual_camera' | 'screen_share' | 'virtual_machine'
+export interface WatchedProcess {
+  pid: number
+  name: string
+  identifier: string
+  category: WatchCategory
+  rule: string
+}
+export interface ProcessScan {
+  watched: WatchedProcess[]
+  scanned: number
+  source: string
+}
+
+/** Desktop global-hotkey monitor state from `sentinel_hotkeys_status`. */
+export interface HotkeyStatus {
+  supported: boolean
+  permission_granted: boolean
+  running: boolean
+  source: string
+  os_combos: string[]
+  cmd_is_system: boolean
+}
+export interface HotkeyEvent {
+  at_ms: number
+  combo: string
 }
 
 export interface BehavioralProfile {

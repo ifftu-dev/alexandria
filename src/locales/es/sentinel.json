@@ -378,6 +378,8 @@
     "rowDisplays": "pantallas",
     "rowAndroidEnv": "entorno android",
     "rowOverlays": "superposiciones ocultas",
+    "rowProcesses": "procesos vigilados",
+    "rowHotkeys": "atajos fantasma",
     "rowFaces": "rostros (en vivo)",
     "rowFacePresent": "rostro presente",
     "rowCameraDevice": "dispositivo de cámara",

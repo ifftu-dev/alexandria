@@ -284,6 +284,10 @@ onBeforeUnmount(() => {
           <span class="text-end font-mono truncate" :class="debug.obscuredTouches || debug.adbEnabled || debug.foreignAccessibility.length ? 'text-red-500' : 'text-foreground'">{{ androidEnvSummary }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowOverlays') }}</span>
           <span class="text-end font-mono truncate" :class="debug.overlaySuspicious.length ? 'text-red-500' : 'text-foreground'">{{ debug.overlaySuspicious.length ? debug.overlaySuspicious.join(', ') : `0/${debug.overlayScanned}` }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowProcesses') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.watchedProcesses.length ? 'text-red-500' : 'text-foreground'">{{ debug.watchedProcesses.length ? debug.watchedProcesses.join(', ') : `0/${debug.processesScanned}` }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowHotkeys') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.phantomHotkeys.length ? 'text-red-500' : 'text-foreground'">{{ !debug.hotkeysRunning ? (debug.hotkeysPermission ? 'off' : 'no-permission') : debug.phantomHotkeys.length ? debug.phantomHotkeys.join(', ') : `0/${debug.nativeHotkeys}` }}</span>
 
           <!-- Camera -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>

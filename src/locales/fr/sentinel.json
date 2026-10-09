@@ -378,6 +378,8 @@
     "rowDisplays": "écrans",
     "rowAndroidEnv": "env. android",
     "rowOverlays": "superpositions masquées",
+    "rowProcesses": "processus surveillés",
+    "rowHotkeys": "raccourcis fantômes",
     "rowFaces": "visages (en direct)",
     "rowFacePresent": "visage présent",
     "rowCameraDevice": "périphérique caméra",

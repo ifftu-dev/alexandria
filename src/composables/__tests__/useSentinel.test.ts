@@ -631,3 +631,142 @@ describe('Display topology native nudges', () => {
     expect(mocks.unlisten).toHaveBeenCalled()
   })
 })
+
+describe('Process watchlist signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+  const withScan = (scan: unknown) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_process_scan') return scan
+      return fallback(command, args)
+    })
+  }
+  const proc = (name: string, category: string) => ({ pid: 1, name, identifier: name, category, rule: `name:${name}` })
+
+  it('maps categories to severity-tiered flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ watched: [proc('Cluely', 'interview_cheat'), proc('AnyDesk', 'remote_desktop'), proc('Claude', 'ai_assistant'), proc('zoom', 'screen_share')], scanned: 400, source: 'nsworkspace' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['cheat_tool_process', 'unauthorized_process', 'ai_assistant_running', 'screen_share_running']])
+    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    const signals = service.getDebugState().signals
+    expect(signals?.watched_processes).toBe(4)
+    expect(signals?.processes_scanned).toBe(400)
+    expect(signals?.watched_categories).toEqual(['interview_cheat', 'remote_desktop', 'ai_assistant', 'screen_share'])
+    await service.stop()
+  })
+
+  it('a virtual camera or VM guest agent alone is a warning, nothing more', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ watched: [proc('obs', 'virtual_camera'), proc('vmtoolsd', 'virtual_machine')], scanned: 90, source: 'procfs' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['unauthorized_process']])
+    await service.stop()
+  })
+
+  it('a clean or null scan adds nothing', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ watched: [], scanned: 300, source: 'toolhelp' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    withScan(null)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[], []])
+    await service.stop()
+  })
+})
+
+describe('Phantom hotkey signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+  const calls = (name: string) => mocks.invoke.mock.calls.filter(([n]) => n === name)
+  const status = (overrides: Record<string, unknown> = {}) => ({
+    supported: true, permission_granted: true, running: false, source: 'cgeventtap', os_combos: ['cmd+tab'], cmd_is_system: false, ...overrides,
+  })
+  const withHotkeys = (st: ReturnType<typeof status>, drains: Array<Array<{ at_ms: number; combo: string }>>) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_hotkeys_status') return st
+      if (command === 'sentinel_hotkeys_start') return { ...st, running: true }
+      if (command === 'sentinel_hotkeys_drain') return drains[Math.min(i++, drains.length - 1)]
+      if (command === 'sentinel_hotkeys_stop') return null
+      return fallback(command, args)
+    })
+  }
+  const press = (key: string, mods: Partial<KeyboardEventInit> = {}) =>
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, ...mods }))
+
+  it('starts the monitor for assessments when permitted, drains per window, and stops on teardown', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(performance, 'now').mockReturnValue(100_000)
+    withHotkeys(status(), [[{ at_ms: 500, combo: 'cmd+backslash' }, { at_ms: 600, combo: 'cmd+tab' }]])
+    const service = (await freshService())()
+    await service.start(null)
+    expect(calls('sentinel_hotkeys_start')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['phantom_hotkey']])
+    expect(service.debug.phantomHotkeys).toEqual(['cmd+backslash'])
+    await service.stop()
+    expect(calls('sentinel_hotkeys_stop')).toHaveLength(1)
+  })
+
+  it('a combo the webview also received is not phantom', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let now = 100_000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    withHotkeys(status(), [[{ at_ms: 500, combo: 'cmd+b' }]])
+    const service = (await freshService())()
+    await service.start(null)
+    now = 100_520
+    press('b', { metaKey: true })
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('three or more phantom combos in a window escalate to critical', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(performance, 'now').mockReturnValue(100_000)
+    withHotkeys(status(), [[{ at_ms: 1, combo: 'cmd+b' }, { at_ms: 2, combo: 'cmd+enter' }, { at_ms: 3, combo: 'cmd+h' }]])
+    const service = (await freshService())()
+    await service.start(null)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['phantom_hotkey_repeated', 'phantom_hotkey']])
+    await service.stop()
+  })
+
+  it('never starts without permission, for interviews, or on unsupported platforms', async () => {
+    withHotkeys(status({ permission_granted: false }), [[]])
+    let service = (await freshService())()
+    await service.start(null)
+    expect(calls('sentinel_hotkeys_start')).toHaveLength(0)
+    expect(service.debug.hotkeysRunning).toBe(false)
+    await service.stop()
+
+    mocks.invoke.mockClear()
+    withHotkeys(status(), [[]])
+    service = (await freshService())()
+    await service.start(null, false, 'interview')
+    expect(calls('sentinel_hotkeys_status')).toHaveLength(0)
+    await service.stop()
+
+    mocks.invoke.mockClear()
+    withHotkeys(status({ supported: false, permission_granted: false, source: 'unsupported' }), [[]])
+    service = (await freshService())()
+    await service.start(null)
+    expect(calls('sentinel_hotkeys_start')).toHaveLength(0)
+    await service.stop()
+    expect(calls('sentinel_hotkeys_stop')).toHaveLength(0)
+  })
+})

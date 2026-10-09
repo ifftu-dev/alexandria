@@ -2,6 +2,8 @@
 //!
 //! - `features` — paste-classifier feature extractor (12-dim)
 //! - `paste_classifier` — frozen ONNX inference via tract
+//! - `global_hotkeys` — listen-only system-wide modifier-combo monitor
+//!   (desktop; phantom-hotkey tell for overlay tools; records combos only)
 //! - `hidden_overlay` — capture-excluded / override-redirect window scan
 //!   (desktop; the Cluely-class overlay tell)
 //! - `keystroke_ae` — per-user autoencoder, candle backprop
@@ -9,6 +11,8 @@
 //! - `face_detect` — YuNet face detector (5 landmarks) via tract
 //! - `gaze` — head-pose / second-device detection + per-user
 //!   calibration MLP (candle)
+//! - `processes` — running-process watchlist (interview-cheat overlays,
+//!   AI clients, remote-desktop hosts, virtual cameras, VM guest agents)
 //! - `prior_blob` — labeled-samples blob shape and validation for the
 //!   encrypted holdout set
 //! - `types` — shared input shapes (keystroke events, mouse points,
@@ -31,9 +35,11 @@ pub mod evidence;
 pub mod face_detect;
 pub mod features;
 pub mod gaze;
+pub mod global_hotkeys;
 pub mod hidden_overlay;
 pub mod keystroke_ae;
 pub mod mouse_cnn;
 pub mod paste_classifier;
 pub mod prior_blob;
+pub mod processes;
 pub mod types;

@@ -11,6 +11,7 @@ import {
   type EnrollmentEmbedding,
 } from '@/utils/sentinel/face-embedder'
 import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
+import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
 import type {
   SignalData,
   BehavioralProfile,
@@ -31,6 +32,10 @@ import type {
   DisplayTopology,
   AndroidEnvironment,
   OverlayScan,
+  ProcessScan,
+  WatchCategory,
+  HotkeyStatus,
+  HotkeyEvent,
 } from '@/types'
 
 const { invoke: tauriInvoke } = useLocalApi()
@@ -136,6 +141,14 @@ function emptySentinelDebug() {
     // Camera device (dev view only; never persisted).
     cameraDeviceLabel: '' as string,
     cameraDeviceVirtual: false,
+    // Process watchlist (latest sample this window).
+    processesScanned: 0,
+    watchedProcesses: [] as string[],
+    // Global hotkey monitor.
+    hotkeysRunning: false,
+    hotkeysPermission: false,
+    nativeHotkeys: 0,
+    phantomHotkeys: [] as string[],
     // Full rule + AI signal snapshot (computed each window).
     signals: null as SignalData | null,
     // Live session-gaze mirror (every camera tick, not just at snapshot) —
@@ -264,6 +277,7 @@ let appFocusLostCount = 0
 let appFocusLostMs = 0
 let focusLostAt = 0
 let lastFocusApp = ''
+let blurStartedAt = 0   // performance.now() of the open blur, for hotkey correlation
 let unlistenFocus: UnlistenFn | null = null
 
 // Native display topology — sampled from the Rust `sentinel_display_topology`
@@ -346,6 +360,43 @@ let overlayLatest: OverlayScan | null = null
 
 const overlayAnomalies = (): string[] =>
   overlayLatest && overlayLatest.suspicious.length > 0 ? ['hidden_overlay'] : []
+
+// Desktop process watchlist — only watched entries cross IPC. Sampled
+// per snapshot window. Cheat tools are critical; remote desktop, virtual
+// cameras and VM guest agents are warnings; AI assistants and screen-share
+// apps are review context only.
+let processLatest: ProcessScan | null = null
+
+const WARNING_PROCESS_CATEGORIES: ReadonlySet<WatchCategory> = new Set(['remote_desktop', 'virtual_camera', 'virtual_machine'])
+
+const processAnomalies = (): string[] => {
+  const out: string[] = []
+  const cats = new Set(processLatest?.watched.map(w => w.category) ?? [])
+  if (cats.has('interview_cheat')) out.push('cheat_tool_process')
+  if ([...cats].some(c => WARNING_PROCESS_CATEGORIES.has(c))) out.push('unauthorized_process')
+  if (cats.has('ai_assistant')) out.push('ai_assistant_running')
+  if (cats.has('screen_share')) out.push('screen_share_running')
+  return out
+}
+
+// Global hotkeys — native listen-only monitor of modifier combos (desktop,
+// assessment purpose only, only when the OS already granted listening).
+// Per window: combos the OS saw but the webview never received, while our
+// window was focused, are "phantom": an overlay tool's hotkey.
+let hotkeyStatus: HotkeyStatus | null = null
+let hotkeysRunning = false
+let hotkeyEpoch = 0                       // performance.now() at monitor t=0
+let webviewCombos: WebviewCombo[] = []    // combos the webview received this window
+let blurIntervals: BlurInterval[] = []    // [start,end] in performance.now() space
+let phantomWindow: string[] = []
+let nativeHotkeyCount = 0
+const WEBVIEW_COMBO_CAP = 512
+
+const hotkeyAnomalies = (): string[] => {
+  if (phantomWindow.length >= 3) return ['phantom_hotkey_repeated', 'phantom_hotkey']
+  if (phantomWindow.length >= 1) return ['phantom_hotkey']
+  return []
+}
 
 // Camera device identity — the video track label the player / interview
 // session obtained from getUserMedia. Only the virtual-camera verdict
@@ -662,6 +713,19 @@ function createSentinelService() {
       if (cameraDeviceVirtual) anomalies.push('virtual_camera')
     }
 
+    if (processLatest) {
+      signals.watched_processes = processLatest.watched.length
+      signals.processes_scanned = processLatest.scanned
+      signals.watched_categories = [...new Set(processLatest.watched.map(w => w.category))]
+    }
+    anomalies.push(...processAnomalies())
+
+    if (hotkeysRunning) {
+      signals.global_hotkeys = nativeHotkeyCount
+      signals.phantom_hotkeys = phantomWindow.length
+    }
+    anomalies.push(...hotkeyAnomalies())
+
     if (cameraOptedIn.value && facePresent !== undefined) {
       signals.face_present = facePresent
       signals.face_count = faceCount
@@ -948,6 +1012,31 @@ function createSentinelService() {
         console.warn('[sentinel] hidden overlay IPC failed', err)
       }
 
+      // Desktop process watchlist (null on mobile).
+      if (!isCurrent()) return
+      try {
+        processLatest = await tauriInvoke<ProcessScan | null>('sentinel_process_scan')
+      } catch (err) {
+        console.warn('[sentinel] process scan IPC failed', err)
+      }
+
+      // Global hotkeys: drain the native ring and subtract what the webview saw.
+      if (!isCurrent()) return
+      if (hotkeysRunning && hotkeyStatus) {
+        try {
+          const native = await tauriInvoke<HotkeyEvent[]>('sentinel_hotkeys_drain')
+          if (!isCurrent()) return
+          nativeHotkeyCount = native.length
+          if (blurStartedAt) blurIntervals.push({ start: blurStartedAt, end: performance.now() })
+          phantomWindow = phantomCombos({
+            native, epoch: hotkeyEpoch, webview: webviewCombos, blurs: blurIntervals,
+            osCombos: hotkeyStatus.os_combos, cmdIsSystem: hotkeyStatus.cmd_is_system,
+          }).map(e => e.combo)
+        } catch (err) {
+          console.warn('[sentinel] hotkey drain IPC failed', err)
+        }
+      }
+
       if (!isCurrent()) return
       const { signals, integrity, consistency, anomalies } = computeScores({
         aiPasteAnomaly: pasteAnomaly,
@@ -1014,6 +1103,12 @@ function createSentinelService() {
       sentinelDebug.overlaySuspicious = overlayLatest?.suspicious.map(w => `${w.owner}:${w.reason}`) ?? []
       sentinelDebug.cameraDeviceLabel = cameraDeviceLabel
       sentinelDebug.cameraDeviceVirtual = cameraDeviceVirtual
+      sentinelDebug.processesScanned = processLatest?.scanned ?? 0
+      sentinelDebug.watchedProcesses = processLatest?.watched.map(w => `${w.name}:${w.category}`) ?? []
+      sentinelDebug.hotkeysRunning = hotkeysRunning
+      sentinelDebug.hotkeysPermission = hotkeyStatus?.permission_granted ?? false
+      sentinelDebug.nativeHotkeys = nativeHotkeyCount
+      sentinelDebug.phantomHotkeys = phantomWindow
       sentinelDebug.appFocusLostCount = appFocusLostCount
       sentinelDebug.appFocusLostMs = appFocusLostMs
       sentinelDebug.lastApp = lastFocusApp
@@ -1051,6 +1146,10 @@ function createSentinelService() {
       displayChangeCount = 0
       displayNativeToggle = false
       obscuredTouchesWindow = 0
+      webviewCombos = []
+      blurIntervals = []
+      phantomWindow = []
+      nativeHotkeyCount = 0
       keystrokeBuffer = []
       mouseBuffer = []
       tabSwitchCount = 0
@@ -1076,6 +1175,13 @@ function createSentinelService() {
 
   const recordKeyDown = (e: KeyboardEvent) => {
     const now = performance.now()
+    if (hotkeysRunning) {
+      const combo = normaliseWebviewCombo(e)
+      if (combo) {
+        webviewCombos.push({ at: now, combo })
+        if (webviewCombos.length > WEBVIEW_COMBO_CAP) webviewCombos.shift()
+      }
+    }
     const flightMs = lastKeystrokeTime > 0 ? now - lastKeystrokeTime : 0
     keystrokeBuffer.push({
       key: e.key.length === 1 ? 'char' : e.key,
@@ -1190,9 +1296,11 @@ function createSentinelService() {
             if (!isActive.value) return
             if (e.payload.focused) {
               if (focusLostAt) { appFocusLostMs += Date.now() - focusLostAt; focusLostAt = 0 }
+              if (blurStartedAt) { blurIntervals.push({ start: blurStartedAt, end: performance.now() }); blurStartedAt = 0 }
             } else {
               appFocusLostCount++
               focusLostAt = Date.now()
+              blurStartedAt = performance.now()
               if (e.payload.app?.name) {
                 lastFocusApp = e.payload.app.name
                 sentinelDebug.lastApp = lastFocusApp // live PiP feedback
@@ -1211,7 +1319,36 @@ function createSentinelService() {
       androidEnvLatest = null
       obscuredTouchesWindow = 0
       overlayLatest = null
+      processLatest = null
       if (purpose === 'assessment' && enrollmentId === null) void setAssessmentShield(true)
+      if (generation !== lifecycleGeneration) return
+
+      // Global hotkey monitor: assessments only, and only when the OS has
+      // already granted listening (the permission prompt lives in the
+      // wizard). A refusal just leaves the signal absent.
+      hotkeyStatus = null
+      hotkeysRunning = false
+      webviewCombos = []
+      blurIntervals = []
+      phantomWindow = []
+      nativeHotkeyCount = 0
+      if (purpose === 'assessment') {
+        try {
+          const st = await tauriInvoke<HotkeyStatus>('sentinel_hotkeys_status')
+          if (generation !== lifecycleGeneration) return
+          hotkeyStatus = st
+          if (st.supported && st.permission_granted) {
+            const started = await tauriInvoke<HotkeyStatus>('sentinel_hotkeys_start')
+            if (generation !== lifecycleGeneration) { void tauriInvoke('sentinel_hotkeys_stop').catch(() => undefined); return }
+            hotkeyEpoch = performance.now()
+            hotkeyStatus = started
+            hotkeysRunning = started.running
+          }
+        } catch (err) {
+          console.warn('[sentinel] hotkey monitor unavailable', err)
+          hotkeysRunning = false
+        }
+      }
       if (generation !== lifecycleGeneration) return
 
       // Display-topology baseline, so the first snapshot can tell a
@@ -1472,6 +1609,10 @@ function createSentinelService() {
     document.removeEventListener('paste', onPaste)
     if (unlistenFocus) { unlistenFocus(); unlistenFocus = null }
     if (unlistenDisplay) { unlistenDisplay(); unlistenDisplay = null }
+    if (hotkeysRunning) {
+      hotkeysRunning = false
+      void tauriInvoke('sentinel_hotkeys_stop').catch(() => undefined)
+    }
     if (displayResampleTimer) { clearTimeout(displayResampleTimer); displayResampleTimer = null }
     if (liveTimer) { clearInterval(liveTimer); liveTimer = null }
   }
@@ -1597,6 +1738,13 @@ function createSentinelService() {
       androidEnvLatest = null
       obscuredTouchesWindow = 0
       overlayLatest = null
+      processLatest = null
+      hotkeyStatus = null
+      webviewCombos = []
+      blurIntervals = []
+      phantomWindow = []
+      nativeHotkeyCount = 0
+      blurStartedAt = 0
       cameraDeviceLabel = ''
       cameraDeviceVirtual = false
       facePresent = undefined
