@@ -64,6 +64,10 @@ attempt cooldown applies.
    on this machine right now. Each run leaves a learner, a recorded
    assessment, an interview, an offer and (first test only) a pilot in the
    demo organisation — `--fresh` before the audience arrives.
+6. Optional, from the Cloud worktree: `node web/scripts/console-walkthrough.mjs`
+   opens the console in your Chrome and walks sign-in, Talent, a run receipt,
+   an interview and the pilot page; `--write` also fills the request,
+   invitation and pilot forms. It prints one line per screen.
 5. Have a terminal open in the app worktree for §6.
 
 ## 1. Learner earns a credential (app)
@@ -285,4 +289,5 @@ scoring, agreement and completion measured, published without identifiers."
 | Hosted status lists | app `credentials.rs` tests (host, URL ids, pending, push); Cloud `tests/status_lists.rs` (publish, serve, forgery, rollback, share refusal) |
 | The whole path, live | `src-tauri/src/commands/live_demo.rs`, two tests: inner functions, and the real Tauri commands via a mock app — `scripts/demo/rehearse.sh`, see §0 step 5 |
 | The desktop screens | Driven once by hand through macOS accessibility on 2026-10-09 (onboarding, directory, Big-O assess, revoke, requested JavaScript assess, share, interview, offer, consent, publish, search); not automated in CI |
+| The Cloud console screens | Cloud `web/scripts/console-walkthrough.mjs --write` (Chrome via playwright-core): sign-in, Talent, receipt, interview, request and invitation forms, a pilot study through its forms |
 | Revoke screen | `src/pages/dashboard/CredentialDetail.test.ts` (revoke → publish → where the list landed) |
