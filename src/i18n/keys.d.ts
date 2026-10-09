@@ -1944,6 +1944,7 @@ export type MessageKey =
   | 'sentinel.debug.rowAppFocusLost'
   | 'sentinel.debug.rowConsistency'
   | 'sentinel.debug.rowDevtools'
+  | 'sentinel.debug.rowDisplays'
   | 'sentinel.debug.rowDownGlances'
   | 'sentinel.debug.rowEnvChanged'
   | 'sentinel.debug.rowFaceConsistency'

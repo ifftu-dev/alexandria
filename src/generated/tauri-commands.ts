@@ -245,6 +245,7 @@ export const TAURI_COMMANDS = [
   "save_extra_relays",
   "search_catalog",
   "sentinel_detect_face",
+  "sentinel_display_topology",
   "sentinel_evidence_decide",
   "sentinel_evidence_delete",
   "sentinel_evidence_pending",

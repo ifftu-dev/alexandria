@@ -375,6 +375,7 @@
     "rowEnvChanged": "environment changed",
     "rowAppFocusLost": "app focus lost",
     "rowSwitchedTo": "switched to",
+    "rowDisplays": "displays",
     "rowFaces": "faces (live)",
     "rowFacePresent": "face present",
     "rowFaceConsistency": "face match",

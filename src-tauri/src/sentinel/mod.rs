@@ -11,6 +11,8 @@
 //!   encrypted holdout set
 //! - `types` — shared input shapes (keystroke events, mouse points,
 //!   digraphs, camera frames) mirrored from the legacy TS structs
+//! - `display_topology` — monitor count, external / mirrored display,
+//!   mobile split-screen (native per-OS probes)
 //! - `evidence` — learner-consented retention of appeal evidence for
 //!   flagged sessions; nothing is persisted without an explicit yes
 //!
@@ -19,6 +21,7 @@
 //! crate.
 
 pub mod active_app;
+pub mod display_topology;
 pub mod evidence;
 pub mod face_detect;
 pub mod features;

@@ -74,7 +74,7 @@ unsafe extern "C" {
 /// This blocks the calling thread until `f` completes on the main queue.
 /// Required for AVFoundation, AVAudioSession, and CoreAudio APIs on iOS.
 ///
-fn run_on_main_thread<F, R>(f: F) -> R
+pub(crate) fn run_on_main_thread<F, R>(f: F) -> R
 where
     F: FnOnce() -> R + Send,
     R: Send,

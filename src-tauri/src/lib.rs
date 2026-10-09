@@ -1519,6 +1519,7 @@ pub fn run() {
             commands::sentinel_gaze::sentinel_score_gaze,
             commands::sentinel_gaze::sentinel_train_gaze_calib,
             commands::sentinel_gaze::sentinel_frontmost_app,
+            commands::sentinel_display::sentinel_display_topology,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

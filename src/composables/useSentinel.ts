@@ -27,6 +27,7 @@ import type {
   GazeFeatures,
   GazeCalibSample,
   TrainGazeCalibResponse,
+  DisplayTopology,
 } from '@/types'
 
 const { invoke: tauriInvoke } = useLocalApi()
@@ -112,6 +113,13 @@ function emptySentinelDebug() {
     appFocusLostCount: 0,
     appFocusLostMs: 0,
     lastApp: '' as string,
+    // Native display topology (latest sample this window).
+    displayCount: 0,
+    externalDisplay: false,
+    splitScreen: false,
+    screenCaptured: false,
+    displayChanges: 0,
+    displaySource: '' as string,
     // Full rule + AI signal snapshot (computed each window).
     signals: null as SignalData | null,
     // Live session-gaze mirror (every camera tick, not just at snapshot) —
@@ -241,6 +249,46 @@ let appFocusLostMs = 0
 let focusLostAt = 0
 let lastFocusApp = ''
 let unlistenFocus: UnlistenFn | null = null
+
+// Native display topology — sampled from the Rust `sentinel_display_topology`
+// IPC once at session start (baseline) and once per snapshot window. The
+// webview cannot see a second monitor, an iPad Split View pane, or an
+// AirPlay mirror; window resizes deliberately produce no signal here.
+// `displayChangeCount` counts topology transitions inside the window.
+let displayBaseline: DisplayTopology | null = null
+let displayLatest: DisplayTopology | null = null
+let displayChangeCount = 0
+
+/** Stable identity for "did the arrangement change" (ignores `source`). */
+const displaySignature = (t: DisplayTopology): string =>
+  `${t.display_count}|${t.external_display ? 1 : 0}|${t.mirrored ? 1 : 0}|${t.split_screen ? 1 : 0}`
+
+/**
+ * Fold a fresh topology sample into the per-window state. Returns the
+ * sample so callers can derive flags. Exported for the snapshot path only.
+ */
+const recordDisplaySample = (sample: DisplayTopology | null): DisplayTopology | null => {
+  if (!sample) return null
+  if (!displayBaseline) displayBaseline = sample
+  if (displayLatest && displaySignature(displayLatest) !== displaySignature(sample)) {
+    displayChangeCount++
+  }
+  displayLatest = sample
+  return sample
+}
+
+/** Flags derived from the latest topology sample + transitions this window. */
+const displayAnomalies = (): string[] => {
+  const out: string[] = []
+  const t = displayLatest
+  if (t) {
+    if (t.external_display) out.push('external_display')
+    if (t.split_screen) out.push('split_screen')
+    if (t.mirrored) out.push('screen_captured')
+  }
+  if (displayChangeCount > 0) out.push('display_change')
+  return out
+}
 
 // Gaze / second-device tracking, accumulated per snapshot window by
 // scoreGaze() and drained in the snapshot dispatch. All gaze inference
@@ -523,6 +571,15 @@ function createSentinelService() {
       environment_changed: environmentChanged,
     }
 
+    if (displayLatest) {
+      signals.display_count = displayLatest.display_count
+      signals.external_display = displayLatest.external_display
+      signals.split_screen = displayLatest.split_screen
+      signals.screen_captured = displayLatest.mirrored
+      signals.display_changes = displayChangeCount
+    }
+    anomalies.push(...displayAnomalies())
+
     if (cameraOptedIn.value && facePresent !== undefined) {
       signals.face_present = facePresent
       signals.face_count = faceCount
@@ -778,6 +835,19 @@ function createSentinelService() {
         }
       }
 
+      // Native display topology: one sample per window. A transition
+      // since the previous sample (monitor plugged in, Split View
+      // entered, mirroring started) is counted; the latest state drives
+      // the per-window flags in computeScores().
+      if (!isCurrent()) return
+      try {
+        const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
+        if (!isCurrent()) return
+        recordDisplaySample(topo)
+      } catch (err) {
+        console.warn('[sentinel] display topology IPC failed', err)
+      }
+
       if (!isCurrent()) return
       const { signals, integrity, consistency, anomalies } = computeScores({
         aiPasteAnomaly: pasteAnomaly,
@@ -828,6 +898,12 @@ function createSentinelService() {
       sentinelDebug.aiMouseHumanProb = mouseHumanProb
       sentinelDebug.facePresent = facePresent ?? false
       sentinelDebug.faceCount = faceCount ?? 0
+      sentinelDebug.displayCount = displayLatest?.display_count ?? 0
+      sentinelDebug.externalDisplay = displayLatest?.external_display ?? false
+      sentinelDebug.splitScreen = displayLatest?.split_screen ?? false
+      sentinelDebug.screenCaptured = displayLatest?.mirrored ?? false
+      sentinelDebug.displayChanges = displayChangeCount
+      sentinelDebug.displaySource = displayLatest?.source ?? ''
       sentinelDebug.appFocusLostCount = appFocusLostCount
       sentinelDebug.appFocusLostMs = appFocusLostMs
       sentinelDebug.lastApp = lastFocusApp
@@ -862,6 +938,7 @@ function createSentinelService() {
       gazeDownGlances = 0
       appFocusLostCount = 0
       appFocusLostMs = 0
+      displayChangeCount = 0
       keystrokeBuffer = []
       mouseBuffer = []
       tabSwitchCount = 0
@@ -1013,6 +1090,20 @@ function createSentinelService() {
         )
       } catch (err) {
         console.warn('[sentinel] focus listener failed', err)
+      }
+      if (generation !== lifecycleGeneration) return
+
+      // Display-topology baseline, so the first snapshot can tell a
+      // pre-existing second monitor from one plugged in mid-session.
+      displayBaseline = null
+      displayLatest = null
+      displayChangeCount = 0
+      try {
+        const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
+        if (generation !== lifecycleGeneration) return
+        recordDisplaySample(topo)
+      } catch (err) {
+        console.warn('[sentinel] display topology baseline failed', err)
       }
       if (generation !== lifecycleGeneration) return
 
@@ -1334,6 +1425,9 @@ function createSentinelService() {
       appFocusLostMs = 0
       focusLostAt = 0
       lastFocusApp = ''
+      displayBaseline = null
+      displayLatest = null
+      displayChangeCount = 0
       facePresent = undefined
       faceCount = undefined
       faceConsistency = undefined

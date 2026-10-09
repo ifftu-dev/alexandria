@@ -10,7 +10,7 @@
  * signals come from `useSentinel().debug`, populated by the real session.
  * Mounted only while the user has explicitly entered diagnostics mode.
  */
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -20,6 +20,16 @@ import type { FaceDetection, ScoreGazeResponse } from '@/types'
 const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { debug } = useSentinel()
+// Display topology, compact: "<count>·<source>" plus any active tells.
+const displaySummary = computed(() => {
+  if (!debug.displaySource) return '—'
+  const tells: string[] = []
+  if (debug.externalDisplay) tells.push('ext')
+  if (debug.splitScreen) tells.push('split')
+  if (debug.screenCaptured) tells.push('captured')
+  if (debug.displayChanges) tells.push(`Δ${debug.displayChanges}`)
+  return `${debug.displayCount}·${debug.displaySource}${tells.length ? ' ' + tells.join(' ') : ''}`
+})
 
 const open = ref(false)
 const cameraOn = ref(false)
@@ -259,6 +269,8 @@ onBeforeUnmount(() => {
           <span class="text-end font-mono" :class="debug.appFocusLostCount ? 'text-red-500' : 'text-foreground'">{{ debug.appFocusLostCount }}× / {{ Math.round(debug.appFocusLostMs / 1000) }}s</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSwitchedTo') }}</span>
           <span class="text-end font-mono text-foreground truncate">{{ debug.lastApp || '—' }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDisplays') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.splitScreen || debug.screenCaptured || debug.displayChanges ? 'text-red-500' : 'text-foreground'">{{ displaySummary }}</span>
 
           <!-- Camera -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>

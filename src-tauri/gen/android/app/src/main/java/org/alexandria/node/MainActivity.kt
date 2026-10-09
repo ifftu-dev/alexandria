@@ -1,7 +1,9 @@
 package org.alexandria.node
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
@@ -10,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
   companion object {
@@ -71,6 +74,35 @@ class MainActivity : TauriActivity() {
       a.runOnUiThread {
         ActivityCompat.requestPermissions(a, missing.toTypedArray(), AV_PERMISSION_REQUEST)
       }
+    }
+
+    /**
+     * Display arrangement for Sentinel, as JSON. Read by Rust
+     * (`sentinel::display_topology`) once per integrity snapshot.
+     *
+     * `display_count` counts every display the DisplayManager drives,
+     * `presentation_count` the secondary / wireless ones (a cast session
+     * shows up here), and the two booleans say whether this activity shares
+     * the screen with another app. Every key is optional on the Rust side,
+     * so an empty object means "nothing observed".
+     */
+    @JvmStatic
+    fun displayTopology(): String {
+      val a = current ?: return "{}"
+      val json = JSONObject()
+      try {
+        val dm = a.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        json.put("display_count", dm.displays.size)
+        json.put(
+          "presentation_count",
+          dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).size,
+        )
+      } catch (_: Exception) {
+        // DisplayManager unavailable: leave the counts out.
+      }
+      json.put("multi_window", a.isInMultiWindowMode)
+      json.put("picture_in_picture", a.isInPictureInPictureMode)
+      return json.toString()
     }
   }
 

@@ -254,6 +254,11 @@ wasmtime = { version = "36", default-features = false, features = ["cranelift", 
 [target.'cfg(target_os = "ios")'.dependencies]
 wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "pulley"] }
 
+# CGRect for Sentinel display-topology probes (Split View detection compares
+# UIWindow bounds against UIScreen bounds). Already in the lock via tao; the
+# `objc2` feature gives it an `Encode` impl for msg_send!.
+objc2-core-foundation = { version = "0.3", features = ["objc2"] }
+
 [dev-dependencies]
 tempfile = "3"
 tauri = { version = "2.10.0", features = ["test"] }

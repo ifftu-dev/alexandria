@@ -33,6 +33,7 @@ pub mod presentation;
 pub mod profile;
 pub mod reputation;
 pub mod role_assessment;
+pub mod sentinel_display;
 pub mod sentinel_evidence;
 pub mod sentinel_gaze;
 pub mod sentinel_holdout;

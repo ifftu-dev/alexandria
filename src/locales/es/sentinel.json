@@ -375,6 +375,7 @@
     "rowEnvChanged": "entorno cambiado",
     "rowAppFocusLost": "foco de la aplicación perdido",
     "rowSwitchedTo": "cambió a",
+    "rowDisplays": "pantallas",
     "rowFaces": "rostros (en vivo)",
     "rowFacePresent": "rostro presente",
     "rowFaceConsistency": "coincidencia de rostro",

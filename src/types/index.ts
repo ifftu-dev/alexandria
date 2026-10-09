@@ -880,11 +880,25 @@ export interface SignalData {
   paste_events: number
   pasted_chars: number
   environment_changed: boolean
+  display_count?: number
+  external_display?: boolean
+  split_screen?: boolean
+  screen_captured?: boolean
+  display_changes?: number
   ai_keystroke_anomaly?: number
   ai_mouse_human_prob?: number
   ai_face_similarity?: number
   ai_face_match?: boolean
   ai_paste_anomaly?: number
+}
+
+/** Native display arrangement reported by `sentinel_display_topology`. */
+export interface DisplayTopology {
+  display_count: number
+  external_display: boolean
+  mirrored: boolean
+  split_screen: boolean
+  source: string
 }
 
 export interface BehavioralProfile {

@@ -375,6 +375,7 @@
     "rowEnvChanged": "环境已改变",
     "rowAppFocusLost": "应用失去焦点",
     "rowSwitchedTo": "切换到",
+    "rowDisplays": "显示器",
     "rowFaces": "人脸（实时）",
     "rowFacePresent": "人脸在场",
     "rowFaceConsistency": "人脸匹配",

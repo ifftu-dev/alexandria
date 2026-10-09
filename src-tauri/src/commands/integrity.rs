@@ -88,9 +88,12 @@ enum Severity {
 /// Info so a client/server version skew never auto-suspends a session.
 fn flag_severity(flag: &str) -> Severity {
     match flag {
-        "bot_suspected" | "face_mismatch" | "paste_classifier_critical" | "device_glance" => {
-            Severity::Critical
-        }
+        "bot_suspected"
+        | "face_mismatch"
+        | "paste_classifier_critical"
+        | "device_glance"
+        | "split_screen"
+        | "screen_captured" => Severity::Critical,
         "behavior_shift"
         | "paste_detected"
         | "multiple_faces"
@@ -99,8 +102,9 @@ fn flag_severity(flag: &str) -> Severity {
         | "paste_classifier_anomaly"
         | "gaze_wander"
         | "gaze_occluded"
-        | "app_switch" => Severity::Warning,
-        "tab_switching" | "no_face" | "frequent_absence" => Severity::Info,
+        | "app_switch"
+        | "display_change" => Severity::Warning,
+        "tab_switching" | "no_face" | "frequent_absence" | "external_display" => Severity::Info,
         _ => Severity::Info,
     }
 }
@@ -711,6 +715,12 @@ mod tests {
         assert_eq!(flag_severity("tab_switching"), Severity::Info);
         assert_eq!(flag_severity("no_face"), Severity::Info);
         assert_eq!(flag_severity("frequent_absence"), Severity::Info);
+
+        // Display topology (docs/sentinel.md §Flagging Logic 17–20).
+        assert_eq!(flag_severity("split_screen"), Severity::Critical);
+        assert_eq!(flag_severity("screen_captured"), Severity::Critical);
+        assert_eq!(flag_severity("display_change"), Severity::Warning);
+        assert_eq!(flag_severity("external_display"), Severity::Info);
 
         assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
         assert_eq!(

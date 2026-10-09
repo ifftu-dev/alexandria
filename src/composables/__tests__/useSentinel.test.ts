@@ -267,3 +267,120 @@ describe('Sentinel lifecycle ownership', () => {
     await service.stop()
   })
 })
+
+describe('Display topology signal', () => {
+  const topology = (overrides: Partial<{
+    display_count: number; external_display: boolean; mirrored: boolean; split_screen: boolean; source: string
+  }> = {}) => ({
+    display_count: 1, external_display: false, mirrored: false, split_screen: false, source: 'test', ...overrides,
+  })
+
+  const withTopology = (responses: Array<ReturnType<typeof topology> | null>) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_display_topology') return responses[Math.min(i++, responses.length - 1)]
+      return fallback(command, args)
+    })
+  }
+
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  it('samples a baseline at start and once per snapshot window', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology()])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology')).toHaveLength(2)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('a null probe (unsupported platform) adds no flags and no signal fields', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([null])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    expect(service.getDebugState().signals?.display_count).toBeUndefined()
+    await service.stop()
+  })
+
+  it('a second monitor present from the start is info-only external_display, not a change', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology({ display_count: 2, external_display: true })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['external_display'], ['external_display']])
+    await service.stop()
+  })
+
+  it('a monitor plugged in mid-session raises display_change for that window only', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([
+      topology(),                                              // baseline at start
+      topology({ display_count: 2, external_display: true }),  // window 1: changed
+      topology({ display_count: 2, external_display: true }),  // window 2: steady
+    ])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([
+      ['external_display', 'display_change'],
+      ['external_display'],
+    ])
+    await service.stop()
+  })
+
+  it('split screen and screen capture are flagged every window they persist', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology({ split_screen: true, mirrored: true })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['split_screen', 'screen_captured']])
+    // getDebugState() only computes signals once there is typing to score.
+    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    const debug = service.getDebugState()
+    expect(debug.signals?.split_screen).toBe(true)
+    expect(debug.signals?.screen_captured).toBe(true)
+    expect(debug.signals?.display_count).toBe(1)
+    await service.stop()
+  })
+
+  it('a failing probe is tolerated and never flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_display_topology') throw new Error('probe unavailable')
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('window resize still produces no display flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology()])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    vi.stubGlobal('outerWidth', window.innerWidth + 800)
+    window.dispatchEvent(new Event('resize'))
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+})
