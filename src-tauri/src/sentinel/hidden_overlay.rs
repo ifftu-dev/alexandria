@@ -489,17 +489,19 @@ mod imp {
         let tree = conn.query_tree(root).ok()?.reply().ok()?;
         let mut out = Vec::with_capacity(tree.children.len());
         for win in tree.children {
-            let Ok(attrs) = conn.get_window_attributes(win).and_then(|c| Ok(c.reply())) else {
+            let Some(attrs) = conn
+                .get_window_attributes(win)
+                .ok()
+                .and_then(|c| c.reply().ok())
+            else {
                 continue;
             };
-            let Ok(attrs) = attrs else { continue };
             if attrs.map_state != MapState::VIEWABLE {
                 continue;
             }
-            let Ok(geom) = conn.get_geometry(win).and_then(|c| Ok(c.reply())) else {
+            let Some(geom) = conn.get_geometry(win).ok().and_then(|c| c.reply().ok()) else {
                 continue;
             };
-            let Ok(geom) = geom else { continue };
 
             let pid = conn
                 .get_property(false, win, net_wm_pid, AtomEnum::CARDINAL, 0, 1)

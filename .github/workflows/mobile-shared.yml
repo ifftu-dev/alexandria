@@ -681,7 +681,10 @@ jobs:
 
       - name: Use preinstalled Android NDK
         run: |
-          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          # Newest NDK below r30: the r30 sysroot rejects the unversioned
+          # `aarch64-linux-android` triple that ffmpeg-sys-next's bindgen
+          # passes ("Unversioned target triples are not supported").
+          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | grep -vE '/(30|3[1-9])\.' | tail -1)"
           if [ -z "$NDK_DIR" ]; then
             echo "No Android NDK installation was found under $ANDROID_SDK_ROOT/ndk." >&2
             exit 1
