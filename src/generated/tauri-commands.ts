@@ -265,6 +265,7 @@ export const TAURI_COMMANDS = [
   "publish_listing",
   "publish_opinion",
   "publish_profile",
+  "publish_status_lists",
   "read_diag_log",
   "recompute_all",
   "recompute_reputation_for_subject",

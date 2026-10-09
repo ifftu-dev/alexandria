@@ -80,7 +80,14 @@ defects:
 
 Neither requires contacting Alexandria. Both require having been given the data,
 which is what a credential *bundle* is for: it carries the key registry and the
-status lists next to the credentials, and verifies entirely offline.
+status lists next to the credentials, and verifies entirely offline. A status
+list named by an `https` URL (`{origin}/status-lists/{issuer}/{n}`) can also be
+fetched from that URL: the document served there is the signed
+`BitstringStatusListCredential` whose `id` is the URL. A verifier that fetches
+one checks `id`, issuer and signature before reading a bit — the reference
+implementation is `verify_fetched_list` in `src/vc/status.rs`, and
+`scripts/demo/verify-credential.mjs` in the app shows the same check in Node.
+The vectors themselves stay offline: their lists are supplied in `store`.
 
 ## Status lists
 

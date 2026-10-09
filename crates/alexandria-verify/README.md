@@ -106,6 +106,14 @@ without any Alexandria code. The one detail independent implementations get
 wrong is the status list bit order: Bitstring Status List counts from the most
 significant bit of each byte.
 
+A credential's `statusListCredential` is either a `urn:` (the list travels in
+the issuer's export bundle) or the URL a host serves it at,
+`{origin}/status-lists/{issuer}/{n}` — `vc::status::list_url` and
+`parse_list_url` go between the two. A verifier that fetches such a URL hands
+the document to `vc::status::verify_fetched_list(document, url, issuer,
+purpose)`, which accepts it only as that list, issued and signed by that
+issuer, and returns the bitstring; the crate does no I/O itself.
+
 ## Licence
 
 MIT OR Apache-2.0, at your option.

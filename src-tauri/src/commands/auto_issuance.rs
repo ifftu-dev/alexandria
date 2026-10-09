@@ -224,27 +224,7 @@ fn issue_new_observation(
 
 // ----- helpers (mirror commands::credentials internals) -----
 
-fn ensure_status_list(conn: &Connection, issuer_did: &Did) -> Result<String, String> {
-    let list_id = format!("urn:alexandria:status-list:{}:1", issuer_did.as_str());
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM credential_status_lists WHERE list_id = ?1",
-            params![list_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if exists == 0 {
-        let bits = vec![0u8; STATUS_LIST_BITS / 8];
-        conn.execute(
-            "INSERT INTO credential_status_lists \
-             (list_id, issuer_did, version, status_purpose, bits, bit_length) \
-             VALUES (?1, ?2, 1, 'revocation', ?3, ?4)",
-            params![list_id, issuer_did.as_str(), bits, STATUS_LIST_BITS as i64],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(list_id)
-}
+use super::credentials::ensure_status_list;
 
 fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String> {
     let next: i64 = conn

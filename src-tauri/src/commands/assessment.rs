@@ -748,7 +748,7 @@ pub async fn assessment_grade(
     let now = crate::commands::credentials::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
-    state
+    let graded = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
@@ -773,7 +773,13 @@ pub async fn assessment_grade(
                 )
             },
         )
-        .await
+        .await?;
+    // A passed attempt may have issued a credential into a list its host has
+    // not seen yet; a verifier fetching that list next minute must find it.
+    if let Err(e) = crate::commands::credentials::publish_status_lists_for(&state).await {
+        log::warn!("status list publication after grading: {e}");
+    }
+    Ok(graded)
 }
 
 /// Grading core, separated from Tauri state so it is directly testable.

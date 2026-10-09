@@ -11,6 +11,18 @@
 //! base64url encoded (`u…`). A list is at least 131,072 bits so that the
 //! position of any one credential in it reveals nothing about how many were
 //! issued.
+//!
+//! # Where a list lives
+//!
+//! `credentialStatus.statusListCredential` is a URL a verifier can fetch
+//! (§14.11.2). A host serves issuer *i*'s list number *n* at
+//! `{origin}/status-lists/{i}/{n}` — see [`list_url`] and [`parse_list_url`] —
+//! and the document it returns is the signed `BitstringStatusListCredential`
+//! whose `id` is that same URL. [`verify_fetched_list`] is the check a verifier
+//! runs on what came back: the fetched document must be the list the
+//! credential named, signed by the credential's issuer, before a bit in it
+//! means anything. An issuer with no host names a `urn:` instead and the list
+//! travels in the §20.4 bundle.
 
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use std::io::{Read, Write};
@@ -78,6 +90,116 @@ pub fn decode_list(encoded: &str) -> Result<Vec<u8>, VcError> {
         ));
     }
     Ok(out)
+}
+
+/// Path prefix under which a host serves status lists.
+pub const STATUS_LIST_PATH: &str = "/status-lists";
+
+/// Where a host serves one issuer's list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListLocation {
+    /// Scheme and authority, no trailing slash.
+    pub origin: String,
+    pub issuer: Did,
+    pub number: u32,
+}
+
+/// The URL `origin` serves issuer `issuer`'s list `number` at.
+///
+/// `origin` is a scheme and authority (`https://cloud.example`); a trailing
+/// slash is dropped so the same host never names one list two ways.
+pub fn list_url(origin: &str, issuer: &Did, number: u32) -> String {
+    format!(
+        "{}{STATUS_LIST_PATH}/{}/{number}",
+        origin.trim_end_matches('/'),
+        issuer.as_str()
+    )
+}
+
+/// Read `origin`, issuer and list number back out of a list URL.
+///
+/// `None` for anything that is not exactly the shape [`list_url`] produces:
+/// a `urn:` id, a different path, a non-`did:key` issuer, or a number that is
+/// not a positive integer. The scheme must be `https`, or `http` on loopback
+/// for development.
+pub fn parse_list_url(url: &str) -> Option<ListLocation> {
+    let (scheme, rest) = url.split_once("://")?;
+    let (authority, path) = rest.split_once('/')?;
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    let host = authority.rsplit_once(':').map_or(authority, |(h, port)| {
+        if port.chars().all(|c| c.is_ascii_digit()) && !port.is_empty() {
+            h
+        } else {
+            authority
+        }
+    });
+    let loopback = matches!(host, "localhost" | "127.0.0.1" | "[::1]");
+    if !(scheme == "https" || (scheme == "http" && loopback)) {
+        return None;
+    }
+    let mut segments = path.split('/');
+    if segments.next()? != &STATUS_LIST_PATH[1..] {
+        return None;
+    }
+    let issuer = crate::did::parse_did_key(segments.next()?).ok()?;
+    let number_text = segments.next()?;
+    if segments.next().is_some()
+        || number_text.is_empty()
+        || number_text.starts_with('0')
+        || number_text.len() > 9
+        || !number_text.chars().all(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+    let number: u32 = number_text.parse().ok()?;
+    Some(ListLocation {
+        origin: format!("{scheme}://{authority}"),
+        issuer,
+        number,
+    })
+}
+
+/// Check a status list document a verifier fetched against the reference that
+/// led to it, and return its bitstring.
+///
+/// The document must be the list the credential named (`id == url`), must be
+/// issued by the credential's issuer and signed by the key that issuer's
+/// `did:key` resolves to, and must declare the status purpose the credential
+/// uses it for. A list that fails any of these says nothing about the
+/// credential — it is somebody else's list, or nobody's.
+pub fn verify_fetched_list(
+    document: &VerifiableCredential,
+    url: &str,
+    issuer: &Did,
+    status_purpose: &str,
+) -> Result<Vec<u8>, VcError> {
+    if document.id.as_deref() != Some(url) {
+        return Err(VcError::InvalidCredential(format!(
+            "status list id {:?} is not the list the credential named",
+            document.id
+        )));
+    }
+    if &document.issuer != issuer {
+        return Err(VcError::InvalidCredential(
+            "status list is not issued by the credential issuer".into(),
+        ));
+    }
+    let key = crate::did::resolve_did_key(issuer)
+        .map_err(|e| VcError::InvalidCredential(format!("status list issuer: {e}")))?;
+    let bits = verify_status_list_credential(document, &key)?;
+    let purpose = document
+        .credential_subject
+        .properties
+        .get("statusPurpose")
+        .and_then(|p| p.as_str());
+    if purpose != Some(status_purpose) {
+        return Err(VcError::InvalidCredential(format!(
+            "status list purpose {purpose:?} is not {status_purpose:?}"
+        )));
+    }
+    Ok(bits)
 }
 
 /// Build and sign the `BitstringStatusListCredential` for `bits`.
@@ -248,5 +370,75 @@ mod tests {
             "short lists are padded to the minimum"
         );
         assert_eq!(get_bit(&decoded, 9), Some(true));
+    }
+
+    #[test]
+    fn list_urls_round_trip_and_reject_other_shapes() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let issuer = derive_did_key(&key);
+        let url = list_url("https://cloud.example/", &issuer, 1);
+        assert_eq!(
+            url,
+            format!("https://cloud.example/status-lists/{}/1", issuer.as_str())
+        );
+        let location = parse_list_url(&url).unwrap();
+        assert_eq!(location.origin, "https://cloud.example");
+        assert_eq!(location.issuer, issuer);
+        assert_eq!(location.number, 1);
+        let local = parse_list_url(&list_url("http://127.0.0.1:8080", &issuer, 12)).unwrap();
+        assert_eq!(local.origin, "http://127.0.0.1:8080");
+        assert_eq!(local.number, 12);
+        for bad in [
+            format!("urn:alexandria:status-list:{}:1", issuer.as_str()),
+            format!("http://cloud.example/status-lists/{}/1", issuer.as_str()),
+            format!("https://cloud.example/lists/{}/1", issuer.as_str()),
+            format!("https://cloud.example/status-lists/{}/0", issuer.as_str()),
+            format!("https://cloud.example/status-lists/{}/01", issuer.as_str()),
+            format!(
+                "https://cloud.example/status-lists/{}/1/extra",
+                issuer.as_str()
+            ),
+            format!("https://cloud.example/status-lists/{}/", issuer.as_str()),
+            format!(
+                "https://user@cloud.example/status-lists/{}/1",
+                issuer.as_str()
+            ),
+            "https://cloud.example/status-lists/did:web:x/1".into(),
+        ] {
+            assert!(parse_list_url(&bad).is_none(), "{bad} should not parse");
+        }
+    }
+
+    #[test]
+    fn a_fetched_list_must_be_the_one_named_by_the_issuer() {
+        let key = SigningKey::from_bytes(&[8; 32]);
+        let issuer = derive_did_key(&key);
+        let url = list_url("https://cloud.example", &issuer, 1);
+        let mut bits = vec![0u8; MIN_BITS / 8];
+        set_bit(&mut bits, 3, true).unwrap();
+        let vc = status_list_credential(
+            &url,
+            &issuer,
+            "revocation",
+            &bits,
+            "2026-10-09T00:00:00Z",
+            &key,
+        )
+        .unwrap();
+        let decoded = verify_fetched_list(&vc, &url, &issuer, "revocation").unwrap();
+        assert_eq!(get_bit(&decoded, 3), Some(true));
+
+        let other_url = list_url("https://cloud.example", &issuer, 2);
+        assert!(verify_fetched_list(&vc, &other_url, &issuer, "revocation").is_err());
+        assert!(verify_fetched_list(&vc, &url, &issuer, "suspension").is_err());
+        let other = derive_did_key(&SigningKey::from_bytes(&[9; 32]));
+        assert!(verify_fetched_list(&vc, &url, &other, "revocation").is_err());
+
+        let mut tampered = vc.clone();
+        tampered.credential_subject.properties.insert(
+            "encodedList".into(),
+            encode_list(&vec![0u8; MIN_BITS / 8]).unwrap().into(),
+        );
+        assert!(verify_fetched_list(&tampered, &url, &issuer, "revocation").is_err());
     }
 }

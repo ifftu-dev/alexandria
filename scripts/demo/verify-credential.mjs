@@ -16,6 +16,11 @@
 // bundle the app exports from Credentials → Export (which also carries the
 // issuer key registry and status lists, so revocation can be checked offline).
 //
+// A credential whose `statusListCredential` is an https URL names a list the
+// issuer publishes; this fetches it (plain GET, one request per list), checks
+// that what came back is that list signed by that issuer, and reads the bit.
+// `--offline` skips the fetch and reports such lists as pending instead.
+//
 // Output, per credential: who issued it, to whom, what it claims, whether the
 // signature verifies against the issuer's did:key, whether it is in its
 // validity window, and its revocation status if the bundle supplies the list.
@@ -157,7 +162,9 @@ export function verifyCredential(vc, context = {}) {
   else {
     const list = context.statusLists?.[status.statusListCredential]
     const index = Number.parseInt(status.statusListIndex, 10)
-    if (!list) result.status = 'pending: status list not supplied (export a bundle to include it)'
+    if (!list) result.status = isListUrl(status.statusListCredential)
+      ? 'pending: status list not fetched (run without --offline, or export a bundle)'
+      : 'pending: status list not supplied (export a bundle to include it)'
     else if (!Number.isInteger(index) || index < 0 || index >= list.length * 8) { result.status = 'invalid status reference'; result.reasons.push('statusListIndex is out of range') }
     else result.status = (list[index >> 3] >> (7 - (index & 7))) & 1 ? 'revoked' : 'active'
   }
@@ -168,6 +175,61 @@ export function verifyCredential(vc, context = {}) {
   const pending = result.signature.startsWith('unverified') || result.status.startsWith('pending')
   result.decision = rejected ? 'reject' : pending ? 'pending' : 'accept'
   return result
+}
+
+/** Is this status list reference one a verifier can fetch? https, or http on loopback for development. */
+export function isListUrl(reference) {
+  if (typeof reference !== 'string') return false
+  try {
+    const url = new URL(reference)
+    const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.hostname === '::1'
+    return url.protocol === 'https:' || (url.protocol === 'http:' && loopback)
+  } catch { return false }
+}
+
+/**
+ * Fetch every URL-named status list the credentials reference and not already
+ * supplied. A fetched document counts only if it is a
+ * `BitstringStatusListCredential` whose `id` is the URL fetched, whose issuer
+ * is the credential's issuer, and whose signature verifies against that
+ * issuer — anything else is somebody else's list and is left out, so the
+ * credential reads as pending rather than wrongly active.
+ * @param {object[]} credentials
+ * @param {{ [listId]: Uint8Array }} statusLists already-known lists, extended in place
+ * @param {{ fetch?: typeof fetch, keyRegistry?: object[] }} [options]
+ * @returns {Promise<string[]>} one line per list that could not be used
+ */
+export async function resolveStatusLists(credentials, statusLists, options = {}) {
+  const doFetch = options.fetch ?? globalThis.fetch
+  const problems = []
+  const wanted = new Map()
+  for (const vc of credentials) {
+    const reference = vc?.credentialStatus
+    if (reference && isListUrl(reference.statusListCredential) && !(reference.statusListCredential in statusLists)) {
+      wanted.set(reference.statusListCredential, { issuer: vc.issuer, purpose: reference.statusPurpose })
+    }
+  }
+  for (const [url, { issuer, purpose }] of wanted) {
+    try {
+      const response = await doFetch(url, { headers: { accept: 'application/vc, application/json' }, redirect: 'error' })
+      if (!response.ok) throw new Error(`${response.status}`)
+      const text = await response.text()
+      if (text.length > 1 << 20) throw new Error('response larger than 1 MiB')
+      const listVc = JSON.parse(text)
+      if (listVc.id !== url) throw new Error(`document id ${listVc.id} is not the URL fetched`)
+      if (listVc.issuer !== issuer) throw new Error('list is not issued by the credential issuer')
+      if (!(listVc.type ?? []).includes('BitstringStatusListCredential')) throw new Error('not a BitstringStatusListCredential')
+      const subject = listVc.credentialSubject ?? {}
+      if (subject.type !== 'BitstringStatusList') throw new Error('subject is not a BitstringStatusList')
+      if (subject.statusPurpose !== purpose) throw new Error(`list purpose ${subject.statusPurpose} is not ${purpose}`)
+      const checked = verifyCredential(listVc, { keyRegistry: options.keyRegistry ?? [] })
+      if (checked.signature !== 'valid') throw new Error(`list signature: ${checked.reasons.join('; ') || checked.signature}`)
+      statusLists[url] = decodeEncodedList(subject.encodedList)
+    } catch (e) {
+      problems.push(`${url}: ${e.message}`)
+    }
+  }
+  return problems
 }
 
 /** `encodedList` → bitstring: multibase base64url (`u`) of GZIP bytes. */
@@ -204,15 +266,18 @@ export function loadInput(json) {
   throw new Error('input is not a credential, an array of credentials, or an alexandria-credential-bundle')
 }
 
-function main(argv) {
-  const file = argv.find((a) => !a.startsWith('--'))
+async function main(argv) {
+  const file = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--at')
   if (!file) {
-    console.error('usage: node verify-credential.mjs <credential-or-bundle.json> [--at <ISO time>]')
+    console.error('usage: node verify-credential.mjs <credential-or-bundle.json> [--at <ISO time>] [--offline]')
     return 2
   }
   const atIndex = argv.indexOf('--at')
   const now = atIndex >= 0 ? new Date(argv[atIndex + 1]) : new Date()
   const { credentials, keyRegistry, statusLists } = loadInput(JSON.parse(readFileSync(file, 'utf8')))
+  if (!argv.includes('--offline')) {
+    for (const problem of await resolveStatusLists(credentials, statusLists, { keyRegistry })) console.error(`status list: ${problem}`)
+  }
   let worst = 0
   for (const vc of credentials) {
     const r = verifyCredential(vc, { now, keyRegistry, statusLists })
@@ -222,7 +287,7 @@ function main(argv) {
     if (r.claim) console.log(`  claim      ${r.claim.skillId}  level ${r.claim.level}  score ${r.claim.score}`)
     console.log(`  signature  ${r.signature}`)
     console.log(`  validity   ${r.validity}`)
-    console.log(`  status     ${r.status}`)
+    console.log(`  status     ${r.status}${vc.credentialStatus && statusLists[vc.credentialStatus.statusListCredential] && isListUrl(vc.credentialStatus.statusListCredential) ? `  (list fetched from ${vc.credentialStatus.statusListCredential})` : ''}`)
     console.log(`  decision   ${r.decision.toUpperCase()}`)
     for (const reason of r.reasons) console.log(`             - ${reason}`)
     if (r.issuer) console.log(`  resolve    https://dev.uniresolver.io/#${r.issuer}  (third-party did:key resolver)`)
@@ -233,5 +298,5 @@ function main(argv) {
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  process.exitCode = main(process.argv.slice(2))
+  process.exitCode = await main(process.argv.slice(2))
 }

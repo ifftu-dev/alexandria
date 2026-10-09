@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "alexandria-verify"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "alexandria-learning-contracts",
  "base64 0.21.7",

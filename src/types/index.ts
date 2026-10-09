@@ -1588,6 +1588,14 @@ export type EndorsementOutcome =
   | { outcome: 'invalid_evidence' }
   | { outcome: 'threshold_unmet'; required_attestors: number; valid_attestors: number }
 
+/** What one status-list publication pass did (`publish_status_lists`). */
+export interface StatusPublishReport {
+  /** List ids the host now serves at their current version. */
+  published: string[]
+  /** One line per list that could not be pushed; it stays pending. */
+  errors: string[]
+}
+
 /**
  * Mirrors `alexandria_verify::trust::CredentialTrust`. A trust state describes
  * provenance only; it never grants a privilege by itself.

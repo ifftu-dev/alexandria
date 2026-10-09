@@ -58,6 +58,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // answered, with the exact signed message. The directory holds the
     // organisation's copy; this one is theirs.
     (11, "hiring_responses", "CREATE TABLE hiring_responses (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('interview','offer')), directory_url TEXT NOT NULL, organization TEXT NOT NULL, role_label TEXT NOT NULL, decision TEXT NOT NULL, chosen_slot INTEGER, meeting_url TEXT, responded_at TEXT NOT NULL, payload_json TEXT NOT NULL);"),
+    // A status list whose id is a URL is served by that host, and the host
+    // only knows what this device has pushed to it. `published_version` is
+    // the last version the host acknowledged; a list whose `version` is
+    // ahead of it is awaiting publication.
+    (12, "status_list_publication", "ALTER TABLE credential_status_lists ADD COLUMN published_version INTEGER NOT NULL DEFAULT 0;"),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"

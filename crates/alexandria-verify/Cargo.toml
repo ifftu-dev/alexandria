@@ -1,6 +1,6 @@
 [package]
 name = "alexandria-verify"
-version = "0.3.0"
+version = "0.4.0"
 description = "Alexandria credential verification — W3C VC Data Model 2.0, Data Integrity eddsa-jcs-2022, Bitstring Status List, did:key"
 edition = "2021"
 rust-version = "1.83.0"

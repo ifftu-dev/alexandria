@@ -1040,6 +1040,53 @@ pub fn run() {
                                     }
                                 }
 
+                                // Status lists a host has not yet seen. Every
+                                // issuance site creates or changes a list; the
+                                // commands that do so publish inline, and this
+                                // pass catches the rest and any push that failed.
+                                if let Some(w) = wallet.as_ref() {
+                                    let signing_key =
+                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
+                                    let issuer = crypto::did::derive_did_key(&signing_key);
+                                    let pending = {
+                                        let guard = db_for_queue.lock();
+                                        match guard.as_deref() {
+                                            Ok(Some(db)) => commands::credentials::pending_status_lists(
+                                                db.conn(),
+                                                &issuer,
+                                            )
+                                            .unwrap_or_default(),
+                                            _ => Vec::new(),
+                                        }
+                                    };
+                                    if !pending.is_empty() {
+                                        let now = commands::credentials::now_rfc3339();
+                                        let (accepted, errors) = commands::credentials::push_status_lists(
+                                            &pending,
+                                            &signing_key,
+                                            &issuer,
+                                            &now,
+                                        )
+                                        .await;
+                                        if !errors.is_empty() {
+                                            log::debug!("status list publication: {errors:?}");
+                                        }
+                                        if !accepted.is_empty() {
+                                            let guard = db_for_queue.lock();
+                                            if let Ok(Some(db)) = guard.as_deref() {
+                                                if let Err(e) = commands::credentials::mark_status_lists_published(
+                                                    db.conn(),
+                                                    &accepted,
+                                                ) {
+                                                    log::warn!("status list publication: {e}");
+                                                } else {
+                                                    log::info!("status lists: published {}", accepted.len());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Cross-device sync: when auto-sync is enabled,
                                 // reconcile with every paired device. No-op if the
                                 // toggle is off, no profile is unlocked, or the
@@ -1483,6 +1530,7 @@ pub fn run() {
             commands::exchange::exchange_credentials,
             commands::exchange::exchange_preview,
             commands::exchange::exchange_send,
+            commands::credentials::publish_status_lists,
             commands::hiring::hiring_interviews,
             commands::hiring::hiring_interview_respond,
             commands::hiring::hiring_offers,

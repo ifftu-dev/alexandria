@@ -1192,11 +1192,11 @@ Each credential MUST conform to the following logical structure.
     }
   },
   "credentialStatus": {
-    "id": "urn:alexandria:status-list:did:key:z6MkIssuer123:1#271",
+    "id": "https://cloud.example/status-lists/did:key:z6MkIssuer123/1#271",
     "type": "BitstringStatusListEntry",
     "statusPurpose": "revocation",
     "statusListIndex": "271",
-    "statusListCredential": "urn:alexandria:status-list:did:key:z6MkIssuer123:1"
+    "statusListCredential": "https://cloud.example/status-lists/did:key:z6MkIssuer123/1"
   },
   "termsOfUse": {
     "policyVersion": "1.0",
@@ -1343,6 +1343,28 @@ each byte, and `statusListCredential` names the list. Lists are at least
 apply a status change for that credential. The implementation checks that the caller-derived DID matches both
 the credential issuer and status-list issuer before changing the bitmap or
 denormalized row.
+
+**Dereferenceable lists.** When the issuer has a status host configured, the
+list is named by the URL the host serves it at:
+
+```
+{origin}/status-lists/{issuer DID}/{list number}
+```
+
+`GET` on that URL returns the current `BitstringStatusListCredential`
+(`Content-Type: application/vc`, public, cacheable for a minute, readable
+cross-origin), whose `id` is the same URL and whose issuer is the DID in the
+path. The issuer publishes with `PUT` of the signed document to the same URL
+whenever a bit changes; the host accepts it only if the document's `id` is that
+URL, its issuer is the path's DID, its proof verifies against the key that DID
+resolves to, and its `validFrom` is not older than the version already served
+(a rollback is refused with 409). There is no account and no session: the
+signature is the authorisation, so any party may relay an issuer's list and no
+party may forge one. A verifier that fetches a list MUST apply the same checks
+to what it receives before reading a bit; a list that fails them is not
+evidence about the credential. A credential whose reference is a `urn:` names a
+list that travels only in the §20.4 bundle. Both forms verify offline from a
+bundle; only the URL form verifies from the credential alone.
 
 #### 14.11.3 Suspension
 

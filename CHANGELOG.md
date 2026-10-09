@@ -20,6 +20,18 @@
   audience, five-minute `expires`). The custom detached-JWS envelopes
   are gone; verifiers refuse a presentation whose proof is not bound to
   them.
+- **Status lists are dereferenceable.** With a status host configured
+  (**Settings → Privacy → Status list host**; the network profile's cloud
+  origin, then the first directory, stand in), a credential names its
+  revocation list by URL — `{origin}/status-lists/{issuer}/{n}` — and the
+  app pushes the signed `BitstringStatusListCredential` there on issuance
+  and every revocation (inline, then retried by the background pass; a
+  **Revoke** reports the push). Any verifier fetches the list from the URL
+  the credential names; the Node verifier and the website verifier do, so
+  a bare credential now verifies and reflects revocation without a bundle.
+  `alexandria-verify` 0.4.0 adds `vc::status::{list_url, parse_list_url,
+  verify_fetched_list}`. Lists issued without a host keep `urn:` ids and
+  travel in the bundle as before.
 
 
 All notable changes to this project will be documented in this file.

@@ -26,6 +26,8 @@ this is the operator's sheet.
 | Cloud interviews and offers | Cloud → **Hiring → Interviews and offers** (`/interviews`, `/interviews/:id`) |
 | Cloud validity pilot | Cloud → **Operations → Validity pilot** (`/pilot`, `/pilot/:id`) |
 | Independent verifier | `scripts/demo/verify-credential.mjs` (Node standard library only; see §6) |
+| Hosted status list | `http://127.0.0.1:8787/status-lists/<issuer did>/1` — the URL every credential issued with **Local demo** configured names in `credentialStatus`; `GET` it in a browser |
+| Status list host setting | Alexandria → **Settings → Privacy → Status list host** (empty = the first directory stands in, so **Local demo** is used) |
 | Third-party DID resolver | <https://dev.uniresolver.io/> — paste the issuer `did:key:…` |
 
 Bundled assessable skills: **JavaScript** (`skill_javascript`) and **Big-O
@@ -137,12 +139,28 @@ Alexandria → **Credentials → Export**. Then, from the app worktree:
 node scripts/demo/verify-credential.mjs ~/Downloads/alexandria-credentials-2026-10-09.json
 ```
 
-The script is ~200 lines, imports only `node:fs` and `node:crypto`, and
-implements the published five-step algorithm: JCS-canonicalise the credential
-with `proof.jws` emptied, verify the detached Ed25519 JWS against the key
-decoded from the issuer's `did:key`, check the validity window, and read the
-revocation bit from the status list the bundle carries. It prints signature,
-validity and status as three separate answers, then ACCEPT / PENDING / REJECT.
+The script is ~300 lines, imports only `node:fs`, `node:crypto` and
+`node:zlib`, and implements the published algorithm: JCS-canonicalise the
+credential and its proof options, verify the `eddsa-jcs-2022` Data Integrity
+proof against the key decoded from the issuer's `did:key`, check the validity
+window, and read the revocation bit. The bit comes from the status list the
+bundle carries, or — when the credential names its list by URL, which every
+credential issued with **Local demo** configured does — from a plain `GET` of
+that URL, after checking the document that came back is that list signed by
+that issuer. It prints signature, validity and status as three separate
+answers, then ACCEPT / PENDING / REJECT, and says where the list came from.
+
+A bare credential now verifies on its own, with Cloud running:
+
+```
+node scripts/demo/verify-credential.mjs credential.json
+```
+
+Then revoke it in Alexandria (**Credentials → the credential → Revoke**), run
+the same command again, and the status flips to `revoked` without re-exporting
+anything: the app pushed the new list to Cloud as part of the revocation. Open
+the list URL in a browser to show the signed `BitstringStatusListCredential`
+being served. `--offline` skips the fetch and reports the list as pending.
 
 To show the key resolution is not ours either: paste the issuer DID into
 <https://dev.uniresolver.io/> — the Universal Resolver returns the same
@@ -225,8 +243,15 @@ scoring, agreement and completion measured, published without identifiers."
 - **Nothing in Talent:** the listing was not published, or expired; republish.
 - **Cloud 401 on `/for/{did}` routes:** the proof is single-use and five
   minutes old at most; the app signs a fresh one per refresh. Check the clock.
-- **Verifier says PENDING:** you passed a bare credential, so the status list
-  is not present. Export the bundle instead.
+- **Verifier says PENDING:** the status list could not be read. For a bare
+  credential naming a `urn:` list, export the bundle instead. For a URL list,
+  Cloud is not running, or the list was never pushed: Alexandria →
+  **Credentials → the credential → Revoke** reports the push result, and the
+  background pass retries every minute.
+- **Credential names a `urn:` list, not the Cloud URL:** it was issued before
+  **Local demo** was added under **Settings → Directories** (or before a
+  **Status list host** was set). Issue a fresh one; ids already in credentials
+  are never rewritten.
 
 ## 10. Tests behind each step
 
