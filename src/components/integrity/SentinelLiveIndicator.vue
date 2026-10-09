@@ -51,6 +51,18 @@ const notices = computed<string[]>(() => {
 
   if (debug.appFocusLostCount > 0) out.push(t('sentinel.evidence.liveOtherApp'))
 
+  // Native environment tells (phase 1–3 signals). Shown so the learner can
+  // fix what is fixable: close the other app, unplug the mirror, stop sharing.
+  if (debug.splitScreen) out.push(t('sentinel.evidence.liveSplitScreen'))
+  if (debug.screenCaptured) out.push(t('sentinel.evidence.liveScreenCaptured'))
+  if (debug.externalDisplay) out.push(t('sentinel.evidence.liveSecondDisplay'))
+  if (debug.overlaySuspicious.length > 0) out.push(t('sentinel.evidence.liveHiddenOverlay'))
+  if (debug.watchedProcesses.some(w => !w.endsWith(':ai_assistant') && !w.endsWith(':screen_share'))) {
+    out.push(t('sentinel.evidence.liveWatchedProcess'))
+  }
+  if (debug.phantomHotkeys.length > 0) out.push(t('sentinel.evidence.livePhantomHotkey'))
+  if (debug.cameraOptedIn && debug.cameraDeviceVirtual) out.push(t('sentinel.evidence.liveVirtualCamera'))
+
   return out
 })
 

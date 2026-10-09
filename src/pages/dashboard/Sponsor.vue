@@ -191,6 +191,9 @@ onMounted(async () => {
             <span v-if="ra.issuance_policy?.min_integrity != null" class="text-muted-foreground">
               {{ $t('dashboard.sponsor.roles.minIntegrity', { value: ra.issuance_policy.min_integrity }) }}
             </span>
+            <span v-if="ra.issuance_policy?.min_camera_coverage != null" class="text-muted-foreground">
+              {{ $t('dashboard.sponsor.roles.minCameraCoverage', { value: ra.issuance_policy.min_camera_coverage }) }}
+            </span>
             <span v-for="s in ra.skill_ids" :key="s" class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{{ s }}</span>
           </div>
           <div class="mt-2 flex gap-2">
