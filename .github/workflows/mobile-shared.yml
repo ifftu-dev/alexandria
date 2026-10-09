@@ -684,19 +684,24 @@ jobs:
           sudo env TMPDIR="$TMPDIR" apt-get update
           sudo env TMPDIR="$TMPDIR" apt-get install -y cmake
 
-      - name: Use preinstalled Android NDK
+      # The runner image now ships only NDK r30, whose sysroot rejects the
+      # unversioned target triple that the bindgen run inside
+      # ffmpeg-sys-next's build script passes ("Unversioned target triples
+      # are not supported"), so the Android build fails before compiling
+      # anything. r26.3 is the release the local Android recipe and the
+      # personhood-lab job build with; install it and use it. Drop this once
+      # ffmpeg-sys-next passes a versioned triple to clang.
+      - name: Install Android NDK r26
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: 'ndk;26.3.11579264'
+
+      - name: Use Android NDK r26
         run: |
-          # The newest NDK below r30. r30 ships a sysroot whose cdefs.h
-          # rejects unversioned target triples, and the bindgen run inside
-          # ffmpeg-sys-next's build script still emits one, so bindings fail
-          # to generate. The runner image added r30 in October 2026; picking
-          # "newest" started selecting it. Drop the cap once ffmpeg-sys-next
-          # (or the clang bindgen invokes) passes a versioned triple.
-          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d \
-            | awk -F/ '{ split($NF, v, "."); if (v[1] + 0 < 30) print }' | sort -V | tail -1)"
-          if [ -z "$NDK_DIR" ]; then
+          NDK_DIR="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+          if [ ! -d "$NDK_DIR" ]; then
             NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-            echo "No Android NDK below r30 is installed; using $NDK_DIR" >&2
+            echo "NDK r26.3 was not installed; falling back to $NDK_DIR" >&2
           fi
           if [ -z "$NDK_DIR" ]; then
             echo "No Android NDK installation was found under $ANDROID_SDK_ROOT/ndk." >&2
