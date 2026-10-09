@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 2 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 97 tables, 106 indexes, 1 view, 3 triggers.
+**Schema**: 3 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 97 tables, 107 indexes, 1 view, 3 triggers.
 
 ---
 
@@ -23,6 +23,7 @@ and requires a database's history to be an exact prefix of this list:
 
 1. `baseline`
 2. `instructor_studio`
+3. `attempt_role_target`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -330,6 +331,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `ended_at` TEXT
 - `end_reason` TEXT
 - `draft_answers_json` TEXT
+- `role_assessment_id` TEXT → `role_assessments.id`
 
 #### `assessment_item_skills`
 
@@ -1265,6 +1267,7 @@ Every foreign key in the baseline, parent to child.
 
 ```mermaid
 erDiagram
+    role_assessments ||--o{ assessment_attempts : role_assessment_id
     question_banks ||--o{ assessment_attempts : bank_id
     assessment_items ||--o{ assessment_item_skills : item_id
     question_banks ||--o{ assessment_items : bank_id
