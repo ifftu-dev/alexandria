@@ -11,6 +11,8 @@ import type {
   IntegritySession,
   SentinelHoldoutRef,
   BehavioralProfile,
+  FlagType,
+  FlagSeverity,
 } from '@/types'
 
 const router = useRouter()
@@ -56,18 +58,48 @@ const signalWeights = computed(() => [
 ])
 
 // ---------------------------------------------------------------------------
-// Anomaly flag types
+// Anomaly flag types. Severity mirrors the backend's authoritative
+// `commands/integrity.rs::flag_severity`; keep the two lists in step.
 // ---------------------------------------------------------------------------
-const anomalyFlagTypes = computed(() => [
-  { type: 'tab_switching', severity: 'warning' as const, description: t('sentinel.flags.items.tabSwitching.description'), trigger: t('sentinel.flags.items.tabSwitching.trigger') },
-  { type: 'paste_detected', severity: 'warning' as const, description: t('sentinel.flags.items.pasteDetected.description'), trigger: t('sentinel.flags.items.pasteDetected.trigger') },
-  { type: 'bot_suspected', severity: 'critical' as const, description: t('sentinel.flags.items.botSuspected.description'), trigger: t('sentinel.flags.items.botSuspected.trigger') },
-  { type: 'no_face', severity: 'info' as const, description: t('sentinel.flags.items.noFace.description'), trigger: t('sentinel.flags.items.noFace.trigger') },
-  { type: 'multiple_faces', severity: 'warning' as const, description: t('sentinel.flags.items.multipleFaces.description'), trigger: t('sentinel.flags.items.multipleFaces.trigger') },
-  { type: 'multi_account', severity: 'critical' as const, description: t('sentinel.flags.items.multiAccount.description'), trigger: t('sentinel.flags.items.multiAccount.trigger') },
-  { type: 'low_integrity', severity: 'warning' as const, description: t('sentinel.flags.items.lowIntegrity.description'), trigger: t('sentinel.flags.items.lowIntegrity.trigger') },
-  { type: 'behavior_shift', severity: 'warning' as const, description: t('sentinel.flags.items.behaviorShift.description'), trigger: t('sentinel.flags.items.behaviorShift.trigger') },
-])
+const FLAG_CATALOG: ReadonlyArray<{ type: FlagType; key: string; severity: FlagSeverity }> = [
+  { type: 'tab_switching', key: 'tabSwitching', severity: 'info' },
+  { type: 'app_switch', key: 'appSwitch', severity: 'warning' },
+  { type: 'paste_detected', key: 'pasteDetected', severity: 'warning' },
+  { type: 'paste_classifier_anomaly', key: 'pasteClassifierAnomaly', severity: 'warning' },
+  { type: 'paste_classifier_critical', key: 'pasteClassifierCritical', severity: 'critical' },
+  { type: 'bot_suspected', key: 'botSuspected', severity: 'critical' },
+  { type: 'low_integrity', key: 'lowIntegrity', severity: 'warning' },
+  { type: 'behavior_shift', key: 'behaviorShift', severity: 'warning' },
+  { type: 'no_face', key: 'noFace', severity: 'info' },
+  { type: 'multiple_faces', key: 'multipleFaces', severity: 'warning' },
+  { type: 'face_mismatch', key: 'faceMismatch', severity: 'critical' },
+  { type: 'prolonged_absence', key: 'prolongedAbsence', severity: 'warning' },
+  { type: 'frequent_absence', key: 'frequentAbsence', severity: 'info' },
+  { type: 'gaze_wander', key: 'gazeWander', severity: 'warning' },
+  { type: 'gaze_occluded', key: 'gazeOccluded', severity: 'warning' },
+  { type: 'device_glance', key: 'deviceGlance', severity: 'critical' },
+  { type: 'virtual_camera', key: 'virtualCamera', severity: 'warning' },
+  { type: 'external_display', key: 'externalDisplay', severity: 'info' },
+  { type: 'display_change', key: 'displayChange', severity: 'warning' },
+  { type: 'split_screen', key: 'splitScreen', severity: 'critical' },
+  { type: 'screen_captured', key: 'screenCaptured', severity: 'critical' },
+  { type: 'hidden_overlay', key: 'hiddenOverlay', severity: 'critical' },
+  { type: 'cheat_tool_process', key: 'cheatToolProcess', severity: 'critical' },
+  { type: 'unauthorized_process', key: 'unauthorizedProcess', severity: 'warning' },
+  { type: 'ai_assistant_running', key: 'aiAssistantRunning', severity: 'info' },
+  { type: 'screen_share_running', key: 'screenShareRunning', severity: 'info' },
+  { type: 'phantom_hotkey', key: 'phantomHotkey', severity: 'warning' },
+  { type: 'phantom_hotkey_repeated', key: 'phantomHotkeyRepeated', severity: 'critical' },
+  { type: 'foreign_accessibility_service', key: 'foreignAccessibilityService', severity: 'warning' },
+  { type: 'debug_bridge_enabled', key: 'debugBridgeEnabled', severity: 'warning' },
+  { type: 'obscured_touch', key: 'obscuredTouch', severity: 'critical' },
+]
+const anomalyFlagTypes = computed(() => FLAG_CATALOG.map(f => ({
+  type: f.type,
+  severity: f.severity,
+  description: t(`sentinel.flags.items.${f.key}.description`),
+  trigger: t(`sentinel.flags.items.${f.key}.trigger`),
+})))
 
 // ---------------------------------------------------------------------------
 // Computed

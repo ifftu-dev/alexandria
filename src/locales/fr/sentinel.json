@@ -90,10 +90,6 @@
         "name": "Collage",
         "description": "Compte la quantité de texte que vous collez. Coller de grands blocs de texte est signalé."
       },
-      "devtools": {
-        "name": "Outils de développement",
-        "description": "Remarque lorsque les outils de développement du navigateur sont ouverts."
-      },
       "facePresent": {
         "name": "Vérification par caméra",
         "description": "Si vous activez votre caméra, Sentinel vérifie toutes les quelques secondes que vous êtes toujours présent."
@@ -113,17 +109,33 @@
         "description": "Quitter la page trop souvent",
         "trigger": "Plus de 10 changements lors d'une vérification"
       },
+      "appSwitch": {
+        "description": "Passage à une autre application",
+        "trigger": "Le système d'exploitation a donné le focus à une autre application"
+      },
       "pasteDetected": {
         "description": "Collage d'un grand bloc de texte",
         "trigger": "Plus de 500 caractères collés"
       },
-      "devtoolsDetected": {
-        "description": "Outils de développement du navigateur ouverts",
-        "trigger": "La vérification des outils de développement est revenue positive"
+      "pasteClassifierAnomaly": {
+        "description": "La réponse semble collée ou tapée par une machine",
+        "trigger": "Le détecteur de collage Sentinel atteint au moins 0,95"
+      },
+      "pasteClassifierCritical": {
+        "description": "La réponse a presque certainement été collée ou tapée par une machine",
+        "trigger": "Le détecteur de collage Sentinel atteint au moins 0,99"
       },
       "botSuspected": {
         "description": "Le mouvement semble automatisé",
         "trigger": "Le mouvement de la souris n'a presque aucune variation naturelle"
+      },
+      "lowIntegrity": {
+        "description": "Le score d'intégrité est tombé sous le seuil de sécurité",
+        "trigger": "Score global inférieur à 0,40"
+      },
+      "behaviorShift": {
+        "description": "Le comportement s'est fortement écarté de votre schéma habituel",
+        "trigger": "Score de correspondance inférieur à 0,35"
       },
       "noFace": {
         "description": "Aucun visage vu sur la caméra",
@@ -133,17 +145,89 @@
         "description": "Plus d'un visage sur la caméra",
         "trigger": "Plus d'un visage lors d'une vérification"
       },
-      "multiAccount": {
-        "description": "Cet appareil est lié à plus d'un compte",
-        "trigger": "Le même appareil a été vu sur plus d'un compte"
+      "faceMismatch": {
+        "description": "Le visage ne correspond pas à celui enregistré",
+        "trigger": "La vérification caméra voit une personne différente de celle enregistrée"
       },
-      "lowIntegrity": {
-        "description": "Le score d'intégrité est tombé sous le seuil de sécurité",
-        "trigger": "Score global inférieur à 0,40"
+      "prolongedAbsence": {
+        "description": "Absent de la caméra pendant un moment",
+        "trigger": "Visage absent sur 5 vérifications consécutives (environ 15 secondes)"
       },
-      "behaviorShift": {
-        "description": "Le comportement s'est fortement écarté de votre schéma habituel",
-        "trigger": "Score de correspondance inférieur à 0,35"
+      "frequentAbsence": {
+        "description": "Souvent absent de la caméra",
+        "trigger": "Visage absent sur plus de la moitié des vérifications d'une fenêtre"
+      },
+      "gazeWander": {
+        "description": "Regarde souvent hors de l'écran",
+        "trigger": "Regard estimé hors écran sur plus de 30 % des vérifications caméra"
+      },
+      "gazeOccluded": {
+        "description": "Yeux cachés à la caméra",
+        "trigger": "Aucune géométrie faciale exploitable sur plus de 40 % des vérifications caméra"
+      },
+      "deviceGlance": {
+        "description": "Coups d'œil répétés vers le bas",
+        "trigger": "Trois coups d'œil ou plus vers le bas, hors écran, dans une fenêtre"
+      },
+      "virtualCamera": {
+        "description": "La caméra est un périphérique virtuel",
+        "trigger": "Le nom du périphérique vidéo correspond à un produit de caméra virtuelle connu"
+      },
+      "externalDisplay": {
+        "description": "Un second écran est connecté",
+        "trigger": "Plus d'un écran branché ; noté, sans pénalité"
+      },
+      "displayChange": {
+        "description": "La configuration d'écran a changé en cours de session",
+        "trigger": "Un écran a été ajouté, retiré, dupliqué, ou l'affichage partagé a été basculé"
+      },
+      "splitScreen": {
+        "description": "Une autre application partage l'écran",
+        "trigger": "Split View, Slide Over, Stage Manager, multifenêtre ou image dans l'image est actif"
+      },
+      "screenCaptured": {
+        "description": "L'écran est enregistré ou dupliqué",
+        "trigger": "Le système signale une capture d'écran, ou deux écrans affichent la même image"
+      },
+      "hiddenOverlay": {
+        "description": "Une fenêtre se cache de la capture d'écran",
+        "trigger": "Un autre programme a une fenêtre exclue de la capture, override-redirect ou transparente aux clics (bureau)"
+      },
+      "cheatToolProcess": {
+        "description": "Un outil de tricherie d'entretien est en cours d'exécution",
+        "trigger": "Un programme de la liste de surveillance des superpositions d'évaluation est en cours (bureau)"
+      },
+      "unauthorizedProcess": {
+        "description": "Contrôle à distance, caméra virtuelle ou VM détectés",
+        "trigger": "Un hôte de bureau à distance, un pilote de caméra virtuelle ou un agent de VM est en cours (bureau)"
+      },
+      "aiAssistantRunning": {
+        "description": "Un assistant IA de bureau est ouvert",
+        "trigger": "Une application d'assistant IA connue est en cours ; noté, sans pénalité"
+      },
+      "screenShareRunning": {
+        "description": "Une application de partage d'écran est ouverte",
+        "trigger": "Une application de réunion ou de partage d'écran est en cours ; noté, sans pénalité"
+      },
+      "phantomHotkey": {
+        "description": "Un raccourci est allé à une autre application",
+        "trigger": "Une combinaison Cmd/Ctrl/Alt a atteint le système mais pas l'évaluation alors qu'elle avait le focus"
+      },
+      "phantomHotkeyRepeated": {
+        "description": "Les raccourcis continuent d'aller à une autre application",
+        "trigger": "Trois raccourcis de ce type ou plus dans une fenêtre"
+      },
+      "foreignAccessibilityService": {
+        "description": "Un service d'accessibilité d'une autre application est actif",
+        "trigger": "Un service d'accessibilité non système est activé (Android)"
+      },
+      "debugBridgeEnabled": {
+        "description": "Le débogage développeur est activé",
+        "trigger": "Le débogage USB ou sans fil est actif (Android)"
+      },
+      "obscuredTouch": {
+        "description": "Un toucher est passé à travers une superposition",
+        "trigger": "Un appui a été reçu alors qu'une autre fenêtre recouvrait l'évaluation (Android)"
       }
     }
   },
@@ -265,7 +349,7 @@
     "alreadyEnrolled": "(déjà configuré — vous pouvez passer)",
     "activeTitle": "Vous protège déjà, sans configuration :",
     "activePaste": "Détecteur de collage Sentinel — repère les réponses collées et les robots de frappe, intégré à chaque copie",
-    "activeRules": "Vérifications de base — rester sur la page, outils de développement, taille des collages et mouvement non naturel",
+    "activeRules": "Vérifications de base — rester sur la page, taille des collages et mouvement non naturel",
     "privacyNote": "Tout reste sur cet appareil. Vos frappes brutes, vos mouvements de souris et votre vidéo ne sont jamais enregistrés. Ce que Sentinel apprend est conservé dans un stockage chiffré sur votre appareil.",
     "begin": "Commencer",
     "typingTitle": "Configuration de la frappe",
@@ -292,8 +376,6 @@
     "awarenessTabBody": "Suit les moments où vous quittez l'évaluation et la durée de votre absence. Un changement occasionnel est acceptable — un grand nombre de changements signale la session.",
     "awarenessClipboardTitle": "Collage",
     "awarenessClipboardBody": "Remarque les événements de collage et compte les caractères collés. Les petits collages sont acceptables — coller de grands blocs de texte dans les réponses déclenche un signalement.",
-    "awarenessDevtoolsTitle": "Outils de développement",
-    "awarenessDevtoolsBody": "Une vérification rapide remarque si les outils de développement du navigateur sont ouverts. C'est un signal faible — il ne vous fait pas échouer, mais il compte dans le score global.",
     "awarenessFingerprintTitle": "Vérification de l'appareil",
     "awarenessFingerprintBody": "Une empreinte privée de cet appareil (aucune donnée personnelle) aide à repérer le même appareil utilisé par différents comptes.",
     "awarenessDisplayTitle": "Écrans et vue partagée",
@@ -381,7 +463,6 @@
     "rowPastedChars": "caractères collés",
     "rowTabSwitches": "changements d'onglet",
     "rowUnfocused": "hors focus",
-    "rowDevtools": "outils de développement",
     "rowEnvChanged": "environnement modifié",
     "rowAppFocusLost": "focus de l'application perdu",
     "rowSwitchedTo": "basculé vers",

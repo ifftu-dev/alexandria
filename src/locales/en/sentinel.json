@@ -90,10 +90,6 @@
         "name": "Pasting",
         "description": "Counts how much text you paste in. Pasting large blocks of text gets flagged."
       },
-      "devtools": {
-        "name": "Developer tools",
-        "description": "Notices when the browser's developer tools are opened."
-      },
       "facePresent": {
         "name": "Camera check",
         "description": "If you opt in to your camera, Sentinel checks every few seconds that you're still there."
@@ -113,17 +109,33 @@
         "description": "Switching away too often",
         "trigger": "More than 10 switches in one check"
       },
+      "appSwitch": {
+        "description": "Switched to another app",
+        "trigger": "The operating system moved focus to a different application"
+      },
       "pasteDetected": {
         "description": "Pasted a large block of text",
         "trigger": "More than 500 characters pasted"
       },
-      "devtoolsDetected": {
-        "description": "Browser developer tools opened",
-        "trigger": "The developer-tools check came back positive"
+      "pasteClassifierAnomaly": {
+        "description": "Answer looks pasted or machine-typed",
+        "trigger": "Sentinel paste detector scores at least 0.95"
+      },
+      "pasteClassifierCritical": {
+        "description": "Answer almost certainly pasted or machine-typed",
+        "trigger": "Sentinel paste detector scores at least 0.99"
       },
       "botSuspected": {
         "description": "Movement looks automated",
         "trigger": "Mouse motion has almost no natural variation"
+      },
+      "lowIntegrity": {
+        "description": "Integrity score dropped below the safe line",
+        "trigger": "Overall score under 0.40"
+      },
+      "behaviorShift": {
+        "description": "Behavior drifted a long way from your usual pattern",
+        "trigger": "Match score under 0.35"
       },
       "noFace": {
         "description": "No face seen on camera",
@@ -133,17 +145,89 @@
         "description": "More than one face on camera",
         "trigger": "More than one face during a check"
       },
-      "multiAccount": {
-        "description": "This device is linked to more than one account",
-        "trigger": "The same device was seen on more than one account"
+      "faceMismatch": {
+        "description": "Face doesn't match the enrolled one",
+        "trigger": "The camera check sees a different person than the one enrolled"
       },
-      "lowIntegrity": {
-        "description": "Integrity score dropped below the safe line",
-        "trigger": "Overall score under 0.40"
+      "prolongedAbsence": {
+        "description": "Away from the camera for a while",
+        "trigger": "Face missing on 5 checks in a row (about 15 seconds)"
       },
-      "behaviorShift": {
-        "description": "Behavior drifted a long way from your usual pattern",
-        "trigger": "Match score under 0.35"
+      "frequentAbsence": {
+        "description": "Often away from the camera",
+        "trigger": "Face missing on more than half the checks in one window"
+      },
+      "gazeWander": {
+        "description": "Looking away from the screen a lot",
+        "trigger": "Gaze estimated off-screen for more than 30% of camera checks"
+      },
+      "gazeOccluded": {
+        "description": "Eyes hidden from the camera",
+        "trigger": "No usable face geometry on more than 40% of camera checks"
+      },
+      "deviceGlance": {
+        "description": "Repeated glances down at something",
+        "trigger": "Three or more downward off-screen glances in one window"
+      },
+      "virtualCamera": {
+        "description": "The camera is a virtual device",
+        "trigger": "The video device name matches a known virtual-camera product"
+      },
+      "externalDisplay": {
+        "description": "A second display is connected",
+        "trigger": "More than one display attached; noted, not penalised"
+      },
+      "displayChange": {
+        "description": "Display setup changed mid-session",
+        "trigger": "A display was added, removed, mirrored, or split view was toggled"
+      },
+      "splitScreen": {
+        "description": "Another app shares the screen",
+        "trigger": "Split View, Slide Over, Stage Manager, multi-window or picture-in-picture is active"
+      },
+      "screenCaptured": {
+        "description": "The screen is being recorded or mirrored",
+        "trigger": "The system reports screen capture, or two displays show the same image"
+      },
+      "hiddenOverlay": {
+        "description": "A window is hiding from screen capture",
+        "trigger": "Another program has a capture-excluded, override-redirect or click-through window open (desktop)"
+      },
+      "cheatToolProcess": {
+        "description": "An interview cheat tool is running",
+        "trigger": "A program from the assessment-overlay watchlist is running (desktop)"
+      },
+      "unauthorizedProcess": {
+        "description": "Remote control, virtual camera or VM detected",
+        "trigger": "A remote-desktop host, virtual-camera driver or VM guest agent is running (desktop)"
+      },
+      "aiAssistantRunning": {
+        "description": "A desktop AI assistant is open",
+        "trigger": "A known AI assistant app is running; noted, not penalised"
+      },
+      "screenShareRunning": {
+        "description": "A screen-sharing app is open",
+        "trigger": "A meeting or screen-share app is running; noted, not penalised"
+      },
+      "phantomHotkey": {
+        "description": "A shortcut went to another app",
+        "trigger": "A Cmd/Ctrl/Alt combo reached the system but not the assessment while it had focus"
+      },
+      "phantomHotkeyRepeated": {
+        "description": "Shortcuts keep going to another app",
+        "trigger": "Three or more such shortcuts in one window"
+      },
+      "foreignAccessibilityService": {
+        "description": "An accessibility service from another app is on",
+        "trigger": "A non-system accessibility service is enabled (Android)"
+      },
+      "debugBridgeEnabled": {
+        "description": "Developer debugging is enabled",
+        "trigger": "USB or wireless debugging is on (Android)"
+      },
+      "obscuredTouch": {
+        "description": "A touch came through an overlay",
+        "trigger": "A tap was delivered while another window was drawn over the assessment (Android)"
       }
     }
   },
@@ -265,7 +349,7 @@
     "alreadyEnrolled": "(already set up — you can skip)",
     "activeTitle": "Already protecting you, no setup needed:",
     "activePaste": "Sentinel paste detector — spots pasted answers and typing bots, built into every copy",
-    "activeRules": "Basic checks — staying on the page, developer tools, paste size, and unnatural movement",
+    "activeRules": "Basic checks — staying on the page, paste size, and unnatural movement",
     "privacyNote": "Everything stays on this device. Your raw keystrokes, mouse movements, and video are never saved. What Sentinel learns is kept in encrypted storage on your device.",
     "begin": "Get started",
     "typingTitle": "Typing setup",
@@ -292,8 +376,6 @@
     "awarenessTabBody": "Tracks when you switch away from the assessment and how long you're gone. The odd switch is fine — a lot of switching flags the session.",
     "awarenessClipboardTitle": "Pasting",
     "awarenessClipboardBody": "Notices paste events and counts the characters pasted. Small pastes are fine — pasting big blocks of text into answers raises a flag.",
-    "awarenessDevtoolsTitle": "Developer tools",
-    "awarenessDevtoolsBody": "A quick check notices if the browser's developer tools are open. It's a soft signal — it won't fail you, but it counts toward the overall score.",
     "awarenessFingerprintTitle": "Device check",
     "awarenessFingerprintBody": "A private fingerprint of this device (no personal data) helps spot the same device being used by different accounts.",
     "awarenessDisplayTitle": "Screens and split view",
@@ -381,7 +463,6 @@
     "rowPastedChars": "pasted characters",
     "rowTabSwitches": "tab switches",
     "rowUnfocused": "unfocused",
-    "rowDevtools": "developer tools",
     "rowEnvChanged": "environment changed",
     "rowAppFocusLost": "app focus lost",
     "rowSwitchedTo": "switched to",
