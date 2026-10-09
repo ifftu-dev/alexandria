@@ -537,3 +537,45 @@ describe('Hidden overlay signal', () => {
     await service.stop()
   })
 })
+
+describe('Virtual camera signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  it('a virtual camera label raises virtual_camera while the camera is opted in', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment', true)
+    service.reportCameraDevice('OBS Virtual Camera')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['virtual_camera']])
+    expect(service.debug.cameraDeviceVirtual).toBe(true)
+    await service.stop()
+  })
+
+  it('a real webcam adds nothing, and the label never reaches the snapshot', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment', true)
+    service.reportCameraDevice('FaceTime HD Camera')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    const snapshot = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_submit_snapshot')?.[1]
+    expect(JSON.stringify(snapshot)).not.toContain('FaceTime')
+    await service.stop()
+  })
+
+  it('opting the camera out clears the device and the flag', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment', true)
+    service.reportCameraDevice('ManyCam')
+    service.setCameraOptedIn(false)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    expect(service.debug.cameraDeviceLabel).toBe('')
+    await service.stop()
+  })
+})

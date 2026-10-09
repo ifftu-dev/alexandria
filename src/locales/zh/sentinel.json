@@ -380,6 +380,7 @@
     "rowOverlays": "隐藏悬浮窗",
     "rowFaces": "人脸（实时）",
     "rowFacePresent": "人脸在场",
+    "rowCameraDevice": "摄像头设备",
     "rowFaceConsistency": "人脸匹配",
     "rowFaceSimMatch": "人脸相似度 / 匹配",
     "rowSessionChecks": "会话检查",

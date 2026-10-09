@@ -491,6 +491,7 @@ async function enableCamera() {
       return
     }
     cameraStream.value = stream
+    sentinel.reportCameraDevice(stream.getVideoTracks()[0]?.label ?? null)
     // Wait a tick so the <video> element is rendered under v-if before attach.
     await new Promise(resolve => setTimeout(resolve, 0))
     if (!isCurrent()) return

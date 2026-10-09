@@ -891,6 +891,7 @@ export interface SignalData {
   hidden_overlays?: number
   overlay_windows_scanned?: number
   overlay_windows_allowlisted?: number
+  camera_device_virtual?: boolean
   ai_keystroke_anomaly?: number
   ai_mouse_human_prob?: number
   ai_face_similarity?: number
@@ -1534,6 +1535,8 @@ export interface IssuancePolicy {
   max_warning?: number | null
   require_clean?: boolean
   required_assurance_level?: string | null
+  /** Minimum fraction of snapshots captured with the camera opted in. */
+  min_camera_coverage?: number | null
 }
 
 export interface IssueCredentialRequest {

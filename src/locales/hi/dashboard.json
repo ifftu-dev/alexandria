@@ -156,6 +156,7 @@
       "minIntegrity": "न्यूनतम अखंडता",
       "maxCritical": "अधिकतम गंभीर",
       "maxWarning": "अधिकतम चेतावनी",
+      "minCameraCoverage": "न्यूनतम कैमरा कवरेज (0–1)",
       "requireClean": "एक स्वच्छ सत्र आवश्यक करें",
       "assuranceLabel": "आवश्यक आश्वासन स्तर",
       "assuranceNone": "(कोई नहीं)"

@@ -380,6 +380,7 @@
     "rowOverlays": "छिपे ओवरले",
     "rowFaces": "चेहरे (लाइव)",
     "rowFacePresent": "चेहरा मौजूद",
+    "rowCameraDevice": "कैमरा डिवाइस",
     "rowFaceConsistency": "चेहरा मिलान",
     "rowFaceSimMatch": "चेहरा समानता / मिलान",
     "rowSessionChecks": "सत्र जाँच",

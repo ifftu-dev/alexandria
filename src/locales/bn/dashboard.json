@@ -156,6 +156,7 @@
       "minIntegrity": "সর্বনিম্ন সততা",
       "maxCritical": "সর্বোচ্চ গুরুতর",
       "maxWarning": "সর্বোচ্চ সতর্কতা",
+      "minCameraCoverage": "সর্বনিম্ন ক্যামেরা কভারেজ (0–1)",
       "requireClean": "একটি নিষ্কলুষ সেশন আবশ্যক করুন",
       "assuranceLabel": "প্রয়োজনীয় নিশ্চয়তার স্তর",
       "assuranceNone": "(কিছু নয়)"

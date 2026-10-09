@@ -156,6 +156,7 @@
       "minIntegrity": "కనీస సమగ్రత",
       "maxCritical": "గరిష్ఠ తీవ్రమైనవి",
       "maxWarning": "గరిష్ఠ హెచ్చరికలు",
+      "minCameraCoverage": "కనీస కెమెరా కవరేజ్ (0–1)",
       "requireClean": "శుభ్రమైన సెషన్ అవసరం",
       "assuranceLabel": "అవసరమైన హామీ స్థాయి",
       "assuranceNone": "(ఏదీ లేదు)"

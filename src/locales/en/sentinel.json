@@ -380,6 +380,7 @@
     "rowOverlays": "hidden overlays",
     "rowFaces": "faces (live)",
     "rowFacePresent": "face present",
+    "rowCameraDevice": "camera device",
     "rowFaceConsistency": "face match",
     "rowFaceSimMatch": "face similarity / match",
     "rowSessionChecks": "session checks",

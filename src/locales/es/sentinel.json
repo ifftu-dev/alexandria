@@ -380,6 +380,7 @@
     "rowOverlays": "superposiciones ocultas",
     "rowFaces": "rostros (en vivo)",
     "rowFacePresent": "rostro presente",
+    "rowCameraDevice": "dispositivo de cámara",
     "rowFaceConsistency": "coincidencia de rostro",
     "rowFaceSimMatch": "similitud / coincidencia de rostro",
     "rowSessionChecks": "comprobaciones de sesión",

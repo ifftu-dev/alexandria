@@ -380,6 +380,7 @@
     "rowOverlays": "దాచిన ఓవర్‌లేలు",
     "rowFaces": "ముఖాలు (ప్రత్యక్షం)",
     "rowFacePresent": "ముఖం ఉంది",
+    "rowCameraDevice": "కెమెరా పరికరం",
     "rowFaceConsistency": "ముఖ సరిపోలిక",
     "rowFaceSimMatch": "ముఖ సారూప్యత / సరిపోలిక",
     "rowSessionChecks": "సెషన్ తనిఖీలు",

@@ -107,7 +107,8 @@ fn flag_severity(flag: &str) -> Severity {
         | "app_switch"
         | "display_change"
         | "foreign_accessibility_service"
-        | "debug_bridge_enabled" => Severity::Warning,
+        | "debug_bridge_enabled"
+        | "virtual_camera" => Severity::Warning,
         "tab_switching" | "no_face" | "frequent_absence" | "external_display" => Severity::Info,
         _ => Severity::Info,
     }
@@ -736,6 +737,9 @@ mod tests {
 
         // Desktop hidden-overlay scan (docs/sentinel.md §Flagging Logic 24).
         assert_eq!(flag_severity("hidden_overlay"), Severity::Critical);
+
+        // Virtual-camera label heuristic (docs/sentinel.md §Flagging Logic 25).
+        assert_eq!(flag_severity("virtual_camera"), Severity::Warning);
 
         assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
         assert_eq!(

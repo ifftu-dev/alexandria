@@ -156,6 +156,7 @@
       "minIntegrity": "Min integrity",
       "maxCritical": "Max critical",
       "maxWarning": "Max warning",
+      "minCameraCoverage": "Min camera coverage (0–1)",
       "requireClean": "Require a clean session",
       "assuranceLabel": "Required assurance level",
       "assuranceNone": "(none)"

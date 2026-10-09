@@ -156,6 +156,7 @@
       "minIntegrity": "کم از کم سالمیت",
       "maxCritical": "زیادہ سے زیادہ سنگین",
       "maxWarning": "زیادہ سے زیادہ انتباہ",
+      "minCameraCoverage": "کم از کم کیمرہ کوریج (0–1)",
       "requireClean": "ایک صاف سیشن درکار ہے",
       "assuranceLabel": "درکار یقین دہانی کی سطح",
       "assuranceNone": "(کوئی نہیں)"

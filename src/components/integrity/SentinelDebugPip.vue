@@ -289,6 +289,8 @@ onBeforeUnmount(() => {
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaces') }}</span>
           <span class="text-end font-mono text-foreground">{{ lastDetections.length }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowCameraDevice') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.cameraDeviceVirtual ? 'text-red-500' : 'text-foreground'">{{ debug.cameraDeviceLabel || '—' }}{{ debug.cameraDeviceVirtual ? ' (virtual)' : '' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFacePresent') }}</span>
           <span class="text-end font-mono text-foreground">{{ yn(debug.signals?.face_present) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaceConsistency') }}</span>

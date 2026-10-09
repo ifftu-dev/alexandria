@@ -10,6 +10,7 @@ import {
   FaceEmbedder,
   type EnrollmentEmbedding,
 } from '@/utils/sentinel/face-embedder'
+import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
 import type {
   SignalData,
   BehavioralProfile,
@@ -132,6 +133,9 @@ function emptySentinelDebug() {
     overlayScanned: 0,
     overlayAllowlisted: 0,
     overlaySuspicious: [] as string[],
+    // Camera device (dev view only; never persisted).
+    cameraDeviceLabel: '' as string,
+    cameraDeviceVirtual: false,
     // Full rule + AI signal snapshot (computed each window).
     signals: null as SignalData | null,
     // Live session-gaze mirror (every camera tick, not just at snapshot) —
@@ -330,6 +334,12 @@ let overlayLatest: OverlayScan | null = null
 
 const overlayAnomalies = (): string[] =>
   overlayLatest && overlayLatest.suspicious.length > 0 ? ['hidden_overlay'] : []
+
+// Camera device identity — the video track label the player / interview
+// session obtained from getUserMedia. Only the virtual-camera verdict
+// reaches scores and snapshots; the label stays in the dev debug view.
+let cameraDeviceLabel = ''
+let cameraDeviceVirtual = false
 
 // Gaze / second-device tracking, accumulated per snapshot window by
 // scoreGaze() and drained in the snapshot dispatch. All gaze inference
@@ -634,6 +644,11 @@ function createSentinelService() {
       signals.overlay_windows_allowlisted = overlayLatest.allowlisted
     }
     anomalies.push(...overlayAnomalies())
+
+    if (cameraOptedIn.value && cameraDeviceLabel) {
+      signals.camera_device_virtual = cameraDeviceVirtual
+      if (cameraDeviceVirtual) anomalies.push('virtual_camera')
+    }
 
     if (cameraOptedIn.value && facePresent !== undefined) {
       signals.face_present = facePresent
@@ -985,6 +1000,8 @@ function createSentinelService() {
       sentinelDebug.overlayScanned = overlayLatest?.scanned ?? 0
       sentinelDebug.overlayAllowlisted = overlayLatest?.allowlisted ?? 0
       sentinelDebug.overlaySuspicious = overlayLatest?.suspicious.map(w => `${w.owner}:${w.reason}`) ?? []
+      sentinelDebug.cameraDeviceLabel = cameraDeviceLabel
+      sentinelDebug.cameraDeviceVirtual = cameraDeviceVirtual
       sentinelDebug.appFocusLostCount = appFocusLostCount
       sentinelDebug.appFocusLostMs = appFocusLostMs
       sentinelDebug.lastApp = lastFocusApp
@@ -1538,6 +1555,8 @@ function createSentinelService() {
       androidEnvLatest = null
       obscuredTouchesWindow = 0
       overlayLatest = null
+      cameraDeviceLabel = ''
+      cameraDeviceVirtual = false
       facePresent = undefined
       faceCount = undefined
       faceConsistency = undefined
@@ -2066,10 +2085,23 @@ function createSentinelService() {
    * the MediaStream, attaching an HTMLVideoElement, and driving the 3s
    * face-verification loop (see docs/sentinel.md §Camera). This only flips
    * the flag that gates face-related signals in computeScores(). */
+  /**
+   * Record which camera device feeds the opted-in stream (the video
+   * track's label). A known virtual-camera product raises `virtual_camera`
+   * each window the camera stays opted in. `null` clears it.
+   */
+  const reportCameraDevice = (label: string | null) => {
+    cameraDeviceLabel = label ?? ''
+    cameraDeviceVirtual = isVirtualCameraLabel(label)
+    sentinelDebug.cameraDeviceLabel = cameraDeviceLabel
+    sentinelDebug.cameraDeviceVirtual = cameraDeviceVirtual
+  }
+
   const setCameraOptedIn = (opted: boolean) => {
     cameraGeneration++
     cameraOptedIn.value = opted
     if (!opted) {
+      reportCameraDevice(null)
       facePresent = undefined
       faceCount = undefined
       faceConsistency = undefined
@@ -2132,6 +2164,7 @@ function createSentinelService() {
     setAIScoringEnabled,
     setPasteClassifierEnabled,
     setCameraOptedIn,
+    reportCameraDevice,
     testBlobAgainstClassifier,
   }
 }

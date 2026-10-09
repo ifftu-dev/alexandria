@@ -156,6 +156,7 @@
       "minIntegrity": "Intégrité min.",
       "maxCritical": "Critiques max.",
       "maxWarning": "Avertissements max.",
+      "minCameraCoverage": "Couverture caméra minimale (0–1)",
       "requireClean": "Exiger une session sans anomalie",
       "assuranceLabel": "Niveau d'assurance requis",
       "assuranceNone": "(aucun)"

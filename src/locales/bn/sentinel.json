@@ -380,6 +380,7 @@
     "rowOverlays": "লুকানো ওভারলে",
     "rowFaces": "মুখ (লাইভ)",
     "rowFacePresent": "মুখ উপস্থিত",
+    "rowCameraDevice": "ক্যামেরা ডিভাইস",
     "rowFaceConsistency": "মুখ মিল",
     "rowFaceSimMatch": "মুখ সাদৃশ্য / মিল",
     "rowSessionChecks": "সেশন যাচাই",

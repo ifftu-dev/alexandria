@@ -156,6 +156,7 @@
       "minIntegrity": "किमान सचोटी",
       "maxCritical": "कमाल गंभीर",
       "maxWarning": "कमाल इशारा",
+      "minCameraCoverage": "किमान कॅमेरा कव्हरेज (0–1)",
       "requireClean": "स्वच्छ सत्र आवश्यक करा",
       "assuranceLabel": "आवश्यक आश्वासन स्तर",
       "assuranceNone": "(काहीही नाही)"

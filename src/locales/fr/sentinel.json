@@ -380,6 +380,7 @@
     "rowOverlays": "superpositions masquées",
     "rowFaces": "visages (en direct)",
     "rowFacePresent": "visage présent",
+    "rowCameraDevice": "périphérique caméra",
     "rowFaceConsistency": "correspondance du visage",
     "rowFaceSimMatch": "similarité / correspondance du visage",
     "rowSessionChecks": "vérifications de session",
