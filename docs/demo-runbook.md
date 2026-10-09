@@ -45,23 +45,28 @@ attempt cooldown applies.
 2. Open <http://127.0.0.1:8787>, press **Continue**. You are signed in as the demo organisation.
 3. Open Alexandria (built from the app worktree), unlock the demo profile.
    **Settings → Directories** → confirm **Local demo** is listed. If not, add it.
-4. Optional: **Settings → Developer → Test data → Seed everything** for courses,
-   discussions and proposals to show around the assessment. Seeds never create
-   credentials, attempts, votes or posts.
-5. Rehearse the whole path in one command, from the app worktree, with Cloud
-   up. It drives the same functions the app's buttons call, against the live
-   Cloud, with a throwaway learner key, and prints one line per step:
+4. **Settings → Developer → Test data**: tick **Assessments** (JavaScript
+   fundamentals, Big-O & complexity) and run. Required in a debug or
+   `tauri dev` build — a development build installs only the taxonomy when a
+   profile is created, so without this step the assessment screen says "no
+   assessment available". A release build ships the banks and skips this.
+   **Seed everything** adds courses, discussions and proposals to show around
+   the assessment; seeds never create credentials, attempts, votes or posts.
+5. Rehearse the whole path in one command from the app worktree:
 
    ```
-   ALEXANDRIA_DEMO_CLOUD=http://127.0.0.1:8787 \
-   cargo test --manifest-path src-tauri/Cargo.toml --lib live_demo -- --ignored --nocapture
+   scripts/demo/rehearse.sh            # starts Cloud if it is not up
+   scripts/demo/rehearse.sh --fresh    # and drops the demo database first
    ```
 
-   Eight lines ending `test result: ok` means every step below works on this
-   machine right now. It leaves a "Live demo learner" candidate, one recorded
-   assessment, one interview, one offer and one pilot in the demo
-   organisation; to start the audience from an empty console, stop the server,
-   `docker rm -f alexandria-assessment-demo-db`, and run the launcher again.
+   It runs two ignored tests against the live Cloud with throwaway learner
+   keys: one through the functions behind the buttons, one through the real
+   Tauri commands the screens invoke (profile online, dev seed, assessment,
+   grading, consent, publish, exchange, hiring, revoke, export). Each prints
+   one line per step; two `test result: ok` lines mean every step below works
+   on this machine right now. Each run leaves a learner, a recorded
+   assessment, an interview, an offer and (first test only) a pilot in the
+   demo organisation — `--fresh` before the audience arrives.
 5. Have a terminal open in the app worktree for §6.
 
 ## 1. Learner earns a credential (app)
@@ -281,4 +286,5 @@ scoring, agreement and completion measured, published without identifiers."
 | Pilot protocol end to end | Cloud `tests/pilot.rs` |
 | Independent verifier | `node --test scripts/demo/verify-credential.test.mjs` against all twelve vectors, plus a served status list |
 | Hosted status lists | app `credentials.rs` tests (host, URL ids, pending, push); Cloud `tests/status_lists.rs` (publish, serve, forgery, rollback, share refusal) |
-| The whole path, live | `src-tauri/src/commands/live_demo.rs` — see §0 step 5 |
+| The whole path, live | `src-tauri/src/commands/live_demo.rs`, two tests: inner functions, and the real Tauri commands via a mock app — `scripts/demo/rehearse.sh`, see §0 step 5 |
+| Revoke screen | `src/pages/dashboard/CredentialDetail.test.ts` (revoke → publish → where the list landed) |
