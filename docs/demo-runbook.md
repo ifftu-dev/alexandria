@@ -45,13 +45,10 @@ attempt cooldown applies.
 2. Open <http://127.0.0.1:8787>, press **Continue**. You are signed in as the demo organisation.
 3. Open Alexandria (built from the app worktree), unlock the demo profile.
    **Settings → Directories** → confirm **Local demo** is listed. If not, add it.
-4. **Settings → Developer → Test data**: tick **Assessments** (JavaScript
-   fundamentals, Big-O & complexity) and run. Required in a debug or
-   `tauri dev` build — a development build installs only the taxonomy when a
-   profile is created, so without this step the assessment screen says "no
-   assessment available". A release build ships the banks and skips this.
-   **Seed everything** adds courses, discussions and proposals to show around
-   the assessment; seeds never create credentials, attempts, votes or posts.
+4. Optional: **Settings → Developer → Test data → Seed everything** for courses,
+   discussions and proposals to show around the assessment. The two assessable
+   banks are installed when the profile is created, in every build; seeds never
+   create credentials, attempts, votes or posts.
 5. Rehearse the whole path in one command from the app worktree:
 
    ```
@@ -258,6 +255,8 @@ scoring, agreement and completion measured, published without identifiers."
   invitation.
 - **Interview answer refused:** the invitation expired or was already
   answered; the app only lists open ones after a refresh.
+- **Inbox still empty after Refresh:** open another settings section and come
+  back to **Directories**; the panel fetches again when it opens.
 - **Pilot enrol disabled:** sign-off not recorded, or consent box unticked.
 - **Nothing in Talent:** the listing was not published, or expired; republish.
 - **Cloud 401 on `/for/{did}` routes:** the proof is single-use and five
@@ -287,4 +286,5 @@ scoring, agreement and completion measured, published without identifiers."
 | Independent verifier | `node --test scripts/demo/verify-credential.test.mjs` against all twelve vectors, plus a served status list |
 | Hosted status lists | app `credentials.rs` tests (host, URL ids, pending, push); Cloud `tests/status_lists.rs` (publish, serve, forgery, rollback, share refusal) |
 | The whole path, live | `src-tauri/src/commands/live_demo.rs`, two tests: inner functions, and the real Tauri commands via a mock app — `scripts/demo/rehearse.sh`, see §0 step 5 |
+| The desktop screens | Driven once by hand through macOS accessibility on 2026-10-09 (onboarding, directory, Big-O assess, revoke, requested JavaScript assess, share, interview, offer, consent, publish, search); not automated in CI |
 | Revoke screen | `src/pages/dashboard/CredentialDetail.test.ts` (revoke → publish → where the list landed) |

@@ -105,6 +105,7 @@ pub fn install_bundled_data(conn: &Connection) -> Result<i64, String> {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn install_foundation(conn: &Connection) -> Result<i64, String> {
     crate::db::with_transaction(conn, || {
         let count = install_taxonomy(conn)?;

@@ -504,13 +504,13 @@ impl AppState {
 
         // Install the labelled built-in taxonomy, goal templates and question
         // banks. No personas, credentials, courses or governance rows are
-        // created, and nothing is downloaded.
-        (if commands::dev_seeds::enabled() {
-            crate::db::bundled::install_foundation(database.conn())
-        } else {
-            crate::db::bundled::install_bundled_data(database.conn())
-        })
-        .map_err(|e| format!("bundled data install failed: {e}"))?;
+        // created, and nothing is downloaded. The same in every build: a
+        // development build used to install the taxonomy alone and leave the
+        // banks to Settings → Developer → Test data, which made a fresh
+        // debug-build profile say "no assessment available" until somebody
+        // remembered — a step a demo operator must never have to remember.
+        crate::db::bundled::install_bundled_data(database.conn())
+            .map_err(|e| format!("bundled data install failed: {e}"))?;
 
         {
             let mut guard = self.db.lock().map_err(|e| e.to_string())?;

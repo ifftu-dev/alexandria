@@ -36,7 +36,11 @@ if ! curl --silent --fail --max-time 2 "$cloud/healthz" >/dev/null; then
   [ -x "$cloud_root/scripts/demo-assessment.sh" ] || { echo "Cloud checkout not found at $cloud_root (set ALEXANDRIA_CLOUD_CHECKOUT)" >&2; exit 1; }
   mkdir -p "$cloud_root/.demo"
   echo "starting Cloud from $cloud_root (log: $cloud_root/.demo/server.log)"
-  (cd "$cloud_root" && nohup scripts/demo-assessment.sh > .demo/server.log 2>&1 & echo $! > .demo/server.pid)
+  (
+    cd "$cloud_root"
+    nohup scripts/demo-assessment.sh > .demo/server.log 2>&1 &
+    echo $! > .demo/server.pid
+  )
   for _ in $(seq 1 180); do
     if curl --silent --fail --max-time 2 "$cloud/healthz" >/dev/null; then break; fi
     sleep 2

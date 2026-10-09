@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -15,7 +15,10 @@ const route = useRoute()
 const router = useRouter()
 const { goals } = useGoals()
 
-const skillId = route.params.id as string
+// Reactive: this page is reused when the router moves from one skill to
+// another (a prerequisite link, a search result), and a value read once at
+// setup kept showing the first skill.
+const skillId = computed(() => route.params.id as string)
 
 const detail = ref<SkillDetail | null>(null)
 const loading = ref(true)
@@ -39,7 +42,7 @@ function goalOverlap(skillIds: string[] | null | undefined): number {
 }
 
 const relatedCourses = computed<Course[]>(() => {
-  const matches = allCourses.value.filter((c) => (c.skill_ids ?? []).includes(skillId))
+  const matches = allCourses.value.filter((c) => (c.skill_ids ?? []).includes(skillId.value))
   return [...matches].sort((a, b) => {
     // Most impactful for the user: more overlap with their goals first.
     const g = goalOverlap(b.skill_ids) - goalOverlap(a.skill_ids)
@@ -85,12 +88,16 @@ const bestCredential = computed<VerifiableCredential | null>(() => {
   return best
 })
 
-onMounted(async () => {
+async function load() {
+  const id = skillId.value
+  loading.value = true
+  error.value = null
+  detail.value = null
   try {
     const [d, did, creds, courses, opinions] = await Promise.all([
-      invoke<SkillDetail>('get_skill', { skillId }),
+      invoke<SkillDetail>('get_skill', { skillId: id }),
       invoke<string | null>('get_local_did').catch(() => null),
-      invoke<VerifiableCredential[]>('list_credentials', { skillId }).catch(() => []),
+      invoke<VerifiableCredential[]>('list_credentials', { skillId: id }).catch(() => []),
       invoke<Course[]>('list_courses').catch(() => []),
       invoke<OpinionRow[]>('list_opinions', {
         subjectFieldId: null,
@@ -106,7 +113,7 @@ onMounted(async () => {
     myCredentials.value = creds.filter((vc) => {
       if (did && vc.credentialSubject.id !== did) return false
       const claim = extractSkillClaim(vc.credentialSubject)
-      return claim !== null && claim.skillId === skillId
+      return claim !== null && claim.skillId === id
     })
   } catch (e: unknown) {
     error.value = typeof e === 'string'
@@ -118,7 +125,9 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+watch(skillId, () => { void load() }, { immediate: true })
 
 function goToSkill(id: string) {
   router.push(`/skills/${id}`)

@@ -813,7 +813,6 @@ mod ipc {
                 crate::commands::profile::get_profile_session_token,
                 crate::commands::identity::get_local_did,
                 crate::commands::holder_pull::set_directories,
-                crate::commands::dev_seeds::dev_seed_run,
                 crate::commands::holder_pull::publish_listing,
                 crate::commands::integrity::integrity_start_session,
                 crate::commands::integrity::integrity_end_session,
@@ -900,20 +899,27 @@ mod ipc {
             json!({"directories": [{"name": "Local demo", "url": base}]}),
         )
         .await;
-        // A development build installs only the taxonomy on profile start;
-        // the question banks come from Settings → Developer → Test data, the
-        // same command the operator presses before a debug-build demo.
-        if crate::commands::dev_seeds::enabled() {
-            let seeded = app
-                .call(
-                    "dev_seed_run",
-                    json!({"selected": ["bank:qb_js", "bank:qb_bigo"]}),
+        // Profile start installs the bundled banks in every build; nothing
+        // is seeded by hand here or by the operator.
+        {
+            let guard = state.db.lock().unwrap();
+            let banks: i64 = guard
+                .as_ref()
+                .unwrap()
+                .conn()
+                .query_row(
+                    "SELECT count(*) FROM question_banks WHERE ratified=1",
+                    [],
+                    |r| r.get(0),
                 )
-                .await;
-            assert_eq!(seeded.as_array().map(Vec::len), Some(2), "{seeded}");
+                .unwrap();
+            assert!(
+                banks >= 2,
+                "bundled banks installed on profile start: {banks}"
+            );
         }
         println!(
-            "0. profile created; {}; Local demo configured; banks seeded",
+            "0. profile created; {}; Local demo configured; bundled banks present",
             did.as_str()
         );
 
