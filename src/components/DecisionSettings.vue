@@ -36,7 +36,7 @@ async function exportShadow() {
     if (generation !== epoch) return
     const url = URL.createObjectURL(new Blob([JSON.stringify({ schema_version: 1, independently_labelled: false, samples }, null, 2)], { type: 'application/json' }))
     const anchor = window.document.createElement('a')
-    anchor.href = url; anchor.download = 'jev-learning-shadow.json'; anchor.click()
+    anchor.href = url; anchor.download = 'learning-shadow.json'; anchor.click()
     URL.revokeObjectURL(url)
   } catch (e) { if (generation === epoch) error.value = String(e) }
   finally { if (generation === epoch) busy.value = false }

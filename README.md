@@ -618,6 +618,6 @@ Use `alexandria path` to print the active profile's directory on any platform, a
 
 Alexandria is free software under the [GNU Affero General Public License v3 or later](LICENSE.md). You may use, study, modify and redistribute it; if you modify it and offer it to others — including over a network — your changes must be published under the same licence. Vendored third-party crates keep their own licences (`crates/iroh-moq` and `crates/moq-media` are Copyright (C) 2025 N0, INC, MIT OR Apache-2.0, as is `crates/live`).
 
-## Optional Jev checks
+## Optional AI checks
 
-See [configuration, shared Cloud/app contracts, and evaluation](docs/jev-integration.md). Features default to off and require explicit hosted-processing consent.
+See [configuration, shared Cloud/app contracts, and evaluation](docs/jev-integration.md). The provider (Jev) is not named in the UI, which calls these **Optional AI checks**. Features default to off and require explicit hosted-processing consent.
