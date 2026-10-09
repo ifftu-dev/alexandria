@@ -692,8 +692,9 @@ mod imp {
         GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-        HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
+        CallNextHookEx, GetMessageW, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+        UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, WH_KEYBOARD_LL, WM_KEYDOWN,
+        WM_QUIT, WM_SYSKEYDOWN,
     };
 
     pub const SOURCE: &str = "wh_keyboard_ll";
@@ -767,8 +768,14 @@ mod imp {
                     if let Ok(mut h) = HOOK.lock() {
                         *h = Some(Hook(hook));
                     }
-                    let _ = tx.send(Ok(()));
+                    // A thread has no message queue until it first asks for
+                    // one, and `stop()` targets this queue with WM_QUIT. Create
+                    // it before reporting ready so a stop() that follows
+                    // start() immediately cannot post into the void and leave
+                    // the hook installed.
                     let mut msg = MSG::default();
+                    let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+                    let _ = tx.send(Ok(()));
                     while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                         if msg.message == WM_QUIT {
                             break;

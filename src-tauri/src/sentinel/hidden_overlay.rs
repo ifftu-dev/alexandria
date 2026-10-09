@@ -417,8 +417,11 @@ mod imp {
 
             // Only resolve the image name for windows we might report —
             // OpenProcess per window is the expensive part of this scan.
+            // A protected or elevated process refuses OpenProcess; name it
+            // "unknown" rather than "" so the report says so and the
+            // allowlist cannot be slipped past with an empty owner.
             let owner = if excluded || clickthrough {
-                process_image(pid).unwrap_or_default()
+                process_image(pid).unwrap_or_else(|| "unknown".to_string())
             } else {
                 String::new()
             };
