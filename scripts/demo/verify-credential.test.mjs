@@ -7,7 +7,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { didKeyToPublicKey, jcs, loadInput, verifyCredential } from './verify-credential.mjs'
+import { gzipSync } from 'node:zlib'
+import { decodeEncodedList, didKeyToPublicKey, jcs, loadInput, verifyCredential } from './verify-credential.mjs'
 
 const VECTORS = join(import.meta.dirname, '../../crates/alexandria-verify/tests/vectors')
 const vector = (name) => JSON.parse(readFileSync(join(VECTORS, name), 'utf8'))
@@ -73,13 +74,20 @@ test('a missing status list is pending, never accepted', () => {
   assert.equal(withoutList.decision, 'pending')
 })
 
-test('reads the app export bundle shape, including its base64 status lists', () => {
+test('decodes a Bitstring Status List encodedList and reads bits from the left', () => {
+  const bits = Buffer.from('0040000000000000', 'hex')
+  const encoded = 'u' + gzipSync(bits).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  assert.deepEqual(Buffer.from(decodeEncodedList(encoded)), bits)
+  assert.throws(() => decodeEncodedList('zNope'))
+})
+
+test('reads the app export bundle shape, including its raw status lists', () => {
   const v = vector('07-revoked.json')
   const bundle = {
     format_version: 'alexandria-credential-bundle/1.0',
     credentials: [v.credential, vector('01-valid.json').credential],
     key_registry: [],
-    status_lists: [{ list_id: 'urn:uuid:status-list-1', issuer_did: v.credential.issuer, version: 1, status_purpose: 'revocation', bits_b64: Buffer.from('0002000000000000', 'hex').toString('base64'), bit_length: 64 }],
+    status_lists: [{ list_id: 'urn:uuid:status-list-1', issuer_did: v.credential.issuer, version: 1, status_purpose: 'revocation', bits_b64: Buffer.from('0040000000000000', 'hex').toString('base64'), bit_length: 64 }],
   }
   const { credentials, statusLists } = loadInput(bundle)
   assert.equal(credentials.length, 2)

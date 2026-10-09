@@ -403,7 +403,7 @@ CREATE TABLE credential_status_lists (
     issuer_did TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,                  -- monotonic; older versions ignored
     status_purpose TEXT NOT NULL DEFAULT 'revocation',
-    bits BLOB NOT NULL,                                  -- packed little-endian bitmap
+    bits BLOB NOT NULL,                                  -- Bitstring Status List bitmap, most significant bit first
     bit_length INTEGER NOT NULL DEFAULT 0,
     signature TEXT,                                      -- issuer signature over (list_id, version, bits)
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))

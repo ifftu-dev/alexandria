@@ -16,8 +16,16 @@
 /// dropped `validUntil` reads as "never expires".
 pub const W3C_VC_V2: &str = "https://www.w3.org/ns/credentials/v2";
 
-/// Alexandria protocol v1 context URI.
-pub const ALEXANDRIA_V1: &str = "https://alexandria.protocol/context/v1";
+/// Alexandria credentials declare only the W3C v2 context.
+///
+/// Every term this envelope adds (`skillId`, `level`, `score`,
+/// `evidenceRefs`, `integrity`, `witness`, the credential classes) is
+/// resolved by the v2 context's default vocabulary,
+/// `https://www.w3.org/ns/credentials/issuer-dependent#`, which the Data
+/// Model defines for exactly this purpose. A JSON-LD processor therefore
+/// expands the document without fetching anything that is not a W3C
+/// document, and nothing that is not resolvable is declared.
+pub const ALEXANDRIA_CONTEXTS: &[&str] = &[W3C_VC_V2];
 
 /// W3C VC v2 context (abridged — defines VerifiableCredential and the
 /// core claim/proof terms). Source: w3.org/ns/credentials/v2.
@@ -45,31 +53,42 @@ const W3C_VC_V2_DOC: &str = r#"{
         "proof": { "@id": "https://w3id.org/security#proof", "@type": "@id", "@container": "@graph" },
         "termsOfUse": { "@id": "https://www.w3.org/2018/credentials#termsOfUse", "@type": "@id" }
       }
+    },
+    "DataIntegrityProof": {
+      "@id": "https://w3id.org/security#DataIntegrityProof",
+      "@context": {
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "created": { "@id": "http://purl.org/dc/terms/created", "@type": "http://www.w3.org/2001/XMLSchema#dateTime" },
+        "cryptosuite": { "@id": "https://w3id.org/security#cryptosuite", "@type": "https://w3id.org/security#cryptosuiteString" },
+        "proofPurpose": { "@id": "https://w3id.org/security#proofPurpose", "@type": "@vocab" },
+        "proofValue": { "@id": "https://w3id.org/security#proofValue", "@type": "https://w3id.org/security#multibase" },
+        "verificationMethod": { "@id": "https://w3id.org/security#verificationMethod", "@type": "@id" }
+      }
+    },
+    "BitstringStatusListEntry": {
+      "@id": "https://www.w3.org/ns/credentials/status#BitstringStatusListEntry",
+      "@context": {
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "statusPurpose": "https://www.w3.org/ns/credentials/status#statusPurpose",
+        "statusListIndex": "https://www.w3.org/ns/credentials/status#statusListIndex",
+        "statusListCredential": { "@id": "https://www.w3.org/ns/credentials/status#statusListCredential", "@type": "@id" }
+      }
+    },
+    "BitstringStatusListCredential": "https://www.w3.org/ns/credentials/status#BitstringStatusListCredential",
+    "BitstringStatusList": {
+      "@id": "https://www.w3.org/ns/credentials/status#BitstringStatusList",
+      "@context": {
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "statusPurpose": "https://www.w3.org/ns/credentials/status#statusPurpose",
+        "encodedList": { "@id": "https://www.w3.org/ns/credentials/status#encodedList", "@type": "https://w3id.org/security#multibase" }
+      }
     }
-  }
-}"#;
-
-/// Alexandria v1 context — defines our claim taxonomy (skill, role,
-/// custom) and derived-state output shape per spec §16.
-const ALEXANDRIA_V1_DOC: &str = r#"{
-  "@context": {
-    "@version": 1.1,
-    "@protected": true,
-    "alexandria": "https://alexandria.protocol/context/v1#",
-    "FormalCredential": "alexandria:FormalCredential",
-    "AssessmentCredential": "alexandria:AssessmentCredential",
-    "AttestationCredential": "alexandria:AttestationCredential",
-    "RoleCredential": "alexandria:RoleCredential",
-    "DerivedCredential": "alexandria:DerivedCredential",
-    "SelfAssertion": "alexandria:SelfAssertion",
-    "claim": { "@id": "alexandria:claim", "@type": "@id" },
-    "kind": "alexandria:kind",
-    "skillId": "alexandria:skillId",
-    "level": { "@id": "alexandria:level", "@type": "http://www.w3.org/2001/XMLSchema#integer" },
-    "score": { "@id": "alexandria:score", "@type": "http://www.w3.org/2001/XMLSchema#double" },
-    "evidenceRefs": { "@id": "alexandria:evidenceRefs", "@container": "@set" },
-    "rubricVersion": "alexandria:rubricVersion",
-    "assessmentMethod": "alexandria:assessmentMethod"
   }
 }"#;
 
@@ -78,7 +97,6 @@ const ALEXANDRIA_V1_DOC: &str = r#"{
 pub fn lookup_context(uri: &str) -> Option<&'static str> {
     match uri {
         W3C_VC_V2 => Some(W3C_VC_V2_DOC),
-        ALEXANDRIA_V1 => Some(ALEXANDRIA_V1_DOC),
         _ => None,
     }
 }
@@ -93,12 +111,6 @@ mod tests {
         // Alexandria contexts are embedded — never fetched at runtime.
         let doc = lookup_context(W3C_VC_V2).expect("W3C context embedded");
         assert!(doc.contains("VerifiableCredential"));
-    }
-
-    #[test]
-    fn lookup_returns_alexandria_v1_context() {
-        let doc = lookup_context(ALEXANDRIA_V1).expect("Alexandria context embedded");
-        assert!(doc.contains("Alexandria") || doc.contains("alexandria"));
     }
 
     #[test]
@@ -122,7 +134,16 @@ mod v2_conformance_tests {
     #[test]
     fn the_declared_context_defines_the_terms_the_envelope_emits() {
         let doc = lookup_context(W3C_VC_V2).expect("v2 context embedded");
-        for term in ["validFrom", "validUntil"] {
+        for term in [
+            "validFrom",
+            "validUntil",
+            "DataIntegrityProof",
+            "cryptosuite",
+            "proofValue",
+            "BitstringStatusListEntry",
+            "statusListIndex",
+            "encodedList",
+        ] {
             assert!(
                 doc.contains(term),
                 "the envelope emits `{term}` but the declared context does not define it"
@@ -141,33 +162,36 @@ mod v2_conformance_tests {
         assert_eq!(W3C_VC_V2, "https://www.w3.org/ns/credentials/v2");
     }
 
-    /// Credentials issued before the move still verify.
-    ///
-    /// Verification is JCS over the JSON document and never inspects
-    /// `@context`, so a credential that declared v1 keeps verifying against its
-    /// own signature. Pinned as a test because "we changed the wire format" and
-    /// "existing credentials still work" are only compatible by accident
-    /// otherwise — and a credential that stops verifying is one a learner
-    /// cannot use.
+    /// The only context a credential declares is one a verifier can resolve.
     #[test]
-    fn a_credential_declaring_the_old_context_still_deserialises() {
-        let old = serde_json::json!({
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
-            "id": "urn:uuid:legacy",
+    fn every_declared_context_is_a_w3c_document() {
+        for uri in ALEXANDRIA_CONTEXTS {
+            assert!(uri.starts_with("https://www.w3.org/"), "{uri}");
+            assert!(lookup_context(uri).is_some(), "{uri} is not embedded");
+        }
+    }
+
+    /// A Data Integrity proof document round-trips through the envelope.
+    #[test]
+    fn a_data_integrity_credential_deserialises() {
+        let doc = serde_json::json!({
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
+            "id": "urn:uuid:di",
             "type": ["VerifiableCredential", "FormalCredential"],
-            "issuer": "did:key:z6MkLegacyIssuer",
+            "issuer": "did:key:z6MkIssuer",
             "validFrom": "2026-01-01T00:00:00Z",
-            "credentialSubject": { "id": "did:key:z6MkLegacySubject" },
+            "credentialSubject": { "id": "did:key:z6MkSubject" },
             "proof": {
-                "type": "Ed25519Signature2020",
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
                 "created": "2026-01-01T00:00:00Z",
-                "verificationMethod": "did:key:z6MkLegacyIssuer#key-1",
+                "verificationMethod": "did:key:z6MkIssuer#z6MkIssuer",
                 "proofPurpose": "assertionMethod",
-                "jws": "header..sig"
+                "proofValue": "z3FXQjecWufY46yg5abdVZsXqLhxhueuSoZgNSARiKBsrHtHd7m7bLv1JvmRf8wVPdvmJtTdZnHSUtrTv9hnKaZ8W"
             }
         });
-        let vc: VerifiableCredential =
-            serde_json::from_value(old).expect("a v1-context credential must still parse");
-        assert_eq!(vc.context[0], "https://www.w3.org/2018/credentials/v1");
+        let vc: VerifiableCredential = serde_json::from_value(doc).expect("parses");
+        assert_eq!(vc.proof.cryptosuite, "eddsa-jcs-2022");
+        assert!(vc.proof.proof_value.starts_with('z'));
     }
 }

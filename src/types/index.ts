@@ -1432,10 +1432,11 @@ export interface TermsOfUse {
 
 export interface Proof {
   type: string
+  cryptosuite: string
   created: string
   verificationMethod: string
   proofPurpose: string
-  jws: string
+  proofValue: string
 }
 
 /**
@@ -1629,6 +1630,7 @@ export interface CredentialBundle {
   credentials: VerifiableCredential[]
   key_registry: KeyRegistryRow[]
   status_lists: StatusListRow[]
+  status_list_credentials?: VerifiableCredential[]
 }
 
 // --- Selective-disclosure presentations (§18) ----------------------------

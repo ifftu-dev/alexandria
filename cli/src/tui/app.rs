@@ -2214,11 +2214,11 @@ mod tests {
             "validFrom": "2026-01-01T00:00:00Z",
             "credentialSubject": { "id": subject },
             "proof": {
-                "type": "Ed25519Signature2020",
+                "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
                 "created": "2026-01-01T00:00:00Z",
                 "verificationMethod": format!("{issuer}#key-1"),
                 "proofPurpose": "assertionMethod",
-                "jws": "test..signature",
+                "proofValue": "ztest..signature",
             },
         }))
         .expect("credential fixture")

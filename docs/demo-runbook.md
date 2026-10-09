@@ -147,13 +147,14 @@ To show the key resolution is not ours either: paste the issuer DID into
 <https://dev.uniresolver.io/> — the Universal Resolver returns the same
 Ed25519 public key the script decoded.
 
-Honest framing for the audience: the proof format is a JCS variant (detached
-JWS over the canonical JSON, documented in
-`crates/alexandria-verify/tests/vectors/README.md` with twelve signed test
-vectors). It is verifiable with any Ed25519 and JCS library in any language.
-It is **not** yet a W3C Data Integrity `eddsa-jcs-2022` proof, so the Digital
-Bazaar or SpruceID verifiers will not accept it unmodified; emitting that
-cryptosuite is a follow-up, not a redesign.
+What to say: the credential is a W3C Verifiable Credential (Data Model 2.0)
+with a standard Data Integrity proof, cryptosuite `eddsa-jcs-2022`, and a
+Bitstring Status List entry. Any conforming Data Integrity verifier — for
+example `@digitalbazaar/data-integrity` with
+`@digitalbazaar/eddsa-jcs-2022-cryptosuite` — accepts it with no Alexandria
+code; the script exists so the audience can read the whole check in one file.
+The twelve signed test vectors in
+`crates/alexandria-verify/tests/vectors/README.md` are the contract.
 
 To prove the script agrees with the reference verifier on every vector:
 `node --test scripts/demo/verify-credential.test.mjs`.

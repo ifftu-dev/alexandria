@@ -471,7 +471,7 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/opinions/1.0` | Qualified field commentary and signed discussion threads/interactions |
 | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements (§14.5) |
-| `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas (§14.11.2) |
+| `/alexandria/vc-status/1.0` | Bitstring Status List snapshots and deltas (§14.11.2) |
 | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes (§14.18) |
 | `/alexandria/pinboard/1.0` | PinBoard pinning-commitment observations (§14.12, §14.20.4) |
 | `/alexandria/plugins/1.0` | Community plugin announcements (manifest CID + metadata) |
@@ -1175,10 +1175,7 @@ Each credential MUST conform to the following logical structure.
 
 ```json
 {
-  "@context": [
-    "https://www.w3.org/ns/credentials/v2",
-    "https://alexandria.protocol/context/v1"
-  ],
+  "@context": ["https://www.w3.org/ns/credentials/v2"],
   "id": "urn:uuid:credential-id",
   "type": ["VerifiableCredential", "FormalCredential"],
   "issuer": "did:key:z6MkIssuer123",
@@ -1195,11 +1192,11 @@ Each credential MUST conform to the following logical structure.
     }
   },
   "credentialStatus": {
-    "id": "status:revocation-list:abc",
-    "type": "RevocationList2020Status",
+    "id": "urn:alexandria:status-list:did:key:z6MkIssuer123:1#271",
+    "type": "BitstringStatusListEntry",
     "statusPurpose": "revocation",
     "statusListIndex": "271",
-    "statusListCredential": "https://example.org/status/1"
+    "statusListCredential": "urn:alexandria:status-list:did:key:z6MkIssuer123:1"
   },
   "termsOfUse": {
     "policyVersion": "1.0",
@@ -1215,16 +1212,25 @@ Each credential MUST conform to the following logical structure.
     "generatedAt": "2026-04-13T00:00:00Z"
   },
   "proof": {
-    "type": "Ed25519Signature2020",
+    "type": "DataIntegrityProof",
+    "cryptosuite": "eddsa-jcs-2022",
     "created": "2026-04-13T00:00:00Z",
-    "verificationMethod": "did:key:z6MkIssuer123#key-1",
+    "verificationMethod": "did:key:z6MkIssuer123#z6MkIssuer123",
     "proofPurpose": "assertionMethod",
-    "jws": "..."
+    "proofValue": "z..."
   }
 }
 ```
 
-The optional `integrity` block is the **Sentinel integrity attestation** (§14.9.5). When present it is part of the signed envelope — the JWS covers it, so the issuer attests to the figures and a verifier reads how the credential was earned, not merely that it was issued. Absent on credentials not backed by a monitored assessment session.
+The envelope is a W3C Verifiable Credentials Data Model 2.0 credential. It
+declares only the W3C v2 context; Alexandria's own terms (`skillId`, `level`,
+`score`, `evidenceRefs`, `integrity`, `witness`, the credential classes) resolve
+through that context's issuer-dependent default vocabulary, so a JSON-LD
+processor expands the document without fetching anything that is not a W3C
+document. The proof is a W3C Data Integrity proof using the `eddsa-jcs-2022`
+cryptosuite, and `credentialStatus` is a Bitstring Status List entry.
+
+The optional `integrity` block is the **Sentinel integrity attestation** (§14.9.5). When present it is part of the signed envelope — the proof covers it, so the issuer attests to the figures and a verifier reads how the credential was earned, not merely that it was issued. Absent on credentials not backed by a monitored assessment session.
 
 ### 14.8 Required Credential Fields
 
@@ -1329,8 +1335,12 @@ Default protocol behavior: expired formal credentials SHOULD be treated as inact
 
 Each revocable credential MUST provide a resolvable status reference. A credential is revoked if `Revoked(c) = 1`. Revoked credentials MUST NOT contribute positive weight to the active trust score.
 
-Only the credential issuer may publish or apply a status change for that
-credential. The implementation checks that the caller-derived DID matches both
+The status reference is a Bitstring Status List entry: `statusListIndex` is a
+bit position in the issuer's list, counted from the most significant bit of
+each byte, and `statusListCredential` names the list. Lists are at least
+131,072 bits. The §20.4 bundle carries each list this node issues as a signed
+`BitstringStatusListCredential`. Only the credential issuer may publish or
+apply a status change for that credential. The implementation checks that the caller-derived DID matches both
 the credential issuer and status-list issuer before changing the bitmap or
 denormalized row.
 
@@ -1364,21 +1374,33 @@ A(c) = (H(c), t_i, issuer_ref)
 
 The full credential SHOULD NOT be stored on-chain unless explicitly required and privacy-compatible.
 
-### 14.12a Canonicalization is JCS, not JSON-LD
+### 14.12a The proof is Data Integrity `eddsa-jcs-2022`
 
-Stated explicitly because an implementer will otherwise assume the wrong one and
-build a verifier that disagrees with every other one.
+Stated explicitly because an implementer will otherwise assume the wrong
+canonicalization and build a verifier that disagrees with every other one.
 
-The signing input is **JCS (RFC 8785)** applied to the credential's JSON
-document with `proof.jws` set to the empty string. It is **not** JSON-LD
-canonicalization (URDNA2015 / RDF Dataset Canonicalization). No JSON-LD
-expansion, no context resolution, and no network fetch happens at any point in
-signing or verification.
+Every credential carries a `DataIntegrityProof` with cryptosuite
+`eddsa-jcs-2022` (W3C VC Data Integrity 1.0; VC-DI-EdDSA 1.0 §3.3). The
+signing input is, exactly as that specification states it:
+
+```text
+proofConfig = proof without proofValue, plus the credential's @context
+hashData    = SHA-256(JCS(proofConfig)) || SHA-256(JCS(credential without proof))
+proofValue  = multibase-base58btc( Ed25519-sign(hashData) )
+```
+
+Canonicalization is **JCS (RFC 8785)**, not JSON-LD canonicalization
+(URDNA2015 / RDF Dataset Canonicalization). No JSON-LD expansion, no context
+resolution, and no network fetch happens at any point in signing or
+verification. `verificationMethod` is `<issuer DID>#<fragment>` — for
+`did:key`, the key's own multibase identifier — and a verifier MUST reject a
+method the issuer does not control.
 
 `@context` is therefore declarative: it states which vocabulary the terms come
 from, and it is covered by the signature like any other field, but nothing
-processes it. A verifier needs a JCS implementation and an Ed25519
-implementation, and nothing else.
+processes it. A verifier needs JCS, SHA-256 and Ed25519, and nothing else —
+which is also why any conforming Data Integrity verifier accepts the
+credential as-is.
 
 Two consequences worth being plain about. The context value must still be
 correct, because a consumer that *does* process JSON-LD will act on it — and a
@@ -1461,7 +1483,7 @@ facts and final classification:
 4. consult applicable suspension and supersession state
 5. resolve the issuer key at the verification time, preferring a supplied
    historical key binding and otherwise using `did:key` self-resolution
-6. canonicalize the payload and verify the detached JWS
+6. recompute the `eddsa-jcs-2022` hash data and verify `proofValue`
 7. evaluate credential type, expiry, lifecycle, and integrity-anchor policy
 8. emit all check facts, pending reason codes, and the decision
 
@@ -2047,7 +2069,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
 | Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only; opt-in on-device caption text over encrypted room gossip |
 | CLI | Rust, clap 4 | Developer tooling (`alexandria`) |
-| **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,verify}` | Ed25519Signature2020 detached JWS over RFC 8785 JCS bytes, §14.7 / §14.13 |
+| **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,status,verify}` | Data Integrity `eddsa-jcs-2022` proofs over RFC 8785 JCS, Bitstring Status List, §14.7 / §14.13 |
 | **Trust aggregation** | `aggregation::{mod,weights,level,independence,antigaming,config}` | §14.14 engine + §14.15 anti-gaming; reproduces the §14.26 worked example |
 | **VC P2P layer** | `p2p::{vc_did,vc_status,vc_fetch,presentation,pinboard,archive}` | Wire layer for §14.5, §14.11.2, §14.18, §14.12.2 |
 | **VC storage** | `commands::{credentials,presentation,pinning,aggregation}`, `db` migrations 22–30 | Issuance, verification, revocation, suspension, allowlist, presentation envelopes, PinBoard commitments |
@@ -2097,12 +2119,12 @@ the §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 ### Normative References
 
 - **[RFC 2119]** Bradner, S., "Key words for use in RFCs to Indicate Requirement Levels", BCP 14, RFC 2119, March 1997. https://www.rfc-editor.org/rfc/rfc2119
-- **[RFC 7797]** Jones, M., "JSON Web Signature (JWS) Unencoded Payload Option", RFC 7797, February 2016 — used for the Ed25519Signature2020 detached-JWS pattern in §14.7. https://www.rfc-editor.org/rfc/rfc7797
 - **[RFC 8785]** Rundgren, A., Jordan, B., Erdtman, S., "JSON Canonicalization Scheme (JCS)", RFC 8785, June 2020 — used as the canonicalisation algorithm feeding signing and anchoring in §14.7, §14.12.3, §14.23.2. https://www.rfc-editor.org/rfc/rfc8785
-- **[W3C VC-DATA-MODEL]** Sporny, M., Longley, D., Chadwick, D., "Verifiable Credentials Data Model v1.1", W3C Recommendation, March 2022 — model underlying §14.6–§14.8. https://www.w3.org/TR/vc-data-model/
+- **[W3C VC-DATA-MODEL]** Sporny, M., Jones, T., Longley, D., et al., "Verifiable Credentials Data Model v2.0", W3C Recommendation, May 2025 — model underlying §14.6–§14.8. https://www.w3.org/TR/vc-data-model-2.0/
+- **[W3C VC-DATA-INTEGRITY]** Sporny, M., Longley, D., Allen, G., et al., "Verifiable Credential Data Integrity 1.0", W3C Recommendation, May 2025 — proof envelope in §14.7. https://www.w3.org/TR/vc-data-integrity/
+- **[W3C VC-DI-EDDSA]** Sporny, M., Longley, D., et al., "Data Integrity EdDSA Cryptosuites v1.0", W3C Recommendation, May 2025 — the `eddsa-jcs-2022` cryptosuite in §14.12a. https://www.w3.org/TR/vc-di-eddsa/
 - **[did:key]** Longley, D., Zundel, B., Sporny, M., "The did:key Method v0.7", W3C CCG Draft — DID method used in §14.5.1. https://w3c-ccg.github.io/did-key-spec/
-- **[Ed25519Signature2020]** Longley, D., Sporny, M., "Ed25519 Signature 2020", W3C CCG Draft — proof suite referenced in §14.7. https://w3c-ccg.github.io/lds-ed25519-2020/
-- **[StatusList2021]** Sporny, M., Longley, D., "Verifiable Credentials Status List v2021", W3C CCG Draft — revocation model in §14.11.2. https://w3c.github.io/vc-status-list-2021/
+- **[W3C BITSTRING-STATUS-LIST]** Sporny, M., Longley, D., et al., "Bitstring Status List v1.0", W3C Recommendation, May 2025 — revocation model in §14.11.2. https://www.w3.org/TR/vc-bitstring-status-list/
 - **[BIP-39]** Palatinus, M., Rusnak, P., Voisine, A., Bowe, S., "Mnemonic code for generating deterministic keys", Bitcoin Improvement Proposal 39, 2013. https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
 - **[CIP-25]** Cardano Improvement Proposal 25, "Media NFT Metadata Standard", 2021. https://cips.cardano.org/cip/CIP-0025
 - **[CIP-30]** Cardano Improvement Proposal 30, "Cardano dApp-Wallet Web Bridge", 2021. https://cips.cardano.org/cip/CIP-0030

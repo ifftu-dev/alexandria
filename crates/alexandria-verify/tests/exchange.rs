@@ -131,7 +131,7 @@ fn existing_credential_cannot_fulfill_new_assessment() {
 #[test]
 fn holder_cannot_assert_another_issuers_status_or_hide_bad_vc_signature() {
     let (key, mut share) = fixture();
-    share.credential.proof.jws.push('x');
+    share.credential.proof.proof_value.push('x');
     assert_eq!(
         decision(&sign_share(share, &key).unwrap()),
         AcceptanceDecision::Reject

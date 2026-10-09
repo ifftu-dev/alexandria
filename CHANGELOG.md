@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Credentials are W3C-conformant end to end.** Proofs are W3C Data
+  Integrity (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`,
+  `proofValue`, `did:key#<key>` verification methods) in place of the
+  custom detached-JWS `Ed25519Signature2020` shape; revocation is a
+  Bitstring Status List (`BitstringStatusListEntry`, most-significant-bit
+  order, 131,072-bit lists, signed `BitstringStatusListCredential`
+  documents in the export bundle); the envelope declares only the W3C v2
+  context. `alexandria-verify` is 0.3.0; the test vectors, the
+  independent Node verifier, Alexandria Cloud's vendored copy and the
+  website's in-browser verifier move together. Pre-launch: no issued
+  credential is migrated.
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

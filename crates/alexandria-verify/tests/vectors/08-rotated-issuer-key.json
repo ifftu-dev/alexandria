@@ -17,8 +17,7 @@
   },
   "credential": {
     "@context": [
-      "https://www.w3.org/ns/credentials/v2",
-      "https://alexandria.protocol/context/v1"
+      "https://www.w3.org/ns/credentials/v2"
     ],
     "id": "urn:uuid:vector-credential",
     "type": [
@@ -35,11 +34,12 @@
       "skillId": "skill_vector"
     },
     "proof": {
-      "type": "Ed25519Signature2020",
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-01T00:00:00Z",
-      "verificationMethod": "",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkrqDKuXTHNaAW4f19nuTxfxZhXQ9RMKvQiZ5vT5oB599T",
       "proofPurpose": "assertionMethod",
-      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..RVAPwW9fai7195c6k6EwpiXUmn3NS-SeOw8HnG9BbiIkzvLvEDKATbT6qwyMyrXUzvv7o79bov-gJ2jD-_kJAg"
+      "proofValue": "zxzPWgDZGraHgo5yNKZX9zqmXGv8q1TsFC3EXZxatUTYywVHNxjiPHRfRRWN3XpN7ZjDfwJxHCtWqjbkcmWH7Dtv"
     }
   },
   "store": {

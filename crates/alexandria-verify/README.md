@@ -1,8 +1,9 @@
 # alexandria-verify
 
 Verify [Alexandria](https://github.com/ifftu-dev/alexandria) credentials: W3C
-Verifiable Credentials 2.0, `did:key` resolution, JCS canonicalization
-(RFC 8785), and detached Ed25519 JWS (RFC 7797, `b64:false`).
+Verifiable Credentials Data Model 2.0 secured with Data Integrity proofs
+(`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`), Bitstring Status List
+revocation, `did:key` resolution, and JCS canonicalization (RFC 8785).
 
 `MIT OR Apache-2.0`, while the Alexandria application itself is
 AGPL-3.0-or-later. That split is deliberate. Alexandria promises that checking a
@@ -93,8 +94,12 @@ twelve credential vectors, the exact-byte limit vectors in
 endorsement import consumes the same endorsement bytes. If you are writing your own verifier in another language, start there:
 the vectors are the contract, and this crate is one implementation of it.
 
-The signing input is **raw payload bytes**, not base64url — RFC 7797 with
-`b64:false`. This is the detail most independent implementations get wrong.
+The proof is the standard `eddsa-jcs-2022` cryptosuite, so a general-purpose
+Data Integrity verifier (for example `@digitalbazaar/data-integrity` with
+`@digitalbazaar/eddsa-jcs-2022-cryptosuite`) verifies an Alexandria credential
+without any Alexandria code. The one detail independent implementations get
+wrong is the status list bit order: Bitstring Status List counts from the most
+significant bit of each byte.
 
 ## Licence
 

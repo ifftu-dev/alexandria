@@ -591,7 +591,6 @@ mod tests {
     const NOW: &str = "2026-09-15T00:00:00Z";
 
     fn store_self_claim(db: &crate::db::Database, binding: &CourseCompletionBinding) {
-        use alexandria_verify::did::VerificationMethodRef;
         use alexandria_verify::trust::{
             completion_root_evidence_ref, course_document_evidence_ref,
         };
@@ -628,16 +627,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
-            proof: Proof {
-                type_: "Ed25519Signature2020".into(),
-                created: "2026-01-01T00:00:00Z".into(),
-                verification_method: VerificationMethodRef(format!(
-                    "{}#key-1",
-                    subject_did.as_str()
-                )),
-                proof_purpose: "assertionMethod".into(),
-                jws: String::new(),
-            },
+            proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         let credential = sign_credential(
             UnsignedCredential {

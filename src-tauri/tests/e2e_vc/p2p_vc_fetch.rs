@@ -40,11 +40,11 @@ fn seed_credential(conn: &rusqlite::Connection, id: &str, subject: &str) {
             "evidenceRefs": [],
         },
         "proof": {
-            "type": "Ed25519Signature2020",
+            "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
             "created": "2026-04-13T00:00:00Z",
             "verificationMethod": "did:key:zIssuerFetchTest#key-1",
             "proofPurpose": "assertionMethod",
-            "jws": "fake..jws"
+            "proofValue": "zfake..jws"
         }
     })
     .to_string();

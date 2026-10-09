@@ -10,7 +10,7 @@ use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
+use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
@@ -167,12 +167,12 @@ pub struct IssueCredentialRequest {
     pub integrity_policy: Option<IssuancePolicy>,
 }
 
-const STATUS_LIST_BITS: usize = 16_384; // 2 KiB bitmap per list
-const STATUS_LIST_TYPE: &str = "RevocationList2020Status";
+const STATUS_LIST_BITS: usize = alexandria_verify::vc::status::MIN_BITS; // 16 KiB bitmap per list
+const STATUS_LIST_TYPE: &str = "BitstringStatusListEntry";
 // Imported rather than redeclared. These were local copies, and a duplicated
 // constant is exactly how the issuance path came to emit the v1 context while
 // the rest of the codebase had moved to v2.
-use alexandria_verify::vc::context::{ALEXANDRIA_V1, W3C_VC_V2};
+use alexandria_verify::vc::context::W3C_VC_V2;
 
 /// Pure-function issuance pipeline. Allocates the next status-list
 /// slot, builds the VC envelope, signs it, persists both the signed
@@ -193,7 +193,7 @@ pub fn issue_credential_impl(
 
     let type_name = req.credential_type.as_str();
 
-    // Build the VC envelope; sign_credential will stamp proof.jws.
+    // Build the VC envelope; sign_credential will stamp proof.proofValue.
     // For skill claims we fold the request's evidence_refs into the
     // claim so the inline subject properties carry them.
     let mut claim = req.claim.clone();
@@ -244,7 +244,7 @@ pub fn issue_credential_impl(
     };
 
     let vc = VerifiableCredential {
-        context: vec![W3C_VC_V2.into(), ALEXANDRIA_V1.into()],
+        context: vec![W3C_VC_V2.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), type_name.to_string()],
         issuer: issuer_did.clone(),
@@ -261,13 +261,7 @@ pub fn issue_credential_impl(
         terms_of_use: None,
         witness: None,
         integrity,
-        proof: Proof {
-            type_: "Ed25519Signature2020".into(),
-            created: now.to_string(),
-            verification_method: VerificationMethodRef(format!("{}#key-1", issuer_did.as_str())),
-            proof_purpose: "assertionMethod".into(),
-            jws: String::new(),
-        },
+        proof: Proof::unsigned(now.to_string()),
     };
     let signed = sign_credential(
         UnsignedCredential { credential: vc },
@@ -402,12 +396,9 @@ pub fn revoke_credential_impl(
             |r| r.get(0),
         )
         .map_err(|e| format!("load status list: {e}"))?;
-    let byte = (index / 8) as usize;
-    let bit = (index % 8) as u8;
-    if byte >= bits.len() {
-        return Err(format!("status index {index} out of range"));
-    }
-    bits[byte] |= 1 << bit;
+    // Bitstring Status List: index 0 is the most significant bit of byte 0.
+    alexandria_verify::vc::status::set_bit(&mut bits, index as usize, true)
+        .map_err(|e| e.to_string())?;
 
     transaction
         .execute(
@@ -577,7 +568,7 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
 
 pub(crate) fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
     let mut clone = vc.clone();
-    clone.proof.jws.clear();
+    clone.proof.proof_value.clear();
     let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;
     let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|e| e.to_string())?;
     Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
@@ -806,6 +797,11 @@ pub struct CredentialBundle {
     pub credentials: Vec<VerifiableCredential>,
     pub key_registry: Vec<KeyRegistryRow>,
     pub status_lists: Vec<StatusListRow>,
+    /// The same lists as signed `BitstringStatusListCredential` documents,
+    /// for the lists this node issues. A verifier that trusts nothing about
+    /// the bundle's author can still check these against the issuer's key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub status_list_credentials: Vec<VerifiableCredential>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -897,6 +893,16 @@ fn bundle_from_payload(value: &serde_json::Value) -> Result<Option<CredentialBun
 /// Build a JCS-canonical export bundle of every credential, key
 /// registry row, and status list known to this node.
 pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
+    export_bundle_signed_impl(conn, None)
+}
+
+/// As [`export_bundle_impl`], and when `signer` is this node's issuer key,
+/// also carry each list this node issues as a signed
+/// `BitstringStatusListCredential`.
+pub fn export_bundle_signed_impl(
+    conn: &Connection,
+    signer: Option<(&SigningKey, &Did)>,
+) -> Result<String, String> {
     use base64::Engine;
 
     // Credentials, ordered deterministically by id so ad-hoc ordering
@@ -959,12 +965,33 @@ pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
     for r in list_rows {
         status_lists.push(r.map_err(|e| e.to_string())?);
     }
+    let mut status_list_credentials = Vec::new();
+    if let Some((key, did)) = signer {
+        let created = now_rfc3339();
+        for list in status_lists.iter().filter(|l| l.issuer_did == did.as_str()) {
+            let bits = base64::engine::general_purpose::STANDARD
+                .decode(list.bits_b64.as_bytes())
+                .map_err(|e| format!("decode list bits: {e}"))?;
+            status_list_credentials.push(
+                alexandria_verify::vc::status::status_list_credential(
+                    &list.list_id,
+                    did,
+                    &list.status_purpose,
+                    &bits,
+                    &created,
+                    key,
+                )
+                .map_err(|e| format!("sign status list: {e}"))?,
+            );
+        }
+    }
 
     let bundle = CredentialBundle {
         format_version: BUNDLE_FORMAT_VERSION.into(),
         credentials,
         key_registry,
         status_lists,
+        status_list_credentials,
     };
     serde_json_canonicalizer::to_string(&bundle).map_err(|e| format!("canonicalize bundle: {e}"))
 }
@@ -1181,7 +1208,23 @@ impl BundleStore {
     fn new(bundle: &CredentialBundle) -> Result<Self, String> {
         use base64::Engine;
         let mut status_lists = Vec::with_capacity(bundle.status_lists.len());
+        // A signed BitstringStatusListCredential is evidence on its own
+        // terms: it is checked against the issuer's key and, when it
+        // verifies, wins over the raw row for the same list id.
+        for list_vc in &bundle.status_list_credentials {
+            let Some(id) = list_vc.id.as_deref() else {
+                return Err("status list credential has no id".into());
+            };
+            let key = alexandria_verify::did::resolve_did_key(&list_vc.issuer)
+                .map_err(|e| format!("status list issuer: {e}"))?;
+            let bits = alexandria_verify::vc::status::verify_status_list_credential(list_vc, &key)
+                .map_err(|e| format!("status list {id}: {e}"))?;
+            status_lists.push((id.to_string(), bits));
+        }
         for list in &bundle.status_lists {
+            if status_lists.iter().any(|(id, _)| id == &list.list_id) {
+                continue;
+            }
             let bits = base64::engine::general_purpose::STANDARD
                 .decode(list.bits_b64.as_bytes())
                 .map_err(|e| format!("decode list bits: {e}"))?;
@@ -1248,13 +1291,14 @@ impl crate::domain::vc::VerificationStore for BundleStore {
 
 #[tauri::command]
 pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
+    let (key, did) = load_issuer_key(&state).await?;
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "credentials.export-bundle",
-            move |db| export_bundle_impl(db.conn()),
+            move |db| export_bundle_signed_impl(db.conn(), Some((&key, &did))),
         )
         .await
 }
@@ -1477,9 +1521,9 @@ mod tests {
             "issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX",
             "validFrom":"2026-04-08T11:15:00Z",
             "credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX"},
-            "proof":{"type":"Ed25519Signature2020","created":"2026-04-08T11:15:00Z",
+            "proof":{"type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022","created":"2026-04-08T11:15:00Z",
                      "verificationMethod":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1",
-                     "proofPurpose":"assertionMethod","jws":"seed..signature"}
+                     "proofPurpose":"assertionMethod","proofValue": "zseed..signature"}
         }"#;
 
         let report = verify_offline_impl(placeholder, NOW).unwrap();
@@ -1626,7 +1670,7 @@ mod tests {
         });
         let vc = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap();
         assert!(vc.integrity.is_some());
-        assert!(!vc.proof.jws.is_empty());
+        assert!(!vc.proof.proof_value.is_empty());
     }
 
     #[test]
@@ -1646,7 +1690,7 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        assert!(!vc.proof.jws.is_empty());
+        assert!(!vc.proof.proof_value.is_empty());
         assert!(vc.id.as_deref().unwrap().starts_with("urn:alexandria:vc:"));
         let status = vc.credential_status.expect("status attached");
         assert_eq!(status.status_list_index, "0");
@@ -1715,7 +1759,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(bits[0] & 0x01, 0x01);
+        assert_eq!(bits[0] & 0x80, 0x80, "index 0 is the most significant bit");
     }
 
     #[test]
@@ -1734,7 +1778,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(bits[0], 0x01);
+        assert_eq!(bits[0], 0x80, "index 0 is the most significant bit");
     }
 
     #[test]
@@ -1852,6 +1896,62 @@ mod tests {
         let one =
             list_credentials_impl(db.conn(), Some(subject.as_str()), Some("other_skill")).unwrap();
         assert_eq!(one.len(), 1);
+    }
+
+    #[test]
+    fn a_signed_export_carries_the_status_list_as_a_bitstring_credential() {
+        // The bundle a learner exports must verify with nothing from this
+        // node: the list it names is inside it, as a credential signed by
+        // the list's issuer, and a revocation set here reads as revoked
+        // from that document alone.
+        let (db, key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &key,
+            &issuer,
+            &sample_request(subject.clone()),
+            NOW,
+        )
+        .unwrap();
+        let json = export_bundle_signed_impl(db.conn(), Some((&key, &issuer))).unwrap();
+        let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
+        assert_eq!(bundle.status_list_credentials.len(), 1);
+        let list = &bundle.status_list_credentials[0];
+        assert_eq!(
+            list.id.as_deref(),
+            vc.credential_status
+                .as_ref()
+                .map(|s| s.status_list_credential.as_str())
+        );
+        assert!(list
+            .type_
+            .iter()
+            .any(|t| t == "BitstringStatusListCredential"));
+        assert_eq!(list.proof.cryptosuite, "eddsa-jcs-2022");
+        let bits = alexandria_verify::vc::status::verify_status_list_credential(
+            list,
+            &key.verifying_key(),
+        )
+        .unwrap();
+        assert_eq!(bits.len() * 8, alexandria_verify::vc::status::MIN_BITS);
+        let unsigned = export_bundle_impl(db.conn()).unwrap();
+        assert!(
+            !unsigned.contains("status_list_credentials"),
+            "no signer, no list credentials"
+        );
+
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        let json = export_bundle_signed_impl(db.conn(), Some((&key, &issuer))).unwrap();
+        let mut bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
+        // Drop the raw rows: the signed list credential alone must carry the revocation.
+        bundle.status_lists.clear();
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+        let (accepted, total) = verify_bundle_offline_impl(&json, NOW).unwrap();
+        assert_eq!(
+            accepted, 0,
+            "a revoked credential must not verify from the signed list"
+        );
+        assert_eq!(total, 1);
     }
 
     #[test]

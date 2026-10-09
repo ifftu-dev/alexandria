@@ -297,7 +297,7 @@ mod tests {
         sign_completion_endorsement, AuthorizedAttestor, CompletionEvidence, EvidenceRequirement,
         COMPLETION_ENDORSEMENT_FORMAT_VERSION, COMPLETION_POLICY_FORMAT_VERSION,
     };
-    use crate::did::{derive_did_key, VerificationMethodRef};
+    use crate::did::derive_did_key;
     use crate::vc::sign::{sign_credential, UnsignedCredential};
     use crate::vc::verify::verify_credential;
     use crate::vc::{Claim, CredentialStatus, Proof};
@@ -340,16 +340,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
-            proof: Proof {
-                type_: "Ed25519Signature2020".into(),
-                created: "2026-01-01T00:00:00Z".into(),
-                verification_method: VerificationMethodRef(format!(
-                    "{}#key-1",
-                    issuer_did.as_str()
-                )),
-                proof_purpose: "assertionMethod".into(),
-                jws: String::new(),
-            },
+            proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         sign_credential(
             UnsignedCredential {

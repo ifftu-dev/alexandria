@@ -59,7 +59,7 @@ pub const TOPIC_PEER_EXCHANGE: &str = "/alexandria/peer-exchange/1.0";
 /// Receivers reflect the DID registry into their local `key_registry`
 /// so historical verification survives across peers.
 pub const TOPIC_VC_DID: &str = "/alexandria/vc-did/1.0";
-/// RevocationList2020-style status list snapshots / deltas (§11.2).
+/// Bitstring Status List snapshots / deltas (§11.2).
 /// Versioned — receivers refuse older versions to prevent rollback.
 pub const TOPIC_VC_STATUS: &str = "/alexandria/vc-status/1.0";
 /// Subject-authored selective-disclosure presentations (§18). Opt-in;

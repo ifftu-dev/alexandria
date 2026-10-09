@@ -562,7 +562,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `issuer_did` TEXT NOT NULL
 - `version` INTEGER NOT NULL default `1` — monotonic; older versions ignored
 - `status_purpose` TEXT NOT NULL default `'revocation'`
-- `bits` BLOB NOT NULL — packed little-endian bitmap
+- `bits` BLOB NOT NULL — Bitstring Status List bitmap, most significant bit first
 - `bit_length` INTEGER NOT NULL default `0`
 - `signature` TEXT — issuer signature over (list_id, version, bits)
 - `updated_at` TEXT NOT NULL default `datetime('now')`

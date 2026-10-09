@@ -179,7 +179,7 @@ impl VerificationStore for ShareStore<'_> {
         }
         let mut bits = vec![0; index / 8 + 1];
         if state.revoked {
-            bits[index / 8] |= 1 << (index % 8);
+            crate::vc::status::set_bit(&mut bits, index, true).ok();
         }
         StoreLookup::Found(bits)
     }

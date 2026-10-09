@@ -1,7 +1,7 @@
 [package]
 name = "alexandria-verify"
-version = "0.2.0"
-description = "Alexandria credential verification — W3C VCs, did:key, JCS canonicalization, detached Ed25519 JWS"
+version = "0.3.0"
+description = "Alexandria credential verification — W3C VC Data Model 2.0, Data Integrity eddsa-jcs-2022, Bitstring Status List, did:key"
 edition = "2021"
 rust-version = "1.83.0"
 license = "MIT OR Apache-2.0"
@@ -9,7 +9,7 @@ repository = "https://github.com/ifftu-dev/alexandria"
 homepage = "https://alexandria.ifftu.dev"
 documentation = "https://docs.rs/alexandria-verify"
 readme = "README.md"
-keywords = ["credentials", "did", "ed25519", "jws", "w3c"]
+keywords = ["credentials", "did", "ed25519", "data-integrity", "w3c"]
 categories = ["cryptography", "authentication"]
 
 # Permissive, deliberately, while the rest of Alexandria is AGPL-3.0-or-later.
@@ -48,6 +48,8 @@ base64 = "0.21"
 thiserror = "2"
 hex = "0.4"
 bs58 = "0.5"
+# Pure-Rust GZIP for Bitstring Status List encodedList; no I/O.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]
 # `hazmat` signs with a non-default nonce, producing a second valid signature

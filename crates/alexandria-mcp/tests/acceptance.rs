@@ -237,8 +237,8 @@ async fn every_credential_failure_is_told_apart_and_none_is_called_valid() {
             note: "well-formed signature by a key the issuer DID does not name",
         },
         Vector {
-            file: "04-malformed-jws",
-            credential: include_str!("../../alexandria-verify/tests/vectors/04-malformed-jws.json"),
+            file: "04-malformed-proof-value",
+            credential: include_str!("../../alexandria-verify/tests/vectors/04-malformed-proof-value.json"),
             signature_valid: false,
             expired: false,
             subject_bound: true,

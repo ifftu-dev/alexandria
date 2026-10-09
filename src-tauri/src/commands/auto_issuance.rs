@@ -15,23 +15,22 @@
 //! envelope (including claim details + witness block) under JWS so it
 //! can travel between peers without being tampered with. The
 //! verifier's trust chain runs: witness tx hash → on-chain script →
-//! datum fields → VC envelope → JWS signature by the same key that
+//! datum fields → VC envelope → Data Integrity proof by the same key that
 //! signed the tx. All of that is cryptographically linked.
 
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::cardano::completion::{self, CompletionObservation};
-use crate::crypto::did::{did_from_verifying_key, Did, VerificationMethodRef};
+use crate::crypto::did::{did_from_verifying_key, Did};
+use crate::domain::vc::context::W3C_VC_V2;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
     Claim, CredentialStatus, CustomClaim, Proof, VerifiableCredential, Witness,
 };
 
-const STATUS_LIST_BITS: usize = 16_384;
-const STATUS_LIST_TYPE: &str = "RevocationList2020Status";
-const W3C_VC_V1: &str = "https://www.w3.org/2018/credentials/v1";
-const ALEXANDRIA_V1: &str = "https://alexandria.protocol/context/v1";
+const STATUS_LIST_BITS: usize = alexandria_verify::vc::status::MIN_BITS;
+const STATUS_LIST_TYPE: &str = "BitstringStatusListEntry";
 
 /// Outcome of a single auto-issuance pipeline run.
 #[derive(Debug, Default)]
@@ -154,7 +153,7 @@ fn issue_new_observation(
     };
 
     let vc = VerifiableCredential {
-        context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
+        context: vec![W3C_VC_V2.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
         issuer: learner_did.clone(),
@@ -171,13 +170,7 @@ fn issue_new_observation(
         terms_of_use: None,
         witness: Some(witness),
         integrity: None,
-        proof: Proof {
-            type_: "Ed25519Signature2020".into(),
-            created: now.clone(),
-            verification_method: VerificationMethodRef(format!("{}#key-1", learner_did.as_str())),
-            proof_purpose: "assertionMethod".into(),
-            jws: String::new(),
-        },
+        proof: Proof::unsigned(now.clone()),
     };
     let signed = sign_credential(
         UnsignedCredential { credential: vc },
@@ -270,7 +263,7 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
 
 fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
     let mut clone = vc.clone();
-    clone.proof.jws.clear();
+    clone.proof.proof_value.clear();
     let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;
     let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|e| e.to_string())?;
     Ok(hex::encode(blake3::hash(&bytes).as_bytes()))

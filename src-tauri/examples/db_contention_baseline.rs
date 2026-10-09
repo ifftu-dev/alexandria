@@ -401,11 +401,11 @@ fn populate_fixture(conn: &Connection, workload: Workload) -> Result<()> {
                     "skill": { "skillId": skill, "level": 0.75, "score": 0.8 }
                 },
                 "proof": {
-                    "type": "Ed25519Signature2020",
+                    "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
                     "created": timestamp,
                     "verificationMethod": "did:key:fixture#key-1",
                     "proofPurpose": "assertionMethod",
-                    "jws": "fixture-signature"
+                    "proofValue": "zfixture-signature"
                 }
             })
             .to_string();

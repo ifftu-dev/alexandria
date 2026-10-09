@@ -56,7 +56,7 @@ Cloud **Operations → Validity pilot** implements the study design from the fun
 
 ## Verify without Alexandria
 
-Export the bundle from **Credentials → Export**, then `node scripts/demo/verify-credential.mjs <bundle.json>`. The script uses only Node's standard library and implements the five-step algorithm published with the test vectors (JCS, detached Ed25519 JWS, `did:key` self-resolution, validity window, status-list bit). `node --test scripts/demo/verify-credential.test.mjs` shows it agrees with the reference verifier on all twelve vectors. The issuer key can also be resolved by the third-party Universal Resolver at <https://dev.uniresolver.io/>. The proof format is a JCS variant documented in `crates/alexandria-verify/tests/vectors/README.md`, not yet a W3C Data Integrity cryptosuite, so general-purpose JSON-LD verifiers do not accept it unmodified.
+Export the bundle from **Credentials → Export**, then `node scripts/demo/verify-credential.mjs <bundle.json>`. The script uses only Node's standard library and implements the five-step algorithm published with the test vectors (JCS, detached Ed25519 JWS, `did:key` self-resolution, validity window, status-list bit). `node --test scripts/demo/verify-credential.test.mjs` shows it agrees with the reference verifier on all twelve vectors. The issuer key can also be resolved by the third-party Universal Resolver at <https://dev.uniresolver.io/>. The credential is a W3C VC Data Model 2.0 document with a Data Integrity `eddsa-jcs-2022` proof and a Bitstring Status List entry, so a general-purpose Data Integrity verifier accepts it unmodified; the signed vectors in `crates/alexandria-verify/tests/vectors/README.md` are the contract.
 
 ## What the audience should understand
 

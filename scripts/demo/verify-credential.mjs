@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Verify an Alexandria credential with nothing but Node's standard library.
 //
-// No Alexandria code, no Alexandria server, no npm packages. The whole check
-// is two standard primitives — JCS (RFC 8785) and Ed25519 (RFC 8032) — plus
-// the did:key encoding (multibase base58btc, multicodec 0xed01). The
-// algorithm is the one published with the test vectors in
-// crates/alexandria-verify/tests/vectors/README.md; this file is a second,
+// No Alexandria code, no Alexandria server, no npm packages. The credential
+// is a W3C Verifiable Credential (Data Model 2.0) secured with a Data
+// Integrity proof, cryptosuite `eddsa-jcs-2022`, so the whole check is three
+// standard primitives — JCS (RFC 8785), SHA-256 and Ed25519 — plus the
+// did:key encoding (multibase base58btc, multicodec 0xed01). Revocation is a
+// Bitstring Status List. The algorithm is the W3C one, restated with the test
+// vectors in crates/alexandria-verify/tests/vectors/README.md; this file is an
 // independent implementation of it.
 //
 //   node scripts/demo/verify-credential.mjs <file.json> [--at 2026-10-09T00:00:00Z]
@@ -20,7 +22,8 @@
 // Three separate answers on purpose; never one green tick.
 
 import { readFileSync } from 'node:fs'
-import { createPublicKey, verify as cryptoVerify } from 'node:crypto'
+import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
+import { gunzipSync } from 'node:zlib'
 
 // ---------- JCS (RFC 8785) ----------
 export function jcs(value) {
@@ -113,21 +116,30 @@ export function verifyCredential(vc, context = {}) {
     }
   }
 
-  // 2-5. Detached JWS over JCS of the document with proof.jws emptied.
-  const jws = vc.proof?.jws
-  if (publicKey && typeof jws === 'string') {
-    const parts = jws.split('.')
-    if (parts.length !== 3 || parts[1] !== '') result.reasons.push('proof.jws is not a detached JWS (header..signature)')
-    else {
-      const copy = structuredClone(vc)
-      copy.proof.jws = ''
-      const signingInput = Buffer.concat([Buffer.from(parts[0], 'utf8'), Buffer.from('.'), Buffer.from(jcs(copy), 'utf8')])
-      try {
-        if (ed25519Verify(publicKey, signingInput, b64urlDecode(parts[2]))) result.signature = 'valid'
-        else result.reasons.push('signature does not verify against the issuer key')
-      } catch (e) { result.reasons.push(`signature: ${e.message}`) }
-    }
-  } else if (!jws) result.reasons.push('credential has no proof.jws')
+  // 2-5. eddsa-jcs-2022: hashData = SHA-256(JCS(proof config)) || SHA-256(JCS(document)),
+  // proofValue = multibase base58btc of Ed25519(hashData).
+  const proof = vc.proof
+  if (!proof || typeof proof !== 'object') result.reasons.push('credential has no proof')
+  else if (proof.type !== 'DataIntegrityProof' || proof.cryptosuite !== 'eddsa-jcs-2022') {
+    result.reasons.push(`unsupported proof: ${proof.type} / ${proof.cryptosuite ?? 'no cryptosuite'}`)
+  } else if (proof.proofPurpose !== 'assertionMethod') result.reasons.push('proofPurpose is not assertionMethod')
+  else if (typeof proof.verificationMethod !== 'string' || proof.verificationMethod.split('#')[0] !== vc.issuer || !proof.verificationMethod.split('#')[1]) {
+    result.reasons.push('verificationMethod is not controlled by the issuer')
+  } else if (publicKey) {
+    try {
+      const document = structuredClone(vc); delete document.proof
+      const config = { ...proof, '@context': vc['@context'] }; delete config.proofValue
+      const hashData = Buffer.concat([
+        createHash('sha256').update(Buffer.from(jcs(config), 'utf8')).digest(),
+        createHash('sha256').update(Buffer.from(jcs(document), 'utf8')).digest(),
+      ])
+      if (typeof proof.proofValue !== 'string' || !proof.proofValue.startsWith('z')) throw new Error('proofValue is not multibase base58btc')
+      const signature = base58Decode(proof.proofValue.slice(1))
+      if (signature.length !== 64) throw new Error('proofValue is not a 64-byte Ed25519 signature')
+      if (ed25519Verify(publicKey, hashData, signature)) result.signature = 'valid'
+      else result.reasons.push('signature does not verify against the issuer key')
+    } catch (e) { result.reasons.push(`signature: ${e.message}`) }
+  }
 
   // 6. Validity window and subject binding.
   const from = vc.validFrom ? new Date(vc.validFrom) : null
@@ -139,7 +151,7 @@ export function verifyCredential(vc, context = {}) {
   const subjectBound = typeof result.subject === 'string' && result.subject.startsWith('did:')
   if (!subjectBound) result.reasons.push('credentialSubject.id is not a DID, so the credential is not bound to a holder')
 
-  // Status list, if the bundle carries it. Bit n = byte n/8, bit n%8, little-endian within the byte.
+  // Bitstring Status List, if the bundle carries it. Bit n = byte n/8, bit n%8 from the most significant bit.
   const status = vc.credentialStatus
   if (!status) result.status = 'no status list named'
   else {
@@ -147,7 +159,7 @@ export function verifyCredential(vc, context = {}) {
     const index = Number.parseInt(status.statusListIndex, 10)
     if (!list) result.status = 'pending: status list not supplied (export a bundle to include it)'
     else if (!Number.isInteger(index) || index < 0 || index >= list.length * 8) { result.status = 'invalid status reference'; result.reasons.push('statusListIndex is out of range') }
-    else result.status = (list[index >> 3] >> (index & 7)) & 1 ? 'revoked' : 'active'
+    else result.status = (list[index >> 3] >> (7 - (index & 7))) & 1 ? 'revoked' : 'active'
   }
 
   const rejected =
@@ -158,13 +170,35 @@ export function verifyCredential(vc, context = {}) {
   return result
 }
 
-/** Accept a bare credential, an array, or an exported bundle. */
+/** `encodedList` → bitstring: multibase base64url (`u`) of GZIP bytes. */
+export function decodeEncodedList(encoded) {
+  if (typeof encoded !== 'string' || !encoded.startsWith('u')) throw new Error('encodedList is not multibase base64url')
+  const compressed = Buffer.from(encoded.slice(1).replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+  return new Uint8Array(gunzipSync(compressed, { maxOutputLength: 1 << 20 }))
+}
+
+/**
+ * Accept a bare credential, an array, or an exported bundle. A bundle's
+ * `BitstringStatusListCredential` documents are verified against their
+ * issuer's did:key before their bits are trusted; raw `status_lists` rows are
+ * read only when no signed list credential covers that list id.
+ */
 export function loadInput(json) {
   if (Array.isArray(json)) return { credentials: json, keyRegistry: [], statusLists: {} }
   if (json && typeof json.format_version === 'string' && Array.isArray(json.credentials)) {
     const statusLists = {}
-    for (const row of json.status_lists ?? []) statusLists[row.list_id] = new Uint8Array(Buffer.from(row.bits_b64, 'base64'))
-    return { credentials: json.credentials, keyRegistry: json.key_registry ?? [], statusLists }
+    const keyRegistry = json.key_registry ?? []
+    for (const listVc of json.status_list_credentials ?? []) {
+      const checked = verifyCredential(listVc, { keyRegistry })
+      const subject = listVc.credentialSubject ?? {}
+      if (checked.signature === 'valid' && subject.type === 'BitstringStatusList' && typeof listVc.id === 'string') {
+        statusLists[listVc.id] = decodeEncodedList(subject.encodedList)
+      }
+    }
+    for (const row of json.status_lists ?? []) {
+      if (!(row.list_id in statusLists)) statusLists[row.list_id] = new Uint8Array(Buffer.from(row.bits_b64, 'base64'))
+    }
+    return { credentials: json.credentials, keyRegistry, statusLists }
   }
   if (json && json.proof) return { credentials: [json], keyRegistry: [], statusLists: {} }
   throw new Error('input is not a credential, an array of credentials, or an alexandria-credential-bundle')
