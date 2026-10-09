@@ -1295,8 +1295,9 @@ An **organization** (sponsor) defines **role assessments** that map a job descri
 
 - `Organization` — `{ id, name, owner_address, did? }`. The sponsor's admin identity (stake address) owns the org.
 - `RoleAssessment` — `{ org_id, role_title, job_description, course_id?, skill_ids[], issuance_policy, required_assurance_level }`. The `issuance_policy` is the §14.9.5 `IssuancePolicy`; `required_assurance_level` is folded into it at issuance.
+- `AssessmentAttempt.role_assessment_id?` — the published role a learner chose to assess for, fixed at the first start and reported back on resume. Learners list candidate roles with `assessment_open_roles(skill_id)`; sponsors list a role's attempts with `list_role_attempts(role_assessment_id)` and issue from one.
 
-`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Backing IPCs: `create_organization`, `list_organizations`, `create_role_assessment`, `list_role_assessments`, `get_role_assessment`, `set_role_assessment_status`, `issue_role_credential`.
+`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Backing IPCs: `create_organization`, `list_organizations`, `create_role_assessment`, `list_role_assessments`, `get_role_assessment`, `set_role_assessment_status`, `issue_role_credential`, `assessment_open_roles`, `list_role_attempts`.
 
 ### 14.10 Non-Transferability Semantics
 

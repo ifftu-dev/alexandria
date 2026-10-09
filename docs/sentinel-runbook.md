@@ -29,6 +29,7 @@
 | Verify holdout gate | `tools/sentinel-train/` | `python eval.py` |
 | Ship a model | `src-tauri/resources/sentinel/` | Replace the artifact and its SHA-256 lockfile in a release |
 | Check what a client runs | Tauri app or IPC | `sentinel_paste_classifier_info` |
+| Re-export the liveness model | `scripts/sentinel/` | `python export-minifasnet.py <Silent-Face-Anti-Spoofing checkout> <out.onnx>` (see Procedure 4) |
 
 ---
 
@@ -123,6 +124,19 @@ attack class), the golden hashes will fail. To bump cleanly:
    distribution has shifted.
 
 ---
+
+## Procedure 4: Re-export the liveness model
+
+The bundled `minifasnet-v2-80.onnx` is the Apache-2.0 `2.7_80x80_MiniFASNetV2.pth` from minivision-ai's Silent-Face-Anti-Spoofing with softmax folded in. To re-export (new upstream weights, new opset, or a tract parser change):
+
+```bash
+git clone --depth 1 https://github.com/minivision-ai/Silent-Face-Anti-Spoofing /tmp/sfas
+uv venv --python 3.12 /tmp/exportenv && uv pip install --python /tmp/exportenv/bin/python torch onnx
+/tmp/exportenv/bin/python scripts/sentinel/export-minifasnet.py /tmp/sfas src-tauri/resources/sentinel/minifasnet-v2-80.onnx
+cd src-tauri/resources/sentinel && shasum -a 256 minifasnet-v2-80.onnx > minifasnet-v2-80.onnx.sha256
+```
+
+The script prints the softmax for an all-zero and an all-128 input; paste both into `REF_ZEROS` / `REF_MID` in `src-tauri/src/sentinel/liveness.rs` and run `cargo test -p alexandria-node sentinel::liveness`. The cv2-pipeline parity test needs no update unless the preprocess changes. Commit artifact, lockfile and reference values together; CI verifies the lockfile.
 
 ## Threat-model checklist
 

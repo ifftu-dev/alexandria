@@ -68,9 +68,10 @@ All processing happens client-side. There is no server-side component in the app
 | `ai_paste_anomaly` | AI | 0-1 | 0.05† | ONNX classifier — probability snapshot is paste / typing-bot / LLM-paste-edit. Drives `paste_classifier_anomaly` (≥0.95) and `paste_classifier_critical` (≥0.99) flags. |
 | `gaze_offscreen_ratio` | AI | 0-1 | advisory | Fraction of camera ticks the learner's gaze was estimated off-screen (second-device / look-away detection). Drives `gaze_wander` (>0.30), `device_glance` (≥3 downward glances), `gaze_occluded` (>0.40 occluded). See §Gaze. |
 | `display_count` / `external_display` / `split_screen` / `screen_captured` | Native | int/bool | advisory | Display arrangement via `sentinel_display_topology` (Tauri monitors on desktop; `UIScreen` + window bounds on iOS; `DisplayManager` + multi-window on Android). Sampled at start, per snapshot window, and on `sentinel://display` nudges (window moved / scale changed). Android also reports a cumulative `native_transitions` counter so a Split View toggle between two samples is still seen. See §Platform coverage. |
-| `foreign_accessibility_services` / `adb_enabled` / `obscured_touches` | Native (Android) | int/bool | advisory | `sentinel_android_environment`: enabled non-system accessibility services, debug-bridge state, and touches delivered while another window was drawn over ours. The assessment shield (`FLAG_SECURE` + `setHideOverlayWindows`, API 31+) is engaged only while an assessment element is current. |
+| `foreign_accessibility_services` / `adb_enabled` / `obscured_touches` | Native (Android) | int/bool | advisory | `sentinel_android_environment`: enabled non-system accessibility services, debug-bridge state, and touches delivered while another window was drawn over ours. The assessment shield (`FLAG_SECURE` + `setHideOverlayWindows`, API 31+) is engaged only while an assessment element is current. The obscured-touch counter only counts while the shield is up and is drained once at session start, so a session never inherits taps from before it began. |
 | `hidden_overlays` / `overlay_windows_scanned` | Native (desktop) | int | advisory | `sentinel_hidden_overlay`: windows another process excluded from screen capture (`kCGWindowSharingState`, `GetWindowDisplayAffinity`), X11 override-redirect windows, Windows click-through topmost windows; minus our own windows and an allowlist of password managers and OS shell surfaces. |
 | `camera_device_virtual` | Rule | bool | advisory | The opted-in video track's label matches a known virtual-camera product. The label itself is shown in the dev view only and never persisted. |
+| `liveness_real_prob` / `liveness_checks` / `liveness_spoof_checks` | AI | 0-1 / int | advisory | MiniFASNetV2 presentation-attack score on the YuNet face box, computed inside `sentinel_score_gaze` (no extra frame IPC). A tick with `real_prob < 0.5` counts as a possible spoof. See §6 Liveness. |
 | `watched_processes` / `watched_categories` | Native (desktop) | int/list | advisory | `sentinel_process_scan`: watchlist matches by category (`interview_cheat`, `remote_desktop`, `virtual_camera`, `virtual_machine`, `ai_assistant`, `screen_share`). The full process list never leaves the backend. |
 | `global_hotkeys` / `phantom_hotkeys` | Native (desktop) | int | advisory | `sentinel_hotkeys_*`: listen-only modifier-combo monitor. Records only key-downs with Cmd/Win/Super, Ctrl or Alt held — never plain keys, Shift-only combos, or key-ups. A phantom is a combo the OS saw that the webview never received while our window was focused, excluding OS-owned shortcuts. Assessment purpose only; starts only if the OS already granted listening. |
 
@@ -129,6 +130,7 @@ Per-snapshot checks:
 29. Screen-share or meeting app running → `screen_share_running` info
 30. ≥ 1 phantom hotkey in the window (desktop) → `phantom_hotkey` warning
 31. ≥ 3 phantom hotkeys in the window (desktop) → `phantom_hotkey_repeated` critical
+32. More than half of ≥ 3 liveness ticks in the window scored as a possible spoof → `spoof_suspected` warning
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
@@ -148,12 +150,12 @@ The native signals above are per-OS `#[cfg]` modules under `src-tauri/src/sentin
 | Display topology | ✓ | ✓ | ✓ | ✓ (count only) | ✓ | ✓ (+ transition counter) |
 | Split-screen | – | – | – | – | ✓ | ✓ |
 | Screen capture / mirroring | heuristic | heuristic | – | – | ✓ | prevented (`FLAG_SECURE`) |
-| Hidden-overlay scan | ✓ | ✓ | override-redirect only | – | n/a | prevented (`setHideOverlayWindows`, API 31+) |
+| Hidden-overlay scan | ✓ | ✓ | – | – | n/a | prevented (`setHideOverlayWindows`, API 31+) |
 | Process watchlist | ✓ | ✓ | ✓ | ✓ | – | – |
 | Phantom hotkeys | ✓ | ✓ (needs Accessibility) | ✓ | – | – | – |
 | Accessibility services / debug bridge | – | – | – | – | – | ✓ |
 
-Wayland is a stated ceiling: the compositor exposes neither the windows nor the keys of other clients, so only the display count is available there. Mobile prevents overlays and capture where it can rather than detecting them; desktop detects because it cannot prevent. Everything in this table is still client-reported (`assuranceLevel: "local"`, see §Integrity Assurance).
+Wayland is a stated ceiling: the compositor exposes neither the windows nor the keys of other clients, so only the display count is available there. X11 is the same ceiling for overlays — override-redirect alone is how every tooltip, menu and IME popup is drawn, and X11 has no capture-exclusion or click-through flag to read — while the process watchlist and phantom hotkeys still apply. Mobile prevents overlays and capture where it can rather than detecting them; desktop detects because it cannot prevent. Everything in this table is still client-reported (`assuranceLevel: "local"`, see §Integrity Assurance).
 
 ### Diagnostics transition
 
@@ -324,6 +326,14 @@ The per-window `gaze_offscreen_ratio` is persisted on `integrity_snapshots` (mig
 
 **Phase 2 (deferred)**: precise point-of-regard via a MediaPipe iris model (Apache-2.0, needs a tflite→ONNX conversion); a gaze × keystroke-timing correlation signal (the high-confidence "copying" flag); face *recognition* via ArcFace (runtime-trivial on tract, but weights are license-gated — buy an InsightFace commercial license). See [sentinel-gaze.md](sentinel-gaze.md) for the full design.
 
+### 6. Liveness / Presentation-Attack Detector
+
+`2.7_80x80_MiniFASNetV2` from minivision-ai's Silent-Face-Anti-Spoofing (**Apache-2.0**), exported to ONNX with softmax folded in (`scripts/sentinel/export-minifasnet.py`) and embedded via `include_bytes!` as `src-tauri/resources/sentinel/minifasnet-v2-80.onnx` with a `.sha256` lockfile CI verifies. Closes the gap the virtual-camera label heuristic leaves: a photo, a replayed video or a rendered face fed through any camera device.
+
+**Input**: the YuNet face box scaled 2.7× about its centre and slid back inside the frame (the upstream `CropImage` rule), bilinear-resized to 80×80, BGR channel order, raw 0..255 values (upstream's `ToTensor` does not divide by 255). **Output**: softmax over `[attack, real, attack]`; class 1 is real. It runs inside `sentinel_score_gaze` on the frame the gaze check already holds, so no extra frame crosses IPC and nothing is persisted.
+
+**Advisory by design**: one low read is lighting or a webcam artefact as often as an attack, so the frontend raises `spoof_suspected` only when more than half of at least three ticks in a snapshot window score below 0.5. Two parity tests pin it: the tract output against the PyTorch softmax, and the Rust preprocess against the upstream cv2 pipeline on a synthetic frame. On the upstream labelled samples with YuNet boxes, the real sample scores 0.9998 and both attack samples score fake.
+
 ### Runtime Toggle
 
 AI signals are advisory by default and do not contribute to the integrity score. A per-profile toggle (`setSetting('sentinel.ai_scoring_enabled')` in the profile-scoped settings DB, exposed in the Sentinel dashboard Profile tab) folds them in at a 0.05 weight each:
@@ -341,7 +351,7 @@ rate spikes.
 
 ## Model Updates
 
-The paste classifier has one model source: `src-tauri/resources/sentinel/paste-v1.onnx`, embedded into the Rust binary at compile time and loaded once by the `sentinel::paste_classifier` `OnceLock`. `sentinel_paste_classifier_info` always reports `bundled`. A retrained model ships by replacing the artifact and its SHA-256 lockfile in an app release; see [sentinel-runbook.md](sentinel-runbook.md).
+The paste classifier has one model source: `src-tauri/resources/sentinel/paste-v1.onnx`, embedded into the Rust binary at compile time and loaded once by the `sentinel::paste_classifier` `OnceLock`. `sentinel_paste_classifier_info` always reports `bundled`. A retrained model ships by replacing the artifact and its SHA-256 lockfile in an app release; see [sentinel-runbook.md](sentinel-runbook.md). The face detector (`yunet.onnx`) and the liveness model (`minifasnet-v2-80.onnx`) follow the same rule: three bundled artifacts, one ship path, each with a lockfile CI checks.
 
 The earlier community prior library and runtime weights replacement are deleted: Sentinel DAO proposals, approved-status ratification, placeholder signatures, the prior gossip mirror, and the kill switch and version blocklist that guarded replacement weights. Their tables stay in the schema until the baseline squash, and nothing reads or writes them. Inbound `/alexandria/sentinel-priors/1.0` messages are rejected before any database access until the topic is removed.
 
@@ -416,7 +426,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 4-tab interface:
 - **Overview**: Live engine status, no-profile prompt, session statistics
 - **Sessions**: Paginated session list with outcome badges, expandable details
-- **Signals**: Signal weight breakdown, threshold documentation
+- **Signals**: Signal weight breakdown, threshold documentation. The flag catalog is data-driven from `FLAG_CATALOG` in `Sentinel.vue`, mirroring `flag_severity`; every flag has a learner-facing description and trigger in the nine locales
 - **Profile**: Stored behavioral profile details, AI model training status
 
 ### Training Wizard
@@ -438,6 +448,8 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 - `setCameraOptedIn(bool)` when the learner accepts/declines camera verification on an assessment element
 - `reportCameraDevice(label)` right after `getUserMedia` resolves, so a virtual-camera label is checked against the marker list without the label leaving the frontend
 - A `setInterval(3000)` in `Player.vue` calls `sentinel.verifyFace(videoEl)` while the camera stream is live; the hidden `<video>` element is torn down on disable or unmount
+
+The standalone runner (`/assessment/:skillId`) first asks `assessment_open_roles`; when a published sponsor role covers the skill, the learner picks the role (or none) before `sentinel.start`. A role whose policy sets `minCameraCoverage > 0` has the camera turned on first (`useCameraPresence`), and `start(null, true)` opts the session in from the first snapshot. The role is stored on the attempt (`assessment_attempts.role_assessment_id`) and reported back on resume. The camera gate is a UI gate: `assessment_start_attempt` validates and stores the role but does not check the camera, and `minCameraCoverage` is enforced at issuance from stored snapshots. A resumed attempt whose stored role requires the camera shows the camera-off banner until it is turned back on.
 
 ### Interview Assistant Integration
 
@@ -648,6 +660,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **No remote models**: No command accepts classifier weights. The only ONNX models the backend parses are embedded in the binary, so no peer or envelope can supply model bytes.
 9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.
-10. **Process and window lists never leave the backend**: `sentinel_process_scan` returns only watchlist matches (name, identifier, category, rule) and `sentinel_hidden_overlay` only the suspicious windows (owner, reason). The enumerations that produced them are dropped in the Rust call.
-11. **The hotkey monitor records no text**: only key-downs with Cmd/Win/Super, Ctrl or Alt held, as a normalised combo string plus a monotonic timestamp. Plain keys, Shift-only combos and key-ups are discarded before they reach the buffer. The monitor runs only for assessment-purpose sessions, only if the OS already granted listening, and its permission prompt lives in the Sentinel wizard — never mid-assessment.
+10. **Process and window lists never leave the backend**: `sentinel_process_scan` returns only watchlist matches (name, identifier, category, rule) and `sentinel_hidden_overlay` only the suspicious windows (owner, reason). The enumerations that produced them are dropped in the Rust call. Window titles never cross IPC, and the allowlist matches the whole owner name, never a substring.
+11. **The hotkey monitor records no text**: only key-downs with Cmd/Win/Super, Ctrl or Alt held, as a normalised combo string plus a monotonic timestamp. Plain keys, Shift-only combos and key-ups are discarded before they reach the buffer. The monitor runs only for assessment-purpose sessions, only if the OS already granted listening, and its permission prompt lives in the Sentinel wizard — never mid-assessment. Text-entry chords are refused before the buffer: Option+key on macOS, AltGr (Ctrl+Alt) on Windows and Linux.
 12. **Camera device label is not persisted**: the virtual-camera check keeps the `MediaStreamTrack` label in the frontend dev view only; snapshots carry the boolean verdict.
+13. **Liveness keeps nothing**: the face patch is built in memory from the same frame the gaze check already holds; only `real_prob` and a boolean cross IPC.
