@@ -125,6 +125,7 @@
       "emptyBody": "Create one for an organization.",
       "requiresClean": "requires a clean session",
       "minIntegrity": "min integrity {value}",
+      "minCameraCoverage": "min camera coverage {value}",
       "publish": "Publish",
       "archive": "Archive"
     },

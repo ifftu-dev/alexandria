@@ -82,9 +82,20 @@ const ROLE_ROW_SELECT: &str = "SELECT ra.id, ra.role_title, o.name, ra.issuance_
                                 JOIN organizations o ON o.id = ra.org_id";
 
 fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
+    // A policy that does not parse must not silently become "no camera
+    // required": surface it so the row errors instead of under-enforcing.
     let policy: Option<crate::commands::credentials::IssuancePolicy> = r
         .get::<_, Option<String>>(3)?
-        .and_then(|s| serde_json::from_str(&s).ok());
+        .map(|s| {
+            serde_json::from_str(&s).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })
+        })
+        .transpose()?;
     let min_camera_coverage = policy.and_then(|p| p.min_camera_coverage);
     Ok(RoleRow {
         target: AttemptRoleTarget {
@@ -116,9 +127,11 @@ pub(crate) fn open_roles_for_skill(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], map_role_row)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("role assessment row unreadable: {e}"))?;
     Ok(rows
-        .filter_map(Result::ok)
+        .into_iter()
         .filter(|row| row.skill_ids.iter().any(|s| s == skill_id))
         .map(|row| row.target)
         .collect())
@@ -1891,6 +1904,21 @@ mod role_target_tests {
         assert!(open[0].camera_required);
         assert_eq!(open[0].min_camera_coverage, Some(0.8));
         assert!(open_roles_for_skill(conn, "skill_py").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unparseable_policy_is_an_error_not_a_lenient_default() {
+        let db = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        let id = role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.8));
+        conn.execute(
+            "UPDATE role_assessments SET issuance_policy_json = '{not json' WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+        assert!(open_roles_for_skill(conn, "skill_rust").is_err());
+        assert!(resolve_role_target(conn, "skill_rust", &id).is_err());
     }
 
     #[test]

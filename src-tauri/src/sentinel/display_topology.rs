@@ -195,13 +195,19 @@ mod imp {
                 let app: Retained<AnyObject> = msg_send![class!(UIApplication), sharedApplication];
                 let windows: Retained<AnyObject> = msg_send![&*app, windows];
                 let window_count: usize = msg_send![&*windows, count];
-                let window_size = if window_count > 0 {
-                    let w: Retained<AnyObject> = msg_send![&*windows, firstObject];
-                    let b: CGRect = msg_send![&*w, bounds];
-                    Some((b.size.width, b.size.height))
-                } else {
-                    None
-                };
+                // Compare the *key* window with the screen. `windows` also
+                // lists the keyboard, alerts and other scenes' windows, and
+                // a narrower one of those would read as Split View.
+                let mut window_size = None;
+                for i in 0..window_count {
+                    let w: Retained<AnyObject> = msg_send![&*windows, objectAtIndex: i];
+                    let is_key: bool = msg_send![&*w, isKeyWindow];
+                    if is_key {
+                        let b: CGRect = msg_send![&*w, bounds];
+                        window_size = Some((b.size.width, b.size.height));
+                        break;
+                    }
+                }
 
                 Some(from_uikit(
                     screen_count,

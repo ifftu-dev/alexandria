@@ -125,6 +125,7 @@
       "emptyBody": "একটি সংস্থার জন্য একটি তৈরি করুন।",
       "requiresClean": "একটি নিষ্কলুষ সেশন প্রয়োজন",
       "minIntegrity": "সর্বনিম্ন সততা {value}",
+      "minCameraCoverage": "ন্যূনতম ক্যামেরা কভারেজ {value}",
       "publish": "প্রকাশ করুন",
       "archive": "সংরক্ষণাগারে রাখুন"
     },

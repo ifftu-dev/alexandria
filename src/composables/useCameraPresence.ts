@@ -147,6 +147,9 @@ export function useCameraPresence(sentinel: Sentinel, videoRef: Ref<HTMLVideoEle
   }
 
   function dispose() {
+    // If the session outlives us (cleanup failed, stop retried later), its
+    // snapshots must not keep crediting camera time that is no longer live.
+    if (bound && sentinel.isActive.value) sentinel.setCameraOptedIn(false)
     bound = false
     generation++
     stopLoops()

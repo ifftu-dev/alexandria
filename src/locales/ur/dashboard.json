@@ -125,6 +125,7 @@
       "emptyBody": "کسی ادارے کے لیے ایک بنائیں۔",
       "requiresClean": "ایک صاف سیشن درکار ہے",
       "minIntegrity": "کم از کم سالمیت {value}",
+      "minCameraCoverage": "کم از کم کیمرہ کوریج {value}",
       "publish": "شائع کریں",
       "archive": "محفوظ خانہ"
     },

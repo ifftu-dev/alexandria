@@ -291,10 +291,20 @@ fn exact_name_matches(name_lower: &str, needle: &str) -> bool {
 fn match_rule(proc_: &RawProcess) -> Option<&'static WatchRule> {
     let name = proc_.name.to_lowercase();
     let identifier = proc_.identifier.to_lowercase();
+    // Linux `comm` is truncated to 15 bytes by the kernel, so a long needle
+    // can only match the executable's basename (from the `exe` link or
+    // `cmdline[0]`). On the other platforms this is the same string again.
+    let exe_stem = identifier
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(&identifier)
+        .to_owned();
     WATCHLIST.iter().find(|r| {
         let needle = r.needle.to_lowercase();
         match r.match_kind {
-            MatchKind::ExactName => exact_name_matches(&name, &needle),
+            MatchKind::ExactName => {
+                exact_name_matches(&name, &needle) || exact_name_matches(&exe_stem, &needle)
+            }
             MatchKind::IdentifierPrefix => identifier.starts_with(&needle),
             MatchKind::NameContains => name.contains(&needle),
         }
@@ -635,6 +645,22 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_truncated_linux_comm_still_matches_on_the_exe_basename() {
+        // The kernel cuts `comm` at 15 bytes; the exe link carries the rest.
+        let p = super::RawProcess {
+            pid: 4242,
+            name: "chrome-remote-d".into(),
+            identifier: "/opt/google/chrome-remote-desktop/chrome-remote-desktop-host".into(),
+        };
+        let scan = super::classify(&[p], 1, "procfs");
+        assert_eq!(scan.watched.len(), 1);
+        assert_eq!(
+            scan.watched[0].category,
+            super::WatchCategory::RemoteDesktop
+        );
+    }
+
     use super::*;
 
     fn p(pid: u32, name: &str, identifier: &str) -> RawProcess {

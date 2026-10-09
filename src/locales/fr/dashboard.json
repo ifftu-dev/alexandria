@@ -125,6 +125,7 @@
       "emptyBody": "Créez-en une pour une organisation.",
       "requiresClean": "nécessite une session sans anomalie",
       "minIntegrity": "intégrité min. {value}",
+      "minCameraCoverage": "couverture caméra min. {value}",
       "publish": "Publier",
       "archive": "Archiver"
     },

@@ -125,6 +125,7 @@
       "emptyBody": "एखाद्या संस्थेसाठी एक तयार करा.",
       "requiresClean": "स्वच्छ सत्र आवश्यक",
       "minIntegrity": "किमान सचोटी {value}",
+      "minCameraCoverage": "किमान कॅमेरा कव्हरेज {value}",
       "publish": "प्रकाशित करा",
       "archive": "संग्रहित करा"
     },

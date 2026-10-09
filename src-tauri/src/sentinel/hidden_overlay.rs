@@ -42,7 +42,7 @@ pub struct OverlayWindow {
     pub pid: u32,
     /// Bundle id (macOS), executable stem (Windows) or WM_CLASS (X11).
     pub owner: String,
-    /// Window title, when the OS let us read it.
+    /// Always `None` on the wire: titles stay in the backend (privacy).
     pub title: Option<String>,
     pub width: u32,
     pub height: u32,
@@ -82,10 +82,10 @@ pub struct RawWindow {
     pub level: i32,
 }
 
-/// Owners that legitimately hide from capture. Matched case-insensitively:
-/// entries with a dot or at least eight characters match as a substring
-/// (bundle ids, long product names); short plain names must match the
-/// whole owner, so `dock` never swallows `Docker Desktop`.
+/// Owners that legitimately hide from capture. Matched case-insensitively
+/// against the whole owner string (a trailing `.exe` is ignored), never as
+/// a substring: an overlay names its own process, so `searchhost-ai` or
+/// `1password-helper` must not inherit an entry's trust.
 pub const ALLOWLIST: &[&str] = &[
     // Password managers (hide secrets from screen share).
     "com.1password.1password",
@@ -145,13 +145,8 @@ pub fn is_allowlisted(owner: &str) -> bool {
     if owner.is_empty() {
         return false;
     }
-    ALLOWLIST.iter().any(|entry| {
-        if entry.contains('.') || entry.len() >= 8 {
-            owner.contains(entry)
-        } else {
-            owner == *entry
-        }
-    })
+    let stem = owner.strip_suffix(".exe").unwrap_or(&owner);
+    ALLOWLIST.contains(&stem)
 }
 
 /// Pure classification: which raw windows are worth a reviewer's eyes.
@@ -159,7 +154,11 @@ pub fn classify(raw: &[RawWindow], own_pid: u32, source: &str) -> OverlayScan {
     let mut suspicious = Vec::new();
     let mut allowlisted = 0u32;
     for w in raw {
-        let flagged = w.excluded_from_capture || w.override_redirect || w.clickthrough_topmost;
+        // X11 override-redirect alone is how every tooltip, menu, IME
+        // candidate list and combo popup is drawn; it is context for a
+        // reviewer, not a tell. Capture exclusion and click-through topmost
+        // are the tells.
+        let flagged = w.excluded_from_capture || w.clickthrough_topmost;
         if !flagged {
             continue;
         }
@@ -180,10 +179,12 @@ pub fn classify(raw: &[RawWindow], own_pid: u32, source: &str) -> OverlayScan {
         } else {
             "clickthrough_topmost"
         };
+        // Titles can carry user content (and on macOS need Screen Recording
+        // to read at all); the reviewer gets owner + reason, nothing more.
         suspicious.push(OverlayWindow {
             pid: w.pid,
             owner: w.owner.clone(),
-            title: w.title.clone(),
+            title: None,
             width: w.width,
             height: w.height,
             on_screen: w.on_screen,
@@ -574,9 +575,10 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_matches_case_insensitive_substrings() {
+    fn allowlist_matches_whole_owner_case_insensitively() {
         assert!(is_allowlisted("com.1password.1password"));
         assert!(is_allowlisted("1Password"));
+        assert!(is_allowlisted("1Password.exe"));
         assert!(is_allowlisted("org.keepassxc.KeePassXC"));
         assert!(is_allowlisted("Bitwarden"));
         assert!(is_allowlisted("com.apple.controlcenter"));
@@ -585,6 +587,10 @@ mod tests {
         assert!(is_allowlisted("Control Center"));
         assert!(!is_allowlisted("Docker Desktop"));
         assert!(!is_allowlisted("Keeper Overlay Tool"));
+        // An overlay picks its own name; a substring of a trusted one buys nothing.
+        assert!(!is_allowlisted("searchhost-ai"));
+        assert!(!is_allowlisted("1password-helper"));
+        assert!(!is_allowlisted("com.1password.1password.overlay"));
         assert!(!is_allowlisted("Cluely"));
         assert!(!is_allowlisted("us.zoom.xos"));
         assert!(!is_allowlisted(""));
@@ -631,12 +637,20 @@ mod tests {
     }
 
     #[test]
-    fn override_redirect_is_reported() {
+    fn override_redirect_alone_is_not_reported() {
+        // Tooltips, menus and IME popups are all override-redirect.
         let mut w = win(9, "some-overlay", 300, 200);
         w.excluded_from_capture = false;
         w.override_redirect = true;
         let scan = classify(&[w], 1, "x11");
-        assert_eq!(scan.suspicious[0].reason, "override_redirect");
+        assert!(scan.suspicious.is_empty());
+        assert_eq!(scan.scanned, 1);
+    }
+
+    #[test]
+    fn titles_never_cross_ipc() {
+        let scan = classify(&[win(7, "Cluely", 640, 220)], 1, "cgwindow");
+        assert_eq!(scan.suspicious[0].title, None);
     }
 
     #[test]
@@ -669,6 +683,6 @@ mod tests {
         assert_eq!(v["source"], "cgwindow");
         assert_eq!(v["suspicious"][0]["reason"], "capture_excluded");
         assert_eq!(v["suspicious"][0]["on_screen"], true);
-        assert_eq!(v["suspicious"][0]["title"], "t");
+        assert!(v["suspicious"][0]["title"].is_null());
     }
 }

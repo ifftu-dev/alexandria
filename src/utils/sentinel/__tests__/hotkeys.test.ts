@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isOsCombo, normaliseWebviewCombo, phantomCombos } from '../hotkeys'
+import { isOsCombo, isTextEntryChord, normaliseWebviewCombo, phantomCombos } from '../hotkeys'
 
 const OS = ['cmd+tab', 'cmd+space', 'cmd+shift+3']
 
@@ -14,6 +14,24 @@ describe('normaliseWebviewCombo', () => {
     expect(normaliseWebviewCombo({ key: 'ArrowLeft', metaKey: false, ctrlKey: true, altKey: false, shiftKey: false })).toBe('ctrl+left')
     expect(normaliseWebviewCombo({ key: 'F15', metaKey: false, ctrlKey: true, altKey: true, shiftKey: true })).toBe('ctrl+alt+shift+f15')
   })
+  it('uses the physical key so shifted symbols and layout characters match the native names', () => {
+    // cmd+shift+[ produces "{" in e.key; the native tap saw keycode 0x21 = bracketleft.
+    expect(normaliseWebviewCombo({ key: '{', code: 'BracketLeft', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true })).toBe('cmd+shift+bracketleft')
+    expect(normaliseWebviewCombo({ key: '!', code: 'Digit1', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true })).toBe('cmd+shift+1')
+    expect(normaliseWebviewCombo({ key: 'ß', code: 'KeyS', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false })).toBe('cmd+s')
+    expect(normaliseWebviewCombo({ key: 'Enter', code: 'NumpadEnter', metaKey: false, ctrlKey: true, altKey: false, shiftKey: false })).toBe('ctrl+enter')
+  })
+
+  it('drops text-entry chords: Option+key on macOS, AltGr (ctrl+alt) on Windows / Linux', () => {
+    // macOS: Option+e is a dead key for accents, never a hotkey worth recording.
+    expect(normaliseWebviewCombo({ key: '´', code: 'KeyE', metaKey: false, ctrlKey: false, altKey: true, shiftKey: false }, false)).toBeNull()
+    expect(normaliseWebviewCombo({ key: 'e', code: 'KeyE', metaKey: true, ctrlKey: false, altKey: true, shiftKey: false }, false)).toBe('cmd+alt+e')
+    // Windows / Linux: AltGr reports as ctrl+alt; `@` on a German layout.
+    expect(normaliseWebviewCombo({ key: '@', code: 'KeyQ', metaKey: false, ctrlKey: true, altKey: true, shiftKey: false }, true)).toBeNull()
+    expect(normaliseWebviewCombo({ key: 'q', code: 'KeyQ', metaKey: false, ctrlKey: false, altKey: true, shiftKey: false }, true)).toBe('alt+q')
+    expect(isTextEntryChord({ metaKey: false, ctrlKey: true, altKey: true }, false)).toBe(false)
+  })
+
   it('never records plain or shift-only keys, nor bare modifiers', () => {
     expect(normaliseWebviewCombo({ key: 'a', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false })).toBeNull()
     expect(normaliseWebviewCombo({ key: 'A', metaKey: false, ctrlKey: false, altKey: false, shiftKey: true })).toBeNull()

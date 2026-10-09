@@ -29,6 +29,54 @@ export interface BlurInterval {
   end: number
 }
 
+/**
+ * Physical-key (`KeyboardEvent.code`) → shared name. The native monitors
+ * report the unshifted physical key (CGEvent keycode / VK code / X11
+ * keysym), so `cmd+shift+[` must stay `cmd+shift+bracketleft` here even
+ * though `e.key` says `{`. Letters, digits and F-keys are handled by the
+ * prefix rules in `codeName`.
+ */
+const CODE_NAMES: Record<string, string> = {
+  Space: 'space',
+  Enter: 'enter',
+  NumpadEnter: 'enter',
+  Tab: 'tab',
+  Escape: 'escape',
+  Backspace: 'backspace',
+  Delete: 'delete',
+  Insert: 'insert',
+  Home: 'home',
+  End: 'end',
+  PageUp: 'pageup',
+  PageDown: 'pagedown',
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  Backslash: 'backslash',
+  IntlBackslash: 'backslash',
+  Slash: 'slash',
+  Comma: 'comma',
+  Period: 'period',
+  Semicolon: 'semicolon',
+  Quote: 'quote',
+  BracketLeft: 'bracketleft',
+  BracketRight: 'bracketright',
+  Minus: 'minus',
+  Equal: 'equal',
+  Backquote: 'grave',
+}
+
+function codeName(code: string): string | null {
+  if (CODE_NAMES[code]) return CODE_NAMES[code]
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase()
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  if (/^Numpad[0-9]$/.test(code)) return code.slice(6)
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code.toLowerCase()
+  return null
+}
+
+/** `e.key` fallback when the event has no physical code (synthetic events). */
 const KEY_NAMES: Record<string, string> = {
   ' ': 'space',
   Enter: 'enter',
@@ -54,15 +102,33 @@ const KEY_NAMES: Record<string, string> = {
 }
 
 /**
- * Normalise a webview keydown into the shared combo vocabulary, or null
- * when no recordable modifier (cmd/ctrl/alt) is held — Shift-only and
- * plain keys are never recorded, mirroring the native privacy gate.
+ * Text-entry chords the native monitors refuse to record: Option+key on
+ * macOS types accented letters and symbols; Ctrl+Alt on Windows / Linux is
+ * AltGr. Recording either would store typed characters. `cmdIsSystem`
+ * (from the hotkey status) tells the two families apart.
  */
-export function normaliseWebviewCombo(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>): string | null {
+export function isTextEntryChord(mods: { metaKey: boolean; ctrlKey: boolean; altKey: boolean }, cmdIsSystem: boolean): boolean {
+  if (cmdIsSystem) return mods.ctrlKey && mods.altKey && !mods.metaKey
+  return mods.altKey && !mods.metaKey && !mods.ctrlKey
+}
+
+/**
+ * Normalise a webview keydown into the shared combo vocabulary, or null
+ * when no recordable modifier (cmd/ctrl/alt) is held — Shift-only, plain
+ * keys and text-entry chords are never recorded, mirroring the native
+ * privacy gate. Prefers the physical key (`code`) so shifted symbols and
+ * layout-dependent characters line up with what the native side saw.
+ */
+export function normaliseWebviewCombo(
+  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> & { code?: string },
+  cmdIsSystem = false,
+): string | null {
   if (!e.metaKey && !e.ctrlKey && !e.altKey) return null
+  if (isTextEntryChord(e, cmdIsSystem)) return null
   const key = e.key
   if (['Meta', 'Control', 'Alt', 'Shift', 'OS', 'Dead', 'Unidentified'].includes(key)) return null
-  const name = KEY_NAMES[key] ?? key.toLowerCase()
+  const fromCode = e.code ? codeName(e.code) : null
+  const name = fromCode ?? KEY_NAMES[key] ?? key.toLowerCase()
   const parts: string[] = []
   if (e.metaKey) parts.push('cmd')
   if (e.ctrlKey) parts.push('ctrl')

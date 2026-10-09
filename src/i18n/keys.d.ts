@@ -661,6 +661,7 @@ export type MessageKey =
   | 'dashboard.sponsor.roles.archive'
   | 'dashboard.sponsor.roles.emptyBody'
   | 'dashboard.sponsor.roles.emptyTitle'
+  | 'dashboard.sponsor.roles.minCameraCoverage'
   | 'dashboard.sponsor.roles.minIntegrity'
   | 'dashboard.sponsor.roles.new'
   | 'dashboard.sponsor.roles.publish'

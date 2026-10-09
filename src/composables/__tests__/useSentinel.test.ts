@@ -426,7 +426,9 @@ describe('Android environment signal and assessment shield', () => {
 
   it('foreign accessibility service and adb are warnings; obscured touches are critical', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
-    withEnv(env({ foreign_accessibility: ['com.evil/.Reader'], adb_enabled: true }), [3, 0])
+    // The first drain happens at start and discards taps from before the
+    // session (7); the windows then see 3 and 0.
+    withEnv(env({ foreign_accessibility: ['com.evil/.Reader'], adb_enabled: true }), [7, 3, 0])
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
@@ -452,13 +454,19 @@ describe('Android environment signal and assessment shield', () => {
     const service = (await freshService())()
     await service.start('enrollment')
     expect(shieldCalls()).toEqual([])
+    // Shield calls are serialised through a promise chain; settle it.
+    const settle = () => vi.advanceTimersByTimeAsync(0)
     service.setElement('e1', 'video')
+    await settle()
     expect(shieldCalls()).toEqual([])
     service.setElement('e2', 'quiz')
+    await settle()
     expect(shieldCalls()).toEqual([true])
     service.setElement('e3', 'quiz')      // idempotent
+    await settle()
     expect(shieldCalls()).toEqual([true])
     service.setElement('e4', 'reading')
+    await settle()
     expect(shieldCalls()).toEqual([true, false])
     await service.stop()
     expect(shieldCalls()).toEqual([true, false])

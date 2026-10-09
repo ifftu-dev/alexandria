@@ -129,13 +129,20 @@ const publishedRoles = computed(() => sponsor.roleAssessments.value.filter(r => 
 // real attempt rather than a hand-typed session id.
 const roleAttempts = ref<RoleAttemptSummary[]>([])
 const roleAttemptsBusy = ref(false)
+let roleAttemptsRequest = 0
 watch(() => issueForm.value.role_assessment_id, async id => {
   roleAttempts.value = []
-  if (!id) return
+  const request = ++roleAttemptsRequest
+  if (!id) {
+    roleAttemptsBusy.value = false
+    return
+  }
   roleAttemptsBusy.value = true
   const list = await sponsor.listRoleAttempts(id)
+  // Only the newest request may settle the busy flag and the list.
+  if (request !== roleAttemptsRequest) return
   roleAttemptsBusy.value = false
-  if (issueForm.value.role_assessment_id === id && list) roleAttempts.value = list
+  if (list) roleAttempts.value = list
 })
 
 function useAttempt(a: RoleAttemptSummary) {

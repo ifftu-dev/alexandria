@@ -148,7 +148,9 @@ class MainActivity : TauriActivity() {
     fun setAssessmentShield(on: Boolean) {
       shieldOn = on
       val a = current ?: return
-      a.runOnUiThread { a.applyShield(on) }
+      // Apply the latest requested state, not this call's argument: two
+      // posts from different threads may run in either order.
+      a.runOnUiThread { a.applyShield(shieldOn) }
     }
 
     /**
@@ -223,7 +225,9 @@ class MainActivity : TauriActivity() {
 
   override fun dispatchTouchEvent(event: MotionEvent): Boolean {
     val obscured = MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED
-    if (event.actionMasked == MotionEvent.ACTION_DOWN && event.flags and obscured != 0) {
+    // Only while the shield is up: the counter is an assessment signal,
+    // not a lifetime tally of every overlay tap on the device.
+    if (shieldOn && event.actionMasked == MotionEvent.ACTION_DOWN && event.flags and obscured != 0) {
       obscuredTouches.incrementAndGet()
     }
     return super.dispatchTouchEvent(event)

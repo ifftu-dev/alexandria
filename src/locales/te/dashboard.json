@@ -125,6 +125,7 @@
       "emptyBody": "ఒక సంస్థ కోసం ఒకదాన్ని సృష్టించండి.",
       "requiresClean": "శుభ్రమైన సెషన్ అవసరం",
       "minIntegrity": "కనీస సమగ్రత {value}",
+      "minCameraCoverage": "కనీస కెమెరా కవరేజ్ {value}",
       "publish": "ప్రచురించు",
       "archive": "ఆర్కైవ్"
     },

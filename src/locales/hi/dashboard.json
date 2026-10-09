@@ -125,6 +125,7 @@
       "emptyBody": "किसी संगठन के लिए एक बनाएँ।",
       "requiresClean": "एक स्वच्छ सत्र आवश्यक है",
       "minIntegrity": "न्यूनतम अखंडता {value}",
+      "minCameraCoverage": "न्यूनतम कैमरा कवरेज {value}",
       "publish": "प्रकाशित करें",
       "archive": "संग्रहित करें"
     },

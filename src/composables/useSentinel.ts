@@ -1207,7 +1207,7 @@ function createSentinelService() {
   const recordKeyDown = (e: KeyboardEvent) => {
     const now = performance.now()
     if (hotkeysRunning) {
-      const combo = normaliseWebviewCombo(e)
+      const combo = normaliseWebviewCombo(e, hotkeyStatus?.cmd_is_system ?? false)
       if (combo) {
         webviewCombos.push({ at: now, combo })
         if (webviewCombos.length > WEBVIEW_COMBO_CAP) webviewCombos.shift()
@@ -1352,6 +1352,9 @@ function createSentinelService() {
       overlayLatest = null
       processLatest = null
       if (purpose === 'assessment' && enrollmentId === null) void setAssessmentShield(true)
+      // The Android counter runs since process start; discard touches that
+      // predate this session so window 1 cannot inherit an old overlay tap.
+      void tauriInvoke<number>('sentinel_take_obscured_touches').catch(() => { /* inert off Android */ })
       if (generation !== lifecycleGeneration) return
 
       // Global hotkey monitor: assessments only, and only when the OS has
@@ -1447,16 +1450,22 @@ function createSentinelService() {
     return ['quiz', 'assessment', 'interactive'].includes(elementType)
   }
 
-  // Engage / release the Android assessment shield. Idempotent on our
-  // side (skips no-ops) and best effort: a failure is logged, never thrown.
-  const setAssessmentShield = async (on: boolean) => {
-    if (shieldRequested === on) return
-    shieldRequested = on
-    try {
-      await tauriInvoke('sentinel_set_assessment_shield', { on })
-    } catch (err) {
-      console.warn('[sentinel] assessment shield IPC failed', err)
-    }
+  // Engage / release the Android assessment shield. Calls are serialised so
+  // an on/off pair cannot land out of order on the native side, and the
+  // recorded state only moves on success so a failed call is retried by
+  // the next request. Best effort: a failure is logged, never thrown.
+  let shieldChain: Promise<void> = Promise.resolve()
+  const setAssessmentShield = (on: boolean): Promise<void> => {
+    shieldChain = shieldChain.then(async () => {
+      if (shieldRequested === on) return
+      try {
+        await tauriInvoke('sentinel_set_assessment_shield', { on })
+        shieldRequested = on
+      } catch (err) {
+        console.warn('[sentinel] assessment shield IPC failed', err)
+      }
+    })
+    return shieldChain
   }
 
   const reportFaceDetection = (present: boolean, count: number, consistency: number, similarity?: number, match?: boolean) => {

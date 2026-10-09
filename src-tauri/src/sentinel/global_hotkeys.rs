@@ -81,9 +81,21 @@ pub struct Modifiers {
 }
 
 impl Modifiers {
-    /// A combo is worth recording only when a non-Shift modifier is held.
+    /// A combo is worth recording only when a non-Shift modifier is held
+    /// and the chord is not how this OS types characters.
     pub fn is_recordable(self) -> bool {
-        self.cmd || self.ctrl || self.alt
+        (self.cmd || self.ctrl || self.alt) && !self.is_text_entry_chord()
+    }
+
+    /// Option+key on macOS types accented letters and symbols; Ctrl+Alt on
+    /// Windows and Linux is AltGr. Recording either would store what the
+    /// learner typed, which the privacy contract forbids.
+    pub fn is_text_entry_chord(self) -> bool {
+        if cfg!(target_os = "macos") {
+            self.alt && !self.cmd && !self.ctrl
+        } else {
+            self.ctrl && self.alt && !self.cmd
+        }
     }
 }
 
@@ -402,7 +414,11 @@ mod imp {
         ) -> CFRunLoopSourceRef;
         fn CFRunLoopGetCurrent() -> CFRunLoopRef;
         fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
-        fn CFRunLoopRun();
+        fn CFRunLoopRunInMode(
+            mode: CFStringRef,
+            seconds: f64,
+            return_after_source_handled: bool,
+        ) -> i32;
         fn CFRunLoopStop(rl: CFRunLoopRef);
         fn CFRelease(cf: CFTypeRef);
         fn CFDictionaryCreate(
@@ -414,6 +430,7 @@ mod imp {
             value_callbacks: *const c_void,
         ) -> CFDictionaryRef;
         static kCFRunLoopCommonModes: CFStringRef;
+        static kCFRunLoopDefaultMode: CFStringRef;
         static kCFBooleanTrue: CFTypeRef;
         static kCFTypeDictionaryKeyCallBacks: c_void;
         static kCFTypeDictionaryValueCallBacks: c_void;
@@ -435,6 +452,9 @@ mod imp {
 
     static LOOP: Mutex<Option<LoopHandle>> = Mutex::new(None);
     static TAP: Mutex<Option<TapHandle>> = Mutex::new(None);
+    /// Set by `stop()`. The monitor thread polls it between run-loop
+    /// slices, so a stop that lands before the loop starts is not lost.
+    static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     struct TapHandle(CFMachPortRef);
     // SAFETY: the mach port is only used from the monitor thread and the
@@ -522,6 +542,7 @@ mod imp {
     }
 
     pub fn start() -> Result<(), String> {
+        STOP.store(false, std::sync::atomic::Ordering::SeqCst);
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         std::thread::Builder::new()
             .name("sentinel-hotkeys".into())
@@ -560,7 +581,12 @@ mod imp {
                         *t = Some(TapHandle(tap));
                     }
                     let _ = tx.send(Ok(()));
-                    CFRunLoopRun();
+                    // Run in slices and re-check the stop flag: a
+                    // CFRunLoopStop issued before the loop is running is a
+                    // no-op, so the flag is what makes stop() reliable.
+                    while !STOP.load(std::sync::atomic::Ordering::SeqCst) {
+                        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, false);
+                    }
                     CGEventTapEnable(tap, false);
                     if let Ok(mut t) = TAP.lock() {
                         *t = None;
@@ -578,6 +604,7 @@ mod imp {
     }
 
     pub fn stop() {
+        STOP.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Ok(l) = LOOP.lock() {
             if let Some(h) = l.as_ref() {
                 // SAFETY: stopping a run loop from another thread is supported.
@@ -856,7 +883,11 @@ mod imp {
 
     pub const SOURCE: &str = "xinput2";
 
-    static STOP: AtomicBool = AtomicBool::new(false);
+    /// Stop token of the current listener. Each start() mints its own, so a
+    /// listener that has not yet noticed stop() keeps its (set) token while
+    /// the new one starts clean, and never records into the same session.
+    static CURRENT: std::sync::Mutex<Option<std::sync::Arc<AtomicBool>>> =
+        std::sync::Mutex::new(None);
 
     fn has_x11() -> bool {
         std::env::var_os("DISPLAY").is_some()
@@ -880,7 +911,12 @@ mod imp {
         use x11rb::protocol::xproto::ConnectionExt as _;
         use x11rb::protocol::Event;
 
-        STOP.store(false, Ordering::SeqCst);
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        if let Ok(mut cur) = CURRENT.lock() {
+            if let Some(old) = cur.replace(stop.clone()) {
+                old.store(true, Ordering::SeqCst);
+            }
+        }
         let (conn, screen_num) = x11rb::connect(None).map_err(|e| format!("X11 connect: {e}"))?;
         let root = conn
             .setup()
@@ -919,7 +955,7 @@ mod imp {
                     mapping.keysyms.get(idx).copied()
                 };
                 loop {
-                    if STOP.load(Ordering::SeqCst) {
+                    if stop.load(Ordering::SeqCst) {
                         break;
                     }
                     let ev = match conn.poll_for_event() {
@@ -958,7 +994,11 @@ mod imp {
     }
 
     pub fn stop() {
-        STOP.store(true, Ordering::SeqCst);
+        if let Ok(cur) = CURRENT.lock() {
+            if let Some(tok) = cur.as_ref() {
+                tok.store(true, Ordering::SeqCst);
+            }
+        }
     }
 }
 
@@ -1103,7 +1143,30 @@ mod tests {
         assert!(!m(false, false, false, true).is_recordable());
         assert!(m(true, false, false, false).is_recordable());
         assert!(m(false, true, false, false).is_recordable());
-        assert!(m(false, false, true, false).is_recordable());
+        // cmd+alt is a hotkey chord everywhere.
+        assert!(m(true, false, true, false).is_recordable());
+    }
+
+    /// Option+key types characters on macOS; AltGr (ctrl+alt) does on
+    /// Windows and Linux. Neither may be recorded.
+    #[test]
+    fn text_entry_chords_are_not_recordable() {
+        let alt_only = m(false, false, true, false);
+        let ctrl_alt = m(false, true, true, false);
+        if cfg!(target_os = "macos") {
+            assert!(alt_only.is_text_entry_chord());
+            assert!(!alt_only.is_recordable());
+            assert!(!ctrl_alt.is_text_entry_chord());
+            assert!(ctrl_alt.is_recordable());
+        } else {
+            assert!(ctrl_alt.is_text_entry_chord());
+            assert!(!ctrl_alt.is_recordable());
+            assert!(!alt_only.is_text_entry_chord());
+            assert!(alt_only.is_recordable());
+        }
+        // Adding the system key (cmd / win / super) makes it a hotkey again.
+        assert!(m(true, true, true, false).is_recordable());
+        assert!(m(true, false, true, false).is_recordable());
     }
 
     #[test]
