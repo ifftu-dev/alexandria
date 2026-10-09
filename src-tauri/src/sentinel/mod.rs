@@ -7,6 +7,8 @@
 //! - `hidden_overlay` — capture-excluded / override-redirect window scan
 //!   (desktop; the Cluely-class overlay tell)
 //! - `keystroke_ae` — per-user autoencoder, candle backprop
+//! - `liveness` — MiniFASNetV2 presentation-attack detector via tract
+//!   (photo / replay / rendered face in front of any camera)
 //! - `mouse_cnn` — reservoir-style trajectory CNN, candle dense head
 //! - `face_detect` — YuNet face detector (5 landmarks) via tract
 //! - `gaze` — head-pose / second-device detection + per-user
@@ -38,6 +40,7 @@ pub mod gaze;
 pub mod global_hotkeys;
 pub mod hidden_overlay;
 pub mod keystroke_ae;
+pub mod liveness;
 pub mod mouse_cnn;
 pub mod paste_classifier;
 pub mod prior_blob;

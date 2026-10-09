@@ -62,6 +62,9 @@ const notices = computed<string[]>(() => {
   }
   if (debug.phantomHotkeys.length > 0) out.push(t('sentinel.evidence.livePhantomHotkey'))
   if (debug.cameraOptedIn && debug.cameraDeviceVirtual) out.push(t('sentinel.evidence.liveVirtualCamera'))
+  if (debug.cameraOptedIn && debug.livenessSpoofRatio != null && debug.livenessSpoofRatio > 0.5) {
+    out.push(t('sentinel.evidence.liveSpoof'))
+  }
 
   return out
 })

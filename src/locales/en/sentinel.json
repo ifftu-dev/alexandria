@@ -173,6 +173,10 @@
         "description": "The camera is a virtual device",
         "trigger": "The video device name matches a known virtual-camera product"
       },
+      "spoofSuspected": {
+        "description": "The camera face looks like a photo, screen or replay",
+        "trigger": "More than half of at least 3 liveness checks in one window scored as a possible spoof"
+      },
       "externalDisplay": {
         "description": "A second display is connected",
         "trigger": "More than one display attached; noted, not penalised"
@@ -490,7 +494,8 @@
     "valIdle": "idle",
     "valYes": "yes",
     "valNo": "no",
-    "valNa": "n/a"
+    "valNa": "n/a",
+    "rowLiveness": "liveness"
   },
   "evidence": {
     "flaggedTitle": "This session was flagged",
@@ -550,6 +555,7 @@
     "noticeNotAccusation": "This is not a finding, and it is not final. Sessions get flagged for ordinary reasons — someone walking behind you is enough.",
     "noticeWhatYouCanDo": "If you kept the evidence from that session, you can send it to them to argue your case. You do not have to, and choosing not to may not be held against you.",
     "noticeOpen": "See what they have",
-    "noticeLater": "Not now"
+    "noticeLater": "Not now",
+    "liveSpoof": "The camera check thinks it is seeing a photo or a screen, not a person. Face the camera in good light."
   }
 }

@@ -295,6 +295,8 @@ onBeforeUnmount(() => {
           <span class="text-end font-mono text-foreground">{{ lastDetections.length }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowCameraDevice') }}</span>
           <span class="text-end font-mono truncate" :class="debug.cameraDeviceVirtual ? 'text-red-500' : 'text-foreground'">{{ debug.cameraDeviceLabel || '—' }}{{ debug.cameraDeviceVirtual ? ' (virtual)' : '' }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowLiveness') }}</span>
+          <span class="text-end font-mono" :class="debug.sessionLivenessSpoof ? 'text-red-500' : 'text-foreground'">{{ debug.sessionLivenessRealProb == null ? '—' : `${fmt(debug.sessionLivenessRealProb)}${debug.livenessSpoofRatio != null ? ` · ${Math.round(debug.livenessSpoofRatio * 100)}% spoof` : ''}` }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFacePresent') }}</span>
           <span class="text-end font-mono text-foreground">{{ yn(debug.signals?.face_present) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaceConsistency') }}</span>

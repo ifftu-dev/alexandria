@@ -721,6 +721,7 @@ export type FlagType =
   | 'gaze_occluded'
   | 'device_glance'
   | 'virtual_camera'
+  | 'spoof_suspected'
   | 'external_display'
   | 'display_change'
   | 'split_screen'
@@ -809,6 +810,14 @@ export interface ScoreGazeResponse {
   faceCount: number
   /** Best detection for overlay — present when a face was found. */
   detection?: FaceDetection | null
+  /** Presentation-attack estimate for the detected face (advisory per tick). */
+  liveness?: LivenessEstimate | null
+}
+
+export interface LivenessEstimate {
+  /** Probability the face is a live person in front of the camera. */
+  real_prob: number
+  spoof_suspected: boolean
 }
 
 // Per-frame gaze features (head-pose proxies + coarse iris offset),
@@ -910,6 +919,11 @@ export interface SignalData {
   overlay_windows_scanned?: number
   overlay_windows_allowlisted?: number
   camera_device_virtual?: boolean
+  /** Liveness ticks this window and how many scored as a possible spoof. */
+  liveness_checks?: number
+  liveness_spoof_checks?: number
+  /** Mean real-face probability over the window's liveness ticks. */
+  liveness_real_prob?: number
   watched_processes?: number
   processes_scanned?: number
   watched_categories?: WatchCategory[]

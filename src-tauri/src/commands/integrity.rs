@@ -111,6 +111,7 @@ fn flag_severity(flag: &str) -> Severity {
         | "foreign_accessibility_service"
         | "debug_bridge_enabled"
         | "virtual_camera"
+        | "spoof_suspected"
         | "unauthorized_process"
         | "phantom_hotkey" => Severity::Warning,
         "tab_switching"
@@ -749,6 +750,7 @@ mod tests {
 
         // Virtual-camera label heuristic (docs/sentinel.md §Flagging Logic 25).
         assert_eq!(flag_severity("virtual_camera"), Severity::Warning);
+        assert_eq!(flag_severity("spoof_suspected"), Severity::Warning);
 
         // Process watchlist (docs/sentinel.md §Flagging Logic 26–29).
         assert_eq!(flag_severity("cheat_tool_process"), Severity::Critical);

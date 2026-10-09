@@ -173,6 +173,10 @@
         "description": "La caméra est un périphérique virtuel",
         "trigger": "Le nom du périphérique vidéo correspond à un produit de caméra virtuelle connu"
       },
+      "spoofSuspected": {
+        "description": "Le visage à la caméra ressemble à une photo, un écran ou une rediffusion",
+        "trigger": "Plus de la moitié d'au moins 3 vérifications de vivacité dans une fenêtre ont été notées comme usurpation possible"
+      },
       "externalDisplay": {
         "description": "Un second écran est connecté",
         "trigger": "Plus d'un écran branché ; noté, sans pénalité"
@@ -490,7 +494,8 @@
     "valIdle": "inactif",
     "valYes": "oui",
     "valNo": "non",
-    "valNa": "s.o."
+    "valNa": "s.o.",
+    "rowLiveness": "vivacité"
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

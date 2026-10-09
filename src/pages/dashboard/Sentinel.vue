@@ -79,6 +79,7 @@ const FLAG_CATALOG: ReadonlyArray<{ type: FlagType; key: string; severity: FlagS
   { type: 'gaze_occluded', key: 'gazeOccluded', severity: 'warning' },
   { type: 'device_glance', key: 'deviceGlance', severity: 'critical' },
   { type: 'virtual_camera', key: 'virtualCamera', severity: 'warning' },
+  { type: 'spoof_suspected', key: 'spoofSuspected', severity: 'warning' },
   { type: 'external_display', key: 'externalDisplay', severity: 'info' },
   { type: 'display_change', key: 'displayChange', severity: 'warning' },
   { type: 'split_screen', key: 'splitScreen', severity: 'critical' },

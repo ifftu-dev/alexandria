@@ -173,6 +173,10 @@
         "description": "La cámara es un dispositivo virtual",
         "trigger": "El nombre del dispositivo de vídeo coincide con un producto de cámara virtual conocido"
       },
+      "spoofSuspected": {
+        "description": "El rostro de la cámara parece una foto, una pantalla o una grabación",
+        "trigger": "Más de la mitad de al menos 3 comprobaciones de vivacidad en un periodo se puntuaron como posible suplantación"
+      },
       "externalDisplay": {
         "description": "Hay una segunda pantalla conectada",
         "trigger": "Más de una pantalla conectada; se anota, no se penaliza"
@@ -490,7 +494,8 @@
     "valIdle": "inactivo",
     "valYes": "sí",
     "valNo": "no",
-    "valNa": "n/d"
+    "valNa": "n/d",
+    "rowLiveness": "vivacidad"
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

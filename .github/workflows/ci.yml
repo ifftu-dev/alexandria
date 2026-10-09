@@ -270,6 +270,8 @@ jobs:
           # corruption or accidental swap fails here loudly. Bump both
           # file + lockfile together when rolling a new bundled model.
           shasum -a 256 -c paste-v1.onnx.sha256
+          shasum -a 256 -c yunet.onnx.sha256
+          shasum -a 256 -c minifasnet-v2-80.onnx.sha256
 
       - name: Sentinel synthetic golden hash
         if: needs.changes.outputs.backend == 'true'

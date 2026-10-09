@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::commands::sentinel_ml::{load_user_model, save_user_model};
 use crate::sentinel::face_detect;
 use crate::sentinel::gaze::{self, GazeCalibWeights, GazeCalibrator, GazeFeatures};
+use crate::sentinel::liveness::{self, LivenessEstimate};
 use crate::sentinel::types::{FaceDetection, FaceFrame, GazeCalibSample, GazeEstimate};
 use crate::AppState;
 
@@ -77,6 +78,11 @@ pub struct ScoreGazeResponse {
     /// caller needs only this one YuNet pass — no separate detect call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detection: Option<FaceDetection>,
+    /// Presentation-attack estimate for `detection`, when a face was
+    /// found and the model ran. Advisory per tick; the frontend flags a
+    /// ratio over the snapshot window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub liveness: Option<LivenessEstimate>,
 }
 
 /// Detect → load per-user calibration (if any) → estimate gaze. The
@@ -128,10 +134,18 @@ pub async fn sentinel_score_gaze(
         let detection = pick_best(&dets).cloned();
         let estimate = gaze::estimate(&frame, detection.as_ref(), calib.as_ref())
             .map_err(|e| e.to_string())?;
+        // Liveness is best-effort: a scoring error drops the estimate for
+        // this tick rather than failing the gaze read.
+        let liveness = detection.as_ref().and_then(|det| {
+            liveness::score(&frame, det.bbox)
+                .map_err(|e| log::debug!(target: "sentinel", "liveness score failed: {e}"))
+                .ok()
+        });
         Ok::<_, String>(ScoreGazeResponse {
             estimate,
             face_count,
             detection,
+            liveness,
         })
     })
     .await

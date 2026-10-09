@@ -159,6 +159,10 @@ function emptySentinelDebug() {
     sessionGazePitch: 0,
     sessionGazeOnScreen: true,
     sessionGazeOccluded: false,
+    // Latest liveness read (every camera tick) and the window ratio.
+    sessionLivenessRealProb: null as number | null,
+    sessionLivenessSpoof: false,
+    livenessSpoofRatio: null as number | null,
   }
 }
 const sentinelDebug = reactive(emptySentinelDebug())
@@ -412,6 +416,14 @@ let gazeTotalChecks = 0
 let gazeOffscreenChecks = 0
 let gazeOccludedChecks = 0
 let gazeDownGlances = 0
+// Liveness (MiniFASNet) accumulators for the current snapshot window.
+let livenessChecks = 0
+let livenessSpoofChecks = 0
+let livenessRealProbSum = 0
+/** Minimum liveness ticks in a window before a spoof ratio is trusted. */
+const LIVENESS_MIN_CHECKS = 3
+/** Fraction of ticks scored as spoof that raises `spoof_suspected`. */
+const LIVENESS_SPOOF_RATIO = 0.5
 // Reusable offscreen canvas for frame downscaling to the detector size.
 let gazeCanvas: HTMLCanvasElement | null = null
 
@@ -1055,6 +1067,19 @@ function createSentinelService() {
         if (gazeOffscreenRatio > GAZE_WANDER_RATIO) anomalies.push('gaze_wander')
         if (occludedRatio > GAZE_OCCLUDED_RATIO) anomalies.push('gaze_occluded')
       }
+      // Liveness: a single low tick is lighting as often as an attack, so
+      // the flag needs a majority of enough ticks in the window.
+      let livenessSpoofRatio: number | null = null
+      if (cameraOptedIn.value && livenessChecks > 0) {
+        livenessSpoofRatio = livenessSpoofChecks / livenessChecks
+        signals.liveness_checks = livenessChecks
+        signals.liveness_spoof_checks = livenessSpoofChecks
+        signals.liveness_real_prob = livenessRealProbSum / livenessChecks
+        if (livenessChecks >= LIVENESS_MIN_CHECKS && livenessSpoofRatio > LIVENESS_SPOOF_RATIO) {
+          anomalies.push('spoof_suspected')
+        }
+      }
+      sentinelDebug.livenessSpoofRatio = livenessSpoofRatio
 
       // Native app-switch: the assessment window lost focus to another OS
       // app this window. Roll any still-open blur into the elapsed total.
@@ -1141,6 +1166,9 @@ function createSentinelService() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      livenessChecks = 0
+      livenessSpoofChecks = 0
+      livenessRealProbSum = 0
       appFocusLostCount = 0
       appFocusLostMs = 0
       displayChangeCount = 0
@@ -1163,6 +1191,9 @@ function createSentinelService() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      livenessChecks = 0
+      livenessSpoofChecks = 0
+      livenessRealProbSum = 0
       snapshotWindowStartMs = Date.now()
 
       scheduleNextSnapshot()
@@ -1521,6 +1552,13 @@ function createSentinelService() {
       sentinelDebug.sessionGazePitch = est.pitch
       sentinelDebug.sessionGazeOnScreen = est.onScreen
       sentinelDebug.sessionGazeOccluded = est.occluded
+      if (resp.liveness) {
+        livenessChecks++
+        livenessRealProbSum += resp.liveness.real_prob
+        if (resp.liveness.spoof_suspected) livenessSpoofChecks++
+        sentinelDebug.sessionLivenessRealProb = resp.liveness.real_prob
+        sentinelDebug.sessionLivenessSpoof = resp.liveness.spoof_suspected
+      }
       if (est.occluded) {
         gazeOccludedChecks++
       } else if (!est.onScreen) {
@@ -1682,6 +1720,9 @@ function createSentinelService() {
     gazeOffscreenChecks = 0
     gazeOccludedChecks = 0
     gazeDownGlances = 0
+    livenessChecks = 0
+    livenessSpoofChecks = 0
+    livenessRealProbSum = 0
 
     return currentSessionId
   }
@@ -1759,6 +1800,9 @@ function createSentinelService() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      livenessChecks = 0
+      livenessSpoofChecks = 0
+      livenessRealProbSum = 0
       keystrokeAeStatus.value = null
       mouseCnnStatus.value = null
       cameraOptedIn.value = false

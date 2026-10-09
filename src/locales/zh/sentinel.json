@@ -173,6 +173,10 @@
         "description": "摄像头是虚拟设备",
         "trigger": "视频设备名称与已知的虚拟摄像头产品匹配"
       },
+      "spoofSuspected": {
+        "description": "摄像头中的人脸像照片、屏幕或回放",
+        "trigger": "一个窗口内至少 3 次活体检测中超过半数被判为疑似伪造"
+      },
       "externalDisplay": {
         "description": "连接了第二台显示器",
         "trigger": "连接了多台显示器；仅记录，不扣分"
@@ -490,7 +494,8 @@
     "valIdle": "空闲",
     "valYes": "是",
     "valNo": "否",
-    "valNa": "不适用"
+    "valNa": "不适用",
+    "rowLiveness": "活体检测"
   },
   "evidence": {
     "releaseTitle": "Contest a flag",
