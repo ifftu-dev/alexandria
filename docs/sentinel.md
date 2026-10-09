@@ -67,6 +67,12 @@ All processing happens client-side. There is no server-side component in the app
 | `ai_face_match` | AI | bool | advisory | Whether face matches enrollment (drives `face_mismatch` flag when false) |
 | `ai_paste_anomaly` | AI | 0-1 | 0.05† | ONNX classifier — probability snapshot is paste / typing-bot / LLM-paste-edit. Drives `paste_classifier_anomaly` (≥0.95) and `paste_classifier_critical` (≥0.99) flags. |
 | `gaze_offscreen_ratio` | AI | 0-1 | advisory | Fraction of camera ticks the learner's gaze was estimated off-screen (second-device / look-away detection). Drives `gaze_wander` (>0.30), `device_glance` (≥3 downward glances), `gaze_occluded` (>0.40 occluded). See §Gaze. |
+| `display_count` / `external_display` / `split_screen` / `screen_captured` | Native | int/bool | advisory | Display arrangement via `sentinel_display_topology` (Tauri monitors on desktop; `UIScreen` + window bounds on iOS; `DisplayManager` + multi-window on Android). Sampled at start, per snapshot window, and on `sentinel://display` nudges (window moved / scale changed). Android also reports a cumulative `native_transitions` counter so a Split View toggle between two samples is still seen. See §Platform coverage. |
+| `foreign_accessibility_services` / `adb_enabled` / `obscured_touches` | Native (Android) | int/bool | advisory | `sentinel_android_environment`: enabled non-system accessibility services, debug-bridge state, and touches delivered while another window was drawn over ours. The assessment shield (`FLAG_SECURE` + `setHideOverlayWindows`, API 31+) is engaged only while an assessment element is current. |
+| `hidden_overlays` / `overlay_windows_scanned` | Native (desktop) | int | advisory | `sentinel_hidden_overlay`: windows another process excluded from screen capture (`kCGWindowSharingState`, `GetWindowDisplayAffinity`), X11 override-redirect windows, Windows click-through topmost windows; minus our own windows and an allowlist of password managers and OS shell surfaces. |
+| `camera_device_virtual` | Rule | bool | advisory | The opted-in video track's label matches a known virtual-camera product. The label itself is shown in the dev view only and never persisted. |
+| `watched_processes` / `watched_categories` | Native (desktop) | int/list | advisory | `sentinel_process_scan`: watchlist matches by category (`interview_cheat`, `remote_desktop`, `virtual_camera`, `virtual_machine`, `ai_assistant`, `screen_share`). The full process list never leaves the backend. |
+| `global_hotkeys` / `phantom_hotkeys` | Native (desktop) | int | advisory | `sentinel_hotkeys_*`: listen-only modifier-combo monitor. Records only key-downs with Cmd/Win/Super, Ctrl or Alt held — never plain keys, Shift-only combos, or key-ups. A phantom is a combo the OS saw that the webview never received while our window was focused, excluding OS-owned shortcuts. Assessment purpose only; starts only if the OS already granted listening. |
 
 † Only applied when advisory AI scoring is toggled on (see §Runtime Toggle).
 
@@ -108,6 +114,21 @@ Per-snapshot checks:
 14. ≥ 3 downward off-screen glances in the window → `device_glance` critical
 15. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
 16. Native OS focus moved to another application → `app_switch` warning (distinct from the webview-only `tab_switching`; detected natively via NSWorkspace / GetForegroundWindow / X11, emitted on `sentinel://focus`)
+17. Second display attached → `external_display` info
+18. Display arrangement changed mid-session (monitor plugged, mirroring toggled, Split View entered, or the Android transition counter advanced) → `display_change` warning
+19. App shares the screen (iPad Split View / Slide Over / Stage Manager, Android multi-window / picture-in-picture), including a toggle between two samples → `split_screen` critical
+20. Screen being recorded or mirrored (iOS `isCaptured`; desktop duplicate monitor geometry) → `screen_captured` critical
+21. Non-system accessibility service enabled (Android) → `foreign_accessibility_service` warning
+22. USB or wireless debugging enabled (Android) → `debug_bridge_enabled` warning
+23. Touch delivered while another window overlaid ours (Android) → `obscured_touch` critical
+24. Capture-excluded, override-redirect or click-through overlay window from another process (desktop) → `hidden_overlay` critical
+25. Opted-in camera is a known virtual-camera product → `virtual_camera` warning
+26. Interview cheat tool process running (desktop) → `cheat_tool_process` critical
+27. Remote-desktop host, virtual-camera driver or VM guest agent running (desktop) → `unauthorized_process` warning
+28. Desktop AI assistant running → `ai_assistant_running` info
+29. Screen-share or meeting app running → `screen_share_running` info
+30. ≥ 1 phantom hotkey in the window (desktop) → `phantom_hotkey` warning
+31. ≥ 3 phantom hotkeys in the window (desktop) → `phantom_hotkey_repeated` critical
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
@@ -117,6 +138,22 @@ new snapshot containing a non-null `devtools_score` or `devtools_detected` flag
 before persisting scores or counters; it cannot safely reconstruct a composite
 from an older client that included the retired term. Historical snapshots and
 their stored outcomes are preserved, not silently rescored.
+
+### Platform coverage and ceilings
+
+The native signals above are per-OS `#[cfg]` modules under `src-tauri/src/sentinel/`; a platform without a source reports the signal as absent, never as clean.
+
+| Capability | Windows | macOS | Linux X11 | Linux Wayland | iOS | Android |
+|---|---|---|---|---|---|---|
+| Display topology | ✓ | ✓ | ✓ | ✓ (count only) | ✓ | ✓ (+ transition counter) |
+| Split-screen | – | – | – | – | ✓ | ✓ |
+| Screen capture / mirroring | heuristic | heuristic | – | – | ✓ | prevented (`FLAG_SECURE`) |
+| Hidden-overlay scan | ✓ | ✓ | override-redirect only | – | n/a | prevented (`setHideOverlayWindows`, API 31+) |
+| Process watchlist | ✓ | ✓ | ✓ | ✓ | – | – |
+| Phantom hotkeys | ✓ | ✓ (needs Accessibility) | ✓ | – | – | – |
+| Accessibility services / debug bridge | – | – | – | – | – | ✓ |
+
+Wayland is a stated ceiling: the compositor exposes neither the windows nor the keys of other clients, so only the display count is available there. Mobile prevents overlays and capture where it can rather than detecting them; desktop detects because it cannot prevent. Everything in this table is still client-reported (`assuranceLevel: "local"`, see §Integrity Assurance).
 
 ### Diagnostics transition
 
@@ -312,6 +349,8 @@ The earlier community prior library and runtime weights replacement are deleted:
 
 Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. Every credential Alexandria issues carries `assuranceLevel: "local"` in its signed `integrity` block (see [protocol-specification.md](protocol-specification.md) §14.9.5). `"anchored"` and `"high_assurance"` remain reserved ladder values with no verified production path: a sponsor role cannot require them, and an `IssuancePolicy.requiredAssuranceLevel` naming either refuses issuance.
 
+A policy may also set `minCameraCoverage` (0–1): the fraction of the session's stored snapshots during which the camera was opted in, read from `integrity_snapshots.camera_score` at issuance. A session with no snapshots never satisfies it. This gates at issuance only; the learner is told in the Sentinel wizard that sponsor roles may require the camera, and attempt-time enforcement requires an attempt bound to a role (see §14.9.6 of the protocol specification).
+
 ### Commitment chain
 
 Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_commitment`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`, the running root on `integrity_sessions.commitment_root`, and the signed `integrity` block carries it as `commitmentRoot`. It is local tamper evidence, not an independent witness.
@@ -359,6 +398,16 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 | `sentinel_extract_gaze_features` | Head-pose + iris features for the best face (wizard calibration capture) |
 | `sentinel_score_gaze` | Detect → load per-user calibration → return `GazeEstimate` + face count |
 | `sentinel_train_gaze_calib` | Fit/refit the per-user gaze calibration MLP from 9-point samples |
+| `sentinel_display_topology` | Native display arrangement: count, external, mirrored, split-screen, screen captured, Android transition counter |
+| `sentinel_android_environment` | Android: accessibility services, debug bridge, shield state, obscured-touch count (Android only; `Err` elsewhere) |
+| `sentinel_set_assessment_shield` | Android: engage/release `FLAG_SECURE` + `setHideOverlayWindows` for the current activity |
+| `sentinel_take_obscured_touches` | Android: return-and-clear the count of touches delivered through an obscuring window |
+| `sentinel_hidden_overlay` | Desktop: scan for capture-excluded / override-redirect / click-through windows owned by other processes |
+| `sentinel_process_scan` | Desktop: watchlist matches by category; the process list stays in the backend |
+| `sentinel_hotkeys_status` | Desktop: monitor capability + permission state plus the OS-owned combo vocabulary; never prompts |
+| `sentinel_hotkeys_request_permission` | Desktop: request listening permission (macOS Accessibility prompt); called only from the wizard |
+| `sentinel_hotkeys_start` / `sentinel_hotkeys_stop` | Desktop: start/stop the listen-only modifier-combo monitor (idempotent) |
+| `sentinel_hotkeys_drain` | Desktop: return-and-clear normalised combos recorded since the previous drain |
 
 ## UI
 
@@ -376,7 +425,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 1. **Welcome** — Explains what Sentinel does and the privacy guarantee
 2. **Typing Calibration** — User types a reference paragraph; system captures digraph timing
 3. **Mouse Calibration** — Click-target game with 8 randomly placed targets
-4. **Awareness** — Explains what signals are monitored during assessments
+4. **Awareness** — Explains what signals are monitored during assessments, including the display, overlay and process watchers; on desktop this step hosts the only prompt for the phantom-hotkey listening permission
 5. **Camera** (optional) — Face detection test + LBP enrollment
 6. **Review** — Summary of calibrated profile + AI model training results
 
@@ -387,6 +436,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 - `setElement()` on element navigation
 - `stop()` on unmount
 - `setCameraOptedIn(bool)` when the learner accepts/declines camera verification on an assessment element
+- `reportCameraDevice(label)` right after `getUserMedia` resolves, so a virtual-camera label is checked against the marker list without the label leaving the frontend
 - A `setInterval(3000)` in `Player.vue` calls `sentinel.verifyFace(videoEl)` while the camera stream is live; the hidden `<video>` element is torn down on disable or unmount
 
 ### Interview Assistant Integration
@@ -598,3 +648,6 @@ These guarantees are architectural — they are enforced by the code structure, 
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **No remote models**: No command accepts classifier weights. The only ONNX models the backend parses are embedded in the binary, so no peer or envelope can supply model bytes.
 9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.
+10. **Process and window lists never leave the backend**: `sentinel_process_scan` returns only watchlist matches (name, identifier, category, rule) and `sentinel_hidden_overlay` only the suspicious windows (owner, reason). The enumerations that produced them are dropped in the Rust call.
+11. **The hotkey monitor records no text**: only key-downs with Cmd/Win/Super, Ctrl or Alt held, as a normalised combo string plus a monotonic timestamp. Plain keys, Shift-only combos and key-ups are discarded before they reach the buffer. The monitor runs only for assessment-purpose sessions, only if the OS already granted listening, and its permission prompt lives in the Sentinel wizard — never mid-assessment.
+12. **Camera device label is not persisted**: the virtual-camera check keeps the `MediaStreamTrack` label in the frontend dev view only; snapshots carry the boolean verdict.
