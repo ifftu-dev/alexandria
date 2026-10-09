@@ -89,8 +89,9 @@ origin and a copyable `alexandria://` link.
 Alexandria → **Settings → Directories → Assessment and credential requests →
 Refresh** → **Take requested assessment**. The attempt is bound to this
 request's id and nonce. Pass, return to the same panel, **Choose a credential**
-→ **Preview disclosure** (show the exact payload: organisation, purpose,
-five-minute validity) → **Share with this organisation**.
+→ **Preview disclosure** (show the exact payload: a W3C Verifiable
+Presentation whose proof names the organisation as `domain` and the request
+nonce as `challenge`, five-minute validity) → **Share with this organisation**.
 
 Cloud → the run → **Refresh result**: credential id, **accept**, learner-issued
 caveat, integrity status.

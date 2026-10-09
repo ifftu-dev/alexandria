@@ -1790,6 +1790,24 @@ A presentation MAY reveal: credential existence only, issuer only, score only, l
 
 Schemas SHOULD be designed so that claim structures can later support zero-knowledge predicates such as `Q_{s,k} ≥ 0.8` or `L_{s,k} ≥ 4` without exposing raw underlying evidence.
 
+#### 14.18.4 Verifiable Presentations
+
+A holder hands credentials to a verifier as a W3C Verifiable Presentation
+(VC Data Model 2.0 §4.13): `type` includes `VerifiablePresentation`,
+`holder` is the subject's DID, and `verifiableCredential` carries the
+credentials — complete, or redacted under §14.18.2. The presentation is
+secured with a holder `DataIntegrityProof` (`eddsa-jcs-2022`) whose
+`proofPurpose` is `authentication`, whose `challenge` is the nonce the
+verifier issued and whose `domain` is the verifier's audience, with `created`
+and `expires` at most five minutes apart. A verifier MUST check all four
+bindings and the holder's signature before reading anything the presentation
+carries, and MUST record `(domain, challenge)` so the same presentation is
+accepted once.
+
+The credential exchange (§14.21) is one such presentation carrying exactly one
+credential plus `request` (the organisation's request, under the holder's
+signature) and, when the holder is also the issuer, `issuerState`.
+
 ### 14.19 NFT Wrapper Rules
 
 An NFT wrapper MAY exist purely as a presentation artifact. If an NFT wrapper is used:

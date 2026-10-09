@@ -1643,12 +1643,25 @@ export interface CreatePresentationRequest {
   nonce: string
 }
 
-export interface PresentationEnvelope {
-  id: string
-  payload_json: string
-  proof: string
-  subject: string
+export interface PresentationProof extends Proof {
+  challenge?: string
+  domain?: string
+  expires?: string
 }
+
+/** A W3C Verifiable Presentation signed by its holder. */
+export interface VerifiablePresentation {
+  '@context': string[]
+  id?: string
+  type: string[]
+  holder: string
+  verifiableCredential?: unknown[]
+  proof: PresentationProof
+  [extra: string]: unknown
+}
+
+/** The selective-disclosure presentation the app builds. */
+export type PresentationEnvelope = VerifiablePresentation
 
 export type PresentationVerification =
   | 'accepted'
@@ -1656,6 +1669,7 @@ export type PresentationVerification =
   | 'audience_mismatch'
   | 'replayed'
   | 'malformed'
+  | 'expired'
 
 // --- PinBoard (§12 + §20.4) ----------------------------------------------
 
@@ -2230,16 +2244,10 @@ export interface DirectoryCredentialRequest {
   request: CredentialRequest
 }
 
-export interface SignedCredentialShare {
-  share: {
-    format: string
-    request: CredentialRequest
-    issued_at: number
-    expires_at: number
-    credential: unknown
-    issuer_state: unknown
-  }
-  signature: string
+/** The credential exchange share: a presentation carrying one credential and the request it answers. */
+export interface SignedCredentialShare extends VerifiablePresentation {
+  request: CredentialRequest
+  issuerState?: unknown
 }
 
 export interface ShareableCredential {

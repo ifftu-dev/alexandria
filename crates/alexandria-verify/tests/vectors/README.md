@@ -42,6 +42,17 @@ by the signature like any other field, and nothing expands or dereferences it.
    status-list evidence is pending. A failed cryptographic/policy check or an
    invalid status reference is rejected.
 
+## Presentations
+
+A holder presents credentials as a W3C Verifiable Presentation secured the
+same way: `proof.type` `DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`,
+`proofPurpose` `authentication`, `challenge` = the verifier's nonce, `domain`
+= the verifier's audience, `created` and `expires` at most 300 seconds apart,
+`verificationMethod` = `<holder DID>#<fragment>`. The hash data is computed
+exactly as for a credential (steps 1–4 above) over the presentation document.
+Verify the holder's signature first, then each credential inside
+`verifiableCredential` on its own terms.
+
 ## Resolving the issuer key
 
 `did:key` is self-resolving: the public key is embedded in the identifier, so no

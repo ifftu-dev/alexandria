@@ -39,21 +39,36 @@ pub struct UnsignedCredential {
 /// `proofValue` present on `credential`, if any, is ignored: the proof
 /// configuration is everything in `proof` except the value.
 pub fn hash_data(credential: &VerifiableCredential) -> Result<[u8; 64], VcError> {
-    let mut config = serde_json::to_value(&credential.proof)?;
-    let object = config
+    hash_data_for(&serde_json::to_value(credential)?)
+}
+
+/// The `eddsa-jcs-2022` hash data for any secured JSON document — a
+/// credential or a presentation — carrying `@context` and a `proof`.
+pub fn hash_data_for(secured: &serde_json::Value) -> Result<[u8; 64], VcError> {
+    let object = secured
+        .as_object()
+        .ok_or_else(|| VcError::InvalidCredential("document is not an object".into()))?;
+    let mut config = object
+        .get("proof")
+        .cloned()
+        .ok_or_else(|| VcError::InvalidCredential("document has no proof".into()))?;
+    let options = config
         .as_object_mut()
         .ok_or_else(|| VcError::InvalidCredential("proof is not an object".into()))?;
-    object.remove("proofValue");
-    object.insert(
+    options.remove("proofValue");
+    options.insert(
         "@context".into(),
-        serde_json::to_value(&credential.context)?,
+        object
+            .get("@context")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
     );
     let canonical_config = canonicalize(&config)?;
 
-    let mut document = serde_json::to_value(credential)?;
+    let mut document = secured.clone();
     document
         .as_object_mut()
-        .ok_or_else(|| VcError::InvalidCredential("credential is not an object".into()))?
+        .expect("checked above")
         .remove("proof");
     let canonical_document = canonicalize(&document)?;
 
@@ -61,6 +76,45 @@ pub fn hash_data(credential: &VerifiableCredential) -> Result<[u8; 64], VcError>
     out[..32].copy_from_slice(&Sha256::digest(&canonical_config));
     out[32..].copy_from_slice(&Sha256::digest(&canonical_document));
     Ok(out)
+}
+
+/// Sign any JSON document whose `proof` holds complete options (type,
+/// cryptosuite, created, verificationMethod, proofPurpose, and for a
+/// presentation challenge/domain/expires). Sets `proof.proofValue`.
+pub fn sign_document(
+    secured: &mut serde_json::Value,
+    signing_key: &SigningKey,
+) -> Result<(), VcError> {
+    if let Some(proof) = secured.get_mut("proof").and_then(|p| p.as_object_mut()) {
+        proof.remove("proofValue");
+    }
+    let signature = signing_key.sign(&hash_data_for(secured)?);
+    secured["proof"]["proofValue"] = multibase_base58btc(&signature.to_bytes()).into();
+    Ok(())
+}
+
+/// Verify the `proofValue` of any secured JSON document against `key`.
+/// `Ok(false)` for a malformed or wrong signature.
+pub fn verify_document(
+    secured: &serde_json::Value,
+    key: &ed25519_dalek::VerifyingKey,
+) -> Result<bool, VcError> {
+    let Some(value) = secured
+        .get("proof")
+        .and_then(|p| p.get("proofValue"))
+        .and_then(|v| v.as_str())
+    else {
+        return Ok(false);
+    };
+    let Some(bytes) = multibase_base58btc_decode(value) else {
+        return Ok(false);
+    };
+    let Ok(signature) = ed25519_dalek::Signature::from_slice(&bytes) else {
+        return Ok(false);
+    };
+    Ok(key
+        .verify_strict(&hash_data_for(secured)?, &signature)
+        .is_ok())
 }
 
 /// The verification method for `signing_key` under `issuer`: the issuer's

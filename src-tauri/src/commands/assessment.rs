@@ -1334,7 +1334,7 @@ mod tests {
     #[test]
     fn native_assessment_is_discoverable_and_verifies_as_a_bound_share() {
         use alexandria_verify::exchange::{
-            sign_share, verify_share, CredentialRequest, CredentialShare, IssuerState, FORMAT,
+            present_credential, verify_share, CredentialRequest, IssuerState,
         };
         let ctx = setup();
         ctx.db.conn().execute("UPDATE assessment_attempts SET exchange_binding='request:demo:nonce' WHERE id='att_1'", []).unwrap();
@@ -1379,20 +1379,16 @@ mod tests {
             created_at: now,
             expires_at: now + 900,
         };
-        let signed = sign_share(
-            CredentialShare {
-                format: FORMAT.into(),
-                request: request.clone(),
-                issued_at: now,
-                expires_at: now + 300,
-                credential: serde_json::from_str(&json).unwrap(),
-                issuer_state: Some(IssuerState {
-                    revoked: false,
-                    suspended: false,
-                    suspended_until: None,
-                    superseded: false,
-                }),
-            },
+        let signed = present_credential(
+            request.clone(),
+            serde_json::from_str(&json).unwrap(),
+            Some(IssuerState {
+                revoked: false,
+                suspended: false,
+                suspended_until: None,
+                superseded: false,
+            }),
+            now,
             &ctx.key,
         )
         .unwrap();

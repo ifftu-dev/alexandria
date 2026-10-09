@@ -1,8 +1,8 @@
 use alexandria_learning_contracts::TaxonomySnapshot;
 use alexandria_verify::exchange::{
-    sign_share, verify_share, CredentialRequest, CredentialShare, IssuerState,
-    SignedCredentialShare, FORMAT,
+    present_credential, shared_credential, verify_share, CredentialRequest, IssuerState,
 };
+use alexandria_verify::vc::presentation::VerifiablePresentation;
 use reqwest::Url;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -231,7 +231,7 @@ pub async fn exchange_preview(
     state: State<'_, AppState>,
     request: CredentialRequest,
     credential_id: String,
-) -> Result<SignedCredentialShare, String> {
+) -> Result<VerifiablePresentation, String> {
     let (key, did) = load_issuer_key(&state).await?;
     validate_request(&request, did.as_str())?;
     state.db_executor.execute(DatabaseWorkload::Learner,state.profile_lease(),"exchange.preview",move |db| {
@@ -242,10 +242,9 @@ pub async fn exchange_preview(
         let credential:alexandria_verify::vc::VerifiableCredential = serde_json::from_str(&json).map_err(|e|e.to_string())?;
         let issuer_state = (credential.issuer==did).then_some(IssuerState {revoked,suspended,suspended_until,superseded});
         let now = chrono::Utc::now().timestamp();
-        let share = CredentialShare {format:FORMAT.into(),expires_at:(now+300).min(request.expires_at),issued_at:now,request,credential,issuer_state};
-        let signed = sign_share(share,&key)?;
-        verify_share(&signed,&signed.share.request,now,&now_rfc3339())?;
-        Ok(signed)
+        let presentation = present_credential(request.clone(), credential, issuer_state, now, &key)?;
+        verify_share(&presentation, &request, now, &now_rfc3339())?;
+        Ok(presentation)
     }).await
 }
 
@@ -253,18 +252,19 @@ pub async fn exchange_preview(
 pub async fn exchange_send(
     state: State<'_, AppState>,
     directory_url: String,
-    signed: SignedCredentialShare,
+    signed: VerifiablePresentation,
 ) -> Result<serde_json::Value, String> {
     let dir = directory(&state, &directory_url).await?;
     let (_, did) = load_issuer_key(&state).await?;
-    validate_request(&signed.share.request, did.as_str())?;
+    let request = shared_credential(&signed)?.request;
+    validate_request(&request, did.as_str())?;
     verify_share(
         &signed,
-        &signed.share.request,
+        &request,
         chrono::Utc::now().timestamp(),
         &now_rfc3339(),
     )?;
-    let id = uuid::Uuid::parse_str(&signed.share.request.id).map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::parse_str(&request.id).map_err(|e| e.to_string())?;
     if !state.profile_lease().is_current() {
         return Err("profile changed".into());
     }

@@ -83,7 +83,7 @@ fn run_verify(
 
     use app_lib::commands::presentation::PresentationVerification as V;
     output::blank();
-    output::kv("Subject", &envelope.subject);
+    output::kv("Subject", envelope.holder.as_str());
     match verdict {
         V::Accepted => output::success("Accepted — signature, audience, and nonce all check out"),
         V::BadSignature => output::error("Rejected — signature does not verify"),
@@ -92,12 +92,13 @@ fn run_verify(
         }
         V::Replayed => output::error("Rejected — this presentation has already been used"),
         V::Malformed => output::error("Rejected — envelope payload is malformed"),
+        V::Expired => output::error("Rejected — the presentation proof has expired"),
     }
 
     // An unverifiable presentation is a verdict, not a command failure: the
     // caller inspects `accepted` (or the human line above) and decides.
     output::emit(&json!({
-        "subject": envelope.subject,
+        "subject": envelope.holder.as_str().to_string(),
         "audience": audience,
         "verdict": verdict,
         "accepted": verdict == V::Accepted,

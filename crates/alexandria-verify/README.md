@@ -94,6 +94,11 @@ twelve credential vectors, the exact-byte limit vectors in
 endorsement import consumes the same endorsement bytes. If you are writing your own verifier in another language, start there:
 the vectors are the contract, and this crate is one implementation of it.
 
+Presentations (`vc::presentation`) are W3C Verifiable Presentations with a
+holder `DataIntegrityProof` of purpose `authentication`, bound to the
+verifier's `challenge` and `domain` and valid for at most five minutes; the
+credential exchange (`exchange`) is built on them.
+
 The proof is the standard `eddsa-jcs-2022` cryptosuite, so a general-purpose
 Data Integrity verifier (for example `@digitalbazaar/data-integrity` with
 `@digitalbazaar/eddsa-jcs-2022-cryptosuite`) verifies an Alexandria credential

@@ -238,7 +238,9 @@ async fn every_credential_failure_is_told_apart_and_none_is_called_valid() {
         },
         Vector {
             file: "04-malformed-proof-value",
-            credential: include_str!("../../alexandria-verify/tests/vectors/04-malformed-proof-value.json"),
+            credential: include_str!(
+                "../../alexandria-verify/tests/vectors/04-malformed-proof-value.json"
+            ),
             signature_valid: false,
             expired: false,
             subject_bound: true,

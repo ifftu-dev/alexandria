@@ -109,7 +109,7 @@ onUnmounted(() => { revision++ })
       <AppButton :disabled="!credentialId || busy" @click="showPreview">{{ t('profile.exchange.preview') }}</AppButton>
       <template v-if="preview">
         <p class="text-sm">{{ t('profile.exchange.disclosure') }}</p>
-        <details><summary>{{ t('profile.exchange.exact') }}</summary><pre class="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{{ JSON.stringify(preview.share, null, 2) }}</pre></details>
+        <details><summary>{{ t('profile.exchange.exact') }}</summary><pre class="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{{ JSON.stringify(preview, null, 2) }}</pre></details>
         <AppButton v-if="!receipt" :disabled="busy" @click="share">{{ t('profile.exchange.share') }}</AppButton>
         <p v-else role="status" class="text-sm">{{ t('profile.exchange.received') }}: {{ receipt }}</p>
       </template>

@@ -1597,6 +1597,7 @@ impl App {
             V::AudienceMismatch => "not bound to this audience",
             V::Replayed => "already used once",
             V::Malformed => "envelope payload is malformed",
+            V::Expired => "the presentation proof has expired",
         };
         let ok = verdict == V::Accepted;
 
@@ -1604,7 +1605,7 @@ impl App {
             title: "Presentation".into(),
             lines: vec![
                 ("Envelope".into(), path.to_string()),
-                ("Subject".into(), envelope.subject.clone()),
+                ("Subject".into(), envelope.holder.as_str().to_string()),
                 ("Audience".into(), audience.to_string()),
                 (
                     "Verdict".into(),

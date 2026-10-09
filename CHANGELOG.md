@@ -13,6 +13,13 @@
   independent Node verifier, Alexandria Cloud's vendored copy and the
   website's in-browser verifier move together. Pre-launch: no issued
   credential is migrated.
+- **Presentations are W3C Verifiable Presentations.** The credential
+  exchange share and the selective-disclosure envelope are
+  `VerifiablePresentation` documents with a holder `DataIntegrityProof`
+  (purpose `authentication`, `challenge` = request nonce, `domain` =
+  audience, five-minute `expires`). The custom detached-JWS envelopes
+  are gone; verifiers refuse a presentation whose proof is not bound to
+  them.
 
 
 All notable changes to this project will be documented in this file.

@@ -12,6 +12,7 @@
 pub mod canonicalize;
 pub mod context;
 pub mod id;
+pub mod presentation;
 pub mod sign;
 pub mod status;
 pub mod verify;
@@ -450,6 +451,14 @@ pub struct Proof {
     pub created: String,
     pub verification_method: VerificationMethodRef,
     pub proof_purpose: String,
+    /// Presentation proofs only: the verifier's nonce and audience (Data
+    /// Integrity §2.1 `challenge` / `domain`) and an expiry for the proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub proof_value: String,
 }
@@ -465,7 +474,27 @@ impl Proof {
             created: created.into(),
             verification_method: VerificationMethodRef(String::new()),
             proof_purpose: "assertionMethod".into(),
+            challenge: None,
+            domain: None,
+            expires: None,
             proof_value: String::new(),
+        }
+    }
+
+    /// Proof options for a holder's presentation: purpose `authentication`,
+    /// bound to the verifier's `challenge` and `domain`, with an expiry.
+    pub fn for_presentation(
+        created: impl Into<String>,
+        expires: impl Into<String>,
+        challenge: impl Into<String>,
+        domain: impl Into<String>,
+    ) -> Self {
+        Proof {
+            proof_purpose: "authentication".into(),
+            challenge: Some(challenge.into()),
+            domain: Some(domain.into()),
+            expires: Some(expires.into()),
+            ..Proof::unsigned(created)
         }
     }
 }

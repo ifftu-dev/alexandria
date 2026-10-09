@@ -562,15 +562,25 @@ async fn credential_summaries_never_carry_the_signed_document() {
     // A presentation for another audience, and one whose proof does not verify,
     // are both refused — and neither records a nonce.
     let envelope = |audience: &str, nonce: &str| {
-        let payload = json!({"audience": audience, "nonce": nonce, "bundle": []}).to_string();
         json!({
             "presentation_json": json!({
+                "@context": ["https://www.w3.org/ns/credentials/v2"],
                 "id": "urn:presentation:test",
-                "payload_json": payload,
+                "type": ["VerifiablePresentation"],
+                "holder": "did:key:not-a-real-key",
                 // Not a proof this device will accept. The audience and replay
                 // checks run before the proof is looked at.
-                "proof": "eyJhbGciOiJFZERTQSJ9..AAAA",
-                "subject": "did:key:not-a-real-key",
+                "proof": {
+                    "type": "DataIntegrityProof",
+                    "cryptosuite": "eddsa-jcs-2022",
+                    "created": "2026-01-01T00:00:00Z",
+                    "expires": "2099-01-01T00:00:00Z",
+                    "verificationMethod": "did:key:not-a-real-key#key",
+                    "proofPurpose": "authentication",
+                    "challenge": nonce,
+                    "domain": audience,
+                    "proofValue": "zAAAA"
+                }
             })
             .to_string(),
             "audience": "did:key:verifier",
