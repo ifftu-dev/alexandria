@@ -274,6 +274,12 @@ let unlistenFocus: UnlistenFn | null = null
 let displayBaseline: DisplayTopology | null = null
 let displayLatest: DisplayTopology | null = null
 let displayChangeCount = 0
+// Native-reported transitions seen so far; the delta between samples
+// counts toggles that began and ended between two samples.
+let displayNativeTransitions = -1
+let displayNativeToggle = false
+let unlistenDisplay: UnlistenFn | null = null
+let displayResampleTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Stable identity for "did the arrangement change" (ignores `source`). */
 const displaySignature = (t: DisplayTopology): string =>
@@ -289,6 +295,12 @@ const recordDisplaySample = (sample: DisplayTopology | null): DisplayTopology | 
   if (displayLatest && displaySignature(displayLatest) !== displaySignature(sample)) {
     displayChangeCount++
   }
+  const native = sample.native_transitions ?? 0
+  if (displayNativeTransitions >= 0 && native > displayNativeTransitions) {
+    displayChangeCount += native - displayNativeTransitions
+    displayNativeToggle = true
+  }
+  displayNativeTransitions = native
   displayLatest = sample
   return sample
 }
@@ -299,7 +311,7 @@ const displayAnomalies = (): string[] => {
   const t = displayLatest
   if (t) {
     if (t.external_display) out.push('external_display')
-    if (t.split_screen) out.push('split_screen')
+    if (t.split_screen || displayNativeToggle) out.push('split_screen')
     if (t.mirrored) out.push('screen_captured')
   }
   if (displayChangeCount > 0) out.push('display_change')
@@ -1037,6 +1049,7 @@ function createSentinelService() {
       appFocusLostCount = 0
       appFocusLostMs = 0
       displayChangeCount = 0
+      displayNativeToggle = false
       obscuredTouchesWindow = 0
       keystrokeBuffer = []
       mouseBuffer = []
@@ -1206,12 +1219,37 @@ function createSentinelService() {
       displayBaseline = null
       displayLatest = null
       displayChangeCount = 0
+      displayNativeTransitions = -1
+      displayNativeToggle = false
       try {
         const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
         if (generation !== lifecycleGeneration) return
         recordDisplaySample(topo)
       } catch (err) {
         console.warn('[sentinel] display topology baseline failed', err)
+      }
+      if (generation !== lifecycleGeneration) return
+
+      // Native nudge (window moved to another monitor / scale changed):
+      // resample right away instead of waiting for the snapshot. Debounced
+      // because a drag emits a stream of moves.
+      try {
+        unlistenDisplay = await tauriListen<{ reason: string }>('sentinel://display', () => {
+          if (!isActive.value) return
+          if (displayResampleTimer) clearTimeout(displayResampleTimer)
+          displayResampleTimer = setTimeout(async () => {
+            displayResampleTimer = null
+            if (!isActive.value || generation !== lifecycleGeneration) return
+            try {
+              const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
+              if (isActive.value && generation === lifecycleGeneration) recordDisplaySample(topo)
+            } catch (err) {
+              console.warn('[sentinel] display resample failed', err)
+            }
+          }, 300)
+        })
+      } catch (err) {
+        console.warn('[sentinel] display listener failed', err)
       }
       if (generation !== lifecycleGeneration) return
 
@@ -1433,6 +1471,8 @@ function createSentinelService() {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     document.removeEventListener('paste', onPaste)
     if (unlistenFocus) { unlistenFocus(); unlistenFocus = null }
+    if (unlistenDisplay) { unlistenDisplay(); unlistenDisplay = null }
+    if (displayResampleTimer) { clearTimeout(displayResampleTimer); displayResampleTimer = null }
     if (liveTimer) { clearInterval(liveTimer); liveTimer = null }
   }
 
@@ -1552,6 +1592,8 @@ function createSentinelService() {
       displayBaseline = null
       displayLatest = null
       displayChangeCount = 0
+      displayNativeTransitions = -1
+      displayNativeToggle = false
       androidEnvLatest = null
       obscuredTouchesWindow = 0
       overlayLatest = null

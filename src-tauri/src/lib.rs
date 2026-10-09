@@ -634,21 +634,40 @@ pub fn run() {
     tracing::subscriber::set_global_default(TracingToLog).ok();
 
     let builder = tauri::Builder::default().on_window_event(|window, event| {
-        // Native app-focus signal for Sentinel: when the assessment
-        // window loses focus, report which OS app took the
-        // foreground (webview can't see this). Emitted to the
-        // frontend, which folds it into the integrity snapshot.
-        if let tauri::WindowEvent::Focused(focused) = event {
-            use tauri::Emitter;
-            let app = if *focused {
-                None
-            } else {
-                crate::sentinel::active_app::frontmost_app()
-            };
-            let _ = window.emit(
-                "sentinel://focus",
-                serde_json::json!({ "focused": *focused, "app": app }),
-            );
+        use tauri::Emitter;
+        match event {
+            // Native app-focus signal for Sentinel: when the assessment
+            // window loses focus, report which OS app took the
+            // foreground (webview can't see this). Emitted to the
+            // frontend, which folds it into the integrity snapshot.
+            tauri::WindowEvent::Focused(focused) => {
+                let app = if *focused {
+                    None
+                } else {
+                    crate::sentinel::active_app::frontmost_app()
+                };
+                let _ = window.emit(
+                    "sentinel://focus",
+                    serde_json::json!({ "focused": *focused, "app": app }),
+                );
+            }
+            // Display-topology nudge: a window that moved to another
+            // monitor or changed scale factor is the moment to resample
+            // `sentinel_display_topology` instead of waiting for the next
+            // snapshot window. The frontend debounces drags.
+            tauri::WindowEvent::Moved(_) => {
+                let _ = window.emit(
+                    "sentinel://display",
+                    serde_json::json!({ "reason": "moved" }),
+                );
+            }
+            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                let _ = window.emit(
+                    "sentinel://display",
+                    serde_json::json!({ "reason": "scale_changed" }),
+                );
+            }
+            _ => {}
         }
     });
 

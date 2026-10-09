@@ -905,6 +905,7 @@ export interface DisplayTopology {
   external_display: boolean
   mirrored: boolean
   split_screen: boolean
+  native_transitions?: number
   source: string
 }
 

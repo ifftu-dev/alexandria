@@ -38,6 +38,12 @@ pub struct DisplayTopology {
     /// The app does not own the whole screen: multi-window / Split View /
     /// Slide Over / Picture-in-Picture (mobile only).
     pub split_screen: bool,
+    /// Cumulative native-reported mode transitions (Android multi-window /
+    /// PiP enter+exit) since process start; the frontend diffs samples so
+    /// a brief toggle between two samples is still seen. `0` where the
+    /// platform reports none.
+    #[serde(default)]
+    pub native_transitions: u32,
     /// Which probe produced this reading, for review context.
     pub source: String,
 }
@@ -69,6 +75,7 @@ pub fn from_monitors(monitors: &[MonitorGeometry], source: &str) -> DisplayTopol
         external_display: display_count > 1,
         mirrored,
         split_screen: false,
+        native_transitions: 0,
         source: source.to_owned(),
     }
 }
@@ -90,6 +97,8 @@ pub fn from_android_json(raw: &str) -> Result<DisplayTopology, String> {
         multi_window: bool,
         #[serde(default)]
         picture_in_picture: bool,
+        #[serde(default)]
+        native_transitions: u32,
     }
     let r: Raw = serde_json::from_str(raw).map_err(|e| format!("display topology JSON: {e}"))?;
     Ok(DisplayTopology {
@@ -97,6 +106,7 @@ pub fn from_android_json(raw: &str) -> Result<DisplayTopology, String> {
         external_display: r.display_count > 1 || r.presentation_count > 0,
         mirrored: false,
         split_screen: r.multi_window || r.picture_in_picture,
+        native_transitions: r.native_transitions,
         source: "android".to_owned(),
     })
 }
@@ -120,6 +130,7 @@ pub fn from_uikit(
         external_display: screen_count > 1,
         mirrored: captured,
         split_screen,
+        native_transitions: 0,
         source: "uikit".to_owned(),
     }
 }
@@ -282,6 +293,15 @@ mod tests {
         assert!(t.split_screen);
         assert!(!t.mirrored);
         assert_eq!(t.source, "android");
+    }
+
+    #[test]
+    fn android_json_carries_native_transitions() {
+        let t = from_android_json(r#"{"display_count":1,"native_transitions":3}"#).unwrap();
+        assert_eq!(t.native_transitions, 3);
+        assert!(!t.split_screen);
+        let d = from_android_json("{}").unwrap();
+        assert_eq!(d.native_transitions, 0);
     }
 
     #[test]

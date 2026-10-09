@@ -196,7 +196,8 @@ describe('Sentinel lifecycle ownership', () => {
     for (const [type, listener] of listeners) {
       expect(removed).toHaveBeenCalledWith(type, listener)
     }
-    expect(mocks.unlisten).toHaveBeenCalledOnce()
+    // One unlisten per native listener: sentinel://focus and sentinel://display.
+    expect(mocks.unlisten).toHaveBeenCalledTimes(2)
     expect(vi.getTimerCount()).toBe(0)
     expect(starter.isActive.value).toBe(false)
   })
@@ -206,7 +207,9 @@ describe('Sentinel lifecycle ownership', () => {
     const service = useSentinel()
     await Promise.all([service.start('enrollment'), useSentinel().start('enrollment')])
     expect(mocks.invoke.mock.calls.filter(([name]) => name === 'integrity_start_session')).toHaveLength(1)
-    expect(mocks.listen).toHaveBeenCalledOnce()
+    // Exactly one set of native listeners (focus + display), not one per caller.
+    expect(mocks.listen).toHaveBeenCalledTimes(2)
+    expect(mocks.listen.mock.calls.map(([name]) => name).sort()).toEqual(['sentinel://display', 'sentinel://focus'])
     await service.stop()
   })
 
@@ -577,5 +580,54 @@ describe('Virtual camera signal', () => {
     expect(snapshotFlags()).toEqual([[]])
     expect(service.debug.cameraDeviceLabel).toBe('')
     await service.stop()
+  })
+})
+
+describe('Display topology native nudges', () => {
+  const topology = (overrides: Record<string, unknown> = {}) => ({
+    display_count: 1, external_display: false, mirrored: false, split_screen: false, native_transitions: 0, source: 'test', ...overrides,
+  })
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+  const withTopology = (responses: Array<ReturnType<typeof topology>>) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_display_topology') return responses[Math.min(i++, responses.length - 1)]
+      return fallback(command, args)
+    })
+  }
+  const fireDisplayEvent = () => {
+    const handler = mocks.listen.mock.calls.find(([name]) => name === 'sentinel://display')?.[1] as ((e: { payload: unknown }) => void) | undefined
+    expect(handler).toBeDefined()
+    handler!({ payload: { reason: 'moved' } })
+  }
+
+  it('a native transition counter delta flags split_screen even when the sample is back to normal', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology({ native_transitions: 4 }), topology({ native_transitions: 6 }), topology({ native_transitions: 6 })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['split_screen', 'display_change'], []])
+    await service.stop()
+  })
+
+  it('a window-moved nudge resamples once after the debounce and catches a new monitor', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology(), topology({ display_count: 2, external_display: true })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    const before = mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology').length
+    fireDisplayEvent(); fireDisplayEvent(); fireDisplayEvent()
+    await vi.advanceTimersByTimeAsync(350)
+    expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology').length).toBe(before + 1)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()[0]).toEqual(['external_display', 'display_change'])
+    await service.stop()
+    expect(mocks.unlisten).toHaveBeenCalled()
   })
 })

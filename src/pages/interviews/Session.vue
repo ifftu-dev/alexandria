@@ -218,7 +218,7 @@ async function startSelfPreview() {
       video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
       audio: false,
     })
-    sentinel.reportCameraDevice(selfStream.value.getVideoTracks()[0]?.label ?? null)
+    sentinel.reportCameraDevice(selfStream.value.getVideoTracks?.()[0]?.label ?? null)
     await nextTick()
     if (selfVideo.value) {
       selfVideo.value.srcObject = selfStream.value

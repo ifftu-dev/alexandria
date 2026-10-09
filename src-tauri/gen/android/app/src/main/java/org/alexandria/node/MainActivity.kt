@@ -110,8 +110,16 @@ class MainActivity : TauriActivity() {
       }
       json.put("multi_window", a.isInMultiWindowMode)
       json.put("picture_in_picture", a.isInPictureInPictureMode)
+      json.put("native_transitions", multiWindowTransitions.get())
       return json.toString()
     }
+
+    /**
+     * Cumulative count of multi-window / PiP mode transitions since process
+     * start. A transition that begins and ends between two Sentinel samples
+     * would otherwise go unseen; the delta between samples surfaces it.
+     */
+    private val multiWindowTransitions = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Whether the assessment shield is engaged. Remembered here so a
@@ -219,6 +227,16 @@ class MainActivity : TauriActivity() {
       obscuredTouches.incrementAndGet()
     }
     return super.dispatchTouchEvent(event)
+  }
+
+  override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: android.content.res.Configuration) {
+    super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+    multiWindowTransitions.incrementAndGet()
+  }
+
+  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    multiWindowTransitions.incrementAndGet()
   }
 
   override fun onRequestPermissionsResult(
