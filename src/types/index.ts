@@ -2170,6 +2170,59 @@ export interface CredentialRequest {
   expires_at: number
 }
 
+export interface InterviewInvite {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  role_label: string
+  message: string
+  mode: 'video' | 'call' | 'in_person'
+  proposed_slots: number[]
+  meeting_url: string | null
+  run_id: string | null
+  created_at: number
+  expires_at: number
+}
+
+export interface DirectoryInterview {
+  directory_url: string
+  invite: InterviewInvite
+}
+
+export interface OfferTerms {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  interview_id: string
+  role_label: string
+  terms: string
+  start_date: string | null
+  created_at: number
+  expires_at: number
+}
+
+export interface DirectoryOffer {
+  directory_url: string
+  offer: OfferTerms
+}
+
+export interface HiringRecord {
+  id: string
+  kind: 'interview' | 'offer'
+  directory_url: string
+  organization: string
+  role_label: string
+  decision: 'accept' | 'decline'
+  chosen_slot: number | null
+  meeting_url: string | null
+  responded_at: string
+  payload_json: string
+}
+
 export interface DirectoryCredentialRequest {
   directory_url: string
   request: CredentialRequest

@@ -148,5 +148,30 @@
     "shareNext": "Share or publish",
     "liveView": "Sentinel Dev · ⌘⇧S",
     "liveNote": "Enable the camera below for a local live preview. During a skill assessment, it also supplies face and gaze signals. Closing this window stops its camera."
+  },
+  "hiring": {
+    "title": "Interview invitations and offers",
+    "note": "Invitations and offers come from your configured directories and are addressed to your identity. Your answer is signed with your key and sent only to that organisation. Silence is not reported as a refusal.",
+    "empty": "No open invitations or offers. Add your directory above, then refresh.",
+    "interviews": "Interview invitations",
+    "offers": "Offers",
+    "chooseTime": "Choose a time",
+    "meeting": "Meeting",
+    "toBeArranged": "To be arranged by the organisation",
+    "noteLabel": "Note to the organisation (optional)",
+    "accept": "Accept",
+    "decline": "Decline",
+    "acceptOffer": "Accept offer",
+    "declineOffer": "Decline offer",
+    "answered": "Answer received",
+    "history": "Your answers",
+    "starts": "Starts",
+    "followsRun": "Follows your assessment",
+    "expires": "Expires",
+    "modeVideo": "Video call",
+    "modeCall": "Phone call",
+    "modeInPerson": "In person",
+    "accepted": "Accepted",
+    "declined": "Declined"
   }
 }

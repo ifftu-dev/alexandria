@@ -26,6 +26,7 @@ import DeveloperSeedsPanel from '@/components/settings/DeveloperSeedsPanel.vue'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
 import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
+import HiringInbox from '@/components/profile/HiringInbox.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
@@ -971,6 +972,7 @@ function onSectionClick(id: SettingsSectionId) {
                 <template v-else-if="activeSection === 'directories'">
                   <HolderDirectories />
                   <CredentialRequests />
+                  <HiringInbox />
                 </template>
 
                 <!-- ──────────── Assistant access — external MCP clients ──────────── -->

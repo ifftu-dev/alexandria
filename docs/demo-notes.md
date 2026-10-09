@@ -57,3 +57,23 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 **If needed:** idle means no assessment is running. Camera preview still works. Keep diagnostics off during assessments; avoid reloading an attempt because cooldowns apply. If sharing fails, retry the same preview promptly and refresh Cloud.
 
 [Setup and troubleshooting](assessment-demo.md)
+
+## 3. Interview and offer
+
+1. **Cloud → run → Invite to interview:** role, message, times, your meeting link → send.
+2. **Alexandria → Settings → Directories → Interview invitations and offers → Refresh → choose a time → Accept.**
+   Say: "Signed over the whole invitation, sent only to this organisation."
+3. **Cloud → interview → Refresh → Record the interview → Advance → Make an offer.**
+4. **Alexandria → Refresh → Accept offer.** Cloud → Refresh → accepted.
+
+## 4. Verify without us
+
+**Credentials → Export**, then in a terminal: `node scripts/demo/verify-credential.mjs <file>`.
+Say: "Node's standard library, JCS and Ed25519. No Alexandria code, no server." Paste the issuer DID into dev.uniresolver.io for the same key.
+
+## 5. Validity pilot
+
+**Cloud → Operations → Validity pilot → Create study → sign-off → reviewers → enrol → screen → score → export.**
+Say: "Random arms, separate reviewers, blind practical scoring, no identifiers in the export."
+
+Full operator sheet: [demo-runbook.md](demo-runbook.md).

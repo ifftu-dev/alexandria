@@ -1,6 +1,6 @@
 # Assessment → credential → Cloud demo
 
-This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandria Cloud. It supports both a learner publishing an earned skill and an organization requesting an assessment or an existing credential. It does not require Jev or an AI provider key.
+This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandria Cloud. It supports a learner publishing an earned skill, an organization requesting an assessment or an existing credential, an interview invitation and offer answered with the learner's signature, and the validity pilot workspace. The operator's click-by-click sheet is [`demo-runbook.md`](demo-runbook.md). It does not require Jev or an AI provider key.
 
 ## Prepare this Mac
 
@@ -40,6 +40,23 @@ Low-data signals can show unavailable rather than a score. Three MCQ clicks do n
 3. In Alexandria, refresh **Assessment and credential requests** and choose **Take requested assessment** on that invitation. This binds the attempt and resulting credential to this exact request and nonce.
 4. Show Sentinel Dev during the assessment. Pass, return to directories, choose the newly earned credential, preview, and share.
 5. Refresh the Cloud run. Open the candidate to show the run there as well. An older credential cannot satisfy a request requiring a new assessment.
+
+## Demo C — interview and offer
+
+1. In Cloud, open the recorded run (or the person record) and choose **Invite to interview**: role, message, mode, one to eight proposed times, and your own meeting link (`https://` or `tel:`). Cloud never hosts or records the conversation.
+2. In Alexandria **Settings → Directories → Interview invitations and offers**, refresh, choose a time, and **Accept** (or **Decline**). The answer is signed over the entire invitation with the learner's key and sent only to that directory; it also appears under **Your answers** with the meeting link.
+3. In Cloud, refresh the interview: *accepted*, chosen time, signed answer. After the conversation, **Record the interview** with an outcome and notes.
+4. **Make an offer** from the recorded interview. In Alexandria, refresh the same panel and **Accept offer** or **Decline offer**. Cloud shows the signed answer.
+
+Invitations and offers expire unanswered after 14 days; answers are valid for five minutes after signing; an exact retry is idempotent and a changed answer conflicts; one open or accepted offer per interview; an offer follows only a recorded interview. Audit events: `interview.invited`, `interview.responded`, `interview.conducted`, `offer.sent`, `offer.responded`.
+
+## Demo D — validity pilot
+
+Cloud **Operations → Validity pilot** implements the study design from the funding application: an outside reviewer signs the protocol off before anyone is enrolled; enrolment records consent and the server assigns a balanced random arm (conventional applications or capability evidence); screening reviewers are registered for one arm only; practical-task scorers are a separate role and their queue never shows a screening decision; payment is recorded regardless of score; employer feedback is per employer. The report gives, per arm, completion, advance rate, screener agreement (percent and Cohen's κ), practical mean, and the participants rejected at screening who scored at or above the practical pass mark. The export carries codes, arms, decisions and scores only — no DID, name or email — and is an `export.issued` audit event. See the [runbook](demo-runbook.md#7-the-validity-pilot-cloud) for the click path.
+
+## Verify without Alexandria
+
+Export the bundle from **Credentials → Export**, then `node scripts/demo/verify-credential.mjs <bundle.json>`. The script uses only Node's standard library and implements the five-step algorithm published with the test vectors (JCS, detached Ed25519 JWS, `did:key` self-resolution, validity window, status-list bit). `node --test scripts/demo/verify-credential.test.mjs` shows it agrees with the reference verifier on all twelve vectors. The issuer key can also be resolved by the third-party Universal Resolver at <https://dev.uniresolver.io/>. The proof format is a JCS variant documented in `crates/alexandria-verify/tests/vectors/README.md`, not yet a W3C Data Integrity cryptosuite, so general-purpose JSON-LD verifiers do not accept it unmodified.
 
 ## What the audience should understand
 

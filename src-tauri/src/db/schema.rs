@@ -54,6 +54,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Proposal-style developer drafts are bound to the subject field they
     // propose for, so the composer can preselect it. Older drafts stay unbound.
     (10, "developer_draft_subject_field", "ALTER TABLE developer_discussion_drafts ADD COLUMN subject_field_id TEXT REFERENCES subject_fields(id);"),
+    // The learner's own record of interview invitations and offers they
+    // answered, with the exact signed message. The directory holds the
+    // organisation's copy; this one is theirs.
+    (11, "hiring_responses", "CREATE TABLE hiring_responses (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('interview','offer')), directory_url TEXT NOT NULL, organization TEXT NOT NULL, role_label TEXT NOT NULL, decision TEXT NOT NULL, chosen_slot INTEGER, meeting_url TEXT, responded_at TEXT NOT NULL, payload_json TEXT NOT NULL);"),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"

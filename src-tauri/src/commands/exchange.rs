@@ -19,7 +19,10 @@ pub struct DirectoryRequest {
     pub request: CredentialRequest,
 }
 
-async fn directory(state: &State<'_, AppState>, address: &str) -> Result<Directory, String> {
+pub(super) async fn directory(
+    state: &State<'_, AppState>,
+    address: &str,
+) -> Result<Directory, String> {
     let directories = super::holder_pull::list_directories(state.clone()).await?;
     let dir = directories
         .into_iter()
@@ -38,7 +41,7 @@ async fn directory(state: &State<'_, AppState>, address: &str) -> Result<Directo
     Ok(dir)
 }
 
-fn client() -> Result<reqwest::Client, String> {
+pub(super) fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(15))
@@ -46,7 +49,9 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-async fn response_json(mut response: reqwest::Response) -> Result<serde_json::Value, String> {
+pub(super) async fn response_json(
+    mut response: reqwest::Response,
+) -> Result<serde_json::Value, String> {
     let status = response.status();
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {

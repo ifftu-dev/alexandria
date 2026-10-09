@@ -53,6 +53,7 @@ DOMAINS = [
     ("Reputation", r"^(reputation_|derived_skill_)"),
     ("Integrity (Sentinel)", r"^(integrity_|sentinel_)"),
     ("Interviews", r"^interview_"),
+    ("Hiring answers", r"^hiring_responses$"),
     ("Organizations and role assessments", r"^(organizations|role_assessments)$"),
     ("Classrooms and tutoring", r"^(classroom|tutoring_)"),
     ("Genesis trust", r"^governance_genesis_trust_anchors$"),
