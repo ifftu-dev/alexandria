@@ -18,8 +18,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.android.gms.tasks.Tasks
+import com.google.android.play.core.integrity.IntegrityManagerFactory
+import com.google.android.play.core.integrity.IntegrityTokenRequest
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : TauriActivity() {
@@ -151,6 +155,26 @@ class MainActivity : TauriActivity() {
       // Apply the latest requested state, not this call's argument: two
       // posts from different threads may run in either order.
       a.runOnUiThread { a.applyShield(shieldOn) }
+    }
+
+    /**
+     * Play Integrity classic request for `nonce` (base64url, no padding).
+     * Blocks the calling thread for up to 20 s, so Rust calls it from a
+     * worker, never the UI thread. Returns the encrypted token, or "" when
+     * Play services are missing or the request failed; the Rust side treats
+     * "" as "cannot attest" and leaves the session local.
+     */
+    @JvmStatic
+    fun requestIntegrityToken(nonce: String): String {
+      val a = current ?: return ""
+      return try {
+        val manager = IntegrityManagerFactory.create(a.applicationContext)
+        val request = IntegrityTokenRequest.builder().setNonce(nonce).build()
+        Tasks.await(manager.requestIntegrityToken(request), 20, TimeUnit.SECONDS).token()
+      } catch (e: Exception) {
+        android.util.Log.w("sentinel", "play integrity request failed: ${e.message}")
+        ""
+      }
     }
 
     /**

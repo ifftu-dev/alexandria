@@ -495,7 +495,8 @@
     "valYes": "oui",
     "valNo": "non",
     "valNa": "s.o.",
-    "rowLiveness": "vivacité"
+    "rowLiveness": "vivacité",
+    "rowAttestation": "attestation"
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

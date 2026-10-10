@@ -495,7 +495,8 @@
     "valYes": "हाँ",
     "valNo": "नहीं",
     "valNa": "n/a",
-    "rowLiveness": "जीवंतता"
+    "rowLiveness": "जीवंतता",
+    "rowAttestation": "प्रमाणन"
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

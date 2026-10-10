@@ -61,7 +61,7 @@ def migrations():
     """Every (version, name, sql) in the order the runner applies them."""
     text = SCHEMA.read_text()
     listing = text.split("pub const MIGRATIONS", 1)[1].split("];", 1)[0]
-    entries = re.findall(r'\(\s*(\d+),\s*"([^"]+)",\s*([A-Za-z0-9_:]+)\s*\)', listing)
+    entries = re.findall(r'\(\s*(\d+),\s*"([^"]+)",\s*([A-Za-z0-9_:]+)\s*,?\s*\)', listing)
     if not entries:
         sys.exit("no migrations found in schema.rs")
     resolved = []

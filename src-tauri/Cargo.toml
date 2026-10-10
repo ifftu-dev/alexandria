@@ -75,6 +75,15 @@ ed25519-dalek = { version = "2", features = ["serde", "rand_core", "zeroize"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 blake2 = "0.10"
 sha2 = "0.10"
+# Device attestation verification (Sentinel `device_attested` assurance):
+# App Attest = CBOR attestation object + X.509 chain to Apple's root (ring
+# signature checks via x509-parser's `verify`), ECDSA P-256 assertions;
+# Play Integrity = JWE (A256KW + A256GCM) around an ES256 JWS, decrypted
+# with the developer's response keys from the network profile.
+minicbor = { version = "0.25", default-features = false }
+x509-parser = { version = "0.17", features = ["verify"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+aes = "0.8"
 hmac = "0.12"
 subtle = "2"
 hkdf = "0.12"
@@ -269,6 +278,8 @@ objc2-core-foundation = { version = "0.3", features = ["objc2"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Synthetic App Attest certificate chains for the attestation verifier tests.
+rcgen = "0.13"
 tauri = { version = "2.10.0", features = ["test"] }
 # Pull in Wasmtime's Pulley interpreter for test builds on every platform, not
 # just iOS. Cargo unions features across dependency kinds only when

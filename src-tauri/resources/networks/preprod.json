@@ -45,6 +45,7 @@
   "subject_qualification_policy_digests": [],
   "cloud_https_origin": null,
   "cloud_service_id": null,
+  "play_integrity_response_keys": null,
   "governance_locator": null,
   "committee_instance_id": null,
   "committee_https_endpoints": [],

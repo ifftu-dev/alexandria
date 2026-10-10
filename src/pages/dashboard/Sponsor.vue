@@ -24,9 +24,10 @@ const tabs = computed(() => [
   { key: 'issue', label: t('dashboard.sponsor.tabs.issue') },
 ])
 
-// Only device-reported assurance is achievable; anchoring and committee
-// co-signing have no verified path.
-const ASSURANCE_LEVELS = ['local']
+// `local` is device-reported; `device_attested` needs a verified platform
+// attestation (iOS App Attest / Android Play Integrity). Anchoring and
+// committee co-signing have no verified path.
+const ASSURANCE_LEVELS = ['local', 'device_attested']
 
 // --- Organizations -------------------------------------------------------
 const orgModalOpen = ref(false)
@@ -158,7 +159,7 @@ function attemptState(a: RoleAttemptSummary): 'passed' | 'failed' | 'open' {
 
 function assuranceTone(level?: string | null): 'success' | 'accent' | 'secondary' {
   if (level === 'high_assurance') return 'success'
-  if (level === 'anchored') return 'accent'
+  if (level === 'anchored' || level === 'device_attested') return 'accent'
   return 'secondary'
 }
 

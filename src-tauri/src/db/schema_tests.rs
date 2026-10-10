@@ -181,7 +181,7 @@ fn the_view_set_is_exact() {
 /// drift detector that fails on any object added or removed without intent.
 /// They cover every migration: the baseline's 92 tables and 105 indexes, the
 /// instructor studio's 5 tables and 1 index, and the attempt role target's
-/// 1 index.
+/// 1 index. Migration 4 adds a column only.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();

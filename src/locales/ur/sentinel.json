@@ -495,7 +495,8 @@
     "valYes": "ہاں",
     "valNo": "نہیں",
     "valNa": "لاگو نہیں",
-    "rowLiveness": "لائیونیس"
+    "rowLiveness": "لائیونیس",
+    "rowAttestation": "تصدیق"
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

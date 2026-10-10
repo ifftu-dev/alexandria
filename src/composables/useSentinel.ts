@@ -16,6 +16,7 @@ import type {
   SignalData,
   BehavioralProfile,
   StartSessionResponse,
+  AttestSessionResponse,
   KeystrokeEvent,
   MousePoint,
   DigraphFeatures,
@@ -163,6 +164,8 @@ function emptySentinelDebug() {
     sessionLivenessRealProb: null as number | null,
     sessionLivenessSpoof: false,
     livenessSpoofRatio: null as number | null,
+    // Device attestation outcome for this session (dev view).
+    attestation: '' as string,
   }
 }
 const sentinelDebug = reactive(emptySentinelDebug())
@@ -1293,6 +1296,12 @@ function createSentinelService() {
       sessionId.value = response.session_id
       clearTrainingBuffers()
       isActive.value = true
+      // Device attestation (iOS App Attest / Android Play Integrity) binds
+      // the platform's word to this session's nonce. Fire-and-forget: the
+      // backend records the outcome and desktop reports unsupported.
+      void invoke<AttestSessionResponse>('integrity_attest_session', { sessionId: response.session_id })
+        .then(r => { sentinelDebug.attestation = r.supported ? (r.stored ? r.assurance_level : 'unavailable') : 'unsupported' })
+        .catch(err => { console.warn('[sentinel] device attestation failed', err); sentinelDebug.attestation = 'error' })
       // A queued stop owns cleanup of an already-created backend session.
       // Do not attach new listeners while that cleanup is pending.
       if (generation !== lifecycleGeneration) return

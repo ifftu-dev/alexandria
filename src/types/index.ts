@@ -746,6 +746,16 @@ export interface IntegritySession {
   warning_count: number
   started_at: string
   ended_at: string | null
+  /** `local`, or `device_attested` once a platform attestation verified. */
+  assurance_level: string
+}
+
+/** Result of `integrity_attest_session` (mobile device attestation). */
+export interface AttestSessionResponse {
+  supported: boolean
+  stored: boolean
+  assurance_level: string
+  unverified?: { outcome: 'no_trust_material' } | { outcome: 'failed'; reason: string } | null
 }
 
 // ---------------------------------------------------------------------------

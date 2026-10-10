@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::profile::scope::ProfileState as State;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
@@ -22,6 +22,9 @@ pub struct IntegritySession {
     pub warning_count: i64,
     pub started_at: String,
     pub ended_at: Option<String>,
+    /// `local`, or `device_attested` once the platform attestation stored
+    /// for this session verified. Re-verified at issuance.
+    pub assurance_level: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,10 +152,12 @@ fn trust_penalty(critical_count: i64, warning_count: i64) -> f64 {
     (critical_count as f64) * 0.20 + (warning_count as f64) * 0.10
 }
 
-/// The only assurance level a session can currently achieve. Commitment
-/// anchoring and committee co-signing have no verified path, so a stored
-/// `assurance_level` or `anchor_ref` never raises what a credential claims.
-pub(crate) const ACHIEVED_ASSURANCE_LEVEL: &str = "local";
+/// The assurance every session has. `device_attested` is reached only
+/// through a platform attestation that verifies (see
+/// `sentinel::attestation`); anchoring and committee co-signing still have
+/// no verified path, and a stored `anchor_ref` never raises what a
+/// credential claims.
+pub(crate) const ACHIEVED_ASSURANCE_LEVEL: &str = crate::sentinel::attestation::ASSURANCE_LOCAL;
 
 // ============================================================================
 // Commands
@@ -195,6 +200,151 @@ pub async fn integrity_start_session(
         .await?;
 
     Ok(StartSessionResponse { session_id })
+}
+
+/// Result of asking the platform to attest a session.
+#[derive(Debug, Serialize)]
+pub struct AttestSessionResponse {
+    /// False on desktop and wherever the platform cannot attest.
+    pub supported: bool,
+    /// An attestation was captured and stored on the session.
+    pub stored: bool,
+    /// The session's assurance after this call.
+    pub assurance_level: String,
+    /// Why the stored attestation did not verify, if it did not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unverified: Option<crate::sentinel::attestation::Unverified>,
+}
+
+/// Ask the platform to attest the session nonce and store the result.
+///
+/// Called by the frontend right after `integrity_start_session`. Blocking
+/// platform work runs off the async runtime. Nothing here can fail the
+/// session: an unsupported or failed attestation leaves it `local`.
+#[tauri::command]
+pub async fn integrity_attest_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<AttestSessionResponse, String> {
+    use crate::sentinel::attestation::{self as att, native};
+
+    if !native::supported() {
+        return Ok(AttestSessionResponse {
+            supported: false,
+            stored: false,
+            assurance_level: att::ASSURANCE_LOCAL.into(),
+            unverified: None,
+        });
+    }
+    let sid = session_id.clone();
+    let (started_at, existing): (String, Option<String>) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "integrity.attest-session.read",
+            move |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT started_at, attestation_json FROM integrity_sessions
+                          WHERE id = ?1 AND ended_at IS NULL",
+                        params![sid],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .map_err(|e| match e {
+                        rusqlite::Error::QueryReturnedNoRows => "session not found or ended".into(),
+                        other => other.to_string(),
+                    })
+            },
+        )
+        .await?;
+    if existing.is_some() {
+        return Err("session already carries an attestation".into());
+    }
+    let nonce = att::session_nonce(&session_id, &started_at);
+    let captured = tokio::task::spawn_blocking(move || native::capture(&nonce))
+        .await
+        .map_err(|e| format!("attestation worker failed: {e}"))??;
+    let Some(captured) = captured else {
+        return Ok(AttestSessionResponse {
+            supported: true,
+            stored: false,
+            assurance_level: att::ASSURANCE_LOCAL.into(),
+            unverified: None,
+        });
+    };
+    let record = att::DeviceAttestation {
+        platform: captured.platform,
+        nonce_hex: hex::encode(nonce),
+        app_id: captured.app_id,
+        payload: captured.payload,
+        captured_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    };
+    // Verify what we just captured (the end-of-session assertion is not
+    // required yet: no commitment root exists).
+    let cfg = att::TrustConfig::from_profile();
+    let now = chrono::Utc::now().timestamp();
+    let (level, unverified) = match att::verify(&record, &nonce, None, &cfg, now) {
+        Ok(_) => (att::ASSURANCE_DEVICE_ATTESTED.to_string(), None),
+        Err(why) => (att::ASSURANCE_LOCAL.to_string(), Some(why)),
+    };
+    let json = serde_json::to_string(&record).map_err(|e| e.to_string())?;
+    let (sid, lvl) = (session_id.clone(), level.clone());
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "integrity.attest-session.store",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "UPDATE integrity_sessions SET attestation_json = ?2, assurance_level = ?3
+                          WHERE id = ?1 AND ended_at IS NULL",
+                        params![sid, json, lvl],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            },
+        )
+        .await?;
+    Ok(AttestSessionResponse {
+        supported: true,
+        stored: true,
+        assurance_level: level,
+        unverified,
+    })
+}
+
+/// iOS: extend a stored App Attest record with an assertion over the
+/// terminal commitment root, so the attested key vouches for the snapshot
+/// stream as well as the start nonce. Best effort; returns the JSON to
+/// store, or `None` when nothing changes.
+fn assert_commitment_for(
+    attestation_json: Option<&str>,
+    commitment_root: Option<&str>,
+) -> Option<String> {
+    use crate::sentinel::attestation::{native, AttestationPayload, DeviceAttestation};
+    let root = commitment_root?;
+    let mut record: DeviceAttestation = serde_json::from_str(attestation_json?).ok()?;
+    let AttestationPayload::AppAttest {
+        key_id_b64,
+        assertion_b64,
+        asserted_root,
+        ..
+    } = &mut record.payload
+    else {
+        return None;
+    };
+    if assertion_b64.is_some() {
+        return None;
+    }
+    let assertion = native::assert_commitment(key_id_b64, root)
+        .map_err(|e| log::warn!(target: "sentinel", "app attest assertion failed: {e}"))
+        .ok()??;
+    *assertion_b64 = Some(assertion);
+    *asserted_root = Some(root.to_string());
+    serde_json::to_string(&record).ok()
 }
 
 /// Submit an integrity snapshot with signal scores.
@@ -435,13 +585,54 @@ pub async fn integrity_end_session(
     session_id: String,
     req: EndSessionRequest,
 ) -> Result<IntegritySession, String> {
+    // On iOS, let the attested key sign the terminal commitment root before
+    // the row is finalised. Platform work stays off the DB thread.
+    let sid = session_id.clone();
+    let pending: Option<(Option<String>, Option<String>)> = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "integrity.end-session.read",
+            move |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT attestation_json, commitment_root FROM integrity_sessions
+                          WHERE id = ?1 AND ended_at IS NULL AND attestation_json IS NOT NULL",
+                        params![sid],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .await?;
+    let asserted = match pending {
+        Some((json, root)) => tokio::task::spawn_blocking(move || {
+            assert_commitment_for(json.as_deref(), root.as_deref())
+        })
+        .await
+        .map_err(|e| format!("attestation worker failed: {e}"))?,
+        None => None,
+    };
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "integrity.end-session",
-            move |db| finish_session(db.conn(), &session_id, &req),
+            move |db| {
+                if let Some(json) = &asserted {
+                    db.conn()
+                        .execute(
+                            "UPDATE integrity_sessions SET attestation_json = ?2
+                              WHERE id = ?1 AND ended_at IS NULL",
+                            params![session_id, json],
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                finish_session(db.conn(), &session_id, &req)
+            },
         )
         .await
 }
@@ -657,6 +848,7 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
         warning_count: row.get(5)?,
         started_at: row.get(6)?,
         ended_at: row.get(7)?,
+        assurance_level: row.get(8)?,
     })
 }
 
@@ -686,7 +878,7 @@ fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> 
 fn read_session(conn: &rusqlite::Connection, id: &str) -> Result<IntegritySession, String> {
     conn.query_row(
         "SELECT id, enrollment_id, status, integrity_score, critical_count, warning_count,
-                started_at, ended_at
+                started_at, ended_at, assurance_level
          FROM integrity_sessions WHERE id = ?1",
         params![id],
         map_session,

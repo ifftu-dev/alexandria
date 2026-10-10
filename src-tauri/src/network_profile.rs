@@ -49,6 +49,9 @@ pub struct NetworkProfile {
     pub subject_qualification_policy_digests: Vec<String>,
     pub cloud_https_origin: Option<String>,
     pub cloud_service_id: Option<String>,
+    /// Play Integrity response keys from the Play Console. Absent until the
+    /// developer downloads them; Android sessions then stay `local`.
+    pub play_integrity_response_keys: Option<crate::sentinel::attestation::PlayIntegrityKeys>,
     pub governance_locator: Option<String>,
     pub committee_instance_id: Option<String>,
     pub committee_https_endpoints: Vec<String>,
@@ -242,6 +245,35 @@ impl NetworkProfile {
                 validate_identifier("cloud_service_id", service_id)?;
             }
             _ => return invalid("cloud_https_origin and cloud_service_id must be set together"),
+        }
+
+        if let Some(keys) = &self.play_integrity_response_keys {
+            use base64::Engine as _;
+            let dec = base64::engine::general_purpose::STANDARD
+                .decode(keys.decryption_key_b64.trim())
+                .map_err(|_| {
+                    NetworkProfileError::Invalid(
+                        "play_integrity_response_keys.decryption_key_b64 is not base64".into(),
+                    )
+                })?;
+            if dec.len() != 32 {
+                return invalid(
+                    "play_integrity_response_keys.decryption_key_b64 must decode to 32 bytes",
+                );
+            }
+            let ver = base64::engine::general_purpose::STANDARD
+                .decode(keys.verification_key_b64.trim())
+                .map_err(|_| {
+                    NetworkProfileError::Invalid(
+                        "play_integrity_response_keys.verification_key_b64 is not base64".into(),
+                    )
+                })?;
+            use p256::pkcs8::DecodePublicKey as _;
+            if p256::ecdsa::VerifyingKey::from_public_key_der(&ver).is_err() {
+                return invalid(
+                    "play_integrity_response_keys.verification_key_b64 is not a P-256 SPKI key",
+                );
+            }
         }
 
         match (
@@ -570,6 +602,33 @@ mod tests {
         profile.receipt_issuer_keys[0] =
             "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN".into();
         assert!(profile.validate().is_err());
+    }
+
+    #[test]
+    fn play_integrity_keys_are_validated_when_present() {
+        use crate::sentinel::attestation::PlayIntegrityKeys;
+        let mut profile = valid_profile();
+        assert!(profile.play_integrity_response_keys.is_none());
+        profile.play_integrity_response_keys = Some(PlayIntegrityKeys {
+            decryption_key_b64: "not base64!".into(),
+            verification_key_b64: "AA==".into(),
+        });
+        assert!(profile.validate().is_err());
+        profile.play_integrity_response_keys = Some(PlayIntegrityKeys {
+            decryption_key_b64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            verification_key_b64: "AA==".into(),
+        });
+        assert!(profile.validate().is_err());
+        // A real P-256 SPKI key and a 32-byte secret validate.
+        use p256::pkcs8::EncodePublicKey as _;
+        let vk = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        use base64::Engine as _;
+        profile.play_integrity_response_keys = Some(PlayIntegrityKeys {
+            decryption_key_b64: base64::engine::general_purpose::STANDARD.encode([1u8; 32]),
+            verification_key_b64: base64::engine::general_purpose::STANDARD
+                .encode(vk.verifying_key().to_public_key_der().unwrap().as_bytes()),
+        });
+        assert!(profile.validate().is_ok());
     }
 
     #[test]

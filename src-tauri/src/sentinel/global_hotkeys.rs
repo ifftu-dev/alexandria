@@ -257,6 +257,7 @@ pub fn push_event(ring: &mut VecDeque<HotkeyEvent>, ev: HotkeyEvent) {
 
 /// Called by every platform callback. Applies the privacy gate: only
 /// recordable modifier combos get in.
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 fn record(mods: Modifiers, key: &str) {
     if !mods.is_recordable() {
         return;

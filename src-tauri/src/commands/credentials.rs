@@ -150,18 +150,21 @@ impl IssuancePolicy {
 }
 
 /// Load an integrity session and summarise it as an `IntegrityAssertion`
-/// for embedding at issuance. `assurance_level` is always
-/// [`ACHIEVED_ASSURANCE_LEVEL`](crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL),
-/// and no anchor reference is embedded: the stored assurance and anchor
-/// columns are not verified evidence.
-fn build_integrity_assertion(
+/// for embedding at issuance. `assurance_level` is `local` unless the
+/// session's stored device attestation verifies right now against `trust`
+/// (see `sentinel::attestation::effective_assurance`); the stored level is
+/// never copied. No anchor reference is embedded.
+pub(crate) fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
     now: &str,
+    trust: &crate::sentinel::attestation::TrustConfig,
 ) -> Result<IntegrityAssertion, String> {
+    use crate::sentinel::attestation::{effective_assurance, SessionAttestationFacts};
     let row = conn
         .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count, commitment_root
+            "SELECT status, integrity_score, critical_count, warning_count, commitment_root,
+                    started_at, assurance_level, attestation_json
              FROM integrity_sessions WHERE id = ?1",
             params![session_id],
             |r| {
@@ -171,20 +174,47 @@ fn build_integrity_assertion(
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("integrity session {session_id} not found"))?;
-    let (status, integrity_score, critical_count, warning_count, commitment_root) = row;
+    let (
+        status,
+        integrity_score,
+        critical_count,
+        warning_count,
+        commitment_root,
+        started_at,
+        stored_assurance_level,
+        attestation_json,
+    ) = row;
+    let facts = SessionAttestationFacts {
+        session_id: session_id.to_string(),
+        started_at,
+        stored_assurance_level,
+        attestation_json,
+        commitment_root: commitment_root.clone(),
+    };
+    let (assurance_level, unverified) =
+        effective_assurance(&facts, trust, chrono::Utc::now().timestamp());
+    if let Some(why) = unverified {
+        log::warn!(
+            target: "sentinel",
+            "session {session_id}: device attestation not credited: {why:?}"
+        );
+    }
     Ok(IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
         integrity_score,
         critical_count,
         warning_count,
-        assurance_level: crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL.to_string(),
+        assurance_level,
         commitment_root,
         anchor_ref: None,
         generated_at: now.to_string(),
@@ -275,7 +305,12 @@ pub fn issue_credential_impl(
     // policy embeds the attestation but gates on nothing.
     let integrity = match &req.integrity_session_id {
         Some(session_id) => {
-            let assertion = build_integrity_assertion(conn, session_id, now)?;
+            let assertion = build_integrity_assertion(
+                conn,
+                session_id,
+                now,
+                &crate::sentinel::attestation::TrustConfig::from_profile(),
+            )?;
             if let Some(policy) = &req.integrity_policy {
                 let facts = SessionFacts::load(conn, session_id)?;
                 policy.evaluate(&assertion, &facts)?;

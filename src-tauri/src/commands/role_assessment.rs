@@ -155,7 +155,8 @@ pub fn create_role_assessment_impl(
     }
     if let Some(level) = &req.required_assurance_level {
         match level.as_str() {
-            crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL => {}
+            crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL
+            | crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED => {}
             "anchored" | "high_assurance" => {
                 return Err(format!(
                     "required_assurance_level '{level}' is unavailable: no verified path can achieve it"
@@ -710,6 +711,27 @@ mod tests {
         assert_eq!(listed[1].passed, Some(false));
         assert_eq!(listed[0].integrity_session_id.as_deref(), Some("isess"));
         assert_eq!(list_role_attempts_impl(conn, &b).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn device_attested_is_an_acceptable_required_level() {
+        let (db, ..) = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        let req = CreateRoleAssessmentRequest {
+            org_id: org.id.clone(),
+            role_title: "Attested".into(),
+            job_description: None,
+            course_id: None,
+            skill_ids: vec![],
+            issuance_policy: None,
+            required_assurance_level: Some("device_attested".into()),
+        };
+        let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
+        assert_eq!(
+            ra.required_assurance_level.as_deref(),
+            Some("device_attested")
+        );
     }
 
     #[test]

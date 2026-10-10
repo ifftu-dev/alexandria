@@ -19,6 +19,8 @@
 //!   encrypted holdout set
 //! - `types` — shared input shapes (keystroke events, mouse points,
 //!   digraphs, camera frames) mirrored from the legacy TS structs
+//! - `attestation` — device attestation (App Attest / Play Integrity) capture
+//!   and on-device verification behind the `device_attested` assurance rung
 //! - `android_environment` — Android assessment shield (FLAG_SECURE +
 //!   hide-overlay-windows), obscured-touch counter, accessibility / ADB report
 //! - `display_topology` — monitor count, external / mirrored display,
@@ -32,6 +34,7 @@
 
 pub mod active_app;
 pub mod android_environment;
+pub mod attestation;
 pub mod display_topology;
 pub mod evidence;
 pub mod face_detect;

@@ -49,7 +49,19 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // rather than discovered at issuance. Also gives sponsors a per-role
     // attempt list to issue from.
     (3, "attempt_role_target", MIGRATION_003_ATTEMPT_ROLE_TARGET),
+    // Device attestation (App Attest / Play Integrity) captured for a
+    // Sentinel session; verified again at issuance before a credential may
+    // claim `device_attested`.
+    (
+        4,
+        "session_device_attestation",
+        MIGRATION_004_DEVICE_ATTESTATION,
+    ),
 ];
+
+const MIGRATION_004_DEVICE_ATTESTATION: &str = r#"
+ALTER TABLE integrity_sessions ADD COLUMN attestation_json TEXT;
+"#;
 
 const MIGRATION_003_ATTEMPT_ROLE_TARGET: &str = r#"
 ALTER TABLE assessment_attempts
@@ -644,7 +656,7 @@ CREATE TABLE integrity_sessions (
     ended_at TEXT,
     critical_count INTEGER NOT NULL DEFAULT 0,
     warning_count INTEGER NOT NULL DEFAULT 0,
-    assurance_level TEXT NOT NULL DEFAULT 'local',
+    assurance_level TEXT NOT NULL DEFAULT 'local',                                             -- local|device_attested (verified again at issuance)
     commitment_root TEXT,
     anchor_ref TEXT,
     purpose TEXT NOT NULL DEFAULT 'assessment' CHECK (purpose IN ('assessment', 'interview'))

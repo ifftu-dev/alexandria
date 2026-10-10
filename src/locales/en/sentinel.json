@@ -495,7 +495,8 @@
     "valYes": "yes",
     "valNo": "no",
     "valNa": "n/a",
-    "rowLiveness": "liveness"
+    "rowLiveness": "liveness",
+    "rowAttestation": "attestation"
   },
   "evidence": {
     "flaggedTitle": "This session was flagged",
