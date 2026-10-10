@@ -125,6 +125,7 @@
       "emptyBody": "ఒక సంస్థ కోసం ఒకదాన్ని సృష్టించండి.",
       "requiresClean": "శుభ్రమైన సెషన్ అవసరం",
       "minIntegrity": "కనీస సమగ్రత {value}",
+      "minCameraCoverage": "కనీస కెమెరా కవరేజ్ {value}",
       "publish": "ప్రచురించు",
       "archive": "ఆర్కైవ్"
     },
@@ -137,7 +138,15 @@
       "submitting": "జారీ చేస్తోంది…",
       "issued": "క్రెడెన్షియల్ జారీ చేయబడింది",
       "assurance": "హామీ:",
-      "integrity": "సమగ్రత {value}"
+      "integrity": "సమగ్రత {value}",
+      "attemptsTitle": "ఈ పాత్రకు ప్రయత్నాలు",
+      "attemptsLoading": "ప్రయత్నాలు లోడ్ అవుతున్నాయి…",
+      "attemptsEmpty": "ఈ పాత్రకు ఇంకా ఏ అభ్యాసకుడూ ప్రయత్నించలేదు.",
+      "attemptPassed": "ఉత్తీర్ణత",
+      "attemptFailed": "ఉత్తీర్ణత సాధించలేదు",
+      "attemptOpen": "కొనసాగుతోంది",
+      "attemptScore": "స్కోరు {value}%",
+      "attemptUse": "ఉపయోగించు"
     },
     "orgModal": {
       "title": "కొత్త సంస్థ",
@@ -156,6 +165,7 @@
       "minIntegrity": "కనీస సమగ్రత",
       "maxCritical": "గరిష్ఠ తీవ్రమైనవి",
       "maxWarning": "గరిష్ఠ హెచ్చరికలు",
+      "minCameraCoverage": "కనీస కెమెరా కవరేజ్ (0–1)",
       "requireClean": "శుభ్రమైన సెషన్ అవసరం",
       "assuranceLabel": "అవసరమైన హామీ స్థాయి",
       "assuranceNone": "(ఏదీ లేదు)"

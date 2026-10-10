@@ -142,6 +142,7 @@ fn pass_assessment(
         db,
         skill.into(),
         Some(session.into()),
+        None,
         rand::random(),
         attempt_id.into(),
         now.clone(),

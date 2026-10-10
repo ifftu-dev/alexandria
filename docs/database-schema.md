@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 12 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 107 tables, 110 indexes, 1 view, 3 triggers.
+**Schema**: 14 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 107 tables, 111 indexes, 1 view, 3 triggers.
 
 ---
 
@@ -33,6 +33,8 @@ and requires a database's history to be an exact prefix of this list:
 10. `developer_draft_subject_field`
 11. `hiring_responses`
 12. `status_list_publication`
+13. `attempt_role_target`
+14. `session_device_attestation`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -361,6 +363,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `item_fingerprints` TEXT
 - `assessed_bloom_level` INTEGER
 - `pass_threshold_snapshot` REAL
+- `role_assessment_id` TEXT → `role_assessments.id`
 
 #### `assessment_item_skills`
 
@@ -931,10 +934,11 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `ended_at` TEXT
 - `critical_count` INTEGER NOT NULL default `0`
 - `warning_count` INTEGER NOT NULL default `0`
-- `assurance_level` TEXT NOT NULL default `'local'`
+- `assurance_level` TEXT NOT NULL default `'local'` — local|device_attested (verified again at issuance)
 - `commitment_root` TEXT
 - `anchor_ref` TEXT
 - `purpose` TEXT NOT NULL default `'assessment'`
+- `attestation_json` TEXT
 
 #### `integrity_snapshots`
 
@@ -1387,6 +1391,7 @@ Every foreign key in the baseline, parent to child.
 
 ```mermaid
 erDiagram
+    role_assessments ||--o{ assessment_attempts : role_assessment_id
     question_banks ||--o{ assessment_attempts : bank_id
     assessment_items ||--o{ assessment_item_skills : item_id
     question_banks ||--o{ assessment_items : bank_id

@@ -63,6 +63,15 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // the last version the host acknowledged; a list whose `version` is
     // ahead of it is awaiting publication.
     (12, "status_list_publication", "ALTER TABLE credential_status_lists ADD COLUMN published_version INTEGER NOT NULL DEFAULT 0;"),
+    // A learner may choose the sponsor role they are assessing for before an
+    // attempt starts, so the role's camera requirement is enforced up front
+    // rather than discovered at issuance. Also gives sponsors a per-role
+    // attempt list to issue from.
+    (13, "attempt_role_target", MIGRATION_013_ATTEMPT_ROLE_TARGET),
+    // Device attestation (App Attest / Play Integrity) captured for a
+    // Sentinel session; verified again at issuance before a credential may
+    // claim `device_attested`.
+    (14, "session_device_attestation", MIGRATION_014_DEVICE_ATTESTATION),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
@@ -78,6 +87,16 @@ UPDATE assessment_items SET bloom_level = 'remember'
 
 const MIGRATION_003_PERSONHOOD: &str =
     include_str!("../../../crates/alexandria-personhood/src/schema.sql");
+
+const MIGRATION_013_ATTEMPT_ROLE_TARGET: &str = r#"
+ALTER TABLE assessment_attempts
+    ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
+CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
+
+const MIGRATION_014_DEVICE_ATTESTATION: &str = r#"
+ALTER TABLE integrity_sessions ADD COLUMN attestation_json TEXT;
+"#;
 
 const MIGRATION_001_BASELINE: &str = r#"
 CREATE TABLE app_settings (
@@ -666,7 +685,7 @@ CREATE TABLE integrity_sessions (
     ended_at TEXT,
     critical_count INTEGER NOT NULL DEFAULT 0,
     warning_count INTEGER NOT NULL DEFAULT 0,
-    assurance_level TEXT NOT NULL DEFAULT 'local',
+    assurance_level TEXT NOT NULL DEFAULT 'local',                                             -- local|device_attested (verified again at issuance)
     commitment_root TEXT,
     anchor_ref TEXT,
     purpose TEXT NOT NULL DEFAULT 'assessment' CHECK (purpose IN ('assessment', 'interview'))

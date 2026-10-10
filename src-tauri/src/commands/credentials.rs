@@ -46,11 +46,43 @@ pub struct IssuancePolicy {
     /// `"local"` is currently achievable.
     #[serde(default)]
     pub required_assurance_level: Option<String>,
+    /// Minimum fraction of snapshots (in `[0,1]`) captured with the camera
+    /// opted in. `Some(1.0)` means the camera was on for the whole
+    /// session; a session with no snapshots never satisfies it. Evaluated
+    /// against the stored snapshots, not the embedded assertion, so the VC
+    /// schema is unchanged.
+    #[serde(default)]
+    pub min_camera_coverage: Option<f64>,
+}
+
+/// Facts about the bound session that the assertion does not carry but a
+/// policy may gate on. Read from the session's snapshots at issuance.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SessionFacts {
+    /// `camera snapshots / all snapshots`, or `None` without snapshots.
+    pub camera_coverage: Option<f64>,
+}
+
+impl SessionFacts {
+    fn load(conn: &Connection, session_id: &str) -> Result<Self, String> {
+        let (total, with_camera): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*),
+                        COALESCE(SUM(CASE WHEN camera_score IS NOT NULL THEN 1 ELSE 0 END), 0)
+                 FROM integrity_snapshots WHERE session_id = ?1",
+                params![session_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            camera_coverage: (total > 0).then(|| with_camera as f64 / total as f64),
+        })
+    }
 }
 
 impl IssuancePolicy {
     /// Returns `Err(reason)` for the first bound the assertion violates.
-    fn evaluate(&self, a: &IntegrityAssertion) -> Result<(), String> {
+    fn evaluate(&self, a: &IntegrityAssertion, facts: &SessionFacts) -> Result<(), String> {
         if self.require_clean && a.status != "completed" {
             return Err(format!(
                 "issuance policy: session status is '{}', requires 'completed'",
@@ -97,23 +129,42 @@ impl IssuancePolicy {
                 ));
             }
         }
+        if let Some(min) = self.min_camera_coverage {
+            match facts.camera_coverage {
+                Some(cov) if cov >= min => {}
+                Some(cov) => {
+                    return Err(format!(
+                        "issuance policy: camera coverage {cov:.2} below minimum {min:.2}"
+                    ))
+                }
+                None => {
+                    return Err(
+                        "issuance policy: camera coverage required but session has no snapshots"
+                            .into(),
+                    )
+                }
+            }
+        }
         Ok(())
     }
 }
 
 /// Load an integrity session and summarise it as an `IntegrityAssertion`
-/// for embedding at issuance. `assurance_level` is always
-/// [`ACHIEVED_ASSURANCE_LEVEL`](crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL),
-/// and no anchor reference is embedded: the stored assurance and anchor
-/// columns are not verified evidence.
-fn build_integrity_assertion(
+/// for embedding at issuance. `assurance_level` is `local` unless the
+/// session's stored device attestation verifies right now against `trust`
+/// (see `sentinel::attestation::effective_assurance`); the stored level is
+/// never copied. No anchor reference is embedded.
+pub(crate) fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
     now: &str,
+    trust: &crate::sentinel::attestation::TrustConfig,
 ) -> Result<IntegrityAssertion, String> {
+    use crate::sentinel::attestation::{effective_assurance, SessionAttestationFacts};
     let row = conn
         .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count, commitment_root
+            "SELECT status, integrity_score, critical_count, warning_count, commitment_root,
+                    started_at, assurance_level, attestation_json
              FROM integrity_sessions WHERE id = ?1",
             params![session_id],
             |r| {
@@ -123,20 +174,47 @@ fn build_integrity_assertion(
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("integrity session {session_id} not found"))?;
-    let (status, integrity_score, critical_count, warning_count, commitment_root) = row;
+    let (
+        status,
+        integrity_score,
+        critical_count,
+        warning_count,
+        commitment_root,
+        started_at,
+        stored_assurance_level,
+        attestation_json,
+    ) = row;
+    let facts = SessionAttestationFacts {
+        session_id: session_id.to_string(),
+        started_at,
+        stored_assurance_level,
+        attestation_json,
+        commitment_root: commitment_root.clone(),
+    };
+    let (assurance_level, unverified) =
+        effective_assurance(&facts, trust, chrono::Utc::now().timestamp());
+    if let Some(why) = unverified {
+        log::warn!(
+            target: "sentinel",
+            "session {session_id}: device attestation not credited: {why:?}"
+        );
+    }
     Ok(IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
         integrity_score,
         critical_count,
         warning_count,
-        assurance_level: crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL.to_string(),
+        assurance_level,
         commitment_root,
         anchor_ref: None,
         generated_at: now.to_string(),
@@ -227,9 +305,15 @@ pub fn issue_credential_impl(
     // policy embeds the attestation but gates on nothing.
     let integrity = match &req.integrity_session_id {
         Some(session_id) => {
-            let assertion = build_integrity_assertion(conn, session_id, now)?;
+            let assertion = build_integrity_assertion(
+                conn,
+                session_id,
+                now,
+                &crate::sentinel::attestation::TrustConfig::from_profile(),
+            )?;
             if let Some(policy) = &req.integrity_policy {
-                policy.evaluate(&assertion)?;
+                let facts = SessionFacts::load(conn, session_id)?;
+                policy.evaluate(&assertion, &facts)?;
             }
             Some(assertion)
         }
@@ -1831,6 +1915,61 @@ mod tests {
             params![id, status, score, critical, warning, NOW],
         )
         .unwrap();
+    }
+
+    fn seed_snapshot(conn: &Connection, session: &str, id: &str, camera: Option<f64>) {
+        conn.execute(
+            "INSERT INTO integrity_snapshots (id, session_id, camera_score, composite_score, captured_at)
+             VALUES (?1, ?2, ?3, 0.9, ?4)",
+            params![id, session, camera, NOW],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn camera_coverage_gate_reads_snapshots() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_cam", "completed", Some(0.9), 0, 0);
+        seed_snapshot(db.conn(), "sess_cam", "snap_1", Some(0.8));
+        seed_snapshot(db.conn(), "sess_cam", "snap_2", Some(0.7));
+        seed_snapshot(db.conn(), "sess_cam", "snap_3", None);
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_cam".into());
+
+        // 2 of 3 snapshots had the camera: 0.66 coverage.
+        req.integrity_policy = Some(IssuancePolicy {
+            min_camera_coverage: Some(0.5),
+            ..Default::default()
+        });
+        assert!(issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).is_ok());
+
+        req.integrity_policy = Some(IssuancePolicy {
+            min_camera_coverage: Some(0.9),
+            ..Default::default()
+        });
+        let err = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        assert!(
+            err.contains("camera coverage 0.67 below minimum 0.90"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn camera_coverage_gate_refuses_sessions_without_snapshots() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_empty", "completed", Some(0.9), 0, 0);
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_empty".into());
+        req.integrity_policy = Some(IssuancePolicy {
+            min_camera_coverage: Some(0.1),
+            ..Default::default()
+        });
+        let err = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        assert!(err.contains("no snapshots"), "{err}");
+
+        // Without the camera bound, the same session issues fine.
+        req.integrity_policy = Some(IssuancePolicy::default());
+        assert!(issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).is_ok());
     }
 
     #[test]

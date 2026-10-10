@@ -11,7 +11,7 @@
  * Camera preview is explicitly enabled in either mode. During a standalone
  * assessment it also drives the consented face/gaze monitoring loops.
  */
-import { ref, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -31,6 +31,25 @@ const { debug } = sentinel
 const { stakeAddress } = useProfiles()
 let deviceFp = ''
 const route = useRoute()
+// Display topology, compact: "<count>·<source>" plus any active tells.
+const displaySummary = computed(() => {
+  if (!debug.displaySource) return '—'
+  const tells: string[] = []
+  if (debug.externalDisplay) tells.push('ext')
+  if (debug.splitScreen) tells.push('split')
+  if (debug.screenCaptured) tells.push('captured')
+  if (debug.displayChanges) tells.push(`Δ${debug.displayChanges}`)
+  return `${debug.displayCount}·${debug.displaySource}${tells.length ? ' ' + tells.join(' ') : ''}`
+})
+// Android environment, compact: shield state plus any active tells.
+const androidEnvSummary = computed(() => {
+  const tells: string[] = []
+  tells.push(debug.shieldRequested ? (debug.shieldActive ? 'shield' : 'shield?') : 'no-shield')
+  if (debug.foreignAccessibility?.length) tells.push(`a11y×${debug.foreignAccessibility?.length}`)
+  if (debug.adbEnabled) tells.push('adb')
+  if (debug.obscuredTouches) tells.push(`obscured×${debug.obscuredTouches}`)
+  return tells.join(' ')
+})
 
 const open = ref(props.initiallyOpen)
 const cameraOn = ref(false)
@@ -327,11 +346,27 @@ onBeforeUnmount(() => {
           <span class="text-end font-mono" :class="debug.appFocusLostCount ? 'text-red-500' : 'text-foreground'">{{ debug.appFocusLostCount }}× / {{ Math.round(debug.appFocusLostMs / 1000) }}s</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSwitchedTo') }}</span>
           <span class="text-end font-mono text-foreground truncate">{{ debug.lastApp || '—' }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDisplays') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.splitScreen || debug.screenCaptured || debug.displayChanges ? 'text-red-500' : 'text-foreground'">{{ displaySummary }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowAndroidEnv') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.obscuredTouches || debug.adbEnabled || debug.foreignAccessibility?.length ? 'text-red-500' : 'text-foreground'">{{ androidEnvSummary }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowOverlays') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.overlaySuspicious?.length ? 'text-red-500' : 'text-foreground'">{{ debug.overlaySuspicious?.length ? debug.overlaySuspicious.join(', ') : `0/${debug.overlayScanned}` }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowProcesses') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.watchedProcesses?.length ? 'text-red-500' : 'text-foreground'">{{ debug.watchedProcesses?.length ? debug.watchedProcesses.join(', ') : `0/${debug.processesScanned}` }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowHotkeys') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.phantomHotkeys?.length ? 'text-red-500' : 'text-foreground'">{{ !debug.hotkeysRunning ? (debug.hotkeysPermission ? 'off' : 'no-permission') : debug.phantomHotkeys?.length ? debug.phantomHotkeys.join(', ') : `0/${debug.nativeHotkeys}` }}</span>
 
           <!-- Camera -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaces') }}</span>
           <span class="text-end font-mono text-foreground">{{ lastDetections.length }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowCameraDevice') }}</span>
+          <span class="text-end font-mono truncate" :class="debug.cameraDeviceVirtual ? 'text-red-500' : 'text-foreground'">{{ debug.cameraDeviceLabel || '—' }}{{ debug.cameraDeviceVirtual ? ' (virtual)' : '' }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowAttestation') }}</span>
+          <span class="text-end font-mono" :class="debug.attestation === 'device_attested' ? 'text-emerald-500' : 'text-foreground'">{{ debug.attestation || '—' }}</span>
+          <span class="text-muted-foreground">{{ $t('sentinel.debug.rowLiveness') }}</span>
+          <span class="text-end font-mono" :class="debug.sessionLivenessSpoof ? 'text-red-500' : 'text-foreground'">{{ debug.sessionLivenessRealProb == null ? '—' : `${fmt(debug.sessionLivenessRealProb)}${debug.livenessSpoofRatio != null ? ` · ${Math.round(debug.livenessSpoofRatio * 100)}% spoof` : ''}` }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFacePresent') }}</span>
           <span class="text-end font-mono text-foreground">{{ yn(debug.signals?.face_present) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaceConsistency') }}</span>

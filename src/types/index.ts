@@ -708,21 +708,40 @@ export interface ElementSkillTag {
 
 export type SessionOutcome = 'clean' | 'flagged' | 'suspended'
 export type FlagSeverity = 'info' | 'warning' | 'critical'
+/** Anomaly flags the backend recognises (`flag_severity`); unknown flags are info. */
 export type FlagType =
-  | 'multi_account'
-  | 'low_integrity'
-  | 'speed_anomaly'
-  | 'device_change'
   | 'tab_switching'
+  | 'app_switch'
   | 'paste_detected'
+  | 'paste_classifier_anomaly'
+  | 'paste_classifier_critical'
+  | 'bot_suspected'
+  | 'low_integrity'
+  | 'behavior_shift'
   | 'no_face'
   | 'multiple_faces'
-  | 'behavior_shift'
   | 'face_mismatch'
   | 'prolonged_absence'
   | 'frequent_absence'
-  | 'bot_suspected'
-  | 'devtools_detected'
+  | 'gaze_wander'
+  | 'gaze_occluded'
+  | 'device_glance'
+  | 'virtual_camera'
+  | 'spoof_suspected'
+  | 'external_display'
+  | 'display_change'
+  | 'split_screen'
+  | 'screen_captured'
+  | 'hidden_overlay'
+  | 'cheat_tool_process'
+  | 'unauthorized_process'
+  | 'ai_assistant_running'
+  | 'screen_share_running'
+  | 'phantom_hotkey'
+  | 'phantom_hotkey_repeated'
+  | 'foreign_accessibility_service'
+  | 'debug_bridge_enabled'
+  | 'obscured_touch'
 
 export interface IntegritySession {
   id: string
@@ -733,6 +752,16 @@ export interface IntegritySession {
   warning_count: number
   started_at: string
   ended_at: string | null
+  /** `local`, or `device_attested` once a platform attestation verified. */
+  assurance_level: string
+}
+
+/** Result of `integrity_attest_session` (mobile device attestation). */
+export interface AttestSessionResponse {
+  supported: boolean
+  stored: boolean
+  assurance_level: string
+  unverified?: { outcome: 'no_trust_material' } | { outcome: 'failed'; reason: string } | null
 }
 
 // ---------------------------------------------------------------------------
@@ -797,6 +826,14 @@ export interface ScoreGazeResponse {
   faceCount: number
   /** Best detection for overlay — present when a face was found. */
   detection?: FaceDetection | null
+  /** Presentation-attack estimate for the detected face (advisory per tick). */
+  liveness?: LivenessEstimate | null
+}
+
+export interface LivenessEstimate {
+  /** Probability the face is a live person in front of the camera. */
+  real_prob: number
+  spoof_suspected: boolean
 }
 
 // Per-frame gaze features (head-pose proxies + coarse iris offset),
@@ -886,11 +923,103 @@ export interface SignalData {
   paste_events: number
   pasted_chars: number
   environment_changed: boolean
+  display_count?: number
+  external_display?: boolean
+  split_screen?: boolean
+  screen_captured?: boolean
+  display_changes?: number
+  foreign_accessibility_services?: number
+  adb_enabled?: boolean
+  obscured_touches?: number
+  hidden_overlays?: number
+  overlay_windows_scanned?: number
+  overlay_windows_allowlisted?: number
+  camera_device_virtual?: boolean
+  /** Liveness ticks this window and how many scored as a possible spoof. */
+  liveness_checks?: number
+  liveness_spoof_checks?: number
+  /** Mean real-face probability over the window's liveness ticks. */
+  liveness_real_prob?: number
+  watched_processes?: number
+  processes_scanned?: number
+  watched_categories?: WatchCategory[]
+  global_hotkeys?: number
+  phantom_hotkeys?: number
   ai_keystroke_anomaly?: number
   ai_mouse_human_prob?: number
   ai_face_similarity?: number
   ai_face_match?: boolean
   ai_paste_anomaly?: number
+}
+
+/** Native display arrangement reported by `sentinel_display_topology`. */
+export interface DisplayTopology {
+  display_count: number
+  external_display: boolean
+  mirrored: boolean
+  split_screen: boolean
+  native_transitions?: number
+  source: string
+}
+
+/** Android-only environment report from `sentinel_android_environment`. */
+export interface AndroidEnvironment {
+  accessibility_services: Array<{ id: string; system: boolean }>
+  foreign_accessibility: string[]
+  adb_enabled: boolean
+  development_settings_enabled: boolean
+  shield_active: boolean
+  overlay_hiding_supported: boolean
+  obscured_touches: number
+  sdk_int: number
+  source: string
+}
+
+/** Desktop hidden-overlay scan from `sentinel_hidden_overlay`. */
+export interface OverlayWindow {
+  pid: number
+  owner: string
+  title: string | null
+  width: number
+  height: number
+  on_screen: boolean
+  reason: string
+}
+export interface OverlayScan {
+  suspicious: OverlayWindow[]
+  allowlisted: number
+  scanned: number
+  source: string
+}
+
+/** Desktop process watchlist scan from `sentinel_process_scan`. */
+export type WatchCategory =
+  | 'ai_assistant' | 'interview_cheat' | 'remote_desktop' | 'virtual_camera' | 'screen_share' | 'virtual_machine'
+export interface WatchedProcess {
+  pid: number
+  name: string
+  identifier: string
+  category: WatchCategory
+  rule: string
+}
+export interface ProcessScan {
+  watched: WatchedProcess[]
+  scanned: number
+  source: string
+}
+
+/** Desktop global-hotkey monitor state from `sentinel_hotkeys_status`. */
+export interface HotkeyStatus {
+  supported: boolean
+  permission_granted: boolean
+  running: boolean
+  source: string
+  os_combos: string[]
+  cmd_is_system: boolean
+}
+export interface HotkeyEvent {
+  at_ms: number
+  combo: string
 }
 
 export interface BehavioralProfile {
@@ -1491,6 +1620,8 @@ export interface IssuancePolicy {
   max_warning?: number | null
   require_clean?: boolean
   required_assurance_level?: string | null
+  /** Minimum fraction of snapshots captured with the camera opted in. */
+  min_camera_coverage?: number | null
 }
 
 export interface IssueCredentialRequest {
@@ -1529,6 +1660,21 @@ export interface RoleAssessment {
   status: string
   created_at: string
   updated_at: string
+}
+
+/** One learner attempt made for a role (sponsor issuance picker). */
+export interface RoleAttemptSummary {
+  attempt_id: string
+  subject_did: string
+  skill_id: string
+  integrity_session_id?: string | null
+  score?: number | null
+  passed?: boolean | null
+  credential_id?: string | null
+  started_at: string
+  graded_at?: string | null
+  ended_at?: string | null
+  end_reason?: string | null
 }
 
 export interface CreateRoleAssessmentRequest {
@@ -2018,6 +2164,18 @@ export interface StartedAttempt {
   pass_threshold: number
   questions: ServedQuestion[]
   draft_answers: SubmittedAnswer[]
+  /** The sponsor role the attempt is for, when the learner chose one. */
+  role?: AttemptRoleTarget | null
+}
+
+/** A published sponsor role a learner can assess a skill for. */
+export interface AttemptRoleTarget {
+  role_assessment_id: string
+  role_title: string
+  org_name: string
+  /** The role's policy sets `min_camera_coverage > 0`: camera on for the whole attempt. */
+  camera_required: boolean
+  min_camera_coverage?: number | null
 }
 
 /** One submitted answer: the served option positions the learner selected. */

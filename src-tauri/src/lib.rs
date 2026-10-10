@@ -669,21 +669,40 @@ pub fn run() {
     tracing::subscriber::set_global_default(TracingToLog).ok();
 
     let builder = tauri::Builder::default().on_window_event(|window, event| {
-        // Native app-focus signal for Sentinel: when the assessment
-        // window loses focus, report which OS app took the
-        // foreground (webview can't see this). Emitted to the
-        // frontend, which folds it into the integrity snapshot.
-        if let tauri::WindowEvent::Focused(focused) = event {
-            use tauri::Emitter;
-            let app = if *focused {
-                None
-            } else {
-                crate::sentinel::active_app::frontmost_app()
-            };
-            let _ = window.emit(
-                "sentinel://focus",
-                serde_json::json!({ "focused": *focused, "app": app }),
-            );
+        use tauri::Emitter;
+        match event {
+            // Native app-focus signal for Sentinel: when the assessment
+            // window loses focus, report which OS app took the
+            // foreground (webview can't see this). Emitted to the
+            // frontend, which folds it into the integrity snapshot.
+            tauri::WindowEvent::Focused(focused) => {
+                let app = if *focused {
+                    None
+                } else {
+                    crate::sentinel::active_app::frontmost_app()
+                };
+                let _ = window.emit(
+                    "sentinel://focus",
+                    serde_json::json!({ "focused": *focused, "app": app }),
+                );
+            }
+            // Display-topology nudge: a window that moved to another
+            // monitor or changed scale factor is the moment to resample
+            // `sentinel_display_topology` instead of waiting for the next
+            // snapshot window. The frontend debounces drags.
+            tauri::WindowEvent::Moved(_) => {
+                let _ = window.emit(
+                    "sentinel://display",
+                    serde_json::json!({ "reason": "moved" }),
+                );
+            }
+            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                let _ = window.emit(
+                    "sentinel://display",
+                    serde_json::json!({ "reason": "scale_changed" }),
+                );
+            }
+            _ => {}
         }
     });
 
@@ -1537,6 +1556,7 @@ pub fn run() {
             commands::hiring::hiring_offer_respond,
             commands::hiring::hiring_history,
             commands::assessment::assessment_start_attempt,
+            commands::assessment::assessment_open_roles,
             commands::assessment::assessment_save_draft,
             commands::assessment::assessment_submit_answers,
             commands::assessment::assessment_recover,
@@ -1588,6 +1608,7 @@ pub fn run() {
             commands::completion::get_completion_witness_status,
             // Integrity
             commands::integrity::integrity_start_session,
+            commands::integrity::integrity_attest_session,
             commands::integrity::integrity_submit_snapshot,
             commands::integrity::integrity_end_session,
             commands::integrity::integrity_get_session,
@@ -1600,6 +1621,7 @@ pub fn run() {
             commands::role_assessment::get_role_assessment,
             commands::role_assessment::set_role_assessment_status,
             commands::role_assessment::issue_role_credential,
+            commands::role_assessment::list_role_attempts,
             // Local-first interview assistant (tutoring media + private record)
             commands::interview::interview_create,
             commands::interview::interview_list,
@@ -1639,6 +1661,17 @@ pub fn run() {
             commands::sentinel_gaze::sentinel_score_gaze,
             commands::sentinel_gaze::sentinel_train_gaze_calib,
             commands::sentinel_gaze::sentinel_frontmost_app,
+            commands::sentinel_display::sentinel_display_topology,
+            commands::sentinel_environment::sentinel_android_environment,
+            commands::sentinel_environment::sentinel_set_assessment_shield,
+            commands::sentinel_environment::sentinel_take_obscured_touches,
+            commands::sentinel_overlay::sentinel_hidden_overlay,
+            commands::sentinel_processes::sentinel_process_scan,
+            commands::sentinel_hotkeys::sentinel_hotkeys_status,
+            commands::sentinel_hotkeys::sentinel_hotkeys_request_permission,
+            commands::sentinel_hotkeys::sentinel_hotkeys_start,
+            commands::sentinel_hotkeys::sentinel_hotkeys_stop,
+            commands::sentinel_hotkeys::sentinel_hotkeys_drain,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

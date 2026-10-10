@@ -90,10 +90,6 @@
         "name": "Pegar",
         "description": "Cuenta cuánto texto pegas. Pegar bloques grandes de texto se marca."
       },
-      "devtools": {
-        "name": "Herramientas de desarrollador",
-        "description": "Detecta cuando se abren las herramientas de desarrollador del navegador."
-      },
       "facePresent": {
         "name": "Comprobación de cámara",
         "description": "Si activas tu cámara, Sentinel comprueba cada pocos segundos que sigues ahí."
@@ -113,17 +109,33 @@
         "description": "Alejarse con demasiada frecuencia",
         "trigger": "Más de 10 cambios en una comprobación"
       },
+      "appSwitch": {
+        "description": "Cambio a otra aplicación",
+        "trigger": "El sistema operativo pasó el foco a otra aplicación"
+      },
       "pasteDetected": {
         "description": "Se pegó un bloque grande de texto",
         "trigger": "Más de 500 caracteres pegados"
       },
-      "devtoolsDetected": {
-        "description": "Se abrieron las herramientas de desarrollador del navegador",
-        "trigger": "La comprobación de herramientas de desarrollador dio positivo"
+      "pasteClassifierAnomaly": {
+        "description": "La respuesta parece pegada o escrita por una máquina",
+        "trigger": "El detector de pegado de Sentinel puntúa al menos 0,95"
+      },
+      "pasteClassifierCritical": {
+        "description": "La respuesta casi seguro fue pegada o escrita por una máquina",
+        "trigger": "El detector de pegado de Sentinel puntúa al menos 0,99"
       },
       "botSuspected": {
         "description": "El movimiento parece automatizado",
         "trigger": "El movimiento del ratón casi no tiene variación natural"
+      },
+      "lowIntegrity": {
+        "description": "La puntuación de integridad cayó por debajo del límite seguro",
+        "trigger": "Puntuación general por debajo de 0,40"
+      },
+      "behaviorShift": {
+        "description": "El comportamiento se desvió mucho de tu patrón habitual",
+        "trigger": "Puntuación de coincidencia por debajo de 0,35"
       },
       "noFace": {
         "description": "No se ve ningún rostro en la cámara",
@@ -133,17 +145,93 @@
         "description": "Más de un rostro en la cámara",
         "trigger": "Más de un rostro durante una comprobación"
       },
-      "multiAccount": {
-        "description": "Este dispositivo está vinculado a más de una cuenta",
-        "trigger": "El mismo dispositivo se vio en más de una cuenta"
+      "faceMismatch": {
+        "description": "El rostro no coincide con el registrado",
+        "trigger": "La comprobación de cámara ve a una persona distinta de la registrada"
       },
-      "lowIntegrity": {
-        "description": "La puntuación de integridad cayó por debajo del límite seguro",
-        "trigger": "Puntuación general por debajo de 0,40"
+      "prolongedAbsence": {
+        "description": "Ausente de la cámara durante un rato",
+        "trigger": "Rostro ausente en 5 comprobaciones seguidas (unos 15 segundos)"
       },
-      "behaviorShift": {
-        "description": "El comportamiento se desvió mucho de tu patrón habitual",
-        "trigger": "Puntuación de coincidencia por debajo de 0,35"
+      "frequentAbsence": {
+        "description": "Ausente de la cámara con frecuencia",
+        "trigger": "Rostro ausente en más de la mitad de las comprobaciones de un periodo"
+      },
+      "gazeWander": {
+        "description": "Mira fuera de la pantalla con frecuencia",
+        "trigger": "Mirada estimada fuera de la pantalla en más del 30 % de las comprobaciones"
+      },
+      "gazeOccluded": {
+        "description": "Ojos ocultos a la cámara",
+        "trigger": "Sin geometría facial utilizable en más del 40 % de las comprobaciones"
+      },
+      "deviceGlance": {
+        "description": "Miradas repetidas hacia abajo",
+        "trigger": "Tres o más miradas hacia abajo fuera de la pantalla en un periodo"
+      },
+      "virtualCamera": {
+        "description": "La cámara es un dispositivo virtual",
+        "trigger": "El nombre del dispositivo de vídeo coincide con un producto de cámara virtual conocido"
+      },
+      "spoofSuspected": {
+        "description": "El rostro de la cámara parece una foto, una pantalla o una grabación",
+        "trigger": "Más de la mitad de al menos 3 comprobaciones de vivacidad en un periodo se puntuaron como posible suplantación"
+      },
+      "externalDisplay": {
+        "description": "Hay una segunda pantalla conectada",
+        "trigger": "Más de una pantalla conectada; se anota, no se penaliza"
+      },
+      "displayChange": {
+        "description": "La configuración de pantalla cambió durante la sesión",
+        "trigger": "Se añadió, quitó o duplicó una pantalla, o se activó la vista dividida"
+      },
+      "splitScreen": {
+        "description": "Otra aplicación comparte la pantalla",
+        "trigger": "Split View, Slide Over, Stage Manager, multiventana o imagen en imagen está activo"
+      },
+      "screenCaptured": {
+        "description": "La pantalla se está grabando o duplicando",
+        "trigger": "El sistema informa de captura de pantalla, o dos pantallas muestran la misma imagen"
+      },
+      "hiddenOverlay": {
+        "description": "Una ventana se oculta de la captura de pantalla",
+        "trigger": "Otro programa tiene abierta una ventana excluida de la captura, override-redirect o transparente a los clics (escritorio)"
+      },
+      "cheatToolProcess": {
+        "description": "Hay una herramienta de trampas para entrevistas en ejecución",
+        "trigger": "Se está ejecutando un programa de la lista de superposiciones de evaluación (escritorio)"
+      },
+      "unauthorizedProcess": {
+        "description": "Control remoto, cámara virtual o máquina virtual detectados",
+        "trigger": "Se ejecuta un host de escritorio remoto, un controlador de cámara virtual o un agente de máquina virtual (escritorio)"
+      },
+      "aiAssistantRunning": {
+        "description": "Hay un asistente de IA de escritorio abierto",
+        "trigger": "Se ejecuta una aplicación de asistente de IA conocida; se anota, no se penaliza"
+      },
+      "screenShareRunning": {
+        "description": "Hay una aplicación de compartir pantalla abierta",
+        "trigger": "Se ejecuta una aplicación de reuniones o de compartir pantalla; se anota, no se penaliza"
+      },
+      "phantomHotkey": {
+        "description": "Un atajo fue a otra aplicación",
+        "trigger": "Una combinación con Cmd/Ctrl/Alt llegó al sistema pero no a la evaluación mientras esta tenía el foco"
+      },
+      "phantomHotkeyRepeated": {
+        "description": "Los atajos siguen yendo a otra aplicación",
+        "trigger": "Tres o más atajos de ese tipo en un periodo"
+      },
+      "foreignAccessibilityService": {
+        "description": "Hay activo un servicio de accesibilidad de otra aplicación",
+        "trigger": "Hay habilitado un servicio de accesibilidad que no es del sistema (Android)"
+      },
+      "debugBridgeEnabled": {
+        "description": "La depuración de desarrollador está habilitada",
+        "trigger": "La depuración USB o inalámbrica está activada (Android)"
+      },
+      "obscuredTouch": {
+        "description": "Un toque llegó a través de una superposición",
+        "trigger": "Se registró un toque mientras otra ventana cubría la evaluación (Android)"
       }
     }
   },
@@ -265,7 +353,7 @@
     "alreadyEnrolled": "(ya configurado: puedes omitirlo)",
     "activeTitle": "Ya te protege, sin necesidad de configuración:",
     "activePaste": "Detector de pegado de Sentinel: detecta respuestas pegadas y bots de escritura, integrado en cada copia",
-    "activeRules": "Comprobaciones básicas: permanecer en la página, herramientas de desarrollador, tamaño de pegado y movimiento no natural",
+    "activeRules": "Comprobaciones básicas: permanecer en la página, tamaño de pegado y movimiento no natural",
     "privacyNote": "Todo permanece en este dispositivo. Tus pulsaciones de teclas, movimientos del ratón y video brutos nunca se guardan. Lo que Sentinel aprende se guarda en almacenamiento cifrado en tu dispositivo.",
     "begin": "Empezar",
     "typingTitle": "Configuración de escritura",
@@ -292,10 +380,18 @@
     "awarenessTabBody": "Registra cuándo te alejas de la evaluación y cuánto tiempo estás fuera. Un cambio ocasional está bien: muchos cambios marcan la sesión.",
     "awarenessClipboardTitle": "Pegar",
     "awarenessClipboardBody": "Detecta los eventos de pegado y cuenta los caracteres pegados. Los pegados pequeños están bien: pegar bloques grandes de texto en las respuestas genera una alerta.",
-    "awarenessDevtoolsTitle": "Herramientas de desarrollador",
-    "awarenessDevtoolsBody": "Una comprobación rápida detecta si las herramientas de desarrollador del navegador están abiertas. Es una señal leve: no te suspende, pero cuenta para la puntuación general.",
     "awarenessFingerprintTitle": "Comprobación del dispositivo",
     "awarenessFingerprintBody": "Una huella privada de este dispositivo (sin datos personales) ayuda a detectar el mismo dispositivo usado por diferentes cuentas.",
+    "awarenessDisplayTitle": "Pantallas y vista dividida",
+    "awarenessDisplayBody": "Detecta una segunda pantalla, duplicado o grabación de pantalla, y otra app compartiendo la pantalla. Un segundo monitor solo se anota; compartir la pantalla durante una evaluación genera una marca.",
+    "awarenessOverlayTitle": "Ventanas ocultas y herramientas conocidas",
+    "awarenessOverlayBody": "En escritorio, busca ventanas que se ocultan de la captura de pantalla y programas de una lista corta: overlays de evaluación, hosts de control remoto, cámaras virtuales. Solo se guardan las coincidencias — nunca tu lista completa de ventanas o programas.",
+    "awarenessHotkeyTitle": "Atajos de teclado hacia otras apps",
+    "awarenessHotkeyBody": "Durante las evaluaciones, Sentinel puede notar combinaciones de atajos (con Cmd, Ctrl o Alt) que el sistema entregó a otra app en vez de a esta. La escritura normal nunca se registra — solo los nombres de las combinaciones. En macOS requiere permiso; puedes concederlo aquí, nunca a mitad de una evaluación.",
+    "hotkeyAllow": "Permitir monitoreo de atajos",
+    "hotkeyAllowed": "El monitoreo de atajos está permitido en este dispositivo.",
+    "hotkeyUnavailable": "No disponible en esta plataforma. Las demás comprobaciones siguen activas.",
+    "hotkeyDenied": "Permiso aún no concedido. Puedes permitirlo en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y volver.",
     "cameraTitle": "Comprobación de rostro (opcional)",
     "cameraBody": "Puedes activar tu cámara para confirmar que estás presente durante las evaluaciones. El video se maneja por completo en tu dispositivo: nunca se envían imágenes ni video a ningún sitio.",
     "cameraHasEnrollment": "Ya tienes una comprobación de rostro configurada. Volver a activar la cámara la reemplaza; Omitir conserva la existente.",
@@ -371,12 +467,17 @@
     "rowPastedChars": "caracteres pegados",
     "rowTabSwitches": "cambios de pestaña",
     "rowUnfocused": "sin foco",
-    "rowDevtools": "herramientas de desarrollador",
     "rowEnvChanged": "entorno cambiado",
     "rowAppFocusLost": "foco de la aplicación perdido",
     "rowSwitchedTo": "cambió a",
+    "rowDisplays": "pantallas",
+    "rowAndroidEnv": "entorno android",
+    "rowOverlays": "superposiciones ocultas",
+    "rowProcesses": "procesos vigilados",
+    "rowHotkeys": "atajos fantasma",
     "rowFaces": "rostros (en vivo)",
     "rowFacePresent": "rostro presente",
+    "rowCameraDevice": "dispositivo de cámara",
     "rowFaceConsistency": "coincidencia de rostro",
     "rowFaceSimMatch": "similitud / coincidencia de rostro",
     "rowSessionChecks": "comprobaciones de sesión",
@@ -394,6 +495,8 @@
     "valYes": "sí",
     "valNo": "no",
     "valNa": "n/d",
+    "rowLiveness": "vivacidad",
+    "rowAttestation": "atestación",
     "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {

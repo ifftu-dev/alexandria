@@ -125,6 +125,7 @@
       "emptyBody": "एखाद्या संस्थेसाठी एक तयार करा.",
       "requiresClean": "स्वच्छ सत्र आवश्यक",
       "minIntegrity": "किमान सचोटी {value}",
+      "minCameraCoverage": "किमान कॅमेरा कव्हरेज {value}",
       "publish": "प्रकाशित करा",
       "archive": "संग्रहित करा"
     },
@@ -137,7 +138,15 @@
       "submitting": "जारी करत आहे…",
       "issued": "प्रमाणपत्र जारी केले",
       "assurance": "आश्वासन:",
-      "integrity": "सचोटी {value}"
+      "integrity": "सचोटी {value}",
+      "attemptsTitle": "या भूमिकेसाठीचे प्रयत्न",
+      "attemptsLoading": "प्रयत्न लोड होत आहेत…",
+      "attemptsEmpty": "या भूमिकेसाठी अजून कोणत्याही शिकणाऱ्याने प्रयत्न केलेला नाही.",
+      "attemptPassed": "उत्तीर्ण",
+      "attemptFailed": "अनुत्तीर्ण",
+      "attemptOpen": "सुरू",
+      "attemptScore": "गुण {value}%",
+      "attemptUse": "वापरा"
     },
     "orgModal": {
       "title": "नवीन संस्था",
@@ -156,6 +165,7 @@
       "minIntegrity": "किमान सचोटी",
       "maxCritical": "कमाल गंभीर",
       "maxWarning": "कमाल इशारा",
+      "minCameraCoverage": "किमान कॅमेरा कव्हरेज (0–1)",
       "requireClean": "स्वच्छ सत्र आवश्यक करा",
       "assuranceLabel": "आवश्यक आश्वासन स्तर",
       "assuranceNone": "(काहीही नाही)"

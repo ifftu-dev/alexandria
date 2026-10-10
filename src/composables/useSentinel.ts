@@ -10,10 +10,13 @@ import {
   FaceEmbedder,
   type EnrollmentEmbedding,
 } from '@/utils/sentinel/face-embedder'
+import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
+import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
 import type {
   SignalData,
   BehavioralProfile,
   StartSessionResponse,
+  AttestSessionResponse,
   KeystrokeEvent,
   MousePoint,
   DigraphFeatures,
@@ -27,6 +30,13 @@ import type {
   GazeFeatures,
   GazeCalibSample,
   TrainGazeCalibResponse,
+  DisplayTopology,
+  AndroidEnvironment,
+  OverlayScan,
+  ProcessScan,
+  WatchCategory,
+  HotkeyStatus,
+  HotkeyEvent,
 } from '@/types'
 
 const { invoke: tauriInvoke } = useLocalApi()
@@ -112,6 +122,34 @@ function emptySentinelDebug() {
     appFocusLostCount: 0,
     appFocusLostMs: 0,
     lastApp: '' as string,
+    // Native display topology (latest sample this window).
+    displayCount: 0,
+    externalDisplay: false,
+    splitScreen: false,
+    screenCaptured: false,
+    displayChanges: 0,
+    displaySource: '' as string,
+    // Android environment (latest sample this window).
+    foreignAccessibility: [] as string[],
+    adbEnabled: false,
+    shieldRequested: false,
+    shieldActive: false,
+    obscuredTouches: 0,
+    // Desktop hidden-overlay scan (latest sample this window).
+    overlayScanned: 0,
+    overlayAllowlisted: 0,
+    overlaySuspicious: [] as string[],
+    // Camera device (dev view only; never persisted).
+    cameraDeviceLabel: '' as string,
+    cameraDeviceVirtual: false,
+    // Process watchlist (latest sample this window).
+    processesScanned: 0,
+    watchedProcesses: [] as string[],
+    // Global hotkey monitor.
+    hotkeysRunning: false,
+    hotkeysPermission: false,
+    nativeHotkeys: 0,
+    phantomHotkeys: [] as string[],
     // Full rule + AI signal snapshot (computed each window).
     signals: null as SignalData | null,
     // Live session-gaze mirror (every camera tick, not just at snapshot) —
@@ -122,6 +160,12 @@ function emptySentinelDebug() {
     sessionGazePitch: 0,
     sessionGazeOnScreen: true,
     sessionGazeOccluded: false,
+    // Latest liveness read (every camera tick) and the window ratio.
+    sessionLivenessRealProb: null as number | null,
+    sessionLivenessSpoof: false,
+    livenessSpoofRatio: null as number | null,
+    // Device attestation outcome for this session (dev view).
+    attestation: '' as string,
   }
 }
 const sentinelDebug = reactive(emptySentinelDebug())
@@ -240,7 +284,132 @@ let appFocusLostCount = 0
 let appFocusLostMs = 0
 let focusLostAt = 0
 let lastFocusApp = ''
+let blurStartedAt = 0   // performance.now() of the open blur, for hotkey correlation
 let unlistenFocus: UnlistenFn | null = null
+
+// Native display topology — sampled from the Rust `sentinel_display_topology`
+// IPC once at session start (baseline) and once per snapshot window. The
+// webview cannot see a second monitor, an iPad Split View pane, or an
+// AirPlay mirror; window resizes deliberately produce no signal here.
+// `displayChangeCount` counts topology transitions inside the window.
+let displayBaseline: DisplayTopology | null = null
+let displayLatest: DisplayTopology | null = null
+let displayChangeCount = 0
+// Native-reported transitions seen so far; the delta between samples
+// counts toggles that began and ended between two samples.
+let displayNativeTransitions = -1
+let displayNativeToggle = false
+let unlistenDisplay: UnlistenFn | null = null
+let displayResampleTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Stable identity for "did the arrangement change" (ignores `source`). */
+const displaySignature = (t: DisplayTopology): string =>
+  `${t.display_count}|${t.external_display ? 1 : 0}|${t.mirrored ? 1 : 0}|${t.split_screen ? 1 : 0}`
+
+/**
+ * Fold a fresh topology sample into the per-window state. Returns the
+ * sample so callers can derive flags. Exported for the snapshot path only.
+ */
+const recordDisplaySample = (sample: DisplayTopology | null): DisplayTopology | null => {
+  if (!sample || typeof sample.display_count !== 'number') return null
+  if (!displayBaseline) displayBaseline = sample
+  if (displayLatest && displaySignature(displayLatest) !== displaySignature(sample)) {
+    displayChangeCount++
+  }
+  const native = sample.native_transitions ?? 0
+  if (displayNativeTransitions >= 0 && native > displayNativeTransitions) {
+    displayChangeCount += native - displayNativeTransitions
+    displayNativeToggle = true
+  }
+  displayNativeTransitions = native
+  displayLatest = sample
+  return sample
+}
+
+/** Flags derived from the latest topology sample + transitions this window. */
+const displayAnomalies = (): string[] => {
+  const out: string[] = []
+  const t = displayLatest
+  if (t) {
+    if (t.external_display) out.push('external_display')
+    if (t.split_screen || displayNativeToggle) out.push('split_screen')
+    if (t.mirrored) out.push('screen_captured')
+  }
+  if (displayChangeCount > 0) out.push('display_change')
+  return out
+}
+
+// Android environment — sampled per snapshot window from the Rust
+// `sentinel_android_environment` IPC (null everywhere else). The
+// obscured-touch counter is drained with it. The assessment shield
+// (FLAG_SECURE + setHideOverlayWindows) is engaged only while an
+// assessment element is current, so course reading stays screenshot-able.
+let androidEnvLatest: AndroidEnvironment | null = null
+let obscuredTouchesWindow = 0
+let shieldRequested = false
+let sessionPurpose: SentinelSessionPurpose = 'assessment'
+
+const environmentAnomalies = (): string[] => {
+  const out: string[] = []
+  const e = androidEnvLatest
+  if (e) {
+    if ((e.foreign_accessibility?.length ?? 0) > 0) out.push('foreign_accessibility_service')
+    if (e.adb_enabled) out.push('debug_bridge_enabled')
+  }
+  if (obscuredTouchesWindow > 0) out.push('obscured_touch')
+  return out
+}
+
+// Desktop hidden-overlay scan — windows excluded from screen capture
+// (Cluely-style), override-redirect (X11) or click-through topmost
+// (Windows), minus our own and an allowlist. Sampled per snapshot window.
+let overlayLatest: OverlayScan | null = null
+
+const overlayAnomalies = (): string[] =>
+  overlayLatest && (overlayLatest.suspicious?.length ?? 0) > 0 ? ['hidden_overlay'] : []
+
+// Desktop process watchlist — only watched entries cross IPC. Sampled
+// per snapshot window. Cheat tools are critical; remote desktop, virtual
+// cameras and VM guest agents are warnings; AI assistants and screen-share
+// apps are review context only.
+let processLatest: ProcessScan | null = null
+
+const WARNING_PROCESS_CATEGORIES: ReadonlySet<WatchCategory> = new Set(['remote_desktop', 'virtual_camera', 'virtual_machine'])
+
+const processAnomalies = (): string[] => {
+  const out: string[] = []
+  const cats = new Set(processLatest?.watched.map(w => w.category) ?? [])
+  if (cats.has('interview_cheat')) out.push('cheat_tool_process')
+  if ([...cats].some(c => WARNING_PROCESS_CATEGORIES.has(c))) out.push('unauthorized_process')
+  if (cats.has('ai_assistant')) out.push('ai_assistant_running')
+  if (cats.has('screen_share')) out.push('screen_share_running')
+  return out
+}
+
+// Global hotkeys — native listen-only monitor of modifier combos (desktop,
+// assessment purpose only, only when the OS already granted listening).
+// Per window: combos the OS saw but the webview never received, while our
+// window was focused, are "phantom": an overlay tool's hotkey.
+let hotkeyStatus: HotkeyStatus | null = null
+let hotkeysRunning = false
+let hotkeyEpoch = 0                       // performance.now() at monitor t=0
+let webviewCombos: WebviewCombo[] = []    // combos the webview received this window
+let blurIntervals: BlurInterval[] = []    // [start,end] in performance.now() space
+let phantomWindow: string[] = []
+let nativeHotkeyCount = 0
+const WEBVIEW_COMBO_CAP = 512
+
+const hotkeyAnomalies = (): string[] => {
+  if (phantomWindow.length >= 3) return ['phantom_hotkey_repeated', 'phantom_hotkey']
+  if (phantomWindow.length >= 1) return ['phantom_hotkey']
+  return []
+}
+
+// Camera device identity — the video track label the player / interview
+// session obtained from getUserMedia. Only the virtual-camera verdict
+// reaches scores and snapshots; the label stays in the dev debug view.
+let cameraDeviceLabel = ''
+let cameraDeviceVirtual = false
 
 // Gaze / second-device tracking, accumulated per snapshot window by
 // scoreGaze() and drained in the snapshot dispatch. All gaze inference
@@ -250,6 +419,14 @@ let gazeTotalChecks = 0
 let gazeOffscreenChecks = 0
 let gazeOccludedChecks = 0
 let gazeDownGlances = 0
+// Liveness (MiniFASNet) accumulators for the current snapshot window.
+let livenessChecks = 0
+let livenessSpoofChecks = 0
+let livenessRealProbSum = 0
+/** Minimum liveness ticks in a window before a spoof ratio is trusted. */
+const LIVENESS_MIN_CHECKS = 3
+/** Fraction of ticks scored as spoof that raises `spoof_suspected`. */
+const LIVENESS_SPOOF_RATIO = 0.5
 // Reusable offscreen canvas for frame downscaling to the detector size.
 let gazeCanvas: HTMLCanvasElement | null = null
 
@@ -523,6 +700,48 @@ function createSentinelService() {
       environment_changed: environmentChanged,
     }
 
+    if (displayLatest) {
+      signals.display_count = displayLatest.display_count
+      signals.external_display = displayLatest.external_display
+      signals.split_screen = displayLatest.split_screen
+      signals.screen_captured = displayLatest.mirrored
+      signals.display_changes = displayChangeCount
+    }
+    anomalies.push(...displayAnomalies())
+
+    if (androidEnvLatest) {
+      signals.foreign_accessibility_services = androidEnvLatest.foreign_accessibility?.length ?? 0
+      signals.adb_enabled = androidEnvLatest.adb_enabled
+    }
+    if (obscuredTouchesWindow > 0) signals.obscured_touches = obscuredTouchesWindow
+    anomalies.push(...environmentAnomalies())
+
+    if (overlayLatest) {
+      signals.hidden_overlays = overlayLatest.suspicious?.length ?? 0
+      signals.overlay_windows_scanned = overlayLatest.scanned
+      signals.overlay_windows_allowlisted = overlayLatest.allowlisted
+    }
+    anomalies.push(...overlayAnomalies())
+
+    if (cameraOptedIn.value && cameraDeviceLabel) {
+      signals.camera_device_virtual = cameraDeviceVirtual
+      if (cameraDeviceVirtual) anomalies.push('virtual_camera')
+    }
+
+    if (processLatest) {
+      const watched = processLatest.watched ?? []
+      signals.watched_processes = watched.length
+      signals.processes_scanned = processLatest.scanned
+      signals.watched_categories = [...new Set(watched.map(w => w.category))]
+    }
+    anomalies.push(...processAnomalies())
+
+    if (hotkeysRunning) {
+      signals.global_hotkeys = nativeHotkeyCount
+      signals.phantom_hotkeys = phantomWindow.length
+    }
+    anomalies.push(...hotkeyAnomalies())
+
     if (cameraOptedIn.value && facePresent !== undefined) {
       signals.face_present = facePresent
       signals.face_count = faceCount
@@ -774,6 +993,68 @@ function createSentinelService() {
         }
       }
 
+      // Native display topology: one sample per window. A transition
+      // since the previous sample (monitor plugged in, Split View
+      // entered, mirroring started) is counted; the latest state drives
+      // the per-window flags in computeScores().
+      if (!isCurrent()) return
+      try {
+        const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
+        if (!isCurrent()) return
+        recordDisplaySample(topo)
+      } catch (err) {
+        console.warn('[sentinel] display topology IPC failed', err)
+      }
+
+      // Android environment + obscured-touch drain (both inert off Android).
+      if (!isCurrent()) return
+      try {
+        const env = await tauriInvoke<AndroidEnvironment | null>('sentinel_android_environment')
+        // Shape-check native payloads: a stub or mismatched backend must read as absent, not crash scoring.
+        androidEnvLatest = env && Array.isArray(env.foreign_accessibility) ? env : null
+        if (!isCurrent()) return
+        const touches = await tauriInvoke<number>('sentinel_take_obscured_touches')
+        obscuredTouchesWindow = typeof touches === 'number' ? touches : 0
+      } catch (err) {
+        console.warn('[sentinel] android environment IPC failed', err)
+      }
+
+      // Desktop hidden-overlay scan (null on mobile / Wayland).
+      if (!isCurrent()) return
+      try {
+        const overlay = await tauriInvoke<OverlayScan | null>('sentinel_hidden_overlay')
+        overlayLatest = overlay && Array.isArray(overlay.suspicious) ? overlay : null
+      } catch (err) {
+        console.warn('[sentinel] hidden overlay IPC failed', err)
+      }
+
+      // Desktop process watchlist (null on mobile).
+      if (!isCurrent()) return
+      try {
+        const procs = await tauriInvoke<ProcessScan | null>('sentinel_process_scan')
+        processLatest = procs && Array.isArray(procs.watched) ? procs : null
+      } catch (err) {
+        console.warn('[sentinel] process scan IPC failed', err)
+      }
+
+      // Global hotkeys: drain the native ring and subtract what the webview saw.
+      if (!isCurrent()) return
+      if (hotkeysRunning && hotkeyStatus) {
+        try {
+          const drained = await tauriInvoke<HotkeyEvent[]>('sentinel_hotkeys_drain')
+          const native = Array.isArray(drained) ? drained : []
+          if (!isCurrent()) return
+          nativeHotkeyCount = native.length
+          if (blurStartedAt) blurIntervals.push({ start: blurStartedAt, end: performance.now() })
+          phantomWindow = phantomCombos({
+            native, epoch: hotkeyEpoch, webview: webviewCombos, blurs: blurIntervals,
+            osCombos: hotkeyStatus.os_combos, cmdIsSystem: hotkeyStatus.cmd_is_system,
+          }).map(e => e.combo)
+        } catch (err) {
+          console.warn('[sentinel] hotkey drain IPC failed', err)
+        }
+      }
+
       if (!isCurrent()) return
       const { signals, integrity, consistency, anomalies } = computeScores({
         aiPasteAnomaly: pasteAnomaly,
@@ -792,6 +1073,19 @@ function createSentinelService() {
         if (gazeOffscreenRatio > GAZE_WANDER_RATIO) anomalies.push('gaze_wander')
         if (occludedRatio > GAZE_OCCLUDED_RATIO) anomalies.push('gaze_occluded')
       }
+      // Liveness: a single low tick is lighting as often as an attack, so
+      // the flag needs a majority of enough ticks in the window.
+      let livenessSpoofRatio: number | null = null
+      if (cameraOptedIn.value && livenessChecks > 0) {
+        livenessSpoofRatio = livenessSpoofChecks / livenessChecks
+        signals.liveness_checks = livenessChecks
+        signals.liveness_spoof_checks = livenessSpoofChecks
+        signals.liveness_real_prob = livenessRealProbSum / livenessChecks
+        if (livenessChecks >= LIVENESS_MIN_CHECKS && livenessSpoofRatio > LIVENESS_SPOOF_RATIO) {
+          anomalies.push('spoof_suspected')
+        }
+      }
+      sentinelDebug.livenessSpoofRatio = livenessSpoofRatio
 
       // Native app-switch: the assessment window lost focus to another OS
       // app this window. Roll any still-open blur into the elapsed total.
@@ -824,6 +1118,28 @@ function createSentinelService() {
       sentinelDebug.aiMouseHumanProb = mouseHumanProb
       sentinelDebug.facePresent = facePresent ?? false
       sentinelDebug.faceCount = faceCount ?? 0
+      sentinelDebug.displayCount = displayLatest?.display_count ?? 0
+      sentinelDebug.externalDisplay = displayLatest?.external_display ?? false
+      sentinelDebug.splitScreen = displayLatest?.split_screen ?? false
+      sentinelDebug.screenCaptured = displayLatest?.mirrored ?? false
+      sentinelDebug.displayChanges = displayChangeCount
+      sentinelDebug.displaySource = displayLatest?.source ?? ''
+      sentinelDebug.foreignAccessibility = androidEnvLatest?.foreign_accessibility ?? []
+      sentinelDebug.adbEnabled = androidEnvLatest?.adb_enabled ?? false
+      sentinelDebug.shieldRequested = shieldRequested
+      sentinelDebug.shieldActive = androidEnvLatest?.shield_active ?? false
+      sentinelDebug.obscuredTouches = obscuredTouchesWindow
+      sentinelDebug.overlayScanned = overlayLatest?.scanned ?? 0
+      sentinelDebug.overlayAllowlisted = overlayLatest?.allowlisted ?? 0
+      sentinelDebug.overlaySuspicious = overlayLatest?.suspicious.map(w => `${w.owner}:${w.reason}`) ?? []
+      sentinelDebug.cameraDeviceLabel = cameraDeviceLabel
+      sentinelDebug.cameraDeviceVirtual = cameraDeviceVirtual
+      sentinelDebug.processesScanned = processLatest?.scanned ?? 0
+      sentinelDebug.watchedProcesses = processLatest?.watched.map(w => `${w.name}:${w.category}`) ?? []
+      sentinelDebug.hotkeysRunning = hotkeysRunning
+      sentinelDebug.hotkeysPermission = hotkeyStatus?.permission_granted ?? false
+      sentinelDebug.nativeHotkeys = nativeHotkeyCount
+      sentinelDebug.phantomHotkeys = phantomWindow
       sentinelDebug.appFocusLostCount = appFocusLostCount
       sentinelDebug.appFocusLostMs = appFocusLostMs
       sentinelDebug.lastApp = lastFocusApp
@@ -856,8 +1172,18 @@ function createSentinelService() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      livenessChecks = 0
+      livenessSpoofChecks = 0
+      livenessRealProbSum = 0
       appFocusLostCount = 0
       appFocusLostMs = 0
+      displayChangeCount = 0
+      displayNativeToggle = false
+      obscuredTouchesWindow = 0
+      webviewCombos = []
+      blurIntervals = []
+      phantomWindow = []
+      nativeHotkeyCount = 0
       keystrokeBuffer = []
       mouseBuffer = []
       tabSwitchCount = 0
@@ -871,6 +1197,9 @@ function createSentinelService() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      livenessChecks = 0
+      livenessSpoofChecks = 0
+      livenessRealProbSum = 0
       snapshotWindowStartMs = Date.now()
 
   }
@@ -892,6 +1221,13 @@ function createSentinelService() {
 
   const recordKeyDown = (e: KeyboardEvent) => {
     const now = performance.now()
+    if (hotkeysRunning) {
+      const combo = normaliseWebviewCombo(e, hotkeyStatus?.cmd_is_system ?? false)
+      if (combo) {
+        webviewCombos.push({ at: now, combo })
+        if (webviewCombos.length > WEBVIEW_COMBO_CAP) webviewCombos.shift()
+      }
+    }
     const flightMs = lastKeystrokeTime > 0 ? now - lastKeystrokeTime : 0
     keystrokeBuffer.push({
       key: e.key.length === 1 ? 'char' : e.key,
@@ -972,6 +1308,12 @@ function createSentinelService() {
       sessionId.value = response.session_id
       clearTrainingBuffers()
       isActive.value = true
+      // Device attestation (iOS App Attest / Android Play Integrity) binds
+      // the platform's word to this session's nonce. Fire-and-forget: the
+      // backend records the outcome and desktop reports unsupported.
+      void invoke<AttestSessionResponse>('integrity_attest_session', { sessionId: response.session_id })
+        .then(r => { sentinelDebug.attestation = r.supported ? (r.stored ? r.assurance_level : 'unavailable') : 'unsupported' })
+        .catch(err => { console.warn('[sentinel] device attestation failed', err); sentinelDebug.attestation = 'error' })
       // A queued stop owns cleanup of an already-created backend session.
       // Do not attach new listeners while that cleanup is pending.
       if (generation !== lifecycleGeneration) return
@@ -1006,9 +1348,11 @@ function createSentinelService() {
             if (!isActive.value) return
             if (e.payload.focused) {
               if (focusLostAt) { appFocusLostMs += Date.now() - focusLostAt; focusLostAt = 0 }
+              if (blurStartedAt) { blurIntervals.push({ start: blurStartedAt, end: performance.now() }); blurStartedAt = 0 }
             } else {
               appFocusLostCount++
               focusLostAt = Date.now()
+              blurStartedAt = performance.now()
               if (e.payload.app?.name) {
                 lastFocusApp = e.payload.app.name
                 sentinelDebug.lastApp = lastFocusApp // live PiP feedback
@@ -1018,6 +1362,86 @@ function createSentinelService() {
         )
       } catch (err) {
         console.warn('[sentinel] focus listener failed', err)
+      }
+      if (generation !== lifecycleGeneration) return
+
+      // Shield: a standalone assessment (no enrollment) is an assessment
+      // from the first frame; the course player engages it via setElement.
+      sessionPurpose = purpose
+      androidEnvLatest = null
+      obscuredTouchesWindow = 0
+      overlayLatest = null
+      processLatest = null
+      if (purpose === 'assessment' && enrollmentId === null) void setAssessmentShield(true)
+      // The Android counter runs since process start; discard touches that
+      // predate this session so window 1 cannot inherit an old overlay tap.
+      void tauriInvoke<number>('sentinel_take_obscured_touches').catch(() => { /* inert off Android */ })
+      if (generation !== lifecycleGeneration) return
+
+      // Global hotkey monitor: assessments only, and only when the OS has
+      // already granted listening (the permission prompt lives in the
+      // wizard). A refusal just leaves the signal absent.
+      hotkeyStatus = null
+      hotkeysRunning = false
+      webviewCombos = []
+      blurIntervals = []
+      phantomWindow = []
+      nativeHotkeyCount = 0
+      if (purpose === 'assessment') {
+        try {
+          const st = await tauriInvoke<HotkeyStatus>('sentinel_hotkeys_status')
+          if (generation !== lifecycleGeneration) return
+          hotkeyStatus = st
+          if (st.supported && st.permission_granted) {
+            const started = await tauriInvoke<HotkeyStatus>('sentinel_hotkeys_start')
+            if (generation !== lifecycleGeneration) { void tauriInvoke('sentinel_hotkeys_stop').catch(() => undefined); return }
+            hotkeyEpoch = performance.now()
+            hotkeyStatus = started
+            hotkeysRunning = started.running
+          }
+        } catch (err) {
+          console.warn('[sentinel] hotkey monitor unavailable', err)
+          hotkeysRunning = false
+        }
+      }
+      if (generation !== lifecycleGeneration) return
+
+      // Display-topology baseline, so the first snapshot can tell a
+      // pre-existing second monitor from one plugged in mid-session.
+      displayBaseline = null
+      displayLatest = null
+      displayChangeCount = 0
+      displayNativeTransitions = -1
+      displayNativeToggle = false
+      try {
+        const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
+        if (generation !== lifecycleGeneration) return
+        recordDisplaySample(topo)
+      } catch (err) {
+        console.warn('[sentinel] display topology baseline failed', err)
+      }
+      if (generation !== lifecycleGeneration) return
+
+      // Native nudge (window moved to another monitor / scale changed):
+      // resample right away instead of waiting for the snapshot. Debounced
+      // because a drag emits a stream of moves.
+      try {
+        unlistenDisplay = await tauriListen<{ reason: string }>('sentinel://display', () => {
+          if (!isActive.value) return
+          if (displayResampleTimer) clearTimeout(displayResampleTimer)
+          displayResampleTimer = setTimeout(async () => {
+            displayResampleTimer = null
+            if (!isActive.value || generation !== lifecycleGeneration) return
+            try {
+              const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
+              if (isActive.value && generation === lifecycleGeneration) recordDisplaySample(topo)
+            } catch (err) {
+              console.warn('[sentinel] display resample failed', err)
+            }
+          }, 300)
+        })
+      } catch (err) {
+        console.warn('[sentinel] display listener failed', err)
       }
       if (generation !== lifecycleGeneration) return
 
@@ -1038,10 +1462,31 @@ function createSentinelService() {
   const setElement = (elementId: string, elementType: string) => {
     currentElementId = elementId
     currentElementType = elementType
+    if (isActive.value && sessionPurpose === 'assessment') {
+      void setAssessmentShield(isAssessmentElement(elementType))
+    }
   }
 
   const isAssessmentElement = (elementType: string): boolean => {
     return ['quiz', 'assessment', 'interactive'].includes(elementType)
+  }
+
+  // Engage / release the Android assessment shield. Calls are serialised so
+  // an on/off pair cannot land out of order on the native side, and the
+  // recorded state only moves on success so a failed call is retried by
+  // the next request. Best effort: a failure is logged, never thrown.
+  let shieldChain: Promise<void> = Promise.resolve()
+  const setAssessmentShield = (on: boolean): Promise<void> => {
+    shieldChain = shieldChain.then(async () => {
+      if (shieldRequested === on) return
+      try {
+        await tauriInvoke('sentinel_set_assessment_shield', { on })
+        shieldRequested = on
+      } catch (err) {
+        console.warn('[sentinel] assessment shield IPC failed', err)
+      }
+    })
+    return shieldChain
   }
 
   const reportFaceDetection = (present: boolean, count: number, consistency: number, similarity?: number, match?: boolean) => {
@@ -1137,6 +1582,13 @@ function createSentinelService() {
       sentinelDebug.sessionGazePitch = est.pitch
       sentinelDebug.sessionGazeOnScreen = est.onScreen
       sentinelDebug.sessionGazeOccluded = est.occluded
+      if (resp.liveness) {
+        livenessChecks++
+        livenessRealProbSum += resp.liveness.real_prob
+        if (resp.liveness.spoof_suspected) livenessSpoofChecks++
+        sentinelDebug.sessionLivenessRealProb = resp.liveness.real_prob
+        sentinelDebug.sessionLivenessSpoof = resp.liveness.spoof_suspected
+      }
       if (est.occluded) {
         gazeOccludedChecks++
       } else if (!est.onScreen) {
@@ -1224,6 +1676,12 @@ function createSentinelService() {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     document.removeEventListener('paste', onPaste)
     if (unlistenFocus) { unlistenFocus(); unlistenFocus = null }
+    if (unlistenDisplay) { unlistenDisplay(); unlistenDisplay = null }
+    if (hotkeysRunning) {
+      hotkeysRunning = false
+      void tauriInvoke('sentinel_hotkeys_stop').catch(() => undefined)
+    }
+    if (displayResampleTimer) { clearTimeout(displayResampleTimer); displayResampleTimer = null }
     if (liveTimer) { clearInterval(liveTimer); liveTimer = null }
   }
 
@@ -1237,6 +1695,7 @@ function createSentinelService() {
     isActive.value = false
     sentinelDebug.active = false
     detachMonitoringListeners()
+    void setAssessmentShield(false)
 
     const integrity = integrityScore.value
     const consistency = consistencyScore.value
@@ -1294,6 +1753,9 @@ function createSentinelService() {
     gazeOffscreenChecks = 0
     gazeOccludedChecks = 0
     gazeDownGlances = 0
+    livenessChecks = 0
+    livenessSpoofChecks = 0
+    livenessRealProbSum = 0
 
     return currentSessionId
   }
@@ -1342,6 +1804,23 @@ function createSentinelService() {
       appFocusLostMs = 0
       focusLostAt = 0
       lastFocusApp = ''
+      displayBaseline = null
+      displayLatest = null
+      displayChangeCount = 0
+      displayNativeTransitions = -1
+      displayNativeToggle = false
+      androidEnvLatest = null
+      obscuredTouchesWindow = 0
+      overlayLatest = null
+      processLatest = null
+      hotkeyStatus = null
+      webviewCombos = []
+      blurIntervals = []
+      phantomWindow = []
+      nativeHotkeyCount = 0
+      blurStartedAt = 0
+      cameraDeviceLabel = ''
+      cameraDeviceVirtual = false
       facePresent = undefined
       faceCount = undefined
       faceConsistency = undefined
@@ -1354,6 +1833,9 @@ function createSentinelService() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      livenessChecks = 0
+      livenessSpoofChecks = 0
+      livenessRealProbSum = 0
       keystrokeAeStatus.value = null
       mouseCnnStatus.value = null
       cameraOptedIn.value = false
@@ -1870,10 +2352,23 @@ function createSentinelService() {
    * the MediaStream, attaching an HTMLVideoElement, and driving the 3s
    * face-verification loop (see docs/sentinel.md §Camera). This only flips
    * the flag that gates face-related signals in computeScores(). */
+  /**
+   * Record which camera device feeds the opted-in stream (the video
+   * track's label). A known virtual-camera product raises `virtual_camera`
+   * each window the camera stays opted in. `null` clears it.
+   */
+  const reportCameraDevice = (label: string | null) => {
+    cameraDeviceLabel = label ?? ''
+    cameraDeviceVirtual = isVirtualCameraLabel(label)
+    sentinelDebug.cameraDeviceLabel = cameraDeviceLabel
+    sentinelDebug.cameraDeviceVirtual = cameraDeviceVirtual
+  }
+
   const setCameraOptedIn = (opted: boolean) => {
     cameraGeneration++
     cameraOptedIn.value = opted
     if (!opted) {
+      reportCameraDevice(null)
       facePresent = undefined
       faceCount = undefined
       faceConsistency = undefined
@@ -1937,6 +2432,7 @@ function createSentinelService() {
     setAIScoringEnabled,
     setPasteClassifierEnabled,
     setCameraOptedIn,
+    reportCameraDevice,
     testBlobAgainstClassifier,
   }
 }

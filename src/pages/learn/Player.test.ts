@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   active: { value: false },
   setElement: vi.fn(),
   setCameraOptedIn: vi.fn(),
+  reportCameraDevice: vi.fn(),
   scoreGaze: vi.fn(),
   verifyFace: vi.fn(),
   getUserMedia: vi.fn<() => Promise<MediaStream>>(),
@@ -38,7 +39,7 @@ vi.mock('@/composables/useSentinel', () => ({
     start: mocks.start, stop: mocks.stop, isActive: mocks.active,
     integrityScore: { value: 1 }, getSessionId: () => 'session-1',
     isAssessmentElement: (type: string) => type === 'quiz',
-    setElement: mocks.setElement, setCameraOptedIn: mocks.setCameraOptedIn,
+    setElement: mocks.setElement, setCameraOptedIn: mocks.setCameraOptedIn, reportCameraDevice: mocks.reportCameraDevice,
     scoreGaze: mocks.scoreGaze, verifyFace: mocks.verifyFace,
   }),
 }))

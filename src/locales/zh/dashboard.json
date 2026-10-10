@@ -125,6 +125,7 @@
       "emptyBody": "为某个组织创建一个。",
       "requiresClean": "需要一次无异常的会话",
       "minIntegrity": "最低诚信度 {value}",
+      "minCameraCoverage": "最低摄像头覆盖率 {value}",
       "publish": "发布",
       "archive": "归档"
     },
@@ -137,7 +138,15 @@
       "submitting": "正在签发…",
       "issued": "凭证已签发",
       "assurance": "保障级别：",
-      "integrity": "诚信度 {value}"
+      "integrity": "诚信度 {value}",
+      "attemptsTitle": "该职位的测评记录",
+      "attemptsLoading": "正在加载测评记录…",
+      "attemptsEmpty": "尚无学习者参加该职位的测评。",
+      "attemptPassed": "已通过",
+      "attemptFailed": "未通过",
+      "attemptOpen": "进行中",
+      "attemptScore": "得分 {value}%",
+      "attemptUse": "使用"
     },
     "orgModal": {
       "title": "新建组织",
@@ -156,6 +165,7 @@
       "minIntegrity": "最低诚信度",
       "maxCritical": "最多严重项",
       "maxWarning": "最多警告项",
+      "minCameraCoverage": "最低摄像头覆盖率（0–1）",
       "requireClean": "要求一次无异常的会话",
       "assuranceLabel": "所需保障级别",
       "assuranceNone": "（无）"

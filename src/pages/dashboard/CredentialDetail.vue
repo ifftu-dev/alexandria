@@ -310,7 +310,7 @@ const decisionVariant = computed(() => {
         <div class="grid gap-2 text-sm">
           <div class="flex items-center justify-between">
             <span class="text-muted-foreground">{{ $t('credentials.detail.assurance') }}</span>
-            <AppBadge :variant="credential.integrity.assuranceLevel === 'high_assurance' ? 'success' : credential.integrity.assuranceLevel === 'anchored' ? 'accent' : 'secondary'">
+            <AppBadge :variant="credential.integrity.assuranceLevel === 'high_assurance' ? 'success' : (credential.integrity.assuranceLevel === 'anchored' || credential.integrity.assuranceLevel === 'device_attested') ? 'accent' : 'secondary'">
               {{ credential.integrity.assuranceLevel }}
             </AppBadge>
           </div>
@@ -343,6 +343,7 @@ const decisionVariant = computed(() => {
         <p class="mt-3 text-xs text-muted-foreground">
           {{ $t('credentials.detail.integrityNote') }}
           <span v-if="credential.integrity.assuranceLevel === 'local'">{{ $t('credentials.detail.integrityLocal') }}</span>
+          <span v-else-if="credential.integrity.assuranceLevel === 'device_attested'">{{ $t('credentials.detail.integrityDeviceAttested') }}</span>
         </p>
       </section>
 

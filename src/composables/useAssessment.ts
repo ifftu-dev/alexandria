@@ -5,6 +5,7 @@
 
 import { useLocalApi } from './useLocalApi'
 import type {
+  AttemptRoleTarget,
   StartedAttempt,
   SubmittedAnswer,
   GradeResult,
@@ -14,10 +15,21 @@ import type {
 export function useAssessment() {
   const { invoke } = useLocalApi()
 
-  function startAttempt(skillId: string, integritySessionId: string): Promise<StartedAttempt> {
+  /** Published sponsor roles the learner may assess this skill for. Empty
+   *  means the runner shows no role chooser. */
+  function openRoles(skillId: string): Promise<AttemptRoleTarget[]> {
+    return invoke<AttemptRoleTarget[]>('assessment_open_roles', { skillId })
+  }
+
+  function startAttempt(
+    skillId: string,
+    integritySessionId: string,
+    roleAssessmentId: string | null = null,
+  ): Promise<StartedAttempt> {
     return invoke<StartedAttempt>('assessment_start_attempt', {
       skillId,
       integritySessionId,
+      roleAssessmentId,
     })
   }
 
@@ -39,5 +51,5 @@ export function useAssessment() {
     return invoke<GoalAssessmentPlan>('assessment_plan_goal', { goalSkillIds })
   }
 
-  return { startAttempt, saveDraft, submitAnswers, grade, planGoal }
+  return { openRoles, startAttempt, saveDraft, submitAnswers, grade, planGoal }
 }

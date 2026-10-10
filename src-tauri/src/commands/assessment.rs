@@ -47,6 +47,136 @@ pub struct StartedAttempt {
     /// Locally saved selections when the same live monitoring session retries
     /// the start request.
     pub draft_answers: Vec<SubmittedAnswer>,
+    /// The sponsor role this attempt is for, when the learner chose one.
+    /// Fixed at the first start; a resumed attempt reports the stored role
+    /// regardless of what the retry asked for.
+    pub role: Option<AttemptRoleTarget>,
+}
+
+/// A published sponsor role a learner can assess for. Chosen before the
+/// attempt starts so the role's camera requirement is enforced from the first
+/// question rather than refused at issuance.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AttemptRoleTarget {
+    pub role_assessment_id: String,
+    pub role_title: String,
+    pub org_name: String,
+    /// True when the role's issuance policy sets `min_camera_coverage > 0`.
+    pub camera_required: bool,
+    pub min_camera_coverage: Option<f64>,
+}
+
+/// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id)`
+/// of the one open attempt a retry resumes.
+type OpenAttemptRow = (String, String, String, Option<String>, Option<String>);
+
+struct RoleRow {
+    target: AttemptRoleTarget,
+    status: String,
+    skill_ids: Vec<String>,
+}
+
+const ROLE_ROW_SELECT: &str = "SELECT ra.id, ra.role_title, o.name, ra.issuance_policy_json, \
+                                     ra.status, ra.skill_ids \
+                                FROM role_assessments ra \
+                                JOIN organizations o ON o.id = ra.org_id";
+
+fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
+    // A policy that does not parse must not silently become "no camera
+    // required": surface it so the row errors instead of under-enforcing.
+    let policy: Option<crate::commands::credentials::IssuancePolicy> = r
+        .get::<_, Option<String>>(3)?
+        .map(|s| {
+            serde_json::from_str(&s).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })
+        })
+        .transpose()?;
+    let min_camera_coverage = policy.and_then(|p| p.min_camera_coverage);
+    Ok(RoleRow {
+        target: AttemptRoleTarget {
+            role_assessment_id: r.get(0)?,
+            role_title: r.get(1)?,
+            org_name: r.get(2)?,
+            camera_required: min_camera_coverage.is_some_and(|c| c > 0.0),
+            min_camera_coverage,
+        },
+        status: r.get(4)?,
+        skill_ids: r
+            .get::<_, Option<String>>(5)?
+            .map(|s| parse_json_vec(&s))
+            .unwrap_or_default(),
+    })
+}
+
+/// Published roles whose required skills include `skill_id`, for the
+/// learner's pre-attempt chooser. Sponsor-side policy detail stays out of
+/// the payload; the learner needs the name and the camera requirement.
+pub(crate) fn open_roles_for_skill(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+) -> Result<Vec<AttemptRoleTarget>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "{ROLE_ROW_SELECT} WHERE ra.status = 'published' ORDER BY o.name, ra.role_title"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], map_role_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("role assessment row unreadable: {e}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| row.skill_ids.iter().any(|s| s == skill_id))
+        .map(|row| row.target)
+        .collect())
+}
+
+fn load_role_row(
+    conn: &rusqlite::Connection,
+    role_assessment_id: &str,
+) -> Result<Option<RoleRow>, String> {
+    conn.query_row(
+        &format!("{ROLE_ROW_SELECT} WHERE ra.id = ?1"),
+        params![role_assessment_id],
+        map_role_row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Validate a learner's chosen role for a new attempt: it must exist, be
+/// published, and list the skill being assessed.
+pub(crate) fn resolve_role_target(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+    role_assessment_id: &str,
+) -> Result<AttemptRoleTarget, String> {
+    let row = load_role_row(conn, role_assessment_id)?.ok_or("role assessment not found")?;
+    if row.status != "published" {
+        return Err("role assessment is not open for attempts".into());
+    }
+    if !row.skill_ids.iter().any(|s| s == skill_id) {
+        return Err(format!("role assessment does not cover skill '{skill_id}'"));
+    }
+    Ok(row.target)
+}
+
+/// The role stored on a resumed attempt, if it still exists. Status is not
+/// rechecked: the attempt was admitted under it and is reported as it was.
+fn stored_role_target(
+    conn: &rusqlite::Connection,
+    role_assessment_id: Option<&str>,
+) -> Result<Option<AttemptRoleTarget>, String> {
+    match role_assessment_id {
+        Some(id) => Ok(load_role_row(conn, id)?.map(|row| row.target)),
+        None => Ok(None),
+    }
 }
 
 /// One submitted answer: the served option POSITIONS the learner selected.
@@ -289,6 +419,7 @@ pub async fn assessment_start_attempt(
     state: State<'_, AppState>,
     skill_id: String,
     integrity_session_id: Option<String>,
+    role_assessment_id: Option<String>,
 ) -> Result<StartedAttempt, String> {
     let seed: u64 = rand::random();
     let attempt_id = crate::commands::credentials::now_rfc3339() + "-" + &seed.to_string();
@@ -299,7 +430,17 @@ pub async fn assessment_start_attempt(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "assessment.start_attempt",
-            move |db| start_attempt_db(db, skill_id, integrity_session_id, seed, attempt_id, now),
+            move |db| {
+                start_attempt_db(
+                    db,
+                    skill_id,
+                    integrity_session_id,
+                    role_assessment_id,
+                    seed,
+                    attempt_id,
+                    now,
+                )
+            },
         )
         .await
 }
@@ -348,6 +489,7 @@ pub(crate) fn start_attempt_db(
     db: &crate::db::Database,
     skill_id: String,
     integrity_session_id: Option<String>,
+    role_assessment_id: Option<String>,
     seed: u64,
     attempt_id: String,
     now: String,
@@ -475,41 +617,55 @@ pub(crate) fn start_attempt_db(
         .collect();
     // Resume the one open attempt verbatim. Re-drawing here would let a
     // learner refresh until they receive a favourable question set.
-    let resumed: Option<(String, String, String, Option<String>)> = conn
+    let resumed: Option<OpenAttemptRow> = conn
         .query_row(
-            "SELECT id, question_ids, option_orders, draft_answers_json \
+            "SELECT id, question_ids, option_orders, draft_answers_json, role_assessment_id \
                FROM assessment_attempts \
               WHERE subject_did = ?1 AND skill_id = ?2 \
                 AND graded_at IS NULL AND ended_at IS NULL \
               ORDER BY started_at DESC LIMIT 1",
             params![subject_did, skill_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let (attempt_id, drawn, draft_answers, is_resumed) =
-        if let Some((existing_id, question_ids_json, option_orders_json, draft_json)) = resumed {
-            (
-                existing_id,
-                crate::assessment::randomizer::Draw {
-                    question_ids: parse_json_vec(&question_ids_json),
-                    option_orders: parse_json_vec(&option_orders_json),
-                },
-                draft_json
-                    .as_deref()
-                    .map(parse_json_vec)
-                    .unwrap_or_default(),
-                true,
-            )
-        } else {
-            (
-                attempt_id,
-                draw(&metas, draw_count.max(1) as usize, seed),
-                Vec::new(),
-                false,
-            )
-        };
+    let (attempt_id, drawn, draft_answers, role, is_resumed) = if let Some((
+        existing_id,
+        question_ids_json,
+        option_orders_json,
+        draft_json,
+        stored_role_id,
+    )) = resumed
+    {
+        (
+            existing_id,
+            crate::assessment::randomizer::Draw {
+                question_ids: parse_json_vec(&question_ids_json),
+                option_orders: parse_json_vec(&option_orders_json),
+            },
+            draft_json
+                .as_deref()
+                .map(parse_json_vec)
+                .unwrap_or_default(),
+            stored_role_target(conn, stored_role_id.as_deref())?,
+            true,
+        )
+    } else {
+        // Validate the chosen role before anything is drawn, so a refused
+        // role never costs the learner an attempt.
+        let role = role_assessment_id
+            .as_deref()
+            .map(|id| resolve_role_target(conn, &skill_id, id))
+            .transpose()?;
+        (
+            attempt_id,
+            draw(&metas, draw_count.max(1) as usize, seed),
+            Vec::new(),
+            role,
+            false,
+        )
+    };
 
     // Build served questions with options reordered per the shuffle.
     let by_id: std::collections::HashMap<&str, &Q> =
@@ -543,8 +699,9 @@ pub(crate) fn start_attempt_db(
         conn.execute(
             "INSERT INTO assessment_attempts \
              (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
-              integrity_session_id, started_at, attempt_ordinal, assessed_bloom_level, pass_threshold_snapshot, item_fingerprints) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+              integrity_session_id, started_at, attempt_ordinal, role_assessment_id, \
+              assessed_bloom_level, pass_threshold_snapshot, item_fingerprints) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 attempt_id,
                 subject_did,
@@ -556,6 +713,7 @@ pub(crate) fn start_attempt_db(
                 integrity_session_id,
                 now,
                 attempt_ordinal as i64,
+                role.as_ref().map(|r| r.role_assessment_id.clone()),
                 assessed_bloom,
                 pass_threshold,
                 serde_json::to_string(&fingerprints).map_err(|e| e.to_string())?,
@@ -570,7 +728,26 @@ pub(crate) fn start_attempt_db(
         pass_threshold,
         questions: served,
         draft_answers,
+        role,
     })
+}
+
+/// Published sponsor roles the learner can assess `skill_id` for. Drives
+/// the pre-attempt role chooser; an empty list means no chooser.
+#[tauri::command]
+pub async fn assessment_open_roles(
+    state: State<'_, AppState>,
+    skill_id: String,
+) -> Result<Vec<AttemptRoleTarget>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.open_roles",
+            move |db| open_roles_for_skill(db.conn(), &skill_id),
+        )
+        .await
 }
 
 /// Save fixed-form selections without grading. This is used before entering
@@ -1993,5 +2170,223 @@ mod tests {
             rust.blocked_reason.as_deref(),
             Some("no assessment available yet")
         );
+    }
+}
+
+#[cfg(test)]
+mod role_target_tests {
+    use super::*;
+    use crate::commands::credentials::IssuancePolicy;
+    use crate::commands::role_assessment::{
+        create_organization_impl, create_role_assessment_impl, set_role_assessment_status_impl,
+        CreateRoleAssessmentRequest,
+    };
+    use crate::db::Database;
+
+    const NOW: &str = "2026-10-09T00:00:00Z";
+
+    fn setup() -> Database {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        SettingsStore::set(
+            db.conn(),
+            keys::IDENTITY_LOCAL_DID,
+            "did:key:zLearner".to_string(),
+        )
+        .unwrap();
+        db.conn()
+            .execute_batch(
+                "INSERT INTO question_banks (id, skill_id, label, ratified, draw_count)
+                 VALUES ('bank_t', 'skill_rust', 'T', 1, 1);
+                 INSERT INTO assessment_items
+                     (id, item_kind, skill_id, content_public, grader_private, bank_id, ratified, bloom_level)
+                 VALUES ('q1', 'mcq', 'skill_rust',
+                         json_object('kind', 'single', 'prompt', 'one?',
+                                     'options', json('[\"a\",\"b\"]')),
+                         json_object('correct_indices', json('[0]')), 'bank_t', 1, 'remember');
+                 INSERT INTO integrity_sessions (id, status) VALUES ('isess_live', 'active');",
+            )
+            .expect("fixture");
+        db
+    }
+
+    fn role(
+        conn: &rusqlite::Connection,
+        org_id: &str,
+        title: &str,
+        skills: &[&str],
+        camera: Option<f64>,
+    ) -> String {
+        let req = CreateRoleAssessmentRequest {
+            org_id: org_id.into(),
+            role_title: title.into(),
+            job_description: None,
+            course_id: None,
+            skill_ids: skills.iter().map(|s| (*s).to_string()).collect(),
+            issuance_policy: Some(IssuancePolicy {
+                min_camera_coverage: camera,
+                ..Default::default()
+            }),
+            required_assurance_level: None,
+        };
+        let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
+        set_role_assessment_status_impl(conn, &ra.id, "published", NOW).unwrap();
+        ra.id
+    }
+
+    #[test]
+    fn open_roles_are_published_and_cover_the_skill() {
+        let db = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        let rust = role(
+            conn,
+            &org.id,
+            "Rust Dev",
+            &["skill_rust", "skill_go"],
+            Some(0.8),
+        );
+        let _go_only = role(conn, &org.id, "Go Dev", &["skill_go"], None);
+        let archived = role(conn, &org.id, "Old Rust", &["skill_rust"], None);
+        set_role_assessment_status_impl(conn, &archived, "archived", NOW).unwrap();
+
+        let open = open_roles_for_skill(conn, "skill_rust").unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].role_assessment_id, rust);
+        assert_eq!(open[0].org_name, "Acme");
+        assert!(open[0].camera_required);
+        assert_eq!(open[0].min_camera_coverage, Some(0.8));
+        assert!(open_roles_for_skill(conn, "skill_py").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unparseable_policy_is_an_error_not_a_lenient_default() {
+        let db = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        let id = role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.8));
+        conn.execute(
+            "UPDATE role_assessments SET issuance_policy_json = '{not json' WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+        assert!(open_roles_for_skill(conn, "skill_rust").is_err());
+        assert!(resolve_role_target(conn, "skill_rust", &id).is_err());
+    }
+
+    #[test]
+    fn a_zero_coverage_policy_does_not_require_the_camera() {
+        let db = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.0));
+        let open = open_roles_for_skill(conn, "skill_rust").unwrap();
+        assert!(!open[0].camera_required);
+    }
+
+    #[test]
+    fn resolve_refuses_unknown_draft_and_non_covering_roles() {
+        let db = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        assert_eq!(
+            resolve_role_target(conn, "skill_rust", "nope").unwrap_err(),
+            "role assessment not found"
+        );
+        let draft = role(conn, &org.id, "Draft", &["skill_rust"], None);
+        set_role_assessment_status_impl(conn, &draft, "draft", NOW).unwrap();
+        assert_eq!(
+            resolve_role_target(conn, "skill_rust", &draft).unwrap_err(),
+            "role assessment is not open for attempts"
+        );
+        let go = role(conn, &org.id, "Go Dev", &["skill_go"], None);
+        assert!(resolve_role_target(conn, "skill_rust", &go)
+            .unwrap_err()
+            .contains("does not cover skill 'skill_rust'"));
+    }
+
+    #[test]
+    fn a_new_attempt_stores_the_chosen_role_and_a_resume_reports_it() {
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let rust = role(db.conn(), &org.id, "Rust Dev", &["skill_rust"], Some(0.9));
+
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            Some(rust.clone()),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        let role = started.role.expect("role target");
+        assert_eq!(role.role_assessment_id, rust);
+        assert!(role.camera_required);
+        let stored: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT role_assessment_id FROM assessment_attempts WHERE id = 'att_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some(rust.as_str()));
+
+        // A retry under the same session resumes the attempt and reports the
+        // stored role even when the request names none.
+        let resumed = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            8,
+            "att_2".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert_eq!(resumed.attempt_id, "att_1");
+        assert_eq!(
+            resumed.role.map(|r| r.role_assessment_id).as_deref(),
+            Some(rust.as_str())
+        );
+    }
+
+    #[test]
+    fn a_refused_role_does_not_create_an_attempt() {
+        let db = setup();
+        let err = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            Some("missing".into()),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap_err();
+        assert_eq!(err, "role assessment not found");
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM assessment_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn an_attempt_without_a_role_has_none() {
+        let db = setup();
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.role.is_none());
     }
 }

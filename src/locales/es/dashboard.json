@@ -125,6 +125,7 @@
       "emptyBody": "Crea una para una organización.",
       "requiresClean": "requiere una sesión limpia",
       "minIntegrity": "integridad mín. {value}",
+      "minCameraCoverage": "cobertura mínima de cámara {value}",
       "publish": "Publicar",
       "archive": "Archivar"
     },
@@ -137,7 +138,15 @@
       "submitting": "Emitiendo…",
       "issued": "Credencial emitida",
       "assurance": "garantía:",
-      "integrity": "integridad {value}"
+      "integrity": "integridad {value}",
+      "attemptsTitle": "Intentos para este puesto",
+      "attemptsLoading": "Cargando intentos…",
+      "attemptsEmpty": "Ningún aprendiz ha intentado este puesto todavía.",
+      "attemptPassed": "Aprobado",
+      "attemptFailed": "No aprobado",
+      "attemptOpen": "En curso",
+      "attemptScore": "puntuación {value}%",
+      "attemptUse": "Usar"
     },
     "orgModal": {
       "title": "Nueva organización",
@@ -156,6 +165,7 @@
       "minIntegrity": "Integridad mínima",
       "maxCritical": "Máx. críticas",
       "maxWarning": "Máx. advertencias",
+      "minCameraCoverage": "Cobertura mínima de cámara (0–1)",
       "requireClean": "Requerir una sesión limpia",
       "assuranceLabel": "Nivel de garantía requerido",
       "assuranceNone": "(ninguno)"
