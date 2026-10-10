@@ -10,6 +10,10 @@ pub mod cli_install;
 pub mod completion;
 pub mod courses;
 pub mod credentials;
+pub mod demo_courses;
+pub mod demo_resources;
+pub mod dev_seed_reset;
+pub mod dev_seeds;
 pub mod diagnostics;
 pub mod elements;
 pub mod enrollment;
@@ -26,7 +30,11 @@ pub mod import;
 pub mod instructor;
 pub mod integrity;
 pub mod interview;
+#[cfg(test)]
+mod live_demo;
 pub mod opinions;
+pub mod personhood_lab;
+pub mod personhood_receipts;
 pub mod pinning;
 pub mod plugins;
 pub mod presentation;
@@ -72,3 +80,10 @@ pub mod tutoring_stubs;
 pub mod studio;
 
 pub mod studio_mcp;
+
+pub mod decisions;
+
+pub mod exchange;
+pub mod hiring;
+
+pub mod discussions;

@@ -175,6 +175,24 @@ impl AppState {
         paths: ProfilePaths,
         keystore: Keystore,
     ) -> Result<(), String> {
+        self.start_profile(paths, keystore, false).await
+    }
+
+    /// Initialize defaults only for profile creation and mnemonic restoration.
+    pub(crate) async fn start_new_profile(
+        &self,
+        paths: ProfilePaths,
+        keystore: Keystore,
+    ) -> Result<(), String> {
+        self.start_profile(paths, keystore, true).await
+    }
+
+    async fn start_profile(
+        &self,
+        paths: ProfilePaths,
+        keystore: Keystore,
+        initialize_defaults: bool,
+    ) -> Result<(), String> {
         // Refuse to switch into a profile while another is active —
         // callers must stop the prior one first.
         {
@@ -194,7 +212,7 @@ impl AppState {
 
         // 1. Open the encrypted DB and run migrations.
         let db_key = zeroize::Zeroizing::new(keystore.derive_db_key());
-        self.open_database(&paths, &db_key)?;
+        self.open_database(&paths, &db_key, initialize_defaults)?;
 
         // 2. Stash keystore in shared state so background workers see it.
         {
@@ -277,6 +295,8 @@ impl AppState {
         }
 
         self.start_registry_refresh().await;
+        commands::discussions::start_relay(self).await?;
+        tutoring::presence::start(self).await?;
 
         // 8. Publish active profile metadata.
         {
@@ -410,8 +430,14 @@ impl AppState {
 
     /// Open the encrypted database for the given profile.
     ///
-    /// Runs migrations, installs builtin plugins, and seeds dev fixtures.
-    fn open_database(&self, paths: &ProfilePaths, db_key: &[u8; 32]) -> Result<(), String> {
+    /// Runs migrations and installs bundled taxonomy, banks, and global plugins.
+    /// Profile commands install owned demo courses after identity initialization.
+    fn open_database(
+        &self,
+        paths: &ProfilePaths,
+        db_key: &[u8; 32],
+        initialize_defaults: bool,
+    ) -> Result<(), String> {
         {
             let guard = self.db.lock().map_err(|e| e.to_string())?;
             if guard.is_some() {
@@ -441,6 +467,20 @@ impl AppState {
             .run_migrations()
             .map_err(|e| format!("database migrations failed: {e}"))?;
 
+        if initialize_defaults {
+            let profile = network_profile::embedded_preprod().map_err(|error| error.to_string())?;
+            let owner = self
+                .profile_manager
+                .get(&paths.id)
+                .ok_or_else(|| "new profile is missing from the profile index".to_string())?;
+            if owner.network_id != profile.network_id {
+                return Err(
+                    "new profile network does not match the bundled governance anchor".into(),
+                );
+            }
+            crate::db::governance_genesis::pin_default_genesis(database.conn(), profile)?;
+        }
+
         // Expire Sentinel appeal evidence whose window has closed. Done on
         // unlock rather than only on a timer, so evidence expires on schedule
         // even when the app has been shut for the whole window — the deadline
@@ -464,7 +504,11 @@ impl AppState {
 
         // Install the labelled built-in taxonomy, goal templates and question
         // banks. No personas, credentials, courses or governance rows are
-        // created, and nothing is downloaded.
+        // created, and nothing is downloaded. The same in every build: a
+        // development build used to install the taxonomy alone and leave the
+        // banks to Settings → Developer → Test data, which made a fresh
+        // debug-build profile say "no assessment available" until somebody
+        // remembered — a step a demo operator must never have to remember.
         crate::db::bundled::install_bundled_data(database.conn())
             .map_err(|e| format!("bundled data install failed: {e}"))?;
 
@@ -484,17 +528,8 @@ impl AppState {
                     stats.failed
                 );
 
-                // Clean up any sessions stuck as 'active' from a previous crash.
-                match db.conn().execute(
-                    "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                    [],
-                ) {
-                    Ok(count) if count > 0 => {
-                        log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
-                    }
-                    Err(e) => log::warn!("tutoring: failed to clean up orphaned sessions: {e}"),
-                    _ => {}
-                }
+                // Tutoring presence reconciles after reconnecting; a profile
+                // restart alone must not end a room that peers still occupy.
                 if let Err(e) = db.conn().execute(
                     "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
                     [],
@@ -1024,6 +1059,53 @@ pub fn run() {
                                     }
                                 }
 
+                                // Status lists a host has not yet seen. Every
+                                // issuance site creates or changes a list; the
+                                // commands that do so publish inline, and this
+                                // pass catches the rest and any push that failed.
+                                if let Some(w) = wallet.as_ref() {
+                                    let signing_key =
+                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
+                                    let issuer = crypto::did::derive_did_key(&signing_key);
+                                    let pending = {
+                                        let guard = db_for_queue.lock();
+                                        match guard.as_deref() {
+                                            Ok(Some(db)) => commands::credentials::pending_status_lists(
+                                                db.conn(),
+                                                &issuer,
+                                            )
+                                            .unwrap_or_default(),
+                                            _ => Vec::new(),
+                                        }
+                                    };
+                                    if !pending.is_empty() {
+                                        let now = commands::credentials::now_rfc3339();
+                                        let (accepted, errors) = commands::credentials::push_status_lists(
+                                            &pending,
+                                            &signing_key,
+                                            &issuer,
+                                            &now,
+                                        )
+                                        .await;
+                                        if !errors.is_empty() {
+                                            log::debug!("status list publication: {errors:?}");
+                                        }
+                                        if !accepted.is_empty() {
+                                            let guard = db_for_queue.lock();
+                                            if let Ok(Some(db)) = guard.as_deref() {
+                                                if let Err(e) = commands::credentials::mark_status_lists_published(
+                                                    db.conn(),
+                                                    &accepted,
+                                                ) {
+                                                    log::warn!("status list publication: {e}");
+                                                } else {
+                                                    log::info!("status lists: published {}", accepted.len());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Cross-device sync: when auto-sync is enabled,
                                 // reconcile with every paired device. No-op if the
                                 // toggle is off, no profile is unlocked, or the
@@ -1185,13 +1267,9 @@ pub fn run() {
                             set_pref(c"mediaStreamEnabled", &yes);
                             set_pref(c"mediaCaptureRequiresSecureConnection", &no);
 
-                            // Install a UIDelegate that auto-grants
-                            // media-capture requests. WKWebView denies by
-                            // default when no UIDelegate implements
-                            // `_webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:`,
-                            // which blocks getUserMedia inside plugin iframes
-                            // even though the plugin's own consent flow has
-                            // already gone through PermissionPrompt.
+                            // The main app uses WebKit's media permission
+                            // prompt; plugin frames require the grants
+                            // recorded by PermissionPrompt in PluginHost.
                             crate::macos_media_delegate::install(wk);
                         }
 
@@ -1273,6 +1351,12 @@ pub fn run() {
             plugins::asset_protocol::handle(&plugins_dir, request)
         })
         .invoke_handler(tauri::generate_handler![
+            commands::personhood_lab::personhood_lab_status,
+            commands::personhood_lab::personhood_lab_action,
+            commands::personhood_receipts::personhood_receipt_prepare,
+            commands::personhood_receipts::personhood_receipt_prove,
+            commands::personhood_receipts::personhood_receipt_cancel,
+            commands::personhood_receipts::personhood_receipt_list,
             commands::health::check_health,
             commands::health::read_diag_log,
             commands::health::frontend_log,
@@ -1322,6 +1406,15 @@ pub fn run() {
             commands::courses::list_courses,
             commands::courses::get_course,
             commands::courses::create_course,
+            commands::demo_courses::import_demo_courses,
+            commands::dev_seeds::dev_seed_catalog,
+            commands::dev_seeds::dev_seed_plan,
+            commands::dev_seeds::dev_seed_run,
+            commands::dev_seeds::dev_seed_drafts,
+            commands::dev_seed_reset::dev_seed_reset_plan,
+            commands::dev_seed_reset::dev_seed_reset_run,
+            commands::demo_resources::list_demo_opinions,
+            commands::demo_courses::import_plugin_demo_course,
             commands::courses::update_course,
             commands::courses::delete_course,
             // Enrollment
@@ -1365,6 +1458,14 @@ pub fn run() {
             commands::studio_mcp::studio_assistant_access,
             commands::studio_mcp::studio_grant_assistant,
             commands::studio_mcp::studio_revoke_assistant,
+            commands::decisions::decision_settings,
+            commands::decisions::decision_export_shadow,
+            commands::decisions::decision_clear_shadow,
+            commands::decisions::decision_save_settings,
+            commands::decisions::decision_learning_review,
+            commands::decisions::decision_content_review,
+            commands::decisions::decision_search,
+            commands::decisions::decision_tutor_review,
             commands::studio::studio_get_course,
             commands::studio::studio_save_course,
             commands::studio::studio_get_tutor_policy,
@@ -1391,9 +1492,14 @@ pub fn run() {
             commands::instructor::instructor_inbox,
             // Course publishing (iroh)
             commands::courses::publish_course,
+            commands::courses::prepare_local_course,
             commands::courses::get_course_completion_policy,
             commands::courses::set_course_completion_policy,
             // Opinions (Field Commentary)
+            commands::discussions::discussion_access,
+            commands::discussions::discussion_add_media,
+            commands::discussions::list_discussions,
+            commands::discussions::act_on_discussion,
             commands::opinions::publish_opinion,
             commands::opinions::list_opinions,
             commands::opinions::get_opinion,
@@ -1420,6 +1526,7 @@ pub fn run() {
             commands::governance_genesis::governance_retrieve_genesis,
             commands::governance_genesis::governance_pin_genesis,
             commands::governance_genesis::governance_get_pinned_genesis,
+            commands::governance_genesis::governance_default_genesis_status,
             // Reputation (VC-sourced engine — see commands::reputation).
             commands::reputation::list_reputation_rows,
             commands::reputation::get_reputation,
@@ -1437,9 +1544,22 @@ pub fn run() {
             commands::skill_bootstrap::bootstrap_confirm,
             commands::skill_bootstrap::bootstrap_extract_text,
             // Dynamic assessments
+            commands::exchange::exchange_requests,
+            commands::exchange::exchange_start_assessment,
+            commands::exchange::exchange_credentials,
+            commands::exchange::exchange_preview,
+            commands::exchange::exchange_send,
+            commands::credentials::publish_status_lists,
+            commands::hiring::hiring_interviews,
+            commands::hiring::hiring_interview_respond,
+            commands::hiring::hiring_offers,
+            commands::hiring::hiring_offer_respond,
+            commands::hiring::hiring_history,
             commands::assessment::assessment_start_attempt,
             commands::assessment::assessment_open_roles,
             commands::assessment::assessment_save_draft,
+            commands::assessment::assessment_submit_answers,
+            commands::assessment::assessment_recover,
             commands::assessment::assessment_grade,
             commands::assessment::assessment_plan_goal,
             commands::diagnostics::diagnostics_status,

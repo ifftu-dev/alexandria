@@ -5,7 +5,7 @@
 // tutorials — one implicit chapter), the selected element's editor on
 // the right. Draft ↔ publish lifecycle wraps the existing
 // `publish_course` pipeline.
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRaw, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -304,7 +304,7 @@ function openMetaEditor() {
   if (!course.value) return
   metaTitle.value = course.value.title
   metaDescription.value = course.value.description ?? ''
-  if (courseStudio.value) metaTutor.value = structuredClone(courseStudio.value.value.tutor)
+  if (courseStudio.value) metaTutor.value = structuredClone(toRaw(courseStudio.value.value.tutor))
   metaTab.value = 'details'
   editingMeta.value = true
 }
@@ -322,7 +322,7 @@ async function saveMeta() {
       description: metaDescription.value.trim() || null,
     }
     course.value = await invoke<Course>('update_course', { courseId: course.value.id, req })
-    if (courseStudio.value) courseStudio.value.value.tutor = structuredClone(metaTutor.value)
+    if (courseStudio.value) courseStudio.value.value.tutor = structuredClone(toRaw(metaTutor.value))
     if (await saveStudio()) editingMeta.value = false
   } catch (e) {
     error.value = String(e)

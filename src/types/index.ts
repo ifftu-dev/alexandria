@@ -473,6 +473,12 @@ export interface RetrievedGenesisPreview {
   preview: GenesisPreview
 }
 
+export interface DefaultGenesisStatus {
+  preview: GenesisPreview
+  genesis_json: string
+  pinned: boolean
+}
+
 export interface PinGenesisResponse {
   preview: GenesisPreview
   newly_pinned: boolean
@@ -1555,10 +1561,11 @@ export interface TermsOfUse {
 
 export interface Proof {
   type: string
+  cryptosuite: string
   created: string
   verificationMethod: string
   proofPurpose: string
-  jws: string
+  proofValue: string
 }
 
 /**
@@ -1727,6 +1734,14 @@ export type EndorsementOutcome =
   | { outcome: 'invalid_evidence' }
   | { outcome: 'threshold_unmet'; required_attestors: number; valid_attestors: number }
 
+/** What one status-list publication pass did (`publish_status_lists`). */
+export interface StatusPublishReport {
+  /** List ids the host now serves at their current version. */
+  published: string[]
+  /** One line per list that could not be pushed; it stays pending. */
+  errors: string[]
+}
+
 /**
  * Mirrors `alexandria_verify::trust::CredentialTrust`. A trust state describes
  * provenance only; it never grants a privilege by itself.
@@ -1769,6 +1784,7 @@ export interface CredentialBundle {
   credentials: VerifiableCredential[]
   key_registry: KeyRegistryRow[]
   status_lists: StatusListRow[]
+  status_list_credentials?: VerifiableCredential[]
 }
 
 // --- Selective-disclosure presentations (§18) ----------------------------
@@ -1781,12 +1797,25 @@ export interface CreatePresentationRequest {
   nonce: string
 }
 
-export interface PresentationEnvelope {
-  id: string
-  payload_json: string
-  proof: string
-  subject: string
+export interface PresentationProof extends Proof {
+  challenge?: string
+  domain?: string
+  expires?: string
 }
+
+/** A W3C Verifiable Presentation signed by its holder. */
+export interface VerifiablePresentation {
+  '@context': string[]
+  id?: string
+  type: string[]
+  holder: string
+  verifiableCredential?: unknown[]
+  proof: PresentationProof
+  [extra: string]: unknown
+}
+
+/** The selective-disclosure presentation the app builds. */
+export type PresentationEnvelope = VerifiablePresentation
 
 export type PresentationVerification =
   | 'accepted'
@@ -1794,6 +1823,7 @@ export type PresentationVerification =
   | 'audience_mismatch'
   | 'replayed'
   | 'malformed'
+  | 'expired'
 
 // --- PinBoard (§12 + §20.4) ----------------------------------------------
 
@@ -2080,13 +2110,13 @@ export interface Goal {
   source_did?: string | null
   goal_skill_ids: string[]
   created_at: string
-  /** How this goal was set: an exam/curriculum/job-role template, or a parsed JD. */
-  kind?: 'exam' | 'curriculum' | 'job_role' | 'jd'
+  /** How this goal was set: a curated template, parsed JD, or learning objective. */
+  kind?: 'exam' | 'curriculum' | 'job_role' | 'jd' | 'learning_goal'
   /** Template slug (e.g. 'cbse.grade10', 'engineering_manager') when kind is a template. */
   source_key?: string
   /** The JD link, when the goal came from a pasted/linked job description. */
   source_url?: string
-  resolution_provenance?: 'template' | 'jd_parsed'
+  resolution_provenance?: 'template' | 'jd_parsed' | 'goal_parsed'
   /** Skill-graph version the target ids were authored against. */
   taxonomy_version?: string
 }
@@ -2118,7 +2148,7 @@ export interface GoalResolution {
   goal_skill_ids: string[]
   suggestions: SkillSuggestion[]
   taxonomy_version?: string
-  resolution_provenance: 'template' | 'jd_parsed'
+  resolution_provenance: 'template' | 'jd_parsed' | 'goal_parsed'
 }
 
 /** A question as served during an assessment — options shuffled, no answer key. */
@@ -2194,6 +2224,7 @@ export type GoalInput =
   | { kind: 'curriculum'; board: string; grade: string }
   | { kind: 'job_role'; key: string }
   | { kind: 'jd_text'; text: string }
+  | { kind: 'learning_goal'; text: string }
   | { kind: 'jd_link'; url: string }
 export type CompletionWitnessStatus = 'not_requested' | 'pending' | 'submitted' | 'outcome_unknown' | 'confirmed' | 'failed_on_chain' | 'unavailable'
 
@@ -2261,4 +2292,227 @@ export interface StudioAssistantAccess {
 export interface StudioAssistantConnection {
   grant: StudioAssistantGrant
   connection_file: string
+}
+export interface PersonhoodLabResult {
+  elapsed_ms: number
+  peak_rss_bytes: number
+}
+
+export interface PersonhoodLabStatus {
+  enabled: boolean
+  phase: string
+  key_status: string
+  downloaded_bytes: number
+  total_bytes: number
+  elapsed_ms: number
+  error: string | null
+  result: PersonhoodLabResult | null
+}
+
+export type PersonhoodLabAction = 'download' | 'prove' | 'cancel' | 'remove_key'
+
+
+export type DecisionMode = 'off' | 'shadow' | 'assist'
+export type DecisionTask = 'job_description' | 'learning_goal' | 'document_claim' | 'studio_review' | 'search' | 'tutor'
+export interface DecisionSettings { mode: DecisionMode; cloud_allowed: boolean; tasks: DecisionTask[]; retain_learning_shadow: boolean }
+export interface DecisionJudgment { value: string; confidence: number; probabilities: Record<string, number> }
+export interface LearningDecisionReview {
+  status: string
+  names: Record<string, string>
+  evidence: Record<string, string>
+  record: null | {
+    schema_version: number; task: DecisionTask; taxonomy_digest: string; taxonomy_revision: string
+    source_hash: string; model: string; rubric_version: string
+    decisions: { skill_id: string; relation: DecisionJudgment; bloom: DecisionJudgment; evidence: { start: number; end: number } | null }[]
+  }
+}
+
+export interface PersonhoodPrivateReceipt {
+  id: string
+  kind: 'synthetic_diagnostic'
+  subject_did: string
+  network_id: string
+  created_at: number
+  expires_at: number
+}
+
+export interface CredentialRequest {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  skill_id: string
+  network_id: string
+  taxonomy_digest: string
+  purpose: string
+  role_label: string
+  require_new_assessment: boolean
+  created_at: number
+  expires_at: number
+}
+
+export interface InterviewInvite {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  role_label: string
+  message: string
+  mode: 'video' | 'call' | 'in_person'
+  proposed_slots: number[]
+  meeting_url: string | null
+  run_id: string | null
+  created_at: number
+  expires_at: number
+}
+
+export interface DirectoryInterview {
+  directory_url: string
+  invite: InterviewInvite
+}
+
+export interface OfferTerms {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  interview_id: string
+  role_label: string
+  terms: string
+  start_date: string | null
+  created_at: number
+  expires_at: number
+}
+
+export interface DirectoryOffer {
+  directory_url: string
+  offer: OfferTerms
+}
+
+export interface HiringRecord {
+  id: string
+  kind: 'interview' | 'offer'
+  directory_url: string
+  organization: string
+  role_label: string
+  decision: 'accept' | 'decline'
+  chosen_slot: number | null
+  meeting_url: string | null
+  responded_at: string
+  payload_json: string
+}
+
+export interface DirectoryCredentialRequest {
+  directory_url: string
+  request: CredentialRequest
+}
+
+/** The credential exchange share: a presentation carrying one credential and the request it answers. */
+export interface SignedCredentialShare extends VerifiablePresentation {
+  request: CredentialRequest
+  issuerState?: unknown
+}
+
+export interface ShareableCredential {
+  id: string
+  issuer: string
+  issued_at: string
+}
+
+export interface OpinionExample {
+  id: string
+  subject_field_id: string
+  title: string
+  summary: string
+  thumbnail_cid: string | null
+  video_cid: string
+  duration_seconds: number
+}
+
+export interface DiscussionContent {
+  title: string
+  body: string
+  post_kind: 'text' | 'link' | 'video'
+  url: string | null
+  video_cid: string | null
+  thumbnail_cid: string | null
+}
+export type DiscussionAction =
+  | { kind: 'post' | 'edit_post'; content: DiscussionContent }
+  | { kind: 'comment' | 'edit_comment'; body: string }
+  | { kind: 'delete' }
+  | { kind: 'vote'; value: number }
+  | { kind: 'report'; reason: string }
+export interface DiscussionRequest {
+  entity_id?: string
+  thread_id?: string
+  parent_id?: string
+  subject_field_id: string
+  action: DiscussionAction
+}
+export interface DiscussionItem {
+  id: string
+  thread_id: string
+  parent_id: string | null
+  subject_field_id: string
+  author_did: string
+  content: DiscussionContent | null
+  body: string
+  created_at: number
+  edited: boolean
+  deleted: boolean
+  score: number
+  my_vote: number
+  comment_count: number
+  reported: boolean
+  credential_proof_ids: string[]
+}
+export interface DiscussionAccess {
+  actor_did: string
+  eligible_fields: string[]
+  governed_fields: string[]
+}
+
+export interface SeedResource {
+  id: string
+  title: string
+  category: string
+  description: string
+  dependencies: string[]
+  installed: boolean
+}
+export interface SeedCatalog {
+  enabled: boolean
+  resources: SeedResource[]
+}
+export interface SeedResult {
+  id: string
+  status: 'added' | 'kept' | 'failed' | 'removed'
+  error: string | null
+}
+export interface SeedDraft {
+  id: string
+  title: string
+  body: string
+  subject_field_id: string | null
+}
+
+export interface SeedResetEffect {
+  label: string
+  count: number
+  action: 'remove' | 'detach'
+}
+export interface SeedResetItem {
+  id: string
+  title: string
+  can_reset: boolean
+  reason: string | null
+  effects: SeedResetEffect[]
+}
+export interface SeedResetPlan {
+  resources: SeedResetItem[]
+  token: string
 }

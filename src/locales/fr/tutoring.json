@@ -103,7 +103,10 @@
     "backToLobby": "Retour au salon",
     "dismiss": "Ignorer",
     "selfPreviewAlt": "Votre aperçu",
-    "peerVideoAlt": "Vidéo de {name}"
+    "peerVideoAlt": "Vidéo de {name}",
+    "endedDescription": "This session has ended. Empty rooms close automatically after five minutes. Ask the host for a new session invite.",
+    "notJoinedTitle": "You are not in this session",
+    "notJoinedDescription": "Join with a current invite to take part. Your camera and microphone turn on when you join."
   },
   "controls": {
     "mute": "Couper le micro",

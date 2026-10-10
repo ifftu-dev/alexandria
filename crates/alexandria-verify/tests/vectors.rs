@@ -30,7 +30,6 @@ use std::path::PathBuf;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 
-use alexandria_verify::did::VerificationMethodRef;
 use alexandria_verify::did::{derive_did_key, Did, KeyRegistryEntry};
 use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
 use alexandria_verify::vc::verify::verify_credential;
@@ -148,12 +147,11 @@ fn key(label: &str) -> SigningKey {
 }
 
 const V2_CONTEXT: &str = "https://www.w3.org/ns/credentials/v2";
-const ALEX_CONTEXT: &str = "https://alexandria.protocol/context/v1";
 const NOW: &str = "2026-06-01T00:00:00Z";
 
 fn skeleton(issuer: Did, subject: Did, valid_until: Option<&str>) -> VerifiableCredential {
     VerifiableCredential {
-        context: vec![V2_CONTEXT.into(), ALEX_CONTEXT.into()],
+        context: vec![V2_CONTEXT.into()],
         id: Some("urn:uuid:vector-credential".into()),
         type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
         issuer,
@@ -173,13 +171,7 @@ fn skeleton(issuer: Did, subject: Did, valid_until: Option<&str>) -> VerifiableC
         terms_of_use: None,
         witness: None,
         integrity: None,
-        proof: Proof {
-            type_: "Ed25519Signature2020".into(),
-            created: "2026-01-01T00:00:00Z".into(),
-            verification_method: VerificationMethodRef(String::new()),
-            proof_purpose: "assertionMethod".into(),
-            jws: String::new(),
-        },
+        proof: Proof::unsigned("2026-01-01T00:00:00Z"),
     }
 }
 
@@ -232,7 +224,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         let mut vc = skeleton(issuer.clone(), subject.clone(), None);
         vc.credential_status = Some(CredentialStatus {
             id: "urn:uuid:missing-status-entry".into(),
-            type_: "RevocationList2020Status".into(),
+            type_: "BitstringStatusListEntry".into(),
             status_purpose: "revocation".into(),
             status_list_credential: "urn:uuid:missing-status-list".into(),
             status_list_index: "0".into(),
@@ -332,12 +324,12 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             &issuer_key,
             &issuer,
         );
-        vc.proof.jws = "not-a-jws".into();
+        vc.proof.proof_value = "not-multibase".into();
         let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
         out.push((
-            "04-malformed-jws",
+            "04-malformed-proof-value",
             Vector {
-                description: "proof.jws is not a detached JWS. A verifier must reject rather than \
+                description: "proof.proofValue is not a multibase Ed25519 signature. A verifier must reject rather than \
                               error out — malformed input is a verification failure, not a crash."
                     .into(),
                 verification_time: NOW.into(),
@@ -403,15 +395,17 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         let mut vc = skeleton(issuer.clone(), subject.clone(), None);
         vc.credential_status = Some(CredentialStatus {
             id: "urn:uuid:status-entry".into(),
-            type_: "RevocationList2020Status".into(),
+            type_: "BitstringStatusListEntry".into(),
             status_purpose: "revocation".into(),
             status_list_credential: "urn:uuid:status-list-1".into(),
             status_list_index: "9".into(),
         });
         let vc = signed(vc, &issuer_key, &issuer);
-        // Bit 9 set: byte 1, bit 1.
+        // Bit 9 set: byte 1, second-most-significant bit (0x40). Bitstring
+        // Status List counts from the left, which is what trips verifiers
+        // that assume the little-endian order of older status-list drafts.
         let mut bits = vec![0u8; 8];
-        bits[1] |= 1 << 1;
+        alexandria_verify::vc::status::set_bit(&mut bits, 9, true).unwrap();
         let store = VectorStore {
             status_lists: BTreeMap::from([(
                 "urn:uuid:status-list-1".to_string(),
@@ -424,8 +418,9 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             "07-revoked",
             Vector {
                 description: "The status list has the credential's index bit set. Index 9 is byte \
-                              1, bit 1 — little-endian within the byte, which is the detail an \
-                              independent implementation most often gets backwards."
+                              1, second from the left (mask 0x40): Bitstring Status List counts \
+                              from the most significant bit, which is the detail an independent \
+                              implementation most often gets backwards."
                     .into(),
                 verification_time: NOW.into(),
                 policy: default_policy.clone(),

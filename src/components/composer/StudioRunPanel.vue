@@ -3,7 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppTextarea } from '@/components/ui'
-import type { StudioDocument, StudioRun } from '@/types'
+import type { StudioDocument, StudioRun, CourseStudio, DecisionJudgment } from '@/types'
 
 const props = defineProps<{ runId: string; draftDirty?: boolean }>()
 const emit = defineEmits<{ applied: []; close: [] }>()
@@ -12,6 +12,8 @@ const { invoke } = useLocalApi()
 const run = ref<StudioDocument<StudioRun> | null>(null)
 const output = ref('')
 const outputStep = ref(0)
+const checks = ref<Record<string, DecisionJudgment>>({})
+const checkBusy = ref(false)
 const error = ref('')
 const busy = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -55,6 +57,20 @@ async function action(command: RunAction) {
     if (['applied', 'undone'].includes(next.value.status)) emit('applied')
   } catch (e) { if (epoch === generation) error.value = String(e) } finally { if (epoch === generation) busy.value = false }
 }
+watch(output, () => { checks.value = {} })
+async function checkDraft() {
+  if (!run.value) return
+  const id = run.value.id
+  const text = output.value
+  const epoch = generation
+  checkBusy.value = true; error.value = ''
+  try {
+    const course = await invoke<StudioDocument<CourseStudio>>('studio_get_course', { courseId: run.value.value.course_id })
+    const result = await invoke<Record<string, DecisionJudgment>>('decision_content_review', { courseId: run.value.value.course_id, revision: course.revision, draft: text })
+    if (epoch === generation && run.value?.id === id && output.value === text) checks.value = result
+  } catch (e) { if (epoch === generation) error.value = String(e) }
+  finally { if (epoch === generation) checkBusy.value = false }
+}
 </script>
 
 <template>
@@ -72,6 +88,9 @@ async function action(command: RunAction) {
         <details class="text-sm"><summary class="cursor-pointer">{{ t('instructor.studio.originalLesson') }}</summary><pre class="mt-2 whitespace-pre-wrap break-words rounded-lg bg-background p-3 font-sans">{{ run.value.original_content || t('instructor.studio.emptyLesson') }}</pre></details>
         <p v-if="draftDirty" role="status" class="text-sm text-warning">{{ t('instructor.studio.saveLessonFirst') }}</p>
         <AppTextarea v-model="output" :label="t('instructor.studio.reviewDraft')" :rows="12" :maxlength="128000" />
+        <p class="text-xs text-muted-foreground">{{ t('instructor.studio.decisionDisclosure') }}</p>
+        <AppButton variant="secondary" :loading="checkBusy" :disabled="!output.trim() || draftDirty" @click="checkDraft">{{ t('instructor.studio.decisionRun') }}</AppButton>
+        <p v-for="(check, name) in checks" :key="name" class="text-sm" role="status">{{ name }} · {{ check.value }} · {{ Math.round(check.confidence * 100) }}%</p>
         <p class="text-xs text-muted-foreground">{{ t('instructor.studio.applyHelp') }}</p>
         <AppButton type="button" :loading="busy" :disabled="!output.trim() || draftDirty" @click="action('studio_apply_run')">{{ t('instructor.studio.approveApply') }}</AppButton>
       </div>

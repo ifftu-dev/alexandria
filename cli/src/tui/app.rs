@@ -1597,6 +1597,7 @@ impl App {
             V::AudienceMismatch => "not bound to this audience",
             V::Replayed => "already used once",
             V::Malformed => "envelope payload is malformed",
+            V::Expired => "the presentation proof has expired",
         };
         let ok = verdict == V::Accepted;
 
@@ -1604,7 +1605,7 @@ impl App {
             title: "Presentation".into(),
             lines: vec![
                 ("Envelope".into(), path.to_string()),
-                ("Subject".into(), envelope.subject.clone()),
+                ("Subject".into(), envelope.holder.as_str().to_string()),
                 ("Audience".into(), audience.to_string()),
                 (
                     "Verdict".into(),
@@ -2214,11 +2215,11 @@ mod tests {
             "validFrom": "2026-01-01T00:00:00Z",
             "credentialSubject": { "id": subject },
             "proof": {
-                "type": "Ed25519Signature2020",
+                "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
                 "created": "2026-01-01T00:00:00Z",
                 "verificationMethod": format!("{issuer}#key-1"),
                 "proofPurpose": "assertionMethod",
-                "jws": "test..signature",
+                "proofValue": "ztest..signature",
             },
         }))
         .expect("credential fixture")

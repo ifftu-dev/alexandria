@@ -310,7 +310,7 @@ fn dispatch(
             let verdict = credentials::verify_presentation(db, &envelope, &request.audience)?;
             json!({
                 "result": verdict.as_str(),
-                "presentation_id": envelope.id,
+                "presentation_id": envelope.id.clone().unwrap_or_default(),
                 "audience": request.audience,
                 "replay_checked": true,
             })

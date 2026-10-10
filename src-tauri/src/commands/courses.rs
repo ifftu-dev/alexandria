@@ -336,6 +336,24 @@ pub async fn publish_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<PublishCourseResult, String> {
+    prepare_course_document(state, course_id, true).await
+}
+
+/// Sign and store an owned draft for local enrollment without a catalog entry
+/// or P2P announcement. Enrollment still requires the verified document binding.
+#[tauri::command]
+pub async fn prepare_local_course(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> Result<PublishCourseResult, String> {
+    prepare_course_document(state, course_id, false).await
+}
+
+async fn prepare_course_document(
+    state: State<'_, AppState>,
+    course_id: String,
+    publish: bool,
+) -> Result<PublishCourseResult, String> {
     // Publication spans several awaits. Database phases are fenced by profile
     // leases; the studio epoch additionally catches a profile switch between
     // them, so a commit can never land in a different profile than the read.
@@ -365,6 +383,9 @@ pub async fn publish_course(
                 let course = get_course_by_id(db.conn(), &read_course_id)?;
                 if course.author_address != signer_address {
                     return Err("course not found or not authored by you".into());
+                }
+                if !publish && course.status != "draft" {
+                    return Err("only an owned draft can be prepared locally".into());
                 }
                 let draft_policy_json: Option<String> = db
                     .conn()
@@ -579,20 +600,14 @@ pub async fn publish_course(
                     }
                 }
 
-                db.conn()
-                    .execute(
-                        "UPDATE courses SET content_cid = ?1, course_document_version = ?2, \
-                 completion_policy_json = ?3, status = 'published', \
-                 version = version + 1, published_at = datetime('now'), \
-                 updated_at = datetime('now') WHERE id = ?4",
-                        params![
-                            content_hash,
-                            document_version,
-                            completion_policy_json,
-                            update_course_id,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
+                record_course_document_binding(
+                    db.conn(),
+                    &update_course_id,
+                    &content_hash,
+                    document_version,
+                    completion_policy_json.as_deref(),
+                    publish,
+                )?;
 
                 // Track as a non-evictable pin (authored content)
                 crate::content_store::storage::upsert_pin(
@@ -606,6 +621,10 @@ pub async fn publish_course(
                 // Read back the updated course to get the new version number
                 let updated_course = get_course_by_id(db.conn(), &update_course_id)?;
                 let version = updated_course.version;
+
+                if !publish {
+                    return Ok((None, None, version));
+                }
 
                 // Build a catalog announcement for P2P discovery
                 let announcement = catalog::build_catalog_announcement(
@@ -635,25 +654,56 @@ pub async fn publish_course(
                 catalog::insert_own_catalog_entry(db, &announcement, &signature_hex)
                     .map_err(|e| format!("catalog insert: {e}"))?;
 
-                Ok((announcement, signed_ann, version))
+                Ok((Some(announcement), Some(signed_ann), version))
             },
         )
         .await?;
 
-    // Broadcast via P2P if the node is running (best-effort — don't fail publish)
-    let p2p_node = state.p2p_node.lock().await;
-    if let Some(ref node) = *p2p_node {
-        if let Err(e) = node.publish_signed(&signed_ann).await {
-            log::warn!("Failed to broadcast catalog announcement via P2P: {e}");
-        } else {
-            log::info!(
-                "Broadcast catalog announcement for '{}' (v{version})",
-                announcement.title,
-            );
+    // Local preparation intentionally leaves the draft out of the catalog.
+    if let (Some(announcement), Some(signed_ann)) = (announcement, signed_ann) {
+        let p2p_node = state.p2p_node.lock().await;
+        if let Some(ref node) = *p2p_node {
+            if let Err(e) = node.publish_signed(&signed_ann).await {
+                log::warn!("Failed to broadcast catalog announcement via P2P: {e}");
+            } else {
+                log::info!(
+                    "Broadcast catalog announcement for '{}' (v{version})",
+                    announcement.title
+                );
+            }
         }
     }
 
     Ok(result)
+}
+
+fn record_course_document_binding(
+    conn: &rusqlite::Connection,
+    course_id: &str,
+    content_hash: &str,
+    document_version: i64,
+    completion_policy_json: Option<&str>,
+    publish: bool,
+) -> Result<(), String> {
+    let updated = conn
+        .execute(
+            "UPDATE courses SET content_cid=?1, course_document_version=?2,
+         completion_policy_json=?3, status=CASE WHEN ?5 THEN 'published' ELSE status END,
+         version=version+1, published_at=CASE WHEN ?5 THEN datetime('now') ELSE published_at END,
+         updated_at=datetime('now') WHERE id=?4 AND (?5 OR status='draft')",
+            params![
+                content_hash,
+                document_version,
+                completion_policy_json,
+                course_id,
+                publish
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    if updated != 1 {
+        return Err("course changed; review before preparing it again".into());
+    }
+    Ok(())
 }
 
 /// Update the local draft policy that will be covered by the next signed
@@ -819,6 +869,34 @@ mod tests {
                 params![id, title, status],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn local_document_binding_keeps_draft_private_and_refuses_published_courses() {
+        let db = test_db();
+        setup_identity(&db);
+        insert_course(&db, "local", "Local example", "draft");
+        let cid = "a".repeat(64);
+        record_course_document_binding(db.conn(), "local", &cid, 3, None, false).unwrap();
+        let (status,stored,version,date): (String,String,i64,Option<String>) = db.conn().query_row("SELECT status,content_cid,course_document_version,published_at FROM courses WHERE id='local'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(
+            (status.as_str(), stored.as_str(), version, date),
+            ("draft", cid.as_str(), 3, None)
+        );
+        record_course_document_binding(db.conn(), "local", &cid, 3, None, true).unwrap();
+        assert!(record_course_document_binding(
+            db.conn(),
+            "local",
+            &"b".repeat(64),
+            3,
+            None,
+            false
+        )
+        .is_err());
+        assert_eq!(
+            get_course_by_id(db.conn(), "local").unwrap().content_cid,
+            Some(cid)
+        );
     }
 
     #[test]

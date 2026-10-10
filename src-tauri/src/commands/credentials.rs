@@ -10,7 +10,7 @@ use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
+use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
@@ -245,12 +245,12 @@ pub struct IssueCredentialRequest {
     pub integrity_policy: Option<IssuancePolicy>,
 }
 
-const STATUS_LIST_BITS: usize = 16_384; // 2 KiB bitmap per list
-const STATUS_LIST_TYPE: &str = "RevocationList2020Status";
+const STATUS_LIST_BITS: usize = alexandria_verify::vc::status::MIN_BITS; // 16 KiB bitmap per list
+const STATUS_LIST_TYPE: &str = "BitstringStatusListEntry";
 // Imported rather than redeclared. These were local copies, and a duplicated
 // constant is exactly how the issuance path came to emit the v1 context while
 // the rest of the codebase had moved to v2.
-use alexandria_verify::vc::context::{ALEXANDRIA_V1, W3C_VC_V2};
+use alexandria_verify::vc::context::W3C_VC_V2;
 
 /// Pure-function issuance pipeline. Allocates the next status-list
 /// slot, builds the VC envelope, signs it, persists both the signed
@@ -271,7 +271,7 @@ pub fn issue_credential_impl(
 
     let type_name = req.credential_type.as_str();
 
-    // Build the VC envelope; sign_credential will stamp proof.jws.
+    // Build the VC envelope; sign_credential will stamp proof.proofValue.
     // For skill claims we fold the request's evidence_refs into the
     // claim so the inline subject properties carry them.
     let mut claim = req.claim.clone();
@@ -328,7 +328,7 @@ pub fn issue_credential_impl(
     };
 
     let vc = VerifiableCredential {
-        context: vec![W3C_VC_V2.into(), ALEXANDRIA_V1.into()],
+        context: vec![W3C_VC_V2.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), type_name.to_string()],
         issuer: issuer_did.clone(),
@@ -345,13 +345,7 @@ pub fn issue_credential_impl(
         terms_of_use: None,
         witness: None,
         integrity,
-        proof: Proof {
-            type_: "Ed25519Signature2020".into(),
-            created: now.to_string(),
-            verification_method: VerificationMethodRef(format!("{}#key-1", issuer_did.as_str())),
-            proof_purpose: "assertionMethod".into(),
-            jws: String::new(),
-        },
+        proof: Proof::unsigned(now.to_string()),
     };
     let signed = sign_credential(
         UnsignedCredential { credential: vc },
@@ -486,12 +480,9 @@ pub fn revoke_credential_impl(
             |r| r.get(0),
         )
         .map_err(|e| format!("load status list: {e}"))?;
-    let byte = (index / 8) as usize;
-    let bit = (index % 8) as u8;
-    if byte >= bits.len() {
-        return Err(format!("status index {index} out of range"));
-    }
-    bits[byte] |= 1 << bit;
+    // Bitstring Status List: index 0 is the most significant bit of byte 0.
+    alexandria_verify::vc::status::set_bit(&mut bits, index as usize, true)
+        .map_err(|e| e.to_string())?;
 
     transaction
         .execute(
@@ -617,10 +608,54 @@ pub fn list_credentials_impl(
 
 // --- internal helpers -----------------------------------------------------
 
-fn ensure_status_list(conn: &Connection, issuer_did: &Did) -> Result<String, String> {
-    // One list per issuer (MVP). list_id is a stable URN so verifiers
-    // can look it up from the credential's credentialStatus.statusListCredential.
-    let list_id = format!("urn:alexandria:status-list:{}:1", issuer_did.as_str());
+/// The origin this identity's status lists are served from, if any.
+///
+/// The `credentials.status_host` setting wins; the network profile's cloud
+/// origin, then the first configured directory, stand in when it is empty.
+/// Only `https`, or `http` on loopback, counts — a list named at a plain
+/// `http` host could be swapped on the wire, and a verifier would believe it.
+pub(crate) fn status_list_host(conn: &Connection) -> Option<String> {
+    use crate::settings::{registry::keys, SettingsStore};
+    let configured = SettingsStore::get(conn, keys::CREDENTIAL_STATUS_HOST);
+    let candidate = if !configured.trim().is_empty() {
+        Some(configured.trim().to_string())
+    } else if let Some(origin) = crate::network_profile::embedded_preprod()
+        .ok()
+        .and_then(|profile| profile.cloud_https_origin.clone())
+    {
+        Some(origin)
+    } else {
+        super::holder_pull::directories_db(conn)
+            .ok()
+            .and_then(|directories| directories.into_iter().next().map(|d| d.url))
+    };
+    candidate
+        .map(|origin| origin.trim_end_matches('/').to_string())
+        .filter(|origin| {
+            (origin.starts_with("https://") || super::holder_pull::is_loopback(origin))
+                && alexandria_verify::vc::status::parse_list_url(
+                    &alexandria_verify::vc::status::list_url(
+                        origin,
+                        &Did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK".into()),
+                        1,
+                    ),
+                )
+                .is_some()
+        })
+}
+
+/// The list a credential issued now by `issuer_did` belongs to.
+///
+/// One list per issuer per host. With a host configured the id is the URL the
+/// host serves it at (§14.11.2), so any verifier can fetch it; without one it
+/// is a URN and the list travels only in exported bundles. A host that
+/// changes later starts a fresh list — ids already written into credentials
+/// are never rewritten.
+pub(crate) fn ensure_status_list(conn: &Connection, issuer_did: &Did) -> Result<String, String> {
+    let list_id = match status_list_host(conn) {
+        Some(origin) => alexandria_verify::vc::status::list_url(&origin, issuer_did, 1),
+        None => format!("urn:alexandria:status-list:{}:1", issuer_did.as_str()),
+    };
     let exists: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM credential_status_lists WHERE list_id = ?1",
@@ -639,6 +674,191 @@ fn ensure_status_list(conn: &Connection, issuer_did: &Did) -> Result<String, Str
         .map_err(|e| e.to_string())?;
     }
     Ok(list_id)
+}
+
+/// A URL-addressed list whose host has not yet seen its current version.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingStatusList {
+    pub list_id: String,
+    pub status_purpose: String,
+    pub bits: Vec<u8>,
+    pub version: i64,
+}
+
+/// Lists this issuer owns that are ahead of what their host acknowledged.
+///
+/// URN-named lists are never pending: nothing serves them.
+pub(crate) fn pending_status_lists(
+    conn: &Connection,
+    issuer_did: &Did,
+) -> Result<Vec<PendingStatusList>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT list_id, status_purpose, bits, version FROM credential_status_lists \
+             WHERE issuer_did = ?1 AND version > published_version ORDER BY list_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![issuer_did.as_str()], |r| {
+            Ok(PendingStatusList {
+                list_id: r.get(0)?,
+                status_purpose: r.get(1)?,
+                bits: r.get(2)?,
+                version: r.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut pending = Vec::new();
+    for row in rows {
+        let list = row.map_err(|e| e.to_string())?;
+        if alexandria_verify::vc::status::parse_list_url(&list.list_id).is_some() {
+            pending.push(list);
+        }
+    }
+    Ok(pending)
+}
+
+/// The signed `BitstringStatusListCredential` a host serves for `list`.
+pub(crate) fn signed_status_list(
+    list: &PendingStatusList,
+    key: &SigningKey,
+    issuer_did: &Did,
+    now: &str,
+) -> Result<VerifiableCredential, String> {
+    alexandria_verify::vc::status::status_list_credential(
+        &list.list_id,
+        issuer_did,
+        &list.status_purpose,
+        &list.bits,
+        now,
+        key,
+    )
+    .map_err(|e| format!("sign status list {}: {e}", list.list_id))
+}
+
+/// Record that a host acknowledged `version` of each list.
+pub(crate) fn mark_status_lists_published(
+    conn: &Connection,
+    published: &[(String, i64)],
+) -> Result<(), String> {
+    for (list_id, version) in published {
+        conn.execute(
+            "UPDATE credential_status_lists SET published_version = ?2 \
+             WHERE list_id = ?1 AND published_version < ?2",
+            params![list_id, version],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// What one publication pass did.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct StatusPublishReport {
+    /// List ids the host now serves at their current version.
+    pub published: Vec<String>,
+    /// One line per list that could not be pushed; the list stays pending.
+    pub errors: Vec<String>,
+}
+
+/// Push each pending list to its host, signed as of `now`.
+///
+/// Returns the `(list_id, version)` pairs the host accepted, so the caller
+/// can mark them, and the failures, which stay pending for the next pass.
+pub(crate) async fn push_status_lists(
+    pending: &[PendingStatusList],
+    key: &SigningKey,
+    issuer_did: &Did,
+    now: &str,
+) -> (Vec<(String, i64)>, Vec<String>) {
+    let mut accepted = Vec::new();
+    let mut errors = Vec::new();
+    for list in pending {
+        match push_status_list(list, key, issuer_did, now).await {
+            Ok(()) => accepted.push((list.list_id.clone(), list.version)),
+            Err(e) => errors.push(format!("{}: {e}", list.list_id)),
+        }
+    }
+    (accepted, errors)
+}
+
+async fn push_status_list(
+    list: &PendingStatusList,
+    key: &SigningKey,
+    issuer_did: &Did,
+    now: &str,
+) -> Result<(), String> {
+    let location = alexandria_verify::vc::status::parse_list_url(&list.list_id)
+        .ok_or("list is not served by a host")?;
+    if &location.issuer != issuer_did {
+        return Err("list belongs to another issuer".into());
+    }
+    let document = signed_status_list(list, key, issuer_did, now)?;
+    let response = super::exchange::client()?
+        .put(&list.list_id)
+        .json(&document)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "{} returned {status}: {}",
+            location.origin,
+            body.chars().take(200).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
+/// Publish every pending list this identity owns, and record what landed.
+///
+/// Called after anything that creates or changes a list, and on demand. A
+/// failed push is reported and left pending; the local revocation already
+/// happened and stands regardless.
+pub async fn publish_status_lists_for(
+    state: &State<'_, AppState>,
+) -> Result<StatusPublishReport, String> {
+    let (key, issuer_did) = load_issuer_key(state).await?;
+    let issuer_for_read = issuer_did.clone();
+    let pending = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "credentials.status_lists.pending",
+            move |db| pending_status_lists(db.conn(), &issuer_for_read),
+        )
+        .await?;
+    if pending.is_empty() {
+        return Ok(StatusPublishReport::default());
+    }
+    let (accepted, errors) = push_status_lists(&pending, &key, &issuer_did, &now_rfc3339()).await;
+    let published = accepted.iter().map(|(id, _)| id.clone()).collect();
+    if !accepted.is_empty() {
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Instructor,
+                state.profile_lease(),
+                "credentials.status_lists.mark",
+                move |db| mark_status_lists_published(db.conn(), &accepted),
+            )
+            .await?;
+    }
+    Ok(StatusPublishReport { published, errors })
+}
+
+/// Best-effort publication after a command that touched a list. The command's
+/// own result is already decided; a host that is down is a warning here and a
+/// pending list for the next pass.
+async fn publish_status_lists_quietly(state: &State<'_, AppState>) {
+    match publish_status_lists_for(state).await {
+        Ok(report) if report.errors.is_empty() => {}
+        Ok(report) => log::warn!("status list publication: {:?}", report.errors),
+        Err(e) => log::warn!("status list publication: {e}"),
+    }
 }
 
 fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String> {
@@ -661,7 +881,7 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
 
 pub(crate) fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
     let mut clone = vc.clone();
-    clone.proof.jws.clear();
+    clone.proof.proof_value.clear();
     let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;
     let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|e| e.to_string())?;
     Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
@@ -695,7 +915,7 @@ pub async fn issue_credential(
 ) -> Result<VerifiableCredential, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    state
+    let issued = state
         .db_executor
         .execute(
             DatabaseWorkload::Instructor,
@@ -703,7 +923,9 @@ pub async fn issue_credential(
             "credentials.issue",
             move |db| issue_credential_impl(db.conn(), &signing_key, &issuer_did, &req, &now),
         )
-        .await
+        .await?;
+    publish_status_lists_quietly(&state).await;
+    Ok(issued)
 }
 
 #[tauri::command]
@@ -755,7 +977,17 @@ pub async fn revoke_credential(
             "credentials.revoke",
             move |db| revoke_credential_impl(db.conn(), &issuer_did, &credential_id, &reason, &now),
         )
-        .await
+        .await?;
+    publish_status_lists_quietly(&state).await;
+    Ok(())
+}
+
+/// Push every status list that is ahead of what its host serves.
+#[tauri::command]
+pub async fn publish_status_lists(
+    state: State<'_, AppState>,
+) -> Result<StatusPublishReport, String> {
+    publish_status_lists_for(&state).await
 }
 
 #[tauri::command]
@@ -890,6 +1122,11 @@ pub struct CredentialBundle {
     pub credentials: Vec<VerifiableCredential>,
     pub key_registry: Vec<KeyRegistryRow>,
     pub status_lists: Vec<StatusListRow>,
+    /// The same lists as signed `BitstringStatusListCredential` documents,
+    /// for the lists this node issues. A verifier that trusts nothing about
+    /// the bundle's author can still check these against the issuer's key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub status_list_credentials: Vec<VerifiableCredential>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -981,6 +1218,16 @@ fn bundle_from_payload(value: &serde_json::Value) -> Result<Option<CredentialBun
 /// Build a JCS-canonical export bundle of every credential, key
 /// registry row, and status list known to this node.
 pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
+    export_bundle_signed_impl(conn, None)
+}
+
+/// As [`export_bundle_impl`], and when `signer` is this node's issuer key,
+/// also carry each list this node issues as a signed
+/// `BitstringStatusListCredential`.
+pub fn export_bundle_signed_impl(
+    conn: &Connection,
+    signer: Option<(&SigningKey, &Did)>,
+) -> Result<String, String> {
     use base64::Engine;
 
     // Credentials, ordered deterministically by id so ad-hoc ordering
@@ -1043,12 +1290,33 @@ pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
     for r in list_rows {
         status_lists.push(r.map_err(|e| e.to_string())?);
     }
+    let mut status_list_credentials = Vec::new();
+    if let Some((key, did)) = signer {
+        let created = now_rfc3339();
+        for list in status_lists.iter().filter(|l| l.issuer_did == did.as_str()) {
+            let bits = base64::engine::general_purpose::STANDARD
+                .decode(list.bits_b64.as_bytes())
+                .map_err(|e| format!("decode list bits: {e}"))?;
+            status_list_credentials.push(
+                alexandria_verify::vc::status::status_list_credential(
+                    &list.list_id,
+                    did,
+                    &list.status_purpose,
+                    &bits,
+                    &created,
+                    key,
+                )
+                .map_err(|e| format!("sign status list: {e}"))?,
+            );
+        }
+    }
 
     let bundle = CredentialBundle {
         format_version: BUNDLE_FORMAT_VERSION.into(),
         credentials,
         key_registry,
         status_lists,
+        status_list_credentials,
     };
     serde_json_canonicalizer::to_string(&bundle).map_err(|e| format!("canonicalize bundle: {e}"))
 }
@@ -1265,7 +1533,23 @@ impl BundleStore {
     fn new(bundle: &CredentialBundle) -> Result<Self, String> {
         use base64::Engine;
         let mut status_lists = Vec::with_capacity(bundle.status_lists.len());
+        // A signed BitstringStatusListCredential is evidence on its own
+        // terms: it is checked against the issuer's key and, when it
+        // verifies, wins over the raw row for the same list id.
+        for list_vc in &bundle.status_list_credentials {
+            let Some(id) = list_vc.id.as_deref() else {
+                return Err("status list credential has no id".into());
+            };
+            let key = alexandria_verify::did::resolve_did_key(&list_vc.issuer)
+                .map_err(|e| format!("status list issuer: {e}"))?;
+            let bits = alexandria_verify::vc::status::verify_status_list_credential(list_vc, &key)
+                .map_err(|e| format!("status list {id}: {e}"))?;
+            status_lists.push((id.to_string(), bits));
+        }
         for list in &bundle.status_lists {
+            if status_lists.iter().any(|(id, _)| id == &list.list_id) {
+                continue;
+            }
             let bits = base64::engine::general_purpose::STANDARD
                 .decode(list.bits_b64.as_bytes())
                 .map_err(|e| format!("decode list bits: {e}"))?;
@@ -1332,13 +1616,14 @@ impl crate::domain::vc::VerificationStore for BundleStore {
 
 #[tauri::command]
 pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
+    let (key, did) = load_issuer_key(&state).await?;
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "credentials.export-bundle",
-            move |db| export_bundle_impl(db.conn()),
+            move |db| export_bundle_signed_impl(db.conn(), Some((&key, &did))),
         )
         .await
 }
@@ -1561,9 +1846,9 @@ mod tests {
             "issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX",
             "validFrom":"2026-04-08T11:15:00Z",
             "credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX"},
-            "proof":{"type":"Ed25519Signature2020","created":"2026-04-08T11:15:00Z",
+            "proof":{"type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022","created":"2026-04-08T11:15:00Z",
                      "verificationMethod":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1",
-                     "proofPurpose":"assertionMethod","jws":"seed..signature"}
+                     "proofPurpose":"assertionMethod","proofValue": "zseed..signature"}
         }"#;
 
         let report = verify_offline_impl(placeholder, NOW).unwrap();
@@ -1765,7 +2050,7 @@ mod tests {
         });
         let vc = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap();
         assert!(vc.integrity.is_some());
-        assert!(!vc.proof.jws.is_empty());
+        assert!(!vc.proof.proof_value.is_empty());
     }
 
     #[test]
@@ -1781,11 +2066,295 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_host_makes_status_lists_url_addressed_and_pending() {
+        use crate::settings::{registry::keys, SettingsStore};
+        use alexandria_verify::vc::status;
+        let (db, key, issuer, subject) = setup();
+        SettingsStore::set(
+            db.conn(),
+            keys::CREDENTIAL_STATUS_HOST,
+            "http://127.0.0.1:8080/".to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            status_list_host(db.conn()).as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
+
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let reference = vc.credential_status.expect("status attached");
+        let expected = status::list_url("http://127.0.0.1:8080", &issuer, 1);
+        assert_eq!(reference.status_list_credential, expected);
+        assert_eq!(reference.id, format!("{expected}#0"));
+
+        // A new list is version 1 and nothing has served it: pending.
+        let pending = pending_status_lists(db.conn(), &issuer).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].version, 1);
+        let signed = signed_status_list(&pending[0], &key, &issuer, NOW).unwrap();
+        let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
+        assert_eq!(status::get_bit(&bits, 0), Some(false));
+
+        mark_status_lists_published(db.conn(), &[(expected.clone(), 1)]).unwrap();
+        assert!(pending_status_lists(db.conn(), &issuer).unwrap().is_empty());
+
+        // Revocation bumps the version past what the host has.
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        let pending = pending_status_lists(db.conn(), &issuer).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].version, 2);
+        let signed = signed_status_list(&pending[0], &key, &issuer, NOW).unwrap();
+        let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
+        assert_eq!(status::get_bit(&bits, 0), Some(true));
+
+        // An older acknowledgement never moves the mark backwards.
+        mark_status_lists_published(db.conn(), &[(expected.clone(), 2)]).unwrap();
+        mark_status_lists_published(db.conn(), &[(expected, 1)]).unwrap();
+        assert!(pending_status_lists(db.conn(), &issuer).unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_https_or_loopback_hosts_count() {
+        use crate::settings::{registry::keys, SettingsStore};
+        let (db, _, _, _) = setup();
+        for bad in ["http://cloud.example", "ftp://x", "cloud.example", "   "] {
+            SettingsStore::set(db.conn(), keys::CREDENTIAL_STATUS_HOST, bad.to_string()).unwrap();
+            assert!(status_list_host(db.conn()).is_none(), "{bad} accepted");
+        }
+        SettingsStore::set(
+            db.conn(),
+            keys::CREDENTIAL_STATUS_HOST,
+            "https://cloud.example/".to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            status_list_host(db.conn()).as_deref(),
+            Some("https://cloud.example")
+        );
+    }
+
+    #[test]
+    fn without_a_host_lists_are_urns_and_never_pending() {
+        let (db, key, issuer, subject) = setup();
+        assert!(status_list_host(db.conn()).is_none());
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        assert!(pending_status_lists(db.conn(), &issuer).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_first_directory_stands_in_for_an_unset_host() {
+        use crate::settings::{
+            registry::{keys, JsonSetting},
+            SettingsStore,
+        };
+        let (db, _, _, _) = setup();
+        SettingsStore::set(
+            db.conn(),
+            keys::HOLDER_DIRECTORIES,
+            JsonSetting(serde_json::json!([
+                {"name": "Demo", "url": "http://localhost:8080"},
+                {"name": "Other", "url": "https://other.example"}
+            ])),
+        )
+        .unwrap();
+        assert_eq!(
+            status_list_host(db.conn()).as_deref(),
+            Some("http://localhost:8080")
+        );
+    }
+
+    /// A one-request HTTP host: records the PUT it receives and answers 200.
+    async fn one_shot_host(
+        expected_path: String,
+    ) -> (String, tokio::sync::oneshot::Receiver<serde_json::Value>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                raw.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&raw).to_string();
+                if let Some(split) = text.find("\r\n\r\n") {
+                    let head = &text[..split];
+                    let length: usize = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if raw.len() >= split + 4 + length {
+                        let first = head.lines().next().unwrap().to_string();
+                        assert_eq!(first, format!("PUT {expected_path} HTTP/1.1"));
+                        let body: serde_json::Value =
+                            serde_json::from_slice(&raw[split + 4..split + 4 + length]).unwrap();
+                        tx.send(body).unwrap();
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\nconnection: close\r\n\r\n{\"ok\":true}")
+                .await
+                .unwrap();
+        });
+        (origin, rx)
+    }
+
+    #[tokio::test]
+    async fn pending_lists_are_put_to_their_host_as_signed_credentials() {
+        use alexandria_verify::vc::status;
+        let key = test_key("issuer");
+        let issuer = derive_did_key(&key);
+        let (origin, received) =
+            one_shot_host(format!("/status-lists/{}/1", issuer.as_str())).await;
+        let list_id = status::list_url(&origin, &issuer, 1);
+        let mut bits = vec![0u8; status::MIN_BITS / 8];
+        status::set_bit(&mut bits, 5, true).unwrap();
+        let pending = vec![PendingStatusList {
+            list_id: list_id.clone(),
+            status_purpose: "revocation".into(),
+            bits,
+            version: 3,
+        }];
+        let (accepted, errors) = push_status_lists(&pending, &key, &issuer, NOW).await;
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(accepted, vec![(list_id.clone(), 3)]);
+        let document: VerifiableCredential =
+            serde_json::from_value(received.await.unwrap()).unwrap();
+        let bits = status::verify_fetched_list(&document, &list_id, &issuer, "revocation").unwrap();
+        assert_eq!(status::get_bit(&bits, 5), Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_host_that_refuses_leaves_the_list_pending() {
+        use alexandria_verify::vc::status;
+        let key = test_key("issuer");
+        let issuer = derive_did_key(&key);
+        let other = derive_did_key(&test_key("other"));
+        // Nothing listens here; and the second list is not ours to push.
+        let pending = vec![
+            PendingStatusList {
+                list_id: status::list_url("http://127.0.0.1:9", &issuer, 1),
+                status_purpose: "revocation".into(),
+                bits: vec![0; 16],
+                version: 1,
+            },
+            PendingStatusList {
+                list_id: status::list_url("http://127.0.0.1:9", &other, 1),
+                status_purpose: "revocation".into(),
+                bits: vec![0; 16],
+                version: 1,
+            },
+        ];
+        let (accepted, errors) = push_status_lists(&pending, &key, &issuer, NOW).await;
+        assert!(accepted.is_empty());
+        assert_eq!(errors.len(), 2);
+        assert!(errors[1].contains("another issuer"), "{errors:?}");
+    }
+
+    /// Writes `scripts/demo/fixtures/status-list-bundle.json`: a signed export
+    /// whose list is URL-addressed, with one revoked and one active
+    /// credential. The stdlib verifier's fetch test serves it over HTTP.
+    ///
+    ///   ALEXANDRIA_REGENERATE_FIXTURES=1 cargo test --lib status_list_fixture
+    #[test]
+    fn status_list_fixture_is_current() {
+        use crate::settings::{registry::keys, SettingsStore};
+        let (db, key, issuer, subject) = setup();
+        SettingsStore::set(
+            db.conn(),
+            keys::CREDENTIAL_STATUS_HOST,
+            "https://cloud.example".to_string(),
+        )
+        .unwrap();
+        let first = issue_credential_impl(
+            db.conn(),
+            &key,
+            &issuer,
+            &sample_request(subject.clone()),
+            NOW,
+        )
+        .unwrap();
+        issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        revoke_credential_impl(
+            db.conn(),
+            &issuer,
+            first.id.as_deref().unwrap(),
+            "fixture",
+            NOW,
+        )
+        .unwrap();
+        let bundle = export_bundle_signed_impl(db.conn(), Some((&key, &issuer))).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&bundle).unwrap();
+        value["origin"] = serde_json::Value::String("https://cloud.example".into());
+        let pretty = serde_json::to_string_pretty(&value).unwrap() + "\n";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../scripts/demo/fixtures/status-list-bundle.json");
+        if std::env::var("ALEXANDRIA_REGENERATE_FIXTURES").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &pretty).unwrap();
+        }
+        // The list credential is signed as of export time, so the file is not
+        // byte-stable; what must hold is that the fixture on disk is a bundle
+        // this code still produces and still verifies: the same credentials,
+        // referencing a URL-addressed list that is signed by their issuer and
+        // marks exactly the first one revoked.
+        let on_disk = std::fs::read_to_string(&path).expect("fixture exists; regenerate it");
+        let on_disk: CredentialBundle = serde_json::from_str(&on_disk).unwrap();
+        let fresh: CredentialBundle = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            serde_json::to_value(&on_disk.credentials).unwrap(),
+            serde_json::to_value(&fresh.credentials).unwrap(),
+            "fixture is stale: ALEXANDRIA_REGENERATE_FIXTURES=1 cargo test --lib status_list_fixture"
+        );
+        let list = &on_disk.status_list_credentials[0];
+        let list_id = list.id.clone().unwrap();
+        assert_eq!(
+            list_id,
+            alexandria_verify::vc::status::list_url("https://cloud.example", &issuer, 1)
+        );
+        let bits = alexandria_verify::vc::status::verify_fetched_list(
+            list,
+            &list_id,
+            &issuer,
+            "revocation",
+        )
+        .unwrap();
+        assert_eq!(alexandria_verify::vc::status::get_bit(&bits, 0), Some(true));
+        assert_eq!(
+            alexandria_verify::vc::status::get_bit(&bits, 1),
+            Some(false)
+        );
+        for credential in &on_disk.credentials {
+            assert_eq!(
+                credential
+                    .credential_status
+                    .as_ref()
+                    .map(|s| s.status_list_credential.as_str()),
+                Some(list_id.as_str())
+            );
+        }
+    }
+
+    #[test]
     fn issue_credential_returns_signed_vc_with_status_slot() {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        assert!(!vc.proof.jws.is_empty());
+        assert!(!vc.proof.proof_value.is_empty());
         assert!(vc.id.as_deref().unwrap().starts_with("urn:alexandria:vc:"));
         let status = vc.credential_status.expect("status attached");
         assert_eq!(status.status_list_index, "0");
@@ -1854,7 +2423,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(bits[0] & 0x01, 0x01);
+        assert_eq!(bits[0] & 0x80, 0x80, "index 0 is the most significant bit");
     }
 
     #[test]
@@ -1873,7 +2442,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(bits[0], 0x01);
+        assert_eq!(bits[0], 0x80, "index 0 is the most significant bit");
     }
 
     #[test]
@@ -1991,6 +2560,62 @@ mod tests {
         let one =
             list_credentials_impl(db.conn(), Some(subject.as_str()), Some("other_skill")).unwrap();
         assert_eq!(one.len(), 1);
+    }
+
+    #[test]
+    fn a_signed_export_carries_the_status_list_as_a_bitstring_credential() {
+        // The bundle a learner exports must verify with nothing from this
+        // node: the list it names is inside it, as a credential signed by
+        // the list's issuer, and a revocation set here reads as revoked
+        // from that document alone.
+        let (db, key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &key,
+            &issuer,
+            &sample_request(subject.clone()),
+            NOW,
+        )
+        .unwrap();
+        let json = export_bundle_signed_impl(db.conn(), Some((&key, &issuer))).unwrap();
+        let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
+        assert_eq!(bundle.status_list_credentials.len(), 1);
+        let list = &bundle.status_list_credentials[0];
+        assert_eq!(
+            list.id.as_deref(),
+            vc.credential_status
+                .as_ref()
+                .map(|s| s.status_list_credential.as_str())
+        );
+        assert!(list
+            .type_
+            .iter()
+            .any(|t| t == "BitstringStatusListCredential"));
+        assert_eq!(list.proof.cryptosuite, "eddsa-jcs-2022");
+        let bits = alexandria_verify::vc::status::verify_status_list_credential(
+            list,
+            &key.verifying_key(),
+        )
+        .unwrap();
+        assert_eq!(bits.len() * 8, alexandria_verify::vc::status::MIN_BITS);
+        let unsigned = export_bundle_impl(db.conn()).unwrap();
+        assert!(
+            !unsigned.contains("status_list_credentials"),
+            "no signer, no list credentials"
+        );
+
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        let json = export_bundle_signed_impl(db.conn(), Some((&key, &issuer))).unwrap();
+        let mut bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
+        // Drop the raw rows: the signed list credential alone must carry the revocation.
+        bundle.status_lists.clear();
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+        let (accepted, total) = verify_bundle_offline_impl(&json, NOW).unwrap();
+        assert_eq!(
+            accepted, 0,
+            "a revoked credential must not verify from the signed list"
+        );
+        assert_eq!(total, 1);
     }
 
     #[test]

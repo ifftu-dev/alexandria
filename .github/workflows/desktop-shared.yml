@@ -6,6 +6,11 @@ on:
       mode:
         required: true
         type: string
+      dev_seeding:
+        description: 'Enable the development-only test data picker (validation only)'
+        required: false
+        type: boolean
+        default: false
       tag:
         required: true
         type: string
@@ -171,7 +176,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -256,7 +261,7 @@ jobs:
           LIBRARY_PATH: /opt/homebrew/lib
         with:
           projectPath: alexandria
-          args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.desktop.macos.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.desktop.macos.conf.json
           includeUpdaterJson: false
 
       - name: Build unsigned macOS release
@@ -269,7 +274,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.desktop.macos.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.desktop.macos.conf.json
           includeUpdaterJson: false
 
       - name: Build signed macOS release
@@ -295,7 +300,7 @@ jobs:
           # the human download. latest.json is NOT emitted per-platform here —
           # the `finalize` job aggregates every platform's signed updater
           # artifact into one manifest (see below).
-          args: --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.desktop.macos.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.desktop.macos.conf.json
           includeUpdaterJson: false
 
       - name: Rename macOS release assets
@@ -320,6 +325,33 @@ jobs:
           }
           rename_asset '*_aarch64.dmg' "Alexandria-${VERSION}-macOS-Apple-Silicon.dmg"
           rename_asset '*_aarch64.dmg.sig' "Alexandria-${VERSION}-macOS-Apple-Silicon.dmg.sig"
+
+      - name: Smoke-test macOS validation startup
+        if: inputs.mode == 'validate'
+        working-directory: alexandria
+        run: |
+          python3 - <<'PYTHON'
+          import pathlib, plistlib, subprocess, tempfile
+          app = pathlib.Path("target/aarch64-apple-darwin/release/bundle/macos/Alexandria.app")
+          info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+          binary = app / "Contents/MacOS" / info["CFBundleExecutable"]
+          with tempfile.TemporaryFile() as output:
+              process = subprocess.Popen([str(binary.resolve())], stdout=output, stderr=output)
+              try:
+                  code = process.wait(timeout=15)
+              except subprocess.TimeoutExpired:
+                  process.terminate()
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
+                  print("Packaged app remained running through startup")
+              else:
+                  output.seek(0)
+                  print(output.read().decode(errors="replace"))
+                  raise SystemExit(f"Packaged app exited during startup ({code})")
+          PYTHON
 
       - name: Collect macOS artifacts
         id: macos-artifacts
@@ -443,7 +475,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -467,7 +499,7 @@ jobs:
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         with:
           projectPath: alexandria
-          args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
       - name: Build Linux release
@@ -480,7 +512,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
       - name: Rename Linux x64 release assets
@@ -627,7 +659,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -651,7 +683,7 @@ jobs:
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         with:
           projectPath: alexandria
-          args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
       - name: Build Linux ARM64 release
@@ -664,7 +696,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
       - name: Rename Linux ARM64 release assets
@@ -789,7 +821,7 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          workspaces: alexandria/src-tauri -> target
+          workspaces: alexandria -> target
 
       - name: Install frontend dependencies
         working-directory: alexandria
@@ -908,7 +940,7 @@ jobs:
           PERL: C:\Strawberry\perl\bin\perl.exe
         with:
           projectPath: alexandria
-          args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
           includeUpdaterJson: false
 
       - name: Build Windows release
@@ -926,7 +958,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
+          args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
           includeUpdaterJson: false
 
       - name: Rename Windows release assets

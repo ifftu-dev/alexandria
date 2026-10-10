@@ -179,9 +179,11 @@ fn the_view_set_is_exact() {
 /// the 94 migrations it replaced. That reference no longer exists in the repo,
 /// so the parity argument cannot be re-run. These counts are what remains: a
 /// drift detector that fails on any object added or removed without intent.
-/// They cover every migration: the baseline's 92 tables and 105 indexes, the
-/// instructor studio's 5 tables and 1 index, and the attempt role target's
-/// 1 index. Migration 4 adds a column only.
+/// They cover every migration: the baseline's 92 tables and 105 indexes, plus
+/// the instructor studio's 5 tables and 1 index, personhood's table and index,
+/// the decision shadow sample table, local opinion examples, and the
+/// learner's hiring answers. The attempt role target adds 1 index; the
+/// device attestation adds a column only.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -189,8 +191,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 97, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 107, "index count changed");
+    assert_eq!(tables, 107, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 111, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         3,

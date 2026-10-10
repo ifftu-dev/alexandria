@@ -67,9 +67,13 @@
     "coreHash": "Genesis core hash",
     "envelopeHash": "Signed envelope hash",
     "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
-    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept.",
+    "defaultNetwork": "డిఫాల్ట్ నెట్‌వర్క్ పాలన",
+    "defaultPinned": "ఈ ప్రొఫైల్ కోసం పిన్ చేయబడింది",
+    "defaultAvailable": "ఈ ప్రొఫైల్ కోసం అందుబాటులో ఉంది",
+    "defaultHint": "కొత్త ప్రొఫైల్‌లు Alexandriaతో అందించిన ధృవీకరించిన జెనెసిస్‌ను స్వయంచాలకంగా పిన్ చేస్తాయి. ఇప్పటికే ఉన్న ప్రొఫైల్‌లు ఇక్కడ దాన్ని సమీక్షించి అంగీకరించవచ్చు. ఈ ఆధారం నమ్మకాన్ని స్థాపిస్తుంది; ఓటింగ్ సేవలు విడిగా కాన్ఫిగర్ చేయబడతాయి.",
+    "useDefault": "ఈ డిఫాల్ట్ నమ్మక ఆధారాన్ని అంగీకరించండి"
   },
-
   "status": {
     "connected": "కనెక్ట్ చేయబడింది",
     "offline": "ఆఫ్‌లైన్",

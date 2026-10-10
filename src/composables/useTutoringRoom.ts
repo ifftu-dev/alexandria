@@ -538,8 +538,9 @@ async function checkDevices(): Promise<DeviceCheckResult> {
 function startPolling(intervalMs = 3000) {
   pollSubscribers += 1
   if (pollInterval) return
-  void refreshStatus()
-  pollInterval = setInterval(() => void refreshStatus(), intervalMs)
+  const refresh = () => { void refreshStatus(); void refreshSessions() }
+  refresh()
+  pollInterval = setInterval(refresh, intervalMs)
 }
 
 function stopPolling() {

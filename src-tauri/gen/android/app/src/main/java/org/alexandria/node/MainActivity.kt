@@ -45,6 +45,17 @@ class MainActivity : TauriActivity() {
      */
     @Volatile private var current: MainActivity? = null
 
+    @JvmStatic
+    fun personhoodLab(action: String): String = PersonhoodLab.dispatch(action)
+
+    fun personhoodKeepAwake(awake: Boolean) {
+      val activity = current ?: return
+      activity.runOnUiThread {
+        if (awake) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      }
+    }
+
     /** True between `requestAvPermissions()` and the user's answer. */
     @Volatile private var pending = false
 
@@ -283,6 +294,7 @@ class MainActivity : TauriActivity() {
     // A recreated activity (rotation, process restore) must keep the
     // assessment shield the Rust side asked for.
     if (shieldOn) applyShield(true)
+    PersonhoodLab.initialize(applicationContext)
     // Hide the native OS status bar (clock/battery) so the app owns the full
     // screen height. It can still be revealed with a swipe from the top edge.
     WindowCompat.getInsetsController(window, window.decorView).apply {
@@ -294,6 +306,21 @@ class MainActivity : TauriActivity() {
     // task keeps its peer connections instead of being killed by Doze /
     // battery optimisation. See P2pForegroundService for details.
     P2pForegroundService.start(this)
+  }
+
+  override fun onStart() {
+    super.onStart()
+    PersonhoodLab.setForeground(true)
+  }
+
+  override fun onStop() {
+    PersonhoodLab.setForeground(false)
+    super.onStop()
+  }
+
+  override fun onTrimMemory(level: Int) {
+    PersonhoodLab.trimMemory(level)
+    super.onTrimMemory(level)
   }
 
   override fun onDestroy() {

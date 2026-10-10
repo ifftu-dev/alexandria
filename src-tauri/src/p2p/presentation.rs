@@ -10,27 +10,17 @@
 use crate::db::Database;
 use crate::p2p::types::SignedGossipMessage;
 
-#[derive(serde::Deserialize)]
-struct PresentationGossip {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    audience: String,
-    #[allow(dead_code)]
-    nonce: String,
-    #[allow(dead_code)]
-    payload_json: String,
-    #[allow(dead_code)]
-    proof: String,
-}
-
 pub fn handle_presentation_message(
     _db: &Database,
     message: &SignedGossipMessage,
 ) -> Result<(), String> {
-    serde_json::from_slice::<PresentationGossip>(&message.payload)
-        .map(|_| ())
-        .map_err(|e| format!("malformed presentation payload: {e}"))
+    let presentation: alexandria_verify::vc::presentation::VerifiablePresentation =
+        serde_json::from_slice(&message.payload)
+            .map_err(|e| format!("malformed presentation payload: {e}"))?;
+    if presentation.proof.domain.is_none() || presentation.proof.challenge.is_none() {
+        return Err("presentation proof names no audience or nonce".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -55,7 +45,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         let msg = stub_msg(
-            br#"{"id":"pres-1","audience":"audit","nonce":"n","payload_json":"{}","proof":"sig"}"#,
+            br#"{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"pres-1","type":["VerifiablePresentation"],"holder":"did:key:z6MkHolder","proof":{"type":"DataIntegrityProof","cryptosuite":"eddsa-jcs-2022","created":"2026-01-01T00:00:00Z","verificationMethod":"did:key:z6MkHolder#z6MkHolder","proofPurpose":"authentication","challenge":"n","domain":"audit","proofValue":"zsig"}}"#,
         );
         handle_presentation_message(&db, &msg).unwrap();
     }

@@ -440,7 +440,7 @@ pub async fn import_credentials(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
+    use crate::crypto::did::{derive_did_key, Did};
     use crate::db::Database;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
     use crate::domain::vc::{CredentialStatus, CredentialType, Proof};
@@ -485,13 +485,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
-            proof: Proof {
-                type_: "Ed25519Signature2020".into(),
-                created: "2026-01-01T00:00:00Z".into(),
-                verification_method: VerificationMethodRef(format!("{}#key-1", issuer.as_str())),
-                proof_purpose: "assertionMethod".into(),
-                jws: String::new(),
-            },
+            proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         sign_credential(UnsignedCredential { credential: vc }, issuer_key, &issuer).unwrap()
     }
@@ -587,7 +581,7 @@ mod tests {
         );
         vc.credential_status = Some(CredentialStatus {
             id: "urn:test:missing-status#0".into(),
-            type_: "RevocationList2020Status".into(),
+            type_: "BitstringStatusListEntry".into(),
             status_purpose: "revocation".into(),
             status_list_index: "0".into(),
             status_list_credential: "urn:test:missing-status".into(),

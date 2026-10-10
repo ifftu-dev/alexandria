@@ -1,6 +1,9 @@
 //! P2P gossip handler for the Field Commentary opinions topic.
 //!
-//! Receive-side processing of `TOPIC_OPINIONS` messages:
+//! Versioned discussion events first pass `db::discussions` with a verified
+//! transport envelope and original actor signature (including relayed events).
+//!
+//! Legacy receive-side processing of `TOPIC_OPINIONS` messages:
 //!
 //! 1. Deserialize the payload as an `OpinionPayload` (the canonical
 //!    signed form from `domain::opinions`).
@@ -57,6 +60,28 @@ pub fn handle_opinion_message(
     message: &SignedGossipMessage,
 ) -> Result<OpinionIngest, String> {
     let policies = embedded_qualification_policies().map_err(|error| error.to_string())?;
+    if serde_json::from_slice::<serde_json::Value>(&message.payload)
+        .ok()
+        .is_some_and(|v| v.get("discussion_version").is_some())
+    {
+        if message.payload.len() > crate::db::discussions::MAX_EVENT_BYTES {
+            return Err("discussion event too large".into());
+        }
+        super::signing::verify_gossip_signature(message).map_err(|e| e.to_string())?;
+        let event = serde_json::from_slice(&message.payload)
+            .map_err(|e| format!("invalid discussion event: {e}"))?;
+        let network = &crate::network_profile::embedded_preprod()
+            .map_err(|e| e.to_string())?
+            .network_id;
+        let now = verification_time_now();
+        let accepted = crate::db::discussions::ingest(db.conn(), &event, policies, network, &now)?;
+        crate::db::discussions::promote(db.conn(), policies, network, &now)?;
+        return Ok(if accepted {
+            OpinionIngest::Stored
+        } else {
+            OpinionIngest::Pending
+        });
+    }
     handle_opinion_message_with(db, message, policies, &verification_time_now())
 }
 

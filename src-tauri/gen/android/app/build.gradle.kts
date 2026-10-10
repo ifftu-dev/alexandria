@@ -30,11 +30,14 @@ android {
     namespace = "org.alexandria.node"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
+        manifestPlaceholders["appLabel"] = "@string/app_name"
         applicationId = "org.alexandria.node"
         minSdk = 28
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        buildConfigField("boolean", "PERSONHOOD_LAB", "false")
     }
     signingConfigs {
         if (releaseKeystoreFile != null) {
@@ -48,6 +51,12 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            buildConfigField("boolean", "PERSONHOOD_LAB", (System.getenv("PERSONHOOD_LAB_BUNDLE") != null).toString())
+            if (System.getenv("PERSONHOOD_LAB_BUNDLE") != null) {
+                packaging.jniLibs.useLegacyPackaging = true
+                applicationIdSuffix = ".personhoodlab"
+                manifestPlaceholders["appLabel"] = "Alexandria Lab"
+            }
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -75,6 +84,10 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+    System.getenv("PERSONHOOD_LAB_BUNDLE")?.let { bundle ->
+        sourceSets.getByName("debug").jniLibs.srcDir("$bundle/jniLibs")
+        sourceSets.getByName("debug").assets.srcDir("$bundle/assets")
     }
 }
 

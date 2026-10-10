@@ -12,9 +12,7 @@
 //! signature means a caller cannot learn whether a nonce was used by timing
 //! the response, and the nonce is recorded only once a signature verifies.
 
-use alexandria_verify::did::{parse_did_key, resolve_did_key};
-use alexandria_verify::vc::sign::b64url_decode;
-use ed25519_dalek::Signature;
+use alexandria_verify::vc::presentation::{verify_presentation_proof, VerifiablePresentation};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -29,15 +27,9 @@ const MAX_OFFSET: u32 = 10_000;
 /// unbounded document.
 pub const MAX_PRESENTATION_BYTES: usize = 256_000;
 
-/// A presentation as the app builds it: a canonical payload naming the
-/// audience and nonce, and a detached Ed25519 JWS over it by the subject.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PresentationEnvelope {
-    pub id: String,
-    pub payload_json: String,
-    pub proof: String,
-    pub subject: String,
-}
+/// A presentation as the app builds it: a W3C Verifiable Presentation whose
+/// holder proof names the audience (`domain`) and nonce (`challenge`).
+pub type PresentationEnvelope = VerifiablePresentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +39,7 @@ pub enum PresentationVerification {
     AudienceMismatch,
     Replayed,
     Malformed,
+    Expired,
 }
 
 impl PresentationVerification {
@@ -57,6 +50,7 @@ impl PresentationVerification {
             Self::AudienceMismatch => "audience_mismatch",
             Self::Replayed => "replayed",
             Self::Malformed => "malformed",
+            Self::Expired => "expired",
         }
     }
 }
@@ -155,23 +149,24 @@ pub fn get_credential(conn: &Connection, credential_id: &str) -> Result<Value> {
 }
 
 /// Check a presentation against the audience it was meant for.
+///
+/// Order: audience, then the replay probe, then the proof — a caller cannot
+/// learn whether a nonce was used by timing the response, and the nonce is
+/// recorded only once the holder's signature verifies.
 pub fn verify_presentation(
     conn: &Connection,
     envelope: &PresentationEnvelope,
     expected_audience: &str,
 ) -> Result<PresentationVerification> {
-    if envelope.payload_json.len() > MAX_PRESENTATION_BYTES
-        || envelope.proof.len() > 4_000
-        || envelope.subject.len() > 300
-    {
+    let size = serde_json::to_vec(envelope)
+        .map(|b| b.len())
+        .unwrap_or(usize::MAX);
+    if size > MAX_PRESENTATION_BYTES || envelope.holder.as_str().len() > 300 {
         return Err(Error::Invalid("the presentation is too large".into()));
     }
-    let Ok(payload) = serde_json::from_str::<Value>(&envelope.payload_json) else {
-        return Ok(PresentationVerification::Malformed);
-    };
     let (Some(audience), Some(nonce)) = (
-        payload.get("audience").and_then(Value::as_str),
-        payload.get("nonce").and_then(Value::as_str),
+        envelope.proof.domain.as_deref(),
+        envelope.proof.challenge.as_deref(),
     ) else {
         return Ok(PresentationVerification::Malformed);
     };
@@ -188,31 +183,14 @@ pub fn verify_presentation(
         return Ok(PresentationVerification::Replayed);
     }
 
-    let Ok(subject) = parse_did_key(&envelope.subject) else {
-        return Ok(PresentationVerification::Malformed);
-    };
-    let Ok(key) = resolve_did_key(&subject) else {
-        return Ok(PresentationVerification::Malformed);
-    };
-
-    let parts: Vec<&str> = envelope.proof.split('.').collect();
-    if parts.len() != 3 || !parts[1].is_empty() {
-        return Ok(PresentationVerification::BadSignature);
-    }
-    let Some(signature) = b64url_decode(parts[2]).filter(|bytes| bytes.len() == 64) else {
-        return Ok(PresentationVerification::BadSignature);
-    };
-    let mut bytes = [0u8; 64];
-    bytes.copy_from_slice(&signature);
-    let mut signed = Vec::with_capacity(parts[0].len() + 1 + envelope.payload_json.len());
-    signed.extend_from_slice(parts[0].as_bytes());
-    signed.push(b'.');
-    signed.extend_from_slice(envelope.payload_json.as_bytes());
-    if key
-        .verify_strict(&signed, &Signature::from_bytes(&bytes))
-        .is_err()
-    {
-        return Ok(PresentationVerification::BadSignature);
+    let now = chrono::Utc::now().timestamp();
+    match verify_presentation_proof(envelope, now) {
+        Ok(_) => {}
+        Err(reason) if reason == "invalid holder signature" => {
+            return Ok(PresentationVerification::BadSignature)
+        }
+        Err(reason) if reason.contains("expired") => return Ok(PresentationVerification::Expired),
+        Err(_) => return Ok(PresentationVerification::Malformed),
     }
 
     // First writer wins a race; the loser sees the row and reports Replayed.
@@ -227,8 +205,8 @@ pub fn verify_presentation(
 mod tests {
     use super::*;
     use alexandria_verify::did::did_from_verifying_key;
-    use alexandria_verify::vc::sign::b64url;
-    use ed25519_dalek::{Signer, SigningKey};
+    use alexandria_verify::vc::presentation::sign_presentation;
+    use ed25519_dalek::SigningKey;
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -259,20 +237,21 @@ mod tests {
     }
 
     fn present(key: &SigningKey, audience: &str, nonce: &str) -> PresentationEnvelope {
-        let payload = json!({"audience": audience, "nonce": nonce, "bundle": []}).to_string();
-        let header = b64url(br#"{"alg":"EdDSA"}"#);
-        let mut signed = header.clone().into_bytes();
-        signed.push(b'.');
-        signed.extend_from_slice(payload.as_bytes());
-        let signature = b64url(&key.sign(&signed).to_bytes());
-        PresentationEnvelope {
-            id: "urn:presentation:1".into(),
-            payload_json: payload,
-            proof: format!("{header}..{signature}"),
-            subject: did_from_verifying_key(&key.verifying_key())
-                .as_str()
-                .to_string(),
-        }
+        let holder = did_from_verifying_key(&key.verifying_key());
+        let now = chrono::Utc::now();
+        let created = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let expires = (now + chrono::Duration::seconds(240))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let vp = VerifiablePresentation::new(
+            Some("urn:presentation:1".into()),
+            holder,
+            vec![json!({"id": "urn:uuid:c1", "type": ["VerifiableCredential"]})],
+            &created,
+            &expires,
+            nonce,
+            audience,
+        );
+        sign_presentation(vp, key).unwrap()
     }
 
     #[test]
@@ -330,23 +309,28 @@ mod tests {
         let conn = db();
         let key = SigningKey::from_bytes(&[9u8; 32]);
         let mut tampered = present(&key, "did:key:verifier", "nonce-2");
-        tampered.payload_json = tampered
-            .payload_json
-            .replace("\"bundle\":[]", "\"bundle\":[1]");
+        tampered.verifiable_credential[0]["id"] = json!("urn:uuid:c2");
         assert_eq!(
             verify_presentation(&conn, &tampered, "did:key:verifier").unwrap(),
             PresentationVerification::BadSignature
         );
 
         let mut malformed = present(&key, "did:key:verifier", "nonce-3");
-        malformed.payload_json = "not json".into();
+        malformed.proof.challenge = None;
         assert_eq!(
             verify_presentation(&conn, &malformed, "did:key:verifier").unwrap(),
             PresentationVerification::Malformed
         );
 
+        let mut stale = present(&key, "did:key:verifier", "nonce-5");
+        stale.proof.expires = Some("2020-01-01T00:00:00Z".into());
+        assert_eq!(
+            verify_presentation(&conn, &stale, "did:key:verifier").unwrap(),
+            PresentationVerification::Expired
+        );
+
         let mut unknown_subject = present(&key, "did:key:verifier", "nonce-4");
-        unknown_subject.subject = "did:web:example.com".into();
+        unknown_subject.holder = alexandria_verify::did::Did("did:web:example.com".into());
         assert_eq!(
             verify_presentation(&conn, &unknown_subject, "did:key:verifier").unwrap(),
             PresentationVerification::Malformed

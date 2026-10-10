@@ -44,29 +44,58 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // policies, tutor threads and lesson feedback. Owned by the studio crate
     // so its tables and the code that reads them change together.
     (2, "instructor_studio", alexandria_studio::store::SCHEMA),
+    (3, "private_personhood_receipts", MIGRATION_003_PERSONHOOD),
+    (4, "decision_shadow_samples", "CREATE TABLE decision_shadow_samples (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, sample TEXT NOT NULL);"),
+    (5, "assessment_submission", MIGRATION_005_ASSESSMENT),
+    (6, "demo_opinion_examples", "CREATE TABLE demo_opinion_examples (id TEXT PRIMARY KEY, subject_field_id TEXT NOT NULL REFERENCES subject_fields(id), title TEXT NOT NULL, summary TEXT NOT NULL, video_cid TEXT NOT NULL, duration_seconds INTEGER NOT NULL);"),
+    (7, "opinion_threads", include_str!("discussions.sql")),
+    (8, "tutoring_presence", "ALTER TABLE tutoring_sessions ADD COLUMN room_id TEXT; ALTER TABLE tutoring_sessions ADD COLUMN last_occupied_at INTEGER; CREATE TABLE tutoring_presence (room_id TEXT NOT NULL,node_id TEXT NOT NULL,present INTEGER NOT NULL,seen_at INTEGER NOT NULL,PRIMARY KEY(room_id,node_id)); CREATE INDEX idx_tutoring_room ON tutoring_sessions(room_id);"),
+    (9, "developer_discussion_drafts", "CREATE TABLE developer_discussion_drafts (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);"),
+    // Proposal-style developer drafts are bound to the subject field they
+    // propose for, so the composer can preselect it. Older drafts stay unbound.
+    (10, "developer_draft_subject_field", "ALTER TABLE developer_discussion_drafts ADD COLUMN subject_field_id TEXT REFERENCES subject_fields(id);"),
+    // The learner's own record of interview invitations and offers they
+    // answered, with the exact signed message. The directory holds the
+    // organisation's copy; this one is theirs.
+    (11, "hiring_responses", "CREATE TABLE hiring_responses (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('interview','offer')), directory_url TEXT NOT NULL, organization TEXT NOT NULL, role_label TEXT NOT NULL, decision TEXT NOT NULL, chosen_slot INTEGER, meeting_url TEXT, responded_at TEXT NOT NULL, payload_json TEXT NOT NULL);"),
+    // A status list whose id is a URL is served by that host, and the host
+    // only knows what this device has pushed to it. `published_version` is
+    // the last version the host acknowledged; a list whose `version` is
+    // ahead of it is awaiting publication.
+    (12, "status_list_publication", "ALTER TABLE credential_status_lists ADD COLUMN published_version INTEGER NOT NULL DEFAULT 0;"),
     // A learner may choose the sponsor role they are assessing for before an
     // attempt starts, so the role's camera requirement is enforced up front
     // rather than discovered at issuance. Also gives sponsors a per-role
     // attempt list to issue from.
-    (3, "attempt_role_target", MIGRATION_003_ATTEMPT_ROLE_TARGET),
+    (13, "attempt_role_target", MIGRATION_013_ATTEMPT_ROLE_TARGET),
     // Device attestation (App Attest / Play Integrity) captured for a
     // Sentinel session; verified again at issuance before a credential may
     // claim `device_attested`.
-    (
-        4,
-        "session_device_attestation",
-        MIGRATION_004_DEVICE_ATTESTATION,
-    ),
+    (14, "session_device_attestation", MIGRATION_014_DEVICE_ATTESTATION),
 ];
 
-const MIGRATION_004_DEVICE_ATTESTATION: &str = r#"
-ALTER TABLE integrity_sessions ADD COLUMN attestation_json TEXT;
+const MIGRATION_005_ASSESSMENT: &str = r#"
+ALTER TABLE assessment_attempts ADD COLUMN submitted_answers_json TEXT CHECK (submitted_answers_json IS NULL OR json_valid(submitted_answers_json));
+ALTER TABLE assessment_attempts ADD COLUMN submitted_at TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN exchange_binding TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN item_fingerprints TEXT;
+ALTER TABLE assessment_attempts ADD COLUMN assessed_bloom_level INTEGER CHECK (assessed_bloom_level BETWEEN 0 AND 5);
+ALTER TABLE assessment_attempts ADD COLUMN pass_threshold_snapshot REAL;
+UPDATE assessment_items SET bloom_level = 'remember'
+ WHERE taxonomy_version = 'bundled' AND id IN ('bq_js1','bq_js2','bq_js3','bq_js4','bq_bo1','bq_bo2','bq_bo3','bq_bo4');
 "#;
 
-const MIGRATION_003_ATTEMPT_ROLE_TARGET: &str = r#"
+const MIGRATION_003_PERSONHOOD: &str =
+    include_str!("../../../crates/alexandria-personhood/src/schema.sql");
+
+const MIGRATION_013_ATTEMPT_ROLE_TARGET: &str = r#"
 ALTER TABLE assessment_attempts
     ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
 CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
+
+const MIGRATION_014_DEVICE_ATTESTATION: &str = r#"
+ALTER TABLE integrity_sessions ADD COLUMN attestation_json TEXT;
 "#;
 
 const MIGRATION_001_BASELINE: &str = r#"
@@ -398,7 +427,7 @@ CREATE TABLE credential_status_lists (
     issuer_did TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,                  -- monotonic; older versions ignored
     status_purpose TEXT NOT NULL DEFAULT 'revocation',
-    bits BLOB NOT NULL,                                  -- packed little-endian bitmap
+    bits BLOB NOT NULL,                                  -- Bitstring Status List bitmap, most significant bit first
     bit_length INTEGER NOT NULL DEFAULT 0,
     signature TEXT,                                      -- issuer signature over (list_id, version, bits)
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))

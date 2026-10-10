@@ -44,7 +44,10 @@
       "subjective": "व्यक्तिनिष्ठ",
       "essay": "निबंध",
       "interactive": "परस्परसंवादी"
-    }
+    },
+    "prepareAndEnroll": "Prepare and enroll",
+    "localPreparationNote": "This is your draft. Enrollment creates a signed local version without publishing it to the course catalog.",
+    "awaitingPublication": "The author must publish this course before you can enroll."
   },
   "dashboard": {
     "title": "माझे शिक्षण",

@@ -157,6 +157,29 @@ The native signals above are per-OS `#[cfg]` modules under `src-tauri/src/sentin
 
 Wayland is a stated ceiling: the compositor exposes neither the windows nor the keys of other clients, so only the display count is available there. X11 is the same ceiling for overlays — override-redirect alone is how every tooltip, menu and IME popup is drawn, and X11 has no capture-exclusion or click-through flag to read — while the process watchlist and phantom hotkeys still apply. Mobile prevents overlays and capture where it can rather than detecting them; desktop detects because it cannot prevent. Everything in this table is still client-reported (`assuranceLevel: "local"`, see §Integrity Assurance).
 
+### Sentinel Dev live panel
+
+An unlocked app can open the Sentinel Dev panel with Command–Shift–S
+(Control–Shift–S on other desktop platforms), or the Sentinel Dev button in the
+standalone assessment runner. It displays the existing monitoring session's
+telemetry without entering diagnostics or consuming the attempt. It is available
+in release builds. **Start camera preview** explicitly requests local camera
+access and displays face/gaze overlays. In a standalone skill assessment it also
+drives the session's face/gaze checks; stopping or closing releases that camera
+opt-in. Outside an assessment, scores show unavailable and the panel explains
+that monitoring is idle. Preview-only frames do not enter the assessment evidence
+staging buffer. Profile lock closes the panel and stops capture.
+
+On macOS, trusted main-frame capture uses the normal WebKit/OS permission prompt.
+Plugin frames still require the host's recorded media grants. Capture and
+inference failures are shown in the panel; late permission results after closing
+are stopped rather than leaving a hidden camera running.
+
+Standalone assessment submission freezes answers while monitoring is live, then
+persists a final snapshot and ends the session before grading. A failed final
+snapshot or session teardown prevents issuance and allows retry with the frozen
+answers. See [the assessment demo runbook](assessment-demo.md).
+
 ### Diagnostics transition
 
 The release workflow uses explicit diagnostics entry/exit from the profile menu;
@@ -664,3 +687,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 11. **The hotkey monitor records no text**: only key-downs with Cmd/Win/Super, Ctrl or Alt held, as a normalised combo string plus a monotonic timestamp. Plain keys, Shift-only combos and key-ups are discarded before they reach the buffer. The monitor runs only for assessment-purpose sessions, only if the OS already granted listening, and its permission prompt lives in the Sentinel wizard — never mid-assessment. Text-entry chords are refused before the buffer: Option+key on macOS, AltGr (Ctrl+Alt) on Windows and Linux.
 12. **Camera device label is not persisted**: the virtual-camera check keeps the `MediaStreamTrack` label in the frontend dev view only; snapshots carry the boolean verdict.
 13. **Liveness keeps nothing**: the face patch is built in memory from the same frame the gaze check already holds; only `real_prob` and a boolean cross IPC.
+
+The live preview uses the unlocked profile and current device fingerprint when
+loading gaze calibration, just like assessment monitoring. Preview frames remain
+excluded from assessment evidence staging.

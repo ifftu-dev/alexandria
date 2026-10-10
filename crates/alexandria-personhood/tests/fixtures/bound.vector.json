@@ -1,0 +1,38 @@
+{
+  "challenge": {
+    "body": {
+      "circuit_id": "anon-aadhaar-v2.0.0-synthetic",
+      "expires_at": 1713555121,
+      "issued_at": 1713555001,
+      "kind": "synthetic_diagnostic",
+      "network_id": "test-network",
+      "nonce": "0303030303030303030303030303030303030303030303030303030303030303",
+      "policy_digest": "5531e992998645cf433fed330ac51205c2d45370cf2e343733fba4448d0668c0",
+      "purpose": "personhood-receipt-v1",
+      "schema_version": 1,
+      "session_nonce": "0202020202020202020202020202020202020202020202020202020202020202",
+      "subject_did": "did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+      "subject_public_key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+      "verifier_public_key": "94b260622d683437105fa05a0b2021d013020025286b6813f99a5d13194cafd7"
+    },
+    "signature": "38b0bca52fd8b6a73b1840a1370ad469e0a64524c69ea0eeafc8ca065e890b6a340525bc2bc55aba7e0a0dbe11a27ca836cc30e7f3f6f369d4deb26061d2d907"
+  },
+  "policy": {
+    "challenge_ttl_seconds": 120,
+    "circuit_id": "anon-aadhaar-v2.0.0-synthetic",
+    "issuer_hash": "15134874015316324267425466444584014077184337590635665158241104437045239495873",
+    "issuer_revoked": false,
+    "kind": "synthetic_diagnostic",
+    "max_document_age_seconds": 315360000,
+    "max_future_skew_seconds": 300,
+    "network_id": "test-network",
+    "nullifier_seed": "343946489433439916327045285934797447663384809193752524628893899090173716351",
+    "receipt_ttl_seconds": 86400,
+    "schema_version": 1,
+    "valid_from": 1713555000,
+    "valid_until": 4102444800,
+    "verification_key_sha256": "40f2ea24b56ffe2b6e6e3578053cbda15e773cb560697bac883a404077fcf177",
+    "verifier_public_key": "94b260622d683437105fa05a0b2021d013020025286b6813f99a5d13194cafd7"
+  },
+  "signal_hash": "8337770486891050856106679359561119838736818038242251060200882816113018700895"
+}

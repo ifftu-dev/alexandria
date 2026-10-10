@@ -496,7 +496,8 @@
     "valNo": "no",
     "valNa": "n/a",
     "rowLiveness": "liveness",
-    "rowAttestation": "attestation"
+    "rowAttestation": "attestation",
+    "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {
     "flaggedTitle": "This session was flagged",

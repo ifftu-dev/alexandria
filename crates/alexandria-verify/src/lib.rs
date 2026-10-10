@@ -16,6 +16,7 @@
 
 pub mod course;
 pub mod did;
+pub mod exchange;
 pub mod governance;
 pub mod hash;
 pub mod json;

@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- **Credentials are W3C-conformant end to end.** Proofs are W3C Data
+  Integrity (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`,
+  `proofValue`, `did:key#<key>` verification methods) in place of the
+  custom detached-JWS `Ed25519Signature2020` shape; revocation is a
+  Bitstring Status List (`BitstringStatusListEntry`, most-significant-bit
+  order, 131,072-bit lists, signed `BitstringStatusListCredential`
+  documents in the export bundle); the envelope declares only the W3C v2
+  context. `alexandria-verify` is 0.3.0; the test vectors, the
+  independent Node verifier, Alexandria Cloud's vendored copy and the
+  website's in-browser verifier move together. Pre-launch: no issued
+  credential is migrated.
+- **Presentations are W3C Verifiable Presentations.** The credential
+  exchange share and the selective-disclosure envelope are
+  `VerifiablePresentation` documents with a holder `DataIntegrityProof`
+  (purpose `authentication`, `challenge` = request nonce, `domain` =
+  audience, five-minute `expires`). The custom detached-JWS envelopes
+  are gone; verifiers refuse a presentation whose proof is not bound to
+  them.
+- **Status lists are dereferenceable.** With a status host configured
+  (**Settings → Privacy → Status list host**; the network profile's cloud
+  origin, then the first directory, stand in), a credential names its
+  revocation list by URL — `{origin}/status-lists/{issuer}/{n}` — and the
+  app pushes the signed `BitstringStatusListCredential` there on issuance
+  and every revocation (inline, then retried by the background pass; a
+  **Revoke** reports the push). Any verifier fetches the list from the URL
+  the credential names; the Node verifier and the website verifier do, so
+  a bare credential now verifies and reflects revocation without a bundle.
+  `alexandria-verify` 0.4.0 adds `vc::status::{list_url, parse_list_url,
+  verify_fetched_list}`. Lists issued without a host keep `urn:` ids and
+  travel in the bundle as before.
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

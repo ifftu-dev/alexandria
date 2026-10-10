@@ -75,7 +75,7 @@ async function save() {
 
 <template>
   <div class="rounded-lg border border-border p-4">
-    <div class="flex items-center justify-between gap-4 mb-1">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-1">
       <p class="text-sm font-medium text-foreground">{{ $t('settings.relays.title') }}</p>
       <AppButton variant="outline" size="sm" @click="addRow">{{ $t('settings.relays.add') }}</AppButton>
     </div>
@@ -98,15 +98,15 @@ async function save() {
         <AppInput
           v-model="row.peer_id"
           :placeholder="$t('settings.relays.deviceIdPlaceholder')"
-          class="flex-1 min-w-[16rem] font-mono text-xs"
+          class="w-full min-w-0 md:flex-1 md:min-w-[16rem] font-mono text-xs"
         />
-        <AppInput v-model="row.host" :placeholder="$t('settings.relays.hostPlaceholder')" class="w-40" />
+        <AppInput v-model="row.host" :placeholder="$t('settings.relays.hostPlaceholder')" class="min-w-0 flex-1 md:w-40" />
         <AppInput v-model="row.port" type="number" :placeholder="$t('settings.relays.portPlaceholder')" class="w-20" />
         <AppButton variant="ghost" size="sm" @click="removeRow(i)">{{ $t('settings.relays.remove') }}</AppButton>
       </div>
     </div>
 
-    <div class="flex items-center gap-3 mt-3">
+    <div class="flex flex-wrap items-center gap-3 mt-3">
       <AppButton size="sm" :disabled="saving || loading" @click="save">
         {{ saving ? $t('settings.relays.saving') : $t('settings.relays.save') }}
       </AppButton>

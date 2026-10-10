@@ -43,6 +43,7 @@
     "strongMatch": "fuerte",
     "matched": "coincide con «{term}»",
     "noMatchingSkills": "No se encontraron habilidades coincidentes: prueba con otra descripción.",
-    "addAsGoal": "Añadir {count} habilidad como meta | Añadir {count} habilidades como meta"
+    "addAsGoal": "Añadir {count} habilidad como meta | Añadir {count} habilidades como meta",
+    "noTemplates": "No hay opciones de objetivos en esta categoría. Prueba otra categoría o describe un objetivo de aprendizaje."
   }
 }

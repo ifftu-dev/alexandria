@@ -103,7 +103,10 @@
     "backToLobby": "لابی کی طرف واپس",
     "dismiss": "برخاست کریں",
     "selfPreviewAlt": "آپ کا پیش منظر",
-    "peerVideoAlt": "{name} کی ویڈیو"
+    "peerVideoAlt": "{name} کی ویڈیو",
+    "endedDescription": "This session has ended. Empty rooms close automatically after five minutes. Ask the host for a new session invite.",
+    "notJoinedTitle": "You are not in this session",
+    "notJoinedDescription": "Join with a current invite to take part. Your camera and microphone turn on when you join."
   },
   "controls": {
     "mute": "خاموش کریں",

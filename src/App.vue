@@ -25,6 +25,7 @@ import { useDeepLinks } from '@/deeplink/useDeepLinks'
 
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
+import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 
 const { invoke } = useLocalApi()
@@ -38,6 +39,14 @@ const {
   hydrateBehavioralProfile,
 } = useSentinel()
 const diagnostics = useDiagnostics()
+const sentinelView = useSentinelView()
+function onSentinelShortcut(event: KeyboardEvent) {
+  if (isUnlocked.value && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.code === 'KeyS') {
+    event.preventDefault()
+    sentinelView.toggle()
+  }
+}
+
 
 // Apply stored theme immediately (before first render)
 initTheme()
@@ -120,6 +129,7 @@ onProfileLocked(async () => {
     await stopForProfileLock()
   } finally {
     diagnostics.resetForProfileLock()
+    sentinelView.close()
     clearPendingEvidenceConsent()
     clearSettingsCache()
   }
@@ -169,6 +179,7 @@ function onFocusOut(e: FocusEvent) {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onSentinelShortcut)
   document.addEventListener('wheel', onWheel, { passive: false })
   window.addEventListener('focus', onWindowFocus)
   document.addEventListener('focusout', onFocusOut)
@@ -219,6 +230,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onSentinelShortcut)
   document.removeEventListener('wheel', onWheel)
   window.removeEventListener('focus', onWindowFocus)
   document.removeEventListener('focusout', onFocusOut)
@@ -255,7 +267,7 @@ onUnmounted(() => {
 
   <!-- Live Sentinel observability PiP. It is not mounted outside explicit
        diagnostics mode, so its listeners and camera cannot survive exit. -->
-  <SentinelDebugPip v-if="isUnlocked && diagnostics.enabled.value" />
+  <SentinelDebugPip :key="String(diagnostics.enabled.value)" v-if="isUnlocked && (diagnostics.enabled.value || sentinelView.visible.value)" :initially-open="!diagnostics.enabled.value" @close="sentinelView.close" />
 
   <!-- Shows what Sentinel can see while a session is running, so avoidable
        flags can be avoided. Self-hides when no session is active. -->

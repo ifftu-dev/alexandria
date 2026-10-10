@@ -93,7 +93,7 @@ The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (
 Each credential binds:
 - subject DID, skill / proficiency scope
 - the course, submissions, or assessment attempt it derives from
-- the issuer DID and an Ed25519 detached-JWS signature
+- the issuer DID and an Ed25519 Data Integrity proof (`eddsa-jcs-2022`)
 
 There is no `/alexandria/evidence/1.0` topic (it was removed in migration 040). Credentials cross the network via the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols.
 
@@ -277,8 +277,8 @@ The celebration shows local credential readiness separately from the optional wi
 ## 7. Credentials
 
 Credentials are W3C Verifiable Credentials stored in the `credentials` table (the `skill_proofs` / `skill_proof_evidence` aggregation tables were dropped in migration 040):
-- Subject- and skill-scoped, signed with Ed25519Signature2020 (detached JWS over RFC 8785 JCS bytes)
-- Lifecycle (issue / suspend / reinstate / revoke) tracked via a RevocationList2020 status list (`credential_status_lists`). Only the credential issuer may revoke, suspend, or reinstate it; the command path verifies both the credential issuer and status-list issuer against the active signing DID.
+- Subject- and skill-scoped, signed with a W3C Data Integrity proof, cryptosuite `eddsa-jcs-2022` (Ed25519 over SHA-256 of RFC 8785 JCS bytes)
+- Lifecycle (issue / suspend / reinstate / revoke) tracked via a Bitstring Status List (`credential_status_lists`). Only the credential issuer may revoke, suspend, or reinstate it; the command path verifies both the credential issuer and status-list issuer against the active signing DID.
 - Credential **integrity** is anchored on Cardano with a metadata-only transaction (label 1697) that timestamps the canonical VC hash — no NFT mint, no on-chain credential content
 
 The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. Migration 088 also retires new CIP-68 reputation-token minting. A new reputation snapshot is a self-signed `DerivedCredential`: its subject properties freeze an explicit as-of time, the `as_of_all_eligible_evidence` scope, scaled scores, confidence method, computation specification, and the ID plus integrity hash of every contributing eligible credential. The normal credential-hash queue can optionally anchor the snapshot VC's canonical hash without publishing the credential or delaying local creation. `submit_snapshot_tx` now only schedules that background anchor; it never performs provider I/O itself.

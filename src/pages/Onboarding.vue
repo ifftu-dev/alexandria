@@ -8,6 +8,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
 import LocaleDropdown from '@/components/settings/LocaleDropdown.vue'
+import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import { BirthdateInput } from '@/components/ui'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
@@ -505,6 +506,7 @@ function enterApp() {
       <!-- WELCOME                                      -->
       <!-- ============================================ -->
       <div v-if="step === 'welcome'" class="text-center">
+        <PersonhoodLabPanel class="mb-6 text-start" />
         <!-- Language picker — chosen before any profile exists; the choice is
              saved to the new profile and synced across devices on completion.
              Compact custom dropdown showing each language in its own script. -->

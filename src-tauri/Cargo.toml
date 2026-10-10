@@ -12,6 +12,8 @@ default-run = "alexandria-node"
 
 [features]
 default = []
+dev-seeding = []
+personhood-lab = ["dep:alexandria-personhood"]
 
 # Enable desktop tutoring video without acoustic echo cancellation.
 # This keeps Windows buildable on GitHub's MSVC runners, where the bundled
@@ -127,6 +129,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 alexandria-verify = { path = "../crates/alexandria-verify" }
+alexandria-decisions = { path = "../crates/alexandria-decisions" }
+alexandria-learning-contracts = { path = "../crates/alexandria-learning-contracts" }
+alexandria-personhood = { path = "../crates/alexandria-personhood", optional = true }
 alexandria-studio = { path = "../crates/alexandria-studio" }
 log = "0.4"
 tracing = "0.1"

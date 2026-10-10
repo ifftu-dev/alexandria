@@ -33,6 +33,10 @@ export function useAssessment() {
     })
   }
 
+  function submitAnswers(attemptId: string, answers: SubmittedAnswer[]): Promise<void> {
+    return invoke('assessment_submit_answers', { attemptId, answers })
+  }
+
   function grade(attemptId: string, answers: SubmittedAnswer[]): Promise<GradeResult> {
     return invoke<GradeResult>('assessment_grade', { attemptId, answers })
   }
@@ -47,5 +51,5 @@ export function useAssessment() {
     return invoke<GoalAssessmentPlan>('assessment_plan_goal', { goalSkillIds })
   }
 
-  return { openRoles, startAttempt, saveDraft, grade, planGoal }
+  return { openRoles, startAttempt, saveDraft, submitAnswers, grade, planGoal }
 }

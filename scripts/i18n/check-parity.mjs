@@ -46,6 +46,15 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Jev goal entry: English fallback pending the next learner translation pass.
+  'goals.picker.learningGoal',
+  'goals.picker.goalPlaceholder',
+  // Learning-shadow storage disclosure: English-only pilot; translations need review.
+  'instructor.studio.decisionRetainShadow',
+  'instructor.studio.decisionShadowRetention',
+  'instructor.studio.decisionExportShadow',
+  'instructor.studio.decisionClearShadow',
+  'instructor.studio.decisionShadowCleared',
   // Startup screen for profile data this build refuses. English-only pending
   // a translate pass; renders in English via the i18n fallback.
   'onboarding.incompatibleData.',

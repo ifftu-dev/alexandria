@@ -1,15 +1,17 @@
 //! IPC commands for selective disclosure + presentations.
 //!
-//! Spec §18 + §23.3. The MVP encoding is "redact-and-resign":
+//! Spec §18 + §23.3. The MVP encoding is "redact-and-resign", carried as a
+//! W3C Verifiable Presentation:
 //!
 //! 1. Each referenced credential is loaded and its JSON is filtered
 //!    to keep only the structural keys (`@context`, `id`, `type`,
-//!    `issuer`, `issuance_date`, `credential_subject.id`) plus any
+//!    `issuer`, `validFrom`, `validUntil`, `credentialSubject.id`) plus any
 //!    paths the caller listed in `reveal`.
-//! 2. The redacted bundle, the audience, and the nonce are
-//!    canonicalized via JCS.
-//! 3. The subject signs those bytes with their Ed25519 key. The
-//!    detached JWS goes in `envelope.proof`.
+//! 2. The redacted credentials go into `verifiableCredential` of a
+//!    presentation whose holder is the subject.
+//! 3. The subject signs the presentation with a `DataIntegrityProof`
+//!    (`eddsa-jcs-2022`, purpose `authentication`) whose `domain` is the
+//!    audience and `challenge` is the nonce, valid for five minutes.
 //!
 //! Because we redact, the original issuer signature on each
 //! credential no longer covers the visible payload — the
@@ -22,8 +24,8 @@
 //! verification with the same pair returns `Replayed`.
 
 use crate::profile::scope::ProfileState as State;
-use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey};
+use alexandria_verify::vc::presentation::{sign_presentation, VerifiablePresentation};
+use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
@@ -104,30 +106,20 @@ pub fn create_presentation_impl(
     }
 
     let id = format!("urn:uuid:{}", Uuid::new_v4());
-    let payload = serde_json::json!({
-        "id": id,
-        "audience": req.audience,
-        "nonce": req.nonce,
-        "credentials": redacted,
-    });
-    let payload_json = serde_json_canonicalizer::to_string(&payload)
-        .map_err(|e| format!("canonicalize payload: {e}"))?;
-
-    // Detached JWS over the canonical payload.
-    let header_b64 = b64url(br#"{"alg":"EdDSA","b64":false,"crit":["b64"]}"#);
-    let mut signing_input = Vec::with_capacity(header_b64.len() + 1 + payload_json.len());
-    signing_input.extend_from_slice(header_b64.as_bytes());
-    signing_input.push(b'.');
-    signing_input.extend_from_slice(payload_json.as_bytes());
-    let sig = subject_signing_key.sign(&signing_input);
-    let proof = format!("{header_b64}..{}", b64url(&sig.to_bytes()));
-
-    Ok(PresentationEnvelope {
-        id,
-        payload_json,
-        proof,
-        subject: subject_did.as_str().to_string(),
-    })
+    let now = chrono::Utc::now();
+    let created = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let expires =
+        (now + chrono::Duration::seconds(300)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let presentation = VerifiablePresentation::new(
+        Some(id),
+        subject_did.clone(),
+        redacted,
+        &created,
+        &expires,
+        &req.nonce,
+        &req.audience,
+    );
+    sign_presentation(presentation, subject_signing_key).map_err(|e| e.to_string())
 }
 
 /// Verify an envelope and consume its (audience, nonce) slot. Idempotent
@@ -205,10 +197,6 @@ fn path_has_descendant_kept(path: &[String], keep: &[Vec<String>]) -> bool {
         .any(|p| p.len() > path.len() && p[..path.len()] == path[..])
 }
 
-fn b64url(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
 async fn load_subject_key(state: &State<'_, AppState>) -> Result<(SigningKey, Did), String> {
     let ks_guard = state.keystore.lock().await;
     let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
@@ -281,18 +269,22 @@ mod tests {
 
     #[test]
     fn presentation_envelope_round_trips() {
-        let env = PresentationEnvelope {
-            id: "pres-1".into(),
-            payload_json: "{\"sub\":\"did:key:z\"}".into(),
-            proof: "sig".into(),
-            subject: "did:key:zSubject".into(),
+        let (db, subject_key, subject, cred_id) = setup_with_credential();
+        let req = CreatePresentationRequest {
+            credential_ids: vec![cred_id],
+            reveal: vec![],
+            audience: "did:web:hirer".into(),
+            nonce: "nonce-rt".into(),
         };
+        let env = create_presentation_impl(db.conn(), &subject_key, &subject, &req).unwrap();
         let s = serde_json::to_string(&env).unwrap();
         let back: PresentationEnvelope = serde_json::from_str(&s).unwrap();
         assert_eq!(back.id, env.id);
-        assert_eq!(back.payload_json, env.payload_json);
-        assert_eq!(back.proof, env.proof);
-        assert_eq!(back.subject, env.subject);
+        assert_eq!(back.holder, subject);
+        assert_eq!(back.proof.challenge.as_deref(), Some("nonce-rt"));
+        assert_eq!(back.proof.domain.as_deref(), Some("did:web:hirer"));
+        assert_eq!(back.proof.proof_purpose, "authentication");
+        assert_eq!(back.type_, vec!["VerifiablePresentation".to_string()]);
     }
 
     fn test_key(role: &str) -> SigningKey {
@@ -345,9 +337,10 @@ mod tests {
             nonce: "n-1".into(),
         };
         let env = create_presentation_impl(db.conn(), &subject_key, &subject, &req).unwrap();
-        assert!(!env.payload_json.contains("\"score\""));
-        assert!(!env.payload_json.contains("evidenceRefs"));
-        assert!(env.payload_json.contains("\"level\""));
+        let payload = serde_json::to_string(&env.verifiable_credential).unwrap();
+        assert!(!payload.contains("\"score\""));
+        assert!(!payload.contains("evidenceRefs"));
+        assert!(payload.contains("\"level\""));
     }
 
     #[test]

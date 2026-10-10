@@ -38,7 +38,6 @@ const elements = ref<Record<string, Element[]>>({})
 const enrollment = ref<Enrollment | null>(null)
 const progress = ref<Record<string, ElementProgress>>({})
 const loading = ref(true)
-const enrolling = ref(false)
 const feedbackOpen = ref(false)
 const feedbackRating = ref(0)
 const feedbackComment = ref('')
@@ -590,16 +589,10 @@ function selectFromMobileNav(chapterId: string, elementId: string) {
   mobileNavOpen.value = false
 }
 
-async function enrollFromPlayer() {
+function enrollFromPlayer() {
   if (!course.value || enrollment.value) return
-  enrolling.value = true
-  try {
-    enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
-  } catch (e) {
-    console.error('Failed to enroll from player:', e)
-  } finally {
-    enrolling.value = false
-  }
+  // Use the detail page's signed-document preparation and plugin pre-flight.
+  router.push(`/courses/${course.value.id}`)
 }
 
 async function markInProgress() {
@@ -634,22 +627,26 @@ async function markInProgress() {
 
 async function markComplete(score?: number) {
   if (!enrollment.value || !activeElement.value) return
+  const elementId = activeElement.value
+  const enrollmentId = enrollment.value.id
+  const elementType = currentElement.value?.element_type
   try {
     const req: UpdateProgressRequest = {
-      element_id: activeElement.value,
+      element_id: elementId,
       status: 'completed',
       score: score ?? null,
     }
     await invoke('update_progress', {
-      enrollmentId: enrollment.value.id,
+      enrollmentId,
       req,
     })
+    if (enrollment.value?.id !== enrollmentId) return
     // Update local progress
-    progress.value[activeElement.value] = {
-      ...progress.value[activeElement.value],
-      id: progress.value[activeElement.value]?.id ?? '',
-      enrollment_id: enrollment.value.id,
-      element_id: activeElement.value,
+    progress.value[elementId] = {
+      ...progress.value[elementId],
+      id: progress.value[elementId]?.id ?? '',
+      enrollment_id: enrollmentId,
+      element_id: elementId,
       status: 'completed',
       score: score ?? null,
       time_spent: 0,
@@ -675,8 +672,10 @@ async function markComplete(score?: number) {
     // Auto-advance to next element after a short delay — but skip for
     // element types where staying put is more useful (replay results,
     // try again, review the score) than jumping ahead.
-    if (shouldAutoAdvance(currentElement.value?.element_type)) {
-      setTimeout(() => advanceToNext(), 500)
+    if (shouldAutoAdvance(elementType)) {
+      setTimeout(() => {
+        if (enrollment.value?.id === enrollmentId && activeElement.value === elementId) advanceToNext()
+      }, 500)
     }
   } catch (e) {
     console.error('Failed to update progress:', e)
@@ -1390,7 +1389,6 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <AppButton
               v-if="!enrollment && course?.kind !== 'tutorial'"
               size="sm"
-              :loading="enrolling"
               @click="enrollFromPlayer"
             >
               {{ $t('learn.player.enrollToTrack') }}

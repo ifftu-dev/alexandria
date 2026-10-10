@@ -496,7 +496,8 @@
     "valNo": "नहीं",
     "valNa": "n/a",
     "rowLiveness": "जीवंतता",
-    "rowAttestation": "प्रमाणन"
+    "rowAttestation": "प्रमाणन",
+    "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

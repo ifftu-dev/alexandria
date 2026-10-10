@@ -131,21 +131,34 @@ const router = createRouter({
       component: () => import('@/pages/instructor/MyCourses.vue'),
       meta: { layout: 'app', requiresInstructorMode: true },
     },
-    // Opinions (Field Commentary — credentialed video takes)
+    // Discussions — credential-qualified peer threads
     {
-      path: '/opinions',
+      path: '/discussions',
+      alias: '/opinions',
       name: 'opinions',
       component: () => import('@/pages/opinions/Index.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/opinions/new',
+      path: '/discussions/new',
+      alias: '/opinions/new',
       name: 'opinion-create',
       component: () => import('@/pages/opinions/New.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/opinions/:id',
+      path: '/opinions/examples/:id',
+      redirect: '/discussions',
+    },
+    {
+      path: '/discussions/legacy/:id',
+      alias: '/opinions/legacy/:id',
+      name: 'legacy-opinion-detail',
+      component: () => import('@/pages/opinions/LegacyDetail.vue'),
+    },
+    {
+      path: '/discussions/:id',
+      alias: '/opinions/:id',
       name: 'opinion-detail',
       component: () => import('@/pages/opinions/Detail.vue'),
       meta: { layout: 'app' },

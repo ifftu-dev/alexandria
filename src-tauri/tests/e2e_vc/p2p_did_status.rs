@@ -159,11 +159,11 @@ async fn credential_queued_until_issuer_did_doc_arrives() {
             "evidenceRefs": [],
         },
         "proof": {
-            "type": "Ed25519Signature2020",
+            "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
             "created": "2026-04-13T00:00:00Z",
             "verificationMethod": "did:key:zPendingIssuer#key-1",
             "proofPurpose": "assertionMethod",
-            "jws": "fake..jws"
+            "proofValue": "zfake..jws"
         }
     })
     .to_string();

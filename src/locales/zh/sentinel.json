@@ -496,7 +496,8 @@
     "valNo": "否",
     "valNa": "不适用",
     "rowLiveness": "活体检测",
-    "rowAttestation": "设备认证"
+    "rowAttestation": "设备认证",
+    "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {
     "releaseTitle": "Contest a flag",

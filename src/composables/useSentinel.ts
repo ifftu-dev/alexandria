@@ -311,7 +311,7 @@ const displaySignature = (t: DisplayTopology): string =>
  * sample so callers can derive flags. Exported for the snapshot path only.
  */
 const recordDisplaySample = (sample: DisplayTopology | null): DisplayTopology | null => {
-  if (!sample) return null
+  if (!sample || typeof sample.display_count !== 'number') return null
   if (!displayBaseline) displayBaseline = sample
   if (displayLatest && displaySignature(displayLatest) !== displaySignature(sample)) {
     displayChangeCount++
@@ -353,7 +353,7 @@ const environmentAnomalies = (): string[] => {
   const out: string[] = []
   const e = androidEnvLatest
   if (e) {
-    if (e.foreign_accessibility.length > 0) out.push('foreign_accessibility_service')
+    if ((e.foreign_accessibility?.length ?? 0) > 0) out.push('foreign_accessibility_service')
     if (e.adb_enabled) out.push('debug_bridge_enabled')
   }
   if (obscuredTouchesWindow > 0) out.push('obscured_touch')
@@ -366,7 +366,7 @@ const environmentAnomalies = (): string[] => {
 let overlayLatest: OverlayScan | null = null
 
 const overlayAnomalies = (): string[] =>
-  overlayLatest && overlayLatest.suspicious.length > 0 ? ['hidden_overlay'] : []
+  overlayLatest && (overlayLatest.suspicious?.length ?? 0) > 0 ? ['hidden_overlay'] : []
 
 // Desktop process watchlist — only watched entries cross IPC. Sampled
 // per snapshot window. Cheat tools are critical; remote desktop, virtual
@@ -710,14 +710,14 @@ function createSentinelService() {
     anomalies.push(...displayAnomalies())
 
     if (androidEnvLatest) {
-      signals.foreign_accessibility_services = androidEnvLatest.foreign_accessibility.length
+      signals.foreign_accessibility_services = androidEnvLatest.foreign_accessibility?.length ?? 0
       signals.adb_enabled = androidEnvLatest.adb_enabled
     }
     if (obscuredTouchesWindow > 0) signals.obscured_touches = obscuredTouchesWindow
     anomalies.push(...environmentAnomalies())
 
     if (overlayLatest) {
-      signals.hidden_overlays = overlayLatest.suspicious.length
+      signals.hidden_overlays = overlayLatest.suspicious?.length ?? 0
       signals.overlay_windows_scanned = overlayLatest.scanned
       signals.overlay_windows_allowlisted = overlayLatest.allowlisted
     }
@@ -729,9 +729,10 @@ function createSentinelService() {
     }
 
     if (processLatest) {
-      signals.watched_processes = processLatest.watched.length
+      const watched = processLatest.watched ?? []
+      signals.watched_processes = watched.length
       signals.processes_scanned = processLatest.scanned
-      signals.watched_categories = [...new Set(processLatest.watched.map(w => w.category))]
+      signals.watched_categories = [...new Set(watched.map(w => w.category))]
     }
     anomalies.push(...processAnomalies())
 
@@ -907,17 +908,13 @@ function createSentinelService() {
   // Snapshot scheduling (random interval 15-45s)
   // =========================================================================
 
-  const scheduleNextSnapshot = () => {
-    if (!isActive.value || !sessionId.value) return
+  let snapshotWork: Promise<void> | null = null
+
+  const captureSnapshot = async (strict: boolean) => {
     const generation = lifecycleGeneration
     const snapshotSessionId = sessionId.value
-    const isCurrent = () => isActive.value
+    const isCurrent = () => isActive.value && !!snapshotSessionId
       && generation === lifecycleGeneration && sessionId.value === snapshotSessionId
-
-    const delay = 15000 + Math.random() * 30000
-    if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
-
-    snapshotTimer = setTimeout(async () => {
       if (!isCurrent()) return
 
       // Run the ONNX paste classifier before the (sync) score path so the
@@ -1012,9 +1009,12 @@ function createSentinelService() {
       // Android environment + obscured-touch drain (both inert off Android).
       if (!isCurrent()) return
       try {
-        androidEnvLatest = await tauriInvoke<AndroidEnvironment | null>('sentinel_android_environment')
+        const env = await tauriInvoke<AndroidEnvironment | null>('sentinel_android_environment')
+        // Shape-check native payloads: a stub or mismatched backend must read as absent, not crash scoring.
+        androidEnvLatest = env && Array.isArray(env.foreign_accessibility) ? env : null
         if (!isCurrent()) return
-        obscuredTouchesWindow = await tauriInvoke<number>('sentinel_take_obscured_touches')
+        const touches = await tauriInvoke<number>('sentinel_take_obscured_touches')
+        obscuredTouchesWindow = typeof touches === 'number' ? touches : 0
       } catch (err) {
         console.warn('[sentinel] android environment IPC failed', err)
       }
@@ -1022,7 +1022,8 @@ function createSentinelService() {
       // Desktop hidden-overlay scan (null on mobile / Wayland).
       if (!isCurrent()) return
       try {
-        overlayLatest = await tauriInvoke<OverlayScan | null>('sentinel_hidden_overlay')
+        const overlay = await tauriInvoke<OverlayScan | null>('sentinel_hidden_overlay')
+        overlayLatest = overlay && Array.isArray(overlay.suspicious) ? overlay : null
       } catch (err) {
         console.warn('[sentinel] hidden overlay IPC failed', err)
       }
@@ -1030,7 +1031,8 @@ function createSentinelService() {
       // Desktop process watchlist (null on mobile).
       if (!isCurrent()) return
       try {
-        processLatest = await tauriInvoke<ProcessScan | null>('sentinel_process_scan')
+        const procs = await tauriInvoke<ProcessScan | null>('sentinel_process_scan')
+        processLatest = procs && Array.isArray(procs.watched) ? procs : null
       } catch (err) {
         console.warn('[sentinel] process scan IPC failed', err)
       }
@@ -1039,7 +1041,8 @@ function createSentinelService() {
       if (!isCurrent()) return
       if (hotkeysRunning && hotkeyStatus) {
         try {
-          const native = await tauriInvoke<HotkeyEvent[]>('sentinel_hotkeys_drain')
+          const drained = await tauriInvoke<HotkeyEvent[]>('sentinel_hotkeys_drain')
+          const native = Array.isArray(drained) ? drained : []
           if (!isCurrent()) return
           nativeHotkeyCount = native.length
           if (blurStartedAt) blurIntervals.push({ start: blurStartedAt, end: performance.now() })
@@ -1161,7 +1164,7 @@ function createSentinelService() {
             anomaly_flags: deduped,
           },
         })
-      } catch { /* best effort */ }
+      } catch (error) { if (strict) throw error }
       if (!isCurrent()) return
 
       // Reset per-snapshot accumulators
@@ -1199,8 +1202,17 @@ function createSentinelService() {
       livenessRealProbSum = 0
       snapshotWindowStartMs = Date.now()
 
-      scheduleNextSnapshot()
-    }, delay)
+  }
+
+  const scheduleNextSnapshot = () => {
+    if (!isActive.value || !sessionId.value) return
+    if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
+    snapshotTimer = setTimeout(() => {
+      snapshotWork = captureSnapshot(false).finally(() => {
+        snapshotWork = null
+        scheduleNextSnapshot()
+      })
+    }, 15000 + Math.random() * 30000)
   }
 
   // =========================================================================
@@ -1676,14 +1688,17 @@ function createSentinelService() {
   const stopSession = async () => {
     if (!sessionId.value) return
 
+    if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
+    await snapshotWork
+    if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
+    if (isActive.value) await captureSnapshot(true)
     isActive.value = false
     sentinelDebug.active = false
     detachMonitoringListeners()
     void setAssessmentShield(false)
 
-    const { integrity, consistency } = computeScores()
-    integrityScore.value = integrity
-    consistencyScore.value = consistency
+    const integrity = integrityScore.value
+    const consistency = consistencyScore.value
 
     const deviceFp = await computeDeviceFingerprint()
     await updateProfile(deviceFp)
@@ -2388,6 +2403,7 @@ function createSentinelService() {
     verifyFace,
     scoreGaze,
     extractGazeFeatures,
+    computeDeviceFingerprint,
     trainGazeCalibration,
     debug: readonly(sentinelDebug),
     getDebugState,

@@ -1,5 +1,7 @@
 {
   "unscoped_commands": {
+    "personhood_lab_status": "Explicit Android debug-only synthetic device experiment; no profile or credential data.",
+    "personhood_lab_action": "Explicit Android debug-only synthetic device experiment; fixed artifacts and no profile or credential mutations.",
     "check_health": "Device readiness, including whether a database is open.",
     "read_diag_log": "Device diagnostics; diagnostics policy is handled separately.",
     "frontend_log": "Device logging bridge.",
