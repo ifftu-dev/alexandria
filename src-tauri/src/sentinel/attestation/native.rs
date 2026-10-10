@@ -59,6 +59,23 @@ mod imp {
     #[link(name = "DeviceCheck", kind = "framework")]
     unsafe extern "C" {}
 
+    unsafe extern "C" {
+        fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
+    }
+
+    /// Nothing in the binary references a DeviceCheck symbol (every call is
+    /// a message send), so a dead-stripping linker may drop the framework's
+    /// load command. Load it explicitly before the first class lookup.
+    fn ensure_devicecheck_loaded() -> bool {
+        static LOADED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *LOADED.get_or_init(|| {
+            let path = c"/System/Library/Frameworks/DeviceCheck.framework/DeviceCheck";
+            // SAFETY: valid NUL-terminated path; RTLD_LAZY | RTLD_GLOBAL = 0x1 | 0x8.
+            !unsafe { dlopen(path.as_ptr(), 0x1 | 0x8) }.is_null()
+                && objc2::runtime::AnyClass::get(c"DCAppAttestService").is_some()
+        })
+    }
+
     const TIMEOUT: Duration = Duration::from_secs(30);
 
     fn b64(bytes: &[u8]) -> String {
@@ -111,6 +128,9 @@ mod imp {
     }
 
     fn service() -> Result<Retained<AnyObject>, String> {
+        if !ensure_devicecheck_loaded() {
+            return Err("DeviceCheck framework unavailable".into());
+        }
         // SAFETY: plain class method on DeviceCheck's singleton.
         let svc: Retained<AnyObject> =
             unsafe { msg_send![class!(DCAppAttestService), sharedService] };

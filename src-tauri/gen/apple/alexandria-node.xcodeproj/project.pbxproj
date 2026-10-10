@@ -17,6 +17,8 @@
 		A8608A39A607BAA6BC5CBE06 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B570D453F704E6001B2AF3B3 /* WebKit.framework */; };
 		AA1234560001000000000001 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560001000000000002 /* AudioToolbox.framework */; };
 		AA1234560002000000000001 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560002000000000002 /* VideoToolbox.framework */; };
+		AA1234560003000000000001 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560003000000000002 /* SystemConfiguration.framework */; };
+		AA1234560004000000000001 /* DeviceCheck.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560004000000000002 /* DeviceCheck.framework */; };
 		AA1234560003000000000001 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560003000000000002 /* CoreMedia.framework */; };
 		AA1234560004000000000001 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560004000000000002 /* CoreVideo.framework */; };
 		AA1234560005000000000001 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560005000000000002 /* AVFoundation.framework */; };
@@ -93,6 +95,8 @@
 		A96D6BF67C5519E02460880D /* course.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = course.rs; sourceTree = "<group>"; };
 		AA1234560001000000000002 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		AA1234560002000000000002 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
+		AA1234560003000000000002 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		AA1234560004000000000002 /* DeviceCheck.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DeviceCheck.framework; path = System/Library/Frameworks/DeviceCheck.framework; sourceTree = SDKROOT; };
 		AA1234560003000000000002 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		AA1234560004000000000002 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
 		AA1234560005000000000002 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
@@ -142,6 +146,8 @@
 				FBFE455178939BB8A104CD74 /* libapp.a in Frameworks */,
 				AA1234560001000000000001 /* AudioToolbox.framework in Frameworks */,
 				AA1234560002000000000001 /* VideoToolbox.framework in Frameworks */,
+				AA1234560003000000000001 /* SystemConfiguration.framework in Frameworks */,
+				AA1234560004000000000001 /* DeviceCheck.framework in Frameworks */,
 				AA1234560003000000000001 /* CoreMedia.framework in Frameworks */,
 				AA1234560004000000000001 /* CoreVideo.framework in Frameworks */,
 				AA1234560005000000000001 /* AVFoundation.framework in Frameworks */,
@@ -188,6 +194,8 @@
 				79A464779C8A46E2D2135DC6 /* MetalKit.framework */,
 				AA1234560001000000000002 /* AudioToolbox.framework */,
 				AA1234560002000000000002 /* VideoToolbox.framework */,
+				AA1234560003000000000002 /* SystemConfiguration.framework */,
+				AA1234560004000000000002 /* DeviceCheck.framework */,
 				AA1234560003000000000002 /* CoreMedia.framework */,
 				AA1234560004000000000002 /* CoreVideo.framework */,
 				AA1234560005000000000002 /* AVFoundation.framework */,
