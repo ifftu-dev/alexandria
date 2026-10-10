@@ -30,6 +30,7 @@
 | Ship a model | `src-tauri/resources/sentinel/` | Replace the artifact and its SHA-256 lockfile in a release |
 | Check what a client runs | Tauri app or IPC | `sentinel_paste_classifier_info` |
 | Re-export the liveness model | `scripts/sentinel/` | `python export-minifasnet.py <Silent-Face-Anti-Spoofing checkout> <out.onnx>` (see Procedure 4) |
+| Enable device attestation | Apple developer portal, Play Console, `preprod.json` | See Procedure 5 |
 
 ---
 
@@ -137,6 +138,32 @@ cd src-tauri/resources/sentinel && shasum -a 256 minifasnet-v2-80.onnx > minifas
 ```
 
 The script prints the softmax for an all-zero and an all-128 input; paste both into `REF_ZEROS` / `REF_MID` in `src-tauri/src/sentinel/liveness.rs` and run `cargo test -p alexandria-node sentinel::liveness`. The cv2-pipeline parity test needs no update unless the preprocess changes. Commit artifact, lockfile and reference values together; CI verifies the lockfile.
+
+## Procedure 5: Enable device attestation
+
+`device_attested` needs one-time platform setup; until it is done, sessions stay `local` and nothing fails.
+
+**iOS (App Attest).**
+
+1. In the Apple developer portal, enable the **App Attest** capability on the App ID `org.alexandria.node` (team `VLMNL3V44U`).
+2. The project already carries the entitlement `com.apple.developer.devicecheck.appattest-environment = production`; Xcode's automatic signing picks up the regenerated profile.
+3. Verify on a physical device (the simulator cannot attest): start an assessment and open **Sentinel Dev**; the `attestation` row reads `device_attested`. Debug builds attest in the development environment, which only debug builds accept.
+
+**Android (Play Integrity).**
+
+1. The app must be listed in Play Console (an internal testing track is enough). Sideloaded builds get `CLOUD_PROJECT_NUMBER_IS_INVALID` or an unrecognised-app verdict and stay `local` by design.
+2. Play Console → App integrity → Play Integrity API → **Link a Cloud project**.
+3. On the same page, under response encryption, choose **Manage and download my response encryption keys** and download them.
+4. Paste the two base64 values into `src-tauri/resources/networks/preprod.json`:
+
+   ```json
+   "play_integrity_response_keys": {
+     "decryption_key_b64": "<AES key>",
+     "verification_key_b64": "<EC public key>"
+   }
+   ```
+
+5. `cargo test -p alexandria-node --lib -- network_profile` refuses a key that is not 32 bytes or not a P-256 public key. The keys let a client read verdicts, not forge them.
 
 ## Threat-model checklist
 

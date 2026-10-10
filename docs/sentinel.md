@@ -380,13 +380,25 @@ The earlier community prior library and runtime weights replacement are deleted:
 
 ## Integrity Assurance
 
-Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. Every credential Alexandria issues carries `assuranceLevel: "local"` in its signed `integrity` block (see [protocol-specification.md](protocol-specification.md) §14.9.5). `"anchored"` and `"high_assurance"` remain reserved ladder values with no verified production path: a sponsor role cannot require them, and an `IssuancePolicy.requiredAssuranceLevel` naming either refuses issuance.
+Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. A credential's signed `integrity` block carries `assuranceLevel: "local"` by default (see [protocol-specification.md](protocol-specification.md) §14.9.5). On iOS and Android it carries `"device_attested"` when the platform attestation stored for the session verifies at issuance (see §Device attestation below). `"anchored"` and `"high_assurance"` remain reserved ladder values with no verified production path: a sponsor role cannot require them, and an `IssuancePolicy.requiredAssuranceLevel` naming either refuses issuance.
 
 A policy may also set `minCameraCoverage` (0–1): the fraction of the session's stored snapshots during which the camera was opted in, read from `integrity_snapshots.camera_score` at issuance. A session with no snapshots never satisfies it. This gates at issuance only; the learner is told in the Sentinel wizard that sponsor roles may require the camera, and attempt-time enforcement requires an attempt bound to a role (see §14.9.6 of the protocol specification).
 
 ### Commitment chain
 
 Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_commitment`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`, the running root on `integrity_sessions.commitment_root`, and the signed `integrity` block carries it as `commitmentRoot`. It is local tamper evidence, not an independent witness.
+
+### Device attestation (`device_attested`)
+
+Sentinel's flags say what the client saw; device attestation says the client was ours. It is the only rung above `local` with a verified path, and it is mobile-only: desktop operating systems offer no equivalent.
+
+- **Capture.** Right after `integrity_start_session` the frontend calls `integrity_attest_session`. iOS: `DCAppAttestService` generates a Secure Enclave key and attests it over the session nonce; when the session ends, the same key signs the terminal commitment root (an assertion), so the platform's statement covers the snapshot stream and not only the start. Android: a Play Integrity classic request for the nonce. Desktop reports `supported: false`.
+- **Verification happens on the device that issues**, with no service in between. Apple's App Attestation Root CA is embedded (`sentinel::attestation::APPLE_APP_ATTEST_ROOT_PEM`, SHA-256 fingerprint `1CB9823B…6242C932`). Play Integrity tokens are opened with the developer's response keys from the network profile (`play_integrity_response_keys`); while those are absent, Android tokens are kept on the session and the session stays `local`.
+- **App Attest checks:** the x5c chain to the root and each certificate's validity; the nonce extension `1.2.840.113635.100.8.2` equals `SHA-256(authData ‖ clientDataHash)`; key id equals `SHA-256(public key)`; `rpIdHash = SHA-256("VLMNL3V44U.org.alexandria.node")`; counter 0; AAGUID `appattest` (`appattestdevelop` is accepted only in debug builds); credential id equals key id. The assertion must verify under the attested key over the commitment root with the counter advanced.
+- **Play Integrity checks:** `A256KW` / `A256GCM` JWE around an `ES256` JWS; our nonce; our package name in both the request and app details; `PLAY_RECOGNIZED`; `MEETS_DEVICE_INTEGRITY`.
+- **Stored, then re-verified.** `integrity_sessions.attestation_json` (migration 14) holds the platform, nonce, app id and the opaque blobs. Issuance never copies the stored `assurance_level`: `build_integrity_assertion` recomputes the nonce and re-verifies, falling back to `local` with a logged reason.
+- **Policy.** `IssuancePolicy.requiredAssuranceLevel: "device_attested"` is accepted for sponsor roles; issuance refuses when the stored attestation does not re-verify.
+- **Ceiling.** The level says "a genuine build of the app on a genuine device", not "no second device in the room" and not "this person". A rooted or jailbroken device that defeats the platform check fails into `local` rather than into a false `device_attested`.
 
 ### Deleted attestation paths
 
@@ -413,8 +425,9 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 | Command | Description |
 |---------|-------------|
 | `integrity_start_session` | Start integrity monitoring; `enrollment_id` is optional and `purpose` defaults to `assessment` or accepts `interview` |
+| `integrity_attest_session` | Ask the platform to attest the session nonce (iOS App Attest, Android Play Integrity); stores the result and reports `supported` / `stored` / `assurance_level`. Desktop reports unsupported |
 | `integrity_get_session` | Get session with scores |
-| `integrity_end_session` | End session and compute final score |
+| `integrity_end_session` | End session and compute final score; on iOS the attested key first signs the terminal commitment root |
 | `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`) |
 | `integrity_list_sessions` | List all sessions |
 | `integrity_list_snapshots` | List snapshots for a session |
@@ -687,6 +700,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 11. **The hotkey monitor records no text**: only key-downs with Cmd/Win/Super, Ctrl or Alt held, as a normalised combo string plus a monotonic timestamp. Plain keys, Shift-only combos and key-ups are discarded before they reach the buffer. The monitor runs only for assessment-purpose sessions, only if the OS already granted listening, and its permission prompt lives in the Sentinel wizard — never mid-assessment. Text-entry chords are refused before the buffer: Option+key on macOS, AltGr (Ctrl+Alt) on Windows and Linux.
 12. **Camera device label is not persisted**: the virtual-camera check keeps the `MediaStreamTrack` label in the frontend dev view only; snapshots carry the boolean verdict.
 13. **Liveness keeps nothing**: the face patch is built in memory from the same frame the gaze check already holds; only `real_prob` and a boolean cross IPC.
+14. **Attestation carries no identity**: the platform key is per-app, per-install, and the blobs stored on the session bind a nonce and an app id, not a person or a device serial.
 
 The live preview uses the unlocked profile and current device fingerprint when
 loading gaze calibration, just like assessment monitoring. Preview frames remain
