@@ -13,16 +13,23 @@ import type {
   PublicProfile,
   PublicSkillGraph,
   UsernameClaim,
+  VerifiableCredential,
 } from '@/types'
+import { provenBloomBySkill } from '@/composables/useSkillGraphState'
+import { useAccountStatus } from '@/composables/useAccountStatus'
+import { bloomName } from '@/utils/bloom'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
+const { isInstructor } = useAccountStatus()
 
 const loading = ref(true)
 const identity = ref<Identity | null>(null)
 const did = ref<string | null>(null)
 const graph = ref<PublicSkillGraph | null>(null)
 const reputation = ref<FullReputationAssertion[]>([])
+/** Proven Bloom rank per skill, from this learner's unrevoked credentials. */
+const provenBloom = ref<Map<string, number>>(new Map())
 const registry = ref<'anchored' | 'receipted' | null>(null)
 
 function registryStanding(claim: UsernameClaim | null): 'anchored' | 'receipted' | null {
@@ -56,16 +63,18 @@ const learningImpact = computed(() =>
 
 onMounted(async () => {
   try {
-    const [id, d, g, rep] = await Promise.all([
+    const [id, d, g, rep, creds] = await Promise.all([
       invoke<Identity | null>('get_profile'),
       invoke<string | null>('get_local_did').catch(() => null),
       invoke<PublicSkillGraph>('get_my_skill_graph').catch(() => null),
       invoke<FullReputationAssertion[]>('get_reputation', { query: {} }).catch(() => []),
+      invoke<VerifiableCredential[]>('list_credentials', { activeOnly: true }).catch(() => []),
     ])
     identity.value = id
     did.value = d
     graph.value = g
     reputation.value = rep
+    provenBloom.value = provenBloomBySkill(creds ?? [], d)
   } finally {
     loading.value = false
   }
@@ -120,8 +129,8 @@ onMounted(async () => {
       </p>
 
       <!-- Impact band -->
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <button class="stat-card" @click="router.push('/reputation')">
+      <div class="grid grid-cols-2 gap-3" :class="isInstructor ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
+        <button v-if="isInstructor" class="stat-card" @click="router.push('/reputation')">
           <span class="stat-label">{{ $t('profile.stats.teachingImpact') }}</span>
           <span class="stat-value">{{ teachingImpact }}</span>
         </button>
@@ -156,6 +165,9 @@ onMounted(async () => {
             @click="router.push(`/skills/${n.id}`)"
           >
             {{ n.name }}
+            <span v-if="provenBloom.has(n.id)" class="skill-chip__level">
+              {{ $t(`common.bloom.${bloomName(provenBloom.get(n.id)!)}`) }}
+            </span>
           </button>
         </div>
       </div>
@@ -197,8 +209,13 @@ onMounted(async () => {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
+  border: 1px solid var(--app-border);
   background: var(--app-muted);
   color: var(--app-foreground);
+}
+.skill-chip__level {
+  margin-inline-start: 0.35rem;
+  opacity: 0.7;
 }
 .skill-chip--teaching {
   background: color-mix(in srgb, var(--app-primary) 85%, black);

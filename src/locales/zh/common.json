@@ -118,5 +118,13 @@
     "added": "{count} 门新课程 | {count} 门新课程",
     "upToDate": "课程已是最新",
     "failed": "无法检查新课程"
+  },
+  "bloom": {
+    "remember": "记忆",
+    "understand": "理解",
+    "apply": "应用",
+    "analyze": "分析",
+    "evaluate": "评价",
+    "create": "创造"
   }
 }

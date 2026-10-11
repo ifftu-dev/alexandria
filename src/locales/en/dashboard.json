@@ -38,7 +38,7 @@
       "skillsTipLabel": "What does skills proven mean?",
       "skillsTipText": "Distinct skills backed by at least one credential in your profile.",
       "confidenceTipLabel": "What is confidence?",
-      "confidenceTipText": "The average strength of the checks behind your credentials — how strongly other learners trust them."
+      "confidenceTipText": "How well your skills are backed, averaged across them. It rises with more credentials from more independent issuers; tests you issue yourself can't raise it on their own."
     },
     "goals": {
       "title": "Your goals",

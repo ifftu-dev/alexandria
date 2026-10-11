@@ -135,5 +135,13 @@
     "added": "{count} new course | {count} new courses",
     "upToDate": "Courses are up to date",
     "failed": "Couldn't check for new courses"
+  },
+  "bloom": {
+    "remember": "Remember",
+    "understand": "Understand",
+    "apply": "Apply",
+    "analyze": "Analyze",
+    "evaluate": "Evaluate",
+    "create": "Create"
   }
 }

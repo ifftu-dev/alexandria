@@ -118,5 +118,13 @@
     "added": "{count} نیا کورس | {count} نئے کورسز",
     "upToDate": "کورسز تازہ ترین ہیں",
     "failed": "نئے کورسز نہیں دیکھے جا سکے"
+  },
+  "bloom": {
+    "remember": "یاد رکھنا",
+    "understand": "سمجھنا",
+    "apply": "اطلاق",
+    "analyze": "تجزیہ",
+    "evaluate": "جانچ",
+    "create": "تخلیق"
   }
 }

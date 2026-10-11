@@ -118,5 +118,13 @@
     "added": "{count} curso nuevo | {count} cursos nuevos",
     "upToDate": "Los cursos están al día",
     "failed": "No se pudieron buscar cursos nuevos"
+  },
+  "bloom": {
+    "remember": "Recordar",
+    "understand": "Comprender",
+    "apply": "Aplicar",
+    "analyze": "Analizar",
+    "evaluate": "Evaluar",
+    "create": "Crear"
   }
 }
