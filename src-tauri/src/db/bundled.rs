@@ -223,7 +223,7 @@ WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) 
     '["var","let","function","global"]', '[1]', 1, 1.0),
   ('bq_js2', 'qb_js', 'What does `typeof null` return?',
     '["\"null\"","\"object\"","\"undefined\"","throws"]', '[1]', 2, 1.0),
-  ('bq_js3', 'qb_js', 'Which are falsy in JavaScript? (select all)',
+  ('bq_js3', 'qb_js', 'Which are falsy in JavaScript?',
     '["0","\"\"","[]","NaN"]', '[0,1,3]', 3, 1.0),
   ('bq_js4', 'qb_js', 'Which method returns a new array?',
     '["push","map","sort","splice"]', '[1]', 2, 1.0),
@@ -233,7 +233,7 @@ WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) 
     '["O(n^2)","O(n log n)","O(n)","O(2^n)"]', '[2]', 2, 1.0),
   ('bq_bo3', 'qb_bigo', 'Average-case lookup in a hash table?',
     '["O(1)","O(log n)","O(n)","O(n log n)"]', '[0]', 2, 1.0),
-  ('bq_bo4', 'qb_bigo', 'Which sorts are O(n log n) worst-case? (select all)',
+  ('bq_bo4', 'qb_bigo', 'Which sorts are O(n log n) worst-case?',
     '["quicksort","mergesort","heapsort","bubblesort"]', '[1,2]', 3, 1.0)
 )
 INSERT OR IGNORE INTO assessment_items
