@@ -1,6 +1,6 @@
 # Assessment → credential → Cloud demo
 
-This demo uses the `codex/assessment-demo` worktrees of Alexandria and Alexandria Cloud. It supports a learner publishing an earned skill, an organization requesting an assessment or an existing credential, an interview invitation and offer answered with the learner's signature, and the validity pilot workspace. The operator's click-by-click sheet is [`demo-runbook.md`](demo-runbook.md). It does not require Jev or an AI provider key.
+This demo runs from the `main` branches of Alexandria and Alexandria Cloud. It supports a learner publishing an earned skill, an organization requesting an assessment or an existing credential, an interview invitation and offer answered with the learner's signature, and the validity pilot workspace. The operator's click-by-click sheet is [`demo-runbook.md`](demo-runbook.md). It does not require Jev or an AI provider key.
 
 ## Prepare this Mac
 
@@ -56,7 +56,7 @@ Cloud **Operations → Validity pilot** implements the study design from the fun
 
 ## Verify without Alexandria
 
-Export the bundle from **Credentials → Export**, then `node scripts/demo/verify-credential.mjs <bundle.json>`. The script uses only Node's standard library and implements the algorithm published with the test vectors (JCS, `eddsa-jcs-2022` Data Integrity proof, `did:key` self-resolution, validity window, status-list bit). A credential whose `statusListCredential` is a URL — every credential issued while a directory such as the local Cloud is configured — is checked on its own: the script fetches the issuer's signed `BitstringStatusListCredential` from that URL, so a bare credential verifies and a revocation shows up on the next run without re-exporting. `node --test scripts/demo/verify-credential.test.mjs` shows it agrees with the reference verifier on all twelve vectors. The issuer key can also be resolved by the third-party Universal Resolver at <https://dev.uniresolver.io/>. The credential is a W3C VC Data Model 2.0 document with a Data Integrity `eddsa-jcs-2022` proof and a Bitstring Status List entry, so a general-purpose Data Integrity verifier accepts it unmodified; the signed vectors in `crates/alexandria-verify/tests/vectors/README.md` are the contract.
+Export the bundle from **Skills & Credentials → Export all**, then `node scripts/demo/verify-credential.mjs <bundle.json>`. The script uses only Node's standard library and implements the algorithm published with the test vectors (JCS, `eddsa-jcs-2022` Data Integrity proof, `did:key` self-resolution, validity window, status-list bit). A credential whose `statusListCredential` is a URL — every credential issued while a directory such as the local Cloud is configured — is checked against the issuer's hosted list: the script fetches the signed `BitstringStatusListCredential` from that URL, even when the bundle carries a copy, and uses the fetched list unless it is older than the copy. A bare credential therefore verifies on its own, and a revocation shows up on the next run of the same bundle or credential without re-exporting. Offline, a bundle reports the status as of its export. `node --test scripts/demo/verify-credential.test.mjs` shows it agrees with the reference verifier on all twelve vectors. The issuer key can also be resolved by the third-party Universal Resolver at <https://dev.uniresolver.io/>. The credential is a W3C VC Data Model 2.0 document with a Data Integrity `eddsa-jcs-2022` proof and a Bitstring Status List entry, so a general-purpose Data Integrity verifier accepts it unmodified; the signed vectors in `crates/alexandria-verify/tests/vectors/README.md` are the contract.
 
 ## What the audience should understand
 
@@ -74,7 +74,7 @@ If final telemetry persistence fails, the attempt stays ungraded and the same fr
 
 If sharing fails, keep the preview open and retry the same payload within its five-minute lifetime. After expiry, create a new preview if the request is still pending. Refresh Cloud before creating another request after a lost response. A durable offline send queue and continuously refreshed issuer-status fetching are follow-up work, not part of this demo.
 
-The installed app is built from this worktree. Main checkouts and profile storage are not replaced by the demo source setup. The installer preserves a copy of the previous application bundle; see the installation receipt for its location.
+The installed app is built from this repository. Profile storage is not replaced by the demo source setup. The installer preserves a copy of the previous application bundle; see the installation receipt for its location.
 
 ## Live role requirements
 

@@ -19,8 +19,9 @@
  *    drift from the wire format; this cannot.
  */
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useLocalApi } from "@/composables/useLocalApi"
+import { DIRECTORIES_CHANGED } from './directoryEvents'
 import { useI18n } from 'vue-i18n'
 
 import { AppButton } from '@/components/ui'
@@ -56,6 +57,8 @@ const includeDisplayName = ref(false)
 const includeBio = ref(false)
 
 const loading = ref(true)
+/** How many directories the learner has added; null until known. Decides which framing line is true. */
+const directoryCount = ref<number | null>(null)
 const saving = ref(false)
 const savedAt = ref(0)
 const error = ref('')
@@ -70,8 +73,22 @@ function apply(preview: TalentIndexPreview) {
   includeBio.value = preview.consent.bio
 }
 
+async function loadDirectoryCount() {
+  try {
+    directoryCount.value = (await invoke<unknown[]>('list_directories')).length
+  } catch {
+    // Unknown is safer than a wrong claim either way: show neither line.
+    directoryCount.value = null
+  }
+}
+
+function onDirectoriesChanged(event: Event) {
+  directoryCount.value = (event as CustomEvent<number>).detail
+}
+
 async function load() {
   loading.value = true
+  void loadDirectoryCount()
   try {
     apply(await invoke<TalentIndexPreview>('get_talent_index_preview'))
   } catch (e) {
@@ -120,7 +137,11 @@ const recordJson = computed(() =>
   record.value === null ? '' : JSON.stringify(record.value, null, 2),
 )
 
-onMounted(load)
+onMounted(() => {
+  window.addEventListener(DIRECTORIES_CHANGED, onDirectoriesChanged)
+  void load()
+})
+onBeforeUnmount(() => window.removeEventListener(DIRECTORIES_CHANGED, onDirectoriesChanged))
 </script>
 
 <template>
@@ -133,10 +154,22 @@ onMounted(load)
       <!--
         Framing, not a result. Sitting under the Save button it read as a
         contradiction of "Saved." — the save persists consent; publication is a
-        separate thing that has nowhere to go yet.
+        separate step. Which line is true depends on whether the learner has
+        added a directory to publish to.
       -->
-      <p v-if="candidates.length > 0" class="mt-2 text-xs text-muted-foreground">
+      <p
+        v-if="candidates.length > 0 && directoryCount === 0"
+        data-testid="talent-index-framing"
+        class="mt-2 text-xs text-muted-foreground"
+      >
         {{ t('profile.talentIndex.notPublishedYet') }}
+      </p>
+      <p
+        v-else-if="candidates.length > 0 && directoryCount !== null"
+        data-testid="talent-index-framing"
+        class="mt-2 text-xs text-muted-foreground"
+      >
+        {{ t('profile.talentIndex.publishSeparately') }}
       </p>
     </header>
 

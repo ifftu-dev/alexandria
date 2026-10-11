@@ -9,14 +9,14 @@ this is the operator's sheet.
 
 | Thing | Location |
 |---|---|
-| Learner app source | worktree `worktrees/alexandria-assessment-demo`, branch `codex/assessment-demo` |
-| Cloud source | worktree `worktrees/alexandria-cloud-assessment-demo`, branch `codex/assessment-demo` |
+| Learner app source | this repository (`alexandria`), `main` |
+| Cloud source | the `alexandria-cloud` repository, `main`, checked out next to this one |
 | Cloud console | <http://127.0.0.1:8787> (sign-in page → **Continue**; loopback dev sign-in only) |
 | Cloud Postgres | Docker container `alexandria-assessment-demo-db`, loopback port 5544, database `alexandria_demo` |
-| Cloud launcher | `scripts/demo-assessment.sh` in the Cloud worktree (needs Docker Desktop running) |
+| Cloud launcher | `scripts/demo-assessment.sh` in the Cloud repository (needs Docker Desktop running) |
 | App directory setting | Alexandria → **Settings → Directories** → add `http://127.0.0.1:8787` named **Local demo** |
 | Learner inbox (requests, interviews, offers) | Alexandria → **Settings → Directories**, three panels: *Assessment and credential requests*, *Interview invitations and offers*, and your own answers under *Your answers* |
-| Credentials | Alexandria → **Credentials** (`/credentials`); detail at `/credentials/:id`; **Export** downloads `alexandria-credentials-<date>.json` |
+| Credentials | Alexandria → **Skills & Credentials** (`/credentials`); a skill card lists the credentials behind it, detail at `/credentials/:id`; **Export all** downloads `alexandria-credentials-<date>.json` |
 | Public listing consent | Alexandria → **My profile → Let employers find you** |
 | Dev test data | Alexandria → **Settings → Developer → Test data** (debug or `dev-seeding` builds only) |
 | Sentinel live view | ⌘⇧S inside the unlocked app |
@@ -37,19 +37,19 @@ attempt cooldown applies.
 
 ## 0. Before the audience arrives (10 minutes)
 
-1. Start Docker Desktop. In the Cloud worktree run `scripts/demo-assessment.sh`.
+1. Start Docker Desktop. In the Cloud repository run `scripts/demo-assessment.sh`.
    Wait for "listening on 127.0.0.1:8787". The script creates the empty
    **Alexandria Demo** organisation, activates the exported taxonomy, builds the
    console if `web/dist` is missing, and starts Ollama for the role-requirements
    step. Nothing else is seeded: no candidates, credentials, interviews or pilots.
 2. Open <http://127.0.0.1:8787>, press **Continue**. You are signed in as the demo organisation.
-3. Open Alexandria (built from the app worktree), unlock the demo profile.
+3. Open Alexandria (built from this repository), unlock the demo profile.
    **Settings → Directories** → confirm **Local demo** is listed. If not, add it.
 4. Optional: **Settings → Developer → Test data → Seed everything** for courses,
    discussions and proposals to show around the assessment. The two assessable
    banks are installed when the profile is created, in every build; seeds never
    create credentials, attempts, votes or posts.
-5. Rehearse the whole path in one command from the app worktree:
+5. Rehearse the whole path in one command from this repository:
 
    ```
    scripts/demo/rehearse.sh            # starts Cloud if it is not up
@@ -64,11 +64,11 @@ attempt cooldown applies.
    on this machine right now. Each run leaves a learner, a recorded
    assessment, an interview, an offer and (first test only) a pilot in the
    demo organisation — `--fresh` before the audience arrives.
-6. Optional, from the Cloud worktree: `node web/scripts/console-walkthrough.mjs`
+6. Optional, from the Cloud repository: `node web/scripts/console-walkthrough.mjs`
    opens the console in your Chrome and walks sign-in, Talent, a run receipt,
    an interview and the pilot page; `--write` also fills the request,
    invitation and pilot forms. It prints one line per screen.
-5. Have a terminal open in the app worktree for §6.
+7. Have a terminal open in this repository for §6.
 
 ## 1. Learner earns a credential (app)
 
@@ -76,7 +76,7 @@ attempt cooldown applies.
 Press ⌘⇧S → **Start camera preview** if you want the Sentinel view visible.
 Answer, submit. On a pass one credential is issued on the device.
 
-Open it from the result (or **Credentials**). Point at: credential id, issuer
+Open it from the result (or **Skills & Credentials**). Point at: credential id, issuer
 DID, subject DID (the same key — this is *learner-issued*), skill, score,
 Bloom level **Remember**, the signed integrity summary, evidence references.
 
@@ -153,34 +153,40 @@ per interview; an offer only follows a recorded interview.
 
 ## 6. Verify the credential without Alexandria (terminal)
 
-Alexandria → **Credentials → Export**. Then, from the app worktree:
+Alexandria → **Skills & Credentials → Export all**. Then, from this repository:
 
 ```
-node scripts/demo/verify-credential.mjs ~/Downloads/alexandria-credentials-2026-10-09.json
+node scripts/demo/verify-credential.mjs ~/Downloads/alexandria-credentials-<date>.json
 ```
 
 The script is ~300 lines, imports only `node:fs`, `node:crypto` and
 `node:zlib`, and implements the published algorithm: JCS-canonicalise the
 credential and its proof options, verify the `eddsa-jcs-2022` Data Integrity
 proof against the key decoded from the issuer's `did:key`, check the validity
-window, and read the revocation bit. The bit comes from the status list the
-bundle carries, or — when the credential names its list by URL, which every
-credential issued with **Local demo** configured does — from a plain `GET` of
-that URL, after checking the document that came back is that list signed by
-that issuer. It prints signature, validity and status as three separate
-answers, then ACCEPT / PENDING / REJECT, and says where the list came from.
+window, and read the revocation bit. When the credential names its list by
+URL, which every credential issued with **Local demo** configured does, the bit
+comes from a plain `GET` of that URL, after checking the document that came
+back is that list signed by that issuer. The fetched list replaces the copy the
+bundle carries unless it is older, so a revocation made after the export still
+shows. If the host cannot be reached, or with `--offline`, the bundle's copy is
+used. It prints signature, validity and status as three separate answers, then
+ACCEPT / PENDING / REJECT, and says where each list came from: fetched from the
+host, or the exported bundle as of its date.
 
-A bare credential now verifies on its own, with Cloud running:
+Then revoke a credential in Alexandria (**Skills & Credentials → the skill card → the credential → Revoke**,
+and confirm), run the same command on the same export again, and its status
+flips to `revoked` without re-exporting anything: the app pushed the new list to
+Cloud as part of the revocation. Open the list URL in a browser to show the
+signed `BitstringStatusListCredential` being served.
+
+A bare credential verifies on its own too, with Cloud running. Without Cloud,
+or with `--offline`, a bare credential reports its status as pending:
 
 ```
+jq '.credentials[] | select(.credentialSubject.skillId=="skill_big_o")' \
+  ~/Downloads/alexandria-credentials-<date>.json > credential.json
 node scripts/demo/verify-credential.mjs credential.json
 ```
-
-Then revoke it in Alexandria (**Credentials → the credential → Revoke**), run
-the same command again, and the status flips to `revoked` without re-exporting
-anything: the app pushed the new list to Cloud as part of the revocation. Open
-the list URL in a browser to show the signed `BitstringStatusListCredential`
-being served. `--offline` skips the fetch and reports the list as pending.
 
 To show the key resolution is not ours either: paste the issuer DID into
 <https://dev.uniresolver.io/> — the Universal Resolver returns the same
@@ -266,7 +272,7 @@ scoring, agreement and completion measured, published without identifiers."
 - **Verifier says PENDING:** the status list could not be read. For a bare
   credential naming a `urn:` list, export the bundle instead. For a URL list,
   Cloud is not running, or the list was never pushed: Alexandria →
-  **Credentials → the credential → Revoke** reports the push result, and the
+  **Skills & Credentials → the skill card → the credential → Revoke** reports the push result, and the
   background pass retries every minute.
 - **Credential names a `urn:` list, not the Cloud URL:** it was issued before
   **Local demo** was added under **Settings → Directories** (or before a

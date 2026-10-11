@@ -24,6 +24,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from "@/composables/useLocalApi"
+import { announceDirectoriesChanged } from './directoryEvents'
 import { useI18n } from 'vue-i18n'
 
 import { AppButton } from '@/components/ui'
@@ -141,6 +142,7 @@ async function add() {
     const next = [...directories.value, { name: newName.value.trim(), url: newUrl.value.trim() }]
     await invoke('set_directories', { directories: next })
     directories.value = next
+    announceDirectoriesChanged(next.length)
     newName.value = ''
     newUrl.value = ''
     await check()
@@ -155,6 +157,7 @@ async function remove(url: string) {
     const next = directories.value.filter((x) => x.url !== url)
     await invoke('set_directories', { directories: next })
     directories.value = next
+    announceDirectoriesChanged(next.length)
     // Dropped locally too. Leaving rows from a directory the learner just
     // removed on screen would suggest it is still being asked.
     requests.value = requests.value.filter((r) => next.some((n) => n.name === r.directory))

@@ -83,6 +83,7 @@
     "saved": "Saved.",
     "saveFailed": "Couldn't save: {error}",
     "notPublishedYet": "No talent index is connected yet, so nothing is being sent anywhere. These choices apply when one is.",
+    "publishSeparately": "Saving only records these choices. Your listing is sent when you publish it to a directory you have added.",
     "withdrawNote": "A listing expires after 30 days. Untick a skill and it goes from the next listing; stop entirely and you drop out of the index without having to ask anyone to remove you."
   },
   "directories": {
