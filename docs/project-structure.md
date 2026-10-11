@@ -157,12 +157,24 @@ src-tauri/
     │   └── stress.rs       # Stub (retired in VC-first cutover; 14-line placeholder)
     │
     ├── classroom/          # Classroom manager + gossip/types
-    ├── sentinel/           # Backend Sentinel ML (tract + candle)
-    │   ├── types.rs        # KeystrokeEvent / MousePoint / DigraphFeatures
+    ├── sentinel/           # Backend Sentinel ML (tract + candle) and native environment checks
+    │   ├── types.rs        # KeystrokeEvent / MousePoint / DigraphFeatures / FaceFrame
     │   ├── features.rs     # 12-dim windowed feature extractor (paste classifier)
     │   ├── paste_classifier.rs  # tract ONNX inference; embedded paste-v1.onnx
     │   ├── keystroke_ae.rs # Per-user autoencoder (candle autograd)
-    │   └── mouse_cnn.rs    # Reservoir-style trajectory CNN (candle dense head)
+    │   ├── mouse_cnn.rs    # Reservoir-style trajectory CNN (candle dense head)
+    │   ├── face_detect.rs  # YuNet face detector (embedded yunet.onnx)
+    │   ├── gaze.rs         # Head-pose / second-device estimate + per-user calibration MLP
+    │   ├── liveness.rs     # MiniFASNetV2 presentation-attack check (embedded ONNX)
+    │   ├── evidence.rs     # Learner-consented retention of flagged-session frames
+    │   ├── active_app.rs   # Frontmost-app (app_switch) watcher
+    │   ├── display_topology.rs   # Monitors, mirroring, iPad Split View / Android multi-window
+    │   ├── android_environment.rs # Assessment shield, accessibility services, ADB, obscured touches
+    │   ├── hidden_overlay.rs     # Capture-excluded / click-through overlay windows (desktop)
+    │   ├── processes.rs    # Interview-cheat / remote-control / virtual-camera watchlist (desktop)
+    │   ├── global_hotkeys.rs     # Listen-only modifier-combo monitor (phantom shortcuts, desktop)
+    │   ├── prior_blob.rs   # Labelled-sample blob shape for the encrypted holdout
+    │   └── attestation/    # device_attested: App Attest + Play Integrity capture and verification
     │
     ├── tutoring/           # `live` crate integration (MoQ rooms/sessions)
     │   ├── mod.rs
@@ -215,7 +227,8 @@ src/
 │   ├── useOmniSearch.ts    # Recents synced via `ui.omni_recents`
 │   ├── useP2P.ts
 │   ├── usePlatform.ts
-│   ├── useSentinel.ts      # AI / paste-classifier toggles synced via `sentinel.*` settings
+│   ├── useSentinel.ts      # Sentinel sessions, signal sampling, snapshots; AI toggles synced via `sentinel.*` settings
+│   ├── useCameraPresence.ts # Camera stream + gaze/face loops for role-required camera attempts
 │   ├── useInterviews.ts    # Interview record CRUD, consent, transcript, follow-ups, review
 │   ├── useLocalSpeechRecognition.ts # On-device-only speech recognition capability gate
 │   ├── useSettingsModal.ts # Type-only now: the `SettingsSectionId` union (settings is a full page, not a modal)
@@ -307,7 +320,9 @@ src/
 └── utils/
     ├── sanitize.ts         # DOMPurify wrappers for HTML and SVG sanitization
     └── sentinel/           # Frontend Sentinel helpers
-        └── face-embedder.ts  # LBP face embedding (pure pixel math)
+        ├── face-embedder.ts  # LBP face embedding (pure pixel math)
+        ├── hotkeys.ts        # Phantom-shortcut correlation (native vs webview combos)
+        └── virtual-camera.ts # Known virtual-camera device labels
                               # Keystroke AE, mouse CNN, paste classifier
                               # all moved to the backend Rust crate -- see
                               # src-tauri/src/sentinel/ and docs/sentinel.md

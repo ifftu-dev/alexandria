@@ -921,15 +921,26 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 | `is_human_likely` | Rule | bool | 0.15 |
 | `tab_switches` | Rule | count | 0.15 |
 | `paste_events` / `pasted_chars` | Rule | count | 0.10 |
-| `devtools_detected` | Rule | bool | 0.10 |
-| `face_present` / `face_count` | Rule | bool/int | 0.15 |
+| `face_present` / `face_count` | Rule | bool/int | 0.15 (camera opted in) |
 | `ai_keystroke_anomaly` | AI | 0-1 | advisory |
 | `ai_mouse_human_prob` | AI | 0-1 | advisory |
 | `ai_face_similarity` | AI | 0-1 | advisory |
+| `ai_paste_anomaly` | AI | 0-1 | advisory |
+| `gaze_offscreen_ratio` | AI | 0-1 | advisory |
+| `liveness_real_prob` / `liveness_checks` / `liveness_spoof_checks` | AI | 0-1 / int | advisory |
+| `app_switch` | Native | event | advisory |
+| `display_count` / `external_display` / `split_screen` / `screen_captured` | Native | int / bool | advisory |
+| `foreign_accessibility_services` / `adb_enabled` / `obscured_touches` | Native (Android) | int / bool | advisory |
+| `hidden_overlays` / `overlay_windows_scanned` | Native (desktop) | int | advisory |
+| `watched_processes` / `watched_categories` | Native (desktop) | int / list | advisory |
+| `global_hotkeys` / `phantom_hotkeys` | Native (desktop) | int | advisory |
+| `camera_device_virtual` | Rule | bool | advisory |
+
+The weights are relative coefficients: the score divides the weighted sum by the coefficients actually present, so a missing optional signal contributes neither score nor denominator. Developer-tools detection is retired; a snapshot carrying `devtools_score` or a `devtools_detected` flag is rejected. Advisory signals raise flags but carry no score weight. Each signal's thresholds, the flag it raises, and that flag's severity are specified in [`docs/sentinel.md`](sentinel.md) (Signal Taxonomy, Flagging Logic); flag severity is authoritative on the issuing device, and an unknown flag counts as info.
 
 ### 12.4 ML Models
 
-Three models, trained on-device. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` ML framework (`src-tauri/src/sentinel/keystroke_ae.rs`, `mouse_cnn.rs`); the face embedder is hand-written TypeScript:
+Three per-user models are trained on-device. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` ML framework (`src-tauri/src/sentinel/keystroke_ae.rs`, `mouse_cnn.rs`); the face embedder is hand-written TypeScript. Frozen models (paste classifier, YuNet face detector, MiniFASNetV2 liveness) are embedded ONNX run by `tract`, each pinned by a SHA-256 lockfile; the gaze calibration MLP is per-user `candle`:
 
 - **Keystroke Autoencoder** (4→8→4→8→4) — Digraph timing features, anomaly detection via reconstruction error. Requires 20+ samples. Threshold: 0.65.
 - **Mouse Trajectory CNN** (Conv1D(3→8)→Conv1D(8→16)→Dense→Sigmoid) — 50-point segments with dx/dy/dt channels. Human threshold: 0.50. Conv layers use reservoir computing (random feature extractors).
@@ -955,6 +966,8 @@ These guarantees are architectural — they are enforced by the code structure, 
 - AI model weights are not biometric data: Weights encode statistical patterns, not recoverable input data.
 - Profile keyed to device: Profiles are device-specific.
 - No server-side data: All behavioral processing happens on-device.
+- Native environment checks return matches, not inventories: process and window enumerations stay in the backend (only watchlist matches and suspicious windows' owner and reason cross IPC, never titles); the shortcut monitor records only modifier combos and refuses text-entry chords; a camera's device label is never persisted.
+- Device attestation carries no identity: the platform key is per-app, per-install, and the stored blobs bind a nonce and an app id, not a person.
 
 ---
 
