@@ -68,6 +68,26 @@ export function useSkillGraphState() {
 }
 
 /**
+ * Highest Bloom rank (0 = remember … 5 = create) each skill's credentials
+ * evidence. A skill credential's `level` claim is that rank; it is not the
+ * 1–5 evidence strength aggregation reports, and the two are shown apart.
+ */
+export function provenBloomBySkill(
+  creds: VerifiableCredential[],
+  subjectDid?: string | null,
+): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const vc of creds) {
+    if (subjectDid && vc.credentialSubject.id !== subjectDid) continue
+    const claim = extractSkillClaim(vc.credentialSubject)
+    if (!claim) continue
+    const rank = Math.min(5, Math.max(0, Math.round(claim.level)))
+    out.set(claim.skillId, Math.max(out.get(claim.skillId) ?? 0, rank))
+  }
+  return out
+}
+
+/**
  * Reduce a credential list to the distinct set of skill IDs
  * represented by skill-kind credentials held by `subjectDid`
  * (or, when no filter is supplied, every skill claim in the list).

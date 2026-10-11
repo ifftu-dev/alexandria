@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
+import { AppBadge, AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
 import { useLocalApi } from '@/composables/useLocalApi'
 import SourceCredentialsModal from '@/components/credential/SourceCredentialsModal.vue'
@@ -21,8 +20,9 @@ import {
   type SkillInfo,
   type VerifiableCredential,
 } from '@/types'
+import { provenBloomBySkill } from '@/composables/useSkillGraphState'
+import { bloomBadge, bloomName } from '@/utils/bloom'
 
-const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const api = useCredentials()
@@ -93,10 +93,14 @@ function skillLabel(id: string): string {
   return skillNames.value.get(id) ?? id
 }
 
-const LEVEL_KEYS = ['none', 'novice', 'beginner', 'competent', 'proficient', 'expert']
-function levelLabel(n: number): string {
-  const key = LEVEL_KEYS[n]
-  return key ? t(`credentials.levels.${key}`) : t('credentials.card.levelShort', { level: n })
+/**
+ * The kind of thinking a skill's credentials evidence (Bloom), or null when no
+ * source is loaded. This leads the card; the 1–5 `level` is evidence strength
+ * from aggregation and is shown as such, never as a mastery name.
+ */
+function provenBloom(s: DerivedSkillState): string | null {
+  const rank = provenBloomBySkill(resolvedSources(s)).get(s.skill_id)
+  return rank === undefined ? null : bloomName(rank)
 }
 
 /** Resolve a derived state's source ids to loaded input credentials. */
@@ -408,13 +412,13 @@ async function exportBundle() {
               <span class="h-1.5 w-1.5 rounded-full" :class="CREDENTIAL_KINDS.DerivedCredential.dot" />
               {{ $t('credentials.kind.derived.short') }}
             </span>
-            <span class="text-xs font-semibold text-foreground">{{ $t('credentials.card.levelShort', { level: s.level }) }}<span class="text-muted-foreground">/5</span></span>
+            <AppBadge v-if="provenBloom(s)" :variant="bloomBadge(provenBloom(s))">{{ $t(`common.bloom.${provenBloom(s)}`) }}</AppBadge>
           </div>
 
           <p class="truncate text-sm font-semibold text-foreground" :title="skillLabel(s.skill_id)">
             {{ skillLabel(s.skill_id) }}
           </p>
-          <p class="text-xs text-muted-foreground">{{ levelLabel(s.level) }}</p>
+          <p class="text-xs text-muted-foreground">{{ $t('credentials.card.evidenceStrength', { level: s.level }) }}</p>
 
           <!-- Confidence bar -->
           <div class="mt-3">

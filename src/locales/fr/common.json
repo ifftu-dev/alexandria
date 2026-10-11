@@ -118,5 +118,13 @@
     "added": "{count} nouveau cours | {count} nouveaux cours",
     "upToDate": "Les cours sont à jour",
     "failed": "Impossible de rechercher de nouveaux cours"
+  },
+  "bloom": {
+    "remember": "Mémoriser",
+    "understand": "Comprendre",
+    "apply": "Appliquer",
+    "analyze": "Analyser",
+    "evaluate": "Évaluer",
+    "create": "Créer"
   }
 }

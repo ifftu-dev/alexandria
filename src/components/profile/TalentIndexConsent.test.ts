@@ -8,7 +8,7 @@ vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mock
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 const preview = {
-  candidates: [{ skillId: 'skill_big_o', name: 'Big-O Analysis', level: 5, issuerClusters: 0, consented: false }],
+  candidates: [{ skillId: 'skill_big_o', name: 'Big-O Analysis', level: 5, issuerClusters: 0, bloomLevel: 0, consented: false }],
   consent: { skills: [], displayName: false, bio: false },
   record: null,
 }

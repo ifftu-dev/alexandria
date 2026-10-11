@@ -25,6 +25,7 @@ import { DIRECTORIES_CHANGED, announceConsentChanged } from './directoryEvents'
 import { useI18n } from 'vue-i18n'
 
 import { AppButton } from '@/components/ui'
+import { bloomName } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
 
@@ -33,6 +34,8 @@ interface PreviewCandidate {
   name: string
   level: number
   issuerClusters: number
+  /** Highest Bloom rank evidenced, 0 = remember … 5 = create. */
+  bloomLevel: number
   consented: boolean
 }
 
@@ -197,7 +200,7 @@ onBeforeUnmount(() => window.removeEventListener(DIRECTORIES_CHANGED, onDirector
           <span class="min-w-0 flex-1">
             <span class="block truncate text-sm text-foreground">{{ c.name }}</span>
             <span class="block text-xs text-muted-foreground">
-              {{ t('profile.talentIndex.level', { level: c.level }) }} ·
+              {{ t('profile.talentIndex.level', { bloom: t(`common.bloom.${bloomName(c.bloomLevel)}`), level: c.level }) }} ·
               {{ t('profile.talentIndex.issuers', { count: c.issuerClusters }, c.issuerClusters) }}
             </span>
           </span>

@@ -15,6 +15,11 @@ export type BloomLevel = (typeof BLOOM_ORDER)[number]
 
 /** 0 (remember) … 5 (create). Unknown/missing levels fall back to 'apply' (2),
  *  matching the `skills.bloom_level` DB default. */
+/** The Bloom level name for a 0–5 rank, as used in `common.bloom.*`. */
+export function bloomName(rank: number): BloomLevel {
+  return BLOOM_ORDER[Math.min(5, Math.max(0, Math.round(rank)))] ?? 'apply'
+}
+
 export function bloomRank(level: string | null | undefined): number {
   const i = BLOOM_ORDER.indexOf((level ?? '').toLowerCase() as BloomLevel)
   return i < 0 ? 2 : i
