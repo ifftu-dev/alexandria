@@ -580,7 +580,23 @@ pub fn list_credentials_impl(
     subject_did: Option<&str>,
     skill_id: Option<&str>,
 ) -> Result<Vec<VerifiableCredential>, String> {
+    list_credentials_filtered(conn, subject_did, skill_id, false)
+}
+
+/// [`list_credentials_impl`], optionally leaving out revoked credentials.
+///
+/// Counts of what a learner has earned must skip revoked rows; the
+/// credential list itself still shows them, marked as revoked.
+pub fn list_credentials_filtered(
+    conn: &Connection,
+    subject_did: Option<&str>,
+    skill_id: Option<&str>,
+    active_only: bool,
+) -> Result<Vec<VerifiableCredential>, String> {
     let mut sql = String::from("SELECT signed_vc_json FROM credentials WHERE 1=1");
+    if active_only {
+        sql.push_str(" AND revoked = 0");
+    }
     let mut args: Vec<String> = Vec::new();
     if let Some(s) = subject_did {
         sql.push_str(" AND subject_did = ?");
@@ -933,6 +949,7 @@ pub async fn list_credentials(
     state: State<'_, AppState>,
     subject: Option<String>,
     skill_id: Option<String>,
+    active_only: Option<bool>,
 ) -> Result<Vec<VerifiableCredential>, String> {
     state
         .db_executor
@@ -940,7 +957,14 @@ pub async fn list_credentials(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "credentials.list",
-            move |db| list_credentials_impl(db.conn(), subject.as_deref(), skill_id.as_deref()),
+            move |db| {
+                list_credentials_filtered(
+                    db.conn(),
+                    subject.as_deref(),
+                    skill_id.as_deref(),
+                    active_only.unwrap_or(false),
+                )
+            },
         )
         .await
 }
@@ -2560,6 +2584,31 @@ mod tests {
         let one =
             list_credentials_impl(db.conn(), Some(subject.as_str()), Some("other_skill")).unwrap();
         assert_eq!(one.len(), 1);
+    }
+
+    #[test]
+    fn active_only_listing_leaves_out_revoked_credentials() {
+        let (db, key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &key,
+            &issuer,
+            &sample_request(subject.clone()),
+            NOW,
+        )
+        .unwrap();
+        revoke_credential_impl(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+
+        let all =
+            list_credentials_filtered(db.conn(), Some(subject.as_str()), None, false).unwrap();
+        assert_eq!(
+            all.len(),
+            1,
+            "the full list still shows a revoked credential"
+        );
+        let active =
+            list_credentials_filtered(db.conn(), Some(subject.as_str()), None, true).unwrap();
+        assert!(active.is_empty());
     }
 
     #[test]
