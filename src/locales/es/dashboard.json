@@ -21,7 +21,10 @@
       "recommendedCta": "Abrir curso",
       "exploreEyebrow": "Explorar",
       "exploreTitle": "Descubre cursos de otros estudiantes",
-      "exploreCta": "Explorar cursos"
+      "exploreCta": "Explorar cursos",
+      "pathEyebrow": "Siguiente en tu ruta",
+      "pathTitle": "Avanza hacia {skill}",
+      "pathCta": "Ver tus metas"
     },
     "stats": {
       "teaching": "Impacto docente",
@@ -46,7 +49,6 @@
     },
     "graph": {
       "title": "Tu mapa de habilidades",
-      "proven": "{count} habilidad demostrada | {count} habilidades demostradas",
       "hide": "Ocultar ▴",
       "expand": "Expandir ▾",
       "empty": "Aún no hay habilidades demostradas. Consigue credenciales terminando cursos y aparecerán aquí.",

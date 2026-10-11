@@ -158,7 +158,7 @@ async function refreshEarned(force = false) {
   try {
     const [localDid, creds] = await Promise.all([
       invoke<string | null>('get_local_did').catch(() => null),
-      invoke<VerifiableCredential[]>('list_credentials', {}),
+      invoke<VerifiableCredential[]>('list_credentials', { activeOnly: true }),
     ])
     if (await applyCredentials(creds, localDid)) {
       await nextTick()
@@ -189,7 +189,7 @@ async function loadData() {
       invoke<SkillInfo[]>('list_skills', {}),
       invoke<SkillGraphEdge[]>('list_skill_graph_edges', {}),
       invoke<string | null>('get_local_did').catch(() => null),
-      invoke<VerifiableCredential[]>('list_credentials', {}).catch(() => []),
+      invoke<VerifiableCredential[]>('list_credentials', { activeOnly: true }).catch(() => []),
     ])
 
     skills.value = sk

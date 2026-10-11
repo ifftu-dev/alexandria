@@ -21,7 +21,10 @@
       "recommendedCta": "打开课程",
       "exploreEyebrow": "探索",
       "exploreTitle": "发现其他学习者的课程",
-      "exploreCta": "浏览课程"
+      "exploreCta": "浏览课程",
+      "pathEyebrow": "你路径上的下一步",
+      "pathTitle": "朝 {skill} 努力",
+      "pathCta": "查看你的目标"
     },
     "stats": {
       "teaching": "教学影响力",
@@ -46,7 +49,6 @@
     },
     "graph": {
       "title": "你的技能图谱",
-      "proven": "{count} 项技能已证明 | {count} 项技能已证明",
       "hide": "隐藏 ▴",
       "expand": "展开 ▾",
       "empty": "还没有已证明的技能。完成课程获得凭证，它们就会显示在这里。",

@@ -21,7 +21,10 @@
       "recommendedCta": "Open course",
       "exploreEyebrow": "Explore",
       "exploreTitle": "Discover courses from other learners",
-      "exploreCta": "Browse courses"
+      "exploreCta": "Browse courses",
+      "pathEyebrow": "Next on your path",
+      "pathTitle": "Work towards {skill}",
+      "pathCta": "View your goals"
     },
     "stats": {
       "teaching": "Teaching impact",
@@ -46,7 +49,6 @@
     },
     "graph": {
       "title": "Your skill graph",
-      "proven": "{count} skill proven | {count} skills proven",
       "hide": "Hide ▴",
       "expand": "Expand ▾",
       "empty": "No proven skills yet. Earn credentials by finishing courses, and they'll show up here.",

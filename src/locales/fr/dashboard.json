@@ -21,7 +21,10 @@
       "recommendedCta": "Ouvrir le cours",
       "exploreEyebrow": "Explorer",
       "exploreTitle": "Découvrez des cours d'autres apprenants",
-      "exploreCta": "Parcourir les cours"
+      "exploreCta": "Parcourir les cours",
+      "pathEyebrow": "Prochaine étape de votre parcours",
+      "pathTitle": "Progressez vers {skill}",
+      "pathCta": "Voir vos objectifs"
     },
     "stats": {
       "teaching": "Impact pédagogique",
@@ -46,7 +49,6 @@
     },
     "graph": {
       "title": "Votre graphe de compétences",
-      "proven": "{count} compétence prouvée | {count} compétences prouvées",
       "hide": "Masquer ▴",
       "expand": "Développer ▾",
       "empty": "Aucune compétence prouvée pour l'instant. Obtenez des justificatifs en terminant des cours, et ils apparaîtront ici.",

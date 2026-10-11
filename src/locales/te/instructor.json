@@ -351,7 +351,7 @@
     "assistantMoved": "Access for external MCP assistants is now in Settings.",
     "openAssistantAccess": "Open assistant access",
     "decisionTitle": "Optional AI checks",
-    "decisionDisclosure": "Selected text is sent to TypeSafe AI when a task is enabled, including in shadow mode. Checks are suggestions and never establish proficiency.",
+    "decisionDisclosure": "AI తనిఖీలు ఆన్‌లో ఉన్నప్పుడు, మీరు ఎంచుకున్న వచనం మీ AI ప్రదాతకు పంపబడుతుంది, పోలిక కోసం నేపథ్యంలో మాత్రమే నడిచే తనిఖీలతో సహా. ఫలితాలు సూచనలు మాత్రమే, ఎప్పుడూ నైపుణ్యాన్ని నిరూపించవు.",
     "decisionCloud": "Allow hosted processing for this profile",
     "decisionSave": "Save decision settings",
     "decisionKey": "AI provider API key (leave blank to keep saved key)",

@@ -21,7 +21,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useLocalApi } from "@/composables/useLocalApi"
-import { DIRECTORIES_CHANGED } from './directoryEvents'
+import { DIRECTORIES_CHANGED, announceConsentChanged } from './directoryEvents'
 import { useI18n } from 'vue-i18n'
 
 import { AppButton } from '@/components/ui'
@@ -126,6 +126,7 @@ async function save() {
     }
     apply(await invoke<TalentIndexPreview>('set_talent_index_consent', { consent }))
     savedAt.value = Date.now()
+    announceConsentChanged(selected.value.size)
   } catch (e) {
     error.value = String(e)
   } finally {

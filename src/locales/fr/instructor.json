@@ -351,7 +351,7 @@
     "assistantMoved": "Access for external MCP assistants is now in Settings.",
     "openAssistantAccess": "Open assistant access",
     "decisionTitle": "Optional AI checks",
-    "decisionDisclosure": "Selected text is sent to TypeSafe AI when a task is enabled, including in shadow mode. Checks are suggestions and never establish proficiency.",
+    "decisionDisclosure": "Lorsque les vérifications par IA sont activées, le texte que vous sélectionnez est envoyé à votre fournisseur d'IA, y compris pour les vérifications exécutées uniquement en arrière-plan à des fins de comparaison. Les résultats sont des suggestions et ne prouvent jamais une compétence.",
     "decisionCloud": "Allow hosted processing for this profile",
     "decisionSave": "Save decision settings",
     "decisionKey": "AI provider API key (leave blank to keep saved key)",
