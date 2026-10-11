@@ -14,6 +14,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { useAssessment } from '@/composables/useAssessment'
 import { useCameraPresence } from '@/composables/useCameraPresence'
 import { useSentinelView } from '@/composables/useSentinelView'
@@ -186,6 +187,7 @@ async function submit() {
     const graded = await grade(attempt.value.attempt_id, answers)
     if (disposed) return
     result.value = graded
+    if (graded.credential_id) announceCredentialsChanged()
   } catch (e) {
     if (!disposed) error.value = String(e)
   } finally {

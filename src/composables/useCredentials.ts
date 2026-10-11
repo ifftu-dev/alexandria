@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useLocalApi } from './useLocalApi'
+import { announceCredentialsChanged } from './credentialEvents'
 import type {
   CreatePresentationRequest,
   CredentialBundle,
@@ -74,9 +75,10 @@ export function useCredentials() {
   }
 
   async function revoke(credentialId: string, reason: string) {
-    return run(() =>
-      invoke<void>('revoke_credential', { credentialId, reason }),
-    )
+    return run(async () => {
+      await invoke<void>('revoke_credential', { credentialId, reason })
+      announceCredentialsChanged()
+    })
   }
 
   /**

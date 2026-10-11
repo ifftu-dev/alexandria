@@ -6,12 +6,15 @@
  * node coloring (earned=green, available=yellow, locked=gray),
  * glow effects, and legend.
  *
- * Data fetched once via Tauri IPC and cached in useSkillGraphState().
+ * Data fetched once via Tauri IPC and cached in useSkillGraphState(). The
+ * earned set is recounted on navigation and when this app issues or revokes
+ * a credential, so the counts do not stay at their unlock-time values.
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
+import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import {
   useSkillGraphState,
   earnedSkillIdsFromCredentials,
@@ -101,6 +104,80 @@ const miniGraphNodes = computed<SkillGraphNode[]>(() => {
   })
 })
 
+/**
+ * Derive everything that depends on the learner's credentials: the earned
+ * set, the available/locked split, and per-skill proficiency. Needs skills and
+ * edges already loaded. Returns whether the earned set changed.
+ */
+async function applyCredentials(creds: VerifiableCredential[], localDid: string | null): Promise<boolean> {
+  credentials.value = creds
+  const earned = earnedSkillIdsFromCredentials(creds, localDid)
+  const before = earnedSkillIds.value
+  const changed = earned.size !== before.size || [...earned].some(id => !before.has(id))
+  earnedSkillIds.value = earned
+  earnedCount.value = earned.size
+
+  // VC-derived proficiency states for the local subject (level + confidence).
+  const states = localDid ? (await listDerivedStates(localDid).catch(() => [])) ?? [] : []
+  const stateMap: Record<string, DerivedSkillState> = {}
+  for (const s of states) stateMap[s.skill_id] = s
+  skillStates.value = stateMap
+
+  let avail = 0
+  let lock = 0
+  for (const skill of skills.value) {
+    if (earned.has(skill.id)) continue
+    const prereqs = prereqMap.value.get(skill.id) ?? []
+    const allMet = prereqs.length === 0 || prereqs.every(p => earned.has(p))
+    if (allMet) {
+      avail++
+    } else {
+      lock++
+    }
+  }
+  availableCount.value = avail
+  lockedCount.value = lock
+  return changed
+}
+
+const REFRESH_MIN_INTERVAL_MS = 1500
+let refreshing = false
+let lastRefresh = 0
+
+/**
+ * Re-read only the credentials (skills and edges do not change in a session)
+ * and redraw the graph if the earned set moved. Throttled for navigation;
+ * `force` skips the throttle for an explicit credential change.
+ */
+async function refreshEarned(force = false) {
+  if (!loaded.value || loadError.value || refreshing) return
+  const now = Date.now()
+  if (!force && now - lastRefresh < REFRESH_MIN_INTERVAL_MS) return
+  refreshing = true
+  lastRefresh = now
+  try {
+    const [localDid, creds] = await Promise.all([
+      invoke<string | null>('get_local_did').catch(() => null),
+      invoke<VerifiableCredential[]>('list_credentials', {}),
+    ])
+    if (await applyCredentials(creds, localDid)) {
+      await nextTick()
+      initGraph()
+    }
+  } catch (e) {
+    // A failed recount keeps the last good counts; the next trigger retries.
+    console.error('SidebarSkillGraph: failed to refresh earned skills:', e)
+  } finally {
+    refreshing = false
+  }
+}
+
+function onCredentialsChanged() {
+  void refreshEarned(true)
+}
+
+const stopAfterEach = router.afterEach(() => { void refreshEarned() })
+
 async function loadData() {
   if (loaded.value) return
 
@@ -117,39 +194,8 @@ async function loadData() {
 
     skills.value = sk
     edges.value = edgeList
-    credentials.value = creds
     totalCount.value = sk.length
-
-    const earned = earnedSkillIdsFromCredentials(creds, localDid)
-    earnedSkillIds.value = earned
-    earnedCount.value = earned.size
-
-    // VC-derived proficiency states for the local subject (level + confidence).
-    const states = localDid ? (await listDerivedStates(localDid).catch(() => [])) ?? [] : []
-    const stateMap: Record<string, DerivedSkillState> = {}
-    for (const s of states) stateMap[s.skill_id] = s
-    skillStates.value = stateMap
-
-    const prereqMap = new Map<string, string[]>()
-    for (const e of edgeList) {
-      if (!prereqMap.has(e.skill_id)) prereqMap.set(e.skill_id, [])
-      prereqMap.get(e.skill_id)!.push(e.prerequisite_id)
-    }
-
-    let avail = 0
-    let lock = 0
-    for (const skill of sk) {
-      if (earned.has(skill.id)) continue
-      const prereqs = prereqMap.get(skill.id) ?? []
-      const allMet = prereqs.length === 0 || prereqs.every(p => earned.has(p))
-      if (allMet) {
-        avail++
-      } else {
-        lock++
-      }
-    }
-    availableCount.value = avail
-    lockedCount.value = lock
+    await applyCredentials(creds, localDid)
   } catch (e) {
     console.error('SidebarSkillGraph: failed to load data:', e)
     loadError.value = true
@@ -161,11 +207,14 @@ async function loadData() {
 }
 
 onMounted(() => {
+  window.addEventListener(CREDENTIALS_CHANGED, onCredentialsChanged)
   if (loaded.value && skills.value.length > 0) {
     // Data already cached from a previous mount — re-init the canvas.
     // Wait for the sidebar expand transition (300ms) to finish so
     // clientWidth is the final expanded size, not the mid-transition value.
     waitForStableSize(() => initGraph())
+    // The cache may predate a credential earned while the sidebar was closed.
+    void refreshEarned()
   } else {
     loadData()
   }
@@ -315,6 +364,8 @@ async function initGraph() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener(CREDENTIALS_CHANGED, onCredentialsChanged)
+  stopAfterEach()
   graphGeneration++
   if (graphInstance) {
     graphInstance._destructor()
