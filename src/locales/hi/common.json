@@ -112,5 +112,11 @@
     "dayPlaceholder": "दिन",
     "monthPlaceholder": "माह",
     "yearPlaceholder": "वर्ष"
+  },
+  "contentSync": {
+    "checking": "नए कोर्स देखे जा रहे हैं…",
+    "added": "{count} नया कोर्स | {count} नए कोर्स",
+    "upToDate": "कोर्स अप टू डेट हैं",
+    "failed": "नए कोर्स नहीं देखे जा सके"
   }
 }

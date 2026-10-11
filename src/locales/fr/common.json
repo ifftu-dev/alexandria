@@ -112,5 +112,11 @@
     "dayPlaceholder": "Jour",
     "monthPlaceholder": "Mois",
     "yearPlaceholder": "Année"
+  },
+  "contentSync": {
+    "checking": "Recherche de nouveaux cours…",
+    "added": "{count} nouveau cours | {count} nouveaux cours",
+    "upToDate": "Les cours sont à jour",
+    "failed": "Impossible de rechercher de nouveaux cours"
   }
 }

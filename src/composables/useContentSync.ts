@@ -1,4 +1,4 @@
-import { computed, readonly, ref } from 'vue'
+import { readonly, ref } from 'vue'
 import { onProfileLocked } from './useProfiles'
 
 type ContentSyncPhase = 'idle' | 'running' | 'success' | 'error'
@@ -69,19 +69,6 @@ function failContentSync(message: string) {
   }, 25000)
 }
 
-const statusMessage = computed(() => {
-  if (phase.value === 'running') {
-    return 'Content sync: checking for new courses...'
-  }
-  if (phase.value === 'success' && stats.value) {
-    return `Content sync complete: +${stats.value.newCourses} courses | hydrated ${stats.value.hydrated} | ${stats.value.durationMs}ms`
-  }
-  if (phase.value === 'error' && error.value) {
-    return `Content sync failed: ${error.value}`
-  }
-  return ''
-})
-
 onProfileLocked(() => {
   profileGeneration += 1
   activeSyncGeneration = null
@@ -98,7 +85,6 @@ export function useContentSync() {
     stats: readonly(stats),
     error: readonly(error),
     visible: readonly(visible),
-    statusMessage,
     startContentSync,
     completeContentSync,
     failContentSync,

@@ -112,5 +112,11 @@
     "dayPlaceholder": "Día",
     "monthPlaceholder": "Mes",
     "yearPlaceholder": "Año"
+  },
+  "contentSync": {
+    "checking": "Buscando cursos nuevos…",
+    "added": "{count} curso nuevo | {count} cursos nuevos",
+    "upToDate": "Los cursos están al día",
+    "failed": "No se pudieron buscar cursos nuevos"
   }
 }

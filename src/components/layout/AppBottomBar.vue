@@ -6,7 +6,12 @@ import { useContentSync } from '@/composables/useContentSync'
 
 const { t } = useI18n()
 const { status: p2pStatus, startPolling } = useP2P()
-const { visible: contentSyncVisible, statusMessage: contentSyncMessage } = useContentSync()
+const {
+  visible: contentSyncVisible,
+  phase: contentSyncPhase,
+  stats: contentSyncStats,
+  error: contentSyncError,
+} = useContentSync()
 
 onMounted(() => {
   startPolling(15000)
@@ -23,6 +28,29 @@ const peerCount = computed(() => {
   return p2pStatus.value.connected_peers
 })
 
+// Shown only once at least one peer is connected: "Connected · no
+// connections" read as a contradiction.
+const peerLabel = computed(() =>
+  peerCount.value > 0 ? t('network.peers', { count: peerCount.value }, peerCount.value) : '',
+)
+
+const contentSyncMessage = computed(() => {
+  switch (contentSyncPhase.value) {
+    case 'running':
+      return t('common.contentSync.checking')
+    case 'success': {
+      const added = contentSyncStats.value?.newCourses ?? 0
+      return added > 0
+        ? t('common.contentSync.added', { count: added }, added)
+        : t('common.contentSync.upToDate')
+    }
+    case 'error':
+      return t('common.contentSync.failed')
+    default:
+      return ''
+  }
+})
+
 const networkIconClass = computed(() => {
   if (p2pStatus.value?.is_running) return 'text-success'
   return 'text-warning'
@@ -37,11 +65,11 @@ const networkIconClass = computed(() => {
         <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
       </svg>
       <span class="font-medium">
-        {{ networkStatusLabel }} · {{ t('network.peers', { count: peerCount }, peerCount) }}
+        {{ networkStatusLabel }}<template v-if="peerLabel"> · {{ peerLabel }}</template>
       </span>
     </div>
 
-    <div v-if="contentSyncVisible && contentSyncMessage" class="bottom-bar__center" :title="contentSyncMessage">
+    <div v-if="contentSyncVisible && contentSyncMessage" class="bottom-bar__center" :title="contentSyncError ?? contentSyncMessage">
       {{ contentSyncMessage }}
     </div>
 

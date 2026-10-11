@@ -112,5 +112,11 @@
     "dayPlaceholder": "دن",
     "monthPlaceholder": "مہینہ",
     "yearPlaceholder": "سال"
+  },
+  "contentSync": {
+    "checking": "نئے کورسز دیکھے جا رہے ہیں…",
+    "added": "{count} نیا کورس | {count} نئے کورسز",
+    "upToDate": "کورسز تازہ ترین ہیں",
+    "failed": "نئے کورسز نہیں دیکھے جا سکے"
   }
 }

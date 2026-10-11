@@ -112,5 +112,11 @@
     "dayPlaceholder": "日",
     "monthPlaceholder": "月",
     "yearPlaceholder": "年"
+  },
+  "contentSync": {
+    "checking": "正在检查新课程…",
+    "added": "{count} 门新课程 | {count} 门新课程",
+    "upToDate": "课程已是最新",
+    "failed": "无法检查新课程"
   }
 }
