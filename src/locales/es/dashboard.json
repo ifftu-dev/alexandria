@@ -38,7 +38,7 @@
       "skillsTipLabel": "¿Qué significa habilidades demostradas?",
       "skillsTipText": "Habilidades distintas respaldadas por al menos una credencial en tu perfil.",
       "confidenceTipLabel": "¿Qué es la confianza?",
-      "confidenceTipText": "La solidez media de las comprobaciones que respaldan tus credenciales: cuánto confían en ellas otros estudiantes."
+      "confidenceTipText": "Hasta qué punto están respaldadas tus habilidades, en promedio. Sube con más credenciales de más emisores independientes; las pruebas que te emites a ti mismo no bastan para subirla."
     },
     "goals": {
       "title": "Tus metas",

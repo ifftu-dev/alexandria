@@ -38,7 +38,7 @@
       "skillsTipLabel": "Que signifie compétences prouvées ?",
       "skillsTipText": "Compétences distinctes appuyées par au moins un justificatif dans votre profil.",
       "confidenceTipLabel": "Qu'est-ce que la confiance ?",
-      "confidenceTipText": "La solidité moyenne des vérifications derrière vos justificatifs — à quel point les autres apprenants leur font confiance."
+      "confidenceTipText": "Le degré d'appui de vos compétences, en moyenne. Elle augmente avec davantage de justificatifs venant de davantage d'émetteurs indépendants ; les tests que vous vous délivrez vous-même ne suffisent pas à l'augmenter."
     },
     "goals": {
       "title": "Vos objectifs",

@@ -38,7 +38,7 @@
       "skillsTipLabel": "已证明技能是什么意思？",
       "skillsTipText": "在你的档案中至少有一份凭证支撑的不同技能。",
       "confidenceTipLabel": "什么是置信度？",
-      "confidenceTipText": "支撑你凭证的核验的平均强度——其他学习者对它们的信任程度。"
+      "confidenceTipText": "你的技能有多少证据支撑，取所有技能的平均值。来自更多独立签发方的更多凭证会提高它；仅靠你自己签发的测试无法提高它。"
     },
     "goals": {
       "title": "你的目标",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -19,6 +19,7 @@ import CourseCard from '@/components/course/CourseCard.vue'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
 import type {
   Course,
+  DerivedSkillState,
   Enrollment,
   FullReputationAssertion,
   Goal,
@@ -45,6 +46,8 @@ const enrolledCourseMap = ref<Record<string, Course>>({})
 const reputation = ref<FullReputationAssertion[]>([])
 const usernameConflict = ref<{ username: string; winner_did: string } | null>(null)
 const myGraph = ref<PublicSkillGraph | null>(null)
+/** Same per-skill states the Credentials page averages, so the two agree. */
+const derivedStates = ref<DerivedSkillState[]>([])
 const goalPaths = ref<Record<string, LearningPath>>({})
 const graphExpanded = ref(false)
 
@@ -61,11 +64,13 @@ const teachingImpact = computed(() =>
 const learningImpact = computed(() =>
   Math.round(reputation.value.filter((a) => a.role === 'learner').reduce((s, a) => s + a.score, 0)),
 )
+// Credential confidence, not the reputation assertions' sample-size
+// confidence: the card sits beside "Skills proven" and explains itself in
+// terms of credentials.
 const avgConfidence = computed(() => {
-  if (reputation.value.length === 0) return 0
-  return Math.round(
-    (reputation.value.reduce((s, a) => s + a.confidence, 0) / reputation.value.length) * 100,
-  )
+  const list = derivedStates.value
+  if (list.length === 0) return 0
+  return Math.round((list.reduce((s, d) => s + d.confidence, 0) / list.length) * 100)
 })
 const skillsProven = computed(() => myGraph.value?.nodes.length ?? 0)
 
@@ -77,18 +82,33 @@ function pathPct(p: LearningPath | undefined): number {
 function pathNext(p: LearningPath | undefined): string | null {
   return p?.steps.find((s) => s.status === 'available')?.name ?? null
 }
+/** Only a loaded path with every step earned is ready; a missing one is still loading. */
+function pathDone(p: LearningPath | undefined): boolean {
+  return !!p && p.total > 0 && p.earned_count === p.total
+}
 
 async function loadCockpit() {
   await useSettings().initialize()
-  const [rep, graph] = await Promise.all([
+  const [rep, graph, did] = await Promise.all([
     invoke<FullReputationAssertion[]>('get_reputation', { query: {} }).catch(() => []),
     invoke<PublicSkillGraph>('get_my_skill_graph').catch(() => null),
+    invoke<string | null>('get_local_did').catch(() => null),
   ])
   reputation.value = rep
   myGraph.value = graph
+  derivedStates.value = did
+    ? await invoke<DerivedSkillState[]>('list_derived_states', { subjectDid: did }).catch(() => [])
+    : []
+  // The conflict check goes over the network; goal paths are local and
+  // should not wait behind it.
+  const paths = loadGoalPaths()
   usernameConflict.value = await invoke<{ username: string; winner_did: string } | null>(
     'check_my_username_conflict',
   ).catch(() => null)
+  await paths
+}
+
+async function loadGoalPaths() {
   const entries = await Promise.all(
     goals.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
   )
@@ -96,6 +116,13 @@ async function loadCockpit() {
   for (const [id, p] of entries) if (p) map[id] = p
   goalPaths.value = map
 }
+
+// Goals load and change independently of this page; a goal added or
+// re-created after mount would otherwise have no path, and read as done.
+watch(
+  () => goals.value.map((g) => g.id).join(),
+  () => void loadGoalPaths(),
+)
 
 // Diagnostic log viewer (for iOS debugging). Dev-only — never shown in
 // production/alpha builds.
@@ -407,7 +434,9 @@ onMounted(async () => {
             <p v-if="pathNext(goalPaths[t.id])" class="mt-0.5 truncate text-xs text-muted-foreground">
               {{ $t('dashboard.home.goals.next', { name: pathNext(goalPaths[t.id]) }) }}
             </p>
-            <p v-else class="mt-0.5 truncate text-xs text-success">{{ $t('dashboard.home.goals.ready') }}</p>
+            <p v-else-if="pathDone(goalPaths[t.id])" class="mt-0.5 truncate text-xs text-success">
+              {{ $t('dashboard.home.goals.ready') }}
+            </p>
           </div>
         </button>
 
@@ -690,7 +719,7 @@ onMounted(async () => {
       <div v-if="selectedGoal">
         <LearningPathView v-if="goalPaths[selectedGoal.id]" :path="goalPaths[selectedGoal.id]!" />
         <p v-else class="py-8 text-center text-sm text-muted-foreground">
-          {{ $t('dashboard.home.goals.ready') }}
+          {{ $t('common.actions.loading') }}
         </p>
         <div class="mt-5 flex justify-end gap-2">
           <AppButton variant="outline" size="sm" @click="selectedGoal = null">
