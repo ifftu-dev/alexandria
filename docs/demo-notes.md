@@ -68,7 +68,7 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 
 ## 4. Verify without us
 
-**Credentials → Export**, then in a terminal: `node scripts/demo/verify-credential.mjs <file>`. A bare credential works too while Cloud runs: it names its revocation list by URL (`http://127.0.0.1:8787/status-lists/<issuer>/1`) and the script fetches it. Revoke in the app, run again, status flips to `revoked`.
+**Skills & Credentials → Export all**, then in a terminal: `node scripts/demo/verify-credential.mjs <file>`. Each credential names its revocation list by URL (`http://127.0.0.1:8787/status-lists/<issuer>/1`) and the script fetches it. Revoke a credential in the app, run the same command on the same file again: its status flips to `revoked`, and the output says the list was fetched from Cloud. A bare credential works too while Cloud runs.
 Say: "Node's standard library, JCS and Ed25519. No Alexandria code, no server." Paste the issuer DID into dev.uniresolver.io for the same key.
 
 ## 5. Validity pilot
