@@ -161,14 +161,14 @@ onBeforeUnmount(() => window.removeEventListener(DIRECTORIES_CHANGED, onDirector
       <p
         v-if="candidates.length > 0 && directoryCount === 0"
         data-testid="talent-index-framing"
-        class="mt-2 text-xs text-muted-foreground"
+        class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
       >
         {{ t('profile.talentIndex.notPublishedYet') }}
       </p>
       <p
         v-else-if="candidates.length > 0 && directoryCount !== null"
         data-testid="talent-index-framing"
-        class="mt-2 text-xs text-muted-foreground"
+        class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
       >
         {{ t('profile.talentIndex.publishSeparately') }}
       </p>
