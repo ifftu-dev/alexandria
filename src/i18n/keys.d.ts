@@ -2058,6 +2058,7 @@ export type MessageKey =
   | 'profile.talentIndex.notPublishedYet'
   | 'profile.talentIndex.nothingSelected'
   | 'profile.talentIndex.previewHeading'
+  | 'profile.talentIndex.publishSeparately'
   | 'profile.talentIndex.save'
   | 'profile.talentIndex.saveFailed'
   | 'profile.talentIndex.saved'
