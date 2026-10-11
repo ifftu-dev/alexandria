@@ -191,7 +191,7 @@ async function addJdGoal() {
         v-model="selectedKey"
         :disabled="busy"
         :aria-label="$t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label })"
-        class="min-h-11 w-full rounded-lg border border-border bg-input px-3 py-2 text-base sm:text-sm text-foreground"
+        class="min-h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-base sm:text-sm text-foreground"
       >
         <option value="" disabled>{{ $t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label }) }}</option>
         <option v-for="tpl in templates" :key="tpl.key" :value="tpl.key">{{ tpl.label }}</option>
@@ -225,7 +225,7 @@ async function addJdGoal() {
         v-else
         v-model="jdText"
         rows="6"
-        class="w-full rounded-lg border border-border bg-input px-3 py-2 text-base sm:text-sm text-foreground"
+        class="w-full rounded-lg border border-border bg-background px-3 py-2 text-base sm:text-sm text-foreground"
         :placeholder="$t(tab === 'learning_goal' ? 'goals.picker.goalPlaceholder' : 'goals.picker.jdPlaceholder')"
       />
       <AppButton

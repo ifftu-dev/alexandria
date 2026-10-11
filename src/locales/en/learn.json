@@ -10,7 +10,6 @@
     "viewSkills": "View my skills",
     "retake": "Retake",
     "verifyTitle": "Verify: {name}",
-    "selectAll": "Select all correct answers. You need {percent}% to pass.",
     "submit": "Submit assessment",
     "roleIntro": "Assessing for a sponsor role? Choose it before you start so its requirements apply from the first question.",
     "roleNone": "No specific role",
@@ -23,7 +22,10 @@
     "cameraConnecting": "Connecting camera…",
     "faceVerified": "Face verified",
     "noFaceDetected": "No face detected",
-    "cameraLost": "The camera turned off. This role requires it — turn it back on."
+    "cameraLost": "The camera turned off. This role requires it — turn it back on.",
+    "passMark": "You need {percent}% to pass.",
+    "chooseOne": "Choose one answer.",
+    "chooseAll": "Choose all that apply."
   },
   "player": {
     "courseFallback": "Course",

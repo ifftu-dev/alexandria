@@ -110,7 +110,7 @@ async function claim() {
     <textarea
       v-model="text"
       rows="6"
-      class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
+      class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
       :placeholder="$t('skills.bootstrap.textPlaceholder')"
     />
     <AppButton variant="outline" :loading="busy" :disabled="!text.trim()" @click="findSkills">

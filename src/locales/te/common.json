@@ -112,5 +112,11 @@
     "dayPlaceholder": "రోజు",
     "monthPlaceholder": "నెల",
     "yearPlaceholder": "సంవత్సరం"
+  },
+  "contentSync": {
+    "checking": "కొత్త కోర్సుల కోసం చూస్తోంది…",
+    "added": "{count} కొత్త కోర్సు | {count} కొత్త కోర్సులు",
+    "upToDate": "కోర్సులు తాజాగా ఉన్నాయి",
+    "failed": "కొత్త కోర్సులను చూడలేకపోయింది"
   }
 }

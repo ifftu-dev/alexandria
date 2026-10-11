@@ -258,7 +258,7 @@ function formatTime(iso: string): string {
 }
 .ec-error {
   margin: 0;
-  color: var(--color-danger, #b00);
+  color: var(--app-destructive);
   font-size: 0.9rem;
 }
 .ec-done {

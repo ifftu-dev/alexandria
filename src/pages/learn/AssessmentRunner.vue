@@ -20,7 +20,7 @@ import { useCameraPresence } from '@/composables/useCameraPresence'
 import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 import { AppButton } from '@/components/ui'
-import type { AttemptRoleTarget, StartedAttempt, GradeResult } from '@/types'
+import type { AttemptRoleTarget, StartedAttempt, GradeResult, SkillDetail } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +31,8 @@ const diagnostics = useDiagnostics()
 const { invoke } = useLocalApi()
 
 const skillId = String(route.params.skillId ?? '')
+// The id stands in until the taxonomy lookup answers (or if it cannot).
+const skillName = ref(skillId.replace(/^skill_/, '').replace(/_/g, ' '))
 const attempt = ref<StartedAttempt | null>(null)
 // selected[questionId] = Set of served option positions.
 const selected = ref<Record<string, Set<number>>>({})
@@ -139,9 +141,20 @@ async function begin(roleAssessmentId: string | null) {
   }
 }
 
+async function loadSkillName(): Promise<void> {
+  try {
+    const detail = await invoke<SkillDetail | null>('get_skill', { skillId })
+    if (!disposed && detail?.skill.name) skillName.value = detail.skill.name
+  } catch {
+    // Keep the id-derived fallback; the name is cosmetic.
+  }
+}
+
 onMounted(async () => {
   try {
-    const recovered = await invoke<GradeResult | null>('assessment_recover', { skillId, requestId: exchangeStart.value?.requestId ?? null })
+    const recovering = invoke<GradeResult | null>('assessment_recover', { skillId, requestId: exchangeStart.value?.requestId ?? null })
+    void loadSkillName()
+    const recovered = await recovering
     if (disposed) return
     if (recovered) { result.value = recovered; monitoringClosed = true; loading.value = false; return }
     roles.value = exchangeStart.value ? [] : await openRoles(skillId)
@@ -166,8 +179,13 @@ onUnmounted(() => {
   void stopMonitoring()
 })
 
-function toggle(qid: string, pos: number) {
+function toggle(qid: string, pos: number, multiple: boolean) {
   if (submitted.value || grading.value) return
+  if (!multiple) {
+    // A single-answer item scores zero with more than one selection.
+    selected.value = { ...selected.value, [qid]: new Set([pos]) }
+    return
+  }
   const set = selected.value[qid] ?? new Set<number>()
   set.has(pos) ? set.delete(pos) : set.add(pos)
   selected.value = { ...selected.value, [qid]: set }
@@ -224,7 +242,7 @@ async function submit() {
 
     <!-- Role chooser -->
     <div v-else-if="choosing && !attempt" class="space-y-4" data-testid="role-chooser">
-      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillId.replace('skill_', '').replace(/_/g, ' ') }) }}</h1>
+      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillName }) }}</h1>
       <p class="text-sm text-muted-foreground">{{ $t('learn.assessment.roleIntro') }}</p>
       <fieldset class="space-y-2">
         <label class="flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm">
@@ -267,6 +285,7 @@ async function submit() {
       >
         {{ result.passed ? '✓' : '—' }}
       </div>
+      <p class="text-sm font-medium text-muted-foreground" data-testid="result-skill">{{ skillName }}</p>
       <h1 class="text-xl font-bold text-foreground">
         {{ result.passed ? $t('learn.assessment.passed') : $t('learn.assessment.notPassedYet') }} — {{ Math.round(result.score * 100) }}%
       </h1>
@@ -285,9 +304,9 @@ async function submit() {
 
     <!-- Questions -->
     <template v-else-if="attempt">
-      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillId.replace('skill_', '').replace(/_/g, ' ') }) }}</h1>
+      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillName }) }}</h1>
       <p class="text-sm text-muted-foreground">
-        {{ $t('learn.assessment.selectAll', { percent: Math.round(attempt.pass_threshold * 100) }) }}
+        {{ $t('learn.assessment.passMark', { percent: Math.round(attempt.pass_threshold * 100) }) }}
       </p>
 
       <div v-if="attempt.role" class="space-y-1 rounded-lg border border-border bg-card p-3 text-sm" data-testid="role-banner">
@@ -306,17 +325,21 @@ async function submit() {
       </div>
 
       <div v-for="(q, qi) in attempt.questions" :key="q.id" class="rounded-xl border border-border p-4">
-        <p class="mb-3 font-medium text-foreground">{{ qi + 1 }}. {{ q.prompt }}</p>
+        <p class="font-medium text-foreground">{{ qi + 1 }}. {{ q.prompt }}</p>
+        <p class="mb-3 mt-1 text-xs text-muted-foreground">
+          {{ q.multiple ? $t('learn.assessment.chooseAll') : $t('learn.assessment.chooseOne') }}
+        </p>
         <label
           v-for="(opt, pi) in q.options"
           :key="pi"
           class="mb-1.5 flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm"
         >
           <input
-            type="checkbox"
+            :type="q.multiple ? 'checkbox' : 'radio'"
+            :name="q.multiple ? undefined : `q-${q.id}`"
             :disabled="grading || submitted"
             :checked="selected[q.id]?.has(pi)"
-            @change="toggle(q.id, pi)"
+            @change="toggle(q.id, pi, q.multiple)"
           />
           <span class="text-foreground">{{ opt }}</span>
         </label>

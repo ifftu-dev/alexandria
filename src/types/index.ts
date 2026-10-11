@@ -2156,6 +2156,8 @@ export interface ServedQuestion {
   id: string
   prompt: string
   options: string[]
+  /** More than one option may be correct; otherwise exactly one must be chosen. */
+  multiple: boolean
 }
 
 export interface StartedAttempt {

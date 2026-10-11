@@ -120,11 +120,17 @@ async function dismiss(thenOpenSettings: boolean) {
   flex-direction: column;
   gap: 0.75rem;
   padding: 1rem 1.1rem;
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--app-border);
   border-radius: 12px;
-  background: var(--color-surface, #fff);
-  color: inherit;
+  background: var(--app-card);
+  color: var(--app-card-foreground);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+/* Clear the desktop status bar (1.75rem). */
+@media (min-width: 768px) {
+  .fn {
+    bottom: 2.75rem;
+  }
 }
 .fn-body {
   display: flex;

@@ -112,5 +112,11 @@
     "dayPlaceholder": "দিন",
     "monthPlaceholder": "মাস",
     "yearPlaceholder": "বছর"
+  },
+  "contentSync": {
+    "checking": "নতুন কোর্স খোঁজা হচ্ছে…",
+    "added": "{count}টি নতুন কোর্স | {count}টি নতুন কোর্স",
+    "upToDate": "কোর্সগুলো হালনাগাদ আছে",
+    "failed": "নতুন কোর্স খোঁজা যায়নি"
   }
 }
