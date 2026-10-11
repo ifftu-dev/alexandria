@@ -11,6 +11,7 @@ import { useContentSync } from '@/composables/useContentSync'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 import { useGoals } from '@/composables/useGoals'
+import { useAccountStatus } from '@/composables/useAccountStatus'
 import { StatusBadge, AppButton, InfoTip, AppModal } from '@/components/ui'
 import { bloomFill } from '@/utils/bloom'
 import { sanitizeSvg } from '@/utils/sanitize'
@@ -32,6 +33,8 @@ const { status: p2pStatus, start: startP2P, startPolling } = useP2P()
 const { startContentSync, completeContentSync, failContentSync } = useContentSync()
 const { isMobilePlatform } = usePlatform()
 const { goals, pathFor } = useGoals()
+// Teaching impact means nothing to someone who has not taken the instructor role.
+const { isInstructor } = useAccountStatus()
 
 const loading = ref(true)
 const enrollments = ref<Enrollment[]>([])
@@ -186,6 +189,19 @@ const heroAction = computed<HeroAction>(() => {
       to: `/courses/${next.id}`,
     }
   }
+  // With no courses on this device, "browse courses" leads to an empty page.
+  // Point at the next skill on a goal path instead.
+  const nextSkill = courses.value.length === 0
+    ? goals.value.map((g) => pathNext(goalPaths.value[g.id])).find((n) => n !== null)
+    : null
+  if (nextSkill) {
+    return {
+      eyebrow: t('dashboard.home.hero.pathEyebrow'),
+      title: t('dashboard.home.hero.pathTitle', { skill: nextSkill }),
+      cta: t('dashboard.home.hero.pathCta'),
+      to: '/goals',
+    }
+  }
   return {
     eyebrow: t('dashboard.home.hero.exploreEyebrow'),
     title: t('dashboard.home.hero.exploreTitle'),
@@ -283,8 +299,8 @@ onMounted(async () => {
 
     <!-- ═══ Reputation stat band ═══ -->
     <section class="mb-6">
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div class="relative">
+      <div class="grid grid-cols-2 gap-3" :class="isInstructor ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
+        <div v-if="isInstructor" class="relative">
           <button class="stat-card w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--teaching">
@@ -413,12 +429,7 @@ onMounted(async () => {
           class="flex w-full items-center justify-between p-4 text-start"
           @click="graphExpanded = !graphExpanded"
         >
-          <div class="flex items-center gap-2">
-            <span class="text-base font-semibold text-foreground">{{ $t('dashboard.home.graph.title') }}</span>
-            <span class="text-xs text-muted-foreground">
-              {{ $t('dashboard.home.graph.proven', { count: skillsProven }, skillsProven) }}
-            </span>
-          </div>
+          <span class="text-base font-semibold text-foreground">{{ $t('dashboard.home.graph.title') }}</span>
           <span class="text-xs text-muted-foreground">{{ graphExpanded ? $t('dashboard.home.graph.hide') : $t('dashboard.home.graph.expand') }}</span>
         </button>
         <div v-if="graphExpanded" class="border-t border-border p-4">
