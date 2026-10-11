@@ -95,8 +95,9 @@ function skillLabel(id: string): string {
 
 /**
  * The kind of thinking a skill's credentials evidence (Bloom), or null when no
- * source is loaded. This leads the card; the 1–5 `level` is evidence strength
- * from aggregation and is shown as such, never as a mastery name.
+ * source is loaded. This leads the card; the 1–5 `level` is the score band
+ * from aggregation (how well the evidence scored, not how much of it there is;
+ * that is confidence) and is shown as such, never as a mastery name.
  */
 function provenBloom(s: DerivedSkillState): string | null {
   const rank = provenBloomBySkill(resolvedSources(s)).get(s.skill_id)
@@ -418,7 +419,7 @@ async function exportBundle() {
           <p class="truncate text-sm font-semibold text-foreground" :title="skillLabel(s.skill_id)">
             {{ skillLabel(s.skill_id) }}
           </p>
-          <p class="text-xs text-muted-foreground">{{ $t('credentials.card.evidenceStrength', { level: s.level }) }}</p>
+          <p class="text-xs text-muted-foreground">{{ $t('credentials.card.score', { level: s.level }) }}</p>
 
           <!-- Confidence bar -->
           <div class="mt-3">

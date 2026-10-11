@@ -397,7 +397,7 @@ export type MessageKey =
   | 'courses.video.unablePlay'
   | 'credentials.card.confidence'
   | 'credentials.card.evidence'
-  | 'credentials.card.evidenceStrength'
+  | 'credentials.card.score'
   | 'credentials.card.sources'
   | 'credentials.card.trust'
   | 'credentials.detail.assurance'

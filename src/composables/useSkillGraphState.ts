@@ -70,7 +70,7 @@ export function useSkillGraphState() {
 /**
  * Highest Bloom rank (0 = remember … 5 = create) each skill's credentials
  * evidence. A skill credential's `level` claim is that rank; it is not the
- * 1–5 evidence strength aggregation reports, and the two are shown apart.
+ * 1–5 score band aggregation reports, and the two are shown apart.
  */
 export function provenBloomBySkill(
   creds: VerifiableCredential[],
