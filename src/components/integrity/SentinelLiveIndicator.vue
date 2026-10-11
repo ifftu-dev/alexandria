@@ -106,19 +106,24 @@ const calm = computed(() => notices.value.length === 0)
   z-index: 40;
   max-width: 18rem;
 }
+/* Clear the desktop status bar (1.75rem) so the chip never sits on it. */
+@media (min-width: 768px) {
+  .sli {
+    bottom: 2.75rem;
+  }
+}
 .sli-chip {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0.7rem;
   border-radius: 999px;
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
-  background: var(--color-surface, rgba(255, 255, 255, 0.9));
-  color: inherit;
+  border: 1px solid var(--app-border);
+  background: var(--app-card);
+  color: var(--app-card-foreground);
   font: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  backdrop-filter: blur(6px);
 }
 .sli-dot {
   width: 7px;
@@ -140,10 +145,10 @@ const calm = computed(() => notices.value.length === 0)
   margin-top: 0.5rem;
   padding: 0.7rem 0.8rem;
   border-radius: 10px;
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
-  background: var(--color-surface, rgba(255, 255, 255, 0.96));
+  border: 1px solid var(--app-border);
+  background: var(--app-card);
+  color: var(--app-card-foreground);
   font-size: 0.8rem;
-  backdrop-filter: blur(6px);
 }
 .sli-h {
   margin: 0 0 0.35rem;

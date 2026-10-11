@@ -123,16 +123,16 @@ watch([day, month, year], () => {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
 }
 .bd-select {
   appearance: none;
   width: 100%;
   padding: 0.5rem 1.75rem 0.5rem 0.625rem;
   font-size: 0.875rem;
-  color: hsl(var(--foreground));
-  background-color: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
+  color: var(--app-foreground);
+  background-color: var(--app-background);
+  border: 1px solid var(--app-input);
   border-radius: 0.5rem;
   /* chevron */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
@@ -144,7 +144,7 @@ watch([day, month, year], () => {
 }
 .bd-select:focus {
   outline: none;
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.4);
+  border-color: var(--app-primary);
+  box-shadow: var(--focus-ring);
 }
 </style>

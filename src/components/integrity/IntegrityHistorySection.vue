@@ -391,7 +391,7 @@ function fmtDate(iso: string | null): string {
 }
 .ih-error {
   margin: 0;
-  color: var(--color-danger, #b00);
+  color: var(--app-destructive);
 }
 .ih-release {
   margin-top: 0.9rem;
@@ -412,7 +412,7 @@ function fmtDate(iso: string | null): string {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
   border-radius: 6px;
-  background: var(--color-surface, transparent);
+  background: var(--app-card);
   color: inherit;
 }
 /* Not styled as an error. Nothing has gone wrong — this is what the control
