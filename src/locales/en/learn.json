@@ -11,7 +11,19 @@
     "retake": "Retake",
     "verifyTitle": "Verify: {name}",
     "selectAll": "Select all correct answers. You need {percent}% to pass.",
-    "submit": "Submit assessment"
+    "submit": "Submit assessment",
+    "roleIntro": "Assessing for a sponsor role? Choose it before you start so its requirements apply from the first question.",
+    "roleNone": "No specific role",
+    "roleCameraRequired": "Camera required",
+    "roleCameraNote": "This role requires the camera for the whole attempt. Turn it on to start; the credential is refused if coverage falls short.",
+    "cameraReady": "Camera is on.",
+    "cameraEnable": "Turn on camera",
+    "startAttempt": "Start assessment",
+    "roleBanner": "Assessing for {role} at {org}.",
+    "cameraConnecting": "Connecting camera…",
+    "faceVerified": "Face verified",
+    "noFaceDetected": "No face detected",
+    "cameraLost": "The camera turned off. This role requires it — turn it back on."
   },
   "player": {
     "courseFallback": "Course",

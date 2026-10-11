@@ -90,10 +90,6 @@
         "name": "粘贴",
         "description": "统计你粘贴了多少文本。粘贴大段文本会被标记。"
       },
-      "devtools": {
-        "name": "开发者工具",
-        "description": "察觉浏览器的开发者工具何时被打开。"
-      },
       "facePresent": {
         "name": "摄像头检查",
         "description": "如果你选择开启摄像头，Sentinel 每隔几秒检查一次你是否仍在。"
@@ -113,17 +109,33 @@
         "description": "切换离开过于频繁",
         "trigger": "一次检查中切换超过 10 次"
       },
+      "appSwitch": {
+        "description": "切换到了其他应用",
+        "trigger": "操作系统将焦点移到了另一个应用程序"
+      },
       "pasteDetected": {
         "description": "粘贴了大段文本",
         "trigger": "粘贴超过 500 个字符"
       },
-      "devtoolsDetected": {
-        "description": "打开了浏览器开发者工具",
-        "trigger": "开发者工具检查结果为阳性"
+      "pasteClassifierAnomaly": {
+        "description": "答案看起来是粘贴或机器输入的",
+        "trigger": "Sentinel 粘贴检测器评分不低于 0.95"
+      },
+      "pasteClassifierCritical": {
+        "description": "答案几乎可以肯定是粘贴或机器输入的",
+        "trigger": "Sentinel 粘贴检测器评分不低于 0.99"
       },
       "botSuspected": {
         "description": "移动看起来是自动化的",
         "trigger": "鼠标运动几乎没有自然变化"
+      },
+      "lowIntegrity": {
+        "description": "诚信度分数跌破安全线",
+        "trigger": "整体分数低于 0.40"
+      },
+      "behaviorShift": {
+        "description": "行为大幅偏离你的常态模式",
+        "trigger": "匹配分数低于 0.35"
       },
       "noFace": {
         "description": "摄像头中未见人脸",
@@ -133,17 +145,93 @@
         "description": "摄像头中出现不止一张人脸",
         "trigger": "一次检查中出现不止一张人脸"
       },
-      "multiAccount": {
-        "description": "此设备关联了不止一个账户",
-        "trigger": "同一设备在不止一个账户上被发现"
+      "faceMismatch": {
+        "description": "人脸与已登记的不一致",
+        "trigger": "摄像头检查看到的人与登记者不同"
       },
-      "lowIntegrity": {
-        "description": "诚信度分数跌破安全线",
-        "trigger": "整体分数低于 0.40"
+      "prolongedAbsence": {
+        "description": "离开摄像头一段时间",
+        "trigger": "连续 5 次检查未检测到人脸（约 15 秒）"
       },
-      "behaviorShift": {
-        "description": "行为大幅偏离你的常态模式",
-        "trigger": "匹配分数低于 0.35"
+      "frequentAbsence": {
+        "description": "经常离开摄像头",
+        "trigger": "一个窗口内超过半数的检查未检测到人脸"
+      },
+      "gazeWander": {
+        "description": "频繁将视线移出屏幕",
+        "trigger": "超过 30% 的摄像头检查估计视线在屏幕外"
+      },
+      "gazeOccluded": {
+        "description": "眼睛被遮挡",
+        "trigger": "超过 40% 的摄像头检查无法获得可用的人脸几何信息"
+      },
+      "deviceGlance": {
+        "description": "反复向下看某物",
+        "trigger": "一个窗口内三次或以上向下看向屏幕外"
+      },
+      "virtualCamera": {
+        "description": "摄像头是虚拟设备",
+        "trigger": "视频设备名称与已知的虚拟摄像头产品匹配"
+      },
+      "spoofSuspected": {
+        "description": "摄像头中的人脸像照片、屏幕或回放",
+        "trigger": "一个窗口内至少 3 次活体检测中超过半数被判为疑似伪造"
+      },
+      "externalDisplay": {
+        "description": "连接了第二台显示器",
+        "trigger": "连接了多台显示器；仅记录，不扣分"
+      },
+      "displayChange": {
+        "description": "会话中显示设置发生变化",
+        "trigger": "添加、移除、镜像了显示器，或切换了分屏"
+      },
+      "splitScreen": {
+        "description": "其他应用共享屏幕",
+        "trigger": "分屏、侧拉、台前调度、多窗口或画中画处于启用状态"
+      },
+      "screenCaptured": {
+        "description": "屏幕正在被录制或镜像",
+        "trigger": "系统报告屏幕捕获，或两台显示器显示相同画面"
+      },
+      "hiddenOverlay": {
+        "description": "有窗口在躲避屏幕捕获",
+        "trigger": "另一个程序打开了排除捕获、override-redirect 或点击穿透的窗口（桌面）"
+      },
+      "cheatToolProcess": {
+        "description": "面试作弊工具正在运行",
+        "trigger": "测评悬浮窗监视名单中的程序正在运行（桌面）"
+      },
+      "unauthorizedProcess": {
+        "description": "检测到远程控制、虚拟摄像头或虚拟机",
+        "trigger": "远程桌面主机、虚拟摄像头驱动或虚拟机客户端代理正在运行（桌面）"
+      },
+      "aiAssistantRunning": {
+        "description": "桌面 AI 助手已打开",
+        "trigger": "已知的 AI 助手应用正在运行；仅记录，不扣分"
+      },
+      "screenShareRunning": {
+        "description": "屏幕共享应用已打开",
+        "trigger": "会议或屏幕共享应用正在运行；仅记录，不扣分"
+      },
+      "phantomHotkey": {
+        "description": "快捷键发送到了其他应用",
+        "trigger": "Cmd/Ctrl/Alt 组合键到达了系统，但在测评获得焦点时未到达测评"
+      },
+      "phantomHotkeyRepeated": {
+        "description": "快捷键持续发送到其他应用",
+        "trigger": "一个窗口内出现三次或以上此类快捷键"
+      },
+      "foreignAccessibilityService": {
+        "description": "其他应用的无障碍服务已开启",
+        "trigger": "启用了非系统的无障碍服务（Android）"
+      },
+      "debugBridgeEnabled": {
+        "description": "已启用开发者调试",
+        "trigger": "USB 或无线调试已开启（Android）"
+      },
+      "obscuredTouch": {
+        "description": "有触摸穿过了悬浮窗",
+        "trigger": "在另一个窗口覆盖测评时收到了点击（Android）"
       }
     }
   },
@@ -265,7 +353,7 @@
     "alreadyEnrolled": "（已设置——可跳过）",
     "activeTitle": "已在保护你，无需设置：",
     "activePaste": "Sentinel 粘贴检测器——识别粘贴的答案和打字机器人，内置于每份副本",
-    "activeRules": "基础检查——停留在页面上、开发者工具、粘贴量以及不自然的移动",
+    "activeRules": "基础检查——停留在页面上、粘贴量以及不自然的移动",
     "privacyNote": "一切都留在此设备上。你的原始按键、鼠标移动和视频绝不会被保存。Sentinel 所学到的内容以加密方式存储在你的设备上。",
     "begin": "开始",
     "typingTitle": "打字设置",
@@ -292,10 +380,18 @@
     "awarenessTabBody": "追踪你何时切换离开测评以及离开了多久。偶尔切换没关系——频繁切换会标记该会话。",
     "awarenessClipboardTitle": "粘贴",
     "awarenessClipboardBody": "察觉粘贴事件并统计粘贴的字符数。少量粘贴没关系——把大段文本粘贴进答案会引发标记。",
-    "awarenessDevtoolsTitle": "开发者工具",
-    "awarenessDevtoolsBody": "一项快速检查会察觉浏览器的开发者工具是否打开。这是一个弱信号——它不会判你失败，但会计入整体分数。",
     "awarenessFingerprintTitle": "设备检查",
     "awarenessFingerprintBody": "此设备的一个私密指纹（不含个人数据）有助于发现同一设备被不同账户使用。",
+    "awarenessDisplayTitle": "屏幕与分屏",
+    "awarenessDisplayBody": "留意第二个显示器、屏幕镜像或录制，以及与其他应用分屏。第二个显示器只会被记录；评估期间分屏会被标记。",
+    "awarenessOverlayTitle": "隐藏窗口与已知工具",
+    "awarenessOverlayBody": "在桌面端，查找对屏幕捕获隐藏的窗口以及一份简短名单中的程序：评估悬浮工具、远程控制主机、虚拟摄像头。只保留匹配项，绝不保留你的完整窗口或程序列表。",
+    "awarenessHotkeyTitle": "发往其他应用的键盘快捷键",
+    "awarenessHotkeyBody": "评估期间，Sentinel 可以留意系统交给其他应用而非本应用的快捷键组合（含 Cmd、Ctrl 或 Alt）。普通输入绝不会被记录，只记录组合名。macOS 上需要授权；可在此授予，绝不会在评估中途弹出。",
+    "hotkeyAllow": "允许监测快捷键",
+    "hotkeyAllowed": "此设备已允许监测快捷键。",
+    "hotkeyUnavailable": "此平台不可用。其他检查仍会运行。",
+    "hotkeyDenied": "尚未授权。可在“系统设置 → 隐私与安全性 → 辅助功能”中允许后返回。",
     "cameraTitle": "人脸检查（可选）",
     "cameraBody": "你可以开启摄像头，以在测评期间确认你在场。视频完全在你的设备上处理——绝不会发送任何图像或视频。",
     "cameraHasEnrollment": "你已设置好人脸检查。再次开启摄像头会替换它；跳过则保留现有的。",
@@ -371,12 +467,17 @@
     "rowPastedChars": "粘贴的字符",
     "rowTabSwitches": "标签切换",
     "rowUnfocused": "失焦",
-    "rowDevtools": "开发者工具",
     "rowEnvChanged": "环境已改变",
     "rowAppFocusLost": "应用失去焦点",
     "rowSwitchedTo": "切换到",
+    "rowDisplays": "显示器",
+    "rowAndroidEnv": "安卓环境",
+    "rowOverlays": "隐藏悬浮窗",
+    "rowProcesses": "受监视进程",
+    "rowHotkeys": "幽灵快捷键",
     "rowFaces": "人脸（实时）",
     "rowFacePresent": "人脸在场",
+    "rowCameraDevice": "摄像头设备",
     "rowFaceConsistency": "人脸匹配",
     "rowFaceSimMatch": "人脸相似度 / 匹配",
     "rowSessionChecks": "会话检查",
@@ -394,6 +495,8 @@
     "valYes": "是",
     "valNo": "否",
     "valNa": "不适用",
+    "rowLiveness": "活体检测",
+    "rowAttestation": "设备认证",
     "idleNote": "No assessment is running. Camera preview works here; typing, mouse, and integrity signals start when you begin an assessment."
   },
   "evidence": {

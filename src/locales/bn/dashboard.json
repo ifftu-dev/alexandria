@@ -125,6 +125,7 @@
       "emptyBody": "একটি সংস্থার জন্য একটি তৈরি করুন।",
       "requiresClean": "একটি নিষ্কলুষ সেশন প্রয়োজন",
       "minIntegrity": "সর্বনিম্ন সততা {value}",
+      "minCameraCoverage": "ন্যূনতম ক্যামেরা কভারেজ {value}",
       "publish": "প্রকাশ করুন",
       "archive": "সংরক্ষণাগারে রাখুন"
     },
@@ -137,7 +138,15 @@
       "submitting": "প্রদান করা হচ্ছে…",
       "issued": "ক্রেডেনশিয়াল প্রদান করা হয়েছে",
       "assurance": "নিশ্চয়তা:",
-      "integrity": "সততা {value}"
+      "integrity": "সততা {value}",
+      "attemptsTitle": "এই ভূমিকার প্রয়াসগুলি",
+      "attemptsLoading": "প্রয়াস লোড হচ্ছে…",
+      "attemptsEmpty": "এই ভূমিকার জন্য এখনও কোনো শিক্ষার্থী প্রয়াস করেনি।",
+      "attemptPassed": "উত্তীর্ণ",
+      "attemptFailed": "অনুত্তীর্ণ",
+      "attemptOpen": "চলছে",
+      "attemptScore": "স্কোর {value}%",
+      "attemptUse": "ব্যবহার করুন"
     },
     "orgModal": {
       "title": "নতুন সংস্থা",
@@ -156,6 +165,7 @@
       "minIntegrity": "সর্বনিম্ন সততা",
       "maxCritical": "সর্বোচ্চ গুরুতর",
       "maxWarning": "সর্বোচ্চ সতর্কতা",
+      "minCameraCoverage": "সর্বনিম্ন ক্যামেরা কভারেজ (0–1)",
       "requireClean": "একটি নিষ্কলুষ সেশন আবশ্যক করুন",
       "assuranceLabel": "প্রয়োজনীয় নিশ্চয়তার স্তর",
       "assuranceNone": "(কিছু নয়)"

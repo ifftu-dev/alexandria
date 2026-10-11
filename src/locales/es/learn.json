@@ -11,7 +11,19 @@
     "retake": "Repetir",
     "verifyTitle": "Verificar: {name}",
     "selectAll": "Selecciona todas las respuestas correctas. Necesitas un {percent}% para aprobar.",
-    "submit": "Enviar evaluación"
+    "submit": "Enviar evaluación",
+    "roleIntro": "¿Te evalúas para un puesto patrocinado? Elígelo antes de empezar para que sus requisitos se apliquen desde la primera pregunta.",
+    "roleNone": "Ningún puesto en concreto",
+    "roleCameraRequired": "Cámara obligatoria",
+    "roleCameraNote": "Este puesto exige la cámara durante todo el intento. Actívala para empezar; la credencial se rechaza si la cobertura es insuficiente.",
+    "cameraReady": "La cámara está activada.",
+    "cameraEnable": "Activar cámara",
+    "startAttempt": "Empezar evaluación",
+    "roleBanner": "Evaluación para {role} en {org}.",
+    "cameraConnecting": "Conectando la cámara…",
+    "faceVerified": "Rostro verificado",
+    "noFaceDetected": "No se detecta ningún rostro",
+    "cameraLost": "La cámara se apagó. Este puesto la exige: vuelve a activarla."
   },
   "player": {
     "courseFallback": "Curso",

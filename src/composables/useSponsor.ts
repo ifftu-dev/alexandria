@@ -4,6 +4,7 @@ import type {
   CreateRoleAssessmentRequest,
   Organization,
   RoleAssessment,
+  RoleAttemptSummary,
   VerifiableCredential,
 } from '@/types'
 
@@ -78,6 +79,13 @@ export function useSponsor() {
     return ra
   }
 
+  /** Learner attempts made for a role, newest first. */
+  async function listRoleAttempts(roleAssessmentId: string) {
+    return run(() =>
+      invoke<RoleAttemptSummary[]>('list_role_attempts', { roleAssessmentId }),
+    )
+  }
+
   async function issueRoleCredential(
     roleAssessmentId: string,
     subject: string,
@@ -103,6 +111,7 @@ export function useSponsor() {
     getRoleAssessment,
     createRoleAssessment,
     setRoleAssessmentStatus,
+    listRoleAttempts,
     issueRoleCredential,
   }
 }

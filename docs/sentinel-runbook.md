@@ -29,6 +29,8 @@
 | Verify holdout gate | `tools/sentinel-train/` | `python eval.py` |
 | Ship a model | `src-tauri/resources/sentinel/` | Replace the artifact and its SHA-256 lockfile in a release |
 | Check what a client runs | Tauri app or IPC | `sentinel_paste_classifier_info` |
+| Re-export the liveness model | `scripts/sentinel/` | `python export-minifasnet.py <Silent-Face-Anti-Spoofing checkout> <out.onnx>` (see Procedure 4) |
+| Enable device attestation | Apple developer portal, Play Console, `preprod.json` | See Procedure 5 |
 
 ---
 
@@ -123,6 +125,45 @@ attack class), the golden hashes will fail. To bump cleanly:
    distribution has shifted.
 
 ---
+
+## Procedure 4: Re-export the liveness model
+
+The bundled `minifasnet-v2-80.onnx` is the Apache-2.0 `2.7_80x80_MiniFASNetV2.pth` from minivision-ai's Silent-Face-Anti-Spoofing with softmax folded in. To re-export (new upstream weights, new opset, or a tract parser change):
+
+```bash
+git clone --depth 1 https://github.com/minivision-ai/Silent-Face-Anti-Spoofing /tmp/sfas
+uv venv --python 3.12 /tmp/exportenv && uv pip install --python /tmp/exportenv/bin/python torch onnx
+/tmp/exportenv/bin/python scripts/sentinel/export-minifasnet.py /tmp/sfas src-tauri/resources/sentinel/minifasnet-v2-80.onnx
+cd src-tauri/resources/sentinel && shasum -a 256 minifasnet-v2-80.onnx > minifasnet-v2-80.onnx.sha256
+```
+
+The script prints the softmax for an all-zero and an all-128 input; paste both into `REF_ZEROS` / `REF_MID` in `src-tauri/src/sentinel/liveness.rs` and run `cargo test -p alexandria-node sentinel::liveness`. The cv2-pipeline parity test needs no update unless the preprocess changes. Commit artifact, lockfile and reference values together; CI verifies the lockfile.
+
+## Procedure 5: Enable device attestation
+
+`device_attested` needs one-time platform setup; until it is done, sessions stay `local` and nothing fails.
+
+**iOS (App Attest).**
+
+1. In the Apple developer portal, enable the **App Attest** capability on the App ID `org.alexandria.node` (team `VLMNL3V44U`).
+2. The project already carries the entitlement `com.apple.developer.devicecheck.appattest-environment = production`; Xcode's automatic signing picks up the regenerated profile.
+3. Verify on a physical device (the simulator cannot attest): start an assessment and open **Sentinel Dev**; the `attestation` row reads `device_attested`. Debug builds attest in the development environment, which only debug builds accept.
+
+**Android (Play Integrity).**
+
+1. The app must be listed in Play Console (an internal testing track is enough). Sideloaded builds get `CLOUD_PROJECT_NUMBER_IS_INVALID` or an unrecognised-app verdict and stay `local` by design.
+2. Play Console → App integrity → Play Integrity API → **Link a Cloud project**.
+3. On the same page, under response encryption, choose **Manage and download my response encryption keys** and download them.
+4. Paste the two base64 values into `src-tauri/resources/networks/preprod.json`:
+
+   ```json
+   "play_integrity_response_keys": {
+     "decryption_key_b64": "<AES key>",
+     "verification_key_b64": "<EC public key>"
+   }
+   ```
+
+5. `cargo test -p alexandria-node --lib -- network_profile` refuses a key that is not 32 bytes or not a P-256 public key. The keys let a client read verdicts, not forge them.
 
 ## Threat-model checklist
 

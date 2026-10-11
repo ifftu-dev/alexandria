@@ -91,6 +91,23 @@ CFStringRef SCNetworkInterfaceGetInterfaceType(void *iface) { return NULL; }
 CFStringRef SCNetworkInterfaceGetLocalizedDisplayName(void *iface) { return NULL; }
 CFDictionaryRef SCNetworkProtocolGetConfiguration(void *protocol) { return NULL; }
 
+// `system-configuration` 0.6 (netwatch / iroh dependency refresh) also calls
+// the proxy, reachability and network-set APIs. Reachability does exist on
+// iOS, but the iOS 27 SDK's SystemConfiguration.tbd only lists arm64e
+// targets, so an arm64 link cannot resolve any of it from the framework.
+// No-op stubs: callers get NULL / 0 and fall back (iroh never needs them).
+CFDictionaryRef SCDynamicStoreCopyProxies(void *store) { return NULL; }
+void *SCNetworkReachabilityCreateWithAddress(CFAllocatorRef a, const void *address) { return NULL; }
+void *SCNetworkReachabilityCreateWithAddressPair(CFAllocatorRef a, const void *local, const void *remote) { return NULL; }
+void *SCNetworkReachabilityCreateWithName(CFAllocatorRef a, const char *name) { return NULL; }
+unsigned char SCNetworkReachabilityGetFlags(void *target, uint32_t *flags) { if (flags) *flags = 0; return 0; }
+unsigned char SCNetworkReachabilityScheduleWithRunLoop(void *target, void *rl, CFStringRef mode) { return 0; }
+unsigned char SCNetworkReachabilityUnscheduleFromRunLoop(void *target, void *rl, CFStringRef mode) { return 0; }
+unsigned char SCNetworkServiceGetEnabled(void *service) { return 0; }
+CFStringRef SCNetworkServiceGetServiceID(void *service) { return NULL; }
+void *SCNetworkSetCopyCurrent(void *prefs) { return NULL; }
+void *SCNetworkSetGetServiceOrder(void *set) { return NULL; }
+
 const CFStringRef kSCDynamicStoreDomainState = NULL;
 const CFStringRef kSCDynamicStorePropNetPrimaryService = NULL;
 const CFStringRef kSCEntNetDNS = NULL;
@@ -98,6 +115,27 @@ const CFStringRef kSCEntNetIPv4 = NULL;
 const CFStringRef kSCNetworkProtocolTypeIPv4 = NULL;
 const CFStringRef kSCNetworkProtocolTypeIPv6 = NULL;
 const CFStringRef kSCPropNetDNSServerAddresses = NULL;
+// `system-configuration` 0.6 matches every kSCNetworkInterfaceType* constant in
+// `from_cfstring`. The iOS 27 SDK's SystemConfiguration.tbd exports them for
+// arm64e only, so an arm64 link cannot resolve them from the framework; NULL
+// stubs turn the match into a no-match (iroh never needs interface types).
+const CFStringRef kSCNetworkInterfaceType6to4 = NULL;
+const CFStringRef kSCNetworkInterfaceTypeBluetooth = NULL;
+const CFStringRef kSCNetworkInterfaceTypeBond = NULL;
+const CFStringRef kSCNetworkInterfaceTypeBridge = NULL;
+const CFStringRef kSCNetworkInterfaceTypeEthernet = NULL;
+const CFStringRef kSCNetworkInterfaceTypeFireWire = NULL;
+const CFStringRef kSCNetworkInterfaceTypeIEEE80211 = NULL;
+const CFStringRef kSCNetworkInterfaceTypeIPSec = NULL;
+const CFStringRef kSCNetworkInterfaceTypeIPv4 = NULL;
+const CFStringRef kSCNetworkInterfaceTypeIrDA = NULL;
+const CFStringRef kSCNetworkInterfaceTypeL2TP = NULL;
+const CFStringRef kSCNetworkInterfaceTypeModem = NULL;
+const CFStringRef kSCNetworkInterfaceTypePPP = NULL;
+const CFStringRef kSCNetworkInterfaceTypePPTP = NULL;
+const CFStringRef kSCNetworkInterfaceTypeSerial = NULL;
+const CFStringRef kSCNetworkInterfaceTypeVLAN = NULL;
+const CFStringRef kSCNetworkInterfaceTypeWWAN = NULL;
 "#,
         )
         .expect("failed to write SC stubs");
@@ -105,6 +143,10 @@ const CFStringRef kSCPropNetDNSServerAddresses = NULL;
         cc::Build::new().file(&stub_path).compile("sc_stubs");
 
         // Link AudioToolbox framework for cpal/coreaudio audio I/O on iOS.
+        // SystemConfiguration for the SCNetworkReachability symbols the
+        // `system-configuration` sys crate uses; its own link attribute is
+        // macOS-only.
+        println!("cargo:rustc-link-lib=framework=SystemConfiguration");
         println!("cargo:rustc-link-lib=framework=AudioToolbox");
 
         // Link VideoToolbox + CoreMedia + CoreVideo for H.264 encoding/decoding

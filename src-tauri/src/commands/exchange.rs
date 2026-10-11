@@ -169,6 +169,7 @@ pub async fn exchange_start_assessment(
                     db,
                     request.skill_id,
                     Some(integrity_session_id),
+                    None,
                     seed,
                     attempt_id,
                     now,

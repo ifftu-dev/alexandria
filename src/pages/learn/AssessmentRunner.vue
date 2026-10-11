@@ -4,21 +4,28 @@
 // are drawn + shuffled per attempt and graded host-side (the answer key never
 // reaches the client). Passing issues an integrity-bound AssessmentCredential
 // that raises the skill's confidence.
-import { onMounted, onUnmounted, ref } from 'vue'
+//
+// When published sponsor roles cover the skill, the learner picks the role
+// they are assessing for before the attempt starts. A role whose policy
+// requires camera coverage has the camera turned on first, so the
+// requirement applies from the first question instead of surfacing as a
+// refusal at issuance.
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAssessment } from '@/composables/useAssessment'
+import { useCameraPresence } from '@/composables/useCameraPresence'
 import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 import { AppButton } from '@/components/ui'
-import type { StartedAttempt, GradeResult } from '@/types'
+import type { AttemptRoleTarget, StartedAttempt, GradeResult } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const sentinel = useSentinel()
 const sentinelView = useSentinelView()
-const { startAttempt, saveDraft, submitAnswers, grade } = useAssessment()
+const { openRoles, startAttempt, saveDraft, submitAnswers, grade } = useAssessment()
 const diagnostics = useDiagnostics()
 const { invoke } = useLocalApi()
 
@@ -38,6 +45,39 @@ let monitoringClosed = false
 let cleanupTask: Promise<void> | null = null
 let unregisterDiagnostics: (() => void) | null = null
 
+// An exchange-driven attempt (directory request) has no role chooser: the
+// requesting organisation already fixed what is being assessed.
+const exchangeStart = computed(() =>
+  typeof route.query.request === 'string' && typeof route.query.directory === 'string'
+    ? { directoryUrl: route.query.directory, requestId: route.query.request }
+    : null,
+)
+
+// Role chooser (only when at least one published role covers the skill).
+const roles = ref<AttemptRoleTarget[]>([])
+const choosing = ref(false)
+const selectedRoleId = ref('')
+const selectedRole = computed(() =>
+  roles.value.find(r => r.role_assessment_id === selectedRoleId.value) ?? null,
+)
+
+const cameraVideoRef = ref<HTMLVideoElement | null>(null)
+const {
+  stream: cameraStream,
+  starting: cameraStarting,
+  error: cameraError,
+  lost: cameraLost,
+  lastFacePresent,
+  enable: enableCamera,
+  bind: bindCamera,
+  dispose: disposeCamera,
+} = useCameraPresence(sentinel, cameraVideoRef)
+
+const cameraRequired = computed(() =>
+  attempt.value ? !!attempt.value.role?.camera_required : !!selectedRole.value?.camera_required,
+)
+const startBlocked = computed(() => loading.value || (cameraRequired.value && !cameraStream.value))
+
 function currentAnswers() {
   if (!attempt.value) return []
   return attempt.value.questions.map(q => ({
@@ -50,6 +90,7 @@ function stopMonitoring(): Promise<void> {
   if (monitoringClosed) return Promise.resolve()
   if (cleanupTask) return cleanupTask
   closing.value = true
+  disposeCamera()
   cleanupTask = sentinel.stop().then(() => { cleanupError.value = ''; monitoringClosed = true }).catch((e: unknown) => {
     if (!disposed) cleanupError.value = String(e)
     else console.warn('Assessment monitoring cleanup failed', e)
@@ -60,25 +101,28 @@ function stopMonitoring(): Promise<void> {
   return cleanupTask
 }
 
-onMounted(async () => {
+async function begin(roleAssessmentId: string | null) {
+  if (disposed || attempt.value) return
+  loading.value = true
+  error.value = ''
   try {
-    const recovered = await invoke<GradeResult | null>('assessment_recover', { skillId, requestId: typeof route.query.request === 'string' ? route.query.request : null })
-    if (disposed) return
-    if (recovered) { result.value = recovered; monitoringClosed = true; return }
     // Auto-activate Sentinel for the assessment (standalone, no enrollment).
-    await sentinel.start(null)
+    // A camera the learner already turned on is opted in from the start.
+    await sentinel.start(null, cameraStream.value !== null)
     if (disposed) return
     const sessionId = sentinel.getSessionId()
     if (!sessionId || !sentinel.isActive.value) throw new Error('Assessment monitoring is not active')
-    const started = typeof route.query.request === 'string' && typeof route.query.directory === 'string'
-      ? await invoke<StartedAttempt>('exchange_start_assessment', { directoryUrl: route.query.directory, requestId: route.query.request, integritySessionId: sessionId })
-      : await startAttempt(skillId, sessionId)
+    const started = exchangeStart.value
+      ? await invoke<StartedAttempt>('exchange_start_assessment', { ...exchangeStart.value, integritySessionId: sessionId })
+      : await startAttempt(skillId, sessionId, roleAssessmentId)
     if (disposed) return
     attempt.value = started
+    choosing.value = false
     for (const q of attempt.value.questions) selected.value[q.id] = new Set()
     for (const answer of attempt.value.draft_answers) {
       selected.value[answer.question_id] = new Set(answer.selected)
     }
+    bindCamera()
     unregisterDiagnostics = diagnostics.registerEntryPreparation(async () => {
       if (attempt.value && !result.value && !submitted.value) {
         await saveDraft(attempt.value.attempt_id, currentAnswers())
@@ -92,6 +136,26 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+}
+
+onMounted(async () => {
+  try {
+    const recovered = await invoke<GradeResult | null>('assessment_recover', { skillId, requestId: exchangeStart.value?.requestId ?? null })
+    if (disposed) return
+    if (recovered) { result.value = recovered; monitoringClosed = true; loading.value = false; return }
+    roles.value = exchangeStart.value ? [] : await openRoles(skillId)
+  } catch (e) {
+    if (!disposed) error.value = String(e)
+    loading.value = false
+    return
+  }
+  if (disposed) return
+  if (roles.value.length === 0) {
+    await begin(null)
+    return
+  }
+  choosing.value = true
+  loading.value = false
 })
 
 onUnmounted(() => {
@@ -152,8 +216,45 @@ async function submit() {
 
     <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">{{ $t('learn.assessment.preparing') }}</div>
 
-    <div v-else-if="error && !attempt" class="rounded-lg border border-error/40 bg-error/5 p-4 text-sm text-error">
+    <div v-else-if="error && !attempt && !choosing" class="rounded-lg border border-error/40 bg-error/5 p-4 text-sm text-error">
       {{ error }}
+    </div>
+
+    <!-- Role chooser -->
+    <div v-else-if="choosing && !attempt" class="space-y-4" data-testid="role-chooser">
+      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillId.replace('skill_', '').replace(/_/g, ' ') }) }}</h1>
+      <p class="text-sm text-muted-foreground">{{ $t('learn.assessment.roleIntro') }}</p>
+      <fieldset class="space-y-2">
+        <label class="flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm">
+          <input v-model="selectedRoleId" type="radio" name="role" value="" data-testid="role-none" />
+          <span class="text-foreground">{{ $t('learn.assessment.roleNone') }}</span>
+        </label>
+        <label
+          v-for="r in roles"
+          :key="r.role_assessment_id"
+          class="flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm"
+        >
+          <input v-model="selectedRoleId" type="radio" name="role" :value="r.role_assessment_id" :data-testid="`role-${r.role_assessment_id}`" />
+          <span class="flex-1 text-foreground">{{ r.role_title }} — {{ r.org_name }}</span>
+          <span v-if="r.camera_required" class="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-medium text-warning">
+            {{ $t('learn.assessment.roleCameraRequired') }}
+          </span>
+        </label>
+      </fieldset>
+
+      <div v-if="selectedRole?.camera_required" class="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="camera-gate">
+        <p class="text-muted-foreground">{{ $t('learn.assessment.roleCameraNote') }}</p>
+        <p v-if="cameraStream" class="font-medium text-success">{{ $t('learn.assessment.cameraReady') }}</p>
+        <AppButton v-else variant="outline" size="sm" :loading="cameraStarting" data-testid="camera-enable" @click="enableCamera">
+          {{ $t('learn.assessment.cameraEnable') }}
+        </AppButton>
+        <p v-if="cameraError" class="text-error">{{ cameraError }}</p>
+      </div>
+
+      <p v-if="error" class="text-sm text-error">{{ error }}</p>
+      <AppButton :disabled="startBlocked" data-testid="start-attempt" @click="begin(selectedRoleId || null)">
+        {{ $t('learn.assessment.startAttempt') }}
+      </AppButton>
     </div>
 
     <!-- Result -->
@@ -187,6 +288,21 @@ async function submit() {
         {{ $t('learn.assessment.selectAll', { percent: Math.round(attempt.pass_threshold * 100) }) }}
       </p>
 
+      <div v-if="attempt.role" class="space-y-1 rounded-lg border border-border bg-card p-3 text-sm" data-testid="role-banner">
+        <p class="text-foreground">{{ $t('learn.assessment.roleBanner', { role: attempt.role.role_title, org: attempt.role.org_name }) }}</p>
+        <template v-if="attempt.role.camera_required">
+          <p v-if="cameraStream" class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span class="h-1.5 w-1.5 rounded-full" :class="lastFacePresent ? 'bg-success' : 'bg-muted-foreground/50'" />
+            {{ lastFacePresent === null ? $t('learn.assessment.cameraConnecting') : lastFacePresent ? $t('learn.assessment.faceVerified') : $t('learn.assessment.noFaceDetected') }}
+          </p>
+          <div v-else class="flex items-center justify-between gap-2 text-xs text-warning" data-testid="camera-lost">
+            <span>{{ cameraLost ? $t('learn.assessment.cameraLost') : $t('learn.assessment.roleCameraNote') }}</span>
+            <AppButton variant="outline" size="sm" :loading="cameraStarting" @click="enableCamera">{{ $t('learn.assessment.cameraEnable') }}</AppButton>
+          </div>
+          <p v-if="cameraError" class="text-xs text-error">{{ cameraError }}</p>
+        </template>
+      </div>
+
       <div v-for="(q, qi) in attempt.questions" :key="q.id" class="rounded-xl border border-border p-4">
         <p class="mb-3 font-medium text-foreground">{{ qi + 1 }}. {{ q.prompt }}</p>
         <label
@@ -212,5 +328,18 @@ async function submit() {
       <p>{{ cleanupError }}</p>
       <AppButton variant="outline" :loading="closing" @click="stopMonitoring">{{ $t('common.actions.retry') }}</AppButton>
     </div>
+
+    <!-- Off-screen video the backend reads frames from. Rendered rather than
+         display:none: WKWebView does not paint frames from a hidden video. -->
+    <video
+      v-if="cameraStream"
+      ref="cameraVideoRef"
+      class="pointer-events-none fixed -start-[10000px] top-0 h-[240px] w-[320px] opacity-0"
+      playsinline
+      autoplay
+      muted
+      width="320"
+      height="240"
+    />
   </div>
 </template>

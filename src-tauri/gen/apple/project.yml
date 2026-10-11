@@ -115,6 +115,19 @@ targets:
       - sdk: Security.framework
       - sdk: UIKit.framework
       - sdk: WebKit.framework
+      # Frameworks the Rust static library needs at link time. Tauri's
+      # `cargo:rustc-link-lib=framework=` lines only reach rustc's own link;
+      # the app is linked by Xcode, so they must be listed here too.
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
+      - sdk: VideoToolbox.framework
+      # `system-configuration` reads kSCNetworkInterfaceType* (netdev / iroh).
+      - sdk: SystemConfiguration.framework
+      # App Attest (Sentinel device_attested): DCAppAttestService.
+      - sdk: DeviceCheck.framework
     preBuildScripts:
       - script: TAURI_IOS_CLI="${SRCROOT}/../../../node_modules/.bin/tauri"; if [ -x "$TAURI_IOS_CLI" ]; then "$TAURI_IOS_CLI" ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}; else export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:${HOME}/.cargo/bin:${PATH}" && cargo-tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}; fi
         name: Build Rust Code

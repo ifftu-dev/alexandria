@@ -58,8 +58,10 @@ pub async fn ensure_camera_and_microphone() -> Result<(), String> {
     }
 }
 
+/// Shared JNI plumbing for reaching `MainActivity` statics from Rust.
+/// Also used by `sentinel::display_topology`.
 #[cfg(target_os = "android")]
-mod jni {
+pub(crate) mod jni {
     use jni::objects::{JClass, JObject, JValue};
 
     const ACTIVITY: &str = "org.alexandria.node.MainActivity";
@@ -96,7 +98,7 @@ mod jni {
         Ok(unsafe { JObject::from_raw(local) })
     }
 
-    fn with_activity_class<T>(
+    pub(crate) fn with_activity_class<T>(
         f: impl FnOnce(&mut ::jni::JNIEnv, &JClass) -> ::jni::errors::Result<T>,
     ) -> Result<T, String> {
         let ctx = ndk_context::android_context();

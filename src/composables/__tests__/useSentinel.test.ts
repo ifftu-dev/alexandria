@@ -214,7 +214,8 @@ describe('Sentinel lifecycle ownership', () => {
     for (const [type, listener] of listeners) {
       expect(removed).toHaveBeenCalledWith(type, listener)
     }
-    expect(mocks.unlisten).toHaveBeenCalledOnce()
+    // One unlisten per native listener: sentinel://focus and sentinel://display.
+    expect(mocks.unlisten).toHaveBeenCalledTimes(2)
     expect(vi.getTimerCount()).toBe(0)
     expect(starter.isActive.value).toBe(false)
   })
@@ -224,7 +225,9 @@ describe('Sentinel lifecycle ownership', () => {
     const service = useSentinel()
     await Promise.all([service.start('enrollment'), useSentinel().start('enrollment')])
     expect(mocks.invoke.mock.calls.filter(([name]) => name === 'integrity_start_session')).toHaveLength(1)
-    expect(mocks.listen).toHaveBeenCalledOnce()
+    // Exactly one set of native listeners (focus + display), not one per caller.
+    expect(mocks.listen).toHaveBeenCalledTimes(2)
+    expect(mocks.listen.mock.calls.map(([name]) => name).sort()).toEqual(['sentinel://display', 'sentinel://focus'])
     await service.stop()
   })
 
@@ -283,5 +286,513 @@ describe('Sentinel lifecycle ownership', () => {
     await service.start('other-enrollment')
     expect(service.isActive.value).toBe(true)
     await service.stop()
+  })
+})
+
+describe('Display topology signal', () => {
+  const topology = (overrides: Partial<{
+    display_count: number; external_display: boolean; mirrored: boolean; split_screen: boolean; source: string
+  }> = {}) => ({
+    display_count: 1, external_display: false, mirrored: false, split_screen: false, source: 'test', ...overrides,
+  })
+
+  const withTopology = (responses: Array<ReturnType<typeof topology> | null>) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_display_topology') return responses[Math.min(i++, responses.length - 1)]
+      return fallback(command, args)
+    })
+  }
+
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  it('samples a baseline at start and once per snapshot window', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology()])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology')).toHaveLength(2)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('a null probe (unsupported platform) adds no flags and no signal fields', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([null])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    expect(service.getDebugState().signals?.display_count).toBeUndefined()
+    await service.stop()
+  })
+
+  it('a second monitor present from the start is info-only external_display, not a change', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology({ display_count: 2, external_display: true })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['external_display'], ['external_display']])
+    await service.stop()
+  })
+
+  it('a monitor plugged in mid-session raises display_change for that window only', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([
+      topology(),                                              // baseline at start
+      topology({ display_count: 2, external_display: true }),  // window 1: changed
+      topology({ display_count: 2, external_display: true }),  // window 2: steady
+    ])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([
+      ['external_display', 'display_change'],
+      ['external_display'],
+    ])
+    await service.stop()
+  })
+
+  it('split screen and screen capture are flagged every window they persist', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology({ split_screen: true, mirrored: true })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['split_screen', 'screen_captured']])
+    // getDebugState() only computes signals once there is typing to score.
+    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    const debug = service.getDebugState()
+    expect(debug.signals?.split_screen).toBe(true)
+    expect(debug.signals?.screen_captured).toBe(true)
+    expect(debug.signals?.display_count).toBe(1)
+    await service.stop()
+  })
+
+  it('a failing probe is tolerated and never flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_display_topology') throw new Error('probe unavailable')
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('window resize still produces no display flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology()])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    vi.stubGlobal('outerWidth', window.innerWidth + 800)
+    window.dispatchEvent(new Event('resize'))
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+})
+
+describe('Android environment signal and assessment shield', () => {
+  const env = (overrides: Partial<{
+    foreign_accessibility: string[]; adb_enabled: boolean; shield_active: boolean; obscured_touches: number
+  }> = {}) => ({
+    accessibility_services: [], foreign_accessibility: [], adb_enabled: false, development_settings_enabled: false,
+    shield_active: true, overlay_hiding_supported: true, obscured_touches: 0, sdk_int: 36, source: 'android', ...overrides,
+  })
+
+  const withEnv = (report: ReturnType<typeof env> | null, obscured: number[] = [0]) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_android_environment') return report
+      if (command === 'sentinel_take_obscured_touches') return obscured[Math.min(i++, obscured.length - 1)]
+      return fallback(command, args)
+    })
+  }
+
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  const shieldCalls = () =>
+    mocks.invoke.mock.calls.filter(([name]) => name === 'sentinel_set_assessment_shield').map(([, args]) => (args as { on: boolean }).on)
+
+  it('off Android (null report, zero touches) adds no flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('foreign accessibility service and adb are warnings; obscured touches are critical', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    // The first drain happens at start and discards taps from before the
+    // session (7); the windows then see 3 and 0.
+    withEnv(env({ foreign_accessibility: ['com.evil/.Reader'], adb_enabled: true }), [7, 3, 0])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([
+      ['foreign_accessibility_service', 'debug_bridge_enabled', 'obscured_touch'],
+      ['foreign_accessibility_service', 'debug_bridge_enabled'],
+    ])
+    await service.stop()
+  })
+
+  it('a standalone assessment engages the shield at start and releases it at stop', async () => {
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start(null)
+    expect(shieldCalls()).toEqual([true])
+    await service.stop()
+    expect(shieldCalls()).toEqual([true, false])
+  })
+
+  it('in a course the shield follows assessment elements only', async () => {
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    expect(shieldCalls()).toEqual([])
+    // Shield calls are serialised through a promise chain; settle it.
+    const settle = () => vi.advanceTimersByTimeAsync(0)
+    service.setElement('e1', 'video')
+    await settle()
+    expect(shieldCalls()).toEqual([])
+    service.setElement('e2', 'quiz')
+    await settle()
+    expect(shieldCalls()).toEqual([true])
+    service.setElement('e3', 'quiz')      // idempotent
+    await settle()
+    expect(shieldCalls()).toEqual([true])
+    service.setElement('e4', 'reading')
+    await settle()
+    expect(shieldCalls()).toEqual([true, false])
+    await service.stop()
+    expect(shieldCalls()).toEqual([true, false])
+  })
+
+  it('an interview session never engages the shield', async () => {
+    withEnv(null)
+    const service = (await freshService())()
+    await service.start(null, false, 'interview')
+    service.setElement('e', 'quiz')
+    await service.stop()
+    expect(shieldCalls()).toEqual([])
+  })
+
+  it('a failing shield IPC is tolerated', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_set_assessment_shield') throw new Error('no activity')
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await expect(service.start(null)).resolves.toBeUndefined()
+    await service.stop()
+  })
+})
+
+describe('Hidden overlay signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  const withScan = (scan: unknown) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_hidden_overlay') return scan
+      return fallback(command, args)
+    })
+  }
+
+  it('a clean scan adds no flag but records counts in signals', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ suspicious: [], allowlisted: 1, scanned: 17, source: 'cgwindow' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    const signals = service.getDebugState().signals
+    expect(signals?.hidden_overlays).toBe(0)
+    expect(signals?.overlay_windows_scanned).toBe(17)
+    expect(signals?.overlay_windows_allowlisted).toBe(1)
+    await service.stop()
+  })
+
+  it('a capture-excluded window is a critical hidden_overlay every window it persists', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({
+      suspicious: [{ pid: 42, owner: 'Cluely', title: null, width: 800, height: 300, on_screen: true, reason: 'capture_excluded' }],
+      allowlisted: 0, scanned: 12, source: 'cgwindow',
+    })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['hidden_overlay'], ['hidden_overlay']])
+    expect(service.debug.overlaySuspicious).toEqual(['Cluely:capture_excluded'])
+    await service.stop()
+  })
+
+  it('a null scan (mobile / Wayland) is silent', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan(null)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+})
+
+describe('Virtual camera signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+
+  it('a virtual camera label raises virtual_camera while the camera is opted in', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment', true)
+    service.reportCameraDevice('OBS Virtual Camera')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['virtual_camera']])
+    expect(service.debug.cameraDeviceVirtual).toBe(true)
+    await service.stop()
+  })
+
+  it('a real webcam adds nothing, and the label never reaches the snapshot', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment', true)
+    service.reportCameraDevice('FaceTime HD Camera')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    const snapshot = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_submit_snapshot')?.[1]
+    expect(JSON.stringify(snapshot)).not.toContain('FaceTime')
+    await service.stop()
+  })
+
+  it('opting the camera out clears the device and the flag', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment', true)
+    service.reportCameraDevice('ManyCam')
+    service.setCameraOptedIn(false)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    expect(service.debug.cameraDeviceLabel).toBe('')
+    await service.stop()
+  })
+})
+
+describe('Display topology native nudges', () => {
+  const topology = (overrides: Record<string, unknown> = {}) => ({
+    display_count: 1, external_display: false, mirrored: false, split_screen: false, native_transitions: 0, source: 'test', ...overrides,
+  })
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+  const withTopology = (responses: Array<ReturnType<typeof topology>>) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_display_topology') return responses[Math.min(i++, responses.length - 1)]
+      return fallback(command, args)
+    })
+  }
+  const fireDisplayEvent = () => {
+    const handler = mocks.listen.mock.calls.find(([name]) => name === 'sentinel://display')?.[1] as ((e: { payload: unknown }) => void) | undefined
+    expect(handler).toBeDefined()
+    handler!({ payload: { reason: 'moved' } })
+  }
+
+  it('a native transition counter delta flags split_screen even when the sample is back to normal', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology({ native_transitions: 4 }), topology({ native_transitions: 6 }), topology({ native_transitions: 6 })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['split_screen', 'display_change'], []])
+    await service.stop()
+  })
+
+  it('a window-moved nudge resamples once after the debounce and catches a new monitor', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withTopology([topology(), topology({ display_count: 2, external_display: true })])
+    const service = (await freshService())()
+    await service.start('enrollment')
+    const before = mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology').length
+    fireDisplayEvent(); fireDisplayEvent(); fireDisplayEvent()
+    await vi.advanceTimersByTimeAsync(350)
+    expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology').length).toBe(before + 1)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()[0]).toEqual(['external_display', 'display_change'])
+    await service.stop()
+    expect(mocks.unlisten).toHaveBeenCalled()
+  })
+})
+
+describe('Process watchlist signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+  const withScan = (scan: unknown) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_process_scan') return scan
+      return fallback(command, args)
+    })
+  }
+  const proc = (name: string, category: string) => ({ pid: 1, name, identifier: name, category, rule: `name:${name}` })
+
+  it('maps categories to severity-tiered flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ watched: [proc('Cluely', 'interview_cheat'), proc('AnyDesk', 'remote_desktop'), proc('Claude', 'ai_assistant'), proc('zoom', 'screen_share')], scanned: 400, source: 'nsworkspace' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['cheat_tool_process', 'unauthorized_process', 'ai_assistant_running', 'screen_share_running']])
+    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    const signals = service.getDebugState().signals
+    expect(signals?.watched_processes).toBe(4)
+    expect(signals?.processes_scanned).toBe(400)
+    expect(signals?.watched_categories).toEqual(['interview_cheat', 'remote_desktop', 'ai_assistant', 'screen_share'])
+    await service.stop()
+  })
+
+  it('a virtual camera or VM guest agent alone is a warning, nothing more', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ watched: [proc('obs', 'virtual_camera'), proc('vmtoolsd', 'virtual_machine')], scanned: 90, source: 'procfs' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['unauthorized_process']])
+    await service.stop()
+  })
+
+  it('a clean or null scan adds nothing', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({ watched: [], scanned: 300, source: 'toolhelp' })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    withScan(null)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[], []])
+    await service.stop()
+  })
+})
+
+describe('Phantom hotkey signal', () => {
+  const snapshotFlags = () =>
+    mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
+  const calls = (name: string) => mocks.invoke.mock.calls.filter(([n]) => n === name)
+  const status = (overrides: Record<string, unknown> = {}) => ({
+    supported: true, permission_granted: true, running: false, source: 'cgeventtap', os_combos: ['cmd+tab'], cmd_is_system: false, ...overrides,
+  })
+  const withHotkeys = (st: ReturnType<typeof status>, drains: Array<Array<{ at_ms: number; combo: string }>>) => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    let i = 0
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_hotkeys_status') return st
+      if (command === 'sentinel_hotkeys_start') return { ...st, running: true }
+      if (command === 'sentinel_hotkeys_drain') return drains[Math.min(i++, drains.length - 1)]
+      if (command === 'sentinel_hotkeys_stop') return null
+      return fallback(command, args)
+    })
+  }
+  const press = (key: string, mods: Partial<KeyboardEventInit> = {}) =>
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, ...mods }))
+
+  it('starts the monitor for assessments when permitted, drains per window, and stops on teardown', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(performance, 'now').mockReturnValue(100_000)
+    withHotkeys(status(), [[{ at_ms: 500, combo: 'cmd+backslash' }, { at_ms: 600, combo: 'cmd+tab' }]])
+    const service = (await freshService())()
+    await service.start(null)
+    expect(calls('sentinel_hotkeys_start')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['phantom_hotkey']])
+    expect(service.debug.phantomHotkeys).toEqual(['cmd+backslash'])
+    await service.stop()
+    expect(calls('sentinel_hotkeys_stop')).toHaveLength(1)
+  })
+
+  it('a combo the webview also received is not phantom', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let now = 100_000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    withHotkeys(status(), [[{ at_ms: 500, combo: 'cmd+b' }]])
+    const service = (await freshService())()
+    await service.start(null)
+    now = 100_520
+    press('b', { metaKey: true })
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([[]])
+    await service.stop()
+  })
+
+  it('three or more phantom combos in a window escalate to critical', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(performance, 'now').mockReturnValue(100_000)
+    withHotkeys(status(), [[{ at_ms: 1, combo: 'cmd+b' }, { at_ms: 2, combo: 'cmd+enter' }, { at_ms: 3, combo: 'cmd+h' }]])
+    const service = (await freshService())()
+    await service.start(null)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(snapshotFlags()).toEqual([['phantom_hotkey_repeated', 'phantom_hotkey']])
+    await service.stop()
+  })
+
+  it('never starts without permission, for interviews, or on unsupported platforms', async () => {
+    withHotkeys(status({ permission_granted: false }), [[]])
+    let service = (await freshService())()
+    await service.start(null)
+    expect(calls('sentinel_hotkeys_start')).toHaveLength(0)
+    expect(service.debug.hotkeysRunning).toBe(false)
+    await service.stop()
+
+    mocks.invoke.mockClear()
+    withHotkeys(status(), [[]])
+    service = (await freshService())()
+    await service.start(null, false, 'interview')
+    expect(calls('sentinel_hotkeys_status')).toHaveLength(0)
+    await service.stop()
+
+    mocks.invoke.mockClear()
+    withHotkeys(status({ supported: false, permission_granted: false, source: 'unsupported' }), [[]])
+    service = (await freshService())()
+    await service.start(null)
+    expect(calls('sentinel_hotkeys_start')).toHaveLength(0)
+    await service.stop()
+    expect(calls('sentinel_hotkeys_stop')).toHaveLength(0)
   })
 })

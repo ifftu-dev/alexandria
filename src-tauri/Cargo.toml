@@ -77,6 +77,15 @@ ed25519-dalek = { version = "2", features = ["serde", "rand_core", "zeroize"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 blake2 = "0.10"
 sha2 = "0.10"
+# Device attestation verification (Sentinel `device_attested` assurance):
+# App Attest = CBOR attestation object + X.509 chain to Apple's root (ring
+# signature checks via x509-parser's `verify`), ECDSA P-256 assertions;
+# Play Integrity = JWE (A256KW + A256GCM) around an ES256 JWS, decrypted
+# with the developer's response keys from the network profile.
+minicbor = { version = "0.25", default-features = false }
+x509-parser = { version = "0.17", features = ["verify"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+aes = "0.8"
 hmac = "0.12"
 subtle = "2"
 hkdf = "0.12"
@@ -198,6 +207,10 @@ rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid", "functio
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
+# Hidden-overlay scan (Sentinel): CGWindowListCopyWindowInfo + kCGWindowSharingState.
+# Both crates are already in the lock via tao / wry.
+objc2-core-graphics = { version = "0.3", features = ["CGWindow", "CGGeometry"] }
+objc2-core-foundation = "0.3"
 
 # Windows: GetForegroundWindow → process image name.
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -205,11 +218,15 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    # Sentinel global-hotkey monitor: GetAsyncKeyState + VK_* constants.
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
 # Linux (X11): _NET_ACTIVE_WINDOW → WM_CLASS. Wayland returns None.
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = "0.13"
+# `xinput`: Sentinel global-hotkey monitor reads XInput2 raw key events.
+x11rb = { version = "0.13", features = ["xinput"] }
 
 # ── Desktop-only dependencies ────────────────────────────────────────
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
@@ -259,8 +276,15 @@ wasmtime = { version = "36", default-features = false, features = ["cranelift", 
 [target.'cfg(target_os = "ios")'.dependencies]
 wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "pulley"] }
 
+# CGRect for Sentinel display-topology probes (Split View detection compares
+# UIWindow bounds against UIScreen bounds). Already in the lock via tao; the
+# `objc2` feature gives it an `Encode` impl for msg_send!.
+objc2-core-foundation = { version = "0.3", features = ["objc2"] }
+
 [dev-dependencies]
 tempfile = "3"
+# Synthetic App Attest certificate chains for the attestation verifier tests.
+rcgen = "0.13"
 tauri = { version = "2.10.0", features = ["test"] }
 # Pull in Wasmtime's Pulley interpreter for test builds on every platform, not
 # just iOS. Cargo unions features across dependency kinds only when

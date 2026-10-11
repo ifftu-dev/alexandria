@@ -26,6 +26,11 @@
          service notification is required for foreground-service status. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Sentinel assessment shield: lets Window.setHideOverlayWindows (API 31+)
+         hide non-system overlays drawn over the app during an assessment.
+         Normal permission, granted at install. See MainActivity.setAssessmentShield. -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

@@ -360,9 +360,13 @@ pub struct Witness {
 /// issuer attests to these numbers and they cannot be altered after the
 /// fact.
 ///
-/// `assurance_level` is `"local"` for every credential Alexandria issues:
-/// the figures are device-reported and a determined attacker could
-/// suppress flags, so downstream verifiers should weight it accordingly.
+/// `assurance_level` is `"local"` by default: the figures are
+/// device-reported and a determined attacker could suppress flags, so
+/// downstream verifiers should weight it accordingly. `"device_attested"`
+/// means the issuing device re-verified a platform attestation (Apple App
+/// Attest or Google Play Integrity) bound to the session nonce and, on
+/// iOS, to the terminal commitment root: the platform vouched that an
+/// unmodified build of the app on a genuine device produced this session.
 /// `"anchored"` and `"high_assurance"` are reserved ladder values with no
 /// verified production path; the value alone is not evidence of either.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -378,8 +382,8 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Achieved assurance: `"local"`. `"anchored"` and `"high_assurance"`
-    /// are reserved ladder values.
+    /// Achieved assurance: `"local"` or `"device_attested"`. `"anchored"`
+    /// and `"high_assurance"` are reserved ladder values.
     pub assurance_level: String,
     /// Terminal commitment root of the device's snapshot stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]

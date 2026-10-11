@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AssessmentRunner from './AssessmentRunner.vue'
-import type { GradeResult, StartedAttempt, SubmittedAnswer } from '@/types'
+import type { AttemptRoleTarget, GradeResult, StartedAttempt, SubmittedAnswer } from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
-  start: vi.fn<(enrollment: string | null) => Promise<void>>(),
+  start: vi.fn<(enrollment: string | null, camera?: boolean) => Promise<void>>(),
+  setCameraOptedIn: vi.fn<(on: boolean) => void>(),
+  reportCameraDevice: vi.fn<(label: string | null) => void>(),
+  openRoles: vi.fn<(skill: string) => Promise<AttemptRoleTarget[]>>(),
   stop: vi.fn<() => Promise<string | undefined>>(),
-  startAttempt: vi.fn<(skill: string, session: string) => Promise<StartedAttempt>>(),
+  startAttempt: vi.fn<(skill: string, session: string, role: string | null) => Promise<StartedAttempt>>(),
   submitAnswers: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   saveDraft: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   grade: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<GradeResult>>(),
@@ -29,10 +32,14 @@ vi.mock('@/composables/useSentinel', () => ({
     isActive: mocks.active,
     integrityScore: { value: 1 },
     getSessionId: () => mocks.active.value ? 'session-1' : null,
+    setCameraOptedIn: mocks.setCameraOptedIn,
+    reportCameraDevice: mocks.reportCameraDevice,
+    verifyFace: () => ({ present: true, count: 1, consistency: 1 }),
+    scoreGaze: async () => null,
   }),
 }))
 vi.mock('@/composables/useAssessment', () => ({
-  useAssessment: () => ({ startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade }),
+  useAssessment: () => ({ openRoles: mocks.openRoles, startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade }),
 }))
 vi.mock('@/composables/useDiagnostics', () => ({
   useDiagnostics: () => ({ registerEntryPreparation: () => () => undefined }),
@@ -67,6 +74,7 @@ beforeEach(() => {
   mocks.active.value = false
   mocks.start.mockReset().mockImplementation(async () => { mocks.active.value = true })
   mocks.stop.mockReset().mockImplementation(async () => { mocks.active.value = false; return 'session-1' })
+  mocks.openRoles.mockReset().mockResolvedValue([])
   mocks.startAttempt.mockReset().mockResolvedValue(attempt)
   mocks.grade.mockReset().mockResolvedValue(result)
 })
@@ -100,7 +108,7 @@ describe('standalone assessment monitoring', () => {
     expect((wrapper.get('input').element as HTMLInputElement).checked).toBe(true)
     await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1')
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
     expect(mocks.grade.mock.calls).toEqual([
       ['attempt-1', [{ question_id: 'question-1', selected: [0] }]],
       ['attempt-1', [{ question_id: 'question-1', selected: [0] }]],
@@ -214,5 +222,122 @@ describe('standalone assessment monitoring', () => {
     expect(mocks.grade).toHaveBeenCalledOnce()
     expect(mocks.stop).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('learn.assessment.notPassedYet')
+  })
+})
+
+describe('role targeting', () => {
+  const plainRole: AttemptRoleTarget = {
+    role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false,
+  }
+  const cameraRole: AttemptRoleTarget = {
+    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true, min_camera_coverage: 0.9,
+  }
+
+  function mockCamera(impl: () => Promise<MediaStream>) {
+    const track = { label: 'OBS Virtual Camera', stop: vi.fn(), addEventListener: vi.fn() }
+    const stream = {
+      getTracks: () => [track],
+      getVideoTracks: () => [track],
+    } as unknown as MediaStream
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(impl.length ? impl : async () => stream) },
+    })
+    return { stream, track }
+  }
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined })
+  })
+
+  it('starts immediately when no role covers the skill', async () => {
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="role-chooser"]').exists()).toBe(false)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+  })
+
+  it('waits for a role choice and passes the chosen role to the attempt', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole, cameraRole])
+    mocks.startAttempt.mockResolvedValue({ ...attempt, role: plainRole })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="role-chooser"]').exists()).toBe(true)
+    expect(mocks.start).not.toHaveBeenCalled()
+    expect(mocks.startAttempt).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain')
+    expect(wrapper.get('[data-testid="role-banner"]').text()).toContain('learn.assessment.roleBanner')
+    expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
+  })
+
+  it('lets the learner decline a role and starts without one', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole])
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-none"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+  })
+
+  it('blocks a camera-required role until the camera is on, then opts the session in', async () => {
+    mocks.openRoles.mockResolvedValue([cameraRole])
+    mocks.startAttempt.mockResolvedValue({ ...attempt, role: cameraRole })
+    const { track } = mockCamera(() => Promise.reject(new Error('unused')))
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-cam"]').setValue(true)
+    await flushPromises()
+    const startButton = () => wrapper.get('[data-testid="start-attempt"]').element as HTMLButtonElement
+    expect(wrapper.find('[data-testid="camera-gate"]').exists()).toBe(true)
+    expect(startButton().disabled).toBe(true)
+    await wrapper.get('[data-testid="camera-enable"]').trigger('click')
+    await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushPromises()
+    expect(mocks.reportCameraDevice).toHaveBeenCalledWith('OBS Virtual Camera')
+    expect(wrapper.text()).toContain('learn.assessment.cameraReady')
+    expect(startButton().disabled).toBe(false)
+    expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, true)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-cam')
+    expect(mocks.setCameraOptedIn).toHaveBeenCalledWith(true)
+    expect(wrapper.find('[data-testid="camera-lost"]').exists()).toBe(false)
+    wrapper.unmount()
+    await flushPromises()
+    expect(track.stop).toHaveBeenCalled()
+  })
+
+  it('keeps the start blocked and shows the error when the camera is refused', async () => {
+    mocks.openRoles.mockResolvedValue([cameraRole])
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => { throw new Error('Permission denied') }) },
+    })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-cam"]').setValue(true)
+    await wrapper.get('[data-testid="camera-enable"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Permission denied')
+    expect((wrapper.get('[data-testid="start-attempt"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(mocks.start).not.toHaveBeenCalled()
+  })
+
+  it('tells a resumed camera-required attempt to turn the camera back on', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole])
+    mocks.startAttempt.mockResolvedValue({ ...attempt, role: cameraRole })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-none"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="camera-lost"]').exists()).toBe(true)
   })
 })

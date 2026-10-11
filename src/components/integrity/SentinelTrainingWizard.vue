@@ -9,7 +9,8 @@ import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
 import { getProfileSessionToken } from '@/composables/profileSession'
-import type { BehavioralProfile } from '@/types'
+import { useLocalApi } from '@/composables/useLocalApi'
+import type { BehavioralProfile, HotkeyStatus } from '@/types'
 
 const emit = defineEmits<{
   complete: []
@@ -64,6 +65,32 @@ const skipStep = (which: 'typing' | 'mouse' | 'camera') => {
   // explicitly chose to keep the existing model.
   clearTrainingBuffers()
   nextStep()
+}
+
+// Phantom-hotkey monitor permission (desktop). Read on the awareness step;
+// the only place Sentinel ever asks — never mid-assessment.
+const { invoke } = useLocalApi()
+const hotkeyStatus = ref<HotkeyStatus | null>(null)
+const hotkeyBusy = ref(false)
+const hotkeyAsked = ref(false)
+const refreshHotkeyStatus = async () => {
+  try {
+    hotkeyStatus.value = await invoke<HotkeyStatus>('sentinel_hotkeys_status')
+  } catch {
+    hotkeyStatus.value = null
+  }
+}
+const requestHotkeyPermission = async () => {
+  if (hotkeyBusy.value) return
+  hotkeyBusy.value = true
+  hotkeyAsked.value = true
+  try {
+    hotkeyStatus.value = await invoke<HotkeyStatus>('sentinel_hotkeys_request_permission')
+  } catch {
+    // Status unchanged; the card keeps offering the button.
+  } finally {
+    hotkeyBusy.value = false
+  }
 }
 
 type Step = 'welcome' | 'typing' | 'mouse' | 'awareness' | 'camera' | 'gaze' | 'review'
@@ -195,6 +222,9 @@ const initStep = (step: Step) => {
         clickCount: m.mouseClickCount,
       }
     }, 300)
+  }
+  else if (step === 'awareness') {
+    void refreshHotkeyStatus()
   }
   else if (step === 'gaze') {
     gazeError.value = null
@@ -890,6 +920,52 @@ onBeforeUnmount(() => {
               <p class="mt-0.5 text-xs text-muted-foreground">
                 {{ $t('sentinel.wizard.awarenessFingerprintBody') }}
               </p>
+            </div>
+          </div>
+
+          <div class="flex gap-3 rounded-lg border border-border bg-card p-4">
+            <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
+              <svg class="h-4 w-4 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="4" width="13" height="10" rx="1.5" /><rect x="9" y="10" width="13" height="10" rx="1.5" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessDisplayTitle') }}</p>
+              <p class="mt-0.5 text-xs text-muted-foreground">{{ $t('sentinel.wizard.awarenessDisplayBody') }}</p>
+            </div>
+          </div>
+
+          <div class="flex gap-3 rounded-lg border border-border bg-card p-4">
+            <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800/60">
+              <svg class="h-4 w-4 text-slate-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M10.6 10.6a2 2 0 102.8 2.8M9.9 5.1A10.5 10.5 0 0121 12a10.6 10.6 0 01-2.1 3.3M6.2 6.2A10.6 10.6 0 003 12a10.5 10.5 0 0012.1 6.1" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessOverlayTitle') }}</p>
+              <p class="mt-0.5 text-xs text-muted-foreground">{{ $t('sentinel.wizard.awarenessOverlayBody') }}</p>
+            </div>
+          </div>
+
+          <div class="flex gap-3 rounded-lg border border-border bg-card p-4" data-testid="awareness-hotkeys">
+            <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+              <svg class="h-4 w-4 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessHotkeyTitle') }}</p>
+              <p class="mt-0.5 text-xs text-muted-foreground">{{ $t('sentinel.wizard.awarenessHotkeyBody') }}</p>
+              <template v-if="hotkeyStatus">
+                <p v-if="!hotkeyStatus.supported" class="mt-2 text-xs text-muted-foreground">{{ $t('sentinel.wizard.hotkeyUnavailable') }}</p>
+                <p v-else-if="hotkeyStatus.permission_granted" class="mt-2 text-xs text-emerald-600 dark:text-emerald-400" data-testid="hotkeys-allowed">{{ $t('sentinel.wizard.hotkeyAllowed') }}</p>
+                <div v-else class="mt-2 flex flex-wrap items-center gap-2">
+                  <AppButton size="sm" variant="secondary" :disabled="hotkeyBusy" data-testid="hotkeys-allow" @click="requestHotkeyPermission">
+                    {{ $t('sentinel.wizard.hotkeyAllow') }}
+                  </AppButton>
+                  <span v-if="hotkeyAsked" class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.hotkeyDenied') }}</span>
+                </div>
+              </template>
             </div>
           </div>
         </div>

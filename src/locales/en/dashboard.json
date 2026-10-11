@@ -125,6 +125,7 @@
       "emptyBody": "Create one for an organization.",
       "requiresClean": "requires a clean session",
       "minIntegrity": "min integrity {value}",
+      "minCameraCoverage": "min camera coverage {value}",
       "publish": "Publish",
       "archive": "Archive"
     },
@@ -137,7 +138,15 @@
       "submitting": "Issuing…",
       "issued": "Credential issued",
       "assurance": "assurance:",
-      "integrity": "integrity {value}"
+      "integrity": "integrity {value}",
+      "attemptsTitle": "Attempts for this role",
+      "attemptsLoading": "Loading attempts…",
+      "attemptsEmpty": "No learner has attempted this role yet.",
+      "attemptPassed": "Passed",
+      "attemptFailed": "Not passed",
+      "attemptOpen": "In progress",
+      "attemptScore": "score {value}%",
+      "attemptUse": "Use"
     },
     "orgModal": {
       "title": "New organization",
@@ -156,6 +165,7 @@
       "minIntegrity": "Min integrity",
       "maxCritical": "Max critical",
       "maxWarning": "Max warning",
+      "minCameraCoverage": "Min camera coverage (0–1)",
       "requireClean": "Require a clean session",
       "assuranceLabel": "Required assurance level",
       "assuranceNone": "(none)"

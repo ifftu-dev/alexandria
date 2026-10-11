@@ -30,6 +30,8 @@ vi.mock('@/composables/useSentinel', () => ({
   }),
 }))
 vi.mock('@/composables/profileSession', () => ({ getProfileSessionToken: () => mocks.token }))
+const localApi = vi.hoisted(() => ({ invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>() }))
+vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: localApi.invoke }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/components/ui', async () => ({
   AppButton: (await import('@/components/ui/AppButton.vue')).default,
@@ -307,5 +309,55 @@ describe('Sentinel calibration lifecycle', () => {
     await flushPromises()
     expect(wrapper.emitted('complete')).toBeUndefined()
     if (action === 'review') expect(mocks.getProfile).not.toHaveBeenCalled()
+  })
+})
+
+describe('Awareness step: phantom-hotkey permission', () => {
+  const status = (overrides: Record<string, unknown> = {}) => ({
+    supported: true, permission_granted: false, running: false, source: 'cgeventtap', os_combos: [], cmd_is_system: false, ...overrides,
+  })
+  async function toAwareness(wrapper: Wizard) {
+    await flushPromises()
+    await click(wrapper, 'sentinel.wizard.begin')
+    await click(wrapper, 'sentinel.wizard.skipKeep')
+    await click(wrapper, 'sentinel.wizard.skipKeep')
+  }
+
+  it('offers the Allow button only when supported and not yet granted, and asks exactly once per click', async () => {
+    localApi.invoke.mockImplementation(async (command) => {
+      if (command === 'sentinel_hotkeys_status') return status()
+      if (command === 'sentinel_hotkeys_request_permission') return status({ permission_granted: true })
+      return null
+    })
+    const wrapper = render()
+    await toAwareness(wrapper)
+    expect(localApi.invoke).toHaveBeenCalledWith('sentinel_hotkeys_status')
+    const allow = wrapper.find('[data-testid="hotkeys-allow"]')
+    expect(allow.exists()).toBe(true)
+    await allow.trigger('click')
+    await flushPromises()
+    expect(localApi.invoke.mock.calls.filter(([c]) => c === 'sentinel_hotkeys_request_permission')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="hotkeys-allow"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="hotkeys-allowed"]').exists()).toBe(true)
+  })
+
+  it('shows the unavailable note on platforms without a monitor and never prompts', async () => {
+    localApi.invoke.mockImplementation(async (command) => {
+      if (command === 'sentinel_hotkeys_status') return status({ supported: false, source: 'unsupported' })
+      return null
+    })
+    const wrapper = render()
+    await toAwareness(wrapper)
+    expect(wrapper.find('[data-testid="hotkeys-allow"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="awareness-hotkeys"]').text()).toContain('sentinel.wizard.hotkeyUnavailable')
+    expect(localApi.invoke.mock.calls.filter(([c]) => c === 'sentinel_hotkeys_request_permission')).toHaveLength(0)
+  })
+
+  it('a failing status probe leaves the card informational', async () => {
+    localApi.invoke.mockRejectedValue(new Error('no backend'))
+    const wrapper = render()
+    await toAwareness(wrapper)
+    expect(wrapper.find('[data-testid="awareness-hotkeys"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="hotkeys-allow"]').exists()).toBe(false)
   })
 })

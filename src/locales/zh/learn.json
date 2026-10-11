@@ -11,7 +11,19 @@
     "retake": "重考",
     "verifyTitle": "验证：{name}",
     "selectAll": "选出所有正确答案。你需要达到 {percent}% 才能通过。",
-    "submit": "提交测评"
+    "submit": "提交测评",
+    "roleIntro": "要为某个赞助方职位参加测评？请在开始前选择，以便其要求从第一题起生效。",
+    "roleNone": "不针对特定职位",
+    "roleCameraRequired": "需要摄像头",
+    "roleCameraNote": "该职位要求全程开启摄像头。请先开启再开始；覆盖率不足时将拒绝颁发凭证。",
+    "cameraReady": "摄像头已开启。",
+    "cameraEnable": "开启摄像头",
+    "startAttempt": "开始测评",
+    "roleBanner": "正在为 {org} 的 {role} 职位进行测评。",
+    "cameraConnecting": "正在连接摄像头…",
+    "faceVerified": "人脸已验证",
+    "noFaceDetected": "未检测到人脸",
+    "cameraLost": "摄像头已关闭。该职位要求开启摄像头，请重新开启。"
   },
   "player": {
     "courseFallback": "课程",
