@@ -9,7 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { createServer } from 'node:http'
-import { decodeEncodedList, didKeyToPublicKey, isListUrl, jcs, loadInput, resolveStatusLists, verifyCredential } from './verify-credential.mjs'
+import { decodeEncodedList, describeListSource, didKeyToPublicKey, isListUrl, jcs, loadInput, resolveStatusLists, verifyCredential } from './verify-credential.mjs'
 
 const VECTORS = join(import.meta.dirname, '../../crates/alexandria-verify/tests/vectors')
 const vector = (name) => JSON.parse(readFileSync(join(VECTORS, name), 'utf8'))
@@ -165,6 +165,72 @@ test('fetches a URL-named status list, checks it is the issuer’s, and reads th
     problems = await resolveStatusLists(credentials, lists4, { fetch: fetchAt })
     assert.match(problems[0], /404/)
     assert.match(verifyCredential(credentials[0], { keyRegistry, statusLists: lists4 }).status, /not fetched/)
+  } finally {
+    server.close()
+  }
+})
+
+test('a bundle copy of a URL-named list is refreshed from the host, unless the host is older', async () => {
+  // The demo path: export, revoke, verify the same export again. The export
+  // carries the list as it was; the host has the revocation. The fetched list
+  // must win, and the report must say which one was read.
+  const bundle = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures/status-list-bundle.json'), 'utf8'))
+  const listVc = bundle.status_list_credentials[0]
+  const listId = listVc.id
+  const [revokedVc, activeVc] = bundle.credentials
+  const served = new Map()
+  const server = createServer((request, response) => {
+    const document = served.get(request.url)
+    if (!document) { response.writeHead(404); response.end('{}'); return }
+    response.writeHead(200, { 'content-type': 'application/vc' })
+    response.end(JSON.stringify(document))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  const fetchAt = (url, init) => fetch(url.replace(bundle.origin, origin), init)
+  // An export taken before the revocation: the same list, nothing set yet.
+  const beforeRevocation = () => {
+    const stale = structuredClone(bundle)
+    stale.status_list_credentials = []
+    stale.status_lists = [{ list_id: listId, issuer_did: listVc.issuer, version: 1, status_purpose: 'revocation', bits_b64: Buffer.alloc(16).toString('base64'), bit_length: 128 }]
+    return loadInput(stale)
+  }
+  try {
+    served.set(new URL(listId).pathname, listVc)
+
+    // Offline, the export's copy is all there is, and the report says so.
+    let { statusLists, listInfo, keyRegistry } = beforeRevocation()
+    assert.equal(verifyCredential(revokedVc, { keyRegistry, statusLists }).status, 'active')
+    assert.equal(describeListSource(listId, listInfo[listId]), '  (list from the exported bundle)')
+
+    // Online, the host's list replaces the copy and the revocation shows.
+    ;({ statusLists, listInfo, keyRegistry } = beforeRevocation())
+    let problems = await resolveStatusLists(bundle.credentials, statusLists, { fetch: fetchAt, keyRegistry, listInfo })
+    assert.deepEqual(problems, [])
+    assert.equal(verifyCredential(revokedVc, { keyRegistry, statusLists }).status, 'revoked')
+    assert.equal(verifyCredential(activeVc, { keyRegistry, statusLists }).status, 'active')
+    assert.deepEqual(listInfo[listId], { source: 'fetched', validFrom: listVc.validFrom })
+    assert.equal(describeListSource(listId, listInfo[listId]), `  (list fetched from ${listId})`)
+
+    // A host that cannot answer leaves the copy in place, and says so.
+    served.clear()
+    ;({ statusLists, listInfo, keyRegistry } = beforeRevocation())
+    problems = await resolveStatusLists(bundle.credentials, statusLists, { fetch: fetchAt, keyRegistry, listInfo })
+    assert.equal(problems.length, 1)
+    assert.match(problems[0], /404; using the exported copy/)
+    assert.equal(verifyCredential(revokedVc, { keyRegistry, statusLists }).status, 'active')
+    assert.equal(listInfo[listId].source, 'bundle')
+
+    // A host serving a list older than the copy must not undo what the copy
+    // shows: the copy here is dated after the served list and is kept.
+    served.set(new URL(listId).pathname, listVc)
+    ;({ statusLists, listInfo, keyRegistry } = beforeRevocation())
+    listInfo[listId] = { source: 'bundle', validFrom: '2999-01-01T00:00:00Z' }
+    problems = await resolveStatusLists(bundle.credentials, statusLists, { fetch: fetchAt, keyRegistry, listInfo })
+    assert.equal(problems.length, 1)
+    assert.match(problems[0], /older than the exported copy/)
+    assert.equal(verifyCredential(revokedVc, { keyRegistry, statusLists }).status, 'active')
+    assert.equal(describeListSource(listId, listInfo[listId]), '  (list from the exported bundle, as of 2999-01-01T00:00:00Z)')
   } finally {
     server.close()
   }

@@ -19,11 +19,15 @@
 // A credential whose `statusListCredential` is an https URL names a list the
 // issuer publishes; this fetches it (plain GET, one request per list), checks
 // that what came back is that list signed by that issuer, and reads the bit.
-// `--offline` skips the fetch and reports such lists as pending instead.
+// It fetches even when a bundle carries a copy of the list: the copy is the
+// list as of export, and a revocation made after the export is only on the
+// host. The fetched list replaces the copy unless it is older than the copy.
+// `--offline` skips the fetch: a bundle's copy is used, and a list nobody
+// supplied is reported as pending.
 //
 // Output, per credential: who issued it, to whom, what it claims, whether the
 // signature verifies against the issuer's did:key, whether it is in its
-// validity window, and its revocation status if the bundle supplies the list.
+// validity window, and its revocation status with where that list came from.
 // Three separate answers on purpose; never one green tick.
 
 import { readFileSync } from 'node:fs'
@@ -188,24 +192,32 @@ export function isListUrl(reference) {
 }
 
 /**
- * Fetch every URL-named status list the credentials reference and not already
- * supplied. A fetched document counts only if it is a
- * `BitstringStatusListCredential` whose `id` is the URL fetched, whose issuer
- * is the credential's issuer, and whose signature verifies against that
+ * Fetch every URL-named status list the credentials reference, including one
+ * a bundle already supplied: the bundle's copy is the list as of export, and
+ * the host has any revocation made since. A fetched document counts only if it
+ * is a `BitstringStatusListCredential` whose `id` is the URL fetched, whose
+ * issuer is the credential's issuer, and whose signature verifies against that
  * issuer — anything else is somebody else's list and is left out, so the
  * credential reads as pending rather than wrongly active.
+ *
+ * When a copy was already supplied, the fetched list replaces it unless the
+ * fetched one is older (`validFrom`): a host serving a stale list must not
+ * undo a revocation the exported copy already shows. A failed fetch keeps the
+ * copy and says so.
  * @param {object[]} credentials
- * @param {{ [listId]: Uint8Array }} statusLists already-known lists, extended in place
- * @param {{ fetch?: typeof fetch, keyRegistry?: object[] }} [options]
+ * @param {{ [listId]: Uint8Array }} statusLists already-known lists, extended or replaced in place
+ * @param {{ fetch?: typeof fetch, keyRegistry?: object[], listInfo?: { [listId]: { source: 'bundle' | 'fetched', validFrom: string | null } } }} [options]
+ *   `listInfo` records where each list came from; updated in place
  * @returns {Promise<string[]>} one line per list that could not be used
  */
 export async function resolveStatusLists(credentials, statusLists, options = {}) {
   const doFetch = options.fetch ?? globalThis.fetch
+  const listInfo = options.listInfo ?? {}
   const problems = []
   const wanted = new Map()
   for (const vc of credentials) {
     const reference = vc?.credentialStatus
-    if (reference && isListUrl(reference.statusListCredential) && !(reference.statusListCredential in statusLists)) {
+    if (reference && isListUrl(reference.statusListCredential)) {
       wanted.set(reference.statusListCredential, { issuer: vc.issuer, purpose: reference.statusPurpose })
     }
   }
@@ -224,12 +236,34 @@ export async function resolveStatusLists(credentials, statusLists, options = {})
       if (subject.statusPurpose !== purpose) throw new Error(`list purpose ${subject.statusPurpose} is not ${purpose}`)
       const checked = verifyCredential(listVc, { keyRegistry: options.keyRegistry ?? [] })
       if (checked.signature !== 'valid') throw new Error(`list signature: ${checked.reasons.join('; ') || checked.signature}`)
-      statusLists[url] = decodeEncodedList(subject.encodedList)
+      const fetched = decodeEncodedList(subject.encodedList)
+      const fetchedFrom = typeof listVc.validFrom === 'string' ? listVc.validFrom : null
+      const copy = url in statusLists ? listInfo[url] ?? { source: 'bundle', validFrom: null } : null
+      if (copy && isOlder(fetchedFrom, copy.validFrom)) {
+        problems.push(`${url}: the host served a list from ${fetchedFrom}, older than the exported copy from ${copy.validFrom}; using the exported copy`)
+        continue
+      }
+      statusLists[url] = fetched
+      listInfo[url] = { source: 'fetched', validFrom: fetchedFrom }
     } catch (e) {
-      problems.push(`${url}: ${e.message}`)
+      problems.push(`${url}: ${e.message}${url in statusLists ? '; using the exported copy' : ''}`)
     }
   }
   return problems
+}
+
+/** Is `a` strictly earlier than `b`? Unknown dates are never older, so a list without one does not lose to a dated copy by default. */
+function isOlder(a, b) {
+  if (!a || !b) return false
+  const ta = Date.parse(a), tb = Date.parse(b)
+  return Number.isFinite(ta) && Number.isFinite(tb) && ta < tb
+}
+
+/** Where a credential's status list came from, for the report. */
+export function describeListSource(listId, info) {
+  if (!info) return ''
+  if (info.source === 'fetched') return `  (list fetched from ${listId})`
+  return `  (list from the exported bundle${info.validFrom ? `, as of ${info.validFrom}` : ''})`
 }
 
 /** `encodedList` → bitstring: multibase base64url (`u`) of GZIP bytes. */
@@ -246,23 +280,28 @@ export function decodeEncodedList(encoded) {
  * read only when no signed list credential covers that list id.
  */
 export function loadInput(json) {
-  if (Array.isArray(json)) return { credentials: json, keyRegistry: [], statusLists: {} }
+  if (Array.isArray(json)) return { credentials: json, keyRegistry: [], statusLists: {}, listInfo: {} }
   if (json && typeof json.format_version === 'string' && Array.isArray(json.credentials)) {
     const statusLists = {}
+    const listInfo = {}
     const keyRegistry = json.key_registry ?? []
     for (const listVc of json.status_list_credentials ?? []) {
       const checked = verifyCredential(listVc, { keyRegistry })
       const subject = listVc.credentialSubject ?? {}
       if (checked.signature === 'valid' && subject.type === 'BitstringStatusList' && typeof listVc.id === 'string') {
         statusLists[listVc.id] = decodeEncodedList(subject.encodedList)
+        listInfo[listVc.id] = { source: 'bundle', validFrom: typeof listVc.validFrom === 'string' ? listVc.validFrom : null }
       }
     }
     for (const row of json.status_lists ?? []) {
-      if (!(row.list_id in statusLists)) statusLists[row.list_id] = new Uint8Array(Buffer.from(row.bits_b64, 'base64'))
+      if (!(row.list_id in statusLists)) {
+        statusLists[row.list_id] = new Uint8Array(Buffer.from(row.bits_b64, 'base64'))
+        listInfo[row.list_id] = { source: 'bundle', validFrom: null }
+      }
     }
-    return { credentials: json.credentials, keyRegistry, statusLists }
+    return { credentials: json.credentials, keyRegistry, statusLists, listInfo }
   }
-  if (json && json.proof) return { credentials: [json], keyRegistry: [], statusLists: {} }
+  if (json && json.proof) return { credentials: [json], keyRegistry: [], statusLists: {}, listInfo: {} }
   throw new Error('input is not a credential, an array of credentials, or an alexandria-credential-bundle')
 }
 
@@ -274,9 +313,9 @@ async function main(argv) {
   }
   const atIndex = argv.indexOf('--at')
   const now = atIndex >= 0 ? new Date(argv[atIndex + 1]) : new Date()
-  const { credentials, keyRegistry, statusLists } = loadInput(JSON.parse(readFileSync(file, 'utf8')))
+  const { credentials, keyRegistry, statusLists, listInfo } = loadInput(JSON.parse(readFileSync(file, 'utf8')))
   if (!argv.includes('--offline')) {
-    for (const problem of await resolveStatusLists(credentials, statusLists, { keyRegistry })) console.error(`status list: ${problem}`)
+    for (const problem of await resolveStatusLists(credentials, statusLists, { keyRegistry, listInfo })) console.error(`status list: ${problem}`)
   }
   let worst = 0
   for (const vc of credentials) {
@@ -287,7 +326,8 @@ async function main(argv) {
     if (r.claim) console.log(`  claim      ${r.claim.skillId}  level ${r.claim.level}  score ${r.claim.score}`)
     console.log(`  signature  ${r.signature}`)
     console.log(`  validity   ${r.validity}`)
-    console.log(`  status     ${r.status}${vc.credentialStatus && statusLists[vc.credentialStatus.statusListCredential] && isListUrl(vc.credentialStatus.statusListCredential) ? `  (list fetched from ${vc.credentialStatus.statusListCredential})` : ''}`)
+    const listId = vc.credentialStatus?.statusListCredential
+    console.log(`  status     ${r.status}${listId && statusLists[listId] ? describeListSource(listId, listInfo[listId]) : ''}`)
     console.log(`  decision   ${r.decision.toUpperCase()}`)
     for (const reason of r.reasons) console.log(`             - ${reason}`)
     if (r.issuer) console.log(`  resolve    https://dev.uniresolver.io/#${r.issuer}  (third-party did:key resolver)`)
