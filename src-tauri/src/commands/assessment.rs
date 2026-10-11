@@ -36,6 +36,10 @@ pub struct ServedQuestion {
     pub id: String,
     pub prompt: String,
     pub options: Vec<String>,
+    /// More than one option may be correct. A single-answer item scores zero
+    /// unless exactly one option is selected, so the client must know which
+    /// control to render.
+    pub multiple: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -564,6 +568,7 @@ pub(crate) fn start_attempt_db(
         id: String,
         prompt: String,
         options: Vec<String>,
+        multiple: bool,
         difficulty: u8,
         bloom: crate::domain::bloom::BloomLevel,
     }
@@ -588,6 +593,7 @@ pub(crate) fn start_attempt_db(
                             .collect()
                     })
                     .unwrap_or_default(),
+                multiple: content.get("kind").and_then(|v| v.as_str()) != Some("single"),
                 difficulty: r.get::<_, i64>(2)? as u8,
                 // Credential-bearing assessments require an explicit cognitive level.
                 bloom: r.get::<_, String>(3)?.parse().map_err(|e: String| {
@@ -681,6 +687,7 @@ pub(crate) fn start_attempt_db(
             id: qid.clone(),
             prompt: q.prompt.clone(),
             options,
+            multiple: q.multiple,
         });
     }
 
@@ -2388,5 +2395,37 @@ mod role_target_tests {
         )
         .unwrap();
         assert!(started.role.is_none());
+    }
+    #[test]
+    fn served_questions_say_whether_several_answers_count() {
+        let db = setup();
+        db.conn()
+            .execute_batch(
+                "UPDATE question_banks SET draw_count = 2 WHERE id = 'bank_t';
+                 INSERT INTO assessment_items
+                     (id, item_kind, skill_id, content_public, grader_private, bank_id, ratified, bloom_level)
+                 VALUES ('q2', 'mcq', 'skill_rust',
+                         json_object('kind', 'multi', 'prompt', 'two?',
+                                     'options', json('[\"a\",\"b\",\"c\"]')),
+                         json_object('correct_indices', json('[0,2]')), 'bank_t', 1, 'remember');",
+            )
+            .unwrap();
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        let multiple: std::collections::HashMap<_, _> = started
+            .questions
+            .iter()
+            .map(|q| (q.id.as_str(), q.multiple))
+            .collect();
+        assert_eq!(multiple.get("q1"), Some(&false));
+        assert_eq!(multiple.get("q2"), Some(&true));
     }
 }

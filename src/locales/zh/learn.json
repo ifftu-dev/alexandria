@@ -10,7 +10,6 @@
     "viewSkills": "查看我的技能",
     "retake": "重考",
     "verifyTitle": "验证：{name}",
-    "selectAll": "选出所有正确答案。你需要达到 {percent}% 才能通过。",
     "submit": "提交测评",
     "roleIntro": "要为某个赞助方职位参加测评？请在开始前选择，以便其要求从第一题起生效。",
     "roleNone": "不针对特定职位",
@@ -23,7 +22,10 @@
     "cameraConnecting": "正在连接摄像头…",
     "faceVerified": "人脸已验证",
     "noFaceDetected": "未检测到人脸",
-    "cameraLost": "摄像头已关闭。该职位要求开启摄像头，请重新开启。"
+    "cameraLost": "摄像头已关闭。该职位要求开启摄像头，请重新开启。",
+    "passMark": "需要达到 {percent}% 才能通过。",
+    "chooseOne": "选择一个答案。",
+    "chooseAll": "选择所有适用的答案。"
   },
   "player": {
     "courseFallback": "课程",

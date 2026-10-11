@@ -56,7 +56,7 @@ function deferred<T>() {
 
 const attempt: StartedAttempt = {
   attempt_id: 'attempt-1', skill_id: 'skill_test', pass_threshold: 0.7,
-  questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'] }],
+  questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: true }],
   draft_answers: [],
 }
 const result: GradeResult = { score: 0.5, passed: false, credential_id: null }
@@ -339,5 +339,35 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="camera-lost"]').exists()).toBe(true)
+  })
+})
+
+describe('question rendering', () => {
+  it('keeps one selection for a single-answer question', async () => {
+    mocks.startAttempt.mockResolvedValue({
+      ...attempt,
+      questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: false }],
+    })
+    const wrapper = render()
+    await flushPromises()
+    const inputs = wrapper.findAll('input')
+    expect(inputs.map(i => i.attributes('type'))).toEqual(['radio', 'radio'])
+    expect(wrapper.text()).toContain('learn.assessment.chooseOne')
+    await inputs[0]!.trigger('change')
+    await inputs[1]!.trigger('change')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
+    await flushPromises()
+    expect(mocks.grade.mock.calls[0]?.[1]).toEqual([{ question_id: 'question-1', selected: [1] }])
+  })
+
+  it('names the skill from the taxonomy on the result screen', async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'assessment_recover') return { score: 1, passed: true, credential_id: 'credential-1' }
+      if (command === 'get_skill') return { skill: { name: 'Big-O Analysis' } }
+      return null
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="result-skill"]').text()).toBe('Big-O Analysis')
   })
 })

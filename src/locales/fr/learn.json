@@ -10,7 +10,6 @@
     "viewSkills": "Voir mes compétences",
     "retake": "Recommencer",
     "verifyTitle": "Vérifier : {name}",
-    "selectAll": "Sélectionnez toutes les bonnes réponses. Il vous faut {percent}% pour réussir.",
     "submit": "Soumettre l'évaluation",
     "roleIntro": "Vous passez l'évaluation pour un poste sponsorisé ? Choisissez-le avant de commencer pour que ses exigences s'appliquent dès la première question.",
     "roleNone": "Aucun poste en particulier",
@@ -23,7 +22,10 @@
     "cameraConnecting": "Connexion de la caméra…",
     "faceVerified": "Visage vérifié",
     "noFaceDetected": "Aucun visage détecté",
-    "cameraLost": "La caméra s'est éteinte. Ce poste l'exige : réactivez-la."
+    "cameraLost": "La caméra s'est éteinte. Ce poste l'exige : réactivez-la.",
+    "passMark": "Il vous faut {percent} % pour réussir.",
+    "chooseOne": "Choisissez une réponse.",
+    "chooseAll": "Choisissez toutes les réponses qui s'appliquent."
   },
   "player": {
     "courseFallback": "Cours",

@@ -10,7 +10,6 @@
     "viewSkills": "Ver mis habilidades",
     "retake": "Repetir",
     "verifyTitle": "Verificar: {name}",
-    "selectAll": "Selecciona todas las respuestas correctas. Necesitas un {percent}% para aprobar.",
     "submit": "Enviar evaluación",
     "roleIntro": "¿Te evalúas para un puesto patrocinado? Elígelo antes de empezar para que sus requisitos se apliquen desde la primera pregunta.",
     "roleNone": "Ningún puesto en concreto",
@@ -23,7 +22,10 @@
     "cameraConnecting": "Conectando la cámara…",
     "faceVerified": "Rostro verificado",
     "noFaceDetected": "No se detecta ningún rostro",
-    "cameraLost": "La cámara se apagó. Este puesto la exige: vuelve a activarla."
+    "cameraLost": "La cámara se apagó. Este puesto la exige: vuelve a activarla.",
+    "passMark": "Necesitas un {percent}% para aprobar.",
+    "chooseOne": "Elige una respuesta.",
+    "chooseAll": "Elige todas las que correspondan."
   },
   "player": {
     "courseFallback": "Curso",
