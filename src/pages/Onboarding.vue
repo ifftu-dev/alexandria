@@ -200,10 +200,10 @@ const wizardSteps = computed<{ id: Step; label: string }[]>(() => {
   ]
   steps.push({ id: 'birthdate', label: t('onboarding.wizard.birthdate') })
   steps.push({ id: 'password', label: t('onboarding.wizard.password') })
+  // Account generation is a few seconds' spinner, not a step the learner
+  // takes; the stepper keeps the password step lit while it runs.
   if (mode.value === 'create') {
-    steps.push({ id: 'generating', label: t('onboarding.wizard.createAccount') }, { id: 'backup', label: t('onboarding.wizard.recoveryPhrase') })
-  } else {
-    steps.push({ id: 'generating', label: t('onboarding.wizard.restoreAccount') })
+    steps.push({ id: 'backup', label: t('onboarding.wizard.recoveryPhrase') })
   }
   // Everybody is a learner, so everybody sets goals right after the account
   // exists (goals persist to the vault-scoped `learner.targets` setting).
@@ -242,7 +242,8 @@ async function linkChild() {
   }
 }
 const activeStepIndex = computed(() => {
-  const idx = wizardSteps.value.findIndex((s) => s.id === step.value)
+  const current = step.value === 'generating' ? 'password' : step.value
+  const idx = wizardSteps.value.findIndex((s) => s.id === current)
   return idx >= 0 ? idx : 0
 })
 function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): string {
