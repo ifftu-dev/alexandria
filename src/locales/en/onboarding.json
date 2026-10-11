@@ -4,15 +4,13 @@
   },
   "wizard": {
     "welcome": "Welcome",
-    "role": "Your Roles",
+    "role": "Your roles",
     "birthdate": "Birthdate",
-    "password": "Set Password",
-    "createAccount": "Create Account",
-    "recoveryPhrase": "Recovery Phrase",
-    "restoreAccount": "Restore Account",
-    "goals": "Your Goals",
-    "skills": "Your Skills",
-    "linkChild": "Link Your Child",
+    "password": "Set password",
+    "recoveryPhrase": "Recovery phrase",
+    "goals": "Your goals",
+    "skills": "Your skills",
+    "linkChild": "Link your child",
     "complete": "Complete"
   },
   "aside": {
@@ -33,10 +31,10 @@
     "whatHappens": "What happens next",
     "step1": "You set a password to protect your account on this device.",
     "step2": "We create your account — your identity, owned only by you.",
-    "step3": "You get a Recovery Phrase — your secret backup. Write it down and keep it safe.",
+    "step3": "You get a recovery phrase — your secret backup. Write it down and keep it safe.",
     "step4": "Start learning, earn credentials, own your education.",
-    "createAccount": "Create Account",
-    "restoreAccount": "Restore My Account",
+    "createAccount": "Create account",
+    "restoreAccount": "Restore my account",
     "signIn": "Sign in to an existing account"
   },
   "role": {
@@ -51,15 +49,15 @@
     "minorNotice": "Because you're under 18, a parent or guardian must activate your account before you can start learning. You'll get an invite code for them at the end of setup."
   },
   "password": {
-    "titleCreate": "Set Your Password",
-    "titleImport": "Restore Your Account",
+    "titleCreate": "Set your password",
+    "titleImport": "Restore your account",
     "subtitleCreate": "This password protects your account on this device.",
-    "subtitleImport": "Enter your Recovery Phrase and set a password for this device.",
-    "recoveryLabel": "Recovery Phrase",
+    "subtitleImport": "Enter your recovery phrase and set a password for this device.",
+    "recoveryLabel": "Recovery phrase",
     "recoveryHint": "Your secret backup to restore your account.",
-    "recoveryPlaceholder": "Enter your 24-word Recovery Phrase, separated by spaces",
+    "recoveryPlaceholder": "Enter your 24-word recovery phrase, separated by spaces",
     "wordsEntered": "no words entered yet | {count} word entered | {count} words entered",
-    "wordsRule": "Recovery Phrases must contain 12, 15, or 24 words.",
+    "wordsRule": "Recovery phrases must contain 12, 15, or 24 words.",
     "usernameLabel": "Username",
     "usernamePlaceholder": "your_handle",
     "usernameHint": "3–32 characters · lowercase letters, numbers, underscores. How others find you.",
@@ -72,31 +70,31 @@
     "displayNameHint": "Defaults to your username — change it any time.",
     "passwordLabel": "Password",
     "passwordPlaceholder": "At least 12 characters",
-    "passwordCounter": "{count}/12 characters minimum",
-    "confirmLabel": "Confirm Password",
+    "passwordCounter": "{count} characters · minimum 12",
+    "confirmLabel": "Confirm password",
     "confirmPlaceholder": "Enter password again",
     "passwordsMismatch": "Passwords do not match.",
     "passwordsMatch": "Passwords match.",
-    "noRecoveryWarning": "There is no password recovery. If you forget this password, you'll need your Recovery Phrase to restore access.",
+    "noRecoveryWarning": "There is no password recovery. If you forget this password, you'll need your recovery phrase to restore access.",
     "biometricLabel": "Enable biometric unlock on this device",
     "biometricHint": "Use Touch ID / Face ID after setup. You can change this later in Settings.",
-    "errorHeading": "Check These Details",
-    "submitCreate": "Create Account",
-    "submitImport": "Restore My Account"
+    "errorHeading": "Check these details",
+    "submitCreate": "Create account",
+    "submitImport": "Restore my account"
   },
   "generating": {
-    "titleCreate": "Creating Your Account",
-    "titleImport": "Restoring Your Account",
+    "titleCreate": "Creating your account",
+    "titleImport": "Restoring your account",
     "subtitle": "This takes a moment while we set things up securely.",
-    "initializing": "Initializing..."
+    "initializing": "Initializing…"
   },
   "backup": {
-    "heading": "Your Recovery Phrase",
+    "heading": "Your recovery phrase",
     "subtitle": "This is your secret backup. Write these 24 words down on paper and store them somewhere safe. It is the ONLY way to restore your account if you forget your password.",
-    "copy": "Copy Recovery Phrase",
+    "copy": "Copy recovery phrase",
     "copied": "Copied to clipboard",
-    "warning": "Never share your Recovery Phrase. Anyone with these words can access your credentials.",
-    "confirm": "I've Written It Down"
+    "warning": "Never share your recovery phrase. Anyone with these words can access your credentials.",
+    "confirm": "I've written it down"
   },
   "goals": {
     "heading": "What are you working toward?",
@@ -117,25 +115,25 @@
     "placeholder": "Paste the invite code from your child's device",
     "hint": "Both devices need to be online to complete the link.",
     "linking": "Linking…",
-    "submit": "Link Child",
+    "submit": "Link child",
     "skip": "Skip for now — I'll add them from my dashboard",
     "childFallback": "your child"
   },
   "done": {
-    "heading": "You're Ready",
+    "heading": "You're ready",
     "bodyCreate": "Your account has been created and encrypted.",
     "bodyImport": "Your account has been restored and encrypted.",
     "dataNote": "All your data stays on this device, protected by your password.",
     "minorNotice": "One more step: your account needs a parent or guardian. Next you'll get an invite code to share with them — your account activates as soon as they accept it from their own device.",
     "linkedWith": "Linked with {name} — their account is now active.",
-    "enterGuardian": "Invite My Guardian",
-    "enterParent": "Open My Dashboard",
-    "enterLearner": "Start Learning"
+    "enterGuardian": "Invite my guardian",
+    "enterParent": "Open my dashboard",
+    "enterLearner": "Start learning"
   },
   "errors": {
     "passwordTooShortDetail": "Your password must be at least 12 characters long. Add a few more characters, then try again.",
-    "phraseLengthUnsupported": "That Recovery Phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.",
-    "phraseInvalid": "That Recovery Phrase does not look valid. Check the word order and spelling, then try again.",
+    "phraseLengthUnsupported": "That recovery phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.",
+    "phraseInvalid": "That recovery phrase does not look valid. Check the word order and spelling, then try again.",
     "createFailed": "We couldn't create your account yet. {error}",
     "restoreFailed": "We couldn't restore your account yet. {error}",
     "birthdateInvalid": "Enter a valid birthdate — it cannot be in the future or more than 120 years ago.",
@@ -144,7 +142,7 @@
     "displayNameRequired": "Choose a display name to continue.",
     "passwordTooShort": "Your password is too short. Use at least 12 characters, then try again.",
     "passwordsDoNotMatch": "The confirmation password does not match yet. Enter the same password in both fields to continue.",
-    "phraseRequired": "Enter your Recovery Phrase to continue. Alexandria accepts 12-, 15-, or 24-word phrases."
+    "phraseRequired": "Enter your recovery phrase to continue. Alexandria accepts 12-, 15-, or 24-word phrases."
   },
   "biometric": {
     "enabledSecure": "Biometric unlock enabled on this device.",
@@ -183,7 +181,7 @@
     "copyCode": "Copy invite code",
     "copied": "Copied to clipboard",
     "checking": "Checking…",
-    "checkActivation": "Check Activation",
+    "checkActivation": "Check activation",
     "backToProfiles": "Back to profiles"
   },
   "incompatibleData": {

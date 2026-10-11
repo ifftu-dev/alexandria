@@ -398,16 +398,16 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Legend -->
-    <div class="mt-2 flex items-center justify-center gap-3 text-[10px]">
-      <span class="flex items-center gap-1" :title="$t('skills.graph.earnedTitle')">
+    <div class="mt-2 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[10px]">
+      <span class="flex items-center gap-1 whitespace-nowrap" :title="$t('skills.graph.earnedTitle')">
         <span class="inline-block h-2 w-2 rounded-full bg-success" />
         <span class="text-muted-foreground">{{ $t('skills.graph.legendEarned', { count: earnedCount }) }}</span>
       </span>
-      <span v-if="availableCount > 0" class="flex items-center gap-1" :title="$t('skills.graph.availableTip')">
+      <span v-if="availableCount > 0" class="flex items-center gap-1 whitespace-nowrap" :title="$t('skills.graph.availableTip')">
         <span class="inline-block h-2 w-2 rounded-full bg-warning" />
         <span class="text-muted-foreground">{{ $t('skills.graph.legendAvailable', { count: availableCount }) }}</span>
       </span>
-      <span class="flex items-center gap-1" :title="$t('skills.graph.lockedTip')">
+      <span class="flex items-center gap-1 whitespace-nowrap" :title="$t('skills.graph.lockedTip')">
         <span class="inline-block h-1.5 w-1.5 rounded-full" style="background: rgba(100, 116, 139, 0.4)" />
         <span class="text-muted-foreground">{{ $t('skills.graph.legendLocked', { count: lockedCount }) }}</span>
       </span>

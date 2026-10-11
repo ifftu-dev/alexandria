@@ -66,7 +66,7 @@
     "offlineHint": "Este perfil lo comparte directamente su propietario. Necesita estar en línea y tener su perfil configurado como público."
   },
   "directories": {
-    "title": "Directorios",
+    "title": "Tus directorios",
     "description": "Los directorios son servicios que guardan registros sobre ti: el registro de una institución, el índice de un empleador. No se consulta ninguno salvo que lo añadas aquí, y cada petición va firmada con tu clave, así que solo tú recibes respuesta.",
     "none": "No has añadido ningún directorio. Este dispositivo no contacta con ningún servidor sobre ti hasta que lo hagas.",
     "addHeading": "Añadir un directorio",
