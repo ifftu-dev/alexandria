@@ -21,10 +21,10 @@
  *    record of who said no to whom, held by the party that was refused.
  */
 
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from "@/composables/useLocalApi"
-import { announceDirectoriesChanged } from './directoryEvents'
+import { CONSENT_CHANGED, announceDirectoriesChanged } from './directoryEvents'
 import { useI18n } from 'vue-i18n'
 
 import { AppButton } from '@/components/ui'
@@ -98,6 +98,25 @@ const publishError = ref<Record<string, string>>({})
 const changingGrant = ref('')
 const sharedIds = ref<Set<string>>(new Set())
 const error = ref('')
+/**
+ * Skills the learner has agreed to publish; null while unknown. At zero the
+ * publish buttons are disabled rather than left to fail on click.
+ */
+const consentedSkills = ref<number | null>(null)
+
+async function loadConsent() {
+  try {
+    const preview = await invoke<{ consent: { skills: string[] } }>('get_talent_index_preview')
+    consentedSkills.value = preview.consent.skills.length
+  } catch {
+    // Unknown: leave publishing enabled and let the command explain.
+    consentedSkills.value = null
+  }
+}
+
+function onConsentChanged(event: Event) {
+  consentedSkills.value = (event as CustomEvent<number>).detail
+}
 
 async function loadDirectories() {
   directories.value = await invoke<Directory[]>('list_directories')
@@ -252,8 +271,14 @@ function when(iso: string) {
 }
 
 onMounted(async () => {
+  window.addEventListener(CONSENT_CHANGED, onConsentChanged)
+  void loadConsent()
   await loadDirectories()
   await check()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(CONSENT_CHANGED, onConsentChanged)
 })
 </script>
 
@@ -385,7 +410,7 @@ onMounted(async () => {
           {{ t('profile.directories.publishHeading') }}
         </h3>
         <p class="text-xs text-muted-foreground">{{ t('profile.directories.publishNote') }}</p>
-        <p class="text-xs text-muted-foreground">
+        <p v-if="consentedSkills === 0" class="text-xs text-muted-foreground">
           {{ t('profile.directories.consentHint') }}
           <button
             type="button"
@@ -401,7 +426,7 @@ onMounted(async () => {
             :key="dir.url"
             variant="outline"
             size="sm"
-            :disabled="publishing === dir.url"
+            :disabled="publishing === dir.url || consentedSkills === 0"
             @click="publish(dir)"
           >
             {{

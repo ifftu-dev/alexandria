@@ -87,7 +87,7 @@
     "withdrawNote": "A listing expires after 30 days. Untick a skill and it goes from the next listing; stop entirely and you drop out of the index without having to ask anyone to remove you."
   },
   "directories": {
-    "title": "Who has asked about you",
+    "title": "Directories",
     "description": "Directories are services that hold records about you — an institution's registry, an employer's index. Nothing is checked unless you add it here, and every request is signed with your key so only you get an answer.",
     "none": "You haven't added any directories. Nothing on this device contacts a server about you until you do.",
     "addHeading": "Add a directory",
@@ -119,7 +119,7 @@
     "problem": "{directory}: {detail}",
     "problemNote": "A directory that cannot be reached is shown rather than skipped — otherwise it would look the same as one with nothing to report.",
     "publishHeading": "Your listing",
-    "publishNote": "Publishing sends the record the section above previews. Sending it again replaces what a directory holds, so changing your consent and republishing is how you take a skill back.",
+    "publishNote": "Publishing sends the record you previewed when choosing what to publish. Sending it again replaces what a directory holds, so changing your consent and republishing is how you take a skill back.",
     "consentLink": "Choose what you're willing to publish",
     "consentHint": "Nothing to publish yet? You have to pick the skills first.",
     "publish": "Publish to {directory}",

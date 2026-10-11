@@ -66,7 +66,7 @@
     "offlineHint": "Este perfil lo comparte directamente su propietario. Necesita estar en línea y tener su perfil configurado como público."
   },
   "directories": {
-    "title": "Quién ha preguntado por ti",
+    "title": "Directorios",
     "description": "Los directorios son servicios que guardan registros sobre ti: el registro de una institución, el índice de un empleador. No se consulta ninguno salvo que lo añadas aquí, y cada petición va firmada con tu clave, así que solo tú recibes respuesta.",
     "none": "No has añadido ningún directorio. Este dispositivo no contacta con ningún servidor sobre ti hasta que lo hagas.",
     "addHeading": "Añadir un directorio",
@@ -98,7 +98,7 @@
     "problem": "{directory}: {detail}",
     "problemNote": "Un directorio inalcanzable se muestra en lugar de omitirse; de lo contrario parecería igual que uno que no tiene nada que informar.",
     "publishHeading": "Tu ficha",
-    "publishNote": "Al publicar se envía el registro que la sección anterior previsualiza. Volver a enviarlo reemplaza lo que guarda un directorio, así que cambiar tu consentimiento y republicar es la forma de retirar una competencia.",
+    "publishNote": "Al publicar se envía el registro que previsualizaste al elegir qué publicar. Volver a enviarlo reemplaza lo que guarda un directorio, así que cambiar tu consentimiento y volver a publicar es la forma de retirar una habilidad.",
     "consentLink": "Elige lo que quieres publicar",
     "consentHint": "¿Nada que publicar todavía? Primero tienes que elegir las competencias.",
     "publish": "Publicar en {directory}",
