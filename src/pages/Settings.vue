@@ -57,6 +57,20 @@ interface SectionMeta {
   keywords: string[]
 }
 const developerEnabled = ref(false)
+// Heroicons outline paths (24px, stroke), one per settings section.
+const SECTION_ICONS: Record<SettingsSectionId, string> = {
+  account: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z',
+  security: 'M12 11c-1.105 0-2 .895-2 2 0 .738.4 1.38 1 1.723V17h2v-2.277c.6-.343 1-.985 1-1.723 0-1.105-.895-2-2-2zM6 10V8a6 6 0 1112 0v2M5 10h14v10H5V10z',
+  personalization: 'M7 21a4 4 0 01-4-4 4 4 0 014-4h1m11-7l-7 7m0 0l-3-3m3 3v6a4 4 0 11-4-4',
+  system: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+  plugins: 'M14.7 6.3a1 1 0 001.4 0l1.6-1.6a1 1 0 011.4 1.4l-1.6 1.6a1 1 0 000 1.4l3 3a1 1 0 010 1.4l-1.6 1.6a1 1 0 01-1.4 0l-3-3a1 1 0 00-1.4 0L9 17a4 4 0 11-5.6-5.6L9 6a1 1 0 011.4 0l4.3 4.3',
+  guardian: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
+  integrity: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+  directories: 'M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z',
+  assistants: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z',
+  advanced: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
+  developer: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4',
+}
 const SECTION_IDS: SettingsSectionId[] = [
   'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity',
   'directories', 'assistants', 'advanced', 'developer',
@@ -528,25 +542,8 @@ function onSectionClick(id: SettingsSectionId) {
                   @click="onSectionClick(s.id)"
                 >
                   <span class="settings-nav-icon" aria-hidden="true">
-                    <!-- Account -->
-                    <svg v-if="s.id === 'account'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z" />
-                    </svg>
-                    <!-- Security -->
-                    <svg v-else-if="s.id === 'security'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 11c-1.105 0-2 .895-2 2 0 .738.4 1.38 1 1.723V17h2v-2.277c.6-.343 1-.985 1-1.723 0-1.105-.895-2-2-2zM6 10V8a6 6 0 1112 0v2M5 10h14v10H5V10z" />
-                    </svg>
-                    <!-- Personalization -->
-                    <svg v-else-if="s.id === 'personalization'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M7 21a4 4 0 01-4-4 4 4 0 014-4h1m11-7l-7 7m0 0l-3-3m3 3v6a4 4 0 11-4-4" />
-                    </svg>
-                    <!-- Plugins -->
-                    <svg v-else-if="s.id === 'plugins'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a1 1 0 001.4 0l1.6-1.6a1 1 0 011.4 1.4l-1.6 1.6a1 1 0 000 1.4l3 3a1 1 0 010 1.4l-1.6 1.6a1 1 0 01-1.4 0l-3-3a1 1 0 00-1.4 0L9 17a4 4 0 11-5.6-5.6L9 6a1 1 0 011.4 0l4.3 4.3" />
-                    </svg>
-                    <!-- System -->
-                    <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16" />
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+                      <path stroke-linecap="round" stroke-linejoin="round" :d="SECTION_ICONS[s.id]" />
                     </svg>
                   </span>
                   <span class="flex flex-1 flex-col text-start min-w-0">
