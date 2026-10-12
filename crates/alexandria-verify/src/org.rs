@@ -3,18 +3,23 @@
 //! An organisation that asks a learner for anything — access to their skills,
 //! an assessment, an interview, an offer — names itself. A name on its own is
 //! a claim anybody can make, so the claim is anchored where only the real
-//! organisation can write: a file on its own domain,
-//! `https://<domain>/.well-known/alexandria-org.json`. That file names the
-//! organisation and lists the keys allowed to sign for it.
+//! organisation can write: a DNS TXT record on its own domain,
+//!
+//! ```text
+//! _alexandria.<domain>  TXT  "v=alexandria-org1; name=<name>; key=<did:key>"
+//! ```
+//!
+//! naming the organisation and listing the keys allowed to sign for it
+//! (`key=` may repeat).
 //!
 //! Every request the organisation sends carries an [`OrgProof`]. A learner's
-//! app fetches the file itself and checks the proof against it, so the name it
-//! shows is the one the domain's owner published, not one a service relayed.
-//! Nobody between the two has to be trusted, including the service that
-//! carried the request.
+//! app looks the record up itself and checks the proof against it, so the
+//! name it shows is the one the domain's owner published, not one a service
+//! relayed. Nobody between the two has to be trusted, including the service
+//! that carried the request.
 //!
-//! The crate performs no I/O: callers fetch the descriptor over HTTPS and hand
-//! it in.
+//! The crate performs no I/O: callers resolve the TXT records and hand them
+//! to [`descriptor_from_txt`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,8 +27,11 @@ use serde_json::Value;
 /// The descriptor's `format` value.
 pub const DESCRIPTOR_FORMAT: &str = "alexandria-org/1";
 
-/// Where the descriptor lives on the organisation's domain.
-pub const WELL_KNOWN_PATH: &str = "/.well-known/alexandria-org.json";
+/// The label the TXT record sits under, in front of the organisation's domain.
+pub const TXT_LABEL: &str = "_alexandria";
+
+/// The record's `v=` value.
+pub const TXT_VERSION: &str = "alexandria-org1";
 
 /// The most signing keys a descriptor may list: enough to rotate, few enough
 /// that a descriptor is not a key dump.
@@ -34,13 +42,13 @@ pub const MAX_NAME_CHARS: usize = 120;
 
 const JWS_HEADER_JSON: &str = r#"{"alg":"EdDSA","b64":false,"crit":["b64"]}"#;
 
-/// What an organisation publishes on its domain.
+/// What an organisation publishes on its domain, as read from its TXT record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrgDescriptor {
     /// Always [`DESCRIPTOR_FORMAT`].
     pub format: String,
-    /// The domain the file is served from. Must match where it was fetched.
+    /// The domain the record was found under.
     pub domain: String,
     /// The organisation's name, as learners will see it.
     pub name: String,
@@ -131,12 +139,68 @@ pub fn normalise_domain(domain: &str) -> Result<String, OrgError> {
     Ok(d)
 }
 
-/// The HTTPS URL a descriptor is fetched from.
-pub fn descriptor_url(domain: &str) -> Result<String, OrgError> {
-    Ok(format!(
-        "https://{}{WELL_KNOWN_PATH}",
-        normalise_domain(domain)?
-    ))
+/// The DNS name to look the record up at.
+pub fn txt_name(domain: &str) -> Result<String, OrgError> {
+    Ok(format!("{TXT_LABEL}.{}", normalise_domain(domain)?))
+}
+
+/// The TXT value an organisation publishes for this descriptor.
+pub fn txt_value(descriptor: &OrgDescriptor) -> String {
+    let mut value = format!("v={TXT_VERSION}; name={}", descriptor.name);
+    for key in &descriptor.keys {
+        value.push_str("; key=");
+        value.push_str(key);
+    }
+    value
+}
+
+/// Read the descriptor out of the TXT records found at [`txt_name`].
+///
+/// Each record is the concatenation of its character-strings. Records that are
+/// not ours (no `v=alexandria-org1`) are ignored, since a name may carry other
+/// TXT records; more than one of ours is refused rather than guessed between.
+/// The result has passed [`check_descriptor`].
+pub fn descriptor_from_txt(domain: &str, records: &[String]) -> Result<OrgDescriptor, OrgError> {
+    let domain = normalise_domain(domain)?;
+    let bad = |e: &str| OrgError::BadDescriptor(e.to_string());
+    let ours: Vec<Vec<(String, String)>> = records
+        .iter()
+        .map(|record| {
+            record
+                .split(';')
+                .filter_map(|part| {
+                    let (k, v) = part.split_once('=')?;
+                    Some((k.trim().to_ascii_lowercase(), v.trim().to_string()))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|fields| fields.iter().any(|(k, v)| k == "v" && v == TXT_VERSION))
+        .collect();
+    let fields = match ours.as_slice() {
+        [] => return Err(bad("no Alexandria record on the domain")),
+        [one] => one,
+        _ => return Err(bad("more than one Alexandria record on the domain")),
+    };
+    let names: Vec<&String> = fields
+        .iter()
+        .filter(|(k, _)| k == "name")
+        .map(|(_, v)| v)
+        .collect();
+    let [name] = names.as_slice() else {
+        return Err(bad("the record must name the organisation exactly once"));
+    };
+    let descriptor = OrgDescriptor {
+        format: DESCRIPTOR_FORMAT.to_string(),
+        domain: domain.clone(),
+        name: (*name).clone(),
+        keys: fields
+            .iter()
+            .filter(|(k, _)| k == "key")
+            .map(|(_, v)| v.clone())
+            .collect(),
+    };
+    check_descriptor(&descriptor, &domain)?;
+    Ok(descriptor)
 }
 
 /// The audience an organisation's requests are addressed with, and that a
@@ -145,7 +209,7 @@ pub fn audience(domain: &str) -> String {
     format!("urn:alexandria:org:{domain}")
 }
 
-/// Check a descriptor fetched from `fetched_from`.
+/// Check a descriptor read for the domain `fetched_from`.
 pub fn check_descriptor(descriptor: &OrgDescriptor, fetched_from: &str) -> Result<(), OrgError> {
     let bad = |e: &str| Err(OrgError::BadDescriptor(e.to_string()));
     if descriptor.format != DESCRIPTOR_FORMAT {
@@ -155,7 +219,7 @@ pub fn check_descriptor(descriptor: &OrgDescriptor, fetched_from: &str) -> Resul
         return bad("domain is not in normal form");
     }
     if descriptor.domain != normalise_domain(fetched_from)? {
-        return bad("names a different domain from the one it was fetched from");
+        return bad("names a different domain from the one it was read for");
     }
     let name = descriptor.name.trim();
     if name.is_empty() || name != descriptor.name {
@@ -333,9 +397,49 @@ mod tests {
             assert!(normalise_domain(bad).is_err(), "{bad}");
         }
         assert_eq!(
-            descriptor_url("alexandria.ifftu.dev").unwrap(),
-            "https://alexandria.ifftu.dev/.well-known/alexandria-org.json"
+            txt_name("alexandria.ifftu.dev").unwrap(),
+            "_alexandria.alexandria.ifftu.dev"
         );
+    }
+
+    #[test]
+    fn the_txt_record_round_trips_and_ignores_other_records() {
+        let d = descriptor(&key(1));
+        let value = txt_value(&d);
+        assert!(value.starts_with("v=alexandria-org1; name=IFFTU; key=did:key:"));
+        let records = vec![
+            "v=spf1 include:_spf.google.com ~all".to_string(),
+            value.clone(),
+        ];
+        assert_eq!(
+            descriptor_from_txt("alexandria.ifftu.dev", &records).unwrap(),
+            d
+        );
+        // Spacing and case of the field names do not matter.
+        let loose = value.replace("; ", ";").replace("name=", "NAME = ");
+        assert_eq!(
+            descriptor_from_txt("alexandria.ifftu.dev", &[loose]).unwrap(),
+            d
+        );
+    }
+
+    #[test]
+    fn a_missing_doubled_or_unkeyed_record_is_refused() {
+        let d = descriptor(&key(1));
+        assert!(descriptor_from_txt("alexandria.ifftu.dev", &[]).is_err());
+        assert!(
+            descriptor_from_txt("alexandria.ifftu.dev", &[txt_value(&d), txt_value(&d)]).is_err()
+        );
+        assert!(descriptor_from_txt(
+            "alexandria.ifftu.dev",
+            &["v=alexandria-org1; name=IFFTU".to_string()]
+        )
+        .is_err());
+        assert!(descriptor_from_txt(
+            "alexandria.ifftu.dev",
+            &[format!("{}; name=Other", txt_value(&d))]
+        )
+        .is_err());
     }
 
     #[test]

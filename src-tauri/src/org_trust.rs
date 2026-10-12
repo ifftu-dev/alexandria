@@ -3,8 +3,8 @@
 //! Everything an organisation sends a learner — an access request, an
 //! assessment request, an interview invitation, an offer — arrives through
 //! Alexandria Cloud with an [`OrgProof`]. The name the app shows comes from
-//! the file the organisation publishes on its own domain, fetched here
-//! directly, never from the service that relayed the request. A request whose
+//! the TXT record the organisation publishes on its own domain, looked up
+//! here directly, never from the service that relayed the request. A request whose
 //! proof does not check out is still shown, so the learner knows it arrived,
 //! but nothing can be sent back to it.
 //!
@@ -23,8 +23,6 @@ use crate::AppState;
 
 /// How long a fetched descriptor is trusted without asking the domain again.
 pub const DESCRIPTOR_TTL_SECS: i64 = 3600;
-
-const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// What the learner is shown about who sent something.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,44 +98,46 @@ fn store(conn: &Connection, descriptor: &OrgDescriptor, now: i64) -> Result<(), 
     Ok(())
 }
 
-/// Fetch and check `domain`'s descriptor over HTTPS.
+/// Look up and check `domain`'s descriptor in DNS.
 pub(crate) async fn fetch_descriptor(domain: &str) -> Result<OrgDescriptor, String> {
-    let url = org::descriptor_url(domain).map_err(|e| e.to_string())?;
-    fetch_descriptor_from(&url, domain).await
+    let name = org::txt_name(domain).map_err(|e| e.to_string())?;
+    let records = txt_records(&name).await?;
+    org::descriptor_from_txt(domain, &records).map_err(|e| match e {
+        OrgError::BadDescriptor(why) => format!("{domain}: {why} ({name})"),
+        other => other.to_string(),
+    })
 }
 
-/// The same, from an explicit URL. Split out so tests can serve a descriptor
-/// from loopback; production only ever passes [`org::descriptor_url`].
-pub(crate) async fn fetch_descriptor_from(
-    url: &str,
-    domain: &str,
-) -> Result<OrgDescriptor, String> {
-    let mut response = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("could not reach {domain}: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "{domain} does not publish an organisation file ({})",
-            response.status()
-        ));
+/// Every TXT record at `name`, each one's strings joined. None found is an
+/// empty list, not an error: "this domain says nothing" is an answer.
+///
+/// The system resolver first; where there is no readable system
+/// configuration (Android has no resolv.conf) a public one stands in.
+async fn txt_records(name: &str) -> Result<Vec<String>, String> {
+    use hickory_resolver::config::ResolverConfig;
+    use hickory_resolver::name_server::TokioConnectionProvider;
+    use hickory_resolver::TokioResolver;
+
+    let resolver = match TokioResolver::builder_tokio() {
+        Ok(builder) => builder.build(),
+        Err(_) => TokioResolver::builder_with_config(
+            ResolverConfig::cloudflare(),
+            TokioConnectionProvider::default(),
+        )
+        .build(),
+    };
+    match resolver.txt_lookup(format!("{name}.")).await {
+        Ok(found) => Ok(found
+            .iter()
+            .map(|txt| {
+                txt.iter()
+                    .map(|part| String::from_utf8_lossy(part).into_owned())
+                    .collect::<String>()
+            })
+            .collect()),
+        Err(e) if e.is_no_records_found() => Ok(Vec::new()),
+        Err(e) => Err(format!("could not look up {name}: {e}")),
     }
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        if body.len() + chunk.len() > MAX_DESCRIPTOR_BYTES {
-            return Err(format!("{domain}'s organisation file is too large"));
-        }
-        body.extend_from_slice(&chunk);
-    }
-    let descriptor: OrgDescriptor = serde_json::from_slice(&body)
-        .map_err(|e| format!("{domain}'s organisation file is unreadable: {e}"))?;
-    org::check_descriptor(&descriptor, domain).map_err(|e| e.to_string())?;
-    Ok(descriptor)
 }
 
 fn learner_problem(error: &OrgError) -> String {
@@ -252,44 +252,16 @@ mod tests {
         assert_eq!((found.name.as_str(), at), ("IFFTU Labs", 20));
     }
 
+    /// Needs the network. `cargo test --lib org_trust -- --ignored`
     #[tokio::test]
-    async fn a_descriptor_is_fetched_checked_and_bounded() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        async fn serve(body: String) -> String {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!(
-                "http://{}/.well-known/alexandria-org.json",
-                listener.local_addr().unwrap()
-            );
-            tokio::spawn(async move {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut buf = [0u8; 2048];
-                let _ = socket.read(&mut buf).await;
-                let reply = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                socket.write_all(reply.as_bytes()).await.unwrap();
-            });
-            url
-        }
-
-        let good = serde_json::to_string(&descriptor()).unwrap();
-        let url = serve(good).await;
-        let found = fetch_descriptor_from(&url, "alexandria.ifftu.dev")
+    #[ignore]
+    async fn txt_lookups_reach_real_dns() {
+        let found = txt_records("alexandria.ifftu.dev").await.unwrap();
+        assert!(found.iter().any(|r| r.starts_with("v=spf1")), "{found:?}");
+        assert!(txt_records("_nothing-here.alexandria.ifftu.dev")
             .await
-            .unwrap();
-        assert_eq!(found.name, "IFFTU");
-
-        // A file served for another domain does not speak for this one.
-        let url = serve(serde_json::to_string(&descriptor()).unwrap()).await;
-        assert!(fetch_descriptor_from(&url, "example.com").await.is_err());
-
-        let url = serve("x".repeat(MAX_DESCRIPTOR_BYTES + 1)).await;
-        assert!(fetch_descriptor_from(&url, "alexandria.ifftu.dev")
-            .await
-            .unwrap_err()
-            .contains("too large"));
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
