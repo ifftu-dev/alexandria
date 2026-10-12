@@ -728,23 +728,7 @@ pub async fn integrity_get_session(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "integrity.get-session",
-            move |db| {
-                let result = db.conn().query_row(
-                    "SELECT id, enrollment_id, status, integrity_score, critical_count, warning_count,
-                            started_at, ended_at
-                     FROM integrity_sessions
-                     WHERE enrollment_id = ?1
-                     ORDER BY started_at DESC LIMIT 1",
-                    params![enrollment_id],
-                    map_session,
-                );
-
-                match result {
-                    Ok(session) => Ok(Some(session)),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                    Err(e) => Err(e.to_string()),
-                }
-            },
+            move |db| latest_session_for_enrollment(db.conn(), &enrollment_id),
         )
         .await
 }
@@ -761,38 +745,7 @@ pub async fn integrity_list_sessions(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "integrity.list-sessions",
-            move |db| {
-                let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-                    if let Some(ref s) = status {
-                        (
-                            "SELECT id, enrollment_id, status, integrity_score, critical_count, warning_count,
-                                    started_at, ended_at
-                             FROM integrity_sessions WHERE status = ?1
-                             ORDER BY started_at DESC"
-                                .to_string(),
-                            vec![Box::new(s.clone())],
-                        )
-                    } else {
-                        (
-                            "SELECT id, enrollment_id, status, integrity_score, critical_count, warning_count,
-                                    started_at, ended_at
-                             FROM integrity_sessions
-                             ORDER BY started_at DESC"
-                                .to_string(),
-                            vec![],
-                        )
-                    };
-
-                let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                    param_values.iter().map(|v| v.as_ref()).collect();
-                let mut stmt = db.conn().prepare(&sql).map_err(|e| e.to_string())?;
-                let sessions = stmt
-                    .query_map(params_ref.as_slice(), map_session)
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?;
-                Ok(sessions)
-            },
+            move |db| list_sessions(db.conn(), status.as_deref()),
         )
         .await
 }
@@ -838,6 +791,11 @@ pub async fn integrity_list_snapshots(
 // Row mapping helpers
 // ============================================================================
 
+/// The columns `map_session` reads, in order. Every session query selects
+/// exactly these, so a field added to one cannot be missing from another.
+const SESSION_COLUMNS: &str = "id, enrollment_id, status, integrity_score, critical_count, \
+     warning_count, started_at, ended_at, assurance_level";
+
 fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
     Ok(IntegritySession {
         id: row.get(0)?,
@@ -877,13 +835,50 @@ fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> 
 
 fn read_session(conn: &rusqlite::Connection, id: &str) -> Result<IntegritySession, String> {
     conn.query_row(
-        "SELECT id, enrollment_id, status, integrity_score, critical_count, warning_count,
-                started_at, ended_at, assurance_level
-         FROM integrity_sessions WHERE id = ?1",
+        &format!("SELECT {SESSION_COLUMNS} FROM integrity_sessions WHERE id = ?1"),
         params![id],
         map_session,
     )
     .map_err(|e| e.to_string())
+}
+
+fn latest_session_for_enrollment(
+    conn: &rusqlite::Connection,
+    enrollment_id: &str,
+) -> Result<Option<IntegritySession>, String> {
+    let result = conn.query_row(
+        &format!(
+            "SELECT {SESSION_COLUMNS} FROM integrity_sessions
+             WHERE enrollment_id = ?1
+             ORDER BY started_at DESC LIMIT 1"
+        ),
+        params![enrollment_id],
+        map_session,
+    );
+    match result {
+        Ok(session) => Ok(Some(session)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn list_sessions(
+    conn: &rusqlite::Connection,
+    status: Option<&str>,
+) -> Result<Vec<IntegritySession>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SESSION_COLUMNS} FROM integrity_sessions
+             WHERE ?1 IS NULL OR status = ?1
+             ORDER BY started_at DESC"
+        ))
+        .map_err(|e| e.to_string())?;
+    let sessions = stmt
+        .query_map(params![status], map_session)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(sessions)
 }
 
 fn read_snapshot(conn: &rusqlite::Connection, id: &str) -> Result<IntegritySnapshot, String> {
@@ -995,6 +990,37 @@ mod tests {
             gaze_offscreen_ratio: Some(0.0),
             anomaly_flags: Vec::new(),
         }
+    }
+
+    #[test]
+    fn every_session_query_reads_the_columns_map_session_expects() {
+        let db = snapshot_db();
+        // The enrollment row itself is beside the point; only the column mapping is.
+        db.conn()
+            .execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 UPDATE integrity_sessions SET enrollment_id = 'enrollment' WHERE id = 'snapshot-session';",
+            )
+            .unwrap();
+
+        let all = list_sessions(db.conn(), None).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].assurance_level, "local");
+        assert_eq!(list_sessions(db.conn(), Some("active")).unwrap().len(), 1);
+        assert!(list_sessions(db.conn(), Some("completed"))
+            .unwrap()
+            .is_empty());
+
+        let latest = latest_session_for_enrollment(db.conn(), "enrollment").unwrap();
+        assert_eq!(latest.map(|s| s.id).as_deref(), Some("snapshot-session"));
+        assert!(latest_session_for_enrollment(db.conn(), "other")
+            .unwrap()
+            .is_none());
+
+        assert_eq!(
+            read_session(db.conn(), "snapshot-session").unwrap().status,
+            "active"
+        );
     }
 
     #[test]
