@@ -165,5 +165,16 @@
     "connected": "{connected}/{total} conectados",
     "micOn": "Micrófono activado",
     "micOff": "Micrófono apagado"
+  },
+  "interviewRoom": {
+    "eyebrow": "Entrevista en Alexandria",
+    "waiting": "Esperando a que el panel abra la sala",
+    "ready": "El panel te está esperando",
+    "explain": "Esta entrevista se hace aquí, en Alexandria, con una conexión directa entre tú y el panel.",
+    "noRecording": "No se graba nada.",
+    "captions": "Solo se generan subtítulos de lo que dices si activas los subtítulos.",
+    "leave": "Puedes salir en cualquier momento.",
+    "join": "Unirse a la entrevista",
+    "checking": "Comprobando cada pocos segundos…"
   }
 }

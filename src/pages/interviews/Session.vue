@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useInterviews } from '@/composables/useInterviews'
 import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecognition'
+import { usePanel, type PanelInterview } from '@/composables/usePanel'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSentinel } from '@/composables/useSentinel'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
@@ -21,6 +22,12 @@ import type {
 const route = useRoute()
 const router = useRouter()
 const interviewId = computed(() => String(route.params.id))
+// A seat on an organisation's panel lives under /panel, which a learner
+// account can open without instructor mode; a local interview under /interviews.
+const basePath = computed(() => (route.path.startsWith('/panel') ? '/panel' : '/interviews'))
+const panelApi = usePanel()
+const panel = ref<PanelInterview | null>(null)
+const panelError = ref<string | null>(null)
 
 const {
   activeInterview,
@@ -114,6 +121,7 @@ onMounted(async () => {
     ?? bundle.participants[0]?.id
     ?? ''
   if (bundle.notes[0]) privateNote.value = bundle.notes[0].text
+  panel.value = await panelApi.status(bundle.session.id).catch(() => null)
   await tutoring.setupEventListeners()
   await tutoring.refreshStatus()
   if (bundle.session.status === 'live') {
@@ -179,12 +187,31 @@ async function saveConsent() {
   showConsent.value = false
 }
 
+/** Join the panel's room if a panelist already opened it, else open it and
+ *  hand Cloud the ticket so the rest of the panel and the candidate can join. */
+async function enterPanelRoom(title: string, name: string) {
+  if (!session.value) throw new Error('no interview')
+  panelError.value = null
+  const current = await panelApi.status(session.value.id)
+  panel.value = current
+  if (current.room.ticket) return tutoring.joinRoom(current.room.ticket, title, name)
+  const room = await tutoring.createRoom(title, name)
+  if (!room.ticket) throw new Error('the room has no ticket to share')
+  panel.value = await panelApi.setRoom(session.value.id, room.ticket)
+  return room
+}
+
 async function startInterview() {
   if (!session.value || !allRequestedConsentsReady.value) return
-  const room = await tutoring.createRoom(
-    `Interview · ${session.value.title}`,
-    interviewer.value?.display_name ?? 'Interviewer',
-  )
+  const title = `Interview · ${session.value.title}`
+  const name = interviewer.value?.display_name ?? 'Interviewer'
+  let room
+  try {
+    room = panel.value ? await enterPanelRoom(title, name) : await tutoring.createRoom(title, name)
+  } catch (cause) {
+    panelError.value = cause instanceof Error ? cause.message : String(cause)
+    return
+  }
   // Sentinel observes this conductor device. Prefer the interviewer attached
   // to that device; a candidate-only interview falls back to its sole party.
   const monitorParticipant = interviewer.value ?? candidate.value
@@ -207,7 +234,7 @@ async function endInterview() {
   if (session.value) {
     await setStatus(session.value.id, 'completed')
     await generateSummary(session.value.id)
-    await router.push(`/interviews/${session.value.id}/review`)
+    await router.push(`${basePath.value}/${session.value.id}/review`)
   }
 }
 
@@ -392,7 +419,7 @@ function formatTime(ms: number) {
 <template>
   <div v-if="activeInterview" class="-m-4 flex min-h-[calc(100dvh-4rem)] flex-col bg-background sm:-m-6 lg:-m-8">
     <header class="flex min-h-14 flex-wrap items-center gap-3 border-b border-border bg-card px-3 py-2 sm:px-5">
-      <button class="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" :title="$t('interviews.session.back')" @click="router.push('/interviews')">
+      <button class="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" :title="$t('interviews.session.back')" @click="router.push(panel ? '/settings/organisations' : '/interviews')">
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
       </button>
       <div class="min-w-0 flex-1">
@@ -418,7 +445,27 @@ function formatTime(ms: number) {
       </template>
     </header>
 
-    <AppAlert v-if="error || tutoring.lastError.value" variant="error" class="m-3">{{ error || tutoring.lastError.value }}</AppAlert>
+    <AppAlert v-if="error || tutoring.lastError.value || panelError" variant="error" class="m-3">{{ error || tutoring.lastError.value || panelError }}</AppAlert>
+
+    <section v-if="panel && !isLive" class="mx-3 mt-3 rounded-xl border border-border bg-card p-4 sm:mx-6" data-testid="panel-brief">
+      <p class="text-xs font-semibold uppercase tracking-[0.14em] text-primary">{{ $t('interviews.panel.forOrg', { org: panel.organization }) }}</p>
+      <h2 class="mt-1 text-base font-semibold text-foreground">{{ panel.roleLabel }} · {{ panel.candidate.displayName || $t('interviews.panel.candidate') }}</h2>
+      <p class="mt-1 text-sm text-muted-foreground">
+        <span v-if="panel.chosenSlot">{{ new Date(panel.chosenSlot * 1000).toLocaleString() }} · </span>
+        {{ $t('interviews.panel.panelists', { names: panel.panel.map(member => member.name).join(', ') }) }}
+      </p>
+      <p class="mt-1 text-sm text-muted-foreground">
+        {{ panel.room.ticket ? $t('interviews.panel.roomOpen') : $t('interviews.panel.roomClosed') }}
+      </p>
+      <div v-if="panel.candidateEvidence.length" class="mt-3">
+        <p class="text-xs font-medium text-muted-foreground">{{ $t('interviews.panel.evidence') }}</p>
+        <ul class="mt-1 flex flex-wrap gap-2">
+          <li v-for="skill in panel.candidateEvidence" :key="skill.skillId" class="rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground">
+            {{ skill.name }} · {{ $t('interviews.panel.score', { level: skill.level }) }}
+          </li>
+        </ul>
+      </div>
+    </section>
 
     <main v-if="!isLive" class="flex-1 overflow-auto p-4 sm:p-6">
       <div class="mx-auto grid max-w-6xl gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">

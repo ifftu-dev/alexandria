@@ -527,6 +527,33 @@ pub async fn hiring_offer_respond(
     Ok(receipt)
 }
 
+/// The room for an accepted interview held in Alexandria, once the panel has
+/// opened it. Asked with the learner's own proof, so only the candidate the
+/// interview is for can learn the ticket.
+#[tauri::command]
+pub async fn hiring_interview_room(
+    state: State<'_, AppState>,
+    directory_url: String,
+    interview_id: String,
+) -> Result<serde_json::Value, String> {
+    let dir = directory(&state, &directory_url).await?;
+    let id = uuid::Uuid::parse_str(&interview_id).map_err(|e| e.to_string())?;
+    let (key, _) = load_issuer_key(&state).await?;
+    let path = format!("/api/interviews/{id}/room");
+    let timestamp = chrono::Utc::now().timestamp();
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let proof = super::holder_pull::proof(&key, "GET", &path, timestamp, &nonce);
+    let response = client()?
+        .get(format!("{}{path}", dir.url.trim_end_matches('/')))
+        .header("x-alexandria-timestamp", timestamp.to_string())
+        .header("x-alexandria-nonce", nonce)
+        .header("x-alexandria-proof", proof)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    response_json(response).await
+}
+
 pub fn history(conn: &rusqlite::Connection) -> Result<Vec<HiringRecord>, String> {
     let mut stmt = conn
         .prepare("SELECT id,kind,directory_url,organization,role_label,decision,chosen_slot,meeting_url,responded_at,payload_json FROM hiring_responses ORDER BY responded_at DESC")

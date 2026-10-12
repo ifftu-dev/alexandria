@@ -165,5 +165,16 @@
     "connected": "{connected}/{total} 已连接",
     "micOn": "麦克风开",
     "micOff": "麦克风关"
+  },
+  "interviewRoom": {
+    "eyebrow": "在 Alexandria 中面试",
+    "waiting": "正在等待面试小组开启房间",
+    "ready": "面试小组已准备好",
+    "explain": "本次面试在 Alexandria 中进行，您与面试小组直接连接。",
+    "noRecording": "不会录制任何内容。",
+    "captions": "只有在您开启字幕后，才会为您说的话生成字幕。",
+    "leave": "您可以随时离开。",
+    "join": "加入面试",
+    "checking": "每隔几秒检查一次…"
   }
 }

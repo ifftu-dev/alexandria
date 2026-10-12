@@ -76,6 +76,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // so every request does not refetch it, and the access the learner has
     // granted, with what was last sent under each grant.
     (15, "organisation_access", MIGRATION_015_ORGANISATION_ACCESS),
+    // An interview session can be a seat on an organisation's panel in
+    // Alexandria Cloud: where to reach it, which interview and seat, and the
+    // panelist's token for that seat.
+    (16, "interview_panel_link", MIGRATION_016_INTERVIEW_PANEL_LINK),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
@@ -96,6 +100,17 @@ const MIGRATION_013_ATTEMPT_ROLE_TARGET: &str = r#"
 ALTER TABLE assessment_attempts
     ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
 CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
+
+const MIGRATION_016_INTERVIEW_PANEL_LINK: &str = r#"
+ALTER TABLE interview_sessions ADD COLUMN cloud_url TEXT;
+ALTER TABLE interview_sessions ADD COLUMN cloud_interview_id TEXT;
+ALTER TABLE interview_sessions ADD COLUMN cloud_panelist_id TEXT;
+ALTER TABLE interview_sessions ADD COLUMN cloud_panel_token TEXT;
+ALTER TABLE interview_sessions ADD COLUMN cloud_org TEXT;
+CREATE UNIQUE INDEX idx_interview_panel_seat
+    ON interview_sessions(cloud_interview_id, cloud_panelist_id)
+    WHERE cloud_interview_id IS NOT NULL;
 "#;
 
 const MIGRATION_015_ORGANISATION_ACCESS: &str = r#"

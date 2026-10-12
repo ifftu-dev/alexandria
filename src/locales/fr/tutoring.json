@@ -165,5 +165,16 @@
     "connected": "{connected}/{total} connectés",
     "micOn": "Micro activé",
     "micOff": "Micro coupé"
+  },
+  "interviewRoom": {
+    "eyebrow": "Entretien dans Alexandria",
+    "waiting": "En attente de l'ouverture de la salle par le jury",
+    "ready": "Le jury vous attend",
+    "explain": "Cet entretien a lieu ici, dans Alexandria, par une connexion directe entre vous et le jury.",
+    "noRecording": "Rien n'est enregistré.",
+    "captions": "Vos paroles ne sont sous-titrées que si vous activez les sous-titres.",
+    "leave": "Vous pouvez partir à tout moment.",
+    "join": "Rejoindre l'entretien",
+    "checking": "Vérification toutes les quelques secondes…"
   }
 }
