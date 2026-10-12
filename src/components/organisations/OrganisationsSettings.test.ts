@@ -73,4 +73,36 @@ describe('OrganisationsSettings', () => {
     expect(mocks.setSetting).toHaveBeenCalledWith('organisations.enabled', 'true')
     expect(wrapper.find('[data-testid=org-requests]').exists()).toBe(true)
   })
+
+  it('opens a pasted panel link and goes to the seat', async () => {
+    mocks.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'org_cloud') return 'https://cloud.example'
+      if (command === 'interview_panel_open') {
+        expect(args).toEqual({ link: 'alexandria://interview/join?id=x' })
+        return { sessionId: 'seat-1', interview: {} }
+      }
+      throw new Error(command)
+    })
+    const wrapper = mount(OrganisationsSettings, { props: { cloudSettingsSection: 'developer' }, global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-testid=panel-link] input').setValue('  alexandria://interview/join?id=x ')
+    await wrapper.find('[data-testid=panel-link]').trigger('submit')
+    await flushPromises()
+    expect(mocks.push).toHaveBeenCalledWith('/panel/seat-1')
+  })
+
+  it('shows why a pasted link could not be opened', async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'org_cloud') return null
+      if (command === 'interview_panel_open') throw 'not an interview link'
+      throw new Error(command)
+    })
+    const wrapper = mount(OrganisationsSettings, { props: { cloudSettingsSection: 'developer' }, global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-testid=panel-link] input').setValue('https://example.com')
+    await wrapper.find('[data-testid=panel-link]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('[data-testid=panel-link] [role=alert]').text()).toBe('not an interview link')
+    expect(mocks.push).not.toHaveBeenCalled()
+  })
 })

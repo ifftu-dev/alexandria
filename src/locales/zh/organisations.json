@@ -15,7 +15,11 @@
     "openDeveloper": "打开开发者设置",
     "cloudLabel": "Alexandria Cloud 地址",
     "cloudDesc": "使用其他 Alexandria Cloud，例如在本地运行的服务。留空则使用网络自带的。",
-    "cloudSaved": "已保存。"
+    "cloudSaved": "已保存。",
+    "panelTitle": "你是面试小组成员吗？",
+    "panelDesc": "粘贴组织发给你的加入链接，即可打开你在面试小组中的席位。",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "打开"
   },
   "requests": {
     "title": "请求",

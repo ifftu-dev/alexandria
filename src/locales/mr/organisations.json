@@ -15,7 +15,11 @@
     "openDeveloper": "डेव्हलपर सेटिंग्ज उघडा",
     "cloudLabel": "Alexandria Cloud पत्ता",
     "cloudDesc": "दुसरे Alexandria Cloud वापरा, उदा. स्थानिकरित्या चालणारे. नेटवर्कचे स्वतःचे वापरण्यासाठी रिकामे ठेवा.",
-    "cloudSaved": "जतन केले."
+    "cloudSaved": "जतन केले.",
+    "panelTitle": "मुलाखत पॅनेलवर आहात?",
+    "panelDesc": "संस्थेने पाठवलेली सामील होण्याची लिंक पेस्ट करा. त्याने पॅनेलवरील तुमचे स्थान उघडेल.",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "उघडा"
   },
   "requests": {
     "title": "विनंत्या",

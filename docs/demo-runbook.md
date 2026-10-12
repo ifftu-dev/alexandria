@@ -223,7 +223,9 @@ Cloud → interview page → **Refresh**: *accepted* with the chosen time and th
 signed answer. The *Panel* section lists the panelists, with *not yet* under *Joined*.
 
 Alexandria (panelist's machine) → open the join link (from a browser, or
-`open 'alexandria://interview/join?…'` in Terminal). The app fetches the
+`open 'alexandria://interview/join?…'` in Terminal; or paste it under
+**Settings → Organisations → On an interview panel?** → **Open**, which also
+works where the system does not hand the link to the app). The app fetches the
 interview with the panelist's token and opens `/panel/:id`: organisation,
 role and candidate, time, the panel, whether the room is open, and the skills
 the candidate has shared with this organisation. Record each participant's

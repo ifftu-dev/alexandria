@@ -15,7 +15,11 @@
     "openDeveloper": "Open Developer settings",
     "cloudLabel": "Alexandria Cloud address",
     "cloudDesc": "Use a different Alexandria Cloud, such as one running locally. Leave empty for the network's own.",
-    "cloudSaved": "Saved."
+    "cloudSaved": "Saved.",
+    "panelTitle": "On an interview panel?",
+    "panelDesc": "Paste the join link the organisation sent you. It opens your seat on the panel.",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "Open"
   },
   "requests": {
     "title": "Requests",
