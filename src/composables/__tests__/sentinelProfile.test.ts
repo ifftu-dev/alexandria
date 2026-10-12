@@ -474,4 +474,19 @@ describe('Sentinel profile-lock boundary', () => {
     await profiles.lockProfile()
   })
 
+
+  it('asks to keep appeal evidence after a flagged assessment, never after an interview', async () => {
+    const { profiles, sentinel } = await services()
+    await profiles.unlockProfile('A', 'password')
+
+    await sentinel.start(null, false, 'interview')
+    await sentinel.stop()
+    expect(sentinel.pendingEvidenceConsent.value).toBeNull()
+
+    await sentinel.start(null, false, 'assessment')
+    await sentinel.stop()
+    expect(sentinel.pendingEvidenceConsent.value).toEqual({ sessionId: 'session-A', reasons: ['paste_detected'] })
+    sentinel.clearPendingEvidenceConsent()
+    await profiles.lockProfile()
+  })
 })

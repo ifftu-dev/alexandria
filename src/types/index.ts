@@ -2370,6 +2370,8 @@ export interface InterviewInvite {
   run_id: string | null
   created_at: number
   expires_at: number
+  /** The organisation asks the candidate to run the integrity check during the call. */
+  integrity_check?: boolean
 }
 
 /** An interview invitation as Alexandria Cloud relayed it, with who really sent it. */

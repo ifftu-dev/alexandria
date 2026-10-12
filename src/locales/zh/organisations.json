@@ -75,7 +75,8 @@
         "call": "电话",
         "inPerson": "当面",
         "alexandria": "在 Alexandria 内"
-      }
+      },
+      "integrityAsked": "他们请你在通话期间进行 Alexandria 的诚信检查。你在加入时决定，也可以拒绝。"
     },
     "offer": {
       "starts": "{date} 开始",

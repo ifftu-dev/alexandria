@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useInterviews } from '@/composables/useInterviews'
 import { usePanel, type PanelInterview, type PanelRecommendation } from '@/composables/usePanel'
 import { AppAlert, AppBadge, AppButton, AppTextarea } from '@/components/ui'
+import PanelIntegrity from '@/components/organisations/PanelIntegrity.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -146,6 +147,9 @@ function exportJson() {
       </section>
 
       <aside class="space-y-4">
+        <div v-if="panel?.integrity?.requested" class="card p-4">
+          <PanelIntegrity :integrity="panel.integrity" />
+        </div>
         <div v-if="panel" class="card border-primary/30 p-4" data-testid="scorecard">
           <h2 class="text-sm font-semibold text-foreground">{{ $t('interviews.panel.scorecardTitle', { org: panel.organization }) }}</h2>
           <p class="mt-1 text-xs text-muted-foreground">{{ $t('interviews.panel.scorecardHint') }}</p>

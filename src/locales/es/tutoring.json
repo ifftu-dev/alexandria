@@ -175,6 +175,34 @@
     "captions": "Solo se generan subtítulos de lo que dices si activas los subtítulos.",
     "leave": "Puedes salir en cualquier momento.",
     "join": "Unirse a la entrevista",
-    "checking": "Comprobando cada pocos segundos…"
+    "checking": "Comprobando cada pocos segundos…",
+    "check": {
+      "title": "La organización pide una comprobación de integridad",
+      "what": "Si aceptas, Alexandria busca señales de ayuda externa en este dispositivo mientras estás en la llamada: cambiar a otras aplicaciones, una segunda pantalla, compartir pantalla o herramientas conocidas para hacer trampa, y texto pegado. Si también permites la cámara, comprueba que haya una cara a la vista y hacia dónde miras.",
+      "shared": "Cuando sales de la llamada, la organización recibe un resumen: sin incidencias o marcado, una puntuación, y qué tipos de alerta aparecieron y cuántas veces. Nunca vídeo, audio, lo que escribes, capturas de pantalla ni las aplicaciones que tienes abiertas.",
+      "optional": "Tú decides. Puedes decir que no y unirte igualmente; la organización verá que no llegó ningún resultado.",
+      "run": "Hacer la comprobación de integridad",
+      "camera": "Permitir también las comprobaciones con cámara",
+      "cameraHint": "Usa la cámara que ya compartes en la llamada. Las imágenes se analizan en este dispositivo y nunca se guardan.",
+      "skip": "No hacerla",
+      "choose": "Elige si quieres hacer la comprobación de integridad",
+      "unsentTitle": "Tu resultado de integridad no se ha enviado",
+      "unsentBody": "La comprobación terminó, pero el resultado no llegó a la organización. No se envió nada.",
+      "retry": "Intentar de nuevo",
+      "sharedTitle": "Lo que compartiste con {org}",
+      "outcome": "Resultado",
+      "clear": "Sin incidencias",
+      "flagged": "Marcado",
+      "ran": "Duración",
+      "ranFor": "{minutes} min · {snapshots} comprobaciones",
+      "cameraLabel": "Comprobaciones con cámara",
+      "cameraOn": "Activadas en el {percent}% de las comprobaciones",
+      "cameraOff": "No permitidas",
+      "flags": "Alertas",
+      "none": "Ninguna",
+      "sharedNote": "Esto es todo lo que se envió. Sin vídeo, audio, escritura ni capturas de pantalla.",
+      "running": "Comprobación de integridad activa",
+      "runningHint": "Termina cuando sales de la llamada. Después la organización recibe un resumen, nunca grabaciones."
+    }
   }
 }

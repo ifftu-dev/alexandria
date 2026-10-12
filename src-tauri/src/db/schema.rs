@@ -80,6 +80,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Alexandria Cloud: where to reach it, which interview and seat, and the
     // panelist's token for that seat.
     (16, "interview_panel_link", MIGRATION_016_INTERVIEW_PANEL_LINK),
+    // The candidate's own copy of each integrity result they sent an
+    // organisation: what they signed, and where it went.
+    (17, "interview_integrity_reports", MIGRATION_017_INTERVIEW_INTEGRITY),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
@@ -100,6 +103,19 @@ const MIGRATION_013_ATTEMPT_ROLE_TARGET: &str = r#"
 ALTER TABLE assessment_attempts
     ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
 CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
+
+const MIGRATION_017_INTERVIEW_INTEGRITY: &str = r#"
+CREATE TABLE interview_integrity_reports (
+    integrity_session_id TEXT PRIMARY KEY REFERENCES integrity_sessions(id) ON DELETE CASCADE,
+    interview_id TEXT NOT NULL,
+    cloud_url TEXT NOT NULL,
+    organization TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
+);
+CREATE INDEX idx_interview_integrity_reports_interview
+    ON interview_integrity_reports(interview_id, sent_at);
 "#;
 
 const MIGRATION_016_INTERVIEW_PANEL_LINK: &str = r#"

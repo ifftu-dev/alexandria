@@ -44,6 +44,10 @@ pub struct InterviewInvite {
     pub run_id: Option<String>,
     pub created_at: i64,
     pub expires_at: i64,
+    /// The organisation asks the candidate to run the integrity check during
+    /// an interview held in Alexandria. Absent from the signed bytes when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub integrity_check: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -149,7 +153,13 @@ pub struct HiringRecord {
 }
 
 pub fn signing_bytes<T: Serialize>(message: &T) -> Result<Vec<u8>, String> {
-    let mut bytes = FORMAT.as_bytes().to_vec();
+    signing_bytes_as(FORMAT, message)
+}
+
+/// `format || 0x00 || JCS(message)`, so a signature over one kind of message
+/// never verifies as another.
+pub fn signing_bytes_as<T: Serialize>(format: &str, message: &T) -> Result<Vec<u8>, String> {
+    let mut bytes = format.as_bytes().to_vec();
     bytes.push(0);
     bytes.extend(serde_json_canonicalizer::to_vec(message).map_err(|e| e.to_string())?);
     if bytes.len() > 64 * 1024 {
@@ -554,6 +564,386 @@ pub async fn hiring_interview_room(
     response_json(response).await
 }
 
+// ── The candidate's integrity check ─────────────────────────────────────
+
+/// What the app signs when it hands an organisation the result of the
+/// integrity check the candidate ran during an interview held in Alexandria.
+/// Mirrored in Alexandria Cloud (`src/hiring.rs`).
+pub const INTEGRITY_FORMAT: &str = "alexandria-interview-integrity/1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IntegrityFlag {
+    pub flag: String,
+    pub severity: String,
+    pub count: u32,
+}
+
+/// Derived values only. There is no field for video, audio, keystrokes,
+/// screenshots or what else was running, and Cloud refuses unknown fields.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IntegrityReport {
+    pub format: String,
+    pub invite: InterviewInvite,
+    /// `clear` or `flagged`.
+    pub outcome: String,
+    /// 0–100.
+    pub score: Option<u8>,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub snapshots: u32,
+    pub camera: bool,
+    pub camera_coverage: u8,
+    pub flags: Vec<IntegrityFlag>,
+    pub commitment_root: Option<String>,
+    pub issued_at: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedIntegrityReport {
+    pub report: IntegrityReport,
+    pub signature: String,
+}
+
+/// One finished Sentinel session, as stored.
+#[derive(Debug, Clone)]
+pub struct CheckRun {
+    pub purpose: String,
+    pub status: String,
+    pub integrity_score: Option<f64>,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub commitment_root: Option<String>,
+    /// Per snapshot: whether the camera was in use, and the flags it raised.
+    pub snapshots: Vec<(bool, Vec<String>)>,
+}
+
+/// SQLite's `datetime('now')`, which is UTC.
+fn sqlite_time(text: &str) -> Result<i64, String> {
+    chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S")
+        .map(|t| t.and_utc().timestamp())
+        .map_err(|_| format!("unreadable time {text:?}"))
+}
+
+/// Turn a finished interview-purpose session into the result the
+/// organisation sees. Pure: the caller supplies the clock.
+pub fn build_integrity_report(
+    invite: InterviewInvite,
+    run: &CheckRun,
+    now: i64,
+) -> Result<IntegrityReport, String> {
+    if !invite.integrity_check || invite.mode != "alexandria" {
+        return Err("this interview did not ask for an integrity check".into());
+    }
+    if run.purpose != "interview" {
+        return Err("that check was not run for an interview".into());
+    }
+    let ended = run
+        .ended_at
+        .as_deref()
+        .ok_or("the check is still running")?;
+    let started_at = sqlite_time(&run.started_at)?;
+    let ended_at = sqlite_time(ended)?;
+    if started_at < invite.created_at {
+        return Err("that check ran before this interview existed".into());
+    }
+
+    let mut counts: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut with_camera = 0usize;
+    for (camera, flags) in &run.snapshots {
+        with_camera += usize::from(*camera);
+        let mut seen = std::collections::HashSet::new();
+        for flag in flags {
+            // Only the app's own flag vocabulary, counted once per snapshot.
+            let word = !flag.is_empty()
+                && flag.len() <= 64
+                && flag
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            if word && seen.insert(flag.as_str()) {
+                *counts.entry(flag.clone()).or_default() += 1;
+            }
+        }
+    }
+    let flags: Vec<IntegrityFlag> = counts
+        .into_iter()
+        .take(64)
+        .map(|(flag, count)| IntegrityFlag {
+            severity: super::integrity::flag_severity(&flag).as_str().into(),
+            flag,
+            count,
+        })
+        .collect();
+    let serious = flags.iter().any(|f| f.severity != "info");
+    let score = run
+        .integrity_score
+        .filter(|s| s.is_finite())
+        .map(|s| (s.clamp(0.0, 1.0) * 100.0).round() as u8);
+    let flagged = serious
+        || score.is_some_and(|s| s < 40)
+        || matches!(run.status.as_str(), "flagged" | "suspended");
+    let total = run.snapshots.len();
+    let camera = with_camera > 0;
+    let camera_coverage = if total == 0 {
+        0
+    } else {
+        ((with_camera * 100 + total / 2) / total) as u8
+    };
+    let commitment_root = run
+        .commitment_root
+        .clone()
+        .filter(|r| !r.is_empty() && r.len() <= 128 && r.bytes().all(|b| b.is_ascii_hexdigit()));
+    Ok(IntegrityReport {
+        format: INTEGRITY_FORMAT.into(),
+        invite,
+        outcome: if flagged { "flagged" } else { "clear" }.into(),
+        score,
+        started_at,
+        ended_at,
+        snapshots: u32::try_from(total).unwrap_or(u32::MAX),
+        camera,
+        camera_coverage,
+        flags,
+        commitment_root,
+        issued_at: now,
+        expires_at: now + RESPONSE_LIFETIME_SECS,
+    })
+}
+
+pub fn sign_integrity_report(
+    report: IntegrityReport,
+    key: &SigningKey,
+    did: &str,
+) -> Result<SignedIntegrityReport, String> {
+    if report.invite.subject_did != did {
+        return Err("this interview belongs to another identity".into());
+    }
+    let signature = URL_SAFE_NO_PAD.encode(
+        key.sign(&signing_bytes_as(INTEGRITY_FORMAT, &report)?)
+            .to_bytes(),
+    );
+    Ok(SignedIntegrityReport { report, signature })
+}
+
+fn load_check(conn: &rusqlite::Connection, session_id: &str) -> Result<CheckRun, String> {
+    let mut run = conn
+        .query_row(
+            "SELECT purpose, status, integrity_score, started_at, ended_at, commitment_root
+             FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |r| {
+                Ok(CheckRun {
+                    purpose: r.get(0)?,
+                    status: r.get(1)?,
+                    integrity_score: r.get(2)?,
+                    started_at: r.get(3)?,
+                    ended_at: r.get(4)?,
+                    commitment_root: r.get(5)?,
+                    snapshots: Vec::new(),
+                })
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => "no such integrity check".to_string(),
+            other => other.to_string(),
+        })?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT camera_score IS NOT NULL, anomaly_flags FROM integrity_snapshots
+             WHERE session_id = ?1 ORDER BY captured_at",
+        )
+        .map_err(|e| e.to_string())?;
+    run.snapshots = stmt
+        .query_map(params![session_id], |r| {
+            let flags: Option<String> = r.get(1)?;
+            Ok((
+                r.get::<_, bool>(0)?,
+                flags
+                    .and_then(|f| serde_json::from_str(&f).ok())
+                    .unwrap_or_default(),
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(run)
+}
+
+/// The accepted invitation behind an interview, from the learner's own
+/// record of the answer they signed.
+fn accepted_invite(
+    conn: &rusqlite::Connection,
+    interview_id: &str,
+) -> Result<(String, InterviewInvite), String> {
+    let (directory_url, payload): (String, String) = conn
+        .query_row(
+            "SELECT directory_url, payload_json FROM hiring_responses
+             WHERE id = ?1 AND kind = 'interview' AND decision = 'accept'",
+            params![interview_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => "you have not accepted this interview".into(),
+            other => other.to_string(),
+        })?;
+    let signed: SignedInterviewResponse =
+        serde_json::from_str(&payload).map_err(|e| e.to_string())?;
+    Ok((directory_url, signed.response.invite))
+}
+
+/// One result the learner sent, as they keep it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SentIntegrityReport {
+    pub integrity_session_id: String,
+    pub interview_id: String,
+    pub organization: String,
+    pub sent_at: String,
+    pub report: IntegrityReport,
+}
+
+pub fn sent_integrity_reports(
+    conn: &rusqlite::Connection,
+    interview_id: &str,
+) -> Result<Vec<SentIntegrityReport>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT integrity_session_id, interview_id, organization, sent_at, payload_json
+             FROM interview_integrity_reports WHERE interview_id = ?1 ORDER BY sent_at",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![interview_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    rows.into_iter()
+        .map(|(session, interview, organization, sent_at, payload)| {
+            let signed: SignedIntegrityReport =
+                serde_json::from_str(&payload).map_err(|e| e.to_string())?;
+            Ok(SentIntegrityReport {
+                integrity_session_id: session,
+                interview_id: interview,
+                organization,
+                sent_at,
+                report: signed.report,
+            })
+        })
+        .collect()
+}
+
+/// Send the organisation the result of the integrity check the learner ran
+/// during an interview held in Alexandria, and keep a copy. A check already
+/// sent is not sent again.
+#[tauri::command]
+pub async fn hiring_interview_integrity_send(
+    state: State<'_, AppState>,
+    interview_id: String,
+    integrity_session_id: String,
+) -> Result<SentIntegrityReport, String> {
+    let id = uuid::Uuid::parse_str(&interview_id).map_err(|e| e.to_string())?;
+    let lookup = (interview_id.clone(), integrity_session_id.clone());
+    let (directory_url, invite, run, already) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "hiring.integrity-load",
+            move |db| {
+                let (url, invite) = accepted_invite(db.conn(), &lookup.0)?;
+                let run = load_check(db.conn(), &lookup.1)?;
+                let already = sent_integrity_reports(db.conn(), &lookup.0)?
+                    .into_iter()
+                    .find(|r| r.integrity_session_id == lookup.1);
+                Ok::<_, String>((url, invite, run, already))
+            },
+        )
+        .await?;
+    if let Some(sent) = already {
+        return Ok(sent);
+    }
+    let dir = directory(&state, &directory_url).await?;
+    let (key, did) = load_issuer_key(&state).await?;
+    let report = build_integrity_report(invite, &run, chrono::Utc::now().timestamp())?;
+    let signed = sign_integrity_report(report, &key, did.as_str())?;
+    if !state.profile_lease().is_current() {
+        return Err("profile changed".into());
+    }
+    let response = client()?
+        .post(format!(
+            "{}/api/interviews/{id}/integrity",
+            dir.url.trim_end_matches('/')
+        ))
+        .json(&signed)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    response_json(response).await?;
+    let sent = SentIntegrityReport {
+        integrity_session_id,
+        interview_id,
+        organization: signed.report.invite.organization.clone(),
+        sent_at: super::credentials::now_rfc3339(),
+        report: signed.report.clone(),
+    };
+    let payload = serde_json::to_string(&signed).map_err(|e| e.to_string())?;
+    let row = sent.clone();
+    let cloud = dir.url.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "hiring.integrity-record",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "INSERT OR IGNORE INTO interview_integrity_reports
+                         (integrity_session_id, interview_id, cloud_url, organization, sent_at, payload_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            row.integrity_session_id,
+                            row.interview_id,
+                            cloud,
+                            row.organization,
+                            row.sent_at,
+                            payload
+                        ],
+                    )
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .await?;
+    Ok(sent)
+}
+
+/// The integrity results the learner has sent for one interview.
+#[tauri::command]
+pub async fn hiring_interview_integrity_sent(
+    state: State<'_, AppState>,
+    interview_id: String,
+) -> Result<Vec<SentIntegrityReport>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "hiring.integrity-sent",
+            move |db| sent_integrity_reports(db.conn(), &interview_id),
+        )
+        .await
+}
+
 pub fn history(conn: &rusqlite::Connection) -> Result<Vec<HiringRecord>, String> {
     let mut stmt = conn
         .prepare("SELECT id,kind,directory_url,organization,role_label,decision,chosen_slot,meeting_url,responded_at,payload_json FROM hiring_responses ORDER BY responded_at DESC")
@@ -618,6 +1008,38 @@ mod tests {
             run_id: None,
             created_at: now - 60,
             expires_at: now + 14 * 86_400,
+            integrity_check: false,
+        }
+    }
+
+    fn checked(did: &str, now: i64) -> InterviewInvite {
+        InterviewInvite {
+            mode: "alexandria".into(),
+            meeting_url: None,
+            integrity_check: true,
+            ..invite(did, now)
+        }
+    }
+
+    /// A run that started an hour after `created`, with these snapshots.
+    fn run(created: i64, status: &str, snapshots: Vec<(bool, Vec<&str>)>) -> CheckRun {
+        let at = |t: i64| {
+            chrono::DateTime::from_timestamp(t, 0)
+                .unwrap()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        };
+        CheckRun {
+            purpose: "interview".into(),
+            status: status.into(),
+            integrity_score: Some(0.874),
+            started_at: at(created + 3600),
+            ended_at: Some(at(created + 5400)),
+            commitment_root: Some("ab".repeat(32)),
+            snapshots: snapshots
+                .into_iter()
+                .map(|(c, f)| (c, f.into_iter().map(String::from).collect()))
+                .collect(),
         }
     }
 
@@ -772,5 +1194,152 @@ mod tests {
         assert_eq!(kept[0].id, "a");
         assert_eq!(kept[0].responded_at, "2026-10-11T10:00:00Z");
         assert_eq!(kept[1].kind, "offer");
+    }
+
+    #[test]
+    fn an_integrity_result_carries_counts_not_what_was_seen() {
+        let (key, did) = holder();
+        let now = 1_800_000_000;
+        let invite = checked(&did, now - 7200);
+        let r = run(
+            invite.created_at,
+            "completed",
+            vec![
+                (true, vec!["tab_switching"]),
+                (true, vec!["tab_switching", "tab_switching", "Not A Flag"]),
+                (false, vec![]),
+                (true, vec!["external_display"]),
+            ],
+        );
+        let report = build_integrity_report(invite.clone(), &r, now).unwrap();
+        assert_eq!(report.outcome, "clear");
+        assert_eq!(report.score, Some(87));
+        assert_eq!(report.snapshots, 4);
+        assert!(report.camera);
+        assert_eq!(report.camera_coverage, 75);
+        assert_eq!(report.ended_at - report.started_at, 1800);
+        assert_eq!(
+            report.flags,
+            vec![
+                IntegrityFlag {
+                    flag: "external_display".into(),
+                    severity: "info".into(),
+                    count: 1
+                },
+                IntegrityFlag {
+                    flag: "tab_switching".into(),
+                    severity: "info".into(),
+                    count: 2
+                },
+            ],
+            "counted once per snapshot; a word outside the vocabulary is dropped"
+        );
+        let signed = sign_integrity_report(report, &key, &did).unwrap();
+        let bytes = signing_bytes_as(INTEGRITY_FORMAT, &signed.report).unwrap();
+        let sig =
+            Signature::from_slice(&URL_SAFE_NO_PAD.decode(&signed.signature).unwrap()).unwrap();
+        resolve_did_key(&Did(did.clone()))
+            .unwrap()
+            .verify(&bytes, &sig)
+            .unwrap();
+        // Not a signature an interview answer would accept.
+        assert!(check_signature(&signed.report, &signed.signature, &did).is_err());
+        let (_, stranger) = {
+            let k = SigningKey::from_bytes(&[9; 32]);
+            let d = crate::crypto::did::derive_did_key(&k).as_str().to_string();
+            (k, d)
+        };
+        assert!(sign_integrity_report(signed.report, &key, &stranger).is_err());
+    }
+
+    #[test]
+    fn a_warning_makes_the_result_flagged() {
+        let (_, did) = holder();
+        let now = 1_800_000_000;
+        let invite = checked(&did, now - 7200);
+        let r = run(
+            invite.created_at,
+            "completed",
+            vec![(false, vec!["app_switch"]), (false, vec!["app_switch"])],
+        );
+        let report = build_integrity_report(invite, &r, now).unwrap();
+        assert_eq!(report.outcome, "flagged");
+        assert!(!report.camera);
+        assert_eq!(report.camera_coverage, 0);
+        assert_eq!(report.flags[0].severity, "warning");
+        assert_eq!(report.flags[0].count, 2);
+    }
+
+    #[test]
+    fn only_a_finished_interview_check_for_an_interview_that_asked() {
+        let (_, did) = holder();
+        let now = 1_800_000_000;
+        let asked = checked(&did, now - 7200);
+        let mut unasked = asked.clone();
+        unasked.integrity_check = false;
+        let ok = run(asked.created_at, "completed", vec![]);
+        assert!(build_integrity_report(unasked, &ok, now).is_err());
+
+        let mut assessment = ok.clone();
+        assessment.purpose = "assessment".into();
+        assert!(build_integrity_report(asked.clone(), &assessment, now).is_err());
+
+        let mut running = ok.clone();
+        running.ended_at = None;
+        assert_eq!(
+            build_integrity_report(asked.clone(), &running, now).unwrap_err(),
+            "the check is still running"
+        );
+
+        let before = run(asked.created_at - 7200, "completed", vec![]);
+        assert!(build_integrity_report(asked, &before, now).is_err());
+    }
+
+    #[test]
+    fn an_invitation_that_never_asked_signs_as_before() {
+        let (_, did) = holder();
+        let plain = invite(&did, 1_800_000_000);
+        assert!(serde_json::to_value(&plain)
+            .unwrap()
+            .get("integrity_check")
+            .is_none());
+        let parsed: InterviewInvite =
+            serde_json::from_value(serde_json::to_value(checked(&did, 1_800_000_000)).unwrap())
+                .unwrap();
+        assert!(parsed.integrity_check);
+    }
+
+    #[test]
+    fn the_learner_keeps_what_they_sent() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let (key, did) = holder();
+        let now = 1_800_000_000;
+        let invite = checked(&did, now - 7200);
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_sessions (id, status, purpose) VALUES ('s1', 'completed', 'interview')",
+                [],
+            )
+            .unwrap();
+        let report = build_integrity_report(
+            invite.clone(),
+            &run(invite.created_at, "completed", vec![]),
+            now,
+        )
+        .unwrap();
+        let signed = sign_integrity_report(report, &key, &did).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO interview_integrity_reports VALUES ('s1', ?1, 'https://cloud.test', 'Alexandria Demo', '2026-10-12T10:00:00Z', ?2)",
+                params![invite.id, serde_json::to_string(&signed).unwrap()],
+            )
+            .unwrap();
+        let kept = sent_integrity_reports(db.conn(), &invite.id).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].report, signed.report);
+        assert!(sent_integrity_reports(db.conn(), "other")
+            .unwrap()
+            .is_empty());
     }
 }

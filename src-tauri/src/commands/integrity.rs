@@ -85,16 +85,26 @@ pub struct StartSessionResponse {
 // ============================================================================
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Severity {
+pub(crate) enum Severity {
     Info,
     Warning,
     Critical,
 }
 
+impl Severity {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Severity::Info => "info",
+            Severity::Warning => "warning",
+            Severity::Critical => "critical",
+        }
+    }
+}
+
 /// Maps anomaly flag names (emitted by `useSentinel.computeScores()`) to
 /// severity per docs/sentinel.md §Flagging Logic. Unknown flags default to
 /// Info so a client/server version skew never auto-suspends a session.
-fn flag_severity(flag: &str) -> Severity {
+pub(crate) fn flag_severity(flag: &str) -> Severity {
     match flag {
         "bot_suspected"
         | "face_mismatch"

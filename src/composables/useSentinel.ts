@@ -1729,7 +1729,9 @@ function createSentinelService() {
       // only case where the learner has anything to decide about. Surfacing it
       // here rather than silently is the point: until this shipped, Sentinel
       // could flag a session and the person it flagged was never told.
-      if (ended?.status === 'flagged') {
+      // Interview-purpose sessions never stage evidence, so there is nothing
+      // to keep and nothing to ask.
+      if (ended?.status === 'flagged' && sessionPurpose === 'assessment') {
         const snaps = await invoke<Array<{ anomaly_flags: string[] }>>(
           'integrity_list_snapshots',
           { sessionId: ended.id },

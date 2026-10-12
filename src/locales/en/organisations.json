@@ -75,7 +75,8 @@
         "call": "Phone call",
         "inPerson": "In person",
         "alexandria": "In Alexandria"
-      }
+      },
+      "integrityAsked": "They ask you to run Alexandria's integrity check during the call. You decide when you join, and you can say no."
     },
     "offer": {
       "starts": "Starts {date}",

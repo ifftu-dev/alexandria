@@ -175,6 +175,34 @@
     "captions": "Vos paroles ne sont sous-titrées que si vous activez les sous-titres.",
     "leave": "Vous pouvez partir à tout moment.",
     "join": "Rejoindre l'entretien",
-    "checking": "Vérification toutes les quelques secondes…"
+    "checking": "Vérification toutes les quelques secondes…",
+    "check": {
+      "title": "L'organisation demande une vérification d'intégrité",
+      "what": "Si vous acceptez, Alexandria recherche sur cet appareil des signes d'aide extérieure pendant l'appel : passage à d'autres applications, deuxième écran, partage d'écran ou outils de triche connus, et texte collé. Si vous autorisez aussi la caméra, elle vérifie qu'un visage est visible et où vous regardez.",
+      "shared": "Quand vous quittez l'appel, l'organisation reçoit un résumé : sans anomalie ou signalé, un score, et quels types d'alerte sont apparus et combien de fois. Jamais de vidéo, d'audio, ce que vous tapez, de captures d'écran ni les applications ouvertes.",
+      "optional": "C'est votre choix. Vous pouvez refuser et rejoindre quand même ; l'organisation verra qu'aucun résultat n'est arrivé.",
+      "run": "Lancer la vérification d'intégrité",
+      "camera": "Autoriser aussi les vérifications par caméra",
+      "cameraHint": "Utilise la caméra que vous partagez déjà dans l'appel. Les images sont analysées sur cet appareil et jamais conservées.",
+      "skip": "Ne pas la lancer",
+      "choose": "Choisissez de lancer ou non la vérification d'intégrité",
+      "unsentTitle": "Votre résultat d'intégrité n'a pas été envoyé",
+      "unsentBody": "La vérification est terminée, mais le résultat n'a pas pu parvenir à l'organisation. Rien n'a été envoyé.",
+      "retry": "Réessayer",
+      "sharedTitle": "Ce que vous avez partagé avec {org}",
+      "outcome": "Résultat",
+      "clear": "Sans anomalie",
+      "flagged": "Signalé",
+      "ran": "Durée",
+      "ranFor": "{minutes} min · {snapshots} contrôles",
+      "cameraLabel": "Vérifications par caméra",
+      "cameraOn": "Actives pour {percent} % des contrôles",
+      "cameraOff": "Non autorisées",
+      "flags": "Alertes",
+      "none": "Aucune",
+      "sharedNote": "C'est tout ce qui a été envoyé. Ni vidéo, ni audio, ni frappe, ni captures d'écran.",
+      "running": "Vérification d'intégrité active",
+      "runningHint": "Se termine quand vous quittez l'appel. L'organisation reçoit alors un résumé, jamais d'enregistrement."
+    }
   }
 }

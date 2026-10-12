@@ -3,6 +3,8 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useInterviewCheck } from '@/composables/useInterviewCheck'
+import { useSentinel } from '@/composables/useSentinel'
 import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecognition'
 import { usePlatform } from '@/composables/usePlatform'
 import { LiveDiagnosticsModal } from '@/components/live'
@@ -43,6 +45,12 @@ const {
 
 const { isMobilePlatform, isIOS } = usePlatform()
 const speech = useLocalSpeechRecognition()
+// The candidate's integrity check, when they chose to run it for an
+// interview held in Alexandria. It ends, and its result is sent, when they
+// leave the call.
+const interviewCheck = useInterviewCheck()
+const sentinel = useSentinel()
+const checkRunning = computed(() => interviewCheck.running.value !== null)
 
 const sessionId = computed(() => route.params.id as string)
 const ticketCopied = ref(false)
@@ -83,6 +91,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling()
   setChatOpen(false)
+  stopCheckCamera()
   stopSelfPreview()
   speech.stop()
   if (durationInterval) {
@@ -164,6 +173,7 @@ async function startSelfPreview() {
       audio: false,
     })
     selfStream.value = stream
+    if (checkRunning.value) sentinel.reportCameraDevice(stream.getVideoTracks?.()[0]?.label ?? null)
     await attachSelfStream()
   } catch (e) {
     console.warn('[tutoring] getUserMedia for self-preview failed:', e)
@@ -194,6 +204,58 @@ watch(
   },
   { immediate: true },
 )
+
+// With the camera allowed for the integrity check, Sentinel looks at the same
+// self-preview the candidate sees: face presence every 3s, gaze every 1.5s.
+// Frames are scored in memory; nothing is kept or sent.
+let checkFaceTimer: ReturnType<typeof setInterval> | null = null
+let checkGazeTimer: ReturnType<typeof setInterval> | null = null
+let gazeInFlight = false
+function checkVideo(): HTMLVideoElement | null {
+  return selfVideoElDesktop.value ?? selfVideoElMobile.value
+}
+function startCheckCamera() {
+  if (checkFaceTimer || checkGazeTimer) return
+  checkFaceTimer = setInterval(() => {
+    const video = checkVideo()
+    if (video) sentinel.verifyFace(video)
+  }, 3000)
+  checkGazeTimer = setInterval(() => {
+    const video = checkVideo()
+    if (!video || gazeInFlight) return
+    gazeInFlight = true
+    sentinel.scoreGaze(video).finally(() => { gazeInFlight = false })
+  }, 1500)
+}
+function stopCheckCamera() {
+  if (checkFaceTimer) clearInterval(checkFaceTimer)
+  if (checkGazeTimer) clearInterval(checkGazeTimer)
+  checkFaceTimer = null
+  checkGazeTimer = null
+  gazeInFlight = false
+}
+watch(
+  [checkRunning, () => sentinel.cameraOptedIn.value, selfStreamActive],
+  ([running, camera, live]) => {
+    if (running && camera && live) startCheckCamera()
+    else stopCheckCamera()
+  },
+  { immediate: true },
+)
+
+/** Leaving ends the check, sends its result, and goes back to the interview. */
+async function finishCheck(): Promise<boolean> {
+  if (!checkRunning.value) return false
+  stopCheckCamera()
+  const next = await interviewCheck.finish()
+  if (next) await router.push(next)
+  return next !== null
+}
+
+// The panel can end the room too; the check ends with it.
+watch(sessionEnded, (ended) => {
+  if (ended) void finishCheck()
+})
 
 // Re-attach when template refs appear (e.g. after mobile/desktop toggle).
 watch([selfVideoElMobile, selfVideoElDesktop], () => {
@@ -264,8 +326,12 @@ async function copyTicket() {
 
 async function handleLeave() {
   try {
+    // The panel ending the room can finish the check first; it then also
+    // takes the candidate back to the interview.
+    const hadCheck = checkRunning.value
     await leaveRoom()
-    router.push('/tutoring')
+    if (await finishCheck()) return
+    if (!hadCheck) router.push('/tutoring')
   } catch {
     // error handled in composable
   }
@@ -413,6 +479,12 @@ function peerInitials(nodeId: string): string {
           <span class="text-xs sm:text-sm font-medium text-foreground truncate max-w-[120px] sm:max-w-[200px]" :title="sessionTitle">
             {{ sessionTitle }}
           </span>
+          <span
+            v-if="checkRunning"
+            class="rounded-full bg-primary/10 px-2 py-0.5 text-[0.65rem] sm:text-xs font-medium text-primary whitespace-nowrap"
+            :title="$t('tutoring.interviewRoom.check.runningHint')"
+            data-testid="integrity-check-on"
+          >{{ $t('tutoring.interviewRoom.check.running') }}</span>
           <!-- Duration timer -->
           <span v-if="isActive" class="rounded bg-muted px-1 sm:px-1.5 py-0.5 text-[0.65rem] sm:text-xs font-mono text-muted-foreground tabular-nums">
             {{ formattedDuration }}

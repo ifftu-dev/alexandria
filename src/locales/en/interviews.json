@@ -212,6 +212,20 @@
     "scorecardNotes": "Notes for the organisation",
     "sendScorecard": "Send to {org}",
     "scorecardSent": "Sent",
-    "writeScorecard": "Write scorecard"
+    "writeScorecard": "Write scorecard",
+    "integrity": {
+      "title": "Candidate's integrity check",
+      "noResult": "No result",
+      "clear": "Clear",
+      "flagged": "Flagged",
+      "waiting": "Requested. A result arrives when the candidate leaves the call, if they chose to run the check.",
+      "run": "Run {n} of {total}",
+      "score": "Score {score}/100",
+      "ran": "{minutes} min",
+      "cameraOn": "camera on for {percent}%",
+      "cameraOff": "camera not allowed",
+      "noFlags": "No flags",
+      "caveat": "Reported by the candidate's own app. Treat a flag as a reason to ask, not a verdict."
+    }
   }
 }

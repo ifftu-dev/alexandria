@@ -29,6 +29,26 @@ export interface PanelInterview {
   panel: PanelMember[]
   room: { ticket: string | null; openedAt: string | null }
   candidateEvidence: PanelEvidence[]
+  /** Present when Cloud knows about the integrity check (always, for a current Cloud). */
+  integrity?: PanelIntegrity | null
+}
+
+/** One run of the candidate's integrity check, as their app reported it. */
+export interface PanelIntegrityResult {
+  outcome: 'clear' | 'flagged'
+  score: number | null
+  startedAt: string | null
+  endedAt: string | null
+  snapshots: number
+  camera: boolean
+  cameraCoverage: number
+  flags: { flag: string; severity: 'info' | 'warning' | 'critical'; count: number }[]
+  receivedAt: string
+}
+
+export interface PanelIntegrity {
+  requested: boolean
+  results: PanelIntegrityResult[]
 }
 
 export interface PanelSession {
@@ -47,6 +67,8 @@ export interface PanelRating {
 export interface CandidateRoom {
   ticket: string | null
   openedAt: string | null
+  /** The organisation asked the candidate to run the integrity check. */
+  integrityCheck?: boolean
 }
 
 export function usePanel() {

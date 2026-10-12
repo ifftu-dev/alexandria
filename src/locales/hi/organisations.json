@@ -75,7 +75,8 @@
         "call": "फ़ोन कॉल",
         "inPerson": "आमने-सामने",
         "alexandria": "Alexandria में"
-      }
+      },
+      "integrityAsked": "वे कॉल के दौरान Alexandria की इंटीग्रिटी जाँच चलाने को कहते हैं। आप जुड़ते समय तय करते हैं, और मना कर सकते हैं।"
     },
     "offer": {
       "starts": "{date} से शुरू",
