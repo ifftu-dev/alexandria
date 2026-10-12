@@ -1,0 +1,144 @@
+{
+  "shareNext": "Partager avec une organisation",
+  "badge": {
+    "verified": "Vérifiée : propriétaire de {domain}",
+    "unverified": "Impossible de vérifier qui a envoyé ceci : {problem}",
+    "noProof": "aucune preuve de son domaine n'accompagnait l'envoi",
+    "claims": "Se présente comme venant de {domain}. Aucune réponse n'est possible tant que ce n'est pas vérifié."
+  },
+  "settings": {
+    "enabled": "Recevoir les demandes des organisations",
+    "enabledDesc": "Permettre aux organisations de demander à voir vos compétences, de vous inviter à des évaluations et à des entretiens, et de vous faire des offres.",
+    "off": "Les demandes des organisations sont désactivées. Cet appareil ne contacte pas Alexandria Cloud pour les recevoir.",
+    "noCloud": "Aucun Alexandria Cloud n'est encore configuré pour ce réseau : les organisations ne peuvent donc pas vous joindre ici.",
+    "noCloudDev": "Les développeurs peuvent en indiquer un dans les réglages développeur.",
+    "openDeveloper": "Ouvrir les réglages développeur",
+    "cloudLabel": "Adresse d'Alexandria Cloud",
+    "cloudDesc": "Utiliser un autre Alexandria Cloud, par exemple un serveur local. Laisser vide pour celui du réseau.",
+    "cloudSaved": "Enregistré."
+  },
+  "requests": {
+    "title": "Demandes",
+    "note": "Les organisations vous joignent via Alexandria Cloud. Chacune prouve son identité avec un enregistrement dans le DNS de son propre domaine, et vous ne pouvez répondre qu'à celles qui le font.",
+    "refresh": "Vérifier maintenant",
+    "checking": "Vérification…",
+    "empty": "Rien ne vous attend.",
+    "expires": "Expire le {when}",
+    "noteLabel": "Note à l'organisation (facultatif)",
+    "answered": "Réponse envoyée : {status}",
+    "kind": {
+      "access": "Souhaite voir vos compétences",
+      "assessment": "Demande d'évaluation",
+      "interview": "Invitation à un entretien",
+      "offer": "Offre"
+    },
+    "access": {
+      "purpose": "Motif : {purpose}",
+      "skillsHeading": "Choisissez ce que vous partagez",
+      "noEvidence": "Pas encore de preuve",
+      "score": "note {level}/5",
+      "share": "Partager",
+      "shareSync": "Partager et garder à jour",
+      "sharing": "Partage…",
+      "notNow": "Pas maintenant",
+      "syncNote": "Garder à jour leur envoie une copie actualisée chaque fois que ces compétences changent, jusqu'à ce que vous arrêtiez de partager.",
+      "notNowNote": "« Pas maintenant » masque cette demande jusqu'au redémarrage de l'application. Ils n'en sont pas informés.",
+      "shared": "Partagé avec {org}.",
+      "sharedSync": "Partagé avec {org}. Ce sera tenu à jour."
+    },
+    "assessment": {
+      "skill": "Compétence : {skill}",
+      "assess": "Passer l'évaluation demandée",
+      "choose": "Choisir une attestation",
+      "noCredentials": "Pas encore d'attestation correspondante. S'ils ont demandé une nouvelle évaluation, passez-la depuis cette demande.",
+      "preview": "Voir ce qui sera envoyé",
+      "disclosure": "Ceci envoie l'attestation choisie en entier, y compris son résumé d'intégrité, à cette seule organisation. Votre fiche n'est pas publiée et aucune capture de surveillance brute n'est envoyée.",
+      "exact": "Exactement ce qui sera envoyé",
+      "share": "Partager avec cette organisation",
+      "received": "Reçu. Leur vérification : {outcome}"
+    },
+    "interview": {
+      "where": "Où",
+      "meetingLink": "Lien de la réunion",
+      "inAlexandria": "Dans Alexandria",
+      "toBeArranged": "À organiser par l'organisation",
+      "followsRun": "Fait suite à votre évaluation",
+      "chooseTime": "Choisissez un horaire",
+      "accept": "Accepter",
+      "decline": "Refuser",
+      "mode": {
+        "video": "Appel vidéo",
+        "call": "Appel téléphonique",
+        "inPerson": "En personne",
+        "alexandria": "Dans Alexandria"
+      }
+    },
+    "offer": {
+      "starts": "Début le {date}",
+      "accept": "Accepter l'offre",
+      "decline": "Refuser l'offre"
+    },
+    "history": {
+      "title": "Vos réponses ({count})",
+      "accepted": "Acceptée",
+      "declined": "Refusée"
+    },
+    "upcoming": {
+      "title": "Entretiens à venir",
+      "join": "Rejoindre l'entretien",
+      "opensSoon": "Ouvre 15 minutes avant"
+    }
+  },
+  "access": {
+    "title": "Qui a accès",
+    "note": "Les organisations avec lesquelles vous avez partagé des compétences. Elles ne voient que les compétences indiquées, et vous pouvez arrêter de partager à tout moment.",
+    "empty": "Vous n'avez partagé vos compétences avec aucune organisation.",
+    "purpose": "Motif : {purpose}",
+    "sharedOn": "Partagé le {date}",
+    "viewed": "Consulté une fois · dernière fois le {date} | Consulté {count} fois · dernière fois le {date}",
+    "notViewed": "Pas encore ouvert",
+    "keepUpToDate": "Garder à jour",
+    "updated": "Mis à jour {relative}",
+    "syncFailed": "Mise à jour impossible : {error}",
+    "stop": "Arrêter de partager",
+    "stopTitle": "Arrêter de partager avec {org} ?",
+    "stopMessage": "{org} ne verra plus ces compétences. Alexandria Cloud supprime ce qu'il conserve pour eux.",
+    "revokedHeading": "Plus partagé ({count})",
+    "stoppedOn": "Arrêté le {date}",
+    "syncNow": "Synchroniser",
+    "syncing": "Synchronisation…",
+    "syncReport": "Envoyés : {sent}. Déjà à jour : {unchanged}.",
+    "syncFailedItem": "Envoi impossible : {detail}",
+    "visibility": {
+      "heading": "Établissements qui peuvent vous voir nommément",
+      "empty": "Aucun établissement n'a reçu cette autorisation.",
+      "note": "Les formateurs voient de toute façon les apprenants des modules qu'ils enseignent : c'est ainsi qu'on aide quelqu'un en difficulté. Ceci concerne les administrateurs, qui sinon ne voient que des totaux. Cela prend fin automatiquement avec votre inscription.",
+      "on": "Les administrateurs de {institution} peuvent voir vos résultats nommément",
+      "off": "Les administrateurs de {institution} ne voient que des totaux",
+      "allow": "Autoriser",
+      "withdraw": "Retirer"
+    },
+    "views": {
+      "heading": "Consultations récentes",
+      "empty": "Personne n'a encore consulté.",
+      "named": "{who} de {where} a ouvert votre dossier",
+      "aggregate": "{where} vous a compté dans un rapport qui ne nommait personne",
+      "module": "sur {module}"
+    }
+  },
+  "problems": {
+    "heading": "Vérification impossible",
+    "note": "Une vérification qui échoue est affichée plutôt qu'ignorée ; sinon, elle ressemblerait à une absence de nouvelles."
+  },
+  "listing": {
+    "framing": "Enregistrer ne fait que conserver ces choix. Rien n'est envoyé tant que vous ne publiez pas ou n'activez pas la mise à jour automatique de votre fiche.",
+    "heading": "Votre fiche",
+    "publishNow": "Publier maintenant",
+    "publishing": "Publication…",
+    "published": "Publiée.",
+    "publishFailed": "Publication impossible : {error}",
+    "nothingToPublish": "Choisissez au moins une compétence et enregistrez avant de publier.",
+    "keepUpToDate": "Garder ma fiche à jour",
+    "keepNote": "Republie automatiquement votre fiche chaque fois que les compétences choisies changent."
+  }
+}

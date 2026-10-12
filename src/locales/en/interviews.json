@@ -185,5 +185,32 @@
     "diagnosticsEmpty": "No active session diagnostics are available.",
     "you": "You",
     "incomingLevel": "Combined incoming audio level"
+  },
+  "panel": {
+    "forOrg": "Interview for {org}",
+    "candidate": "Candidate",
+    "panelists": "Panel: {names}",
+    "roomOpen": "The room is open. Starting joins it.",
+    "roomClosed": "Nobody has opened the room yet. Starting opens it for the panel and the candidate.",
+    "evidence": "What the candidate has shared with you",
+    "score": "score {level}/5",
+    "scorecardTitle": "Scorecard for {org}",
+    "scorecardHint": "Only your ratings, the criteria coverage, your recommendation and these notes are sent. The transcript and your private notes stay on this device.",
+    "ratingFor": "Rating for {criterion}",
+    "notRated": "Not rated",
+    "rating1": "1 · Weak",
+    "rating2": "2 · Mixed",
+    "rating3": "3 · Good",
+    "rating4": "4 · Strong",
+    "recommendation": "Recommendation",
+    "recommend": {
+      "strong_yes": "Strong yes",
+      "yes": "Yes",
+      "no": "No",
+      "strong_no": "Strong no"
+    },
+    "scorecardNotes": "Notes for the organisation",
+    "sendScorecard": "Send to {org}",
+    "scorecardSent": "Sent"
   }
 }

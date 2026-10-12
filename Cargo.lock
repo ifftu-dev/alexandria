@@ -312,6 +312,7 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "futures",
  "hex",
+ "hickory-resolver 0.26.1",
  "hkdf",
  "hmac",
  "image",

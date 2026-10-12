@@ -2,6 +2,22 @@ import { describe, it, expect } from 'vitest'
 import { parseDeepLink } from './parse'
 
 describe('parseDeepLink', () => {
+  describe('interview panel', () => {
+    const link =
+      'alexandria://interview/join?cloud=https%3A%2F%2Fcloud.example&id=i-1&panelist=p-1&token=t0k3n'
+    it('hands the whole custom-scheme link to the backend', () => {
+      expect(parseDeepLink(link)).toEqual({ kind: 'interview-panel', link })
+    })
+    it('refuses the https form, which would put the token in logs', () => {
+      expect(
+        parseDeepLink(link.replace('alexandria://interview', 'https://alexandria.ifftu.dev/interview')),
+      ).toBeNull()
+    })
+    it('refuses a link missing any part', () => {
+      expect(parseDeepLink(link.replace('&token=t0k3n', ''))).toBeNull()
+      expect(parseDeepLink('alexandria://interview/leave?id=i-1')).toBeNull()
+    })
+  })
   describe('guardian accept', () => {
     it('parses the custom scheme with a code', () => {
       expect(parseDeepLink('alexandria://guardian/accept?code=ABC123')).toEqual({

@@ -29,6 +29,18 @@ async function navigate(target: DeepLinkTarget): Promise<void> {
     await router.push({ path: '/guardian', query: { accept: target.code } })
     return
   }
+  if (target.kind === 'interview-panel') {
+    // The backend checks the link and fetches the interview; a bad link just
+    // lands the panelist on the organisations page with nothing opened.
+    const { usePanel } = await import('@/composables/usePanel')
+    try {
+      const seat = await usePanel().openLink(target.link)
+      await router.push(`/panel/${seat.sessionId}`)
+    } catch (cause) {
+      console.warn('could not open interview link', cause)
+    }
+    return
+  }
   if (target.kind === 'governance-genesis-locator') {
     await router.push({ path: '/community/import', query: { locator: target.locator } })
     return

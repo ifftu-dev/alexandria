@@ -963,6 +963,8 @@ pub async fn assessment_grade(
     if let Err(e) = crate::commands::credentials::publish_status_lists_for(&state).await {
         log::warn!("status list publication after grading: {e}");
     }
+    // A new credential can change what a synced grant or listing shows.
+    crate::commands::organisations::sync_quietly(&state).await;
     Ok(graded)
 }
 

@@ -19,6 +19,9 @@ export type DeepLinkTarget =
   /** Bounded founding-genesis locator. Opening it only navigates to the
    *  review screen; retrieval and trust pinning remain explicit actions. */
   | { kind: 'governance-genesis-locator'; locator: string }
+  /** A panelist's seat on an organisation's interview. The whole link goes to
+   *  the backend, which validates it and attaches a local interview session. */
+  | { kind: 'interview-panel'; link: string }
   /** A concrete in-app router path. The caller still validates it against the
    *  router's registered routes before navigating (defense in depth). */
   | { kind: 'route'; path: string }
@@ -69,6 +72,15 @@ export function parseDeepLink(raw: string): DeepLinkTarget | null {
       // alexandria://classroom/<id>  →  /classrooms/:id
       const id = segments[0]
       return id ? { kind: 'route', path: `/classrooms/${id}` } : null
+    }
+    case 'interview': {
+      // alexandria://interview/join?cloud=…&id=…&panelist=…&token=… — custom
+      // scheme only: the token is a credential and has no business in an
+      // https URL that browsers and servers log.
+      if (url.protocol !== 'alexandria:' || segments[0] !== 'join') return null
+      const required = ['cloud', 'id', 'panelist', 'token']
+      if (raw.trim().length > 2048 || !required.every(k => url.searchParams.get(k))) return null
+      return { kind: 'interview-panel', link: url.href }
     }
     case 'governance': {
       if (segments[0] !== 'genesis' || !segments[1] || raw.trim().length > 2048) {

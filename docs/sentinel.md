@@ -555,13 +555,15 @@ The learner can release the evidence for their own session, and only they can.
 A right to contest a flag is worth what the chance of hearing about the flag is
 worth. A service can decide it could not explain an assessment, open a review,
 have somebody read it and reach a conclusion, without the person it is about
-learning any of it — so the application checks, on unlock, whether any service
-the learner has added is reporting a flag it has not already told them about.
+learning any of it — so the application checks, on unlock, whether the
+Alexandria Cloud it talks to is reporting a flag it has not already told them
+about.
 
 It is learned from the learner's own export, which they can already fetch and
 which answers to nobody else. Nothing is fetched in order to check: a learner
-with no directories configured never has a row, and a service that cannot be
-reached produces no notice rather than an error.
+who has switched off requests from organisations, or whose app has no
+Alexandria Cloud set, never has a row, and a service that cannot be reached
+produces no notice rather than an error.
 
 Each flag is raised with the learner **once** — repeating an accusation is its
 own kind of pressure — and the record is of what was shown, not of what was

@@ -231,6 +231,28 @@ const router = createRouter({
       component: () => import('@/pages/interviews/Review.vue'),
       meta: { layout: 'app', requiresInstructorMode: true },
     },
+    // A seat on an organisation's interview panel, opened from a join link.
+    // Same pages as a local interview, without instructor mode: a hiring
+    // manager on a panel need not teach.
+    {
+      path: '/panel/:id',
+      name: 'panel-session',
+      component: () => import('@/pages/interviews/Session.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/panel/:id/review',
+      name: 'panel-review',
+      component: () => import('@/pages/interviews/Review.vue'),
+      meta: { layout: 'app' },
+    },
+    // The candidate's way into an interview held in Alexandria.
+    {
+      path: '/interview-room/:id',
+      name: 'interview-room',
+      component: () => import('@/pages/interviews/CandidateRoom.vue'),
+      meta: { layout: 'app' },
+    },
 
     // Skills & Taxonomy
     {
@@ -371,6 +393,13 @@ const router = createRouter({
       name: 'plugin-docs',
       component: () => import('@/pages/PluginDocs.vue'),
       meta: { layout: 'app' },
+    },
+
+    // Requests from organisations used to live under "directories". Kept as
+    // a redirect: a finished assessment and older links still point here.
+    {
+      path: '/settings/directories',
+      redirect: '/settings/organisations',
     },
 
     // Settings — full-page, section-deep-linkable (/settings/:section).

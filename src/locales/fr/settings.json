@@ -33,9 +33,9 @@
         "label": "Tous les paramètres",
         "desc": "Chaque paramètre pour ce compte"
       },
-      "directories": {
-        "label": "Annuaires",
-        "desc": "Services à qui vous avez demandé ce qu'ils détiennent à votre sujet."
+      "organisations": {
+        "label": "Organisations",
+        "desc": "Qui peut voir vos compétences, et ce que les organisations vous ont demandé"
       },
       "assistants": {
         "label": "Assistant access",

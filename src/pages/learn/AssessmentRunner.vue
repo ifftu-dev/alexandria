@@ -302,7 +302,7 @@ async function submit() {
       </p>
       <div class="flex justify-center gap-2">
         <AppButton v-if="result.credential_id" @click="router.push('/credentials/' + encodeURIComponent(result.credential_id))">{{ $t('credentials.title') }}</AppButton>
-        <AppButton v-if="result.credential_id" variant="outline" @click="router.push('/settings/directories')">{{ $t('profile.exchange.shareNext') }}</AppButton>
+        <AppButton v-if="result.credential_id" variant="outline" @click="router.push('/settings/organisations')">{{ $t('organisations.shareNext') }}</AppButton>
         <AppButton :variant="result.credential_id ? 'outline' : 'primary'" @click="router.push('/skills')">{{ $t('learn.assessment.viewSkills') }}</AppButton>
         <AppButton v-if="!result.passed" variant="outline" :disabled="closing || !!cleanupError" @click="router.go(0)">{{ $t('learn.assessment.retake') }}</AppButton>
       </div>

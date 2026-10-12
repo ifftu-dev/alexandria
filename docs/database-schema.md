@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 14 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 107 tables, 111 indexes, 1 view, 3 triggers.
+**Schema**: 16 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 110 tables, 113 indexes, 1 view, 3 triggers.
 
 ---
 
@@ -35,6 +35,8 @@ and requires a database's history to be an exact prefix of this list:
 12. `status_list_publication`
 13. `attempt_role_target`
 14. `session_device_attestation`
+15. `organisation_access`
+16. `interview_panel_link`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1046,6 +1048,11 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `started_at` TEXT
 - `ended_at` TEXT
 - `expires_at` TEXT NOT NULL
+- `cloud_url` TEXT
+- `cloud_interview_id` TEXT
+- `cloud_panelist_id` TEXT
+- `cloud_panel_token` TEXT
+- `cloud_org` TEXT
 
 #### `interview_transcript_segments`
 
@@ -1075,6 +1082,36 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `meeting_url` TEXT
 - `responded_at` TEXT NOT NULL
 - `payload_json` TEXT NOT NULL
+
+### Organisation access (3)
+
+#### `listing_publications`
+
+- `cloud_url` TEXT PK
+- `digest` TEXT NOT NULL
+- `published_at` INTEGER NOT NULL
+
+#### `org_descriptors`
+
+- `domain` TEXT PK
+- `descriptor_json` TEXT NOT NULL
+- `fetched_at` INTEGER NOT NULL
+
+#### `org_grants`
+
+- `grant_id` TEXT PK
+- `cloud_url` TEXT NOT NULL
+- `org_domain` TEXT NOT NULL
+- `org_name` TEXT NOT NULL
+- `purpose` TEXT NOT NULL
+- `skill_ids_json` TEXT NOT NULL
+- `sync` INTEGER NOT NULL
+- `statement_json` TEXT NOT NULL
+- `granted_at` INTEGER NOT NULL
+- `revoked_at` INTEGER
+- `snapshot_digest` TEXT
+- `synced_at` INTEGER
+- `sync_error` TEXT
 
 ### Organizations and role assessments (2)
 

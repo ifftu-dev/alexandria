@@ -175,5 +175,16 @@
     "unavailable": "On-device speech recognition is not available in this WebView, so captions cannot be enabled without risking audio leaving the device.",
     "cancel": "Cancel",
     "enable": "Enable and share text"
+  },
+  "interviewRoom": {
+    "eyebrow": "Interview in Alexandria",
+    "waiting": "Waiting for the panel to open the room",
+    "ready": "The panel is ready for you",
+    "explain": "This interview happens here, in Alexandria, over a direct connection between you and the panel.",
+    "noRecording": "Nothing is recorded.",
+    "captions": "Captions of what you say are only made if you turn captions on.",
+    "leave": "You can leave at any time.",
+    "join": "Join interview",
+    "checking": "Checking every few seconds…"
   }
 }

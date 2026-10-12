@@ -14,12 +14,14 @@
 //! That indirection is the point. A verifier should link a signature checker,
 //! not an application.
 
+pub mod access;
 pub mod course;
 pub mod did;
 pub mod exchange;
 pub mod governance;
 pub mod hash;
 pub mod json;
+pub mod org;
 pub mod qualification;
 pub mod talent;
 pub mod trust;

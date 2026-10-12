@@ -13,6 +13,7 @@ import instructor from './instructor.json'
 import guardian from './guardian.json'
 import plugins from './plugins.json'
 import profile from './profile.json'
+import organisations from './organisations.json'
 import goals from './goals.json'
 import sentinel from './sentinel.json'
 import nav from './nav.json'
@@ -20,4 +21,4 @@ import dashboard from './dashboard.json'
 import omni from './omni.json'
 import update from './update.json'
 
-export default { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, goals, sentinel, nav, dashboard, omni, update }
+export default { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, organisations, goals, sentinel, nav, dashboard, omni, update }

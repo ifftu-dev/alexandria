@@ -14,6 +14,7 @@ pub mod goals;
 #[cfg(test)]
 mod json_limit_boundaries;
 pub mod network_profile;
+pub mod org_trust;
 pub mod p2p;
 pub mod plugins;
 pub mod profile;
@@ -1106,6 +1107,78 @@ pub fn run() {
                                     }
                                 }
 
+                                // Organisations the learner keeps in sync, and a
+                                // listing they asked to keep current. Planned
+                                // against the database, sent without holding it,
+                                // recorded after. Unchanged records are skipped,
+                                // so most passes send nothing.
+                                if let Some(w) = wallet.as_ref() {
+                                    let signing_key =
+                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
+                                    let did = crypto::did::derive_did_key(&signing_key);
+                                    let now = commands::credentials::now_rfc3339();
+                                    let now_unix = chrono::Utc::now().timestamp();
+                                    let plan = {
+                                        let guard = db_for_queue.lock();
+                                        match guard.as_deref() {
+                                            Ok(Some(db)) => {
+                                                let grants = commands::organisations::plan_sync(
+                                                    db.conn(),
+                                                    &signing_key,
+                                                    did.as_str(),
+                                                    now_unix,
+                                                    &now,
+                                                );
+                                                let listing = commands::organisations::plan_listing(
+                                                    db.conn(),
+                                                    &signing_key,
+                                                    did.as_str(),
+                                                    now_unix,
+                                                    &now,
+                                                );
+                                                Some((grants, listing))
+                                            }
+                                            _ => None,
+                                        }
+                                    };
+                                    if let Some((Ok((pending, _)), listing)) = plan {
+                                        let results =
+                                            commands::organisations::send_snapshots(&pending).await;
+                                        let listing_sent = match &listing {
+                                            Ok(Some((url, digest, signed))) => Some((
+                                                url.clone(),
+                                                digest.clone(),
+                                                commands::organisations::send_listing(url, signed)
+                                                    .await,
+                                            )),
+                                            _ => None,
+                                        };
+                                        let guard = db_for_queue.lock();
+                                        if let Ok(Some(db)) = guard.as_deref() {
+                                            match commands::organisations::record_sync(
+                                                db.conn(),
+                                                &pending,
+                                                &results,
+                                                now_unix,
+                                            ) {
+                                                Ok(r) if !r.failed.is_empty() => {
+                                                    log::debug!("organisation sync: {:?}", r.failed)
+                                                }
+                                                Err(e) => log::warn!("organisation sync: {e}"),
+                                                _ => {}
+                                            }
+                                            if let Some((url, digest, Ok(()))) = &listing_sent {
+                                                let _ = commands::organisations::record_listing(
+                                                    db.conn(),
+                                                    url,
+                                                    digest,
+                                                    now_unix,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Cross-device sync: when auto-sync is enabled,
                                 // reconcile with every paired device. No-op if the
                                 // toggle is off, no profile is unlocked, or the
@@ -1739,14 +1812,22 @@ pub fn run() {
             commands::talent_index::get_talent_index_preview,
             commands::talent_index::set_talent_index_consent,
             commands::talent_index::sign_talent_index_record,
-            commands::holder_pull::list_directories,
-            commands::holder_pull::set_directories,
-            commands::holder_pull::fetch_disclosure_requests,
             commands::holder_pull::fetch_access_log,
-            commands::holder_pull::share_disclosure,
             commands::holder_pull::fetch_visibility,
             commands::holder_pull::set_visibility,
             commands::holder_pull::publish_listing,
+            commands::organisations::org_access_requests,
+            commands::organisations::org_grant,
+            commands::organisations::org_grants,
+            commands::organisations::org_grant_set_sync,
+            commands::organisations::org_grant_revoke,
+            commands::organisations::org_sync_now,
+            commands::interview_panel::interview_panel_open,
+            commands::interview_panel::interview_panel_status,
+            commands::interview_panel::interview_panel_set_room,
+            commands::interview_panel::interview_panel_scorecard,
+            commands::hiring::hiring_interview_room,
+            commands::organisations::org_cloud,
             commands::holder_release::holder_contestable_runs,
             commands::holder_release::holder_release_evidence,
             commands::holder_release::holder_withdraw_evidence,

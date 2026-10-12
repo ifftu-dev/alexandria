@@ -2364,7 +2364,7 @@ export interface InterviewInvite {
   subject_did: string
   role_label: string
   message: string
-  mode: 'video' | 'call' | 'in_person'
+  mode: 'video' | 'call' | 'in_person' | 'alexandria'
   proposed_slots: number[]
   meeting_url: string | null
   run_id: string | null
@@ -2372,9 +2372,12 @@ export interface InterviewInvite {
   expires_at: number
 }
 
-export interface DirectoryInterview {
+/** An interview invitation as Alexandria Cloud relayed it, with who really sent it. */
+export interface OrgInterview {
   directory_url: string
   invite: InterviewInvite
+  orgProof: OrgProof | null
+  org: OrgCheck
 }
 
 export interface OfferTerms {
@@ -2391,9 +2394,12 @@ export interface OfferTerms {
   expires_at: number
 }
 
-export interface DirectoryOffer {
+/** An offer as Alexandria Cloud relayed it, with who really sent it. */
+export interface OrgOffer {
   directory_url: string
   offer: OfferTerms
+  orgProof: OrgProof | null
+  org: OrgCheck
 }
 
 export interface HiringRecord {
@@ -2409,9 +2415,106 @@ export interface HiringRecord {
   payload_json: string
 }
 
-export interface DirectoryCredentialRequest {
+/** An assessment or credential request as Alexandria Cloud relayed it. */
+export interface OrgCredentialRequest {
   directory_url: string
   request: CredentialRequest
+  orgProof: OrgProof | null
+  org: OrgCheck
+}
+
+/** An organisation's signature over one payload, made with a key its domain publishes. */
+export interface OrgProof {
+  domain: string
+  verificationMethod: string
+  created: string
+  jws: string
+}
+
+/**
+ * Who sent something, as checked against the file its domain publishes.
+ * `name` is only ever set when `verified`; an unverified sender has no name
+ * the app can vouch for.
+ */
+export interface OrgCheck {
+  domain: string | null
+  name: string | null
+  verified: boolean
+  problem: string | null
+}
+
+/** What came back from Alexandria Cloud, and what could not be asked. */
+export interface CloudPull<T> {
+  items: T[]
+  problems: CloudProblem[]
+}
+
+export interface CloudProblem {
+  /** The service that could not be asked (today always Alexandria Cloud). */
+  directory: string
+  detail: string
+}
+
+/** An organisation asking to see some of a learner's skills. Wire shape, snake_case. */
+export interface AccessRequest {
+  id: string
+  audience: string
+  nonce: string
+  organization: string
+  subject_did: string
+  skill_ids: string[]
+  purpose: string
+  network_id: string
+  created_at: number
+  expires_at: number
+}
+
+/** One requested skill, as the learner can answer it. */
+export interface SkillChoice {
+  skillId: string
+  name: string
+  /** A skill without evidence is shown but cannot be shared: there is nothing to send. */
+  hasEvidence: boolean
+  /** 0 (remember) … 5 (create). */
+  bloomLevel: number | null
+  /** Score 1–5. */
+  level: number | null
+}
+
+export interface AccessRequestItem {
+  directoryUrl: string
+  request: AccessRequest
+  orgProof: OrgProof | null
+  org: OrgCheck
+  skills: SkillChoice[]
+}
+
+/** Access the learner has given an organisation. Times are unix seconds unless noted. */
+export interface GrantView {
+  grantId: string
+  orgDomain: string
+  orgName: string
+  purpose: string
+  skills: SkillChoice[]
+  sync: boolean
+  grantedAt: number
+  syncedAt: number | null
+  syncError: string | null
+  revokedAt: number | null
+  /** RFC 3339, as Alexandria Cloud reports it. */
+  lastViewedAt: string | null
+  viewCount: number | null
+}
+
+export interface GrantsView {
+  grants: GrantView[]
+  problems: CloudProblem[]
+}
+
+export interface SyncReport {
+  sent: number
+  unchanged: number
+  failed: string[]
 }
 
 /** The credential exchange share: a presentation carrying one credential and the request it answers. */

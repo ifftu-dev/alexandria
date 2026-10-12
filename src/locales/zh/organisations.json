@@ -1,0 +1,144 @@
+{
+  "shareNext": "与组织分享",
+  "badge": {
+    "verified": "已验证：{domain} 的所有者",
+    "unverified": "无法验证发送者：{problem}",
+    "noProof": "它没有附带其域名的证明",
+    "claims": "它声称来自 {domain}。在核实之前，无法向其回复任何内容。"
+  },
+  "settings": {
+    "enabled": "接收来自组织的请求",
+    "enabledDesc": "允许组织请求查看你的技能、邀请你参加评估和面试，以及向你发送录用通知。",
+    "off": "来自组织的请求已关闭。此设备不会为此联系 Alexandria Cloud。",
+    "noCloud": "此网络尚未设置 Alexandria Cloud，因此组织无法在这里联系到你。",
+    "noCloudDev": "开发者可以在开发者设置中进行设置。",
+    "openDeveloper": "打开开发者设置",
+    "cloudLabel": "Alexandria Cloud 地址",
+    "cloudDesc": "使用其他 Alexandria Cloud，例如在本地运行的服务。留空则使用网络自带的。",
+    "cloudSaved": "已保存。"
+  },
+  "requests": {
+    "title": "请求",
+    "note": "组织通过 Alexandria Cloud 联系你。每个组织都会用其自身域名 DNS 中的记录证明身份，你只能回复能够证明身份的组织。",
+    "refresh": "立即检查",
+    "checking": "正在检查…",
+    "empty": "目前没有待处理的事项。",
+    "expires": "{when} 到期",
+    "noteLabel": "给组织的备注（可选）",
+    "answered": "已发送回复：{status}",
+    "kind": {
+      "access": "想查看你的技能",
+      "assessment": "评估请求",
+      "interview": "面试邀请",
+      "offer": "录用通知"
+    },
+    "access": {
+      "purpose": "原因：{purpose}",
+      "skillsHeading": "选择要分享的内容",
+      "noEvidence": "尚无证据",
+      "score": "得分 {level}/5",
+      "share": "分享",
+      "shareSync": "分享并保持同步",
+      "sharing": "正在分享…",
+      "notNow": "暂不",
+      "syncNote": "保持同步后，在你停止分享之前，这些技能每次变化都会向对方发送更新后的副本。",
+      "notNowNote": "“暂不”会在应用重新启动前隐藏此请求。对方不会收到通知。",
+      "shared": "已与 {org} 分享。",
+      "sharedSync": "已与 {org} 分享，并将保持更新。"
+    },
+    "assessment": {
+      "skill": "技能：{skill}",
+      "assess": "参加所请求的评估",
+      "choose": "选择一份凭证",
+      "noCredentials": "还没有匹配的凭证。如果对方要求新的评估，请从此请求开始评估。",
+      "preview": "预览将发送的内容",
+      "disclosure": "这会将你所选的完整凭证（包括其诚信摘要）仅发送给该组织。不会发布你的档案，也不会发送任何原始监控录像。",
+      "exact": "将发送的确切内容",
+      "share": "与该组织分享",
+      "received": "已收到。对方的核查结果：{outcome}"
+    },
+    "interview": {
+      "where": "地点",
+      "meetingLink": "会议链接",
+      "inAlexandria": "在 Alexandria 内",
+      "toBeArranged": "由组织安排",
+      "followsRun": "在你的评估之后",
+      "chooseTime": "选择时间",
+      "accept": "接受",
+      "decline": "拒绝",
+      "mode": {
+        "video": "视频通话",
+        "call": "电话",
+        "inPerson": "当面",
+        "alexandria": "在 Alexandria 内"
+      }
+    },
+    "offer": {
+      "starts": "{date} 开始",
+      "accept": "接受录用",
+      "decline": "拒绝录用"
+    },
+    "history": {
+      "title": "你的回复（{count}）",
+      "accepted": "已接受",
+      "declined": "已拒绝"
+    },
+    "upcoming": {
+      "title": "即将进行的面试",
+      "join": "加入面试",
+      "opensSoon": "开始前 15 分钟开放"
+    }
+  },
+  "access": {
+    "title": "谁有访问权限",
+    "note": "你已与之分享技能的组织。它们只能看到列出的技能，你可以随时停止分享。",
+    "empty": "你尚未与任何组织分享技能。",
+    "purpose": "原因：{purpose}",
+    "sharedOn": "分享于 {date}",
+    "viewed": "查看过 1 次 · 最近 {date} | 查看过 {count} 次 · 最近 {date}",
+    "notViewed": "尚未打开",
+    "keepUpToDate": "保持更新",
+    "updated": "{relative}更新",
+    "syncFailed": "无法更新：{error}",
+    "stop": "停止分享",
+    "stopTitle": "停止与 {org} 分享？",
+    "stopMessage": "{org} 将无法再看到这些技能。Alexandria Cloud 会删除为其保存的内容。",
+    "revokedHeading": "已停止分享（{count}）",
+    "stoppedOn": "停止于 {date}",
+    "syncNow": "立即同步",
+    "syncing": "正在同步…",
+    "syncReport": "已发送：{sent}。已是最新：{unchanged}。",
+    "syncFailedItem": "无法发送：{detail}",
+    "visibility": {
+      "heading": "可以按姓名查看你的机构",
+      "empty": "尚未向任何机构授予此权限。",
+      "note": "讲师无论如何都能看到其所授模块中的学习者——这样遇到困难的人才能得到帮助。这里指的是管理员，否则他们只能看到汇总数字。你的注册结束时，此权限会自动终止。",
+      "on": "{institution} 的管理员可以看到带有你姓名的成绩",
+      "off": "{institution} 的管理员只能看到汇总数字",
+      "allow": "允许",
+      "withdraw": "撤回"
+    },
+    "views": {
+      "heading": "最近查看",
+      "empty": "还没有人查看过。",
+      "named": "{where} 的 {who} 打开了你的记录",
+      "aggregate": "{where} 在一份不点名的报告中统计了你",
+      "module": "于 {module}"
+    }
+  },
+  "problems": {
+    "heading": "无法检查",
+    "note": "失败的检查会显示出来而不是被跳过——否则看起来就像没有任何可报告的内容。"
+  },
+  "listing": {
+    "framing": "保存只会记录这些选择。在你发布或开启“保持档案更新”之前，不会发送任何内容。",
+    "heading": "你的档案",
+    "publishNow": "立即发布",
+    "publishing": "正在发布…",
+    "published": "已发布。",
+    "publishFailed": "无法发布：{error}",
+    "nothingToPublish": "发布前请至少选择一项技能并保存。",
+    "keepUpToDate": "保持我的档案更新",
+    "keepNote": "每当你所选的技能发生变化时，自动重新发布你的档案。"
+  }
+}

@@ -1,0 +1,144 @@
+{
+  "shareNext": "Compartir con una organización",
+  "badge": {
+    "verified": "Verificada: es dueña de {domain}",
+    "unverified": "No se pudo verificar quién envió esto: {problem}",
+    "noProof": "llegó sin prueba de su dominio",
+    "claims": "Dice que viene de {domain}. No se puede responder hasta que eso se compruebe."
+  },
+  "settings": {
+    "enabled": "Recibir solicitudes de organizaciones",
+    "enabledDesc": "Permite que las organizaciones pidan ver tus habilidades, te inviten a evaluaciones y entrevistas, y te envíen ofertas.",
+    "off": "Las solicitudes de organizaciones están desactivadas. Este dispositivo no contacta con Alexandria Cloud para recibirlas.",
+    "noCloud": "Todavía no hay ningún Alexandria Cloud configurado para esta red, así que las organizaciones no pueden contactarte aquí.",
+    "noCloudDev": "Los desarrolladores pueden configurar uno en los ajustes de desarrollador.",
+    "openDeveloper": "Abrir ajustes de desarrollador",
+    "cloudLabel": "Dirección de Alexandria Cloud",
+    "cloudDesc": "Usa otro Alexandria Cloud, por ejemplo uno local. Déjalo vacío para usar el de la red.",
+    "cloudSaved": "Guardado."
+  },
+  "requests": {
+    "title": "Solicitudes",
+    "note": "Las organizaciones te contactan a través de Alexandria Cloud. Cada una demuestra quién es con un registro en el DNS de su propio dominio, y solo puedes responder a las que lo hacen.",
+    "refresh": "Comprobar ahora",
+    "checking": "Comprobando…",
+    "empty": "No tienes nada pendiente.",
+    "expires": "Caduca {when}",
+    "noteLabel": "Nota para la organización (opcional)",
+    "answered": "Respuesta enviada: {status}",
+    "kind": {
+      "access": "Quiere ver tus habilidades",
+      "assessment": "Solicitud de evaluación",
+      "interview": "Invitación a entrevista",
+      "offer": "Oferta"
+    },
+    "access": {
+      "purpose": "Motivo: {purpose}",
+      "skillsHeading": "Elige qué compartir",
+      "noEvidence": "Aún sin evidencia",
+      "score": "puntuación {level}/5",
+      "share": "Compartir",
+      "shareSync": "Compartir y mantener actualizado",
+      "sharing": "Compartiendo…",
+      "notNow": "Ahora no",
+      "syncNote": "Mantener actualizado les envía una copia nueva cada vez que cambian estas habilidades, hasta que dejes de compartir.",
+      "notNowNote": "«Ahora no» lo oculta hasta que reinicies la aplicación. No se les avisa.",
+      "shared": "Compartido con {org}.",
+      "sharedSync": "Compartido con {org}. Se mantendrá actualizado."
+    },
+    "assessment": {
+      "skill": "Habilidad: {skill}",
+      "assess": "Hacer la evaluación solicitada",
+      "choose": "Elegir una credencial",
+      "noCredentials": "Aún no tienes una credencial que coincida. Si pidieron una evaluación nueva, hazla desde esta solicitud.",
+      "preview": "Ver qué se enviará",
+      "disclosure": "Esto envía la credencial completa que elegiste, incluido su resumen de integridad, solo a esta organización. No publica tu perfil ni envía capturas de supervisión sin procesar.",
+      "exact": "Exactamente lo que se enviará",
+      "share": "Compartir con esta organización",
+      "received": "Recibido. Su comprobación: {outcome}"
+    },
+    "interview": {
+      "where": "Dónde",
+      "meetingLink": "Enlace de la reunión",
+      "inAlexandria": "En Alexandria",
+      "toBeArranged": "La organización lo concretará",
+      "followsRun": "Sigue a tu evaluación",
+      "chooseTime": "Elige una hora",
+      "accept": "Aceptar",
+      "decline": "Rechazar",
+      "mode": {
+        "video": "Videollamada",
+        "call": "Llamada telefónica",
+        "inPerson": "En persona",
+        "alexandria": "En Alexandria"
+      }
+    },
+    "offer": {
+      "starts": "Empieza el {date}",
+      "accept": "Aceptar oferta",
+      "decline": "Rechazar oferta"
+    },
+    "history": {
+      "title": "Tus respuestas ({count})",
+      "accepted": "Aceptada",
+      "declined": "Rechazada"
+    },
+    "upcoming": {
+      "title": "Próximas entrevistas",
+      "join": "Unirse a la entrevista",
+      "opensSoon": "Se abre 15 minutos antes"
+    }
+  },
+  "access": {
+    "title": "Quién tiene acceso",
+    "note": "Organizaciones con las que has compartido habilidades. Solo ven las habilidades indicadas y puedes dejar de compartir cuando quieras.",
+    "empty": "No has compartido tus habilidades con ninguna organización.",
+    "purpose": "Motivo: {purpose}",
+    "sharedOn": "Compartido el {date}",
+    "viewed": "Visto una vez · última {date} | Visto {count} veces · última {date}",
+    "notViewed": "Aún no lo han abierto",
+    "keepUpToDate": "Mantener actualizado",
+    "updated": "Actualizado {relative}",
+    "syncFailed": "No se pudo actualizar: {error}",
+    "stop": "Dejar de compartir",
+    "stopTitle": "¿Dejar de compartir con {org}?",
+    "stopMessage": "{org} ya no verá estas habilidades. Alexandria Cloud borra lo que guarda para ellos.",
+    "revokedHeading": "Ya no compartido ({count})",
+    "stoppedOn": "Dejado de compartir el {date}",
+    "syncNow": "Sincronizar ahora",
+    "syncing": "Sincronizando…",
+    "syncReport": "Enviados: {sent}. Ya actualizados: {unchanged}.",
+    "syncFailedItem": "No se pudo enviar: {detail}",
+    "visibility": {
+      "heading": "Instituciones que pueden verte por tu nombre",
+      "empty": "Ninguna institución tiene este permiso.",
+      "note": "Los instructores ven a los estudiantes de los módulos que imparten en cualquier caso; así se ayuda a quien tiene dificultades. Esto se refiere a los administradores, que de otro modo solo ven totales. Termina solo cuando termina tu matrícula.",
+      "on": "Los administradores de {institution} pueden ver tus resultados con tu nombre",
+      "off": "Los administradores de {institution} solo ven totales",
+      "allow": "Permitir",
+      "withdraw": "Retirar"
+    },
+    "views": {
+      "heading": "Consultas recientes",
+      "empty": "Nadie ha mirado todavía.",
+      "named": "{who} de {where} abrió tu expediente",
+      "aggregate": "{where} te contó en un informe que no nombraba a nadie",
+      "module": "en {module}"
+    }
+  },
+  "problems": {
+    "heading": "No se pudo comprobar",
+    "note": "Una comprobación fallida se muestra en lugar de omitirse; si no, parecería que no hay nada que informar."
+  },
+  "listing": {
+    "framing": "Guardar solo registra estas elecciones. No se envía nada hasta que publiques o actives mantener tu perfil actualizado.",
+    "heading": "Tu perfil",
+    "publishNow": "Publicar ahora",
+    "publishing": "Publicando…",
+    "published": "Publicado.",
+    "publishFailed": "No se pudo publicar: {error}",
+    "nothingToPublish": "Elige al menos una habilidad y guarda antes de publicar.",
+    "keepUpToDate": "Mantener mi perfil actualizado",
+    "keepNote": "Vuelve a publicar tu perfil automáticamente cada vez que cambian las habilidades que elegiste."
+  }
+}

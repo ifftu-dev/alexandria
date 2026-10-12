@@ -33,9 +33,9 @@
         "label": "Todos los ajustes",
         "desc": "Todos los ajustes de esta cuenta"
       },
-      "directories": {
-        "label": "Directorios",
-        "desc": "Servicios a los que has pedido que te digan qué guardan sobre ti."
+      "organisations": {
+        "label": "Organizaciones",
+        "desc": "Quién puede ver tus habilidades y qué te han pedido las organizaciones"
       },
       "assistants": {
         "label": "Assistant access",

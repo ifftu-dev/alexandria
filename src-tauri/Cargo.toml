@@ -166,6 +166,9 @@ iroh-gossip = "0.101"
 live = { path = "../crates/live", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
+# Organisations prove their domain with a TXT record. 0.26: the 0.25 line has
+# RUSTSEC-2026-0118/0119.
+hickory-resolver = "0.26"
 
 # ── Mobile + Windows SQLCipher dependencies ──────────────────────────
 [target.'cfg(any(target_os = "ios", target_os = "android", target_os = "windows"))'.dependencies]

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useInterviews } from '@/composables/useInterviews'
+import { usePanel, type PanelInterview, type PanelRecommendation } from '@/composables/usePanel'
 import { AppAlert, AppBadge, AppButton, AppTextarea } from '@/components/ui'
 
 const route = useRoute()
@@ -16,6 +17,16 @@ const saved = ref(false)
 const anonymizeExport = ref(true)
 const includePrivateNotes = ref(false)
 
+const panelApi = usePanel()
+const panel = ref<PanelInterview | null>(null)
+const ratings = ref<Record<string, number | null>>({})
+const recommendation = ref<PanelRecommendation | ''>('')
+const scorecardNotes = ref('')
+const scorecardSent = ref(false)
+const scorecardError = ref<string | null>(null)
+const sending = ref(false)
+const recommendations: PanelRecommendation[] = ['strong_yes', 'yes', 'no', 'strong_no']
+
 const bundle = computed(() => activeInterview.value)
 const coveredCount = computed(() => bundle.value?.criteria.filter(item => item.status === 'covered').length ?? 0)
 const partialCount = computed(() => bundle.value?.criteria.filter(item => item.status === 'partial').length ?? 0)
@@ -25,7 +36,29 @@ onMounted(async () => {
   if (!loaded) return
   summary.value = loaded.session.summary ?? await generateSummary(interviewId.value)
   conclusion.value = loaded.session.conclusion ?? ''
+  panel.value = await panelApi.status(interviewId.value).catch(() => null)
 })
+
+/** What the panelist chooses to send the organisation. The transcript and
+ *  notes stay here; only coverage, ratings, a recommendation and these notes go. */
+async function sendScorecard() {
+  if (!bundle.value || !panel.value || !recommendation.value) return
+  sending.value = true
+  scorecardError.value = null
+  try {
+    await panelApi.sendScorecard(
+      interviewId.value,
+      bundle.value.criteria.map(item => ({ criterion: item.label, rating: ratings.value[item.label] ?? null })),
+      recommendation.value,
+      scorecardNotes.value,
+    )
+    scorecardSent.value = true
+  } catch (cause) {
+    scorecardError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sending.value = false
+  }
+}
 
 async function save() {
   await saveReview(interviewId.value, summary.value, conclusion.value)
@@ -80,7 +113,7 @@ function exportJson() {
   <div v-if="bundle" class="mx-auto max-w-6xl space-y-5 pb-10">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="flex items-start gap-3">
-        <button class="mt-0.5 rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" :title="$t('interviews.review.back')" @click="router.push('/interviews')">
+        <button class="mt-0.5 rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" :title="$t('interviews.review.back')" @click="router.push(panel ? '/settings/organisations' : '/interviews')">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div>
@@ -113,6 +146,33 @@ function exportJson() {
       </section>
 
       <aside class="space-y-4">
+        <div v-if="panel" class="card border-primary/30 p-4" data-testid="scorecard">
+          <h2 class="text-sm font-semibold text-foreground">{{ $t('interviews.panel.scorecardTitle', { org: panel.organization }) }}</h2>
+          <p class="mt-1 text-xs text-muted-foreground">{{ $t('interviews.panel.scorecardHint') }}</p>
+          <div class="mt-3 space-y-2">
+            <label v-for="criterion in bundle.criteria" :key="criterion.id" class="flex items-center gap-2 text-xs text-foreground">
+              <span class="min-w-0 flex-1 truncate">{{ criterion.label }}</span>
+              <select v-model.number="ratings[criterion.label]" class="rounded-md border border-border bg-background px-2 py-1 text-xs" :aria-label="$t('interviews.panel.ratingFor', { criterion: criterion.label })">
+                <option :value="null">{{ $t('interviews.panel.notRated') }}</option>
+                <option v-for="n in 4" :key="n" :value="n">{{ $t(`interviews.panel.rating${n}`) }}</option>
+              </select>
+            </label>
+          </div>
+          <fieldset class="mt-3">
+            <legend class="text-xs font-medium text-muted-foreground">{{ $t('interviews.panel.recommendation') }}</legend>
+            <div class="mt-1 grid grid-cols-2 gap-1">
+              <label v-for="choice in recommendations" :key="choice" class="flex items-center gap-1.5 text-xs text-foreground">
+                <input v-model="recommendation" type="radio" name="recommendation" :value="choice" class="accent-primary" />
+                {{ $t(`interviews.panel.recommend.${choice}`) }}
+              </label>
+            </div>
+          </fieldset>
+          <div class="mt-3"><AppTextarea v-model="scorecardNotes" :label="$t('interviews.panel.scorecardNotes')" :rows="4" /></div>
+          <AppAlert v-if="scorecardError" variant="error" class="mt-2">{{ scorecardError }}</AppAlert>
+          <AppButton class="mt-3 w-full" :loading="sending" :disabled="!recommendation" @click="sendScorecard">
+            {{ scorecardSent ? $t('interviews.panel.scorecardSent') : $t('interviews.panel.sendScorecard', { org: panel.organization }) }}
+          </AppButton>
+        </div>
         <div class="card p-4">
           <h2 class="text-sm font-semibold text-foreground">{{ $t('interviews.review.coverage') }}</h2>
           <div class="mt-3 space-y-2">
