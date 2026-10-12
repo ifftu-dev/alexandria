@@ -37,6 +37,7 @@ import type {
   WatchCategory,
   HotkeyStatus,
   HotkeyEvent,
+  IntegritySnapshot,
 } from '@/types'
 
 const { invoke: tauriInvoke } = useLocalApi()
@@ -91,6 +92,10 @@ function isCriticalPasteScore(s: number): boolean {
 
 const sessionId = ref<string | null>(null)
 const isActive = ref(false)
+// Set when a snapshot reports the backend suspended this session. It takes
+// no more snapshots after that; the learner can still submit, and the
+// session ends as suspended.
+const suspended = ref(false)
 const integrityScore = ref(1.0)
 const consistencyScore = ref(1.0)
 
@@ -117,6 +122,7 @@ function emptySentinelDebug() {
     aiPasteAnomaly: -1,
     aiKeystrokeAnomaly: -1,
     aiMouseHumanProb: -1,
+    suspended: false,
     facePresent: false,
     faceCount: 0,
     appFocusLostCount: 0,
@@ -1146,7 +1152,7 @@ function createSentinelService() {
       sentinelDebug.signals = signals
 
       try {
-        await invoke('integrity_submit_snapshot', {
+        const stored = await invoke<IntegritySnapshot>('integrity_submit_snapshot', {
           req: {
             session_id: snapshotSessionId,
             element_id: currentElementId,
@@ -1164,6 +1170,10 @@ function createSentinelService() {
             anomaly_flags: deduped,
           },
         })
+        if (stored?.session_status === 'suspended') {
+          suspended.value = true
+          sentinelDebug.suspended = true
+        }
       } catch (error) { if (strict) throw error }
       if (!isCurrent()) return
 
@@ -1205,7 +1215,7 @@ function createSentinelService() {
   }
 
   const scheduleNextSnapshot = () => {
-    if (!isActive.value || !sessionId.value) return
+    if (!isActive.value || !sessionId.value || suspended.value) return
     if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
     snapshotTimer = setTimeout(() => {
       snapshotWork = captureSnapshot(false).finally(() => {
@@ -1307,6 +1317,8 @@ function createSentinelService() {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId, purpose })
       sessionId.value = response.session_id
       clearTrainingBuffers()
+      suspended.value = false
+      sentinelDebug.suspended = false
       isActive.value = true
       // Device attestation (iOS App Attest / Android Play Integrity) binds
       // the platform's word to this session's nonce. Fire-and-forget: the
@@ -1691,7 +1703,9 @@ function createSentinelService() {
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
     await snapshotWork
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
-    if (isActive.value) await captureSnapshot(true)
+    // A suspended session refuses snapshots, so a final one would only fail
+    // and leave the attempt unable to finish.
+    if (isActive.value && !suspended.value) await captureSnapshot(true)
     isActive.value = false
     sentinelDebug.active = false
     detachMonitoringListeners()
@@ -1848,6 +1862,7 @@ function createSentinelService() {
         localStorage.removeItem(PASTE_CLASSIFIER_STORAGE_KEY)
       } catch { /* localStorage disabled */ }
       pendingEvidenceConsent.value = null
+      suspended.value = false
       Object.assign(sentinelDebug, emptySentinelDebug())
     })
   }
@@ -2384,6 +2399,7 @@ function createSentinelService() {
     // State
     sessionId: readonly(sessionId),
     isActive: readonly(isActive),
+    suspended: readonly(suspended),
     integrityScore: readonly(integrityScore),
     consistencyScore: readonly(consistencyScore),
     cameraOptedIn: readonly(cameraOptedIn),

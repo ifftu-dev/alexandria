@@ -25,7 +25,9 @@
     "cameraLost": "La caméra s'est éteinte. Ce poste l'exige : réactivez-la.",
     "passMark": "Il vous faut {percent} % pour réussir.",
     "chooseOne": "Choisissez une réponse.",
-    "chooseAll": "Choisissez toutes les réponses qui s'appliquent."
+    "chooseAll": "Choisissez toutes les réponses qui s'appliquent.",
+    "integritySuspended": "Les contrôles d'intégrité ont suspendu cette tentative.",
+    "integritySuspendedNote": "Plus aucun contrôle n'est effectué. Vous pouvez encore soumettre ; le résultat indiquera que la session a été suspendue."
   },
   "player": {
     "courseFallback": "Cours",

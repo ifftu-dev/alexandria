@@ -62,6 +62,35 @@ describe('Sentinel lifecycle ownership', () => {
     expect(service.sessionId.value).toBeNull()
   })
 
+  it('stops snapshotting once a snapshot reports suspension, and still ends the session', async () => {
+    const service = (await freshService())()
+    await service.start(null)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'integrity_submit_snapshot') return { session_status: 'suspended' }
+      if (command === 'integrity_end_session') return { id: 'session-1', status: 'suspended' }
+      return fallback(command, args)
+    })
+    await vi.advanceTimersByTimeAsync(45_001)
+    expect(service.suspended.value).toBe(true)
+    expect(service.debug.suspended).toBe(true)
+
+    // The backend refuses anything further, so nothing further is sent.
+    const sent = () => mocks.invoke.mock.calls.filter(([name]) => name === 'integrity_submit_snapshot').length
+    const before = sent()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(sent()).toBe(before)
+
+    await service.stop()
+    expect(sent()).toBe(before)
+    expect(mocks.invoke.mock.calls.some(([name]) => name === 'integrity_end_session')).toBe(true)
+    expect(service.sessionId.value).toBeNull()
+
+    await service.start(null)
+    expect(service.suspended.value).toBe(false)
+    await service.stop()
+  })
+
   it('preserves camera evidence through failed teardown and clears opt-in only after success', async () => {
     const service = (await freshService())()
     await service.start('enrollment', true)

@@ -908,6 +908,8 @@ export interface IntegritySnapshot {
   ai_paste_anomaly: number | null
   anomaly_flags: string[]
   captured_at: string
+  /** Session status once this snapshot counted; set only on submit. */
+  session_status?: string
 }
 
 export interface SignalData {
