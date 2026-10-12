@@ -10,6 +10,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import { LiveDiagnosticsModal } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
+import type { SentinelFrame } from '@/utils/sentinel/frame'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -208,23 +209,43 @@ watch(
 // With the camera allowed for the integrity check, Sentinel looks at the same
 // self-preview the candidate sees: face presence every 3s, gaze every 1.5s.
 // Frames are scored in memory; nothing is kept or sent.
+//
+// On iOS that preview is not a webview stream — the call holds the camera
+// and hands the webview JPEG frames — so the check decodes the latest one.
+const nativeSelfFrames = computed(() => isIOS && videoEnabled.value && !screenSharing.value && selfVideoSrc.value !== null)
+const checkCameraLive = computed(() => selfStreamActive.value || nativeSelfFrames.value)
 let checkFaceTimer: ReturnType<typeof setInterval> | null = null
 let checkGazeTimer: ReturnType<typeof setInterval> | null = null
+let faceInFlight = false
 let gazeInFlight = false
-function checkVideo(): HTMLVideoElement | null {
-  return selfVideoElDesktop.value ?? selfVideoElMobile.value
+async function checkFrame(): Promise<SentinelFrame | null> {
+  if (selfStreamActive.value) return selfVideoElDesktop.value ?? selfVideoElMobile.value
+  const src = nativeSelfFrames.value ? selfVideoSrc.value : null
+  if (!src) return null
+  const still = new Image()
+  still.src = src
+  try {
+    await still.decode()
+  } catch {
+    return null
+  }
+  return still
 }
 function startCheckCamera() {
   if (checkFaceTimer || checkGazeTimer) return
   checkFaceTimer = setInterval(() => {
-    const video = checkVideo()
-    if (video) sentinel.verifyFace(video)
+    if (faceInFlight) return
+    faceInFlight = true
+    void checkFrame()
+      .then((frame) => { if (frame && checkFaceTimer) sentinel.verifyFace(frame) })
+      .finally(() => { faceInFlight = false })
   }, 3000)
   checkGazeTimer = setInterval(() => {
-    const video = checkVideo()
-    if (!video || gazeInFlight) return
+    if (gazeInFlight) return
     gazeInFlight = true
-    sentinel.scoreGaze(video).finally(() => { gazeInFlight = false })
+    void checkFrame()
+      .then((frame) => (frame && checkGazeTimer ? sentinel.scoreGaze(frame) : null))
+      .finally(() => { gazeInFlight = false })
   }, 1500)
 }
 function stopCheckCamera() {
@@ -232,10 +253,11 @@ function stopCheckCamera() {
   if (checkGazeTimer) clearInterval(checkGazeTimer)
   checkFaceTimer = null
   checkGazeTimer = null
+  faceInFlight = false
   gazeInFlight = false
 }
 watch(
-  [checkRunning, () => sentinel.cameraOptedIn.value, selfStreamActive],
+  [checkRunning, () => sentinel.cameraOptedIn.value, checkCameraLive],
   ([running, camera, live]) => {
     if (running && camera && live) startCheckCamera()
     else stopCheckCamera()

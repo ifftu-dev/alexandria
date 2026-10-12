@@ -11,6 +11,7 @@ import {
   type EnrollmentEmbedding,
 } from '@/utils/sentinel/face-embedder'
 import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
+import { frameSize, type SentinelFrame } from '@/utils/sentinel/frame'
 import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
 import type {
   SignalData,
@@ -1513,11 +1514,11 @@ function createSentinelService() {
     else { consecutiveNoFaceChecks = 0 }
   }
 
-  const verifyFace = (video: HTMLVideoElement): {
+  const verifyFace = (video: SentinelFrame): {
     present: boolean; count: number; consistency: number
     similarity?: number; match?: boolean
   } => {
-    if (!video || video.readyState < 2) return { present: false, count: 0, consistency: 0.2 }
+    if (!video || !frameSize(video)) return { present: false, count: 0, consistency: 0.2 }
 
     if (faceEmbedder?.isEnrolled) {
       const result = faceEmbedder.verify(video)
@@ -1548,9 +1549,10 @@ function createSentinelService() {
   // for callers that want to surface it live, or null on any failure
   // (gaze is advisory — failures never break the monitoring loop).
   const scoreGaze = async (
-    video: HTMLVideoElement,
+    video: SentinelFrame,
   ): Promise<GazeEstimate | null> => {
-    if (!isActive.value || !sessionId.value || !cameraOptedIn.value || !video || video.readyState < 2 || document.hidden) return null
+    const size = video ? frameSize(video) : null
+    if (!isActive.value || !sessionId.value || !cameraOptedIn.value || !size || document.hidden) return null
     const generation = lifecycleGeneration
     const captureGeneration = cameraGeneration
     const gazeSessionId = sessionId.value
@@ -1562,11 +1564,9 @@ function createSentinelService() {
       // Cap the longest side at 224px — YuNet letterboxes into 640²
       // internally, so a smaller frame only trims IPC payload, not
       // detection (the model runs at a fixed input size regardless).
-      const vw = video.videoWidth || 640
-      const vh = video.videoHeight || 480
-      const scale = Math.min(1, 224 / Math.max(vw, vh))
-      const w = Math.max(1, Math.round(vw * scale))
-      const h = Math.max(1, Math.round(vh * scale))
+      const scale = Math.min(1, 224 / Math.max(size.width, size.height))
+      const w = Math.max(1, Math.round(size.width * scale))
+      const h = Math.max(1, Math.round(size.height * scale))
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
       gazeCanvas.width = w
       gazeCanvas.height = h
