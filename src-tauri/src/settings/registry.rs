@@ -427,7 +427,7 @@ pub mod keys {
     /// person: organisations asking for access, assessments, interviews and
     /// offers. One switch rather than a list of servers: every organisation
     /// reaches a learner through the network's Cloud, and each one proves its
-    /// name with a file on its own domain, so there is nothing for the learner
+    /// name with a TXT record on its own domain, so there is nothing for the learner
     /// to configure. Off means the app never contacts Cloud on its own.
     pub const ORGANISATIONS_ENABLED: SettingKey<bool> = SettingKey {
         key: "organisations.enabled",

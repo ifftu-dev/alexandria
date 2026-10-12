@@ -9,7 +9,7 @@
 # which needs Docker Desktop and Ollama) when nothing answers on 8787, waits
 # for it, then runs the two ignored rehearsal tests: the function-level one
 # and the one through the real Tauri commands. Each prints one line per demo
-# step. Eight numbered lines and "test result: ok" twice means the demo works
+# step. The numbered lines (including 4b) and "test result: ok" means the demo works
 # on this machine right now.
 set -euo pipefail
 app_root=$(cd "$(dirname "$0")/../.." && pwd)

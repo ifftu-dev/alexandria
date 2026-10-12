@@ -19,7 +19,7 @@
   },
   "requests": {
     "title": "Demandes",
-    "note": "Les organisations vous joignent via Alexandria Cloud. Chacune prouve son identité avec un fichier sur son propre site web, et vous ne pouvez répondre qu'à celles qui le font.",
+    "note": "Les organisations vous joignent via Alexandria Cloud. Chacune prouve son identité avec un enregistrement dans le DNS de son propre domaine, et vous ne pouvez répondre qu'à celles qui le font.",
     "refresh": "Vérifier maintenant",
     "checking": "Vérification…",
     "empty": "Rien ne vous attend.",

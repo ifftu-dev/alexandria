@@ -19,7 +19,7 @@
   },
   "requests": {
     "title": "请求",
-    "note": "组织通过 Alexandria Cloud 联系你。每个组织都会用其自己网站上的文件证明身份，你只能回复能够证明身份的组织。",
+    "note": "组织通过 Alexandria Cloud 联系你。每个组织都会用其自身域名 DNS 中的记录证明身份，你只能回复能够证明身份的组织。",
     "refresh": "立即检查",
     "checking": "正在检查…",
     "empty": "目前没有待处理的事项。",

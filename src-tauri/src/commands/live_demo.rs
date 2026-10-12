@@ -6,7 +6,11 @@
 //! rehearsal of `docs/demo-runbook.md`: learner earns a credential, publishes
 //! a listing, is found, completes a requested assessment, shares the result,
 //! accepts an interview and an offer, is enrolled in a validity pilot, and
-//! the credential is verified by the stdlib script and then revoked.
+//! the credential is verified by the stdlib script and then revoked. The IPC
+//! rehearsal also grants an organisation access with sync and revokes it, and
+//! holds the interview in Alexandria: panel seat, room ticket, scorecard.
+//! Organisation requests are checked against the real
+//! `_alexandria.alexandria.ifftu.dev` TXT record, so both need DNS.
 //!
 //! Ignored by default because it needs Cloud up (`scripts/demo-assessment.sh`
 //! in the Cloud checkout) and the Node verifier on PATH:

@@ -19,7 +19,7 @@
   },
   "requests": {
     "title": "Solicitudes",
-    "note": "Las organizaciones te contactan a través de Alexandria Cloud. Cada una demuestra quién es con un archivo en su propio sitio web, y solo puedes responder a las que lo hacen.",
+    "note": "Las organizaciones te contactan a través de Alexandria Cloud. Cada una demuestra quién es con un registro en el DNS de su propio dominio, y solo puedes responder a las que lo hacen.",
     "refresh": "Comprobar ahora",
     "checking": "Comprobando…",
     "empty": "No tienes nada pendiente.",

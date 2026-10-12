@@ -169,7 +169,7 @@ pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsR
 /// Record any flag seen here that this device has not recorded before.
 ///
 /// Written from an export that was being read anyway. Nothing is fetched in
-/// order to do this, and a person with no directories configured never gets a
+/// order to do this, and a person whose app is not connected to Alexandria Cloud never gets a
 /// row — the same rule the rest of this module follows.
 async fn note_flags(state: &State<'_, AppState>, runs: &[ContestableRun]) -> Result<(), String> {
     let flagged: Vec<ContestableRun> = runs

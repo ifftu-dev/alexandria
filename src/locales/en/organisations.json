@@ -19,7 +19,7 @@
   },
   "requests": {
     "title": "Requests",
-    "note": "Organisations reach you through Alexandria Cloud. Each one proves who it is with a file on its own website, and you can only answer those that do.",
+    "note": "Organisations reach you through Alexandria Cloud. Each one proves who it is with a record in its own domain's DNS, and you can only answer those that do.",
     "refresh": "Check now",
     "checking": "Checking…",
     "empty": "Nothing is waiting for you.",

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Organisations, not directories.** The app talks to the network's
+  Alexandria Cloud behind one switch (**Settings → Organisations**). Every
+  request an organisation sends carries a proof the app checks itself
+  against the organisation's DNS record,
+  `_alexandria.<domain> TXT "v=alexandria-org1; name=…; key=did:key:…"`;
+  an organisation that does not verify can be seen but not answered.
+  Access requests are answered with learner-signed grants, shared once or
+  kept in sync, listed under **Who has access**, and revocable (**Stop
+  sharing**; Cloud deletes what it held). The listing can keep itself up to
+  date. Interviews can be held in Alexandria: a panelist's join link opens a
+  seat with the interview assistant, the room ticket reaches the candidate,
+  and panelists send scorecards. Disclosure (presentation) requests and the
+  directory list are removed; `alexandria-verify` gains `org` and `access`.
 - **Credentials are W3C-conformant end to end.** Proofs are W3C Data
   Integrity (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`,
   `proofValue`, `did:key#<key>` verification methods) in place of the
