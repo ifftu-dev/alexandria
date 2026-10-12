@@ -355,6 +355,34 @@ pub async fn sign_consented_record(
         .await
 }
 
+/// The record an organisation sees under an access grant.
+///
+/// Built from the same candidates as the listing, but the grant is its own
+/// consent: the skills it names, and the display name, because an
+/// organisation the learner chose to give access to should know who it is
+/// looking at. Never the bio. `None` when none of the granted skills has any
+/// evidence yet; the grant then holds nothing until one does.
+pub fn grant_snapshot_record(
+    conn: &Connection,
+    subject_did: &str,
+    skill_ids: &[String],
+    now: &str,
+) -> Result<Option<crate::domain::talent_index::TalentIndexRecord>, String> {
+    let consent = TalentIndexConsent {
+        skills: skill_ids.to_vec(),
+        display_name: true,
+        bio: false,
+    };
+    let record = build_record(
+        subject_did,
+        &candidate_skills(conn, subject_did)?,
+        &profile_fields(conn),
+        &consent,
+        &record_term_end(now),
+    );
+    Ok(record.filter(|r| !r.skills.is_empty()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

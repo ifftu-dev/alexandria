@@ -626,8 +626,8 @@ pub fn list_credentials_filtered(
 
 /// The origin this identity's status lists are served from, if any.
 ///
-/// The `credentials.status_host` setting wins; the network profile's cloud
-/// origin, then the first configured directory, stand in when it is empty.
+/// The `credentials.status_host` setting wins; the Alexandria Cloud the app
+/// talks to stands in when it is empty.
 /// Only `https`, or `http` on loopback, counts — a list named at a plain
 /// `http` host could be swapped on the wire, and a verifier would believe it.
 pub(crate) fn status_list_host(conn: &Connection) -> Option<String> {
@@ -635,15 +635,8 @@ pub(crate) fn status_list_host(conn: &Connection) -> Option<String> {
     let configured = SettingsStore::get(conn, keys::CREDENTIAL_STATUS_HOST);
     let candidate = if !configured.trim().is_empty() {
         Some(configured.trim().to_string())
-    } else if let Some(origin) = crate::network_profile::embedded_preprod()
-        .ok()
-        .and_then(|profile| profile.cloud_https_origin.clone())
-    {
-        Some(origin)
     } else {
-        super::holder_pull::directories_db(conn)
-            .ok()
-            .and_then(|directories| directories.into_iter().next().map(|d| d.url))
+        super::holder_pull::cloud_origin(conn)
     };
     candidate
         .map(|origin| origin.trim_end_matches('/').to_string())
@@ -941,6 +934,7 @@ pub async fn issue_credential(
         )
         .await?;
     publish_status_lists_quietly(&state).await;
+    super::organisations::sync_quietly(&state).await;
     Ok(issued)
 }
 
@@ -1003,6 +997,8 @@ pub async fn revoke_credential(
         )
         .await?;
     publish_status_lists_quietly(&state).await;
+    // A revoked credential stops counting, so what a synced grant shows changes.
+    super::organisations::sync_quietly(&state).await;
     Ok(())
 }
 
@@ -2169,19 +2165,13 @@ mod tests {
     }
 
     #[test]
-    fn the_first_directory_stands_in_for_an_unset_host() {
-        use crate::settings::{
-            registry::{keys, JsonSetting},
-            SettingsStore,
-        };
+    fn the_cloud_stands_in_for_an_unset_host() {
+        use crate::settings::{registry::keys, SettingsStore};
         let (db, _, _, _) = setup();
         SettingsStore::set(
             db.conn(),
-            keys::HOLDER_DIRECTORIES,
-            JsonSetting(serde_json::json!([
-                {"name": "Demo", "url": "http://localhost:8080"},
-                {"name": "Other", "url": "https://other.example"}
-            ])),
+            keys::CLOUD_ORIGIN,
+            "http://localhost:8080".to_string(),
         )
         .unwrap();
         assert_eq!(

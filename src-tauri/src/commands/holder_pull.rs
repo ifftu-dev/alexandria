@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Asking a directory what it holds about you, and answering when it asks.
+//! Asking Alexandria Cloud what organisations hold about you, and answering
+//! when they ask.
 //!
-//! # What a directory is
+//! # Where requests come from
 //!
-//! A service somebody else runs that holds records about this person: an
-//! institution's registry, an employer's index, anything that has been told a
-//! DID. None is configured by default and none is discovered automatically —
-//! the list lives in [`keys::HOLDER_DIRECTORIES`] and is empty until the
-//! learner puts something in it. An offline-first application does not decide
-//! on its user's behalf to start talking to a server.
+//! Organisations reach a learner through the network's Alexandria Cloud. The
+//! address comes from the network profile (or a developer override in
+//! [`keys::CLOUD_ORIGIN`]), and the learner has one switch,
+//! [`keys::ORGANISATIONS_ENABLED`], that stops the app contacting it at all.
+//! The service is not what the learner has to trust about who is asking: each
+//! organisation signs what it sends with a key its own domain publishes, and
+//! the app checks that itself (see `crate::org_trust`).
 //!
 //! # Why the client is here and the server is not
 //!
@@ -36,33 +38,17 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 
 use crate::db::executor::DatabaseWorkload;
-use crate::settings::registry::{keys, JsonSetting};
+use crate::settings::registry::keys;
 use crate::settings::SettingsStore;
 use crate::AppState;
 
-/// A directory the learner has chosen to check.
+/// The Cloud service the app asks. Kept as a list so callers that fan out
+/// over services keep working; today it holds at most one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Directory {
-    /// What the learner calls it. Their label, not the server's — a service
-    /// that names itself in a list of things watching you is a service that
-    /// gets to choose how it is described.
     pub name: String,
-    /// Base URL, https only.
+    /// Base URL, https only (http on loopback for local testing).
     pub url: String,
-}
-
-/// One request for a disclosure, as the holder sees it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DisclosureRequest {
-    /// Which directory it came from, so a learner with several can tell.
-    pub directory: String,
-    pub id: String,
-    /// The organisation that is asking, by name.
-    pub from: String,
-    pub skill_ids: Vec<String>,
-    pub purpose: String,
-    pub expires_at: String,
 }
 
 /// One entry in a directory's record of who looked at this person.
@@ -111,8 +97,32 @@ pub(crate) async fn directories(state: &State<'_, AppState>) -> Result<Vec<Direc
 }
 
 pub(crate) fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
-    let JsonSetting(raw) = SettingsStore::get(conn, keys::HOLDER_DIRECTORIES);
-    serde_json::from_value(raw).map_err(|e| format!("the directory list is unreadable: {e}"))
+    if !SettingsStore::get(conn, keys::ORGANISATIONS_ENABLED) {
+        return Ok(Vec::new());
+    }
+    Ok(cloud_origin(conn)
+        .into_iter()
+        .map(|url| Directory {
+            name: "Alexandria Cloud".into(),
+            url,
+        })
+        .collect())
+}
+
+/// The Cloud origin this app talks to, whether or not requests are switched
+/// on: the developer override, else the network profile's. Only https, or
+/// http on loopback, counts.
+pub(crate) fn cloud_origin(conn: &rusqlite::Connection) -> Option<String> {
+    let configured = SettingsStore::get(conn, keys::CLOUD_ORIGIN);
+    let origin = if !configured.trim().is_empty() {
+        configured.trim().to_string()
+    } else {
+        crate::network_profile::embedded_preprod()
+            .ok()
+            .and_then(|profile| profile.cloud_https_origin.clone())?
+    };
+    let origin = origin.trim_end_matches('/').to_string();
+    (origin.starts_with("https://") || is_loopback(&origin)).then_some(origin)
 }
 
 /// A value used once, so two identical requests do not sign identically.
@@ -203,80 +213,6 @@ pub(crate) fn is_loopback(url: &str) -> bool {
 
 // --- tauri command handlers ----------------------------------------------
 
-#[tauri::command]
-pub async fn list_directories(state: State<'_, AppState>) -> Result<Vec<Directory>, String> {
-    directories(&state).await
-}
-
-#[tauri::command]
-pub async fn set_directories(
-    state: State<'_, AppState>,
-    directories: Vec<Directory>,
-) -> Result<(), String> {
-    for d in &directories {
-        if !d.url.starts_with("https://") && !is_loopback(&d.url) {
-            return Err(format!("{} must be an https URL", d.url));
-        }
-    }
-
-    let setting = JsonSetting(serde_json::to_value(&directories).map_err(|e| e.to_string())?);
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "holder.directories.set",
-            move |db| {
-                SettingsStore::set(db.conn(), keys::HOLDER_DIRECTORIES, setting)
-                    .map_err(|e| e.to_string())
-            },
-        )
-        .await
-}
-
-/// Who is asking for a disclosure, across every configured directory.
-#[tauri::command]
-pub async fn fetch_disclosure_requests(
-    state: State<'_, AppState>,
-) -> Result<PullResult<DisclosureRequest>, String> {
-    let dirs = directories(&state).await?;
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let client = reqwest::Client::new();
-
-    let mut items = Vec::new();
-    let mut problems = Vec::new();
-
-    for dir in &dirs {
-        let path = format!("/api/presentations/for/{}", did.as_str());
-        match signed_get(&client, dir, &sk, &path).await {
-            Ok(value) => {
-                let rows: Vec<serde_json::Value> =
-                    serde_json::from_value(value).unwrap_or_default();
-                for r in rows {
-                    items.push(DisclosureRequest {
-                        directory: dir.name.clone(),
-                        id: string_at(&r, "id"),
-                        from: string_at(&r, "from"),
-                        skill_ids: r
-                            .get("skillIds")
-                            .and_then(|v| serde_json::from_value(v.clone()).ok())
-                            .unwrap_or_default(),
-                        purpose: string_at(&r, "purpose"),
-                        expires_at: string_at(&r, "expiresAt"),
-                    });
-                }
-            }
-            Err(detail) => problems.push(Problem {
-                directory: dir.name.clone(),
-                detail,
-            }),
-        }
-    }
-
-    Ok(PullResult { items, problems })
-}
-
-/// Who has looked at this person's outcomes, across every configured directory.
 #[tauri::command]
 pub async fn fetch_access_log(
     state: State<'_, AppState>,
@@ -433,98 +369,62 @@ pub async fn set_visibility(
     Ok(())
 }
 
-/// Publish the consented listing to a directory.
+/// Publish the consented listing to Alexandria Cloud, where employers search.
 ///
-/// The last step the talent-index consent screen was missing: it has always
-/// built and signed the record and had nowhere to send it. What goes is
-/// exactly what that screen previews, so the preview stays the audit surface
-/// and this is only delivery.
+/// What goes is exactly what the consent screen previews, so the preview stays
+/// the audit surface and this is only delivery. Recorded afterwards so the
+/// automatic pass does not send the same listing again.
 #[tauri::command]
-pub async fn publish_listing(
-    state: State<'_, AppState>,
-    directory_url: String,
-) -> Result<(), String> {
-    if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
-        return Err("a directory must be https".into());
-    }
-
-    let signed = crate::commands::talent_index::sign_talent_index_record(state)
+pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
+    let cloud = directories(&state)
         .await?
-        .ok_or_else(|| {
-            "you have not consented to publish any skills yet — choose what to share first"
-                .to_string()
-        })?;
-
-    let base = directory_url.trim_end_matches('/');
-    let resp = reqwest::Client::new()
-        .post(format!("{base}/api/index/records"))
-        .json(&signed)
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
+        .into_iter()
+        .next()
+        .ok_or("requests from organisations are switched off, or no Alexandria Cloud is set")?;
+    let (key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let now = crate::commands::credentials::now_rfc3339();
+    let now_unix = chrono::Utc::now().timestamp();
+    let (sign_key, subject, at) = (key.clone(), did.as_str().to_string(), now.clone());
+    let (digest, signed) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.listing.sign",
+            move |db| {
+                let record = crate::commands::talent_index::get_talent_index_preview_impl(
+                    db.conn(),
+                    &subject,
+                    &at,
+                )?
+                .record
+                .ok_or(
+                    "you have not chosen any skills to publish yet — choose what to share first",
+                )?;
+                Ok((
+                    crate::commands::organisations::snapshot_digest(&record)?,
+                    crate::domain::talent_index::sign_record(&record, &sign_key, &at)?,
+                ))
+            },
+        )
+        .await?;
+    crate::commands::organisations::send_listing(&cloud.url, &signed).await?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "holder.listing.record",
+            move |db| {
+                crate::commands::organisations::record_listing(
+                    db.conn(),
+                    &cloud.url,
+                    &digest,
+                    now_unix,
+                )
+            },
+        )
         .await
-        .map_err(|e| e.to_string())?;
-
-    if !resp.status().is_success() {
-        let code = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{code}: {body}"));
-    }
-    Ok(())
-}
-
-/// Answer a disclosure request by sharing a signed record.
-///
-/// The record is the one the talent-index consent screen already builds and
-/// signs, so what leaves the device here is exactly what the learner has
-/// already agreed can leave it, and there is one place to audit rather than
-/// two.
-///
-/// There is no counterpart that declines. A request that is not answered
-/// expires, and adding a "refused" call would turn a consent mechanism into a
-/// record of who said no to whom.
-#[tauri::command]
-pub async fn share_disclosure(
-    state: State<'_, AppState>,
-    directory_url: String,
-    request_id: String,
-    skill_ids: Vec<String>,
-) -> Result<(), String> {
-    if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
-        return Err("a directory must be https".into());
-    }
-
-    // Narrowed to what this request named. An asker who wanted one skill gets
-    // one skill, not the whole listing — the request said what it was for, and
-    // answering it with everything would make that statement decorative.
-    //
-    // An empty list means the request named nothing, which the service does not
-    // allow; treated as "no narrowing" rather than "disclose nothing", because
-    // the alternative is a share that silently sends an empty record.
-    let filter = (!skill_ids.is_empty()).then_some(skill_ids.as_slice());
-
-    let signed = crate::commands::talent_index::sign_consented_record(state, filter)
-        .await?
-        .ok_or_else(|| {
-            "none of the skills they asked for are ones you have agreed to share — \
-             choose what to share first"
-                .to_string()
-        })?;
-
-    let base = directory_url.trim_end_matches('/');
-    let resp = reqwest::Client::new()
-        .post(format!("{base}/api/presentations/{request_id}/share"))
-        .json(&serde_json::json!({ "presentation": signed }))
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !resp.status().is_success() {
-        let code = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{code}: {body}"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -666,23 +566,43 @@ mod tests {
     }
 
     #[test]
-    fn configured_directories_round_trip_through_the_profile_store() {
+    fn cloud_is_the_override_else_the_profile_and_the_switch_stops_it() {
         let db = Database::open_in_memory().expect("database");
         db.run_migrations().expect("migrations");
-        let expected = vec![Directory {
-            name: "University".into(),
-            url: "https://directory.example".into(),
-        }];
+        let profile_origin = crate::network_profile::embedded_preprod()
+            .ok()
+            .and_then(|p| p.cloud_https_origin.clone());
+        assert_eq!(cloud_origin(db.conn()), profile_origin);
+
         SettingsStore::set(
             db.conn(),
-            keys::HOLDER_DIRECTORIES,
-            JsonSetting(serde_json::to_value(&expected).expect("directory JSON")),
+            keys::CLOUD_ORIGIN,
+            "http://127.0.0.1:8787/".into(),
         )
-        .expect("directory setting");
+        .expect("override");
+        assert_eq!(
+            cloud_origin(db.conn()).as_deref(),
+            Some("http://127.0.0.1:8787")
+        );
+        assert_eq!(directories_db(db.conn()).expect("services").len(), 1);
 
-        let actual = directories_db(db.conn()).expect("directories");
-        assert_eq!(actual.len(), 1);
-        assert_eq!(actual[0].name, expected[0].name);
-        assert_eq!(actual[0].url, expected[0].url);
+        // Plaintext to anywhere but loopback is not a Cloud the app will use.
+        SettingsStore::set(db.conn(), keys::CLOUD_ORIGIN, "http://cloud.example".into())
+            .expect("override");
+        assert_eq!(cloud_origin(db.conn()), None);
+
+        SettingsStore::set(
+            db.conn(),
+            keys::CLOUD_ORIGIN,
+            "https://cloud.example".into(),
+        )
+        .expect("override");
+        SettingsStore::set(db.conn(), keys::ORGANISATIONS_ENABLED, false).expect("switch");
+        assert!(directories_db(db.conn()).expect("services").is_empty());
+        // Status lists still have a home: the switch is about requests.
+        assert_eq!(
+            cloud_origin(db.conn()).as_deref(),
+            Some("https://cloud.example")
+        );
     }
 }

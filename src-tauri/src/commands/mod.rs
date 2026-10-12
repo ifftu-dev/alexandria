@@ -85,5 +85,6 @@ pub mod decisions;
 
 pub mod exchange;
 pub mod hiring;
+pub mod organisations;
 
 pub mod discussions;

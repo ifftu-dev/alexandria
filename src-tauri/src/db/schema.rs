@@ -72,6 +72,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Sentinel session; verified again at issuance before a credential may
     // claim `device_attested`.
     (14, "session_device_attestation", MIGRATION_014_DEVICE_ATTESTATION),
+    // Organisations: the descriptor each one publishes on its domain, cached
+    // so every request does not refetch it, and the access the learner has
+    // granted, with what was last sent under each grant.
+    (15, "organisation_access", MIGRATION_015_ORGANISATION_ACCESS),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
@@ -92,6 +96,35 @@ const MIGRATION_013_ATTEMPT_ROLE_TARGET: &str = r#"
 ALTER TABLE assessment_attempts
     ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
 CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
+
+const MIGRATION_015_ORGANISATION_ACCESS: &str = r#"
+CREATE TABLE org_descriptors (
+    domain TEXT PRIMARY KEY,
+    descriptor_json TEXT NOT NULL CHECK (json_valid(descriptor_json)),
+    fetched_at INTEGER NOT NULL
+);
+CREATE TABLE org_grants (
+    grant_id TEXT PRIMARY KEY,
+    cloud_url TEXT NOT NULL,
+    org_domain TEXT NOT NULL,
+    org_name TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    skill_ids_json TEXT NOT NULL CHECK (json_valid(skill_ids_json)),
+    sync INTEGER NOT NULL CHECK (sync IN (0, 1)),
+    statement_json TEXT NOT NULL CHECK (json_valid(statement_json)),
+    granted_at INTEGER NOT NULL,
+    revoked_at INTEGER,
+    snapshot_digest TEXT,
+    synced_at INTEGER,
+    sync_error TEXT
+);
+CREATE INDEX idx_org_grants_domain ON org_grants(org_domain);
+CREATE TABLE listing_publications (
+    cloud_url TEXT PRIMARY KEY,
+    digest TEXT NOT NULL,
+    published_at INTEGER NOT NULL
+);
 "#;
 
 const MIGRATION_014_DEVICE_ATTESTATION: &str = r#"

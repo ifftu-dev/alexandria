@@ -20,8 +20,10 @@ use crate::commands::exchange::{client, directory, response_json};
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
 use crate::crypto::did::{resolve_did_key, Did};
 use crate::db::executor::DatabaseWorkload;
+use crate::org_trust::{self, OrgCheck};
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
+use alexandria_verify::org::OrgProof;
 
 pub const FORMAT: &str = "alexandria-hiring-response/1";
 pub const RESPONSE_LIFETIME_SECS: i64 = 300;
@@ -101,12 +103,33 @@ pub struct SignedOfferResponse {
 pub struct DirectoryInterview {
     pub directory_url: String,
     pub invite: InterviewInvite,
+    #[serde(rename = "orgProof")]
+    pub org_proof: Option<OrgProof>,
+    pub org: OrgCheck,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryOffer {
     pub directory_url: String,
     pub offer: Offer,
+    #[serde(rename = "orgProof")]
+    pub org_proof: Option<OrgProof>,
+    pub org: OrgCheck,
+}
+
+/// An invitation as Cloud serves it, with the organisation's proof.
+#[derive(Debug, Clone, Deserialize)]
+struct InviteEnvelope {
+    invite: InterviewInvite,
+    #[serde(rename = "orgProof")]
+    org_proof: Option<OrgProof>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OfferEnvelope {
+    offer: Offer,
+    #[serde(rename = "orgProof")]
+    org_proof: Option<OrgProof>,
 }
 
 /// What the learner keeps: the answer they signed, and where it went.
@@ -291,28 +314,35 @@ pub async fn hiring_interviews(
 ) -> Result<PullResult<DirectoryInterview>, String> {
     let (_, did) = load_issuer_key(&state).await?;
     let path = format!("/api/interviews/for/{}", did.as_str());
-    let dirs = super::holder_pull::list_directories(state.clone()).await?;
+    let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
     let mut problems = Vec::new();
     for dir in dirs {
         match async {
             let resolved = directory(&state, &dir.url).await?;
-            signed_get::<InterviewInvite>(&state, &resolved, &path).await
+            signed_get::<InviteEnvelope>(&state, &resolved, &path).await
         }
         .await
         {
-            Ok(found) => items.extend(
-                found
-                    .into_iter()
-                    .filter(|i| {
-                        i.subject_did == did.as_str()
-                            && i.expires_at > chrono::Utc::now().timestamp()
-                    })
-                    .map(|invite| DirectoryInterview {
+            Ok(found) => {
+                for envelope in found.into_iter().filter(|e| {
+                    e.invite.subject_did == did.as_str()
+                        && e.invite.expires_at > chrono::Utc::now().timestamp()
+                }) {
+                    let org = org_trust::check_item(
+                        &state,
+                        &envelope.invite,
+                        envelope.org_proof.as_ref(),
+                    )
+                    .await;
+                    items.push(DirectoryInterview {
                         directory_url: dir.url.clone(),
-                        invite,
-                    }),
-            ),
+                        invite: envelope.invite,
+                        org_proof: envelope.org_proof,
+                        org,
+                    });
+                }
+            }
             Err(detail) => problems.push(Problem {
                 directory: dir.name,
                 detail,
@@ -328,28 +358,32 @@ pub async fn hiring_offers(
 ) -> Result<PullResult<DirectoryOffer>, String> {
     let (_, did) = load_issuer_key(&state).await?;
     let path = format!("/api/offers/for/{}", did.as_str());
-    let dirs = super::holder_pull::list_directories(state.clone()).await?;
+    let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
     let mut problems = Vec::new();
     for dir in dirs {
         match async {
             let resolved = directory(&state, &dir.url).await?;
-            signed_get::<Offer>(&state, &resolved, &path).await
+            signed_get::<OfferEnvelope>(&state, &resolved, &path).await
         }
         .await
         {
-            Ok(found) => items.extend(
-                found
-                    .into_iter()
-                    .filter(|o| {
-                        o.subject_did == did.as_str()
-                            && o.expires_at > chrono::Utc::now().timestamp()
-                    })
-                    .map(|offer| DirectoryOffer {
+            Ok(found) => {
+                for envelope in found.into_iter().filter(|e| {
+                    e.offer.subject_did == did.as_str()
+                        && e.offer.expires_at > chrono::Utc::now().timestamp()
+                }) {
+                    let org =
+                        org_trust::check_item(&state, &envelope.offer, envelope.org_proof.as_ref())
+                            .await;
+                    items.push(DirectoryOffer {
                         directory_url: dir.url.clone(),
-                        offer,
-                    }),
-            ),
+                        offer: envelope.offer,
+                        org_proof: envelope.org_proof,
+                        org,
+                    });
+                }
+            }
             Err(detail) => problems.push(Problem {
                 directory: dir.name,
                 detail,
@@ -376,11 +410,15 @@ pub async fn hiring_interview_respond(
     state: State<'_, AppState>,
     directory_url: String,
     invite: InterviewInvite,
+    org_proof: Option<OrgProof>,
     decision: String,
     chosen_slot: Option<i64>,
     note: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let dir = directory(&state, &directory_url).await?;
+    org_trust::check_item(&state, &invite, org_proof.as_ref())
+        .await
+        .require()?;
     let (key, did) = load_issuer_key(&state).await?;
     let signed = sign_interview_response(
         invite,
@@ -434,10 +472,14 @@ pub async fn hiring_offer_respond(
     state: State<'_, AppState>,
     directory_url: String,
     offer: Offer,
+    org_proof: Option<OrgProof>,
     decision: String,
     note: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let dir = directory(&state, &directory_url).await?;
+    org_trust::check_item(&state, &offer, org_proof.as_ref())
+        .await
+        .require()?;
     let (key, did) = load_issuer_key(&state).await?;
     let signed = sign_offer_response(
         offer,

@@ -407,28 +407,13 @@ pub mod keys {
         default: || JsonSetting(serde_json::json!({})),
     };
 
-    /// Directories the learner has chosen to check for records about
-    /// themselves. Shape: array of `{ "name": string, "url": string }`.
-    ///
-    /// Empty by default and never populated automatically. A directory is a
-    /// service somebody else runs that holds records about this person — an
-    /// institution's registry, an employer's index — and the only thing this
-    /// app does with one is ask it what it is holding, signing the request with
-    /// the learner's own key. Adding one is a decision to talk to a server,
-    /// which an offline-first application should never make on the user's
-    /// behalf.
-    ///
-    /// Deliberately a list rather than a single endpoint. A learner may be
-    /// enrolled at one institution and applying to three employers, and a
-    /// design that assumed one server would push everybody towards a single
-    /// one.
     /// Where this identity's revocation lists are served from. When set, a
     /// credential issued here names `<host>/status-lists/<issuer>/<n>` as its
     /// `statusListCredential`, and the list is pushed there whenever it
     /// changes, so a verifier anywhere can fetch the current list without
     /// this device or a bundle. Empty means lists are named by URN and travel
-    /// only in exported bundles. The network profile's cloud origin, then the
-    /// first configured directory, stand in when this is empty.
+    /// only in exported bundles. The Alexandria Cloud the app talks to stands
+    /// in when this is empty.
     pub const CREDENTIAL_STATUS_HOST: SettingKey<String> = SettingKey {
         key: "credentials.status_host",
         scope: Scope::Sync,
@@ -438,13 +423,42 @@ pub mod keys {
         default: String::new,
     };
 
-    pub const HOLDER_DIRECTORIES: SettingKey<JsonSetting> = SettingKey {
-        key: "holder.directories",
+    /// Whether the app asks Alexandria Cloud for requests addressed to this
+    /// person: organisations asking for access, assessments, interviews and
+    /// offers. One switch rather than a list of servers: every organisation
+    /// reaches a learner through the network's Cloud, and each one proves its
+    /// name with a file on its own domain, so there is nothing for the learner
+    /// to configure. Off means the app never contacts Cloud on its own.
+    pub const ORGANISATIONS_ENABLED: SettingKey<bool> = SettingKey {
+        key: "organisations.enabled",
         scope: Scope::Sync,
         category: "Privacy",
-        label: "Directories to check",
-        description: "Services you have chosen to ask what they hold about you.",
-        default: || JsonSetting(serde_json::json!([])),
+        label: "Receive requests from organisations",
+        description: "Let organisations ask for access to your skills, invite you to assessments and interviews, and send offers.",
+        default: || true,
+    };
+
+    /// Developer override for the Alexandria Cloud address. Empty means the
+    /// network profile's. Per device, because it points at a local test server.
+    pub const CLOUD_ORIGIN: SettingKey<String> = SettingKey {
+        key: "organisations.cloud_origin",
+        scope: Scope::Device,
+        category: "Developer",
+        label: "Alexandria Cloud address",
+        description: "Use a different Alexandria Cloud, such as one running locally. Leave empty for the network's.",
+        default: String::new,
+    };
+
+    /// Whether a changed talent-index listing is republished without asking.
+    /// Off by default: publishing is the learner's decision each time until
+    /// they say otherwise.
+    pub const TALENT_INDEX_SYNC: SettingKey<bool> = SettingKey {
+        key: "talent_index.sync",
+        scope: Scope::Sync,
+        category: "Privacy",
+        label: "Keep my listing up to date",
+        description: "Republish your listing automatically when your skills change.",
+        default: || false,
     };
 
     pub const INSTRUCTOR_GRAPH_PREFS: SettingKey<JsonSetting> = SettingKey {
@@ -580,7 +594,9 @@ pub fn all_entries(
         entry!(INSTRUCTOR_GRAPH_PREFS),
         entry!(TALENT_INDEX_CONSENT),
         entry!(CREDENTIAL_STATUS_HOST),
-        entry!(HOLDER_DIRECTORIES),
+        entry!(ORGANISATIONS_ENABLED),
+        entry!(CLOUD_ORIGIN),
+        entry!(TALENT_INDEX_SYNC),
         entry!(LEARNER_TARGETS),
         entry!(IDENTITY_LOCAL_DID),
     ]
@@ -626,7 +642,9 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(INSTRUCTOR_GRAPH_PREFS);
     check!(TALENT_INDEX_CONSENT);
     check!(CREDENTIAL_STATUS_HOST);
-    check!(HOLDER_DIRECTORIES);
+    check!(ORGANISATIONS_ENABLED);
+    check!(CLOUD_ORIGIN);
+    check!(TALENT_INDEX_SYNC);
     check!(LEARNER_TARGETS);
     check!(IDENTITY_LOCAL_DID);
     None

@@ -33,7 +33,7 @@ use crate::commands::talent_index::{get_talent_index_preview_impl, set_talent_in
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::Database;
 use crate::domain::talent_index::{sign_record, TalentIndexConsent};
-use crate::settings::registry::{keys, JsonSetting};
+use crate::settings::registry::keys;
 use crate::settings::SettingsStore;
 
 struct Cloud {
@@ -278,14 +278,9 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         did.as_str().to_string(),
     )
     .unwrap();
-    // Settings → Directories → Local demo. This is also what makes the
-    // status host resolve to Cloud.
-    SettingsStore::set(
-        db.conn(),
-        keys::HOLDER_DIRECTORIES,
-        JsonSetting(json!([{"name": "Local demo", "url": base}])),
-    )
-    .unwrap();
+    // Point the app at the local Cloud (Settings → Developer). This is also
+    // what makes the status host resolve to Cloud.
+    SettingsStore::set(db.conn(), keys::CLOUD_ORIGIN, base.to_string()).unwrap();
     assert_eq!(
         crate::commands::credentials::status_list_host(db.conn()).as_deref(),
         Some(base.trim_end_matches('/'))
@@ -813,7 +808,6 @@ mod ipc {
             .invoke_handler(tauri::generate_handler![
                 crate::commands::profile::get_profile_session_token,
                 crate::commands::identity::get_local_did,
-                crate::commands::holder_pull::set_directories,
                 crate::commands::holder_pull::publish_listing,
                 crate::commands::integrity::integrity_start_session,
                 crate::commands::integrity::integrity_end_session,
@@ -895,11 +889,16 @@ mod ipc {
         app.session = Some(session.as_str().expect("session token").to_string());
         let did = app.call("get_local_did", json!({})).await;
         let did = Did(did.as_str().expect("local DID").to_string());
-        app.call(
-            "set_directories",
-            json!({"directories": [{"name": "Local demo", "url": base}]}),
-        )
-        .await;
+        // Settings → Developer → Alexandria Cloud address.
+        {
+            let guard = state.db.lock().unwrap();
+            SettingsStore::set(
+                guard.as_ref().unwrap().conn(),
+                keys::CLOUD_ORIGIN,
+                base.to_string(),
+            )
+            .unwrap();
+        }
         // Profile start installs the bundled banks in every build; nothing
         // is seeded by hand here or by the operator.
         {

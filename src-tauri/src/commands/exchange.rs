@@ -10,20 +10,35 @@ use serde::{Deserialize, Serialize};
 use crate::commands::credentials::{load_issuer_key, now_rfc3339};
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
 use crate::db::executor::DatabaseWorkload;
+use crate::org_trust::{self, OrgCheck};
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
+use alexandria_verify::org::OrgProof;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryRequest {
     pub directory_url: String,
     pub request: CredentialRequest,
+    #[serde(rename = "orgProof")]
+    pub org_proof: Option<OrgProof>,
+    /// Who sent it, as its domain publishes. Only a verified sender can be
+    /// answered.
+    pub org: OrgCheck,
+}
+
+/// One request as Cloud serves it: the organisation's payload and its proof.
+#[derive(Debug, Clone, Deserialize)]
+struct RequestEnvelope {
+    request: CredentialRequest,
+    #[serde(rename = "orgProof")]
+    org_proof: Option<OrgProof>,
 }
 
 pub(super) async fn directory(
     state: &State<'_, AppState>,
     address: &str,
 ) -> Result<Directory, String> {
-    let directories = super::holder_pull::list_directories(state.clone()).await?;
+    let directories = super::holder_pull::directories(state).await?;
     let dir = directories
         .into_iter()
         .find(|d| d.url.trim_end_matches('/') == address.trim_end_matches('/'))
@@ -72,7 +87,7 @@ pub(super) async fn response_json(
 async fn requests(
     state: &State<'_, AppState>,
     dir: &Directory,
-) -> Result<Vec<CredentialRequest>, String> {
+) -> Result<Vec<RequestEnvelope>, String> {
     let (key, did) = load_issuer_key(state).await?;
     let path = format!("/api/assessment-requests/for/{}", did.as_str());
     let timestamp = chrono::Utc::now().timestamp();
@@ -101,7 +116,7 @@ pub(crate) fn validate_request(request: &CredentialRequest, did: &str) -> Result
         return Err("request belongs to another identity".into());
     }
     if request.network_id != snapshot.network_id || request.taxonomy_digest != snapshot.digest {
-        return Err("directory and app taxonomy do not match".into());
+        return Err("the organisation's skill list does not match this app's".into());
     }
     if request.expires_at <= chrono::Utc::now().timestamp() {
         return Err("request has expired".into());
@@ -113,7 +128,7 @@ pub(crate) fn validate_request(request: &CredentialRequest, did: &str) -> Result
 pub async fn exchange_requests(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryRequest>, String> {
-    let dirs = super::holder_pull::list_directories(state.clone()).await?;
+    let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
     let mut problems = Vec::new();
     for dir in dirs {
@@ -123,10 +138,22 @@ pub async fn exchange_requests(
         }
         .await
         {
-            Ok(found) => items.extend(found.into_iter().map(|request| DirectoryRequest {
-                directory_url: dir.url.clone(),
-                request,
-            })),
+            Ok(found) => {
+                for envelope in found {
+                    let org = org_trust::check_item(
+                        &state,
+                        &envelope.request,
+                        envelope.org_proof.as_ref(),
+                    )
+                    .await;
+                    items.push(DirectoryRequest {
+                        directory_url: dir.url.clone(),
+                        request: envelope.request,
+                        org_proof: envelope.org_proof,
+                        org,
+                    });
+                }
+            }
             Err(detail) => problems.push(Problem {
                 directory: dir.name,
                 detail,
@@ -144,11 +171,15 @@ pub async fn exchange_start_assessment(
     integrity_session_id: String,
 ) -> Result<super::assessment::StartedAttempt, String> {
     let dir = directory(&state, &directory_url).await?;
-    let request = requests(&state, &dir)
+    let envelope = requests(&state, &dir)
         .await?
         .into_iter()
-        .find(|r| r.id == request_id)
+        .find(|r| r.request.id == request_id)
         .ok_or("request is not available")?;
+    org_trust::check_item(&state, &envelope.request, envelope.org_proof.as_ref())
+        .await
+        .require()?;
+    let request = envelope.request;
     let (_, did) = load_issuer_key(&state).await?;
     validate_request(&request, did.as_str())?;
     let seed: u64 = rand::random();
@@ -231,10 +262,16 @@ pub async fn exchange_credentials(
 pub async fn exchange_preview(
     state: State<'_, AppState>,
     request: CredentialRequest,
+    org_proof: Option<OrgProof>,
     credential_id: String,
 ) -> Result<VerifiablePresentation, String> {
     let (key, did) = load_issuer_key(&state).await?;
     validate_request(&request, did.as_str())?;
+    // The presentation is bound to this organisation and is what leaves the
+    // device, so it is only made for one whose domain vouches for it.
+    org_trust::check_item(&state, &request, org_proof.as_ref())
+        .await
+        .require()?;
     state.db_executor.execute(DatabaseWorkload::Learner,state.profile_lease(),"exchange.preview",move |db| {
         let row: Option<(String,bool,bool,Option<String>,bool)> = db.conn().query_row(
             "SELECT signed_vc_json,revoked,suspended,suspended_until,EXISTS(SELECT 1 FROM credentials n WHERE n.supersedes=c.id AND n.issuer_did=c.issuer_did) FROM credentials c WHERE id=?1 AND subject_did=?2",
