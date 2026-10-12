@@ -13,7 +13,7 @@
 # on this machine right now.
 set -euo pipefail
 app_root=$(cd "$(dirname "$0")/../.." && pwd)
-cloud_root="${ALEXANDRIA_CLOUD_CHECKOUT:-$(dirname "$app_root")/alexandria-cloud-assessment-demo}"
+cloud_root="${ALEXANDRIA_CLOUD_CHECKOUT:-$(dirname "$app_root")/alexandria-cloud}"
 cloud="${ALEXANDRIA_DEMO_CLOUD:-http://127.0.0.1:8787}"
 fresh=0
 for arg in "$@"; do
