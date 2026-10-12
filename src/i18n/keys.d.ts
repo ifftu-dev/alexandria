@@ -1272,6 +1272,7 @@ export type MessageKey =
   | 'interviews.panel.scorecardSent'
   | 'interviews.panel.scorecardTitle'
   | 'interviews.panel.sendScorecard'
+  | 'interviews.panel.writeScorecard'
   | 'interviews.review.back'
   | 'interviews.review.conclusionLabel'
   | 'interviews.review.conclusionPlaceholder'

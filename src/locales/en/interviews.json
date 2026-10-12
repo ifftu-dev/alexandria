@@ -211,6 +211,7 @@
     },
     "scorecardNotes": "Notes for the organisation",
     "sendScorecard": "Send to {org}",
-    "scorecardSent": "Sent"
+    "scorecardSent": "Sent",
+    "writeScorecard": "Write scorecard"
   }
 }

@@ -457,6 +457,11 @@ function formatTime(ms: number) {
       <p class="mt-1 text-sm text-muted-foreground">
         {{ panel.room.ticket ? $t('interviews.panel.roomOpen') : $t('interviews.panel.roomClosed') }}
       </p>
+      <!-- The scorecard is reached at the end of the call; this is the way to it
+           for a conversation the panel held some other way. -->
+      <AppButton class="mt-3" size="xs" variant="outline" data-testid="panel-scorecard" @click="router.push(`${basePath}/${interviewId}/review`)">
+        {{ $t('interviews.panel.writeScorecard') }}
+      </AppButton>
       <div v-if="panel.candidateEvidence.length" class="mt-3">
         <p class="text-xs font-medium text-muted-foreground">{{ $t('interviews.panel.evidence') }}</p>
         <ul class="mt-1 flex flex-wrap gap-2">
