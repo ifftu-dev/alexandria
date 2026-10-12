@@ -20,6 +20,7 @@ pub mod exchange;
 pub mod governance;
 pub mod hash;
 pub mod json;
+pub mod org;
 pub mod qualification;
 pub mod talent;
 pub mod trust;
