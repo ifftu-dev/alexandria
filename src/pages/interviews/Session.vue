@@ -123,6 +123,11 @@ onMounted(async () => {
     ?? ''
   if (bundle.notes[0]) privateNote.value = bundle.notes[0].text
   panel.value = await panelApi.status(bundle.session.id).catch(() => null)
+  // On a panel seat the candidate is on their own device, so this
+  // microphone is the panelist's.
+  if (panel.value) {
+    selectedSpeakerId.value = bundle.participants.find(item => item.role === 'interviewer')?.id ?? selectedSpeakerId.value
+  }
   await tutoring.setupEventListeners()
   await tutoring.refreshStatus()
   if (bundle.session.status === 'live') {

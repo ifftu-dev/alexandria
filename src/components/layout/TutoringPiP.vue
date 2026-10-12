@@ -36,6 +36,7 @@ const isVisible = computed(() => {
   return Boolean(sessionStatus.value)
     && route.name !== 'tutoring-session'
     && route.name !== 'interview-session'
+    && route.name !== 'panel-session'
 })
 
 const sessionTitle = computed(() => sessionStatus.value?.session_title ?? t('tutoring.header.title'))
