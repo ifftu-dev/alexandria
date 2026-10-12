@@ -103,7 +103,8 @@ chosen time. `/interview-room/:id` asks Cloud for the ticket with a request
 signed by the learner's own key (`hiring_interview_room`), so only the
 candidate the interview is for can learn it. Until a panelist has opened the
 room, the page checks again every few seconds. Joining enters the ordinary
-live tutoring room. The candidate's app keeps no interview record. The
+live tutoring room. The candidate's app keeps no interview record beyond the
+answer they signed and, if they ran the integrity check, the result they sent. The
 candidate's captions follow the tutoring rules: made only if the candidate
 turns them on, and kept in memory only.
 
@@ -115,7 +116,13 @@ scorecards side by side on its interview page.
 
 **Sentinel.** A panel seat never starts Sentinel. Integrity monitoring belongs
 on the candidate's device, and the seat's session is created with Sentinel
-off.
+off. The organisation can ask for it there: an invitation with
+`integrity_check` makes the waiting room ask the candidate, before **Join**,
+whether to run the check and whether to allow camera checks. If they run it,
+the summary their app sends when they leave the call (outcome, score, flag
+counts, camera coverage) appears on the panel seat, on the scorecard page and
+in Cloud, marked as the candidate's app's own report. See
+[Sentinel](sentinel.md#candidate-integrity-check).
 
 ## Architecture
 
@@ -203,6 +210,7 @@ also do not stage camera frames for the assessment appeal-evidence flow.
 | Speech recognition | Enabled only with an explicit on-device-processing capability; there is no cloud fallback. |
 | Attribution | Durable segments require a known, consenting participant. Ambiguous remote speakers are not persisted. |
 | Notes | Interviewer notes are local and private; they are excluded from export unless the instructor deliberately includes them. |
+| Candidate integrity check | Runs only if the organisation asked and the candidate agreed. Only the summary leaves the candidate's device; the candidate keeps a copy of what they sent. |
 | Panel seats | The transcript, private notes, summary and conclusion stay on the panelist's device. Only the scorecard the panelist sends — ratings, coverage per criterion, a recommendation and its notes — goes to the organisation's Cloud. The seat's token is stored with the local session so the review can still reach Cloud. |
 | Export | Pseudonyms are on by default. Including names or private notes is an explicit local export choice. |
 | Retention | Configurable from 1–365 days, default 30. Expired interviews are hidden and purged when the interview list opens; they can also be purged or deleted explicitly. |
@@ -226,12 +234,15 @@ The baseline schema holds six interview tables and the `purpose` column on
 Migration 16 (`interview_panel_link`) adds `cloud_url`, `cloud_interview_id`,
 `cloud_panelist_id`, `cloud_panel_token` and `cloud_org` to
 `interview_sessions`, with one session per Cloud interview and seat.
+Migration 17 (`interview_integrity_reports`) keeps the candidate's copy of each
+integrity result they sent.
 
 The `commands/interview.rs` module exposes create/list/get, consent, transcript,
 follow-up, criterion, note, lifecycle, summary/review, deletion, and expiry-purge
 operations. `commands/interview_panel.rs` adds `interview_panel_open`,
 `interview_panel_status`, `interview_panel_set_room` and
-`interview_panel_scorecard`; the candidate's `hiring_interview_room` is in
+`interview_panel_scorecard`; the candidate's `hiring_interview_room`,
+`hiring_interview_integrity_send` and `hiring_interview_integrity_sent` are in
 `commands/hiring.rs`. See [Database Schema](database-schema.md) for the table summary and
 [Sentinel](sentinel.md) for integrity semantics.
 
