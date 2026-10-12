@@ -1,6 +1,6 @@
 # Sentinel — Assessment and Interview Integrity
 
-> On-device integrity system for Alexandria's learning, assessment, and interview surfaces. Biometric and behavioural data is processed on-device and not persisted — only derived scores (0-1) and anomaly flags are stored locally. The single exception is learner-consented **assessment appeal** evidence: on a *flagged assessment* session, and only after the learner is shown the flag and explicitly chooses to keep it, the flagged snapshots' evidence is retained on-device for 14 days so they have something to contest with. Interview-purpose sessions never enter this evidence-staging path. Declining, or not answering, persists nothing. The one path by which anything more detailed reaches a server is a learner releasing it themselves to contest an assessment flag; see [Review and adjudication](#review-and-adjudication).
+> On-device integrity system for Alexandria's learning, assessment, and interview surfaces. Biometric and behavioural data is processed on-device and not persisted — only derived scores (0-1) and anomaly flags are stored locally. The single exception is learner-consented **assessment appeal** evidence: on a *flagged assessment* session, and only after the learner is shown the flag and explicitly chooses to keep it, the flagged snapshots' evidence is retained on-device for 14 days so they have something to contest with. Interview-purpose sessions never enter this evidence-staging path. Declining, or not answering, persists nothing. Two paths reach a server, and the learner starts both: releasing evidence to contest an assessment flag (see [Review and adjudication](#review-and-adjudication)), and the summary of a [candidate integrity check](#candidate-integrity-check) they agreed to run for an organisation's interview — counts and a score, never evidence.
 
 ## Design Principles
 
@@ -89,7 +89,7 @@ cap an otherwise perfect score at 0.90.
 
 ### Client-Side (`useSentinel.ts`)
 
-- **Activation**: Starts when a learner opens the course player (enrolled), begins any assessment attempt (standalone, with no enrollment), or an instructor starts a consented interview with Sentinel enabled. Interview monitoring observes the conductor device, preferring its interviewer participant and falling back to the candidate in a candidate-only plan.
+- **Activation**: Starts when a learner opens the course player (enrolled), begins any assessment attempt (standalone, with no enrollment), an instructor starts a consented interview with Sentinel enabled, or a candidate agrees to an organisation's integrity check before joining an interview held in Alexandria. Interview monitoring observes the conductor device, preferring its interviewer participant and falling back to the candidate in a candidate-only plan.
 - **Snapshot interval**: Random 15-45 seconds
 - **Profile storage**: localStorage keyed by `sentinel_profile_{userId}_{deviceFp[0:16]}`
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
@@ -502,6 +502,35 @@ store derived scores and flags, but the backend does not stage their camera
 frames for the assessment appeal-evidence flow. See
 [Interview Assistant](interview-assistant.md#sentinel).
 
+### Candidate integrity check
+
+For an interview held in Alexandria, an organisation can ask in its signed
+invitation for the candidate to run Sentinel on their own device during the
+call. The candidate decides in the waiting room (`/interview-room/:id`), with
+nothing preselected, and separately whether to allow camera checks; saying no
+still lets them join. A yes starts `start(null, camera, 'interview')` before
+the room is joined (`useInterviewCheck`), the call screen shows that the check
+is on, and face and gaze checks look at the call's own self-preview only when
+the camera was allowed.
+
+Leaving the call ends the session. The backend
+(`hiring_interview_integrity_send`) builds the summary from the stored session,
+not from anything the frontend holds: an outcome (`clear`, or `flagged` when
+any warning or critical flag was raised, the score fell below 0.40, or the
+session ended flagged), the score as 0–100, start and end, the snapshot count,
+the percentage of snapshots with the camera on, each flag in the app's
+vocabulary with its severity and how many snapshots raised it, and the
+commitment root. It signs that over the accepted invitation under
+`alexandria-interview-integrity/1`, posts it to the organisation's Cloud, and
+keeps the learner's copy (`interview_integrity_reports`, migration 17). The
+waiting room then shows exactly what was sent, or offers to send it again.
+
+The summary carries no frames, audio, keystrokes, mouse data, window titles or
+process lists, and Cloud refuses unknown fields. The organisation and the panel
+see it with the caveat that it is the candidate's app's own report: assurance
+is `local`, and a flag is a reason to ask, not a verdict. Interview-purpose
+sessions stage no evidence, so a flagged check does not ask to keep any.
+
 ## Review and adjudication
 
 Sentinel produces flags. A flag is an accusation in waiting, so what happens next
@@ -694,10 +723,10 @@ These guarantees are architectural — they are enforced by the code structure, 
    Frames are captured at 224px on the longest side and stored JPEG-encoded, so this is low-resolution imagery, roughly 15 KB per flagged snapshot. That reduces the exposure; it does not make it nothing, which is why it is opt-in.
 4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images.
 5. **Profile keyed to device**: `sentinel_profile_{userId}_{deviceFingerprint[0:16]}` — profiles are device-specific.
-6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The single path by which anything derived from a session reaches a server is a learner-initiated evidence release during an appeal — see [Review and adjudication](#review-and-adjudication). There is no automatic one, and no operator-initiated one.
+6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. Two paths carry anything derived from a session to a server, and the learner starts both: an evidence release during an appeal — see [Review and adjudication](#review-and-adjudication) — and the summary of a [candidate integrity check](#candidate-integrity-check) they agreed to run for an organisation's interview, which holds only an outcome, a score, flag counts and camera coverage. There is no other automatic path, and no operator-initiated one.
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **No remote models**: No command accepts classifier weights. The only ONNX models the backend parses are embedded in the binary, so no peer or envelope can supply model bytes.
-9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.
+9. **Interview scope is explicit**: Sentinel runs during an interview only after a participant on the conductor device records the Sentinel choice, or after the candidate agrees to an organisation's integrity check on their own device; camera-derived checks require the separate camera choice. Interview-purpose sessions store derived signals only and never stage camera frames as appeal evidence.
 10. **Process and window lists never leave the backend**: `sentinel_process_scan` returns only watchlist matches (name, identifier, category, rule) and `sentinel_hidden_overlay` only the suspicious windows (owner, reason). The enumerations that produced them are dropped in the Rust call. Window titles never cross IPC, and the allowlist matches the whole owner name, never a substring.
 11. **The hotkey monitor records no text**: only key-downs with Cmd/Win/Super, Ctrl or Alt held, as a normalised combo string plus a monotonic timestamp. Plain keys, Shift-only combos and key-ups are discarded before they reach the buffer. The monitor runs only for assessment-purpose sessions, only if the OS already granted listening, and its permission prompt lives in the Sentinel wizard — never mid-assessment. Text-entry chords are refused before the buffer: Option+key on macOS, AltGr (Ctrl+Alt) on Windows and Linux.
 12. **Camera device label is not persisted**: the virtual-camera check keeps the `MediaStreamTrack` label in the frontend dev view only; snapshots carry the boolean verdict.

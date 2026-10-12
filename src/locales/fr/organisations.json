@@ -75,7 +75,8 @@
         "call": "Appel téléphonique",
         "inPerson": "En personne",
         "alexandria": "Dans Alexandria"
-      }
+      },
+      "integrityAsked": "Ils vous demandent de lancer la vérification d'intégrité d'Alexandria pendant l'appel. Vous décidez en rejoignant, et vous pouvez refuser."
     },
     "offer": {
       "starts": "Début le {date}",

@@ -837,6 +837,7 @@ mod ipc {
                 crate::commands::holder_pull::publish_listing,
                 crate::commands::integrity::integrity_start_session,
                 crate::commands::integrity::integrity_end_session,
+                crate::commands::integrity::integrity_submit_snapshot,
                 crate::commands::assessment::assessment_start_attempt,
                 crate::commands::assessment::assessment_submit_answers,
                 crate::commands::assessment::assessment_grade,
@@ -855,6 +856,8 @@ mod ipc {
                 crate::commands::hiring::hiring_offers,
                 crate::commands::hiring::hiring_offer_respond,
                 crate::commands::hiring::hiring_interview_room,
+                crate::commands::hiring::hiring_interview_integrity_send,
+                crate::commands::hiring::hiring_interview_integrity_sent,
                 crate::commands::organisations::org_access_requests,
                 crate::commands::organisations::org_grant,
                 crate::commands::organisations::org_grants,
@@ -862,6 +865,7 @@ mod ipc {
                 crate::commands::organisations::org_grant_revoke,
                 crate::commands::organisations::org_sync_now,
                 crate::commands::interview_panel::interview_panel_open,
+                crate::commands::interview_panel::interview_panel_status,
                 crate::commands::interview_panel::interview_panel_set_room,
                 crate::commands::interview_panel::interview_panel_scorecard,
                 crate::commands::hiring::hiring_history,
@@ -1172,7 +1176,7 @@ mod ipc {
             .org(
                 "POST",
                 "/api/interviews",
-                Some(json!({"candidate_id": candidate, "role_label": "Junior engineer", "message": "We would like to talk it through in Alexandria.", "mode": "alexandria", "proposed_slots": [slot_a, slot_b], "run_id": request_id, "criteria": ["Communication", "Technical depth"], "panel": [{"name": "Asha"}]})),
+                Some(json!({"candidate_id": candidate, "role_label": "Junior engineer", "message": "We would like to talk it through in Alexandria.", "mode": "alexandria", "proposed_slots": [slot_a, slot_b], "run_id": request_id, "criteria": ["Communication", "Technical depth"], "panel": [{"name": "Asha"}], "integrity_check": true})),
             )
             .await;
         assert_eq!(code, 200, "{body}");
@@ -1190,6 +1194,7 @@ mod ipc {
         let invite_proof = invite["orgProof"].clone();
         let invite = invite["invite"].clone();
         assert_eq!(invite["mode"], "alexandria");
+        assert_eq!(invite["integrity_check"], true, "{invite}");
         let slot = invite["proposed_slots"][0].clone();
         let receipt = app
             .call(
@@ -1220,6 +1225,61 @@ mod ipc {
             )
             .await;
         assert_eq!(room["ticket"], "ipc-rehearsal-ticket", "{room}");
+        assert_eq!(room["integrityCheck"], true, "{room}");
+        // The candidate agreed to the integrity check: it runs for the call
+        // on their device, and the result goes to the organisation.
+        let check = app
+            .call(
+                "integrity_start_session",
+                json!({"enrollmentId": null, "purpose": "interview"}),
+            )
+            .await;
+        let check_id = check["session_id"].as_str().unwrap().to_string();
+        for flags in [json!([]), json!(["tab_switching"])] {
+            app.call(
+                "integrity_submit_snapshot",
+                json!({"req": {"session_id": check_id, "element_id": "interview", "integrity_score": 0.9, "consistency_score": 0.9, "typing_score": null, "mouse_score": null, "human_score": null, "tab_score": 0.9, "paste_score": 1.0, "devtools_score": null, "camera_score": null, "ai_paste_anomaly": null, "anomaly_flags": flags}}),
+            )
+            .await;
+        }
+        app.call(
+            "integrity_end_session",
+            json!({"sessionId": check_id, "req": {"overall_integrity_score": 0.9, "overall_consistency_score": 0.9}}),
+        )
+        .await;
+        let sent = app
+            .call(
+                "hiring_interview_integrity_send",
+                json!({"interviewId": invite_id, "integritySessionId": check_id}),
+            )
+            .await;
+        assert_eq!(sent["report"]["outcome"], "clear", "{sent}");
+        assert_eq!(
+            sent["report"]["flags"][0]["flag"], "tab_switching",
+            "{sent}"
+        );
+        let again = app
+            .call(
+                "hiring_interview_integrity_send",
+                json!({"interviewId": invite_id, "integritySessionId": check_id}),
+            )
+            .await;
+        assert_eq!(again["sent_at"], sent["sent_at"], "sent once");
+        let kept = app
+            .call(
+                "hiring_interview_integrity_sent",
+                json!({"interviewId": invite_id}),
+            )
+            .await;
+        assert_eq!(kept.as_array().map(Vec::len), Some(1), "{kept}");
+        let seen = app
+            .call("interview_panel_status", json!({"sessionId": seat_id}))
+            .await;
+        assert_eq!(seen["integrity"]["requested"], true, "{seen}");
+        assert_eq!(
+            seen["integrity"]["results"][0]["snapshots"], 2,
+            "the panel sees the result: {seen}"
+        );
         app.call(
             "interview_panel_scorecard",
             json!({"sessionId": seat_id, "ratings": [{"criterion": "Communication", "rating": 4}], "recommendation": "yes", "notes": "Clear on trade-offs."}),
@@ -1267,7 +1327,7 @@ mod ipc {
             2,
             "both answers are kept: {history}"
         );
-        println!("5. interview held in Alexandria: accepted, panel room handed to the candidate, scorecard in; offer accepted");
+        println!("5. interview held in Alexandria: accepted, panel room handed to the candidate, integrity check result seen by the panel, scorecard in; offer accepted");
 
         // ── 6. Verify without Alexandria ──────────────────────────────────
         let (exit, out) = node_verify(&first);

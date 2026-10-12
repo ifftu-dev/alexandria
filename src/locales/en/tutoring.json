@@ -185,6 +185,34 @@
     "captions": "Captions of what you say are only made if you turn captions on.",
     "leave": "You can leave at any time.",
     "join": "Join interview",
-    "checking": "Checking every few seconds…"
+    "checking": "Checking every few seconds…",
+    "check": {
+      "title": "The organisation asks for an integrity check",
+      "what": "If you agree, Alexandria looks for signs of outside help on this device while you are in the call: switching to other apps, a second screen, screen sharing or known cheating tools, and pasted text. If you also allow the camera, it checks that a face is in view and where you are looking.",
+      "shared": "When you leave the call, the organisation gets a summary: clear or flagged, a score, and which kinds of flag came up and how often. Never video, audio, what you type, screenshots or the apps you have open.",
+      "optional": "It is your choice. You can say no and still join; the organisation will see that no result came back.",
+      "run": "Run the integrity check",
+      "camera": "Also allow camera checks",
+      "cameraHint": "Uses the camera you already share in the call. Frames are checked on this device and never kept.",
+      "skip": "Don't run it",
+      "choose": "Choose whether to run the integrity check",
+      "unsentTitle": "Your integrity result has not been sent",
+      "unsentBody": "The check finished, but the result could not reach the organisation. Nothing was sent.",
+      "retry": "Try again",
+      "sharedTitle": "What you shared with {org}",
+      "outcome": "Result",
+      "clear": "Clear",
+      "flagged": "Flagged",
+      "ran": "Ran for",
+      "ranFor": "{minutes} min · {snapshots} checks",
+      "cameraLabel": "Camera checks",
+      "cameraOn": "On for {percent}% of checks",
+      "cameraOff": "Not allowed",
+      "flags": "Flags",
+      "none": "None",
+      "sharedNote": "This is everything that was sent. No video, audio, typing or screenshots.",
+      "running": "Integrity check on",
+      "runningHint": "Ends when you leave the call. The organisation then gets a summary, never recordings."
+    }
   }
 }

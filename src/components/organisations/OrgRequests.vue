@@ -552,6 +552,9 @@ onUnmounted(() => {
           <span v-else>{{ t('organisations.requests.interview.toBeArranged') }}</span>
           <span v-if="entry.item.invite.run_id"> · {{ t('organisations.requests.interview.followsRun') }}</span>
         </p>
+        <p v-if="entry.item.invite.integrity_check" class="text-xs text-muted-foreground" data-testid="invite-integrity">
+          {{ t('organisations.requests.interview.integrityAsked') }}
+        </p>
         <template v-if="!receipts[entry.key]">
           <label class="block text-sm text-foreground">{{ t('organisations.requests.interview.chooseTime') }}
             <select

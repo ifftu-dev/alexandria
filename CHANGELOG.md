@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Candidate integrity check for interviews held in Alexandria.** An
+  organisation can ask, in the signed invitation, for the candidate to run
+  Sentinel on their own device during the call. The candidate chooses before
+  joining (nothing preselected), and separately whether to allow camera
+  checks. When they leave, their app signs and sends a summary built from the
+  stored session — outcome, score, flag counts, camera coverage, never
+  recordings — and keeps a copy; the waiting room shows what was shared. The
+  panel seat, scorecard page and Cloud show the result as the candidate's
+  app's own report. A flagged interview-purpose session no longer asks to
+  keep appeal evidence, since none is staged.
 - **Organisations, not directories.** The app talks to the network's
   Alexandria Cloud behind one switch (**Settings → Organisations**). Every
   request an organisation sends carries a proof the app checks itself

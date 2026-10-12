@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 16 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 110 tables, 113 indexes, 1 view, 3 triggers.
+**Schema**: 17 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 111 tables, 114 indexes, 1 view, 3 triggers.
 
 ---
 
@@ -37,6 +37,7 @@ and requires a database's history to be an exact prefix of this list:
 14. `session_device_attestation`
 15. `organisation_access`
 16. `interview_panel_link`
+17. `interview_integrity_reports`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -980,7 +981,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `training_samples` INTEGER NOT NULL default `0`
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 
-### Interviews (6)
+### Interviews (7)
 
 #### `interview_criteria`
 
@@ -1001,6 +1002,15 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `reason` TEXT NOT NULL
 - `status` TEXT NOT NULL default `'suggested'`
 - `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `interview_integrity_reports`
+
+- `integrity_session_id` TEXT PK → `integrity_sessions.id`
+- `interview_id` TEXT NOT NULL
+- `cloud_url` TEXT NOT NULL
+- `organization` TEXT NOT NULL
+- `sent_at` TEXT NOT NULL
+- `payload_json` TEXT NOT NULL
 
 #### `interview_notes`
 
@@ -1477,6 +1487,7 @@ erDiagram
     interview_criteria ||--o{ interview_followups : criterion_id
     interview_transcript_segments ||--o{ interview_followups : source_segment_id
     interview_sessions ||--o{ interview_followups : session_id
+    integrity_sessions ||--o{ interview_integrity_reports : integrity_session_id
     interview_sessions ||--o{ interview_notes : session_id
     interview_sessions ||--o{ interview_participants : session_id
     integrity_sessions ||--o{ interview_sessions : integrity_session_id

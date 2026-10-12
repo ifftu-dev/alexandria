@@ -118,6 +118,11 @@ pub struct PanelInterview {
     pub room: PanelRoom,
     #[serde(default)]
     pub candidate_evidence: Vec<Value>,
+    /// Whether the organisation asked the candidate to run the integrity
+    /// check, and each result the candidate's app sent. Passed through as
+    /// Cloud shows it.
+    #[serde(default)]
+    pub integrity: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -472,6 +477,7 @@ mod tests {
                 opened_at: None,
             },
             candidate_evidence: Vec::new(),
+            integrity: None,
         }
     }
 

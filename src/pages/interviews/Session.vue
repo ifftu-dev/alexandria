@@ -10,6 +10,7 @@ import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
 import { LiveDiagnosticsModal, LiveParticipantTile, LiveSessionControls } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
+import PanelIntegrity from '@/components/organisations/PanelIntegrity.vue'
 import { AppAlert, AppBadge, AppButton, AppModal, AppTextarea } from '@/components/ui'
 import type {
   DeviceList,
@@ -462,6 +463,7 @@ function formatTime(ms: number) {
       <AppButton class="mt-3" size="xs" variant="outline" data-testid="panel-scorecard" @click="router.push(`${basePath}/${interviewId}/review`)">
         {{ $t('interviews.panel.writeScorecard') }}
       </AppButton>
+      <PanelIntegrity v-if="panel.integrity" :integrity="panel.integrity" class="mt-3" />
       <div v-if="panel.candidateEvidence.length" class="mt-3">
         <p class="text-xs font-medium text-muted-foreground">{{ $t('interviews.panel.evidence') }}</p>
         <ul class="mt-1 flex flex-wrap gap-2">

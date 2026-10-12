@@ -150,6 +150,8 @@ export const TAURI_COMMANDS = [
   "guardian_revoke_link",
   "guardian_sync_now",
   "hiring_history",
+  "hiring_interview_integrity_send",
+  "hiring_interview_integrity_sent",
   "hiring_interview_respond",
   "hiring_interview_room",
   "hiring_interviews",
