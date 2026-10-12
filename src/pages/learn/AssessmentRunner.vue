@@ -221,9 +221,15 @@ async function submit() {
     <div v-if="sentinel.isActive.value" class="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm">
       <span
         class="h-2.5 w-2.5 rounded-full"
-        :class="sentinel.isActive.value ? 'bg-success' : 'bg-muted-foreground'"
+        :class="sentinel.suspended.value ? 'bg-warning' : 'bg-success'"
       />
-      <div class="flex-1">
+      <div v-if="sentinel.suspended.value" class="flex-1" role="status">
+        <span class="font-medium text-foreground">{{ $t('learn.assessment.integritySuspended') }}</span>
+        <span class="text-muted-foreground">
+          {{ $t('learn.assessment.integritySuspendedNote') }}
+        </span>
+      </div>
+      <div v-else class="flex-1">
         <span class="font-medium text-foreground">{{ $t('learn.assessment.integrityOn') }}</span>
         <span class="text-muted-foreground">
           {{ $t('learn.assessment.integrityNote') }}

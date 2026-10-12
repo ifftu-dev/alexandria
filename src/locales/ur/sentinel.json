@@ -519,6 +519,7 @@
     "noticeNotAccusation": "This is not a finding, and it is not final. Sessions get flagged for ordinary reasons — someone walking behind you is enough.",
     "noticeWhatYouCanDo": "If you kept the evidence from that session, you can send it to them to argue your case. You do not have to, and choosing not to may not be held against you.",
     "noticeOpen": "See what they have",
-    "noticeLater": "Not now"
+    "noticeLater": "Not now",
+    "liveSuspended": "سیشن معطل"
   }
 }

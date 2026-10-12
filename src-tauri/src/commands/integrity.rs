@@ -43,6 +43,11 @@ pub struct IntegritySnapshot {
     pub gaze_offscreen_ratio: Option<f64>,
     pub anomaly_flags: Vec<String>,
     pub captured_at: String,
+    /// The session's status once this snapshot was counted. Only a submit
+    /// sets it, so the app can tell the learner when monitoring suspends
+    /// the attempt instead of failing at submit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -573,7 +578,12 @@ fn persist_snapshot(
         .map_err(|e| e.to_string())?;
     }
 
-    let snapshot = read_snapshot(conn, &snapshot_id)?;
+    let mut snapshot = read_snapshot(conn, &snapshot_id)?;
+    snapshot.session_status = Some(if should_update {
+        new_status.to_string()
+    } else {
+        current_status
+    });
     tx.commit().map_err(|e| e.to_string())?;
     Ok(snapshot)
 }
@@ -830,6 +840,7 @@ fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> 
         gaze_offscreen_ratio: row.get(11)?,
         anomaly_flags,
         captured_at: row.get(13)?,
+        session_status: None,
     })
 }
 
@@ -1211,6 +1222,31 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn each_snapshot_reports_the_session_status_it_left_behind() {
+        let db = snapshot_db();
+        let clean = persist_snapshot(db.conn(), &snapshot_request()).unwrap();
+        assert_eq!(clean.session_status.as_deref(), Some("active"));
+
+        let critical = SubmitSnapshotRequest {
+            anomaly_flags: vec!["phantom_hotkey_repeated".into()],
+            ..snapshot_request()
+        };
+        let first = persist_snapshot(db.conn(), &critical).unwrap();
+        assert_eq!(first.session_status.as_deref(), Some("flagged"));
+        // The second critical suspends the session. The snapshot that did it
+        // still lands and says so; that is the only way the learner hears.
+        let second = persist_snapshot(db.conn(), &critical).unwrap();
+        assert_eq!(second.session_status.as_deref(), Some("suspended"));
+
+        assert!(persist_snapshot(db.conn(), &snapshot_request())
+            .unwrap_err()
+            .contains("status: suspended"));
+        // Listing snapshots is not a status report.
+        let listed = read_snapshot(db.conn(), &second.id).unwrap();
+        assert_eq!(listed.session_status, None);
     }
 
     #[test]

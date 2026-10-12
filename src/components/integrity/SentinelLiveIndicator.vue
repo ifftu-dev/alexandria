@@ -39,6 +39,10 @@ const notices = computed<string[]>(() => {
   const out: string[] = []
   if (!debug.active) return out
 
+  // First, because it changes what the learner should do next: no more
+  // checks are taken, and the result will say the session was suspended.
+  if (debug.suspended) out.push(t('sentinel.evidence.liveSuspended'))
+
   if (debug.cameraOptedIn) {
     if (debug.faceCount > 1) out.push(t('sentinel.evidence.liveTwoPeople'))
     else if (!debug.facePresent) out.push(t('sentinel.evidence.liveNoFace'))

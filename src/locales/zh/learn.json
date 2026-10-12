@@ -25,7 +25,9 @@
     "cameraLost": "摄像头已关闭。该职位要求开启摄像头，请重新开启。",
     "passMark": "需要达到 {percent}% 才能通过。",
     "chooseOne": "选择一个答案。",
-    "chooseAll": "选择所有适用的答案。"
+    "chooseAll": "选择所有适用的答案。",
+    "integritySuspended": "完整性检查已暂停此次作答。",
+    "integritySuspendedNote": "不会再进行检查。你仍可提交；结果会记录此会话曾被暂停。"
   },
   "player": {
     "courseFallback": "课程",
