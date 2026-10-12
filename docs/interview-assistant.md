@@ -79,7 +79,8 @@ The token is the seat's only credential, so the link is accepted only on the
 custom scheme (never an `https` URL that browsers and servers log), and its
 Cloud origin must be `https`, or `http` on loopback for local testing.
 
-**Opening the link.** The desktop app hands the link to
+**Opening the link.** The desktop app (as a deep link, or pasted under
+Settings → Organisations → *On an interview panel?*) hands the link to
 `interview_panel_open` (`commands/interview_panel.rs`). It fetches the
 interview from Cloud with `Authorization: Panelist <token>` and creates an
 ordinary local interview session: the organisation's criteria, the panelist as

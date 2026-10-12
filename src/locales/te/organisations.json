@@ -15,7 +15,11 @@
     "openDeveloper": "డెవలపర్ సెట్టింగ్‌లు తెరవండి",
     "cloudLabel": "Alexandria Cloud చిరునామా",
     "cloudDesc": "వేరే Alexandria Cloud ను ఉపయోగించండి, ఉదా. స్థానికంగా నడుస్తున్నది. నెట్‌వర్క్ సొంతదాని కోసం ఖాళీగా ఉంచండి.",
-    "cloudSaved": "సేవ్ అయింది."
+    "cloudSaved": "సేవ్ అయింది.",
+    "panelTitle": "ఇంటర్వ్యూ ప్యానెల్‌లో ఉన్నారా?",
+    "panelDesc": "సంస్థ మీకు పంపిన చేరే లింక్‌ను అతికించండి. అది ప్యానెల్‌లో మీ స్థానాన్ని తెరుస్తుంది.",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "తెరవండి"
   },
   "requests": {
     "title": "అభ్యర్థనలు",

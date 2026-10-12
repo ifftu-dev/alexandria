@@ -14,8 +14,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { usePanel } from '@/composables/usePanel'
 import { useSettings } from '@/composables/useSettings'
-import { AppButton, AppSwitch } from '@/components/ui'
+import { AppButton, AppInput, AppSwitch } from '@/components/ui'
 import OrgRequests from './OrgRequests.vue'
 import OrgAccess from './OrgAccess.vue'
 
@@ -35,6 +36,27 @@ const cloud = ref<string | null | undefined>(undefined)
 const error = ref('')
 const switching = ref(false)
 const accessPanel = ref<InstanceType<typeof OrgAccess> | null>(null)
+
+// A panelist's join link normally arrives as a deep link. Where the system
+// does not hand it to the app (a link pasted into chat, a build that is not
+// the registered handler), pasting it here does the same thing.
+const panel = usePanel()
+const panelLink = ref('')
+const panelError = ref('')
+const openingPanel = ref(false)
+
+async function openPanelLink() {
+  openingPanel.value = true
+  panelError.value = ''
+  try {
+    const seat = await panel.openLink(panelLink.value.trim())
+    await router.push(`/panel/${seat.sessionId}`)
+  } catch (e) {
+    panelError.value = String(e)
+  } finally {
+    openingPanel.value = false
+  }
+}
 
 const enabled = computed(() => {
   const entry = byKey.value.get(ENABLED_KEY)
@@ -107,5 +129,17 @@ onMounted(async () => {
       <OrgRequests @shared="accessPanel?.refresh()" />
       <OrgAccess ref="accessPanel" :cloud-url="cloud" />
     </template>
+
+    <form class="space-y-2 rounded-xl border border-border p-4" data-testid="panel-link" @submit.prevent="openPanelLink">
+      <p class="text-sm font-medium text-foreground">{{ t('organisations.settings.panelTitle') }}</p>
+      <p class="text-xs text-muted-foreground">{{ t('organisations.settings.panelDesc') }}</p>
+      <div class="flex gap-2">
+        <AppInput v-model="panelLink" class="flex-1" :placeholder="t('organisations.settings.panelPlaceholder')" :aria-label="t('organisations.settings.panelTitle')" />
+        <AppButton type="submit" size="sm" :loading="openingPanel" :disabled="!panelLink.trim()">
+          {{ t('organisations.settings.panelOpen') }}
+        </AppButton>
+      </div>
+      <p v-if="panelError" role="alert" class="text-xs text-destructive">{{ panelError }}</p>
+    </form>
   </div>
 </template>

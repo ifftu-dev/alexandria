@@ -15,7 +15,11 @@
     "openDeveloper": "Ouvrir les réglages développeur",
     "cloudLabel": "Adresse d'Alexandria Cloud",
     "cloudDesc": "Utiliser un autre Alexandria Cloud, par exemple un serveur local. Laisser vide pour celui du réseau.",
-    "cloudSaved": "Enregistré."
+    "cloudSaved": "Enregistré.",
+    "panelTitle": "Membre d'un jury d'entretien ?",
+    "panelDesc": "Collez le lien que l'organisation vous a envoyé. Il ouvre votre place dans le jury.",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "Ouvrir"
   },
   "requests": {
     "title": "Demandes",

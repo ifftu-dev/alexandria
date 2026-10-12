@@ -15,7 +15,11 @@
     "openDeveloper": "Abrir ajustes de desarrollador",
     "cloudLabel": "Dirección de Alexandria Cloud",
     "cloudDesc": "Usa otro Alexandria Cloud, por ejemplo uno local. Déjalo vacío para usar el de la red.",
-    "cloudSaved": "Guardado."
+    "cloudSaved": "Guardado.",
+    "panelTitle": "¿Formas parte de un panel de entrevista?",
+    "panelDesc": "Pega el enlace para unirte que te envió la organización. Abre tu puesto en el panel.",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "Abrir"
   },
   "requests": {
     "title": "Solicitudes",

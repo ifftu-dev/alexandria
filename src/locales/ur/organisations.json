@@ -15,7 +15,11 @@
     "openDeveloper": "ڈیولپر ترتیبات کھولیں",
     "cloudLabel": "Alexandria Cloud کا پتا",
     "cloudDesc": "کوئی دوسرا Alexandria Cloud استعمال کریں، جیسے مقامی طور پر چلنے والا۔ نیٹ ورک کے اپنے کے لیے خالی چھوڑ دیں۔",
-    "cloudSaved": "محفوظ ہو گیا۔"
+    "cloudSaved": "محفوظ ہو گیا۔",
+    "panelTitle": "کسی انٹرویو پینل میں ہیں؟",
+    "panelDesc": "تنظیم کا بھیجا ہوا شامل ہونے کا لنک پیسٹ کریں۔ یہ پینل میں آپ کی نشست کھولتا ہے۔",
+    "panelPlaceholder": "alexandria://interview/join?…",
+    "panelOpen": "کھولیں"
   },
   "requests": {
     "title": "درخواستیں",
