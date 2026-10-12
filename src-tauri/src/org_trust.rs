@@ -114,25 +114,33 @@ pub(crate) async fn fetch_descriptor(domain: &str) -> Result<OrgDescriptor, Stri
 /// The system resolver first; where there is no readable system
 /// configuration (Android has no resolv.conf) a public one stands in.
 async fn txt_records(name: &str) -> Result<Vec<String>, String> {
-    use hickory_resolver::config::ResolverConfig;
-    use hickory_resolver::name_server::TokioConnectionProvider;
+    use hickory_resolver::config::{ResolverConfig, CLOUDFLARE};
+    use hickory_resolver::net::runtime::TokioRuntimeProvider;
+    use hickory_resolver::proto::rr::RData;
     use hickory_resolver::TokioResolver;
 
-    let resolver = match TokioResolver::builder_tokio() {
-        Ok(builder) => builder.build(),
-        Err(_) => TokioResolver::builder_with_config(
-            ResolverConfig::cloudflare(),
-            TokioConnectionProvider::default(),
-        )
-        .build(),
-    };
+    let resolver = TokioResolver::builder_tokio()
+        .and_then(|builder| builder.build())
+        .or_else(|_| {
+            TokioResolver::builder_with_config(
+                ResolverConfig::udp_and_tcp(&CLOUDFLARE),
+                TokioRuntimeProvider::default(),
+            )
+            .build()
+        })
+        .map_err(|e| format!("could not set up DNS: {e}"))?;
     match resolver.txt_lookup(format!("{name}.")).await {
         Ok(found) => Ok(found
+            .answers()
             .iter()
-            .map(|txt| {
-                txt.iter()
-                    .map(|part| String::from_utf8_lossy(part).into_owned())
-                    .collect::<String>()
+            .filter_map(|record| match &record.data {
+                RData::TXT(txt) => Some(
+                    txt.txt_data
+                        .iter()
+                        .map(|part| String::from_utf8_lossy(part).into_owned())
+                        .collect::<String>(),
+                ),
+                _ => None,
             })
             .collect()),
         Err(e) if e.is_no_records_found() => Ok(Vec::new()),
