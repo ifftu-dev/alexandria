@@ -379,11 +379,23 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         )
         .await;
     assert_eq!(code, 200, "{pending}");
-    let requests: Vec<CredentialRequest> = serde_json::from_value(pending).unwrap();
-    let request = requests
-        .into_iter()
-        .find(|r| r.id == request_id)
-        .expect("the request reaches the learner");
+    // Each request arrives with the organisation's proof, checked against the
+    // TXT record its domain publishes.
+    let envelope = pending
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["request"]["id"] == request_id.as_str())
+        .expect("the request reaches the learner")
+        .clone();
+    let request: CredentialRequest = serde_json::from_value(envelope["request"].clone()).unwrap();
+    let proof: alexandria_verify::org::OrgProof =
+        serde_json::from_value(envelope["orgProof"].clone()).unwrap();
+    let descriptor = crate::org_trust::fetch_descriptor(&proof.domain)
+        .await
+        .unwrap();
+    alexandria_verify::org::verify(&envelope["request"], &proof, &descriptor).unwrap();
+    assert_eq!(request.organization, descriptor.name);
     crate::commands::exchange::validate_request(&request, did.as_str()).unwrap();
     let binding = format!("request:{}:{}", request.id, request.nonce);
     let second_id = pass_assessment(
@@ -458,11 +470,16 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         .holder_get(&key, &format!("/api/interviews/for/{}", did.as_str()))
         .await;
     assert_eq!(code, 200, "{invites}");
-    let invites: Vec<InterviewInvite> = serde_json::from_value(invites).unwrap();
-    let invite = invites
-        .into_iter()
-        .find(|i| i.id == body["invite"]["id"].as_str().unwrap())
-        .expect("invitation reaches the learner");
+    let invite: InterviewInvite = serde_json::from_value(
+        invites
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["invite"]["id"] == body["invite"]["id"])
+            .expect("invitation reaches the learner")["invite"]
+            .clone(),
+    )
+    .unwrap();
     let answer = sign_interview_response(
         invite.clone(),
         "accept",
@@ -502,11 +519,16 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         .holder_get(&key, &format!("/api/offers/for/{}", did.as_str()))
         .await;
     assert_eq!(code, 200, "{offers}");
-    let offers: Vec<Offer> = serde_json::from_value(offers).unwrap();
-    let offer = offers
-        .into_iter()
-        .find(|o| o.id == body["offer"]["id"].as_str().unwrap())
-        .expect("offer reaches the learner");
+    let offer: Offer = serde_json::from_value(
+        offers
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["offer"]["id"] == body["offer"]["id"])
+            .expect("offer reaches the learner")["offer"]
+            .clone(),
+    )
+    .unwrap();
     let answer = sign_offer_response(
         offer.clone(),
         "accept",
@@ -828,6 +850,16 @@ mod ipc {
                 crate::commands::hiring::hiring_interview_respond,
                 crate::commands::hiring::hiring_offers,
                 crate::commands::hiring::hiring_offer_respond,
+                crate::commands::hiring::hiring_interview_room,
+                crate::commands::organisations::org_access_requests,
+                crate::commands::organisations::org_grant,
+                crate::commands::organisations::org_grants,
+                crate::commands::organisations::org_grant_set_sync,
+                crate::commands::organisations::org_grant_revoke,
+                crate::commands::organisations::org_sync_now,
+                crate::commands::interview_panel::interview_panel_open,
+                crate::commands::interview_panel::interview_panel_set_room,
+                crate::commands::interview_panel::interview_panel_scorecard,
                 crate::commands::hiring::hiring_history,
             ])
             .build(mock_context(noop_assets()))
@@ -959,8 +991,7 @@ mod ipc {
             )
             .await;
         assert!(preview["record"].is_object(), "{preview}");
-        app.call("publish_listing", json!({"directoryUrl": base}))
-            .await;
+        app.call("publish_listing", json!({})).await;
         println!("2. listing published");
 
         // ── 3. Found; candidate created ───────────────────────────────────
@@ -1010,7 +1041,10 @@ mod ipc {
             .iter()
             .find(|i| i["request"]["id"] == request_id.as_str())
             .unwrap_or_else(|| panic!("request reaches the inbox: {inbox}"));
+        assert_eq!(item["org"]["verified"], true, "{item}");
+        assert_eq!(item["org"]["domain"], "alexandria.ifftu.dev", "{item}");
         let request = item["request"].clone();
+        let org_proof = item["orgProof"].clone();
         let (_, second_id) = take_assessment(
             &app,
             &state,
@@ -1034,7 +1068,7 @@ mod ipc {
         let signed = app
             .call(
                 "exchange_preview",
-                json!({"request": request, "credentialId": second_id}),
+                json!({"request": request, "orgProof": org_proof, "credentialId": second_id}),
             )
             .await;
         assert_eq!(signed["type"][0], "VerifiablePresentation", "{signed}");
@@ -1054,6 +1088,79 @@ mod ipc {
         );
         println!("4. requested assessment taken and shared through exchange_*; accept, hosted list clear");
 
+        // ── 4b. Access: asked, granted with sync, viewed, sync off, revoked ─
+        let (code, body) = cloud
+            .org(
+                "POST",
+                "/api/access-requests",
+                Some(json!({"candidate_id": candidate, "skill_ids": ["skill_javascript", "skill_big_o"], "purpose": "IPC rehearsal of access grants"})),
+            )
+            .await;
+        assert_eq!(code, 200, "{body}");
+        let access_id = body["request"]["id"].as_str().unwrap().to_string();
+        let inbox = app.call("org_access_requests", json!({})).await;
+        let item = inbox["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["request"]["id"] == access_id.as_str())
+            .unwrap_or_else(|| panic!("access request reaches the inbox: {inbox}"))
+            .clone();
+        assert_eq!(item["org"]["name"], "IFFTU", "{item}");
+        let grant = app
+            .call(
+                "org_grant",
+                json!({"directoryUrl": base, "request": item["request"], "orgProof": item["orgProof"], "skillIds": ["skill_javascript"], "sync": true}),
+            )
+            .await;
+        let grant_id = grant["grantId"].as_str().unwrap().to_string();
+        let (code, access) = cloud
+            .org("GET", &format!("/api/candidates/{candidate}/access"), None)
+            .await;
+        assert_eq!(code, 200, "{access}");
+        let held = access["grants"].to_string();
+        assert!(held.contains("skill_javascript"), "{access}");
+        let sync = app.call("org_sync_now", json!({})).await;
+        assert_eq!(sync["failed"], json!([]), "{sync}");
+        let listed = app.call("org_grants", json!({})).await;
+        let mine = listed["grants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["grantId"] == grant_id.as_str())
+            .unwrap_or_else(|| panic!("grant is listed: {listed}"))
+            .clone();
+        assert!(
+            mine["lastViewedAt"].is_string(),
+            "the organisation's look is visible: {mine}"
+        );
+        let off = app
+            .call(
+                "org_grant_set_sync",
+                json!({"grantId": grant_id, "sync": false}),
+            )
+            .await;
+        assert_eq!(off["sync"], false, "{off}");
+        let revoked = app
+            .call("org_grant_revoke", json!({"grantId": grant_id}))
+            .await;
+        assert!(revoked["revokedAt"].is_number(), "{revoked}");
+        let (_, access) = cloud
+            .org("GET", &format!("/api/candidates/{candidate}/access"), None)
+            .await;
+        let theirs = access["grants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["grantId"] == grant_id.as_str() || g["id"] == grant_id.as_str())
+            .unwrap_or_else(|| panic!("grant still listed: {access}"))
+            .clone();
+        assert!(
+            theirs["snapshot"].is_null(),
+            "revoking deletes what Cloud held: {theirs}"
+        );
+        println!("4b. access granted with sync, seen by the organisation, sync turned off, revoked; Cloud holds nothing");
+
         // ── 5. Interview and offer, through the hiring commands ───────────
         let slot_a = (chrono::Utc::now() + chrono::Duration::days(2)).to_rfc3339();
         let slot_b = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
@@ -1061,27 +1168,63 @@ mod ipc {
             .org(
                 "POST",
                 "/api/interviews",
-                Some(json!({"candidate_id": candidate, "role_label": "Junior engineer", "message": "We would like to discuss the assessment you completed.", "mode": "video", "proposed_slots": [slot_a, slot_b], "meeting_url": "https://meet.example.test/alexandria", "run_id": request_id})),
+                Some(json!({"candidate_id": candidate, "role_label": "Junior engineer", "message": "We would like to talk it through in Alexandria.", "mode": "alexandria", "proposed_slots": [slot_a, slot_b], "run_id": request_id, "criteria": ["Communication", "Technical depth"], "panel": [{"name": "Asha"}]})),
             )
             .await;
         assert_eq!(code, 200, "{body}");
         let invite_id = body["invite"]["id"].as_str().unwrap().to_string();
+        let join_link = body["panel"][0]["joinLink"].as_str().unwrap().to_string();
         let inbox = app.call("hiring_interviews", json!({})).await;
         let invite = inbox["items"]
             .as_array()
             .unwrap()
             .iter()
             .find(|i| i["invite"]["id"] == invite_id.as_str())
-            .unwrap_or_else(|| panic!("invitation reaches the inbox: {inbox}"))["invite"]
+            .unwrap_or_else(|| panic!("invitation reaches the inbox: {inbox}"))
             .clone();
+        assert_eq!(invite["org"]["verified"], true, "{invite}");
+        let invite_proof = invite["orgProof"].clone();
+        let invite = invite["invite"].clone();
+        assert_eq!(invite["mode"], "alexandria");
         let slot = invite["proposed_slots"][0].clone();
         let receipt = app
             .call(
                 "hiring_interview_respond",
-                json!({"directoryUrl": base, "invite": invite, "decision": "accept", "chosenSlot": slot, "note": "Looking forward to it."}),
+                json!({"directoryUrl": base, "invite": invite, "orgProof": invite_proof, "decision": "accept", "chosenSlot": slot, "note": "Looking forward to it."}),
             )
             .await;
         assert_eq!(receipt["status"], "accepted", "{receipt}");
+        // The panelist opens their link in Alexandria; the room they open is
+        // the one the candidate is handed; their scorecard reaches the org.
+        let seat = app
+            .call("interview_panel_open", json!({"link": join_link}))
+            .await;
+        let seat_id = seat["sessionId"].as_str().unwrap().to_string();
+        assert_eq!(
+            seat["interview"]["candidate"]["displayName"], "Live learner",
+            "{seat}"
+        );
+        app.call(
+            "interview_panel_set_room",
+            json!({"sessionId": seat_id, "ticket": "ipc-rehearsal-ticket"}),
+        )
+        .await;
+        let room = app
+            .call(
+                "hiring_interview_room",
+                json!({"directoryUrl": base, "interviewId": invite_id}),
+            )
+            .await;
+        assert_eq!(room["ticket"], "ipc-rehearsal-ticket", "{room}");
+        app.call(
+            "interview_panel_scorecard",
+            json!({"sessionId": seat_id, "ratings": [{"criterion": "Communication", "rating": 4}], "recommendation": "yes", "notes": "Clear on trade-offs."}),
+        )
+        .await;
+        let (_, detail) = cloud
+            .org("GET", &format!("/api/interviews/{invite_id}"), None)
+            .await;
+        assert!(detail["panel"][0]["submittedAt"].is_string(), "{detail}");
         let (code, body) = cloud
             .org(
                 "POST",
@@ -1105,12 +1248,12 @@ mod ipc {
             .unwrap()
             .iter()
             .find(|o| o["offer"]["id"] == offer_id.as_str())
-            .unwrap_or_else(|| panic!("offer reaches the inbox: {inbox}"))["offer"]
+            .unwrap_or_else(|| panic!("offer reaches the inbox: {inbox}"))
             .clone();
         let receipt = app
             .call(
                 "hiring_offer_respond",
-                json!({"directoryUrl": base, "offer": offer, "decision": "accept", "note": null}),
+                json!({"directoryUrl": base, "offer": offer["offer"], "orgProof": offer["orgProof"], "decision": "accept", "note": null}),
             )
             .await;
         assert_eq!(receipt["status"], "accepted", "{receipt}");
@@ -1120,7 +1263,7 @@ mod ipc {
             2,
             "both answers are kept: {history}"
         );
-        println!("5. interview and offer accepted through hiring_*; history has both");
+        println!("5. interview held in Alexandria: accepted, panel room handed to the candidate, scorecard in; offer accepted");
 
         // ── 6. Verify without Alexandria ──────────────────────────────────
         let (exit, out) = node_verify(&first);
