@@ -216,7 +216,7 @@ is never promoted to `suspended` mid-interview and Sentinel does not stop the
 room. The final integrity row remains review context; it does not gate the
 interview assistant or make a hiring decision.
 
-**Where it runs:** the Rust backend re-evaluates status on every `integrity_submit_snapshot` and once more at `integrity_end_session`. Severity counters are denormalized on `integrity_sessions.critical_count` / `warning_count` for O(1) evaluation. Per-snapshot `anomaly_flags` are persisted as JSON on `integrity_snapshots.anomaly_flags` (migration 036). Assessment status only promotes in severity mid-session (`active → flagged → suspended`); interview status promotes at most to `flagged` while live. A clean session finalizes as `completed` at end.
+**Where it runs:** the Rust backend re-evaluates status on every `integrity_submit_snapshot` and once more at `integrity_end_session`. Severity counters are denormalized on `integrity_sessions.critical_count` / `warning_count` for O(1) evaluation. Per-snapshot `anomaly_flags` are persisted as JSON on `integrity_snapshots.anomaly_flags` (migration 036). Assessment status only promotes in severity mid-session (`active → flagged → suspended`); interview status promotes at most to `flagged` while live. A clean session finalizes as `completed` at end. Each snapshot returns the status it left behind as `session_status`. A suspended session refuses further snapshots, so once the app sees `suspended` it stops sending them, tells the learner (live indicator and assessment header), and at submit ends the session without a final snapshot; grading still runs.
 
 ### Trust Factor Integration
 
@@ -428,7 +428,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 | `integrity_attest_session` | Ask the platform to attest the session nonce (iOS App Attest, Android Play Integrity); stores the result and reports `supported` / `stored` / `assurance_level`. Desktop reports unsupported |
 | `integrity_get_session` | Get session with scores |
 | `integrity_end_session` | End session and compute final score; on iOS the attested key first signs the terminal commitment root |
-| `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`) |
+| `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`); returns it with the resulting `session_status` |
 | `integrity_list_sessions` | List all sessions |
 | `integrity_list_snapshots` | List snapshots for a session |
 | `sentinel_score_paste` | Extract 12-dim features + score via tract. Single round-trip per snapshot. |

@@ -25,7 +25,9 @@
     "cameraLost": "La cámara se apagó. Este puesto la exige: vuelve a activarla.",
     "passMark": "Necesitas un {percent}% para aprobar.",
     "chooseOne": "Elige una respuesta.",
-    "chooseAll": "Elige todas las que correspondan."
+    "chooseAll": "Elige todas las que correspondan.",
+    "integritySuspended": "Las comprobaciones de integridad suspendieron este intento.",
+    "integritySuspendedNote": "No se harán más comprobaciones. Aún puedes enviar; el resultado registrará que la sesión fue suspendida."
   },
   "player": {
     "courseFallback": "Curso",

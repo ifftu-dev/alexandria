@@ -25,7 +25,9 @@
     "cameraLost": "The camera turned off. This role requires it — turn it back on.",
     "passMark": "You need {percent}% to pass.",
     "chooseOne": "Choose one answer.",
-    "chooseAll": "Choose all that apply."
+    "chooseAll": "Choose all that apply.",
+    "integritySuspended": "Integrity checks suspended this attempt.",
+    "integritySuspendedNote": "No more checks are taken. You can still submit; the result will record that the session was suspended."
   },
   "player": {
     "courseFallback": "Course",

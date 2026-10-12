@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   saveDraft: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   grade: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<GradeResult>>(),
   active: { value: false },
+  suspended: { value: false },
   push: vi.fn(),
   go: vi.fn(),
 }))
@@ -30,6 +31,7 @@ vi.mock('@/composables/useSentinel', () => ({
     start: mocks.start,
     stop: mocks.stop,
     isActive: mocks.active,
+    suspended: mocks.suspended,
     integrityScore: { value: 1 },
     getSessionId: () => mocks.active.value ? 'session-1' : null,
     setCameraOptedIn: mocks.setCameraOptedIn,
@@ -72,6 +74,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.active.value = false
+  mocks.suspended.value = false
   mocks.start.mockReset().mockImplementation(async () => { mocks.active.value = true })
   mocks.stop.mockReset().mockImplementation(async () => { mocks.active.value = false; return 'session-1' })
   mocks.openRoles.mockReset().mockResolvedValue([])
@@ -202,6 +205,20 @@ describe('standalone assessment monitoring', () => {
     grading.resolve(result)
     await flushPromises()
     expect(mocks.stop).toHaveBeenCalledOnce()
+  })
+
+  it('tells the learner when monitoring suspends the attempt, and still lets them submit', async () => {
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('learn.assessment.integrityOn')
+    mocks.suspended.value = true
+    await wrapper.get('input').setValue(true)
+    expect(wrapper.get('[role="status"]').text()).toContain('learn.assessment.integritySuspended')
+    expect(wrapper.text()).not.toContain('learn.assessment.integrityOn')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
+    await flushPromises()
+    expect(mocks.stop).toHaveBeenCalledOnce()
+    expect(mocks.grade).toHaveBeenCalledOnce()
   })
 
   it('freezes answers and waits for cleanup before grading', async () => {
