@@ -822,6 +822,19 @@ pub async fn org_sync_now(state: State<'_, AppState>) -> Result<SyncReport, Stri
     sync_for(&state).await
 }
 
+/// The Alexandria Cloud requests come through, or none when requests are
+/// switched off or no Cloud is set. Without it an empty inbox reads the same
+/// as "nobody asked", and the screen has no address to answer a visibility
+/// change to.
+#[tauri::command]
+pub async fn org_cloud(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    Ok(super::holder_pull::directories(&state)
+        .await?
+        .into_iter()
+        .next()
+        .map(|cloud| cloud.url))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

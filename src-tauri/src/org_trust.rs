@@ -262,6 +262,13 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+        // The test organisation's own record.
+        let ifftu = fetch_descriptor("alexandria.ifftu.dev").await.unwrap();
+        assert_eq!(ifftu.name, "IFFTU");
+        assert_eq!(
+            ifftu.keys,
+            ["did:key:z6MkqWNi44j62UbaZJZnGUfGE2TMoPavjsXD99MFvpuJYkp7"]
+        );
     }
 
     #[test]

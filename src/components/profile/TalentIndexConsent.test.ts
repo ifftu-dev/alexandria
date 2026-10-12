@@ -1,58 +1,96 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed, ref } from 'vue'
 import TalentIndexConsent from './TalentIndexConsent.vue'
-import { announceDirectoriesChanged } from './directoryEvents'
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn() }))
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), setSetting: vi.fn(), sync: 'false' }))
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/composables/useSettings', () => {
+  const value = ref('false')
+  return {
+    useSettings: () => {
+      value.value = mocks.sync
+      return {
+        byKey: computed(() => new Map([['talent_index.sync', { key: 'talent_index.sync', current_value: value.value }]])),
+        initialize: async () => {},
+        setSetting: async (key: string, next: string) => {
+          await mocks.setSetting(key, next)
+          value.value = next
+        },
+      }
+    },
+  }
+})
 
-const preview = {
-  candidates: [{ skillId: 'skill_big_o', name: 'Big-O Analysis', level: 5, issuerClusters: 0, bloomLevel: 0, consented: false }],
-  consent: { skills: [], displayName: false, bio: false },
-  record: null,
+function preview(consented: string[]) {
+  return {
+    candidates: [{ skillId: 'skill_big_o', name: 'Big-O Analysis', level: 5, issuerClusters: 0, bloomLevel: 0, consented: consented.length > 0 }],
+    consent: { skills: consented, displayName: false, bio: false },
+    record: null,
+  }
 }
 
-function arm(directories: unknown[] | Error) {
+function arm(consented: string[], publish: () => unknown = () => null) {
   mocks.invoke.mockImplementation(async (command: string) => {
-    if (command === 'get_talent_index_preview') return preview
-    if (command === 'list_directories') {
-      if (directories instanceof Error) throw directories
-      return directories
-    }
+    if (command === 'get_talent_index_preview') return preview(consented)
+    if (command === 'publish_listing') return publish()
     throw new Error(command)
   })
 }
 
-const framing = (wrapper: ReturnType<typeof mount>) => wrapper.find('[data-testid=talent-index-framing]')
+const publishButton = (wrapper: ReturnType<typeof mount>) =>
+  wrapper.findAll('button').find((b) => b.text() === 'organisations.listing.publishNow')!
 
-beforeEach(() => { mocks.invoke.mockReset() })
+beforeEach(() => {
+  mocks.invoke.mockReset()
+  mocks.setSetting.mockReset()
+  mocks.sync = 'false'
+})
 
-describe('TalentIndexConsent framing', () => {
-  it('says nothing is sent when no directory has been added', async () => {
+describe('TalentIndexConsent publishing', () => {
+  it('says saving and publishing are separate steps', async () => {
     arm([])
     const wrapper = mount(TalentIndexConsent); await flushPromises()
-    expect(framing(wrapper).text()).toBe('profile.talentIndex.notPublishedYet')
+    expect(wrapper.find('[data-testid=talent-index-framing]').text()).toBe('organisations.listing.framing')
   })
 
-  it('says publishing is a separate step once a directory exists', async () => {
-    arm([{ name: 'Local demo', url: 'http://127.0.0.1:8787' }])
-    const wrapper = mount(TalentIndexConsent); await flushPromises()
-    expect(framing(wrapper).text()).toBe('profile.talentIndex.publishSeparately')
-  })
-
-  it('follows a directory added on the same page without a reload', async () => {
+  it('cannot publish until a skill has been saved', async () => {
     arm([])
-    const wrapper = mount(TalentIndexConsent, { attachTo: document.body }); await flushPromises()
-    expect(framing(wrapper).text()).toBe('profile.talentIndex.notPublishedYet')
-    announceDirectoriesChanged(1); await flushPromises()
-    expect(framing(wrapper).text()).toBe('profile.talentIndex.publishSeparately')
-    wrapper.unmount()
+    const wrapper = mount(TalentIndexConsent); await flushPromises()
+    expect(publishButton(wrapper).attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('organisations.listing.nothingToPublish')
   })
 
-  it('makes neither claim when the directory list cannot be read', async () => {
-    arm(new Error('locked'))
+  it('publishes now to the built-in Cloud, with no address to choose', async () => {
+    arm(['skill_big_o'])
     const wrapper = mount(TalentIndexConsent); await flushPromises()
-    expect(framing(wrapper).exists()).toBe(false)
+    await publishButton(wrapper).trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('publish_listing')
+    expect(wrapper.text()).toContain('organisations.listing.published')
+  })
+
+  it('shows why publishing failed', async () => {
+    arm(['skill_big_o'], () => { throw new Error('no Alexandria Cloud is set') })
+    const wrapper = mount(TalentIndexConsent); await flushPromises()
+    await publishButton(wrapper).trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid=talent-index-publish] [role=alert]').text()).toBe('organisations.listing.publishFailed')
+  })
+
+  it('keeps the listing up to date through the talent_index.sync setting', async () => {
+    arm(['skill_big_o'])
+    const wrapper = mount(TalentIndexConsent); await flushPromises()
+    const toggle = wrapper.find('[data-testid=talent-index-publish] [role=switch]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click'); await flushPromises()
+    expect(mocks.setSetting).toHaveBeenCalledWith('talent_index.sync', 'true')
+    expect(wrapper.find('[data-testid=talent-index-publish] [role=switch]').attributes('aria-checked')).toBe('true')
+  })
+
+  it('shows the switch on when the setting already is', async () => {
+    mocks.sync = 'true'
+    arm(['skill_big_o'])
+    const wrapper = mount(TalentIndexConsent); await flushPromises()
+    expect(wrapper.find('[data-testid=talent-index-publish] [role=switch]').attributes('aria-checked')).toBe('true')
   })
 })

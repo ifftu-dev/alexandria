@@ -1827,6 +1827,7 @@ pub fn run() {
             commands::interview_panel::interview_panel_set_room,
             commands::interview_panel::interview_panel_scorecard,
             commands::hiring::hiring_interview_room,
+            commands::organisations::org_cloud,
             commands::holder_release::holder_contestable_runs,
             commands::holder_release::holder_release_evidence,
             commands::holder_release::holder_withdraw_evidence,

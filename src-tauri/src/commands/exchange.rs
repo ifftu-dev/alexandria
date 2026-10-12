@@ -296,6 +296,17 @@ pub async fn exchange_send(
     let (_, did) = load_issuer_key(&state).await?;
     let request = shared_credential(&signed)?.request;
     validate_request(&request, did.as_str())?;
+    // Checked again here rather than trusted from the preview: this is the
+    // step that sends, and the request it answers must still be one the
+    // organisation's domain vouches for.
+    let envelope = requests(&state, &dir)
+        .await?
+        .into_iter()
+        .find(|e| e.request == request)
+        .ok_or("this request is no longer open")?;
+    org_trust::check_item(&state, &envelope.request, envelope.org_proof.as_ref())
+        .await
+        .require()?;
     verify_share(
         &signed,
         &request,

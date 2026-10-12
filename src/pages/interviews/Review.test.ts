@@ -51,7 +51,8 @@ describe('Review scorecard', () => {
     arm(true)
     const wrapper = mountReview(); await flushPromises()
     const card = wrapper.get('[data-testid=scorecard]')
-    const send = card.findAll('button').at(-1)!
+    const buttons = card.findAll('button')
+    const send = buttons[buttons.length - 1]!
     expect(send.attributes('disabled')).toBeDefined()
 
     await card.findAll('select')[0]!.setValue('4')

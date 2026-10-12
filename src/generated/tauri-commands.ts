@@ -237,6 +237,7 @@ export const TAURI_COMMANDS = [
   "move_element",
   "move_incompatible_profile_data",
   "org_access_requests",
+  "org_cloud",
   "org_grant",
   "org_grant_revoke",
   "org_grant_set_sync",

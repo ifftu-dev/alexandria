@@ -17,14 +17,18 @@
  *    exact JSON the backend produced, so there is no gap between what the
  *    learner is shown and what would be sent. A summary written by hand could
  *    drift from the wire format; this cannot.
+ *
+ * Saving and publishing stay separate steps. The listing goes to the
+ * network's Alexandria Cloud when the learner presses Publish now, or by
+ * itself whenever it changes once they switch on keeping it up to date.
  */
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useLocalApi } from "@/composables/useLocalApi"
-import { DIRECTORIES_CHANGED, announceConsentChanged } from './directoryEvents'
+import { useSettings } from '@/composables/useSettings'
 import { useI18n } from 'vue-i18n'
 
-import { AppButton } from '@/components/ui'
+import { AppButton, AppSwitch } from '@/components/ui'
 import { bloomName } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
@@ -59,12 +63,24 @@ const selected = ref<Set<string>>(new Set())
 const includeDisplayName = ref(false)
 const includeBio = ref(false)
 
+const SYNC_KEY = 'talent_index.sync'
+
 const loading = ref(true)
-/** How many directories the learner has added; null until known. Decides which framing line is true. */
-const directoryCount = ref<number | null>(null)
 const saving = ref(false)
 const savedAt = ref(0)
 const error = ref('')
+/** Skills in the stored consent: what Publish now would actually send. */
+const savedSkills = ref(0)
+const publishing = ref(false)
+const published = ref(false)
+const publishError = ref('')
+const switching = ref(false)
+
+const { byKey, initialize, setSetting } = useSettings()
+const keepUpToDate = computed(() => {
+  const value = byKey.value.get(SYNC_KEY)?.current_value
+  return value === 'true' || value === '1'
+})
 
 const nothingSelected = computed(() => selected.value.size === 0)
 
@@ -74,24 +90,11 @@ function apply(preview: TalentIndexPreview) {
   selected.value = new Set(preview.consent.skills)
   includeDisplayName.value = preview.consent.displayName
   includeBio.value = preview.consent.bio
-}
-
-async function loadDirectoryCount() {
-  try {
-    directoryCount.value = (await invoke<unknown[]>('list_directories')).length
-  } catch {
-    // Unknown is safer than a wrong claim either way: show neither line.
-    directoryCount.value = null
-  }
-}
-
-function onDirectoriesChanged(event: Event) {
-  directoryCount.value = (event as CustomEvent<number>).detail
+  savedSkills.value = preview.consent.skills.length
 }
 
 async function load() {
   loading.value = true
-  void loadDirectoryCount()
   try {
     apply(await invoke<TalentIndexPreview>('get_talent_index_preview'))
   } catch (e) {
@@ -129,11 +132,37 @@ async function save() {
     }
     apply(await invoke<TalentIndexPreview>('set_talent_index_consent', { consent }))
     savedAt.value = Date.now()
-    announceConsentChanged(selected.value.size)
   } catch (e) {
     error.value = String(e)
   } finally {
     saving.value = false
+  }
+}
+
+/** Sends the stored listing — the one previewed above once saved. */
+async function publish() {
+  publishing.value = true
+  published.value = false
+  publishError.value = ''
+  try {
+    await invoke('publish_listing')
+    published.value = true
+  } catch (e) {
+    publishError.value = String(e)
+  } finally {
+    publishing.value = false
+  }
+}
+
+async function setKeepUpToDate(value: boolean) {
+  switching.value = true
+  publishError.value = ''
+  try {
+    await setSetting(SYNC_KEY, value ? 'true' : 'false')
+  } catch (e) {
+    publishError.value = String(e)
+  } finally {
+    switching.value = false
   }
 }
 
@@ -142,10 +171,9 @@ const recordJson = computed(() =>
 )
 
 onMounted(() => {
-  window.addEventListener(DIRECTORIES_CHANGED, onDirectoriesChanged)
+  void initialize().catch(() => {})
   void load()
 })
-onBeforeUnmount(() => window.removeEventListener(DIRECTORIES_CHANGED, onDirectoriesChanged))
 </script>
 
 <template>
@@ -158,22 +186,14 @@ onBeforeUnmount(() => window.removeEventListener(DIRECTORIES_CHANGED, onDirector
       <!--
         Framing, not a result. Sitting under the Save button it read as a
         contradiction of "Saved." — the save persists consent; publication is a
-        separate step. Which line is true depends on whether the learner has
-        added a directory to publish to.
+        separate step, below.
       -->
       <p
-        v-if="candidates.length > 0 && directoryCount === 0"
+        v-if="candidates.length > 0"
         data-testid="talent-index-framing"
         class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
       >
-        {{ t('profile.talentIndex.notPublishedYet') }}
-      </p>
-      <p
-        v-else-if="candidates.length > 0 && directoryCount !== null"
-        data-testid="talent-index-framing"
-        class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
-      >
-        {{ t('profile.talentIndex.publishSeparately') }}
+        {{ t('organisations.listing.framing') }}
       </p>
     </header>
 
@@ -250,6 +270,36 @@ onBeforeUnmount(() => window.removeEventListener(DIRECTORIES_CHANGED, onDirector
         <span v-if="error" class="text-sm text-destructive">
           {{ t('profile.talentIndex.saveFailed', { error }) }}
         </span>
+      </div>
+
+      <div class="space-y-3 border-t border-border pt-4" data-testid="talent-index-publish">
+        <h3 class="text-sm font-medium text-foreground">{{ t('organisations.listing.heading') }}</h3>
+        <div class="flex flex-wrap items-center gap-3">
+          <AppButton variant="outline" :disabled="publishing || savedSkills === 0" @click="publish">
+            {{ publishing ? t('organisations.listing.publishing') : t('organisations.listing.publishNow') }}
+          </AppButton>
+          <span v-if="published" role="status" class="text-sm text-muted-foreground">
+            {{ t('organisations.listing.published') }}
+          </span>
+        </div>
+        <p v-if="savedSkills === 0" class="text-xs text-muted-foreground">
+          {{ t('organisations.listing.nothingToPublish') }}
+        </p>
+        <div class="flex items-start gap-3">
+          <AppSwitch
+            :model-value="keepUpToDate"
+            :disabled="switching"
+            :label="t('organisations.listing.keepUpToDate')"
+            @update:model-value="setKeepUpToDate"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm text-foreground">{{ t('organisations.listing.keepUpToDate') }}</span>
+            <span class="block text-xs text-muted-foreground">{{ t('organisations.listing.keepNote') }}</span>
+          </span>
+        </div>
+        <p v-if="publishError" role="alert" class="text-sm text-destructive">
+          {{ t('organisations.listing.publishFailed', { error: publishError }) }}
+        </p>
       </div>
     </template>
   </section>
