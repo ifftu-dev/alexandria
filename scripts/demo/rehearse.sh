@@ -51,6 +51,6 @@ echo "Cloud is up at $cloud"
 
 cd "$app_root"
 ALEXANDRIA_DEMO_CLOUD="$cloud" cargo test --manifest-path src-tauri/Cargo.toml --lib live_demo -- --ignored --nocapture --test-threads=1 2>&1 \
-  | grep -E '^[0-9]\. |^test |test result|panicked|failed:'
+  | grep -E '^[0-9][a-z]?\. |^test |test result|panicked|failed:'
 echo
 echo "Console: $cloud   (press Continue to sign in as the demo organisation)"

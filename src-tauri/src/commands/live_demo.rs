@@ -951,7 +951,7 @@ mod ipc {
             );
         }
         println!(
-            "0. profile created; {}; Local demo configured; bundled banks present",
+            "0. profile created; {}; Cloud configured; bundled banks present",
             did.as_str()
         );
 
