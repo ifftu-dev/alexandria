@@ -1,14 +1,18 @@
 # Interview Assistant
 
-> Instructor-facing, local-first support for planning, conducting, transcribing,
-> and reviewing structured interviews. The attributed transcript is the durable
-> record; raw audio and video are not recorded in the current release.
+> Local-first support for planning, conducting, transcribing, and reviewing
+> structured interviews — for instructors, and for panelists on an
+> organisation's interview held in Alexandria. The attributed transcript is the
+> durable record; raw audio and video are not recorded in the current release.
 
 ## Scope and status
 
 The interview assistant is available in Instructor mode at `/interviews`. It
 reuses Alexandria's live tutoring transport and visual language while keeping
-the interview record in a separate, private data model.
+the interview record in a separate, private data model. The same session and
+review pages also serve as a panel seat on an interview an organisation
+schedules in Alexandria Cloud (see [Panel seats](#panel-seats-on-an-organisations-interview));
+those live under `/panel` and do not need Instructor mode.
 
 The shipped workflow includes:
 
@@ -26,7 +30,8 @@ The shipped workflow includes:
 - coverage tracking, private interviewer notes, and an editable summary and
   conclusion; and
 - a JSON export that uses participant pseudonyms and excludes private notes by
-  default.
+  default; and
+- for a panel seat, a scorecard sent to the organisation from the review.
 
 This is deliberately not a raw-media recorder. The `record_audio` and
 `record_video` schema fields reserve the consent/data-model boundary for future
@@ -55,6 +60,61 @@ The routes are:
 | `/interviews` | Plan and list interviews |
 | `/interviews/:id` | Consent/preflight and live interview workspace |
 | `/interviews/:id/review` | Transcript, coverage, summary, conclusion, and export |
+| `/panel/:id` | A panel seat: the organisation's brief, consent/preflight and the live workspace |
+| `/panel/:id/review` | The same review, plus the scorecard for the organisation |
+| `/interview-room/:id` | The candidate's way into an interview held in Alexandria |
+
+## Panel seats on an organisation's interview
+
+An organisation can hold an interview inside Alexandria instead of on a meeting
+link. It schedules the interview in Alexandria Cloud with **Where: In
+Alexandria**, the criteria the panel assesses, and one to six panelists. Cloud
+returns each panelist a join link once:
+
+```text
+alexandria://interview/join?cloud=<Cloud origin>&id=<interview>&panelist=<seat>&token=<token>
+```
+
+The token is the seat's only credential, so the link is accepted only on the
+custom scheme (never an `https` URL that browsers and servers log), and its
+Cloud origin must be `https`, or `http` on loopback for local testing.
+
+**Opening the link.** The desktop app hands the link to
+`interview_panel_open` (`commands/interview_panel.rs`). It fetches the
+interview from Cloud with `Authorization: Panelist <token>` and creates an
+ordinary local interview session: the organisation's criteria, the panelist as
+interviewer, the other panelists as interviewers, and the candidate. Opening
+the same link again reuses that session. The page shows the organisation, role
+and candidate, the chosen time, the panel, whether the room is open, and any
+skills the candidate has shared with that organisation.
+
+**Starting.** Consent works as for any interview: every requested
+participant's choices are recorded first. On **Start interview**, the app asks
+Cloud whether the room is open. If it is, the panelist joins it. If not, the
+panelist creates the tutoring room and posts its ticket to Cloud
+(`interview_panel_set_room`), so the first panelist in opens the room and
+everyone else joins it.
+
+**The candidate.** The candidate accepts the invitation under **Settings →
+Organisations**. An accepted interview held in Alexandria then appears under
+*Upcoming interviews*, and **Join interview** opens 15 minutes before the
+chosen time. `/interview-room/:id` asks Cloud for the ticket with a request
+signed by the learner's own key (`hiring_interview_room`), so only the
+candidate the interview is for can learn it. Until a panelist has opened the
+room, the page checks again every few seconds. Joining enters the ordinary
+live tutoring room. The candidate's app keeps no interview record. The
+candidate's captions follow the tutoring rules: made only if the candidate
+turns them on, and kept in memory only.
+
+**Scorecard.** From the review, a panelist can send the organisation a
+scorecard (`interview_panel_scorecard`): for each criterion, a rating from 1
+to 4 or none and the session's coverage status, plus a recommendation (strong
+yes, yes, no, strong no) and notes of up to 4,000 characters. Cloud shows the
+scorecards side by side on its interview page.
+
+**Sentinel.** A panel seat never starts Sentinel. Integrity monitoring belongs
+on the candidate's device, and the seat's session is created with Sentinel
+off.
 
 ## Architecture
 
@@ -142,6 +202,7 @@ also do not stage camera frames for the assessment appeal-evidence flow.
 | Speech recognition | Enabled only with an explicit on-device-processing capability; there is no cloud fallback. |
 | Attribution | Durable segments require a known, consenting participant. Ambiguous remote speakers are not persisted. |
 | Notes | Interviewer notes are local and private; they are excluded from export unless the instructor deliberately includes them. |
+| Panel seats | The transcript, private notes, summary and conclusion stay on the panelist's device. Only the scorecard the panelist sends — ratings, coverage per criterion, a recommendation and its notes — goes to the organisation's Cloud. The seat's token is stored with the local session so the review can still reach Cloud. |
 | Export | Pseudonyms are on by default. Including names or private notes is an explicit local export choice. |
 | Retention | Configurable from 1–365 days, default 30. Expired interviews are hidden and purged when the interview list opens; they can also be purged or deleted explicitly. |
 
@@ -151,7 +212,7 @@ subsequent handling of that file.
 
 ## Data model and IPC
 
-Migration 092 adds six interview tables and adds `purpose` to
+The baseline schema holds six interview tables and the `purpose` column on
 `integrity_sessions`:
 
 - `interview_sessions`
@@ -161,9 +222,16 @@ Migration 092 adds six interview tables and adds `purpose` to
 - `interview_notes`
 - `interview_followups`
 
+Migration 16 (`interview_panel_link`) adds `cloud_url`, `cloud_interview_id`,
+`cloud_panelist_id`, `cloud_panel_token` and `cloud_org` to
+`interview_sessions`, with one session per Cloud interview and seat.
+
 The `commands/interview.rs` module exposes create/list/get, consent, transcript,
 follow-up, criterion, note, lifecycle, summary/review, deletion, and expiry-purge
-operations. See [Database Schema](database-schema.md) for the table summary and
+operations. `commands/interview_panel.rs` adds `interview_panel_open`,
+`interview_panel_status`, `interview_panel_set_room` and
+`interview_panel_scorecard`; the candidate's `hiring_interview_room` is in
+`commands/hiring.rs`. See [Database Schema](database-schema.md) for the table summary and
 [Sentinel](sentinel.md) for integrity semantics.
 
 ## Shared live-session UI

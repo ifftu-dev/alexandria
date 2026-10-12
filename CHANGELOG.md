@@ -21,8 +21,8 @@
   are gone; verifiers refuse a presentation whose proof is not bound to
   them.
 - **Status lists are dereferenceable.** With a status host configured
-  (**Settings → Privacy → Status list host**; the network profile's cloud
-  origin, then the first directory, stand in), a credential names its
+  (**Settings → Privacy → Status list host**; the Alexandria Cloud the app
+  talks to stands in), a credential names its
   revocation list by URL — `{origin}/status-lists/{issuer}/{n}` — and the
   app pushes the signed `BitstringStatusListCredential` there on issuance
   and every revocation (inline, then retried by the background pass; a

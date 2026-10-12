@@ -10,6 +10,7 @@ in-app destinations:
 | Course / tutorial | `alexandria://course/<id>` | `https://alexandria.ifftu.dev/course/<id>` |
 | Classroom | `alexandria://classroom/<id>` | `https://alexandria.ifftu.dev/classroom/<id>` |
 | Generic route (fallback) | `alexandria://open?route=/any/path` | `https://alexandria.ifftu.dev/open?route=/any/path` |
+| Interview panel seat | `alexandria://interview/join?cloud=<origin>&id=<interview>&panelist=<seat>&token=<token>` | none — custom scheme only |
 
 - The **custom scheme** always works once the app is installed — no server, no
   verification. It is the reliable baseline (QR codes, cross-device hand-off,
@@ -20,6 +21,12 @@ in-app destinations:
   `app-open.html` interstitial rebuilds the `alexandria://` URL from the path
   and offers it alongside a download link. HTTPS additionally requires the
   association files below **and** a signed release build (see Android signing).
+
+The interview panel link has no HTTPS form on purpose: its token is the
+panelist's credential, and an `https` URL is one that browsers and servers log.
+The whole link goes to the backend (`interview_panel_open`), which checks it,
+fetches the interview from that Alexandria Cloud, and opens the panel seat at
+`/panel/:id`.
 
 Received links are **queued until a profile is unlocked** and replayed the
 moment one is: a parent tapping a guardian link on a fresh install lands on the

@@ -408,6 +408,11 @@ the active profile's SQLCipher database. A remote caption becomes an interview
 transcript segment only after it is matched to a participant who consented to
 transcription. Interview tables never enter cross-device sync or global gossip,
 and their configured expiry is enforced by the interview list/purge command.
+An organisation can also hold an interview in Alexandria: a panelist's join
+link from Alexandria Cloud opens an interview session as a panel seat, the
+first panelist in opens the tutoring room and posts its ticket to Cloud, and
+the candidate fetches it with a request signed by their own key. Only the
+scorecard a panelist sends leaves the device.
 See [Interview Assistant](interview-assistant.md).
 
 ### Operations
@@ -711,6 +716,9 @@ bundled taxonomy, goal templates and question banks and nothing else.
 | Interviews | `/interviews` | Instructor-only interview planning and local record list |
 | Interview Session | `/interviews/:id` | Consent/preflight and live interview workspace |
 | Interview Review | `/interviews/:id/review` | Transcript, criteria coverage, summary, conclusion, and export |
+| Panel Seat | `/panel/:id` | An organisation's interview opened from a panelist's join link; no instructor mode needed |
+| Panel Review | `/panel/:id/review` | Interview review plus the scorecard sent to the organisation |
+| Interview Room | `/interview-room/:id` | The candidate's way into an interview held in Alexandria |
 | My Courses | `/dashboard/courses` | Enrolled courses, progress |
 | Credentials | `/dashboard/credentials` | W3C Verifiable Credentials — the same view is embedded as the default tab of `/skills` |
 | Reputation | `/dashboard/reputation` | Distribution-based reputation (median/p25/p75) |

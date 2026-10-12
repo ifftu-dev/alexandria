@@ -1,7 +1,7 @@
 # Alexandria demo — presenter notes
 
 **Open:** Alexandria, learner `demo_for_ashish`; trusted instructor `demo`; Cloud at <http://127.0.0.1:8787>.
-**Directory:** `http://127.0.0.1:8787` in Alexandria → Settings → Directories.
+**Cloud:** `http://127.0.0.1:8787` in Alexandria → Settings → Developer → Alexandria Cloud address. Requests appear under Settings → Organisations. The demo organisation is **IFFTU**, verified by the DNS TXT record `_alexandria.alexandria.ifftu.dev`; Cloud → Settings → Organisation identity must say **Verified**, or Cloud refuses to contact candidates.
 **Development/test builds:** open **Settings → Developer → Test data**. On phones, tap **Developer** in the settings list; use the category selector and search to find resources. Choose resources → **Review selection → Seed these resources**, or use **Seed everything** for one reviewed run. Seeds apply only to the unlocked profile; repeat runs keep existing work. **Reset selected** or **Reset all seeds** shows affected records before removing local seeds, edits, and progress; confirm only after reviewing. Issued credentials and published discussions remain. New development profiles receive the required taxonomy/global plugins automatically, while optional content is opt-in. Standard release builds retain the temporary automatic demo rollout.
 
 Courses appear under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**. Seeded discussion prompts and **Proposals** (one proposal-style draft per bundled subject field, with the field preselected) are local drafts: **Open draft**, edit, then publish with an accepted topic credential. There is no proposal, ballot or tally table to seed; governance on this branch is the pinned demo genesis only.
@@ -33,17 +33,16 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 2. **Show Sentinel Dev:** press **⌘⇧S → Start camera preview** and allow camera access.
    Say: “These are live local integrity signals.” Then answer and submit.
 3. **Open the earned credential.** Point out its ID, score, skill, issuer, and integrity summary.
-4. **My profile → Let employers find you:** choose Big-O Analysis, review and save consent.
-   **Settings → Directories:** publish to Local demo.
+4. **My profile → Let employers find you:** choose Big-O Analysis, review and save consent → **Publish now**.
 5. **Cloud → Talent:** Big-O Analysis, **Remember**, **0 issuer clusters**. Add the person to candidates.
 6. **Candidate → Invite to assess or share:** uncheck “Require a new assessment.”
-   **Alexandria → Directories:** refresh requests, choose credential, preview, share.
+   **Alexandria → Settings → Organisations → Check now:** point at **Verified: owns alexandria.ifftu.dev**; choose credential, preview, share.
    **Cloud run:** refresh and show the matching credential ID and verification result.
 
 ## 2. Organization first
 
 1. On the same Cloud candidate, request **JavaScript** with **Require a new assessment** checked.
-2. In Alexandria → Directories, refresh and **Take requested assessment**.
+2. In Alexandria → Settings → Organisations, **Check now** and **Take requested assessment**.
 3. Show **⌘⇧S**, complete the assessment, then preview and share its new credential.
 4. Refresh the Cloud run; return to the candidate to show the recorded assessment.
    Say: “This credential answers this specific invitation.”
@@ -58,13 +57,21 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 
 [Setup and troubleshooting](assessment-demo.md)
 
-## 3. Interview and offer
+## 3. Access, interview and offer
 
-1. **Cloud → run → Invite to interview:** role, message, times, your meeting link → send.
-2. **Alexandria → Settings → Directories → Interview invitations and offers → Refresh → choose a time → Accept.**
+1. **Cloud → candidate → Access → Request access:** two skills, a purpose → send.
+2. **Alexandria → Settings → Organisations → Check now → Share and keep in sync.**
+   **Who has access:** IFFTU, the skills, Keep up to date on. **Cloud → candidate → Access:** the snapshot.
+   **Stop sharing → confirm.** Cloud → Refresh: revoked, nothing held.
+   Say: "They asked, I chose the skills, I can see when they looked, and I can stop."
+3. **Cloud → run → Invite to interview:** role, message, **Where: In Alexandria**, a time in the next 15 minutes, criteria, one panelist → send. Copy the join link (shown once) to the panelist's machine.
+4. **Alexandria → Settings → Organisations → Check now → choose a time → Accept.**
    Say: "Signed over the whole invitation, sent only to this organisation."
-3. **Cloud → interview → Refresh → Record the interview → Advance → Make an offer.**
-4. **Alexandria → Refresh → Accept offer.** Cloud → Refresh → accepted.
+5. **Panelist's machine:** open the link → record choices → **Start interview**. **Learner:** Upcoming interviews → **Join interview**.
+   Show captions, criteria coverage, follow-up suggestions. End → review → ratings, recommendation, notes → **Send to IFFTU**.
+   Say: "The call is between our two apps. Only the scorecard goes to the organisation; the transcript stays here."
+6. **Cloud → interview → Refresh:** the scorecard → **Record the interview → Advance → Make an offer.**
+7. **Alexandria → Check now → Accept offer.** Cloud → Refresh → accepted.
 
 ## 4. Verify without us
 

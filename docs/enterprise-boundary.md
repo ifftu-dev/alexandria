@@ -62,7 +62,9 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Noticing that a service has flagged you | **Core** | Read from the learner's own export with their own key. The service is not asked to notify anybody, and cannot be trusted to |
 | Importing a credential someone handed you | **Core** | Receiving is not a commercial act |
 | Talent-index consent UI, publish client, wire schema | **Core** | A learner must audit what leaves their device |
-| Asking a directory what it holds about you, and answering when it asks | **Core** | Deciding whether to disclose is a decision about the learner's own data, made on their machine with their key. Also the only way the "every look is shown to the learner" promise is kept: a disclosure log nobody can read is a claim, not a control |
+| Answering an organisation's access request, keeping a grant in sync, and stopping it | **Core** | Deciding whether to share is a decision about the learner's own data, made on their machine with their key: every grant, update and revoke is a statement the learner signs, and the record sent under it is built on the device. Also the only way the "every look is shown to the learner" promise is kept: an access log nobody can read is a claim, not a control |
+| Checking who is asking — an organisation's proof against its domain's TXT record | **Core** | The name a learner trusts must not be one the relaying service chose. The app reads the record and checks the signature itself; the format lives in `alexandria-verify` |
+| Sitting on an interview panel in the app, and the candidate's way into the call | **Core** | It is the interview assistant and the tutoring room, both already core. What the organisation gets is the scorecard a panelist chooses to send; the transcript and notes stay on the device |
 | The signed-pull proof — challenge format, freshness window | **Core** | Both halves have to agree byte for byte, and the holder's half is what a learner is trusting. Defining it here means the service implements a published format rather than the client reverse-engineering whatever a server accepts |
 | SSO / SAML / OIDC, SCIM provisioning | **Enterprise** | Exists only because an org has many people |
 | Role-based access control, delegated admin | **Enterprise** | Same |
@@ -74,7 +76,7 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Bulk verification | **Enterprise** | A metered enterprise operation |
 | Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow — but it may not request evidence, and released evidence is legible to the one reviewer assigned to the case rather than to the organisation; see `sentinel.md` |
 | Cohort analytics, skills intelligence | **Enterprise** | Cross-user server-side aggregation |
-| The directory a learner points at — its records, its disclosure requests, its access log | **Enterprise** | Server-side state about many people, held by an organisation. Core asks it questions; it is not core |
+| Alexandria Cloud's side of this — domain claims, access requests, the grants and snapshots it holds, interview scheduling, panel links and scorecards, the access log | **Enterprise** | Server-side state about many people, held by an organisation. Core asks it questions and answers it; it is not core |
 | Seat accounting and billing | **Enterprise** | Definitionally multi-tenant |
 
 Note the pattern in the split cases: the *client* is core and the *service* is
@@ -84,7 +86,7 @@ holds data about other people. The verification logic is core; the hosted API
 with an SLA in front of it is enterprise.
 
 The split runs in both directions, which is easy to miss. Publishing is a
-learner sending something out and the client is core; reading a disclosure log
+learner sending something out and the client is core; reading an access log
 is a learner asking what came back, and that client is core for the same
 reason. A design where only the outbound half were auditable would let somebody
 agree to be findable and never see who went looking — the consent would be

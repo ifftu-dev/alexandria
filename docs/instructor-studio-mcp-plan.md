@@ -365,7 +365,7 @@ Validation (2026-09-16, Cloud worktree):
 
 Decided with the user:
 
-- **Names in `search_talent`:** a match carries its DID, its hits and its gaps; the published display name is included only for somebody who has already sent this organisation a verified presentation. Being listed in the index is consent to be found, not consent to be named to a third-party model. The console screen is unchanged and still shows names.
+- **Names in `search_talent`:** a match carries its DID, its hits and its gaps; the published display name is included only for somebody who has already sent this organisation a verified presentation (since access grants replaced presentation requests: somebody who has granted this organisation access to their skills and not revoked it). Being listed in the index is consent to be found, not consent to be named to a third-party model. The console screen is unchanged and still shows names.
 - **Candidate summaries:** no email address. Id, DID, name, when they were added, and their assessment runs with status and integrity flag. The contact address, and the evidence behind a flag, stay in the console.
 
 Implemented: `get_role`, `search_talent`, `get_candidate_summary` and `compare_candidate_to_role`, beside `list_roles`. Scopes are `roles:read`, `talent:read` and `candidates:read`; the comparison reads a candidate *and* a role, so the gate now requires every scope a tool names rather than a single one, and the challenge names the missing one.
