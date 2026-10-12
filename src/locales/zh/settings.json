@@ -33,9 +33,9 @@
         "label": "全部设置",
         "desc": "此账户的每一项设置"
       },
-      "directories": {
-        "label": "目录",
-        "desc": "你请求其告知它们持有你哪些信息的服务。"
+      "organisations": {
+        "label": "组织",
+        "desc": "谁可以查看你的技能，以及各组织向你提出了哪些请求"
       },
       "assistants": {
         "label": "Assistant access",

@@ -373,6 +373,13 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // Requests from organisations used to live under "directories". Kept as
+    // a redirect: a finished assessment and older links still point here.
+    {
+      path: '/settings/directories',
+      redirect: '/settings/organisations',
+    },
+
     // Settings — full-page, section-deep-linkable (/settings/:section).
     {
       path: '/settings/:section?',

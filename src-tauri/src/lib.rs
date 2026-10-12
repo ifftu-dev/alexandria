@@ -1822,6 +1822,7 @@ pub fn run() {
             commands::organisations::org_grant_set_sync,
             commands::organisations::org_grant_revoke,
             commands::organisations::org_sync_now,
+            commands::organisations::org_cloud,
             commands::holder_release::holder_contestable_runs,
             commands::holder_release::holder_release_evidence,
             commands::holder_release::holder_withdraw_evidence,

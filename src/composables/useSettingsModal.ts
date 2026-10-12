@@ -12,7 +12,7 @@ export type SettingsSectionId =
   | 'system'
   | 'plugins'
   | 'guardian'
-  | 'directories'
+  | 'organisations'
   | 'integrity'
   | 'assistants'
   | 'advanced'

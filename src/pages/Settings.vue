@@ -26,12 +26,11 @@ import DeveloperSeedsPanel from '@/components/settings/DeveloperSeedsPanel.vue'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
 import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
-import HiringInbox from '@/components/profile/HiringInbox.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
-import HolderDirectories from '@/components/profile/HolderDirectories.vue'
-import CredentialRequests from '@/components/profile/CredentialRequests.vue'
+import OrganisationsSettings from '@/components/organisations/OrganisationsSettings.vue'
+import CloudOriginField from '@/components/settings/CloudOriginField.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
@@ -66,14 +65,14 @@ const SECTION_ICONS: Record<SettingsSectionId, string> = {
   plugins: 'M14.7 6.3a1 1 0 001.4 0l1.6-1.6a1 1 0 011.4 1.4l-1.6 1.6a1 1 0 000 1.4l3 3a1 1 0 010 1.4l-1.6 1.6a1 1 0 01-1.4 0l-3-3a1 1 0 00-1.4 0L9 17a4 4 0 11-5.6-5.6L9 6a1 1 0 011.4 0l4.3 4.3',
   guardian: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
   integrity: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
-  directories: 'M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z',
+  organisations: 'M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z',
   assistants: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z',
   advanced: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
   developer: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4',
 }
 const SECTION_IDS: SettingsSectionId[] = [
   'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity',
-  'directories', 'assistants', 'advanced', 'developer',
+  'organisations', 'assistants', 'advanced', 'developer',
 ]
 const SECTIONS = computed<SectionMeta[]>(() => [
   ...(developerEnabled.value ? [{ id: 'developer' as const, label: 'Developer', desc: 'Test data and selective seeding', keywords: ['seed', 'test', 'demo', 'resources'] }] : []),
@@ -91,9 +90,9 @@ const SECTIONS = computed<SectionMeta[]>(() => [
     keywords: ['guardian', 'parent', 'oversight', 'minor', 'ward', 'family', 'link', 'unlink'] },
   { id: 'integrity', label: t('settings.nav.sections.integrity.label'), desc: t('settings.nav.sections.integrity.desc'),
     keywords: ['integrity', 'sentinel', 'flagged', 'evidence', 'appeal', 'camera', 'monitoring', 'proctoring', 'delete evidence'] },
-  { id: 'directories', label: t('settings.nav.sections.directories.label'), desc: t('settings.nav.sections.directories.desc'),
-    keywords: ['directory', 'directories', 'registry', 'employer', 'institution', 'who asked', 'who looked',
-               'access log', 'disclosure', 'requests', 'publish', 'talent index', 'consent', 'visibility'] },
+  { id: 'organisations', label: t('settings.nav.sections.organisations.label'), desc: t('settings.nav.sections.organisations.desc'),
+    keywords: ['organisation', 'organization', 'employer', 'institution', 'who asked', 'who looked', 'access',
+               'share', 'sync', 'revoke', 'stop sharing', 'requests', 'interview', 'offer', 'assessment', 'visibility'] },
   { id: 'assistants', label: t('settings.nav.sections.assistants.label'), desc: t('settings.nav.sections.assistants.desc'),
     keywords: ['assistant', 'mcp', 'model context protocol', 'claude', 'ai', 'connection', 'grant', 'revoke'] },
   { id: 'advanced', label: t('settings.nav.sections.advanced.label'), desc: t('settings.nav.sections.advanced.desc'),
@@ -960,16 +959,9 @@ function onSectionClick(id: SettingsSectionId) {
                   <IntegrityHistorySection />
                 </template>
 
-                <!-- ──────────── Directories ──────────── -->
-                <!-- Reachable from the profile too, where it sits under the
-                     consent that produces the listing. It is here as well
-                     because "which servers am I talking to" is a question
-                     people take to settings, and a control nobody can find is
-                     one nobody uses. -->
-                <template v-else-if="activeSection === 'directories'">
-                  <HolderDirectories />
-                  <CredentialRequests />
-                  <HiringInbox />
+                <!-- ──────────── Organisations — requests and who has access ──────────── -->
+                <template v-else-if="activeSection === 'organisations'">
+                  <OrganisationsSettings :cloud-settings-section="developerEnabled ? 'developer' : 'advanced'" />
                 </template>
 
                 <!-- ──────────── Assistant access — external MCP clients ──────────── -->
@@ -978,7 +970,7 @@ function onSectionClick(id: SettingsSectionId) {
                 </template>
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->
-                <template v-else-if="activeSection === 'developer' && developerEnabled"><DeveloperSeedsPanel /></template>
+                <template v-else-if="activeSection === 'developer' && developerEnabled"><CloudOriginField class="mt-5" /><DeveloperSeedsPanel /></template>
           <template v-else-if="activeSection === 'advanced'">
                   <PersonhoodLabPanel />
                   <AdvancedSettingsPanel />

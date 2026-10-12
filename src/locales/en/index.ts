@@ -13,6 +13,7 @@ import instructor from './instructor.json'
 import guardian from './guardian.json'
 import plugins from './plugins.json'
 import profile from './profile.json'
+import organisations from './organisations.json'
 import goals from './goals.json'
 import sentinel from './sentinel.json'
 import nav from './nav.json'
@@ -21,7 +22,7 @@ import omni from './omni.json'
 import update from './update.json'
 import interviews from './interviews.json'
 
-const messages = { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, goals, sentinel, nav, dashboard, omni, update, interviews }
+const messages = { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, organisations, goals, sentinel, nav, dashboard, omni, update, interviews }
 
 // The English catalog is the canonical shape all other locales conform to.
 export type LocaleMessages = typeof messages

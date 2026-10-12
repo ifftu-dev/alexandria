@@ -1,0 +1,144 @@
+{
+  "shareNext": "Share with an organisation",
+  "badge": {
+    "verified": "Verified: owns {domain}",
+    "unverified": "Couldn't verify who sent this: {problem}",
+    "noProof": "it came without proof from its domain",
+    "claims": "It says it is from {domain}. Nothing can be sent back until that checks out."
+  },
+  "settings": {
+    "enabled": "Receive requests from organisations",
+    "enabledDesc": "Let organisations ask to see your skills, invite you to assessments and interviews, and send you offers.",
+    "off": "Requests from organisations are off. This device doesn't contact Alexandria Cloud for them.",
+    "noCloud": "No Alexandria Cloud is set up for this network yet, so organisations can't reach you here.",
+    "noCloudDev": "Developers can point the app at one in the Developer settings.",
+    "openDeveloper": "Open Developer settings",
+    "cloudLabel": "Alexandria Cloud address",
+    "cloudDesc": "Use a different Alexandria Cloud, such as one running locally. Leave empty for the network's own.",
+    "cloudSaved": "Saved."
+  },
+  "requests": {
+    "title": "Requests",
+    "note": "Organisations reach you through Alexandria Cloud. Each one proves who it is with a file on its own website, and you can only answer those that do.",
+    "refresh": "Check now",
+    "checking": "Checking…",
+    "empty": "Nothing is waiting for you.",
+    "expires": "Expires {when}",
+    "noteLabel": "Note to the organisation (optional)",
+    "answered": "Answer sent: {status}",
+    "kind": {
+      "access": "Wants to see your skills",
+      "assessment": "Assessment request",
+      "interview": "Interview invitation",
+      "offer": "Offer"
+    },
+    "access": {
+      "purpose": "Why: {purpose}",
+      "skillsHeading": "Choose what to share",
+      "noEvidence": "No evidence yet",
+      "score": "score {level}/5",
+      "share": "Share",
+      "shareSync": "Share and keep in sync",
+      "sharing": "Sharing…",
+      "notNow": "Not now",
+      "syncNote": "Keeping in sync sends them an updated copy whenever these skills change, until you stop sharing.",
+      "notNowNote": "Not now hides this until you restart the app. They are not told.",
+      "shared": "Shared with {org}.",
+      "sharedSync": "Shared with {org}. It will be kept up to date."
+    },
+    "assessment": {
+      "skill": "Skill: {skill}",
+      "assess": "Take requested assessment",
+      "choose": "Choose a credential",
+      "noCredentials": "No matching credential yet. If they asked for a new assessment, take it from this request.",
+      "preview": "Preview what will be sent",
+      "disclosure": "This sends the whole credential you chose, including its integrity summary, to this organisation only. It does not publish your listing or send any raw monitoring captures.",
+      "exact": "Exactly what will be sent",
+      "share": "Share with this organisation",
+      "received": "Received. Their check: {outcome}"
+    },
+    "interview": {
+      "where": "Where",
+      "meetingLink": "Meeting link",
+      "inAlexandria": "In Alexandria",
+      "toBeArranged": "To be arranged by the organisation",
+      "followsRun": "Follows your assessment",
+      "chooseTime": "Choose a time",
+      "accept": "Accept",
+      "decline": "Decline",
+      "mode": {
+        "video": "Video call",
+        "call": "Phone call",
+        "inPerson": "In person",
+        "alexandria": "In Alexandria"
+      }
+    },
+    "offer": {
+      "starts": "Starts {date}",
+      "accept": "Accept offer",
+      "decline": "Decline offer"
+    },
+    "history": {
+      "title": "Your answers ({count})",
+      "accepted": "Accepted",
+      "declined": "Declined"
+    },
+    "upcoming": {
+      "title": "Upcoming interviews",
+      "join": "Join interview",
+      "opensSoon": "Opens 15 minutes before"
+    }
+  },
+  "access": {
+    "title": "Who has access",
+    "note": "Organisations you have shared skills with. They see only the skills listed, and you can stop sharing at any time.",
+    "empty": "You haven't shared your skills with any organisation.",
+    "purpose": "Why: {purpose}",
+    "sharedOn": "Shared {date}",
+    "viewed": "Viewed once · last {date} | Viewed {count} times · last {date}",
+    "notViewed": "Not opened yet",
+    "keepUpToDate": "Keep up to date",
+    "updated": "Updated {relative}",
+    "syncFailed": "Couldn't update: {error}",
+    "stop": "Stop sharing",
+    "stopTitle": "Stop sharing with {org}?",
+    "stopMessage": "{org} will no longer see these skills. Alexandria Cloud deletes what it holds for them.",
+    "revokedHeading": "No longer shared ({count})",
+    "stoppedOn": "Stopped {date}",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "syncReport": "Sent {sent}. Already up to date: {unchanged}.",
+    "syncFailedItem": "Couldn't send: {detail}",
+    "visibility": {
+      "heading": "Institutions that can see you by name",
+      "empty": "No institution has been given this.",
+      "note": "Instructors see the learners in modules they teach either way — that is how somebody who is struggling gets help. This is about administrators, who otherwise see only counts. It ends by itself when your enrolment does.",
+      "on": "Administrators at {institution} can see your named outcomes",
+      "off": "Administrators at {institution} see only totals",
+      "allow": "Allow",
+      "withdraw": "Withdraw"
+    },
+    "views": {
+      "heading": "Recent views",
+      "empty": "Nobody has looked yet.",
+      "named": "{who} at {where} opened your record",
+      "aggregate": "{where} counted you in a report that named nobody",
+      "module": "on {module}"
+    }
+  },
+  "problems": {
+    "heading": "Couldn't check",
+    "note": "A check that failed is shown rather than skipped — otherwise it would look the same as having nothing to report."
+  },
+  "listing": {
+    "framing": "Saving only records these choices. Nothing is sent until you publish, or turn on keeping your listing up to date.",
+    "heading": "Your listing",
+    "publishNow": "Publish now",
+    "publishing": "Publishing…",
+    "published": "Published.",
+    "publishFailed": "Couldn't publish: {error}",
+    "nothingToPublish": "Choose at least one skill and save before publishing.",
+    "keepUpToDate": "Keep my listing up to date",
+    "keepNote": "Republishes your listing automatically whenever your chosen skills change."
+  }
+}
