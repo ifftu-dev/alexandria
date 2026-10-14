@@ -85,8 +85,11 @@ async function join() {
     if (runCheck) {
       await interviewCheck.begin({ interviewId: interviewId.value, cloud: cloud.value, camera: checkCamera.value })
     }
-    const room = await tutoring.joinRoom(ticket.value, undefined, undefined, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker)
-    await router.push(`/tutoring/${room.id}`)
+    const room = await tutoring.joinRoom(ticket.value, undefined, undefined, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, {
+      kind: 'interview_candidate',
+      contextId: interviewId.value,
+    })
+    await router.push(`/interview-call/${room.id}?cloud=${encodeURIComponent(cloud.value)}`)
   } catch (cause) {
     if (runCheck) await interviewCheck.abandon()
     error.value = cause instanceof Error ? cause.message : String(cause)

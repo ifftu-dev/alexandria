@@ -177,7 +177,8 @@
     "description": "Alexandria will transcribe this device's microphone only when the WebView guarantees on-device processing, then share final text segments and your room display name with current peers. Tutoring does not persist these captions.",
     "unavailable": "On-device speech recognition is not available in this WebView, so captions cannot be enabled without risking audio leaving the device.",
     "cancel": "Cancel",
-    "enable": "Enable and share text"
+    "enable": "Enable and share text",
+    "descriptionInterview": "Alexandria will transcribe this device's microphone only when the WebView guarantees on-device processing, then share final text segments and your room display name with the people in this interview. In an interview, the panel's device keeps these captions as the interview transcript."
   },
   "interviewRoom": {
     "eyebrow": "Interview in Alexandria",

@@ -4,6 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlatform } from '@/composables/usePlatform'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useInterviewCheck } from '@/composables/useInterviewCheck'
+import { useSentinel } from '@/composables/useSentinel'
+import { callHome, callScreen } from '@/utils/callKinds'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -20,7 +23,13 @@ const {
   stopPolling,
   toggleAudio,
   leaveRoom,
+  sessions,
 } = useTutoringRoom()
+const interviewCheck = useInterviewCheck()
+const sentinel = useSentinel()
+
+// The call's own record says what it is for, and so where it lives.
+const callRecord = computed(() => sessions.value.find(s => s.id === sessionId.value) ?? null)
 
 onMounted(async () => {
   await setupEventListeners()
@@ -37,6 +46,7 @@ const isVisible = computed(() => {
     && route.name !== 'tutoring-session'
     && route.name !== 'interview-session'
     && route.name !== 'panel-session'
+    && route.name !== 'interview-call'
 })
 
 const sessionTitle = computed(() => sessionStatus.value?.session_title ?? t('tutoring.header.title'))
@@ -59,7 +69,7 @@ const previewSrc = computed(() => {
 
 async function openSession() {
   if (!sessionId.value) return
-  await router.push(`/tutoring/${sessionId.value}`)
+  await router.push(callScreen(callRecord.value ?? { id: sessionId.value }))
 }
 
 async function handleToggleAudio() {
@@ -70,12 +80,21 @@ async function handleToggleAudio() {
   }
 }
 
+/**
+ * Leave this call, the way its kind leaves: never ends it for anyone else.
+ * The candidate's integrity check is finished and its result sent; any
+ * other local Sentinel run stops. A panelist or classroom member can come
+ * back while the call goes on.
+ */
 async function handleLeave() {
+  const call = callRecord.value ?? { id: sessionId.value }
+  const onCallScreen = route.path === callScreen(call) || route.path.startsWith('/tutoring')
   try {
     await leaveRoom()
-    if (route.path.startsWith('/tutoring')) {
-      await router.push('/tutoring')
-    }
+    const next = await interviewCheck.finish()
+    if (sentinel.isActive.value) await sentinel.stop()
+    if (next) await router.push(next)
+    else if (onCallScreen) await router.push(callHome(call))
   } catch {
     // Error is surfaced through the shared tutoring state.
   }

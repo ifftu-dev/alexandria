@@ -12,6 +12,7 @@ import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
 import type { SentinelFrame } from '@/utils/sentinel/frame'
 import { openCameraPreview } from '@/utils/callCamera'
+import { callHome, sharesInvites } from '@/utils/callKinds'
 import { useCallDevices } from '@/composables/useCallDevices'
 import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 
@@ -121,11 +122,22 @@ watch(() => lastError.value, () => {
 
 const isActive = computed(() => sessionStatus.value?.session_id === sessionId.value)
 const sessionRecord = computed(() => sessions.value.find(s => s.id === sessionId.value))
+// What this call is for. An interview or classroom call shows on this
+// screen too, but offers no invite and leads back to its own home.
+const callKind = computed(() => sessionRecord.value?.kind ?? (route.name === 'interview-call' ? 'interview_candidate' : 'tutoring'))
+const offersInvites = computed(() => sharesInvites(callKind.value))
+const isInterviewCall = computed(() => callKind.value.startsWith('interview_'))
+const homeRoute = computed(() => callHome(
+  sessionRecord.value ?? { id: sessionId.value, kind: callKind.value },
+  typeof route.query.cloud === 'string' ? route.query.cloud : null,
+))
 const sessionEnded = computed(() => sessionRecord.value?.status === 'ended')
 const sessionTitle = computed(() => isActive.value ? sessionStatus.value?.session_title ?? '' : sessionRecord.value?.title ?? t('tutoring.header.title'))
 const joining = ref(false)
 async function rejoin() {
-  if (!sessionRecord.value?.ticket || sessionEnded.value) return
+  // Only open tutoring rejoins from here; other kinds rejoin from their own
+  // screen, which runs their consent and checks first.
+  if (!sessionRecord.value?.ticket || sessionEnded.value || callKind.value !== 'tutoring') return
   joining.value = true
   try { const joined = await joinRoom(sessionRecord.value.ticket, sessionRecord.value.title); await router.replace(`/tutoring/${joined.id}`) } catch { /* useTutoringRoom exposes the error in lastError. */ } finally { joining.value = false }
 }
@@ -360,7 +372,7 @@ async function handleLeave() {
     const hadCheck = checkRunning.value
     await leaveRoom()
     if (await finishCheck()) return
-    if (!hadCheck) router.push('/tutoring')
+    if (!hadCheck) router.push(homeRoute.value)
   } catch {
     // error handled in composable
   }
@@ -494,7 +506,7 @@ function peerInitials(nodeId: string): string {
       <div class="flex items-center gap-2 sm:gap-3 min-w-0">
         <button
           class="flex items-center gap-1 rounded-lg px-1.5 py-1 sm:px-2 sm:py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          @click="router.push('/tutoring')"
+          @click="router.push(homeRoute)"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -579,7 +591,7 @@ function peerInitials(nodeId: string): string {
 
         <!-- Copy ticket -->
         <button
-          v-if="isActive && sessionStatus?.ticket"
+          v-if="isActive && sessionStatus?.ticket && offersInvites"
           class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="copyTicket"
           :title="ticketCopied ? $t('common.actions.copied') : $t('tutoring.session.copyInviteTitle')"
@@ -595,7 +607,7 @@ function peerInitials(nodeId: string): string {
 
         <!-- Show QR invite -->
         <button
-          v-if="isActive && sessionStatus?.ticket"
+          v-if="isActive && sessionStatus?.ticket && offersInvites"
           class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="showQrInvite = true"
           :title="$t('tutoring.session.qrTitle')"
@@ -989,12 +1001,12 @@ function peerInitials(nodeId: string): string {
             </div>
             <h3 class="text-sm font-medium text-foreground">{{ $t(sessionEnded ? 'tutoring.session.ended' : 'tutoring.session.notJoinedTitle') }}</h3>
             <p class="mt-1 text-xs text-muted-foreground">{{ $t(sessionEnded ? 'tutoring.session.endedDescription' : 'tutoring.session.notJoinedDescription') }}</p>
-            <button v-if="sessionRecord?.ticket && !sessionEnded" :disabled="joining" class="mt-5 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50" @click="rejoin">{{ $t(joining ? 'tutoring.device.joining' : 'tutoring.join.join') }}</button>
+            <button v-if="sessionRecord?.ticket && !sessionEnded && callKind === 'tutoring'" :disabled="joining" class="mt-5 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50" @click="rejoin">{{ $t(joining ? 'tutoring.device.joining' : 'tutoring.join.join') }}</button>
             <button
               class="mt-4 mx-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              @click="router.push('/tutoring')"
+              @click="router.push(homeRoute)"
             >
-              {{ $t('tutoring.session.backToLobby') }}
+              {{ callKind === 'tutoring' ? $t('tutoring.session.backToLobby') : $t('common.actions.back') }}
             </button>
           </div>
         </div>
@@ -1417,7 +1429,7 @@ function peerInitials(nodeId: string): string {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
-        <div v-if="showQrInvite && sessionStatus?.ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showQrInvite = false">
+        <div v-if="showQrInvite && sessionStatus?.ticket && offersInvites" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showQrInvite = false">
           <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
             <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.qrInvite.title') }}</h2>
             <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.qrInvite.desc') }}</p>
@@ -1454,7 +1466,7 @@ function peerInitials(nodeId: string): string {
       <div v-if="showCaptionConsent" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" @click.self="showCaptionConsent = false">
         <div class="card w-full max-w-md p-6">
           <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.captions.title') }}</h2>
-          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ $t('tutoring.captions.description') }}</p>
+          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ isInterviewCall ? $t('tutoring.captions.descriptionInterview') : $t('tutoring.captions.description') }}</p>
           <p v-if="!speech.locallyAvailable.value" class="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">{{ $t('tutoring.captions.unavailable') }}</p>
           <p v-if="speech.error.value" class="mt-2 text-xs text-destructive">{{ speech.error.value }}</p>
           <div class="mt-6 flex justify-end gap-2">

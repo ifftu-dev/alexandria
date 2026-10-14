@@ -6,7 +6,7 @@ import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecogniti
 import { usePanel, type PanelInterview } from '@/composables/usePanel'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSentinel } from '@/composables/useSentinel'
-import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useTutoringRoom, type CallContext } from '@/composables/useTutoringRoom'
 import { useCallDevices } from '@/composables/useCallDevices'
 import { openCameraPreview } from '@/utils/callCamera'
 import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
@@ -29,6 +29,12 @@ const interviewId = computed(() => String(route.params.id))
 // A seat on an organisation's panel lives under /panel, which a learner
 // account can open without instructor mode; a local interview under /interviews.
 const basePath = computed(() => (route.path.startsWith('/panel') ? '/panel' : '/interviews'))
+// A panel seat and the in-person assistant are different kinds of call; both
+// belong to this interview, which is where the mini window brings you back.
+const callContext = computed<CallContext>(() => ({
+  kind: route.path.startsWith('/panel') ? 'interview_panel' : 'interview_assistant',
+  contextId: interviewId.value,
+}))
 const panelApi = usePanel()
 const panel = ref<PanelInterview | null>(null)
 const panelError = ref<string | null>(null)
@@ -218,7 +224,7 @@ async function enterPanelRoom(title: string, name: string) {
   panel.value = current
   if (current.room.ticket) {
     try {
-      return await tutoring.joinRoom(current.room.ticket, title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker)
+      return await tutoring.joinRoom(current.room.ticket, title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
     } catch (cause) {
       // Nobody is left in the room Cloud knows about (every panelist's app
       // closed): open a new one below and hand Cloud its ticket instead.
@@ -227,7 +233,7 @@ async function enterPanelRoom(title: string, name: string) {
       tutoring.clearError()
     }
   }
-  const room = await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker)
+  const room = await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
   if (!room.ticket) throw new Error('the room has no ticket to share')
   panel.value = await panelApi.setRoom(session.value.id, room.ticket)
   return room
@@ -241,7 +247,7 @@ async function startInterview() {
   try {
     room = panel.value
       ? await enterPanelRoom(title, name)
-      : await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker)
+      : await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
   } catch (cause) {
     panelError.value = cause instanceof Error ? cause.message : String(cause)
     return

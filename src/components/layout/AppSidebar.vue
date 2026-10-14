@@ -14,7 +14,7 @@ defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
 const router = useRouter()
 const route = useRoute()
-const { sessions: tutoringSessionsList, refreshSessions } = useTutoringRoom()
+const { tutoringSessions: tutoringSessionsList, refreshSessions } = useTutoringRoom()
 const { invoke } = useLocalApi()
 
 const isActive = (path: string) => {

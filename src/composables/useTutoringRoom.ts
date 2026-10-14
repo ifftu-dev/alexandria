@@ -1,6 +1,7 @@
-import { ref, readonly } from 'vue'
+import { computed, ref, readonly } from 'vue'
 import type {
   TutoringSessionInfo,
+  CallKind,
   TutoringSessionStatus,
   TutoringPeer,
   TutoringVideoFrame,
@@ -276,12 +277,20 @@ async function refreshSessions(): Promise<void> {
   }
 }
 
+/** What a call is for, recorded with it when it is created or joined. */
+export interface CallContext {
+  kind?: CallKind
+  /** The classroom, interview or plugin element it belongs to. */
+  contextId?: string | null
+}
+
 async function createRoom(
   title: string,
   displayName?: string,
   cameraId?: string | null,
   micId?: string | null,
   speakerId?: string | null,
+  call: CallContext = {},
 ): Promise<TutoringSessionInfo> {
   const generation = profileGeneration
   loading.value = true
@@ -293,6 +302,8 @@ async function createRoom(
       cameraId: cameraId || null,
       micId: micId || null,
       speakerId: speakerId || null,
+      kind: call.kind ?? 'tutoring',
+      contextId: call.contextId ?? null,
     })
     if (!isCurrentProfile(generation)) throw new Error('Profile changed while creating room')
     await setupEventListeners()
@@ -321,6 +332,7 @@ async function joinRoom(
   cameraId?: string | null,
   micId?: string | null,
   speakerId?: string | null,
+  call: CallContext = {},
 ): Promise<TutoringSessionInfo> {
   const generation = profileGeneration
   loading.value = true
@@ -333,6 +345,8 @@ async function joinRoom(
       cameraId: cameraId || null,
       micId: micId || null,
       speakerId: speakerId || null,
+      kind: call.kind ?? 'tutoring',
+      contextId: call.contextId ?? null,
     })
     if (!isCurrentProfile(generation)) throw new Error('Profile changed while joining room')
     await setupEventListeners()
@@ -577,6 +591,8 @@ export function useTutoringRoom() {
   return {
     sessionStatus: readonly(sessionStatus),
     sessions: readonly(sessions),
+    /** Only standalone tutoring sessions, for the tutoring lobby and sidebar. */
+    tutoringSessions: computed(() => sessions.value.filter(s => (s.kind ?? 'tutoring') === 'tutoring')),
     lastError: readonly(lastError),
     loading: readonly(loading),
     videoFrames: readonly(videoFrames),

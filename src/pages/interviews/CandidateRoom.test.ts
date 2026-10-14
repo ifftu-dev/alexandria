@@ -73,8 +73,8 @@ describe('CandidateRoom', () => {
 
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
     expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, null, null, null)
-    expect(mocks.push).toHaveBeenCalledWith('/tutoring/room-7')
+    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, null, null, null, { kind: 'interview_candidate', contextId: 'int-1' })
+    expect(mocks.push).toHaveBeenCalledWith(`/interview-call/room-7?cloud=${encodeURIComponent('http://127.0.0.1:8787')}`)
 
     // No more asking once the room is known.
     const asked = mocks.invoke.mock.calls.length
@@ -108,7 +108,7 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
     expect(mocks.begin).toHaveBeenCalledWith({ interviewId: 'int-1', cloud: 'http://127.0.0.1:8787', camera: true })
     expect(mocks.begin.mock.invocationCallOrder[0]!).toBeLessThan(mocks.joinRoom.mock.invocationCallOrder[0]!)
-    expect(mocks.push).toHaveBeenCalledWith('/tutoring/room-7')
+    expect(mocks.push).toHaveBeenCalledWith(`/interview-call/room-7?cloud=${encodeURIComponent('http://127.0.0.1:8787')}`)
   })
 
   it('joins without the check when the candidate says no', async () => {
@@ -117,7 +117,7 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=check-skip]').setValue(true)
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
     expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, null, null, null)
+    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, null, null, null, { kind: 'interview_candidate', contextId: 'int-1' })
   })
 
   it('stops the check if the room cannot be joined', async () => {
@@ -170,7 +170,7 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=device-camera]').setValue('Index(1)')
     await wrapper.get('[data-testid=device-mic]').setValue('mic-1')
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
-    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, 'Index(1)', 'mic-1', null)
+    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, 'Index(1)', 'mic-1', null, { kind: 'interview_candidate', contextId: 'int-1' })
     expect(JSON.parse(localStorage.getItem('alexandria.call-devices') ?? '{}')).toEqual({ camera: 'Index(1)', mic: 'mic-1', speaker: null })
   })
 })
