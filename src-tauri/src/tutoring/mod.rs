@@ -32,3 +32,4 @@ pub use manager_mobile::TutoringManager;
 
 pub(crate) mod call_kind;
 pub(crate) mod presence;
+mod preview_jpeg;

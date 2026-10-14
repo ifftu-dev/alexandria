@@ -71,6 +71,55 @@ function isCurrentProfile(generation: number): boolean {
 const pendingFrames: Record<string, string> = {}
 let rafId: number | null = null
 
+/**
+ * Frames waiting to be decoded, newest only, per tile.
+ *
+ * An <img> handed a JPEG it has not decoded yet can paint nothing until it
+ * has, so a tile flashed blank between frames. Each frame is decoded
+ * off-screen first and only then shown; a tile that decodes slower than
+ * frames arrive skips to the newest. Bumping a tile's epoch (its video ended)
+ * or `frameEpoch` (teardown) drops whatever is still in flight.
+ */
+const decodeQueue: Record<string, string> = {}
+const decoding = new Set<string>()
+const tileEpochs: Record<string, number> = {}
+let frameEpoch = 0
+
+function queueVideoFrame(nodeId: string, src: string) {
+  decodeQueue[nodeId] = src
+  if (decoding.has(nodeId)) return
+  decoding.add(nodeId)
+  void decodeFrames(nodeId, frameEpoch, tileEpochs[nodeId] ?? 0)
+}
+
+async function decodeFrames(nodeId: string, epoch: number, tileEpoch: number) {
+  const current = () => epoch === frameEpoch && tileEpoch === (tileEpochs[nodeId] ?? 0)
+  while (current() && decodeQueue[nodeId] !== undefined) {
+    const src = decodeQueue[nodeId]!
+    delete decodeQueue[nodeId]
+    const still = new Image()
+    still.src = src
+    try {
+      await still.decode()
+    } catch {
+      continue
+    }
+    if (!current()) break
+    pendingFrames[nodeId] = src
+    if (rafId === null) {
+      rafId = requestAnimationFrame(flushVideoFrames)
+    }
+  }
+  if (epoch === frameEpoch) decoding.delete(nodeId)
+}
+
+function dropVideoTile(nodeId: string) {
+  tileEpochs[nodeId] = (tileEpochs[nodeId] ?? 0) + 1
+  decoding.delete(nodeId)
+  delete decodeQueue[nodeId]
+  delete pendingFrames[nodeId]
+}
+
 function flushVideoFrames() {
   rafId = null
   const keys = Object.keys(pendingFrames)
@@ -104,10 +153,7 @@ async function setupEventListeners() {
       const nextVideoUnlisten = await listen<TutoringVideoFrame>('tutoring:video-frame', (event) => {
         if (!isCurrentProfile(generation)) return
         const { node_id, jpeg_b64 } = event.payload
-        pendingFrames[node_id] = `data:image/jpeg;base64,${jpeg_b64}`
-        if (rafId === null) {
-          rafId = requestAnimationFrame(flushVideoFrames)
-        }
+        queueVideoFrame(node_id, `data:image/jpeg;base64,${jpeg_b64}`)
       })
       installed.push(nextVideoUnlisten)
       if (!isCurrentProfile(generation)) return
@@ -137,6 +183,7 @@ async function setupEventListeners() {
         (event) => {
           if (!isCurrentProfile(generation)) return
           const { node_id } = event.payload
+          dropVideoTile(node_id)
           const updated = { ...videoFrames.value }
           delete updated[node_id]
           videoFrames.value = updated
@@ -222,6 +269,11 @@ function teardownEventListeners() {
   }
   for (const key of Object.keys(pendingFrames)) {
     delete pendingFrames[key]
+  }
+  frameEpoch++
+  decoding.clear()
+  for (const key of Object.keys(decodeQueue)) {
+    delete decodeQueue[key]
   }
   micLevel.value = 0
   outputLevel.value = 0

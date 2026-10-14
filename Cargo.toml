@@ -28,6 +28,12 @@ exclude = ["plugins"]
 [profile.dev.package.scrypt]
 opt-level = 3
 
+# Call video reaches the webview as JPEG frames encoded by `image`. Unoptimised,
+# the encoder keeps a phone's CPU pinned and the self view drops to a few
+# frames a second, so development builds would misreport how calls behave.
+[profile.dev.package.image]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true

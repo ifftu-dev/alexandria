@@ -11,14 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use std::io::Cursor;
-
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use base64::Engine;
 use bytes::Bytes;
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh::EndpointId;
 use iroh_gossip::net::Gossip;
@@ -1494,7 +1487,10 @@ impl TutoringManager {
                     video,
                     node_id.to_string(),
                     app_handle.clone(),
-                    (640, 360),
+                    // Fit inside 960x960: a landscape camera arrives at
+                    // 960x540 and a phone held upright at 540x960, instead
+                    // of both squeezed into 640x360.
+                    (960, 960),
                     82,
                     30,
                     Some(inner.clone()),
@@ -2241,6 +2237,7 @@ impl TutoringManager {
             );
 
             let frame_interval = Duration::from_millis(1000 / fps as u64);
+            let gate = frame_interval.saturating_sub(Duration::from_millis(8));
             let mut last_emit = std::time::Instant::now();
             let mut frame_count: u64 = 0;
 
@@ -2291,49 +2288,30 @@ impl TutoringManager {
                                 );
                             }
                         }
-                        // Rate-limit to ~15 fps
+                        // Frames arrive on the source's clock; a gate exactly
+                        // one interval wide drops every other one whenever
+                        // they arrive a hair early.
                         let now = std::time::Instant::now();
-                        if now.duration_since(last_emit) < frame_interval {
+                        if now.duration_since(last_emit) < gate {
                             continue;
                         }
                         last_emit = now;
 
-                        let img = frame.img();
-                        let (width, height) = img.dimensions();
-
-                        // Convert RGBA -> RGB (JPEG does not support alpha channel).
-                        // `as_chunks` rather than `chunks_exact`: the pixel
-                        // stride is a constant, so this hands back `[u8; 4]`
-                        // and the per-element bounds checks go with it.
-                        let rgb_data: Vec<u8> = img
-                            .as_raw()
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .flat_map(|px| [px[0], px[1], px[2]])
-                            .collect();
-
-                        // Encode to JPEG (quality 60 for good size/quality tradeoff)
-                        let mut jpeg_buf = Vec::with_capacity((width * height) as usize / 4);
-                        let mut cursor = Cursor::new(&mut jpeg_buf);
-                        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-                            &mut cursor,
-                            quality,
-                        );
-                        match encoder.write_image(
-                            &rgb_data,
-                            width,
-                            height,
-                            image::ExtendedColorType::Rgb8,
-                        ) {
-                            Ok(()) => {}
-                            Err(e) => {
+                        // The decoder already fitted the frame to the
+                        // viewport; encoding runs off the async workers.
+                        let img = frame.img().clone();
+                        let encoded = tokio::task::spawn_blocking(move || {
+                            super::preview_jpeg::encode(img, (u32::MAX, u32::MAX), quality)
+                        })
+                        .await;
+                        let (jpeg_b64, width, height) = match encoded {
+                            Ok(Ok(frame)) => frame,
+                            Ok(Err(e)) => {
                                 log::warn!("tutoring: JPEG encode failed for {node_id}: {e}");
                                 continue;
                             }
-                        }
-
-                        let jpeg_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
+                            Err(_) => continue,
+                        };
 
                         let _ = app_handle.emit(
                             "tutoring:video-frame",

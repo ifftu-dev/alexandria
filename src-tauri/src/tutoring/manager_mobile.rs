@@ -20,14 +20,11 @@
 //! Phase 3: Full audio+video P2P tutoring on iOS.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use bytes::Bytes;
-use image::ImageEncoder;
 use iroh::{Endpoint, EndpointId};
 use iroh_gossip::net::Gossip;
 use live::media::audio::{AudioBackend, InputStream, OutputStream};
@@ -3321,17 +3318,28 @@ impl TutoringManager {
     ) -> TaskHandle {
         let (mut frames, handle) = watch.split();
         let is_self_preview = node_id == "self";
+        // The decoder scales each frame to fit this box before the JPEG step,
+        // which is the costly part: a 720x1280 self view encoded several
+        // times a second held a core at 100% (iOS killed the app for it). The
+        // self view only fills a phone-sized tile, so 360x640 is plenty; a
+        // remote camera fits 960x960 whichever way up it is held.
         let viewport = if is_self_preview {
-            (720, 1280)
+            (360, 640)
         } else {
-            (1280, 720)
+            (960, 960)
         };
         let jpeg_quality = if is_self_preview { 75 } else { 70 };
+        // The encoder scales again only if a frame still arrives larger.
+        let max_size = viewport;
         let frame_interval = if is_self_preview {
-            Duration::from_millis(55)
+            Duration::from_millis(42)
         } else {
             Duration::from_millis(95)
         };
+        // Frames arrive on the camera's own clock; a gate exactly one
+        // interval wide drops every other one whenever they arrive a hair
+        // early.
+        let gate = frame_interval.saturating_sub(Duration::from_millis(8));
         handle.set_viewport(viewport.0, viewport.1);
 
         tasks.clone().spawn(async move {
@@ -3384,40 +3392,26 @@ impl TutoringManager {
                             ));
                         }
                         let now = std::time::Instant::now();
-                        if now.duration_since(last_emit) < frame_interval {
+                        if now.duration_since(last_emit) < gate {
                             continue;
                         }
                         last_emit = now;
 
-                        let img = frame.img();
-                        let (width, height) = img.dimensions();
-
-                        let rgb_data: Vec<u8> = img
-                            .as_raw()
-                            .chunks_exact(4)
-                            .flat_map(|px| [px[0], px[1], px[2]])
-                            .collect();
-
-                        let mut jpeg_buf = Vec::with_capacity((width * height) as usize / 4);
-                        let mut cursor = Cursor::new(&mut jpeg_buf);
-                        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-                            &mut cursor,
-                            jpeg_quality,
-                        );
-                        match encoder.write_image(
-                            &rgb_data,
-                            width,
-                            height,
-                            image::ExtendedColorType::Rgb8,
-                        ) {
-                            Ok(()) => {}
-                            Err(e) => {
+                        // Scaling and encoding run on a blocking thread, not
+                        // on the async workers the call's networking shares.
+                        let img = frame.img().clone();
+                        let encoded = tokio::task::spawn_blocking(move || {
+                            super::preview_jpeg::encode(img, max_size, jpeg_quality)
+                        })
+                        .await;
+                        let (jpeg_b64, width, height) = match encoded {
+                            Ok(Ok(frame)) => frame,
+                            Ok(Err(e)) => {
                                 log::warn!("tutoring: JPEG encode failed for {node_id}: {e}");
                                 continue;
                             }
-                        }
-
-                        let jpeg_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
+                            Err(_) => continue,
+                        };
 
                         let _ = app_handle.emit(
                             "tutoring:video-frame",
