@@ -329,6 +329,16 @@ pub async fn tutoring_toggle_audio(
     state.tutoring.toggle_audio(enable).await
 }
 
+/// Use a different camera for the rest of the session, switching now if
+/// the camera is on. Returns the name of the camera in use.
+#[tauri::command]
+pub async fn tutoring_set_camera(
+    camera_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.tutoring.set_camera(camera_id).await
+}
+
 #[tauri::command]
 pub async fn tutoring_set_audio_devices(
     _mic_id: Option<String>,

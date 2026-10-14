@@ -11,6 +11,9 @@ import { LiveDiagnosticsModal } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
 import type { SentinelFrame } from '@/utils/sentinel/frame'
+import { openCameraPreview } from '@/utils/callCamera'
+import { useCallDevices } from '@/composables/useCallDevices'
+import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -42,7 +45,12 @@ const {
   listDevices,
   setAudioDevices,
   getDiagnostics,
+  setCamera,
+  mediaBusy,
 } = useTutoringRoom()
+const callDevices = useCallDevices()
+const deviceChoice = callDevices.choice
+const showCallDevices = ref(false)
 
 const { isMobilePlatform, isIOS } = usePlatform()
 const speech = useLocalSpeechRecognition()
@@ -155,29 +163,26 @@ async function attachSelfStream() {
 }
 
 async function startSelfPreview() {
-  // A mobile camera permits only one client, so the webview must not open the
-  // device when the Rust side already holds it to publish to peers — there,
-  // getUserMedia returns a blank stream and the Rust JPEG bridge
-  // (selfVideoSrc) is the correct source.
-  //
-  // That is true on iOS, where manager_mobile drives an AVCaptureSession. It is
-  // NOT true on Android: the capture backend is nokhwa, which ships bindings
-  // for macOS, Windows and Linux only, so nothing claims the camera there and
-  // gating Android out left it with no camera path at all. Let the webview open
-  // it until an Android Camera2 backend exists, at which point this should go
-  // back to gating both platforms.
+  // On iOS the call itself holds the camera and hands the webview JPEG frames
+  // (selfVideoSrc); opening it here would get a blank stream. Elsewhere the
+  // webview opens the same camera the call publishes, by the name the call
+  // reports, so the self view shows what everyone else sees. No name (the
+  // camera did not open, or Android's Camera2 source) leaves the JPEG frames.
   if (isIOS) return
   if (selfStream.value) return
+  const cameraName = cameraNameNow.value
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-      audio: false,
-    })
+    const stream = await openCameraPreview(cameraName)
+    if (!stream) return
+    if (selfStream.value || cameraNameNow.value !== cameraName) {
+      for (const track of stream.getTracks()) track.stop()
+      return
+    }
     selfStream.value = stream
     if (checkRunning.value) sentinel.reportCameraDevice(stream.getVideoTracks?.()[0]?.label ?? null)
     await attachSelfStream()
   } catch (e) {
-    console.warn('[tutoring] getUserMedia for self-preview failed:', e)
+    console.warn('[tutoring] self-preview camera failed to open:', e)
   }
 }
 
@@ -194,14 +199,16 @@ function stopSelfPreview() {
 // Sync with session video state. Only run the native preview when the
 // camera track is on AND we're not screen-sharing (screen share reuses the
 // Rust JPEG bridge).
+// The camera the self view should show: the published one, while the
+// camera is on and the screen is not being shared.
+const cameraNameNow = computed(() =>
+  isActive.value && videoEnabled.value && !screenSharing.value ? (sessionStatus.value?.camera_name ?? null) : null,
+)
 watch(
-  [videoEnabled, screenSharing, isActive],
-  ([video, screen, active]) => {
-    if (active && video && !screen) {
-      startSelfPreview()
-    } else {
-      stopSelfPreview()
-    }
+  cameraNameNow,
+  (camera) => {
+    stopSelfPreview()
+    if (camera) void startSelfPreview()
   },
   { immediate: true },
 )
@@ -212,7 +219,7 @@ watch(
 //
 // On iOS that preview is not a webview stream — the call holds the camera
 // and hands the webview JPEG frames — so the check decodes the latest one.
-const nativeSelfFrames = computed(() => isIOS && videoEnabled.value && !screenSharing.value && selfVideoSrc.value !== null)
+const nativeSelfFrames = computed(() => !selfStreamActive.value && videoEnabled.value && !screenSharing.value && selfVideoSrc.value !== null)
 const checkCameraLive = computed(() => selfStreamActive.value || nativeSelfFrames.value)
 let checkFaceTimer: ReturnType<typeof setInterval> | null = null
 let checkGazeTimer: ReturnType<typeof setInterval> | null = null
@@ -403,6 +410,11 @@ async function applyAudioDevices() {
   }
 }
 
+async function openCallDevices() {
+  await callDevices.refresh().catch(() => undefined)
+  showCallDevices.value = true
+}
+
 async function handleToggleScreenShare() {
   try {
     await toggleScreenShare(!screenSharing.value)
@@ -555,6 +567,14 @@ function peerInitials(nodeId: string): string {
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5h2.25m13.5 0H21m-15.75 4.5H6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 15h.75M7.5 10.5V8.25A2.25 2.25 0 019.75 6h4.5A2.25 2.25 0 0116.5 8.25v2.25m-9 0h9" />
           </svg>
           <span class="hidden sm:inline">{{ $t('tutoring.session.audioLabel') }}</span>
+        </button>
+        <button
+          v-if="isActive && !isMobilePlatform"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+          data-testid="call-devices"
+          @click="openCallDevices"
+        >
+          <span>{{ $t('tutoring.device.devices') }}</span>
         </button>
 
         <!-- Copy ticket -->
@@ -989,6 +1009,7 @@ function peerInitials(nodeId: string): string {
                 ? 'border-border bg-muted text-foreground hover:bg-muted/80'
                 : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
               :title="audioEnabled ? $t('tutoring.controls.muteMic') : $t('tutoring.controls.unmuteMic')"
+              :disabled="mediaBusy"
               @click="handleToggleAudio"
             >
               <svg v-if="audioEnabled" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1024,6 +1045,7 @@ function peerInitials(nodeId: string): string {
               ? 'border-border bg-muted text-foreground hover:bg-muted/80'
               : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
             :title="videoEnabled ? $t('tutoring.controls.cameraOff') : $t('tutoring.controls.cameraOn')"
+            :disabled="mediaBusy"
             @click="handleToggleVideo"
           >
             <svg v-if="videoEnabled && !screenSharing" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1042,6 +1064,7 @@ function peerInitials(nodeId: string): string {
               ? 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/20'
               : 'border-border bg-muted text-foreground hover:bg-muted/80'"
             :title="screenSharing ? $t('tutoring.controls.stopShare') : $t('tutoring.controls.share')"
+            :disabled="mediaBusy"
             @click="handleToggleScreenShare"
           >
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1207,6 +1230,31 @@ function peerInitials(nodeId: string): string {
         </svg>
       </button>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="showCallDevices"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        @click.self="showCallDevices = false"
+      >
+        <div class="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+          <h2 class="mb-4 text-lg font-semibold text-foreground">{{ $t('tutoring.device.devices') }}</h2>
+          <CallDevicePicker
+            in-call
+            :model-value="deviceChoice"
+            :devices="callDevices.devices.value"
+            :disabled="mediaBusy"
+            @update:model-value="value => Object.assign(deviceChoice, value)"
+            @camera-change="camera => setCamera(camera).catch(() => undefined)"
+          />
+          <div class="mt-5 flex justify-end">
+            <button class="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted" @click="showCallDevices = false">
+              {{ $t('tutoring.session.dismiss') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <Transition

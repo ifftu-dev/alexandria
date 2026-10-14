@@ -1758,6 +1758,7 @@ pub fn run() {
             commands::tutoring::tutoring_toggle_video,
             commands::tutoring::tutoring_toggle_audio,
             commands::tutoring::tutoring_set_audio_devices,
+            commands::tutoring::tutoring_set_camera,
             commands::tutoring::tutoring_toggle_screen_share,
             commands::tutoring::tutoring_send_chat,
             commands::tutoring::tutoring_send_transcript,

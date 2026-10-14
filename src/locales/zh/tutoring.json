@@ -56,7 +56,10 @@
     "textOnly": "你仍可加入——本次会话将仅使用文字聊天。",
     "checking": "检查中…",
     "starting": "启动中…",
-    "joining": "加入中…"
+    "joining": "加入中…",
+    "automatic": "自动",
+    "audioNextJoin": "麦克风和扬声器的更改将在你下次加入时生效。",
+    "devices": "设备"
   },
   "qr": {
     "scanTitle": "扫描二维码邀请",

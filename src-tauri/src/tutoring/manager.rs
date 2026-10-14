@@ -166,6 +166,25 @@ pub struct DeviceSelection {
     pub speaker_device_id: Option<String>,
 }
 
+/// The system's name for an open camera, as a webview labels the same device.
+#[cfg(all(
+    any(feature = "tutoring-video", feature = "tutoring-video-static"),
+    not(target_os = "android")
+))]
+fn camera_label(camera: &CameraCapturer) -> String {
+    camera.device_name().to_string()
+}
+
+/// Android's Camera2 source does not name its device; the webview preview is
+/// not matched against it there.
+#[cfg(all(
+    any(feature = "tutoring-video", feature = "tutoring-video-static"),
+    target_os = "android"
+))]
+fn camera_label(_camera: &CameraCapturer) -> String {
+    String::new()
+}
+
 /// Parse a camera index string (Debug-formatted `CameraIndex`) back to the enum.
 ///
 /// Accepts formats: "Index(0)", "String(\"FaceTime HD Camera\")", or a plain
@@ -205,6 +224,9 @@ pub struct SessionStatus {
     pub video_enabled: bool,
     pub audio_enabled: bool,
     pub screen_sharing: bool,
+    /// The camera peers are seeing, by the system's name for it. `None` when
+    /// the camera is off or the screen is shared instead.
+    pub camera_name: Option<String>,
     /// Session start time (millis since Unix epoch).
     pub started_at: u64,
 }
@@ -274,6 +296,7 @@ struct ActiveSession {
     video_enabled: bool,
     audio_enabled: bool,
     screen_sharing: bool,
+    camera_name: Option<String>,
     /// Chat sender for the derived gossip topic.
     chat_sender: Option<iroh_gossip::api::GossipSender>,
     /// Names sender for the /names gossip topic. Kept alongside `chat_sender`
@@ -425,7 +448,7 @@ impl TutoringManager {
             }
 
             // Start publishing local media (using selected camera if any)
-            let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+            let (mut broadcast, mic_input, camera_name) = Self::create_broadcast(
                 tasks.clone(),
                 audio_ctx.as_ref(),
                 true,
@@ -433,6 +456,7 @@ impl TutoringManager {
                 devices.camera_index.clone(),
             )
             .await?;
+            let has_video = camera_name.is_some();
             room.publish(BROADCAST_NAME, broadcast.producer())
                 .await
                 .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -511,6 +535,7 @@ impl TutoringManager {
                 video_enabled: has_video,
                 audio_enabled: has_audio,
                 screen_sharing: false,
+                camera_name,
                 chat_sender,
                 names_sender,
                 our_node_id,
@@ -600,7 +625,7 @@ impl TutoringManager {
             }
 
             // Start publishing local media (using selected camera if any)
-            let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+            let (mut broadcast, mic_input, camera_name) = Self::create_broadcast(
                 tasks.clone(),
                 audio_ctx.as_ref(),
                 true,
@@ -608,6 +633,7 @@ impl TutoringManager {
                 devices.camera_index.clone(),
             )
             .await?;
+            let has_video = camera_name.is_some();
             room.publish(BROADCAST_NAME, broadcast.producer())
                 .await
                 .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -685,6 +711,7 @@ impl TutoringManager {
                 video_enabled: has_video,
                 audio_enabled: has_audio,
                 screen_sharing: false,
+                camera_name,
                 chat_sender,
                 names_sender,
                 our_node_id,
@@ -783,6 +810,7 @@ impl TutoringManager {
                 .and_then(parse_camera_index);
             match CameraCapturer::with_index(camera_idx) {
                 Ok(camera) => {
+                    let name = camera_label(&camera);
                     let renditions =
                         VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
                     session
@@ -790,6 +818,7 @@ impl TutoringManager {
                         .set_video(Some(renditions))
                         .map_err(|e| format!("failed to enable video: {e}"))?;
                     session.video_enabled = true;
+                    session.camera_name = Some(name);
                     // Restart self-preview
                     session.self_preview_task = Self::start_self_preview(
                         tasks.clone(),
@@ -808,6 +837,7 @@ impl TutoringManager {
                 .set_video(None)
                 .map_err(|e| format!("failed to disable video: {e}"))?;
             session.video_enabled = false;
+            session.camera_name = None;
             // Emit a "self" video ended so frontend can show placeholder
             let _ = session.app_handle.emit(
                 "tutoring:peer-video-ended",
@@ -874,6 +904,53 @@ impl TutoringManager {
         Ok(session.audio_enabled)
     }
 
+    /// Use a different camera. Remembered for the rest of the session; when
+    /// the camera is on (and the screen is not being shared) it switches now.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    pub async fn set_camera(&self, camera_index: Option<String>) -> Result<Option<String>, String> {
+        let tasks = self.tasks.clone();
+        let mut inner = self.inner.lock().await;
+        let session = inner
+            .as_mut()
+            .filter(|_| self.tasks.is_open())
+            .ok_or("not in a tutoring session")?;
+        session.device_selection.camera_index = camera_index;
+        if !session.video_enabled || session.screen_sharing {
+            return Ok(session.camera_name.clone());
+        }
+        let camera_idx = session
+            .device_selection
+            .camera_index
+            .as_deref()
+            .and_then(parse_camera_index);
+        let camera = CameraCapturer::with_index(camera_idx)
+            .map_err(|e| format!("camera unavailable: {e}"))?;
+        let name = camera_label(&camera);
+        if let Some(t) = session.self_preview_task.take() {
+            t.abort();
+        }
+        let renditions = VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
+        session
+            .broadcast
+            .set_video(Some(renditions))
+            .map_err(|e| format!("failed to switch camera: {e}"))?;
+        session.camera_name = Some(name);
+        session.self_preview_task = Self::start_self_preview(
+            tasks.clone(),
+            &mut session.broadcast,
+            session.app_handle.clone(),
+        );
+        Ok(session.camera_name.clone())
+    }
+
+    #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+    pub async fn set_camera(
+        &self,
+        _camera_index: Option<String>,
+    ) -> Result<Option<String>, String> {
+        Err(VIDEO_DISABLED_ERROR.into())
+    }
+
     /// Toggle screen sharing on/off.
     ///
     /// Screen sharing replaces the camera video track. When disabled,
@@ -907,6 +984,7 @@ impl TutoringManager {
                         .map_err(|e| format!("failed to start screen share: {e}"))?;
                     session.screen_sharing = true;
                     session.video_enabled = true;
+                    session.camera_name = None;
                     // Self-preview now shows screen share
                     session.self_preview_task = Self::start_self_preview(
                         tasks.clone(),
@@ -928,6 +1006,7 @@ impl TutoringManager {
                 .and_then(parse_camera_index);
             match CameraCapturer::with_index(camera_idx) {
                 Ok(camera) => {
+                    let name = camera_label(&camera);
                     let renditions =
                         VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
                     session
@@ -935,6 +1014,7 @@ impl TutoringManager {
                         .set_video(Some(renditions))
                         .map_err(|e| format!("failed to restore camera: {e}"))?;
                     session.video_enabled = true;
+                    session.camera_name = Some(name);
                     session.self_preview_task = Self::start_self_preview(
                         tasks.clone(),
                         &mut session.broadcast,
@@ -944,6 +1024,7 @@ impl TutoringManager {
                 Err(_) => {
                     let _ = session.broadcast.set_video(None);
                     session.video_enabled = false;
+                    session.camera_name = None;
                     let _ = session.app_handle.emit(
                         "tutoring:peer-video-ended",
                         PeerVideoEndedEvent {
@@ -1067,6 +1148,7 @@ impl TutoringManager {
             video_enabled: session.video_enabled,
             audio_enabled: session.audio_enabled,
             screen_sharing: session.screen_sharing,
+            camera_name: session.camera_name.clone(),
             started_at: session.started_at,
         })
     }
@@ -1424,9 +1506,9 @@ impl TutoringManager {
 
     /// Create a PublishBroadcast with camera + mic.
     ///
-    /// Returns `(broadcast, mic_input, has_video)` — the mic_input is a clone
-    /// of the InputStream for peak metering, and `has_video` reflects whether
-    /// camera initialization actually succeeded.
+    /// Returns `(broadcast, mic_input, camera_name)` — the mic_input is a clone
+    /// of the InputStream for peak metering, and `camera_name` is the camera
+    /// that opened, or `None` when none did.
     ///
     /// `camera_index` selects a specific camera; `None` uses the default.
     async fn create_broadcast(
@@ -1435,16 +1517,16 @@ impl TutoringManager {
         video: bool,
         audio: bool,
         camera_index: Option<String>,
-    ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
+    ) -> Result<(PublishBroadcast, Option<InputStream>, Option<String>), String> {
         if !tasks.is_open() {
             return Err("media session is closing".into());
         }
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
         #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-        let mut has_video = false;
+        let mut camera_name: Option<String> = None;
         #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
-        let has_video = false;
+        let camera_name: Option<String> = None;
 
         if audio {
             if let Some(ctx) = audio_ctx {
@@ -1479,12 +1561,13 @@ impl TutoringManager {
 
             match camera_result {
                 Ok(camera) => {
+                    let name = camera_label(&camera);
                     let video_renditions =
                         VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
                     broadcast
                         .set_video(Some(video_renditions))
                         .map_err(|e| format!("failed to set video: {e}"))?;
-                    has_video = true;
+                    camera_name = Some(name);
                     log::info!("tutoring: camera initialized");
                 }
                 Err(e) => {
@@ -1498,7 +1581,7 @@ impl TutoringManager {
             log::info!("tutoring: ignoring requested camera — {VIDEO_DISABLED_ERROR}");
         }
 
-        Ok((broadcast, mic_input, has_video))
+        Ok((broadcast, mic_input, camera_name))
     }
 
     /// Start a self-preview from the broadcast's local video source.

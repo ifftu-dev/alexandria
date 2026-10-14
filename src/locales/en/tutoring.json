@@ -56,7 +56,10 @@
     "textOnly": "You can still join — this session will use text chat only.",
     "checking": "Checking…",
     "starting": "Starting…",
-    "joining": "Joining…"
+    "joining": "Joining…",
+    "automatic": "Automatic",
+    "audioNextJoin": "Microphone and speaker changes apply the next time you join.",
+    "devices": "Devices"
   },
   "qr": {
     "scanTitle": "Scan QR invite",

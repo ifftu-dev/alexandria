@@ -10,6 +10,9 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePanel } from '@/composables/usePanel'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useCallDevices } from '@/composables/useCallDevices'
+import { usePlatform } from '@/composables/usePlatform'
+import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 import { useInterviewCheck, type SentIntegrityReport } from '@/composables/useInterviewCheck'
 import { AppAlert, AppButton } from '@/components/ui'
 
@@ -19,6 +22,9 @@ const route = useRoute()
 const router = useRouter()
 const panelApi = usePanel()
 const tutoring = useTutoringRoom()
+const { isMobilePlatform } = usePlatform()
+const callDevices = useCallDevices()
+const deviceChoice = callDevices.choice
 const interviewCheck = useInterviewCheck()
 
 const interviewId = computed(() => String(route.params.id))
@@ -79,7 +85,7 @@ async function join() {
     if (runCheck) {
       await interviewCheck.begin({ interviewId: interviewId.value, cloud: cloud.value, camera: checkCamera.value })
     }
-    const room = await tutoring.joinRoom(ticket.value)
+    const room = await tutoring.joinRoom(ticket.value, undefined, undefined, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker)
     await router.push(`/tutoring/${room.id}`)
   } catch (cause) {
     if (runCheck) await interviewCheck.abandon()
@@ -99,6 +105,7 @@ async function retrySend() {
 }
 
 onMounted(async () => {
+  if (!isMobilePlatform) void callDevices.refresh().catch(() => undefined)
   await Promise.all([check(), loadShared()])
   if (!ticket.value) timer = window.setInterval(() => void check(), POLL_MS)
 })
@@ -150,6 +157,13 @@ onUnmounted(() => {
         </fieldset>
       </section>
 
+      <CallDevicePicker
+        v-if="!isMobilePlatform"
+        class="mt-6"
+        :model-value="deviceChoice"
+        :devices="callDevices.devices.value"
+        @update:model-value="value => Object.assign(deviceChoice, value)"
+      />
       <AppAlert v-if="error" variant="error" class="mt-4">{{ error }}</AppAlert>
       <div class="mt-6 flex items-center gap-3">
         <AppButton :disabled="!ticket || needsChoice" :loading="joining" data-testid="join-interview" @click="join">

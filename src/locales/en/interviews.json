@@ -132,7 +132,9 @@
     "integrity": "Integrity",
     "consistency": "Consistency",
     "cameraSignals": "Camera signals",
-    "consented": "Consented"
+    "consented": "Consented",
+    "callLost": "This device is no longer in the call. Rejoin to carry on with the interview.",
+    "rejoin": "Rejoin call"
   },
   "review": {
     "back": "Back to interviews",

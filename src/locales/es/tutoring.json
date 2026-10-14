@@ -56,7 +56,10 @@
     "textOnly": "Aún puedes unirte: esta sesión usará solo chat de texto.",
     "checking": "Comprobando…",
     "starting": "Iniciando…",
-    "joining": "Uniéndote…"
+    "joining": "Uniéndote…",
+    "automatic": "Automático",
+    "audioNextJoin": "Los cambios de micrófono y altavoz se aplican la próxima vez que te unas.",
+    "devices": "Dispositivos"
   },
   "qr": {
     "scanTitle": "Escanear invitación QR",

@@ -7,6 +7,8 @@ interface Props {
   incomingLevel?: number
   canShareScreen?: boolean
   endLabel?: string
+  /** A change is still being applied; the toggles wait for it. */
+  busy?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
@@ -15,6 +17,7 @@ withDefaults(defineProps<Props>(), {
   incomingLevel: 0,
   canShareScreen: true,
   endLabel: 'Leave',
+  busy: false,
 })
 
 const emit = defineEmits<{
@@ -28,9 +31,10 @@ const emit = defineEmits<{
 <template>
   <div class="flex flex-wrap items-center justify-center gap-2 border-t border-border bg-card/95 px-3 py-3 backdrop-blur-sm">
     <button
-      class="relative grid h-10 w-10 place-items-center rounded-full border transition-colors"
+      class="relative grid h-10 w-10 place-items-center rounded-full border transition-colors disabled:cursor-wait disabled:opacity-60"
       :class="audioEnabled ? 'border-border bg-muted text-foreground hover:bg-border/70' : 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'"
       :title="audioEnabled ? 'Mute microphone' : 'Unmute microphone'"
+      :disabled="busy"
       @click="emit('toggleAudio')"
     >
       <span class="sr-only">{{ audioEnabled ? 'Mute microphone' : 'Unmute microphone' }}</span>
@@ -46,9 +50,10 @@ const emit = defineEmits<{
     </button>
 
     <button
-      class="relative grid h-10 w-10 place-items-center rounded-full border transition-colors"
+      class="relative grid h-10 w-10 place-items-center rounded-full border transition-colors disabled:cursor-wait disabled:opacity-60"
       :class="videoEnabled ? 'border-border bg-muted text-foreground hover:bg-border/70' : 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'"
       :title="videoEnabled ? 'Turn camera off' : 'Turn camera on'"
+      :disabled="busy"
       @click="emit('toggleVideo')"
     >
       <span class="sr-only">{{ videoEnabled ? 'Turn camera off' : 'Turn camera on' }}</span>
@@ -60,9 +65,10 @@ const emit = defineEmits<{
 
     <button
       v-if="canShareScreen"
-      class="relative grid h-10 w-10 place-items-center rounded-full border transition-colors"
+      class="relative grid h-10 w-10 place-items-center rounded-full border transition-colors disabled:cursor-wait disabled:opacity-60"
       :class="screenSharing ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted text-foreground hover:bg-border/70'"
       :title="screenSharing ? 'Stop sharing' : 'Share screen'"
+      :disabled="busy"
       @click="emit('toggleScreenShare')"
     >
       <span class="sr-only">{{ screenSharing ? 'Stop sharing' : 'Share screen' }}</span>

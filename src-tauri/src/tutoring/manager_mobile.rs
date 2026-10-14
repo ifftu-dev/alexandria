@@ -404,6 +404,9 @@ pub struct SessionStatus {
     pub video_enabled: bool,
     pub audio_enabled: bool,
     pub screen_sharing: bool,
+    /// Always `None` here: the call's own capture is the only camera path,
+    /// so there is no webview preview to match against it.
+    pub camera_name: Option<String>,
     /// Session start time (millis since Unix epoch).
     pub started_at: u64,
 }
@@ -2304,6 +2307,14 @@ impl TutoringManager {
         Ok(())
     }
 
+    /// Mobile uses the device's front camera; there is no other to switch to.
+    pub async fn set_camera(
+        &self,
+        _camera_index: Option<String>,
+    ) -> Result<Option<String>, String> {
+        Err("switching cameras is not available on this device".into())
+    }
+
     /// Toggle local camera on/off.
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
         let tasks = self.tasks.clone();
@@ -2461,6 +2472,7 @@ impl TutoringManager {
             video_enabled: session.video_enabled,
             audio_enabled: session.audio_enabled,
             screen_sharing: false, // No screen sharing on mobile
+            camera_name: None,
             started_at: session.started_at,
         })
     }

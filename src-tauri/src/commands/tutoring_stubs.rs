@@ -109,6 +109,14 @@ pub async fn tutoring_toggle_audio(
 }
 
 #[tauri::command]
+pub async fn tutoring_set_camera(
+    _camera_id: Option<String>,
+    _state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    Err(UNSUPPORTED.into())
+}
+
+#[tauri::command]
 pub async fn tutoring_set_audio_devices(
     _mic_id: Option<String>,
     _speaker_id: Option<String>,

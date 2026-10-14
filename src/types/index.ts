@@ -1158,6 +1158,8 @@ export interface TutoringSessionStatus {
   video_enabled: boolean
   audio_enabled: boolean
   screen_sharing: boolean
+  /** The camera peers see, by the system's name for it; null when the camera is off or the screen is shared. */
+  camera_name?: string | null
   started_at: number
 }
 

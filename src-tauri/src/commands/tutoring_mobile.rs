@@ -270,6 +270,15 @@ pub async fn tutoring_toggle_audio(
     state.tutoring.toggle_audio(enable).await
 }
 
+/// Mobile calls use the device's front camera; there is no other to pick.
+#[tauri::command]
+pub async fn tutoring_set_camera(
+    camera_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.tutoring.set_camera(camera_id).await
+}
+
 #[tauri::command]
 pub async fn tutoring_set_audio_devices(
     mic_id: Option<String>,

@@ -312,6 +312,7 @@ pub struct CameraCapturer {
     pub(crate) mjpg_decoder: MjpgDecoder,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    name: String,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -324,7 +325,8 @@ impl CameraCapturer {
     /// Create a camera capturer targeting a specific camera by index.
     ///
     /// If `index` is `None`, falls back to the `IROH_LIVE_CAMERA` env var,
-    /// then to the last camera reported by nokhwa (typically the primary one).
+    /// then tries every camera nokhwa reports, real devices before virtual
+    /// ones, until one opens.
     pub fn with_index(index: Option<CameraIndex>) -> Result<Self> {
         info!("Initializing camera capturer (nokhwa)");
         nokhwa_initialize(|granted| {
@@ -337,26 +339,36 @@ impl CameraCapturer {
         }
         info!("Available cameras: {cameras:?}");
 
-        let camera_index = match index {
-            Some(idx) => idx,
+        let candidates = match index {
+            Some(idx) => vec![idx],
             None => match std::env::var("IROH_LIVE_CAMERA").ok() {
-                None => {
-                    // Order of cameras in nokhwa is reversed from usual order (primary camera is last).
-                    let first_camera = cameras.last().unwrap();
-                    info!(": {}", first_camera.human_name());
-                    first_camera.index().clone()
-                }
-                Some(camera_name) => match u32::from_str(&camera_name).ok() {
+                None => camera_preference(&cameras),
+                Some(camera_name) => vec![match u32::from_str(&camera_name).ok() {
                     Some(num) => CameraIndex::Index(num),
                     None => CameraIndex::String(camera_name),
-                },
+                }],
             },
         };
+        let mut last_err = None;
+        for camera_index in candidates {
+            match Self::open(camera_index.clone()) {
+                Ok(capturer) => return Ok(capturer),
+                Err(err) => {
+                    warn!(?camera_index, "camera would not open: {err:#}");
+                    last_err = Some(err);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("No cameras available")))
+    }
+
+    fn open(camera_index: CameraIndex) -> Result<Self> {
         let mut camera = nokhwa::Camera::new(
             camera_index,
             RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestResolution),
         )?;
-        info!("Using camera: {}", camera.info().human_name());
+        let name = camera.info().human_name();
+        info!("Using camera: {name}");
         let available_formats = camera.compatible_camera_formats()?;
         debug!("Available formats: {available_formats:?}",);
         if let Some(format) = Self::select_format(available_formats, Resolution::new(1920, 1080))
@@ -373,7 +385,14 @@ impl CameraCapturer {
             mjpg_decoder: MjpgDecoder::new()?,
             width: resolution.width(),
             height: resolution.height(),
+            name,
         })
+    }
+
+    /// The camera's name as the system reports it, e.g. "MacBook Pro Camera".
+    /// The same label a webview gives the device, so a preview can open it.
+    pub fn device_name(&self) -> &str {
+        &self.name
     }
 
     /// List available cameras. Returns a vec of (index, human_name) pairs.
@@ -403,6 +422,33 @@ impl CameraCapturer {
             .or_else(|| formats.last())
             .cloned()
     }
+}
+
+/// Names of virtual cameras, as products label them (lowercase). Matches the
+/// app's own list in `src/utils/sentinel/virtual-camera.ts`.
+#[cfg(not(target_os = "android"))]
+const VIRTUAL_CAMERA_MARKERS: &[&str] = &[
+    "obs virtual",
+    "manycam",
+    "snap camera",
+    "xsplit",
+    "camo",
+    "v4l2loopback",
+    "virtual cam",
+];
+
+/// The cameras to try, best first. nokhwa lists the primary camera last, but
+/// a virtual camera (OBS, Camo…) can sit there too, and those often deliver
+/// pixel formats nokhwa cannot open; real devices go first.
+#[cfg(not(target_os = "android"))]
+fn camera_preference(cameras: &[nokhwa::utils::CameraInfo]) -> Vec<CameraIndex> {
+    let is_virtual = |name: &str| {
+        let name = name.to_lowercase();
+        VIRTUAL_CAMERA_MARKERS.iter().any(|m| name.contains(m))
+    };
+    let mut ordered: Vec<_> = cameras.iter().rev().collect();
+    ordered.sort_by_key(|c| is_virtual(&c.human_name()));
+    ordered.into_iter().map(|c| c.index().clone()).collect()
 }
 
 #[cfg(not(target_os = "android"))]
