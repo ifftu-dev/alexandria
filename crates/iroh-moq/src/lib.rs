@@ -1,4 +1,5 @@
 // Copyright 2025 N0, INC
+// Modified by Alexandria Pvt. Ltd. — see crates/VENDORING.md
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -332,8 +333,12 @@ type BroadcastName = String;
 struct Actor {
     endpoint: Endpoint,
     shutdown_token: CancellationToken,
-    publishing: HashMap<BroadcastName, BroadcastProducer>,
-    publishing_closed_futs: FuturesUnordered<BoxFuture<BroadcastName>>,
+    /// What this endpoint offers, by name, with the generation that put it
+    /// there. Publishing a name again replaces the entry; the generation lets
+    /// the replaced broadcast's close leave the new one alone.
+    publishing: HashMap<BroadcastName, (u64, BroadcastProducer)>,
+    publishing_closed_futs: FuturesUnordered<BoxFuture<(BroadcastName, u64)>>,
+    publish_generation: u64,
     sessions: HashMap<EndpointId, MoqSession>,
     session_tasks: JoinSet<(EndpointId, Result<(), web_transport_iroh::SessionError>)>,
     pending_connects: HashMap<EndpointId, Vec<oneshot::Sender<Result<MoqSession, Arc<AnyError>>>>>,
@@ -347,6 +352,7 @@ impl Actor {
             shutdown_token: CancellationToken::new(),
             publishing: Default::default(),
             publishing_closed_futs: Default::default(),
+            publish_generation: 0,
             sessions: Default::default(),
             session_tasks: Default::default(),
             pending_connects: Default::default(),
@@ -368,8 +374,13 @@ impl Actor {
                     info!(remote=%endpoint_id.fmt_short(), "session closed: {res:?}");
                     self.sessions.remove(&endpoint_id);
                 }
-                Some(name) = self.publishing_closed_futs.next(), if !self.publishing_closed_futs.is_empty() => {
-                    self.publishing.remove(&name);
+                Some((name, generation)) = self.publishing_closed_futs.next(), if !self.publishing_closed_futs.is_empty() => {
+                    // Only forget the broadcast that closed. A newer one may
+                    // have taken its name since (a room restarted), and
+                    // removing that would leave every later session without it.
+                    if self.publishing.get(&name).is_some_and(|(current, _)| *current == generation) {
+                        self.publishing.remove(&name);
+                    }
                 }
                 Some(res) = self.pending_connect_tasks.join_next(), if !self.pending_connect_tasks.is_empty() => {
                     let (endpoint_id, res) = res.expect("connect task panicked");
@@ -411,7 +422,7 @@ impl Actor {
     fn handle_incoming_session(&mut self, session: MoqSession) {
         tracing::info!("handle new incoming session");
         let remote = session.remote_id();
-        for (name, producer) in self.publishing.iter() {
+        for (name, (_, producer)) in self.publishing.iter() {
             session.publish(name.to_string(), producer.consume());
         }
         self.sessions.insert(remote, session.clone());
@@ -445,10 +456,12 @@ impl Actor {
         // Hold the consumer inside the future: moq-net's `closed()` borrows
         // `&self`, so the consumer must outlive the await.
         let closed_consumer = producer.consume();
-        self.publishing.insert(name.clone(), producer);
+        self.publish_generation += 1;
+        let generation = self.publish_generation;
+        self.publishing.insert(name.clone(), (generation, producer));
         self.publishing_closed_futs.push(Box::pin(async move {
             closed_consumer.closed().await;
-            name
+            (name, generation)
         }));
     }
 
