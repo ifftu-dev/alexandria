@@ -2231,12 +2231,25 @@ impl TutoringManager {
         self.stop_room(false).await
     }
 
+    /// Leave the room without letting a stuck media task hold leaving hostage.
+    ///
+    /// The session leaves the lock first, so every other call command keeps
+    /// answering. Cleanup then gets a few seconds; a task that cannot be
+    /// aborted (one blocked in native code, which only yields at its next
+    /// await) finishes in the background. Starting another room is still
+    /// refused until it does, because [`SessionTasks::open`] waits for an
+    /// empty registry: no second camera opens on top of the first.
     async fn stop_room(&self, require_active: bool) -> Result<(), String> {
-        let mut inner = self.inner.lock().await;
-        if require_active && inner.is_none() {
-            return Err("not in a tutoring session".into());
-        }
-        if let Some(session) = inner.as_ref() {
+        crate::diag::log("leave: waiting for the session lock");
+        let session = {
+            let mut inner = self.inner.lock().await;
+            if require_active && inner.is_none() {
+                return Err("not in a tutoring session".into());
+            }
+            inner.take()
+        };
+        crate::diag::log("leave: session taken, stopping media");
+        if let Some(session) = session.as_ref() {
             if let Some(preview) = &session.self_preview_task {
                 preview.abort();
             }
@@ -2244,8 +2257,23 @@ impl TutoringManager {
                 task.abort();
             }
         }
-        self.tasks.shutdown().await;
-        *inner = None;
+        // Stop admitting work and abort what can be aborted now, so nothing
+        // new starts even if the cleanup below has to finish later.
+        self.tasks.close();
+        let tasks = self.tasks.clone();
+        let mut cleanup = tokio::spawn(async move {
+            tasks.shutdown().await;
+            drop(session);
+        });
+        if tokio::time::timeout(Duration::from_secs(3), &mut cleanup)
+            .await
+            .is_err()
+        {
+            log::warn!("tutoring: media cleanup still running 3s after leaving; finishing in the background");
+            crate::diag::log("leave: media cleanup still running after 3s, continuing");
+        } else {
+            crate::diag::log("leave: media stopped");
+        }
         set_idle_timer_disabled(false);
         Ok(())
     }

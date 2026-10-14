@@ -1,4 +1,5 @@
 use super::TutoringManager;
+use std::time::Duration;
 use tokio::sync::oneshot;
 
 #[tokio::test]
@@ -40,4 +41,43 @@ async fn interrupted_shutdown_still_blocks_task_admission_until_retry() {
     assert!(released.await.is_err());
     manager.tasks.open().expect("next room may start");
     manager.shutdown().await.expect("finish fixture");
+}
+
+#[tokio::test]
+async fn leaving_returns_while_a_blocked_native_task_finishes_in_the_background() {
+    let manager = TutoringManager::new();
+    manager.tasks.open().expect("startup admission");
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let tasks = manager.tasks.clone();
+    let native = tokio::spawn(async move {
+        // Stands in for a camera open stuck in native code: it cannot be
+        // aborted, only waited for.
+        let _ = tasks
+            .run_blocking(move || {
+                let _ = released.recv();
+            })
+            .await;
+    });
+    tokio::task::yield_now().await;
+
+    // Leaving does not wait for it. (Real clock: a paused one never
+    // advances while blocking work runs.)
+    tokio::time::timeout(Duration::from_secs(10), manager.shutdown())
+        .await
+        .expect("leave returns while native work is stuck")
+        .expect("leave");
+    assert!(!manager.tasks.is_open());
+    // No second room starts while the first one's camera may still be held.
+    assert!(manager.tasks.open().is_err());
+
+    release.send(()).expect("finish native work");
+    native.await.expect("native task");
+    for _ in 0..100 {
+        if manager.tasks.open().is_ok() {
+            manager.shutdown().await.expect("finish fixture");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("cleanup never finished after the native work returned");
 }
