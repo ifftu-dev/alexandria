@@ -88,11 +88,24 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (18, "call_kinds", MIGRATION_018_CALL_KINDS),
 ];
 
-const MIGRATION_018_CALL_KINDS: &str = r#"
+pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
 ALTER TABLE tutoring_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'tutoring'
     CHECK (kind IN ('tutoring', 'classroom', 'interview_panel', 'interview_candidate', 'interview_assistant', 'plugin'));
 ALTER TABLE tutoring_sessions ADD COLUMN context_id TEXT;
 CREATE INDEX idx_tutoring_sessions_kind ON tutoring_sessions(kind, created_at);
+-- Calls made before kinds existed: interview rooms are known through the
+-- interview that recorded them (a Cloud link marks a panel seat), and
+-- classroom calls through their call id. A candidate's old rows cannot be
+-- told apart and stay tutoring.
+UPDATE tutoring_sessions
+   SET kind = CASE WHEN s.cloud_interview_id IS NOT NULL THEN 'interview_panel' ELSE 'interview_assistant' END,
+       context_id = s.id
+  FROM interview_sessions AS s
+ WHERE s.tutoring_session_id = tutoring_sessions.id;
+UPDATE tutoring_sessions
+   SET kind = 'classroom',
+       context_id = (SELECT c.classroom_id FROM classroom_calls AS c WHERE c.id = tutoring_sessions.id)
+ WHERE id IN (SELECT id FROM classroom_calls);
 "#;
 
 const MIGRATION_005_ASSESSMENT: &str = r#"

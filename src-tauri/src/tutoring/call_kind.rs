@@ -239,4 +239,34 @@ mod tests {
         assert!(refused.contains("classroom"), "{refused}");
         check_join_kind(conn, &ticket, CallKind::Classroom).unwrap();
     }
+
+    #[test]
+    fn migration_backfills_interview_rows_recorded_before_kinds() {
+        // The backfill runs inside migration 18; replay its statements on a
+        // row shaped like one recorded before the migration.
+        let db = db();
+        let conn = db.conn();
+        conn.execute_batch(
+            "INSERT INTO tutoring_sessions (id, title, status) VALUES ('old', 'Interview · X', 'ended');
+             INSERT INTO interview_sessions (id, title, expires_at, tutoring_session_id, cloud_interview_id)
+                 VALUES ('int-9', 'X', '2099-01-01', 'old', 'cloud-1');
+             UPDATE tutoring_sessions SET kind = 'tutoring', context_id = NULL WHERE id = 'old';",
+        )
+        .unwrap();
+        let backfill = crate::db::schema::MIGRATION_018_CALL_KINDS
+            .split("-- Calls made before kinds existed")
+            .nth(1)
+            .unwrap();
+        conn.execute_batch(backfill.split_once('\n').unwrap().1)
+            .unwrap();
+        let (kind, ctx): (String, Option<String>) = conn
+            .query_row(
+                "SELECT kind, context_id FROM tutoring_sessions WHERE id = 'old'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "interview_panel");
+        assert_eq!(ctx.as_deref(), Some("int-9"));
+    }
 }
