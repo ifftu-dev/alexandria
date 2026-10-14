@@ -15,7 +15,10 @@
 
 use std::{
     collections::{HashMap, hash_map},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use iroh::{
@@ -83,6 +86,9 @@ impl From<mpsc::error::SendError<ActorMessage>> for LiveActorDiedError {
 pub struct Moq {
     tx: mpsc::Sender<ActorMessage>,
     shutdown_token: CancellationToken,
+    /// Hands out publish generations, so an unpublish names exactly the
+    /// broadcast it withdraws and never a newer one under the same name.
+    publish_generation: Arc<AtomicU64>,
     _actor_handle: Arc<AbortOnDropHandle<()>>,
 }
 
@@ -97,6 +103,7 @@ impl Moq {
         Self {
             shutdown_token,
             tx,
+            publish_generation: Arc::new(AtomicU64::new(0)),
             _actor_handle: Arc::new(AbortOnDropHandle::new(actor_task)),
         }
     }
@@ -107,15 +114,47 @@ impl Moq {
         }
     }
 
-    pub async fn publish(&self, name: impl ToString, producer: BroadcastProducer) -> Result<()> {
+    /// Offer `producer` to every current and future session under `name`.
+    ///
+    /// Returns the publish generation; pass it to [`Self::unpublish`] to
+    /// withdraw this broadcast without touching a newer one of the same name.
+    /// The actor keeps only a consumer, so the broadcast also ends on its own
+    /// when the caller drops its last producer.
+    pub async fn publish(&self, name: impl ToString, producer: BroadcastProducer) -> Result<u64> {
+        let generation = self.publish_generation.fetch_add(1, Ordering::Relaxed) + 1;
         self.tx
             .send(ActorMessage::PublishBroadcast {
                 broadcast_name: name.to_string(),
                 producer,
+                generation,
+            })
+            .await
+            .std_context("live actor died")?;
+        Ok(generation)
+    }
+
+    /// Stop offering the broadcast published as `generation` under `name` to
+    /// new sessions. Sessions already serving it stop when its producers drop.
+    pub async fn unpublish(&self, name: impl ToString, generation: u64) -> Result<()> {
+        self.tx
+            .send(ActorMessage::Unpublish {
+                broadcast_name: name.to_string(),
+                generation,
             })
             .await
             .std_context("live actor died")?;
         Ok(())
+    }
+
+    /// [`Self::unpublish`] without waiting, for teardown paths that cannot
+    /// await (a `Drop`). Gives up if the actor's queue is full or gone.
+    pub fn try_unpublish(&self, name: impl ToString, generation: u64) {
+        self.tx
+            .try_send(ActorMessage::Unpublish {
+                broadcast_name: name.to_string(),
+                generation,
+            })
+            .ok();
     }
 
     pub async fn published_broadcasts(&self) -> Vec<String> {
@@ -316,6 +355,11 @@ enum ActorMessage {
     PublishBroadcast {
         broadcast_name: BroadcastName,
         producer: BroadcastProducer,
+        generation: u64,
+    },
+    Unpublish {
+        broadcast_name: BroadcastName,
+        generation: u64,
     },
     Connect {
         remote: EndpointAddr,
@@ -336,11 +380,20 @@ struct Actor {
     /// What this endpoint offers, by name, with the generation that put it
     /// there. Publishing a name again replaces the entry; the generation lets
     /// the replaced broadcast's close leave the new one alone.
-    publishing: HashMap<BroadcastName, (u64, BroadcastProducer)>,
+    ///
+    /// Only a consumer is kept: holding a producer here would keep a broadcast
+    /// alive, and announced to every peer, after its owner had dropped it.
+    publishing: HashMap<BroadcastName, (u64, BroadcastConsumer)>,
     publishing_closed_futs: FuturesUnordered<BoxFuture<(BroadcastName, u64)>>,
-    publish_generation: u64,
-    sessions: HashMap<EndpointId, MoqSession>,
-    session_tasks: JoinSet<(EndpointId, Result<(), web_transport_iroh::SessionError>)>,
+    /// One session per peer, tagged with the id it was registered under, so
+    /// an old session closing never evicts a newer one for the same peer.
+    sessions: HashMap<EndpointId, (u64, MoqSession)>,
+    next_session_id: u64,
+    session_tasks: JoinSet<(
+        EndpointId,
+        u64,
+        Result<(), web_transport_iroh::SessionError>,
+    )>,
     pending_connects: HashMap<EndpointId, Vec<oneshot::Sender<Result<MoqSession, Arc<AnyError>>>>>,
     pending_connect_tasks: JoinSet<(EndpointId, Result<MoqSession, AnyError>)>,
 }
@@ -352,8 +405,8 @@ impl Actor {
             shutdown_token: CancellationToken::new(),
             publishing: Default::default(),
             publishing_closed_futs: Default::default(),
-            publish_generation: 0,
             sessions: Default::default(),
+            next_session_id: 0,
             session_tasks: Default::default(),
             pending_connects: Default::default(),
             pending_connect_tasks: Default::default(),
@@ -370,17 +423,15 @@ impl Actor {
                     }
                 }
                 Some(res) = self.session_tasks.join_next(), if !self.session_tasks.is_empty() => {
-                    let (endpoint_id, res) = res.expect("session task panicked");
+                    let (endpoint_id, session_id, res) = res.expect("session task panicked");
                     info!(remote=%endpoint_id.fmt_short(), "session closed: {res:?}");
-                    self.sessions.remove(&endpoint_id);
+                    remove_if_current(&mut self.sessions, &endpoint_id, session_id);
                 }
                 Some((name, generation)) = self.publishing_closed_futs.next(), if !self.publishing_closed_futs.is_empty() => {
                     // Only forget the broadcast that closed. A newer one may
                     // have taken its name since (a room restarted), and
                     // removing that would leave every later session without it.
-                    if self.publishing.get(&name).is_some_and(|(current, _)| *current == generation) {
-                        self.publishing.remove(&name);
-                    }
+                    remove_if_current(&mut self.publishing, &name, generation);
                 }
                 Some(res) = self.pending_connect_tasks.join_next(), if !self.pending_connect_tasks.is_empty() => {
                     let (endpoint_id, res) = res.expect("connect task panicked");
@@ -410,7 +461,16 @@ impl Actor {
             ActorMessage::PublishBroadcast {
                 broadcast_name: name,
                 producer,
-            } => self.handle_publish_broadcast(name, producer),
+                generation,
+            } => self.handle_publish_broadcast(name, producer, generation),
+            ActorMessage::Unpublish {
+                broadcast_name,
+                generation,
+            } => {
+                if remove_if_current(&mut self.publishing, &broadcast_name, generation) {
+                    info!(name = %broadcast_name, generation, "unpublished");
+                }
+            }
             ActorMessage::Connect { remote, reply } => self.handle_connect(remote, reply),
             ActorMessage::GetPublished { reply } => {
                 let names = self.publishing.keys().cloned().collect();
@@ -422,10 +482,12 @@ impl Actor {
     fn handle_incoming_session(&mut self, session: MoqSession) {
         tracing::info!("handle new incoming session");
         let remote = session.remote_id();
-        for (name, (_, producer)) in self.publishing.iter() {
-            session.publish(name.to_string(), producer.consume());
+        for (name, (_, broadcast)) in self.publishing.iter() {
+            session.publish(name.to_string(), broadcast.clone());
         }
-        self.sessions.insert(remote, session.clone());
+        self.next_session_id += 1;
+        let session_id = self.next_session_id;
+        self.sessions.insert(remote, (session_id, session.clone()));
         for reply in self.pending_connects.remove(&remote).into_iter().flatten() {
             reply.send(Ok(session.clone())).ok();
         }
@@ -443,12 +505,17 @@ impl Actor {
                     err => Err(err)
                 },
             };
-            (remote, res)
+            (remote, session_id, res)
         });
     }
 
-    fn handle_publish_broadcast(&mut self, name: BroadcastName, producer: BroadcastProducer) {
-        for session in self.sessions.values_mut() {
+    fn handle_publish_broadcast(
+        &mut self,
+        name: BroadcastName,
+        producer: BroadcastProducer,
+        generation: u64,
+    ) {
+        for (_, session) in self.sessions.values_mut() {
             session
                 .publish
                 .publish_broadcast(name.clone(), producer.consume());
@@ -456,9 +523,10 @@ impl Actor {
         // Hold the consumer inside the future: moq-net's `closed()` borrows
         // `&self`, so the consumer must outlive the await.
         let closed_consumer = producer.consume();
-        self.publish_generation += 1;
-        let generation = self.publish_generation;
-        self.publishing.insert(name.clone(), (generation, producer));
+        self.publishing
+            .insert(name.clone(), (generation, producer.consume()));
+        // `producer` drops at the end of this call: the caller's own handle
+        // decides the broadcast's lifetime, not this actor.
         self.publishing_closed_futs.push(Box::pin(async move {
             closed_consumer.closed().await;
             (name, generation)
@@ -471,7 +539,7 @@ impl Actor {
         reply: oneshot::Sender<Result<MoqSession, Arc<AnyError>>>,
     ) {
         let remote_id = remote.id;
-        if let Some(session) = self.sessions.get(&remote_id) {
+        if let Some((_, session)) = self.sessions.get(&remote_id) {
             // Check if the cached session's QUIC connection is still alive.
             // A connection can die (path failure, idle timeout) without the
             // session_tasks future having fired yet. Reusing a dead session
@@ -499,5 +567,46 @@ impl Actor {
                 entry.insert(Default::default()).push(reply);
             }
         }
+    }
+}
+
+/// Remove `key` only if its entry still carries `tag`, the id or generation
+/// that was current when the caller learned of it. Returns whether it did.
+///
+/// Sessions and published broadcasts are both replaced in place when a peer
+/// reconnects or a room restarts; the old one's close must not take the new
+/// one with it.
+fn remove_if_current<K: std::hash::Hash + Eq, V>(
+    map: &mut HashMap<K, (u64, V)>,
+    key: &K,
+    tag: u64,
+) -> bool {
+    if map.get(key).is_some_and(|(current, _)| *current == tag) {
+        map.remove(key);
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stale_close_leaves_the_newer_entry_alone() {
+        let mut map: HashMap<&str, (u64, &str)> = HashMap::new();
+        map.insert("cam", (1, "first room"));
+        map.insert("cam", (2, "restarted room"));
+        assert!(!remove_if_current(&mut map, &"cam", 1));
+        assert_eq!(map.get("cam"), Some(&(2, "restarted room")));
+        assert!(remove_if_current(&mut map, &"cam", 2));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn removing_a_missing_key_is_a_no_op() {
+        let mut map: HashMap<&str, (u64, ())> = HashMap::new();
+        assert!(!remove_if_current(&mut map, &"cam", 7));
     }
 }

@@ -20,7 +20,9 @@
 //! MoQ subscription for it (with exponential-backoff retry and periodic
 //! reconciliation). MoQ sessions are shared bidirectionally (a peer both
 //! publishes to and subscribes from the same session), so subscription repair
-//! never closes the underlying session.
+//! never closes the underlying session. Each subscription attempt is numbered
+//! so a superseded one's result or close is ignored, and leaving the room
+//! withdraws what it published.
 //!
 //! Derived from n0-computer's `iroh-live` room layer (Apache-2.0/MIT), ported to
 //! iroh 1.0 and trimmed to the surface this app uses.
@@ -216,6 +218,47 @@ const PRESENCE_HORIZON: Duration = Duration::from_secs(120);
 #[display("{}:{}", _0.fmt_short(), _1)]
 struct BroadcastId(EndpointId, String);
 
+/// The current attempt per key, so work started for an older attempt (a
+/// connect still in flight, a subscription's close, a retry timer) is
+/// recognised and ignored once a newer attempt has replaced it.
+#[derive(Debug)]
+struct Attempts<K> {
+    current: HashMap<K, u64>,
+    next: u64,
+}
+
+impl<K> Default for Attempts<K> {
+    fn default() -> Self {
+        Self {
+            current: HashMap::new(),
+            next: 0,
+        }
+    }
+}
+
+impl<K: std::hash::Hash + Eq> Attempts<K> {
+    /// Start a new attempt for `key`; earlier ones become stale.
+    fn begin(&mut self, key: K) -> u64 {
+        self.next += 1;
+        self.current.insert(key, self.next);
+        self.next
+    }
+
+    fn is_current(&self, key: &K, attempt: u64) -> bool {
+        self.current.get(key) == Some(&attempt)
+    }
+
+    /// Forget `key` if `attempt` is still its current one.
+    fn end(&mut self, key: &K, attempt: u64) -> bool {
+        if self.is_current(key, attempt) {
+            self.current.remove(key);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 struct Actor {
     me: EndpointId,
     endpoint: Endpoint,
@@ -223,15 +266,20 @@ struct Actor {
     live: Live,
     active_subscribe: HashSet<BroadcastId>,
     active_publish: HashSet<String>,
+    /// What this room published, with the generation the MoQ actor gave it,
+    /// so leaving withdraws exactly these and nothing newer.
+    published: Attempts<String>,
     known_remote_broadcasts: HashMap<EndpointId, Vec<String>>,
     active_sessions: HashMap<BroadcastId, MoqSession>,
     peer_addrs: HashMap<EndpointId, EndpointAddr>,
     retry_counts: HashMap<BroadcastId, u32>,
+    /// The current subscription attempt per broadcast.
+    attempts: Attempts<BroadcastId>,
     connecting:
-        FuturesUnordered<BoxFuture<(BroadcastId, Result<(MoqSession, SubscribeBroadcast)>)>>,
-    subscribe_closed: FuturesUnordered<BoxFuture<BroadcastId>>,
-    retry_timers: FuturesUnordered<BoxFuture<BroadcastId>>,
-    publish_closed: FuturesUnordered<BoxFuture<String>>,
+        FuturesUnordered<BoxFuture<(BroadcastId, u64, Result<(MoqSession, SubscribeBroadcast)>)>>,
+    subscribe_closed: FuturesUnordered<BoxFuture<(BroadcastId, u64)>>,
+    retry_timers: FuturesUnordered<BoxFuture<(BroadcastId, u64)>>,
+    publish_closed: FuturesUnordered<BoxFuture<(String, u64)>>,
     event_tx: mpsc::Sender<RoomEvent>,
     /// Sender for our own presence announcements on the room gossip topic.
     gossip_tx: GossipSender,
@@ -262,10 +310,12 @@ impl Actor {
             _gossip: gossip,
             active_subscribe: Default::default(),
             active_publish: Default::default(),
+            published: Default::default(),
             known_remote_broadcasts: Default::default(),
             active_sessions: Default::default(),
             peer_addrs: Default::default(),
             retry_counts: Default::default(),
+            attempts: Default::default(),
             connecting: Default::default(),
             subscribe_closed: Default::default(),
             retry_timers: Default::default(),
@@ -315,7 +365,14 @@ impl Actor {
                         Some(msg) => self.handle_api_message(msg).await
                     }
                 }
-                Some((id, res)) = self.connecting.next(), if !self.connecting.is_empty() => {
+                Some((id, attempt, res)) = self.connecting.next(), if !self.connecting.is_empty() => {
+                    if !self.attempts.is_current(&id, attempt) {
+                        // A newer attempt replaced this one (forced
+                        // resubscribe, reconcile). Its result, success or
+                        // failure, must not touch the newer attempt's state.
+                        debug!("ignoring result of superseded attempt for {id}");
+                        continue;
+                    }
                     match res {
                         Ok((session, broadcast)) => {
                             let peer_id = session.remote_id();
@@ -333,34 +390,43 @@ impl Actor {
                             self.event_tx.send(RoomEvent::BroadcastSubscribed { session, broadcast }).await.ok();
                             self.subscribe_closed.push(Box::pin(async move {
                                 closed_fut.await;
-                                id
+                                (id, attempt)
                             }))
                         }
                         Err(err) => {
                             self.active_subscribe.remove(&id);
                             warn!("Subscribing to broadcast {id} failed: {err:#}");
-                            self.schedule_retry(id);
+                            self.schedule_retry(id, attempt);
                         }
                     }
                 }
-                Some(id) = self.subscribe_closed.next(), if !self.subscribe_closed.is_empty() => {
+                Some((id, attempt)) = self.subscribe_closed.next(), if !self.subscribe_closed.is_empty() => {
+                    if !self.attempts.is_current(&id, attempt) {
+                        // The old subscription a forced resubscribe replaced
+                        // has closed; the new one is unaffected.
+                        continue;
+                    }
                     self.active_subscribe.remove(&id);
                     // Keep the MoQ session alive across subscription repair.
                     // The session is shared bidirectionally (pub + sub), so
                     // dropping it here can kill the reverse publishing tracks
                     // and collapse the whole tutoring connection.
-                    self.schedule_retry(id);
+                    self.schedule_retry(id, attempt);
                 }
-                Some(id) = self.retry_timers.next(), if !self.retry_timers.is_empty() => {
-                    self.handle_retry(id);
+                Some((id, attempt)) = self.retry_timers.next(), if !self.retry_timers.is_empty() => {
+                    self.handle_retry(id, attempt);
                 }
                 _ = reconcile_interval.tick() => {
                     self.prune_expired_peers();
                     self.reconcile_subscriptions();
                 }
-                Some(name) = self.publish_closed.next(), if !self.publish_closed.is_empty() => {
-                    self.active_publish.remove(&name);
-                    self.update_kv().await;
+                Some((name, generation)) = self.publish_closed.next(), if !self.publish_closed.is_empty() => {
+                    // A broadcast replaced under the same name closing must
+                    // not stop us announcing the one that replaced it.
+                    if self.published.end(&name, generation) {
+                        self.active_publish.remove(&name);
+                        self.update_kv().await;
+                    }
                 }
             }
         }
@@ -372,11 +438,21 @@ impl Actor {
                 // Hold the consumer inside the future: moq's `closed()` borrows
                 // `&self`, so it must outlive the await.
                 let closed_consumer = producer.consume();
-                self.live.publish(name.clone(), producer).await.ok();
+                let generation = match self.live.publish(name.clone(), producer).await {
+                    Ok(generation) => generation,
+                    Err(err) => {
+                        warn!("failed to publish {name}: {err:#}");
+                        return;
+                    }
+                };
+                if let Some(&replaced) = self.published.current.get(&name) {
+                    self.live.try_unpublish(&name, replaced);
+                }
+                self.published.current.insert(name.clone(), generation);
                 self.active_publish.insert(name.clone());
                 self.publish_closed.push(Box::pin(async move {
                     closed_consumer.closed().await;
-                    name
+                    (name, generation)
                 }));
                 self.update_kv().await;
             }
@@ -431,8 +507,10 @@ impl Actor {
             .ok();
     }
 
-    /// Attempt to connect and subscribe to a broadcast.
+    /// Attempt to connect and subscribe to a broadcast. Starts a new attempt;
+    /// anything still running for an earlier one is ignored when it lands.
     fn start_connect_and_subscribe(&mut self, id: BroadcastId, remote: EndpointId, name: String) {
+        let attempt = self.attempts.begin(id.clone());
         let live = self.live.clone();
         let addr = self.peer_addrs.get(&remote).cloned().unwrap_or_else(|| {
             let mut addr = EndpointAddr::from(remote);
@@ -484,11 +562,11 @@ impl Actor {
                     ))
                 }
             };
-            (id, session)
+            (id, attempt, session)
         }));
     }
 
-    fn schedule_retry(&mut self, id: BroadcastId) {
+    fn schedule_retry(&mut self, id: BroadcastId, attempt: u64) {
         let count = self.retry_counts.entry(id.clone()).or_insert(0);
         *count += 1;
         // 2s, 4s, 8s, 16s, 30s cap
@@ -497,11 +575,15 @@ impl Actor {
         let retry_id = id;
         self.retry_timers.push(Box::pin(async move {
             tokio::time::sleep(Duration::from_secs(delay_secs)).await;
-            retry_id
+            (retry_id, attempt)
         }));
     }
 
-    fn handle_retry(&mut self, id: BroadcastId) {
+    fn handle_retry(&mut self, id: BroadcastId, attempt: u64) {
+        if !self.attempts.is_current(&id, attempt) {
+            debug!("retry: {id} — superseded by a newer attempt, skipping");
+            return;
+        }
         let still_known = self
             .known_remote_broadcasts
             .get(&id.0)
@@ -569,6 +651,15 @@ impl Actor {
         }
     }
 
+    /// Withdraw everything this room published from the MoQ actor. Runs when
+    /// the room actor ends for any reason, including being aborted when the
+    /// last [`RoomHandle`] drops, so a left room never stays announced.
+    fn unpublish_all(&mut self) {
+        for (name, generation) in self.published.current.drain() {
+            self.live.try_unpublish(&name, generation);
+        }
+    }
+
     /// Drop peers whose presence has not been refreshed within the horizon.
     fn prune_expired_peers(&mut self) {
         let now = Instant::now();
@@ -582,6 +673,46 @@ impl Actor {
             self.peer_last_seen.remove(&id);
             self.known_remote_broadcasts.remove(&id);
         }
+    }
+}
+
+impl Drop for Actor {
+    fn drop(&mut self) {
+        self.unpublish_all();
+    }
+}
+
+#[cfg(test)]
+mod attempt_tests {
+    use super::Attempts;
+
+    #[test]
+    fn a_newer_attempt_makes_the_older_one_stale() {
+        let mut attempts = Attempts::default();
+        let first = attempts.begin("peer:cam");
+        let second = attempts.begin("peer:cam");
+        assert!(!attempts.is_current(&"peer:cam", first));
+        assert!(attempts.is_current(&"peer:cam", second));
+    }
+
+    #[test]
+    fn a_stale_close_does_not_end_the_current_attempt() {
+        let mut attempts = Attempts::default();
+        let first = attempts.begin("peer:cam");
+        let second = attempts.begin("peer:cam");
+        assert!(!attempts.end(&"peer:cam", first));
+        assert!(attempts.is_current(&"peer:cam", second));
+        assert!(attempts.end(&"peer:cam", second));
+        assert!(!attempts.is_current(&"peer:cam", second));
+    }
+
+    #[test]
+    fn attempts_for_different_keys_are_independent() {
+        let mut attempts = Attempts::default();
+        let cam = attempts.begin("peer:cam");
+        let screen = attempts.begin("peer:screen");
+        assert!(attempts.is_current(&"peer:cam", cam));
+        assert!(attempts.is_current(&"peer:screen", screen));
     }
 }
 
