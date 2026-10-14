@@ -30,4 +30,5 @@ pub use manager::TutoringManager;
 #[cfg(target_os = "ios")]
 pub use manager_mobile::TutoringManager;
 
+pub(crate) mod call_kind;
 pub(crate) mod presence;

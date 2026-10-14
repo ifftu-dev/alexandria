@@ -10,6 +10,7 @@
 //! audio-only capabilities.
 
 use crate::profile::scope::ProfileState as State;
+use crate::tutoring::call_kind::CallKind;
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -34,6 +35,8 @@ pub struct TutoringSessionInfo {
     pub status: String,
     pub created_at: String,
     pub ended_at: Option<String>,
+    pub kind: CallKind,
+    pub context_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,12 +64,15 @@ pub struct DeviceList {
 const UNSUPPORTED: &str = "Audio-only tutoring on mobile is coming soon";
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn tutoring_create_room(
     _title: String,
     _display_name: Option<String>,
     _camera_id: Option<String>,
     _mic_id: Option<String>,
     _speaker_id: Option<String>,
+    _kind: Option<String>,
+    _context_id: Option<String>,
     _app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -74,6 +80,7 @@ pub async fn tutoring_create_room(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn tutoring_join_room(
     _ticket: String,
     _title: Option<String>,
@@ -81,6 +88,8 @@ pub async fn tutoring_join_room(
     _camera_id: Option<String>,
     _mic_id: Option<String>,
     _speaker_id: Option<String>,
+    _kind: Option<String>,
+    _context_id: Option<String>,
     _app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -174,7 +183,7 @@ pub async fn tutoring_list_sessions(
                 let mut stmt = db
                     .conn()
                     .prepare(
-                        "SELECT id, title, ticket, status, created_at, ended_at
+                        "SELECT id, title, ticket, status, created_at, ended_at, kind, context_id
                          FROM tutoring_sessions
                          ORDER BY created_at DESC
                          LIMIT 50",
@@ -190,6 +199,9 @@ pub async fn tutoring_list_sessions(
                             status: row.get(3)?,
                             created_at: row.get(4)?,
                             ended_at: row.get(5)?,
+                            kind: CallKind::parse(row.get::<_, Option<String>>(6)?.as_deref())
+                                .unwrap_or(CallKind::Tutoring),
+                            context_id: row.get(7)?,
                         })
                     })
                     .map_err(|e| e.to_string())?

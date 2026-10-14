@@ -83,7 +83,17 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // The candidate's own copy of each integrity result they sent an
     // organisation: what they signed, and where it went.
     (17, "interview_integrity_reports", MIGRATION_017_INTERVIEW_INTEGRITY),
+    // What each call is for (tutoring, classroom, interview seat or
+    // candidate, assistant, plugin) and the thing it belongs to.
+    (18, "call_kinds", MIGRATION_018_CALL_KINDS),
 ];
+
+const MIGRATION_018_CALL_KINDS: &str = r#"
+ALTER TABLE tutoring_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'tutoring'
+    CHECK (kind IN ('tutoring', 'classroom', 'interview_panel', 'interview_candidate', 'interview_assistant', 'plugin'));
+ALTER TABLE tutoring_sessions ADD COLUMN context_id TEXT;
+CREATE INDEX idx_tutoring_sessions_kind ON tutoring_sessions(kind, created_at);
+"#;
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
 ALTER TABLE assessment_attempts ADD COLUMN submitted_answers_json TEXT CHECK (submitted_answers_json IS NULL OR json_valid(submitted_answers_json));
