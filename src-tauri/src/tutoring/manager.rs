@@ -185,6 +185,59 @@ fn camera_label(_camera: &CameraCapturer) -> String {
     String::new()
 }
 
+/// How long a camera or screen source may take to open mid-call.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+const SOURCE_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// An opened video source, ready to swap into the broadcast: its camera name
+/// (none for a screen) and its renditions.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+type OpenedSource = (Option<String>, VideoRenditions);
+
+/// Open a video source away from the call's lock.
+///
+/// Opening a camera can block for seconds, or forever when the device is
+/// gone; doing it under `inner` froze every call command (14 Oct). This runs
+/// on a detached blocking thread, not the session's task set, so a source
+/// that never answers stalls neither the call's other controls nor leaving
+/// the call. On timeout the thread is abandoned and whatever it eventually
+/// opens is dropped.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+async fn open_video_source(
+    open: impl FnOnce() -> Result<OpenedSource, String> + Send + 'static,
+) -> Result<OpenedSource, String> {
+    match tokio::time::timeout(SOURCE_OPEN_TIMEOUT, tokio::task::spawn_blocking(open)).await {
+        Ok(Ok(opened)) => opened,
+        Ok(Err(join)) => Err(format!("the video source failed to open: {join}")),
+        Err(_) => Err(format!(
+            "the video source did not open within {}s",
+            SOURCE_OPEN_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+/// Open a camera by index (or the preferred one) and build its renditions.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+fn open_camera(camera_idx: Option<CameraIndex>) -> Result<OpenedSource, String> {
+    let camera =
+        CameraCapturer::with_index(camera_idx).map_err(|e| format!("camera unavailable: {e}"))?;
+    let name = camera_label(&camera);
+    Ok((
+        Some(name),
+        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all()),
+    ))
+}
+
+/// Open the screen for sharing and build its renditions.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+fn open_screen() -> Result<OpenedSource, String> {
+    let screen = ScreenCapturer::new().map_err(|e| format!("screen capture unavailable: {e}"))?;
+    Ok((
+        None,
+        VideoRenditions::new::<H264Encoder>(screen, VideoPreset::all()),
+    ))
+}
+
 /// Parse a camera index string (Debug-formatted `CameraIndex`) back to the enum.
 ///
 /// Accepts formats: "Index(0)", "String(\"FaceTime HD Camera\")", or a plain
@@ -779,74 +832,108 @@ impl TutoringManager {
 
     // ── Media controls ─────────────────────────────────────────────
 
+    /// The session a video change started on, if it is still the one running.
+    /// The lock is released while a source opens, so the call may have ended
+    /// or been replaced in the meantime.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    fn same_session<'a>(
+        &self,
+        inner: &'a mut Option<ActiveSession>,
+        session_id: &str,
+    ) -> Result<&'a mut ActiveSession, String> {
+        inner
+            .as_mut()
+            .filter(|session| self.tasks.is_open() && session.session_id == session_id)
+            .ok_or_else(|| "the call ended while its video source was opening".to_string())
+    }
+
+    /// Swap an opened source into the broadcast and restart the self view.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    fn install_video(
+        tasks: &Arc<SessionTasks>,
+        session: &mut ActiveSession,
+        (camera_name, renditions): OpenedSource,
+        screen: bool,
+    ) -> Result<(), String> {
+        if let Some(task) = session.self_preview_task.take() {
+            task.abort();
+        }
+        session
+            .broadcast
+            .set_video(Some(renditions))
+            .map_err(|e| format!("failed to enable video: {e}"))?;
+        session.video_enabled = true;
+        session.screen_sharing = screen;
+        session.camera_name = camera_name;
+        let app_handle = session.app_handle.clone();
+        session.self_preview_task =
+            Self::start_self_preview(tasks.clone(), &mut session.broadcast, app_handle);
+        Ok(())
+    }
+
+    /// Stop sending video and tell the webview the self view ended.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    fn remove_video(session: &mut ActiveSession) -> Result<(), String> {
+        if let Some(task) = session.self_preview_task.take() {
+            task.abort();
+        }
+        session
+            .broadcast
+            .set_video(None)
+            .map_err(|e| format!("failed to disable video: {e}"))?;
+        session.video_enabled = false;
+        session.screen_sharing = false;
+        session.camera_name = None;
+        // Emit a "self" video ended so frontend can show placeholder
+        let _ = session.app_handle.emit(
+            "tutoring:peer-video-ended",
+            PeerVideoEndedEvent {
+                node_id: "self".into(),
+            },
+        );
+        Ok(())
+    }
+
     /// Toggle local camera on/off.
+    ///
+    /// Turning it on opens the camera with the call's lock released, then
+    /// swaps it in only if the session is still the same one and the camera
+    /// is still wanted.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
-        let tasks = self.tasks.clone();
-        let mut inner = self.inner.lock().await;
-        let session = inner
-            .as_mut()
-            .filter(|_| self.tasks.is_open())
-            .ok_or("not in a tutoring session")?;
+        let (session_id, camera_idx) = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
 
-        if enable == session.video_enabled && !session.screen_sharing {
-            return Ok(session.video_enabled);
-        }
-
-        // Abort old self-preview
-        if let Some(t) = session.self_preview_task.take() {
-            t.abort();
-        }
-
-        if enable {
-            // If screen sharing is active, switch back to camera
-            if session.screen_sharing {
-                session.screen_sharing = false;
+            if enable == session.video_enabled && !session.screen_sharing {
+                return Ok(session.video_enabled);
+            }
+            if !enable {
+                Self::remove_video(session)?;
+                return Ok(session.video_enabled);
             }
             let camera_idx = session
                 .device_selection
                 .camera_index
                 .as_deref()
                 .and_then(parse_camera_index);
-            match CameraCapturer::with_index(camera_idx) {
-                Ok(camera) => {
-                    let name = camera_label(&camera);
-                    let renditions =
-                        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to enable video: {e}"))?;
-                    session.video_enabled = true;
-                    session.camera_name = Some(name);
-                    // Restart self-preview
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                }
-                Err(e) => {
-                    log::warn!("tutoring: camera unavailable: {e}");
-                    return Err(format!("camera unavailable: {e}"));
-                }
-            }
-        } else {
-            session
-                .broadcast
-                .set_video(None)
-                .map_err(|e| format!("failed to disable video: {e}"))?;
-            session.video_enabled = false;
-            session.camera_name = None;
-            // Emit a "self" video ended so frontend can show placeholder
-            let _ = session.app_handle.emit(
-                "tutoring:peer-video-ended",
-                PeerVideoEndedEvent {
-                    node_id: "self".into(),
-                },
-            );
-        }
+            (session.session_id.clone(), camera_idx)
+        };
 
+        let opened = open_video_source(move || open_camera(camera_idx))
+            .await
+            .inspect_err(|e| log::warn!("tutoring: {e}"))?;
+
+        let mut inner = self.inner.lock().await;
+        let session = self.same_session(&mut inner, &session_id)?;
+        if session.video_enabled && !session.screen_sharing {
+            // Another change turned the camera on meanwhile; keep that one.
+            return Ok(true);
+        }
+        Self::install_video(&self.tasks, session, opened, false)?;
         Ok(session.video_enabled)
     }
 
@@ -908,38 +995,34 @@ impl TutoringManager {
     /// the camera is on (and the screen is not being shared) it switches now.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn set_camera(&self, camera_index: Option<String>) -> Result<Option<String>, String> {
-        let tasks = self.tasks.clone();
+        let (session_id, camera_idx) = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
+            session.device_selection.camera_index = camera_index;
+            if !session.video_enabled || session.screen_sharing {
+                return Ok(session.camera_name.clone());
+            }
+            let camera_idx = session
+                .device_selection
+                .camera_index
+                .as_deref()
+                .and_then(parse_camera_index);
+            (session.session_id.clone(), camera_idx)
+        };
+
+        let opened = open_video_source(move || open_camera(camera_idx)).await?;
+
         let mut inner = self.inner.lock().await;
-        let session = inner
-            .as_mut()
-            .filter(|_| self.tasks.is_open())
-            .ok_or("not in a tutoring session")?;
-        session.device_selection.camera_index = camera_index;
+        let session = self.same_session(&mut inner, &session_id)?;
         if !session.video_enabled || session.screen_sharing {
+            // The camera was turned off or the screen shared meanwhile; the
+            // choice is remembered for the next time the camera turns on.
             return Ok(session.camera_name.clone());
         }
-        let camera_idx = session
-            .device_selection
-            .camera_index
-            .as_deref()
-            .and_then(parse_camera_index);
-        let camera = CameraCapturer::with_index(camera_idx)
-            .map_err(|e| format!("camera unavailable: {e}"))?;
-        let name = camera_label(&camera);
-        if let Some(t) = session.self_preview_task.take() {
-            t.abort();
-        }
-        let renditions = VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
-        session
-            .broadcast
-            .set_video(Some(renditions))
-            .map_err(|e| format!("failed to switch camera: {e}"))?;
-        session.camera_name = Some(name);
-        session.self_preview_task = Self::start_self_preview(
-            tasks.clone(),
-            &mut session.broadcast,
-            session.app_handle.clone(),
-        );
+        Self::install_video(&self.tasks, session, opened, false)?;
         Ok(session.camera_name.clone())
     }
 
@@ -957,84 +1040,49 @@ impl TutoringManager {
     /// the camera is restored if it was previously enabled.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_screen_share(&self, enable: bool) -> Result<bool, String> {
-        let tasks = self.tasks.clone();
-        let mut inner = self.inner.lock().await;
-        let session = inner
-            .as_mut()
-            .filter(|_| self.tasks.is_open())
-            .ok_or("not in a tutoring session")?;
-
-        if enable == session.screen_sharing {
-            return Ok(session.screen_sharing);
-        }
-
-        // Abort old self-preview
-        if let Some(t) = session.self_preview_task.take() {
-            t.abort();
-        }
-
-        if enable {
-            match ScreenCapturer::new() {
-                Ok(screen) => {
-                    let renditions =
-                        VideoRenditions::new::<H264Encoder>(screen, VideoPreset::all());
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to start screen share: {e}"))?;
-                    session.screen_sharing = true;
-                    session.video_enabled = true;
-                    session.camera_name = None;
-                    // Self-preview now shows screen share
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                }
-                Err(e) => {
-                    return Err(format!("screen capture unavailable: {e}"));
-                }
+        let (session_id, camera_idx) = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
+            if enable == session.screen_sharing {
+                return Ok(session.screen_sharing);
             }
-        } else {
-            // Stop screen share, restore camera (using stored device selection)
-            session.screen_sharing = false;
             let camera_idx = session
                 .device_selection
                 .camera_index
                 .as_deref()
                 .and_then(parse_camera_index);
-            match CameraCapturer::with_index(camera_idx) {
-                Ok(camera) => {
-                    let name = camera_label(&camera);
-                    let renditions =
-                        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to restore camera: {e}"))?;
-                    session.video_enabled = true;
-                    session.camera_name = Some(name);
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                }
-                Err(_) => {
-                    let _ = session.broadcast.set_video(None);
-                    session.video_enabled = false;
-                    session.camera_name = None;
-                    let _ = session.app_handle.emit(
-                        "tutoring:peer-video-ended",
-                        PeerVideoEndedEvent {
-                            node_id: "self".into(),
-                        },
-                    );
+            (session.session_id.clone(), camera_idx)
+        };
+
+        // The screen (to share) or the camera (to restore) opens with the
+        // lock released; sharing continues until the camera is ready.
+        let opened = if enable {
+            open_video_source(open_screen).await?
+        } else {
+            match open_video_source(move || open_camera(camera_idx)).await {
+                Ok(opened) => opened,
+                Err(e) => {
+                    log::warn!("tutoring: {e}; screen share stopped without a camera");
+                    let mut inner = self.inner.lock().await;
+                    let session = self.same_session(&mut inner, &session_id)?;
+                    if session.screen_sharing {
+                        Self::remove_video(session)?;
+                    }
+                    return Ok(session.screen_sharing);
                 }
             }
-        }
+        };
 
+        let mut inner = self.inner.lock().await;
+        let session = self.same_session(&mut inner, &session_id)?;
+        if session.screen_sharing == enable {
+            // Another change got there first; keep it.
+            return Ok(session.screen_sharing);
+        }
+        Self::install_video(&self.tasks, session, opened, enable)?;
         Ok(session.screen_sharing)
     }
 
