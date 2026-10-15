@@ -12,7 +12,7 @@ import { useCallDevices } from '@/composables/useCallDevices'
 import { openCameraPreview } from '@/utils/callCamera'
 import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
-import { LiveDiagnosticsModal, LiveParticipantTile, LiveSessionControls } from '@/components/live'
+import { LiveDiagnosticsModal, LiveParticipantTile, LiveSessionControls, VideoGrid } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import PanelIntegrity from '@/components/organisations/PanelIntegrity.vue'
 import { AppAlert, AppBadge, AppButton, AppModal, AppTextarea } from '@/components/ui'
@@ -633,15 +633,17 @@ function formatTime(ms: number) {
 
     <main v-else class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(20rem,1fr)_22rem_20rem]">
       <section class="flex min-h-0 flex-col border-e border-border bg-muted/20">
-        <div class="flex-1 overflow-auto p-3">
+        <div class="flex min-h-0 flex-1 flex-col p-3">
           <div v-if="!tutoringActive" class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3" data-testid="rejoin-call">
             <p class="text-sm text-foreground">{{ $t('interviews.session.callLost') }}</p>
             <AppButton size="sm" :loading="loading" @click="startInterview">{{ $t('interviews.session.rejoin') }}</AppButton>
           </div>
-          <div class="grid min-h-full content-center gap-3" :class="peers.length > 0 ? 'grid-cols-2' : 'grid-cols-1'">
+          <VideoGrid v-slot="{ tileStyle }" class="flex-1" :count="peers.length + 1">
             <LiveParticipantTile
               v-for="peer in peers"
               :key="peer.node_id"
+              class="shrink-0"
+              :style="tileStyle"
               :name="peer.display_name || peer.node_id.slice(0, 8)"
               :initials="participantInitials(peer.display_name || peer.node_id)"
               :video-src="tutoring.videoFrames.value[peer.node_id]"
@@ -654,14 +656,15 @@ function formatTime(ms: number) {
               :video-src="tutoring.videoFrames.value.self"
               :muted="!tutoring.sessionStatus.value?.audio_enabled"
               self
-              :compact="peers.length > 0"
+              class="shrink-0"
+              :style="tileStyle"
               label="This device"
             >
               <template v-if="selfStream" #video>
                 <video ref="selfVideo" autoplay muted playsinline class="absolute inset-0 h-full w-full scale-x-[-1] object-contain" />
               </template>
             </LiveParticipantTile>
-          </div>
+          </VideoGrid>
         </div>
         <LiveSessionControls
           :audio-enabled="tutoring.sessionStatus.value?.audio_enabled ?? false"
