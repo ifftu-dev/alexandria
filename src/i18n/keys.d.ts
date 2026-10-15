@@ -1265,6 +1265,7 @@ export type MessageKey =
   | 'interviews.panel.integrity.score'
   | 'interviews.panel.integrity.title'
   | 'interviews.panel.integrity.waiting'
+  | 'interviews.panel.notAccepted'
   | 'interviews.panel.notRated'
   | 'interviews.panel.panelists'
   | 'interviews.panel.rating1'

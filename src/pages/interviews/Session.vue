@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useInterviews } from '@/composables/useInterviews'
 import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecognition'
 import { usePanel, type PanelInterview } from '@/composables/usePanel'
@@ -24,6 +25,7 @@ import type {
 } from '@/types'
 
 const route = useRoute()
+const { t } = useI18n()
 const router = useRouter()
 const interviewId = computed(() => String(route.params.id))
 // A seat on an organisation's panel lives under /panel, which a learner
@@ -110,6 +112,9 @@ const criteria = computed(() => activeInterview.value?.criteria ?? [])
 const allRequestedConsentsReady = computed(() => participants.value.every(
   participant => participant.consented_at !== null,
 ))
+// A panel seat's room can only be handed to the candidate once they have
+// accepted; Cloud refuses it before then, so the call would run for nobody.
+const awaitingCandidate = computed(() => !!panel.value && panel.value.status !== 'accepted' && !panel.value.room.ticket)
 const connectionQuality = computed(() => {
   if (!tutoringActive.value) return 'Offline'
   if (peers.value.length === 0) return 'Ready'
@@ -222,6 +227,9 @@ async function enterPanelRoom(title: string, name: string) {
   panelError.value = null
   const current = await panelApi.status(session.value.id)
   panel.value = current
+  if (!current.room.ticket && current.status !== 'accepted') {
+    throw new Error(t('interviews.panel.notAccepted'))
+  }
   if (current.room.ticket) {
     try {
       return await tutoring.joinRoom(current.room.ticket, title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
@@ -234,8 +242,15 @@ async function enterPanelRoom(title: string, name: string) {
     }
   }
   const room = await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
-  if (!room.ticket) throw new Error('the room has no ticket to share')
-  panel.value = await panelApi.setRoom(session.value.id, room.ticket)
+  try {
+    if (!room.ticket) throw new Error('the room has no ticket to share')
+    panel.value = await panelApi.setRoom(session.value.id, room.ticket)
+  } catch (cause) {
+    // Nobody else can find a room Cloud does not know about; close it rather
+    // than leave this device's camera and microphone running for no one.
+    await tutoring.leaveRoom()
+    throw cause
+  }
   return room
 }
 
@@ -507,7 +522,7 @@ function formatTime(ms: number) {
         {{ $t('interviews.panel.panelists', { names: panel.panel.map(member => member.name).join(', ') }) }}
       </p>
       <p class="mt-1 text-sm text-muted-foreground">
-        {{ panel.room.ticket ? $t('interviews.panel.roomOpen') : $t('interviews.panel.roomClosed') }}
+        {{ panel.room.ticket ? $t('interviews.panel.roomOpen') : awaitingCandidate ? $t('interviews.panel.notAccepted') : $t('interviews.panel.roomClosed') }}
       </p>
       <!-- The scorecard is reached at the end of the call; this is the way to it
            for a conversation the panel held some other way. -->
@@ -591,8 +606,9 @@ function formatTime(ms: number) {
               :devices="callDevices.devices.value"
               @update:model-value="value => Object.assign(deviceChoice, value)"
             />
-            <AppButton class="mt-5 w-full" :loading="loading" :disabled="!allRequestedConsentsReady" @click="startInterview">{{ $t('interviews.session.start') }}</AppButton>
+            <AppButton class="mt-5 w-full" :loading="loading" :disabled="!allRequestedConsentsReady || awaitingCandidate" @click="startInterview">{{ $t('interviews.session.start') }}</AppButton>
             <p v-if="!allRequestedConsentsReady" class="mt-2 text-center text-xs text-muted-foreground">{{ $t('interviews.session.recordChoicesFirst') }}</p>
+            <p v-else-if="awaitingCandidate" class="mt-2 text-center text-xs text-muted-foreground">{{ $t('interviews.panel.notAccepted') }}</p>
           </div>
         </aside>
       </div>

@@ -194,6 +194,7 @@
     "panelists": "Panel: {names}",
     "roomOpen": "The room is open. Starting joins it.",
     "roomClosed": "Nobody has opened the room yet. Starting opens it for the panel and the candidate.",
+    "notAccepted": "The candidate hasn't accepted this interview yet. You can start once they have.",
     "evidence": "What the candidate has shared with you",
     "score": "score {level}/5",
     "scorecardTitle": "Scorecard for {org}",
