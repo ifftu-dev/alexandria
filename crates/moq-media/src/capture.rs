@@ -371,7 +371,10 @@ impl CameraCapturer {
         info!("Using camera: {name}");
         let available_formats = camera.compatible_camera_formats()?;
         debug!("Available formats: {available_formats:?}",);
-        if let Some(format) = Self::select_format(available_formats, Resolution::new(1920, 1080))
+        // 720p: what a call tile needs. 1080p doubled every per-frame cost on
+        // both ends (conversion, encode, the receiver's decode) for detail
+        // no tile shows.
+        if let Some(format) = Self::select_format(available_formats, Resolution::new(1280, 720))
             && let Err(err) = camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
                 RequestedFormatType::Exact(format),
             ))

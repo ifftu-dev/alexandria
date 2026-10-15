@@ -48,17 +48,19 @@ async fn leaving_returns_while_a_blocked_native_task_finishes_in_the_background(
     let manager = TutoringManager::new();
     manager.tasks.open().expect("startup admission");
     let (release, released) = std::sync::mpsc::channel::<()>();
+    let (started, running) = oneshot::channel::<()>();
     let tasks = manager.tasks.clone();
     let native = tokio::spawn(async move {
         // Stands in for a camera open stuck in native code: it cannot be
         // aborted, only waited for.
         let _ = tasks
             .run_blocking(move || {
+                let _ = started.send(());
                 let _ = released.recv();
             })
             .await;
     });
-    tokio::task::yield_now().await;
+    running.await.expect("native work started");
 
     // Leaving does not wait for it. (Real clock: a paused one never
     // advances while blocking work runs.)

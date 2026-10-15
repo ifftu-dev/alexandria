@@ -3334,7 +3334,7 @@ impl TutoringManager {
         let frame_interval = if is_self_preview {
             Duration::from_millis(42)
         } else {
-            Duration::from_millis(95)
+            Duration::from_millis(50)
         };
         // Frames arrive on the camera's own clock; a gate exactly one
         // interval wide drops every other one whenever they arrive a hair
