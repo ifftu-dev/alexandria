@@ -115,6 +115,22 @@ const allRequestedConsentsReady = computed(() => participants.value.every(
 // A panel seat's room can only be handed to the candidate once they have
 // accepted; Cloud refuses it before then, so the call would run for nobody.
 const awaitingCandidate = computed(() => !!panel.value && panel.value.status !== 'accepted' && !panel.value.room.ticket)
+// Ask Cloud again while waiting, so Start turns on when the candidate accepts.
+let panelRefresh: ReturnType<typeof setInterval> | null = null
+watch(awaitingCandidate, (waiting) => {
+  if (waiting && !panelRefresh) {
+    panelRefresh = setInterval(() => {
+      const id = session.value?.id
+      if (!id) return
+      void panelApi.status(id).then((current) => {
+        if (session.value?.id === id) panel.value = current
+      }).catch(() => undefined)
+    }, 5000)
+  } else if (!waiting && panelRefresh) {
+    clearInterval(panelRefresh)
+    panelRefresh = null
+  }
+})
 const connectionQuality = computed(() => {
   if (!tutoringActive.value) return 'Offline'
   if (peers.value.length === 0) return 'Ready'
@@ -158,6 +174,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (panelRefresh) clearInterval(panelRefresh)
   speech.stop()
   stopSelfPreview()
   stopSentinelCameraLoops()
