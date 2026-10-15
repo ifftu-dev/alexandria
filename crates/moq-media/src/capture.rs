@@ -437,17 +437,35 @@ const VIRTUAL_CAMERA_MARKERS: &[&str] = &[
     "virtual cam",
 ];
 
-/// The cameras to try, best first. nokhwa lists the primary camera last, but
-/// a virtual camera (OBS, Camo…) can sit there too, and those often deliver
-/// pixel formats nokhwa cannot open; real devices go first.
+/// The cameras to try, best first, when nobody picked one: the computer's own
+/// camera, then other real cameras, then a nearby iPhone or iPad offered
+/// through Continuity Camera, then virtual cameras.
+///
+/// nokhwa lists the primary camera last, so the list is reversed first, but
+/// macOS lists a Continuity iPhone after the built-in camera and it ended up
+/// first: the call silently took over the phone's camera, including a phone
+/// that was itself in the call. Virtual cameras (OBS, Camo…) often deliver
+/// pixel formats nokhwa cannot open, so they go last.
 #[cfg(not(target_os = "android"))]
 fn camera_preference(cameras: &[nokhwa::utils::CameraInfo]) -> Vec<CameraIndex> {
-    let is_virtual = |name: &str| {
-        let name = name.to_lowercase();
-        VIRTUAL_CAMERA_MARKERS.iter().any(|m| name.contains(m))
+    let rank = |camera: &nokhwa::utils::CameraInfo| {
+        let name = camera.human_name().to_lowercase();
+        let description = camera.description().to_lowercase();
+        if VIRTUAL_CAMERA_MARKERS.iter().any(|m| name.contains(m)) {
+            3
+        } else if ["iphone", "ipad"]
+            .iter()
+            .any(|m| name.contains(m) || description.contains(m))
+        {
+            2
+        } else if description.contains("builtin") {
+            0
+        } else {
+            1
+        }
     };
     let mut ordered: Vec<_> = cameras.iter().rev().collect();
-    ordered.sort_by_key(|c| is_virtual(&c.human_name()));
+    ordered.sort_by_key(|c| rank(c));
     ordered.into_iter().map(|c| c.index().clone()).collect()
 }
 
@@ -509,5 +527,65 @@ mod tests {
     fn screen_capturer_is_send_without_moving_native_handles() {
         fn assert_send<T: Send>() {}
         assert_send::<ScreenCapturer>();
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod camera_preference_tests {
+    use super::camera_preference;
+    use nokhwa::utils::{CameraIndex, CameraInfo};
+
+    fn camera(index: u32, name: &str, description: &str) -> CameraInfo {
+        CameraInfo::new(name, description, "", CameraIndex::Index(index))
+    }
+
+    #[test]
+    fn the_computers_own_camera_beats_a_continuity_iphone_and_obs() {
+        // As macOS listed them on the MacBook that took over the iPhone.
+        let cameras = [
+            camera(
+                0,
+                "MacBook Pro Camera",
+                "Apple Inc.: MacBook Pro Camera - AVCaptureDeviceTypeBuiltInWideAngleCamera",
+            ),
+            camera(
+                1,
+                "OBS Virtual Camera",
+                "OBS Project: OBS Camera Extension - AVCaptureDeviceTypeExternal",
+            ),
+            camera(
+                2,
+                "Pratyush’s iPhone Camera",
+                ": iPhone18,3 - AVCaptureDeviceTypeExternal",
+            ),
+        ];
+        assert_eq!(
+            camera_preference(&cameras),
+            vec![
+                CameraIndex::Index(0),
+                CameraIndex::Index(2),
+                CameraIndex::Index(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_plugged_in_webcam_comes_before_a_continuity_iphone() {
+        let cameras = [
+            camera(
+                0,
+                "Logitech BRIO",
+                "Logitech: BRIO - AVCaptureDeviceTypeExternal",
+            ),
+            camera(
+                1,
+                "Desk iPad Camera",
+                ": iPad16,3 - AVCaptureDeviceTypeExternal",
+            ),
+        ];
+        assert_eq!(
+            camera_preference(&cameras),
+            vec![CameraIndex::Index(0), CameraIndex::Index(1)]
+        );
     }
 }
