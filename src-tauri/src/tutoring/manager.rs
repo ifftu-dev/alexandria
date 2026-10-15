@@ -1671,8 +1671,11 @@ impl TutoringManager {
             watch,
             "self".into(),
             app_handle,
-            (1280, 720),
-            82,
+            // The page shows the camera itself when it can; these frames are
+            // the fallback (and the shared screen). 960x540 fills a tile
+            // without the IPC cost of full 720p frames thirty times a second.
+            (960, 540),
+            80,
             30,
         ))
     }
