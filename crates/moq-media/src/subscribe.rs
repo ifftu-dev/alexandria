@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    collections::{BTreeMap, VecDeque},
-    sync::Arc,
-    time::Duration,
-};
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use std::collections::VecDeque;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use hang::catalog::{AudioConfig, Catalog};
 use moq_lite::{BroadcastConsumer, Track};
@@ -641,17 +639,15 @@ impl WatchTrack {
             let mut viewport = viewport.watch();
             let shutdown = shutdown.clone();
             move || {
-                // TODO: Make configurable.
-                let fps = 30;
                 let mut rescaler = Rescaler::new(decode_config.pixel_format.to_ffmpeg(), None)
                     .expect("failed to create rescaler");
-                let frame_duration = Duration::from_secs_f32(1. / fps as f32);
+                let frame_duration = Duration::from_secs_f32(1. / 30.);
                 if let Err(err) = source.start() {
                     warn!("Video source failed to start: {err:?}");
                     return;
                 }
                 let start = Instant::now();
-                for i in 1.. {
+                loop {
                     // let t = Instant::now();
                     if shutdown.is_cancelled() {
                         break;
@@ -671,14 +667,10 @@ impl WatchTrack {
                             let _ = frame_tx.blocking_send(frame);
                             // trace!(t=?t.elapsed(), "send");
                         }
-                        Ok(None) => {}
+                        // Take each frame as it arrives instead of on a
+                        // clock of our own, which skipped frames.
+                        Ok(None) => std::thread::sleep(crate::publish::SOURCE_POLL_INTERVAL),
                         Err(_) => break,
-                    }
-                    let expected_time = i * frame_duration;
-                    let actual_time = start.elapsed();
-                    if expected_time > actual_time {
-                        std::thread::sleep(expected_time - actual_time);
-                        // trace!(t=?t.elapsed(), slept=?(actual_time - expected_time), ?expected_time, ?actual_time, "done");
                     }
                 }
                 if let Err(err) = source.stop() {
