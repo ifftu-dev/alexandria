@@ -274,6 +274,11 @@ const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
 /// Mobile video presets — use lower resolutions to save battery/bandwidth.
 const MOBILE_VIDEO_PRESETS: [VideoPreset; 2] = [VideoPreset::P360, VideoPreset::P720];
 
+/// The rendition a phone watches: 720p at most. Its tiles are never larger
+/// than the 960px remote viewport, and decoding plus copying out 1080p frames
+/// fell behind the sender (15 Oct).
+const PHONE_VIDEO_QUALITY: live::media::av::Quality = live::media::av::Quality::High;
+
 const IOS_AUDIO_OUTPUT_AUTO_ID: &str = "ios:auto";
 const IOS_AUDIO_OUTPUT_SPEAKER_ID: &str = "ios:speaker";
 const IOS_AUDIO_PORT_ID_PREFIX: &str = "ios:port:";
@@ -1719,7 +1724,7 @@ impl TutoringManager {
         crate::diag::log(&format!(
             "  [{short_id}] video repair: subscribing (VtDecoder, quality=High)..."
         ));
-        match catalog.select_video_rendition(live::media::av::Quality::Highest) {
+        match catalog.select_video_rendition(PHONE_VIDEO_QUALITY) {
             Ok(selected) => {
                 crate::diag::log(&format!(
                     "  [{short_id}] video repair: selected rendition {selected}"
@@ -1734,7 +1739,7 @@ impl TutoringManager {
 
         match broadcast.watch_with::<VtDecoder>(
             &live::media::av::DecodeConfig::default(),
-            live::media::av::Quality::Highest,
+            PHONE_VIDEO_QUALITY,
         ) {
             Ok(video_track) => {
                 log::info!("tutoring: watching video from {short_id}:{name}");

@@ -215,10 +215,20 @@ fn open_camera(camera_idx: Option<CameraIndex>) -> Result<OpenedSource, String> 
     let camera =
         CameraCapturer::with_index(camera_idx).map_err(|e| format!("camera unavailable: {e}"))?;
     let name = camera_label(&camera);
+    let presets = camera_presets(&camera);
     Ok((
         Some(name),
-        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all()),
+        VideoRenditions::new::<H264Encoder>(camera, presets),
     ))
+}
+
+/// The renditions a camera can fill: none above its capture height. Offering
+/// 1080p from a 720p capture made the encoder upscale and every phone decode
+/// 2.25x the pixels for nothing (15 Oct).
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+fn camera_presets(camera: &CameraCapturer) -> Vec<VideoPreset> {
+    use live::media::av::VideoSource;
+    VideoPreset::up_to(camera.format().dimensions[1])
 }
 
 /// Open the screen for sharing and build its renditions.
@@ -1629,8 +1639,8 @@ impl TutoringManager {
             match camera_result {
                 Ok(camera) => {
                     let name = camera_label(&camera);
-                    let video_renditions =
-                        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
+                    let presets = camera_presets(&camera);
+                    let video_renditions = VideoRenditions::new::<H264Encoder>(camera, presets);
                     broadcast
                         .set_video(Some(video_renditions))
                         .map_err(|e| format!("failed to set video: {e}"))?;
