@@ -363,23 +363,42 @@ impl CameraCapturer {
     }
 
     fn open(camera_index: CameraIndex) -> Result<Self> {
-        let mut camera = nokhwa::Camera::new(
-            camera_index,
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestResolution),
-        )?;
-        let name = camera.info().human_name();
-        info!("Using camera: {name}");
-        let available_formats = camera.compatible_camera_formats()?;
-        debug!("Available formats: {available_formats:?}",);
         // 720p: what a call tile needs. 1080p doubled every per-frame cost on
         // both ends (conversion, encode, the receiver's decode) for detail
-        // no tile shows.
-        if let Some(format) = Self::select_format(available_formats, Resolution::new(1280, 720))
-            && let Err(err) = camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
-                RequestedFormatType::Exact(format),
-            ))
-        {
-            warn!(?format, "Failed to change camera format: {err:#}");
+        // no tile shows. Ask for it when opening: that request is matched
+        // against the device's own format list, whereas nokhwa's
+        // `compatible_camera_formats` comes back empty on macOS (its
+        // AVFoundation backend filters formats with `!=` fourcc), which left
+        // the camera at 1080p (16 Oct).
+        let mut camera = match nokhwa::Camera::new(
+            camera_index.clone(),
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestResolution(
+                CALL_RESOLUTION,
+            )),
+        ) {
+            Ok(camera) => camera,
+            Err(err) => {
+                debug!("camera has no {CALL_RESOLUTION} format ({err}), opening its highest");
+                nokhwa::Camera::new(
+                    camera_index,
+                    RequestedFormat::new::<RgbFormat>(
+                        RequestedFormatType::AbsoluteHighestResolution,
+                    ),
+                )?
+            }
+        };
+        let name = camera.info().human_name();
+        info!("Using camera: {name}");
+        if camera.resolution() != CALL_RESOLUTION {
+            let available_formats = camera.compatible_camera_formats()?;
+            debug!("Available formats: {available_formats:?}",);
+            if let Some(format) = Self::select_format(available_formats, CALL_RESOLUTION)
+                && let Err(err) = camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
+                    RequestedFormatType::Exact(format),
+                ))
+            {
+                warn!(?format, "Failed to change camera format: {err:#}");
+            }
         }
         info!("Using format: {}", camera.camera_format());
         let resolution = camera.resolution();
@@ -426,6 +445,13 @@ impl CameraCapturer {
             .cloned()
     }
 }
+
+/// The capture size a call asks a camera for.
+#[cfg(not(target_os = "android"))]
+const CALL_RESOLUTION: Resolution = Resolution {
+    width_x: 1280,
+    height_y: 720,
+};
 
 /// Names of virtual cameras, as products label them (lowercase). Matches the
 /// app's own list in `src/utils/sentinel/virtual-camera.ts`.
