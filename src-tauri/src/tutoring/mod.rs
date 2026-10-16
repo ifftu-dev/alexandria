@@ -32,4 +32,9 @@ pub use manager_mobile::TutoringManager;
 
 pub(crate) mod call_kind;
 pub(crate) mod presence;
+#[cfg(any(
+    feature = "tutoring-video",
+    feature = "tutoring-video-static",
+    feature = "tutoring-video-ios"
+))]
 mod preview_jpeg;

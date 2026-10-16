@@ -2253,6 +2253,7 @@ impl TutoringManager {
             let gate = frame_interval.saturating_sub(Duration::from_millis(8));
             let mut last_emit = std::time::Instant::now();
             let mut frame_count: u64 = 0;
+            let mut stats = BridgeStats::default();
 
             let initial_timeout = Duration::from_secs(10);
             let stall_timeout = Duration::from_secs(30);
@@ -2312,6 +2313,7 @@ impl TutoringManager {
 
                         // The decoder already fitted the frame to the
                         // viewport; encoding runs off the async workers.
+                        let encode_started = std::time::Instant::now();
                         let img = frame.img().clone();
                         let encoded = tokio::task::spawn_blocking(move || {
                             super::preview_jpeg::encode(img, (u32::MAX, u32::MAX), quality)
@@ -2326,6 +2328,7 @@ impl TutoringManager {
                             Err(_) => continue,
                         };
 
+                        let emit_started = std::time::Instant::now();
                         let _ = app_handle.emit(
                             "tutoring:video-frame",
                             VideoFrameEvent {
@@ -2335,6 +2338,11 @@ impl TutoringManager {
                                 height,
                             },
                         );
+                        if let Some(summary) =
+                            stats.record(emit_started - encode_started, emit_started.elapsed())
+                        {
+                            log::info!("tutoring: frame bridge {node_id}: {summary}");
+                        }
                     }
                     None => {
                         log::info!("tutoring: frame bridge ended for {node_id} (track closed)");
@@ -2353,6 +2361,41 @@ impl TutoringManager {
                 }
             }
         })
+    }
+}
+
+/// Rolling numbers for a frame bridge, so a slow preview can be pinned on
+/// the JPEG encode, the hand-off to the webview, or the frames arriving.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+#[derive(Default)]
+struct BridgeStats {
+    since: Option<std::time::Instant>,
+    sent: u32,
+    encode: Duration,
+    emit: Duration,
+}
+
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+impl BridgeStats {
+    const WINDOW: u32 = 150;
+
+    /// Count one sent frame; every [`Self::WINDOW`] frames, describe them.
+    fn record(&mut self, encode: Duration, emit: Duration) -> Option<String> {
+        let since = *self.since.get_or_insert_with(std::time::Instant::now);
+        self.sent += 1;
+        self.encode += encode;
+        self.emit += emit;
+        if self.sent < Self::WINDOW {
+            return None;
+        }
+        let summary = format!(
+            "sent {:.1} fps, encode {:.1} ms, emit {:.1} ms",
+            f64::from(self.sent) / since.elapsed().as_secs_f64(),
+            self.encode.as_secs_f64() * 1000.0 / f64::from(self.sent),
+            self.emit.as_secs_f64() * 1000.0 / f64::from(self.sent),
+        );
+        *self = Self::default();
+        Some(summary)
     }
 }
 
