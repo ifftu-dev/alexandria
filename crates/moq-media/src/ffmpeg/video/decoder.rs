@@ -205,6 +205,19 @@ impl VideoDecoder for FfmpegVideoDecoder {
             }
         }
     }
+
+    fn discard_frames(&mut self) -> Result<()> {
+        loop {
+            match self.codec.receive_frame(&mut self.decoded) {
+                Ok(()) => {}
+                Err(ffmpeg::util::error::Error::BufferTooSmall) => return Ok(()),
+                Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::util::error::EAGAIN => {
+                    return Ok(());
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
 }
 
 /// Parse AVCC-format data and return the NAL unit types present.

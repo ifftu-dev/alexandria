@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 
 use hang::catalog::{AudioConfig, Catalog};
 use moq_lite::{BroadcastConsumer, Track};
@@ -860,6 +864,8 @@ impl WatchTrack {
     ) -> Result<(), anyhow::Error> {
         let mut pkt_count: u64 = 0;
         let mut decoded_count: u64 = 0;
+        let mut skipped_count: u64 = 0;
+        let mut pending = VecDeque::new();
         info!("videodec: run_loop starting, waiting for first packet...");
         loop {
             if shutdown.is_cancelled() {
@@ -868,11 +874,27 @@ impl WatchTrack {
                 );
                 break;
             }
-            let Some(packet) = input_rx.blocking_recv() else {
+            if pending.is_empty() {
+                let Some(packet) = input_rx.blocking_recv() else {
+                    info!(
+                        "videodec: run_loop input channel closed after {pkt_count} packets, {decoded_count} decoded frames"
+                    );
+                    break;
+                };
+                pending.push_back(packet);
+            }
+            while let Ok(packet) = input_rx.try_recv() {
+                pending.push_back(packet);
+            }
+            let skipped = skip_to_latest_keyframe(&mut pending, MAX_VIDEO_BACKLOG);
+            if skipped > 0 {
+                skipped_count += skipped as u64;
                 info!(
-                    "videodec: run_loop input channel closed after {pkt_count} packets, {decoded_count} decoded frames"
+                    "videodec: fell behind, skipped {skipped} packets to the newest keyframe ({skipped_count} total)"
                 );
-                break;
+            }
+            let Some(packet) = pending.pop_front() else {
+                continue;
             };
             pkt_count += 1;
             if viewport_watcher.update() {
@@ -884,6 +906,14 @@ impl WatchTrack {
                 .push_packet(packet)
                 .context("failed to push packet")?;
             trace!(t=?t.elapsed(), "videodec: push_packet");
+            // A newer packet is already waiting: whatever this one decoded to
+            // is stale before anyone could see it, so don't convert it.
+            if !pending.is_empty() {
+                decoder
+                    .discard_frames()
+                    .context("failed to discard frames")?;
+                continue;
+            }
             while let Some(frame) = decoder.pop_frame().context("failed to pop frame")? {
                 decoded_count += 1;
                 if decoded_count <= 3 || decoded_count.is_multiple_of(100) {
@@ -908,6 +938,35 @@ impl WatchTrack {
             }
         }
         Ok(())
+    }
+}
+
+/// Packets a video decoder may fall behind by before it jumps ahead: about
+/// half a second at 30 fps. Senders start a group with a keyframe every
+/// second, so the jump lands at most a second back.
+#[cfg(any(feature = "video", feature = "video-ios"))]
+const MAX_VIDEO_BACKLOG: usize = 15;
+
+/// Drop waiting packets up to the newest keyframe once more than `max_backlog`
+/// are queued, so a decoder slower than the sender shows live video with gaps
+/// instead of ever-older video. Returns how many packets were dropped.
+///
+/// Packets after a keyframe depend on it, and packets before it are never
+/// needed again, so decoding resumes cleanly from that keyframe.
+#[cfg(any(feature = "video", feature = "video-ios"))]
+fn skip_to_latest_keyframe(
+    pending: &mut VecDeque<moq_mux::container::Frame>,
+    max_backlog: usize,
+) -> usize {
+    if pending.len() <= max_backlog {
+        return 0;
+    }
+    match pending.iter().rposition(|packet| packet.keyframe) {
+        Some(newest_keyframe) => {
+            pending.drain(..newest_keyframe);
+            newest_keyframe
+        }
+        None => 0,
     }
 }
 
@@ -995,5 +1054,55 @@ impl AvRemoteTrack {
             audio,
             video,
         })
+    }
+}
+
+#[cfg(all(test, any(feature = "video", feature = "video-ios")))]
+mod backlog_tests {
+    use std::collections::VecDeque;
+
+    use moq_mux::container::{Frame, Timestamp};
+
+    use super::skip_to_latest_keyframe;
+
+    fn packets(keyframes: &[usize], len: usize) -> VecDeque<Frame> {
+        (0..len)
+            .map(|i| Frame {
+                payload: vec![i as u8].into(),
+                timestamp: Timestamp::from_micros(i as u64 * 33_333).unwrap(),
+                duration: None,
+                keyframe: keyframes.contains(&i),
+            })
+            .collect()
+    }
+
+    fn first_index(pending: &VecDeque<Frame>) -> u8 {
+        pending
+            .front()
+            .map(|f| f.payload.iter().next().copied().unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_short_backlog_is_decoded_in_full() {
+        let mut pending = packets(&[0, 10], 12);
+        assert_eq!(skip_to_latest_keyframe(&mut pending, 15), 0);
+        assert_eq!(pending.len(), 12);
+    }
+
+    #[test]
+    fn a_long_backlog_jumps_to_the_newest_keyframe() {
+        let mut pending = packets(&[0, 30, 60], 70);
+        assert_eq!(skip_to_latest_keyframe(&mut pending, 15), 60);
+        assert_eq!(pending.len(), 10);
+        assert!(pending[0].keyframe);
+        assert_eq!(first_index(&pending), 60);
+    }
+
+    #[test]
+    fn without_a_keyframe_to_land_on_nothing_is_dropped() {
+        let mut pending = packets(&[], 40);
+        assert_eq!(skip_to_latest_keyframe(&mut pending, 15), 0);
+        assert_eq!(pending.len(), 40);
     }
 }

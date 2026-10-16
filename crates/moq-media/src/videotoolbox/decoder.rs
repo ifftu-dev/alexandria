@@ -57,6 +57,9 @@ struct CMTimeRepr {
 const K_CM_TIME_FLAGS_VALID: u32 = 1;
 const K_CV_PIXEL_FORMAT_TYPE_32_BGRA: u32 = 0x42475241;
 const K_CF_NUMBER_SINT32_TYPE: i64 = 3;
+/// `kVTInvalidSessionErr`: iOS tears decode sessions down when the app leaves
+/// the foreground, and every later decode fails with this.
+const K_VT_INVALID_SESSION_ERR: OSStatus = -12903;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -92,6 +95,7 @@ unsafe extern "C" {
     ) -> CFMutableDictionaryRef;
     fn CFDictionarySetValue(dict: CFMutableDictionaryRef, key: *const c_void, value: *const c_void);
     fn CFRelease(cf: CFTypeRef);
+    fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
     fn CFNumberCreate(
         allocator: CFAllocatorRef,
         the_type: i64,
@@ -180,12 +184,24 @@ struct VTDecompressionOutputCallbackRecord {
     decompress_output_ref_con: *mut c_void,
 }
 
-/// Decoded frame waiting to be consumed.
+/// A decoded picture still in VideoToolbox's BGRA buffer. Copying it out as
+/// RGBA is the expensive part of decoding, so that waits until someone takes
+/// the frame; a frame dropped for being stale never pays it.
 struct RawDecodedFrame {
-    rgba_data: Vec<u8>,
-    width: u32,
-    height: u32,
+    /// Retained in the callback, released on drop.
+    pixel_buffer: CVPixelBufferRef,
     timestamp_us: u64,
+}
+
+// SAFETY: CoreVideo pixel buffers are reference-counted objects that may be
+// retained, released and read from any thread.
+unsafe impl Send for RawDecodedFrame {}
+
+impl Drop for RawDecodedFrame {
+    fn drop(&mut self) {
+        // SAFETY: balances the CFRetain taken when the frame was queued.
+        unsafe { CFRelease(self.pixel_buffer as CFTypeRef) };
+    }
 }
 
 type DecoderSession = (
@@ -209,6 +225,9 @@ pub struct VtDecoder {
     viewport_h: u32,
     frame_count: u64,
     initialized: bool,
+    /// The catalog's avcC, kept to rebuild the session after iOS invalidates it.
+    description: Option<Vec<u8>>,
+    frames_out: u64,
 }
 
 // SAFETY: The VideoToolbox session and format-description references are
@@ -222,6 +241,15 @@ unsafe impl Send for VtDecoder {}
 
 impl Drop for VtDecoder {
     fn drop(&mut self) {
+        self.close_session();
+    }
+}
+
+impl VtDecoder {
+    /// Release the session and everything tied to it; the decoder can be
+    /// initialized again from the next keyframe.
+    fn close_session(&mut self) {
+        self.initialized = false;
         if !self.session.is_null() {
             unsafe {
                 let status = VTDecompressionSessionWaitForAsynchronousFrames(self.session);
@@ -252,6 +280,7 @@ impl VideoDecoder for VtDecoder {
     fn new(config: &hang::catalog::VideoConfig, _playback_config: &DecodeConfig) -> Result<Self> {
         let viewport_w = config.coded_width.unwrap_or(640);
         let viewport_h = config.coded_height.unwrap_or(480);
+        let description = config.description.as_ref().map(|d| d.to_vec());
 
         match config.description.as_ref() {
             Some(desc_bytes) => {
@@ -273,19 +302,21 @@ impl VideoDecoder for VtDecoder {
                             viewport_h,
                             frame_count: 0,
                             initialized: true,
+                            description,
+                            frames_out: 0,
                         })
                     }
                     Err(e) => {
                         tracing::warn!(
                             "VtDecoder: eager init failed: {e:#}, deferring to first keyframe"
                         );
-                        Ok(Self::uninit(viewport_w, viewport_h))
+                        Ok(Self::uninit(viewport_w, viewport_h, description))
                     }
                 }
             }
             None => {
                 tracing::warn!("VtDecoder: no description in catalog - will need keyframe to init");
-                Ok(Self::uninit(viewport_w, viewport_h))
+                Ok(Self::uninit(viewport_w, viewport_h, None))
             }
         }
     }
@@ -295,6 +326,20 @@ impl VideoDecoder for VtDecoder {
     }
 
     fn push_packet(&mut self, packet: moq_mux::container::Frame) -> Result<()> {
+        // After iOS invalidated the session, rebuild it from the catalog's
+        // description at the next keyframe.
+        if !self.initialized
+            && packet.keyframe
+            && let Some(description) = self.description.clone()
+        {
+            match Self::create_session(&description) {
+                Ok(parts) => {
+                    tracing::info!("VtDecoder: session created at keyframe");
+                    self.install(parts);
+                }
+                Err(e) => tracing::warn!("VtDecoder: session creation failed: {e:#}"),
+            }
+        }
         if !self.initialized {
             if !packet.keyframe {
                 return Ok(());
@@ -340,13 +385,9 @@ impl VideoDecoder for VtDecoder {
             avcc.extend_from_slice(&pps);
 
             match Self::create_session(&avcc) {
-                Ok((session, format_desc, output, callback_context)) => {
-                    tracing::info!("VtDecoder: deferred init succeeded, session={session:?}");
-                    self.session = session;
-                    self.format_desc = format_desc;
-                    self.output = output;
-                    self.callback_context = callback_context;
-                    self.initialized = true;
+                Ok(parts) => {
+                    tracing::info!("VtDecoder: deferred init succeeded, session={:?}", parts.0);
+                    self.install(parts);
                 }
                 Err(e) => {
                     tracing::warn!("VtDecoder: deferred init failed: {e:#}");
@@ -470,7 +511,14 @@ impl VideoDecoder for VtDecoder {
         // Now it's safe to drop data — decode is complete (synchronous)
         drop(data);
 
-        if dec_status != 0 {
+        if dec_status == K_VT_INVALID_SESSION_ERR {
+            tracing::warn!(
+                "VtDecoder: session invalidated at frame #{} (app left the foreground?); \
+                 recreating it at the next keyframe",
+                self.frame_count
+            );
+            self.close_session();
+        } else if dec_status != 0 {
             tracing::warn!(
                 "VTDecompressionSessionDecodeFrame failed: OSStatus={dec_status}, frame #{}",
                 self.frame_count
@@ -490,35 +538,44 @@ impl VideoDecoder for VtDecoder {
     }
 
     fn pop_frame(&mut self) -> Result<Option<DecodedFrame>> {
+        // Only the newest picture is worth converting; older ones are stale.
         let raw = {
             let mut q = self
                 .output
                 .lock()
                 .map_err(|e| anyhow::anyhow!("lock: {e}"))?;
-            let item = q.pop_front();
-            if item.is_some() {
-                let remaining = q.len();
-                if remaining == 0 || remaining % 100 == 0 {
-                    tracing::info!(
-                        "VtDecoder::pop_frame: got frame, {} remaining in queue",
-                        remaining
-                    );
-                }
-            }
-            item
+            let newest = q.pop_back();
+            q.clear();
+            newest
         };
-
-        match raw {
-            None => Ok(None),
-            Some(raw) => {
-                // Create image::RgbaImage from RGBA bytes
-                let img = image::RgbaImage::from_raw(raw.width, raw.height, raw.rgba_data)
-                    .context("failed to create RgbaImage from decoded frame")?;
-                let frame = image::Frame::new(img);
-                let timestamp = Duration::from_micros(raw.timestamp_us);
-                Ok(Some(DecodedFrame { frame, timestamp }))
-            }
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        // SAFETY: the buffer stays retained by `raw` for the whole copy.
+        let Some((rgba, width, height)) = (unsafe { copy_bgra_as_rgba(raw.pixel_buffer) }) else {
+            return Ok(None);
+        };
+        self.frames_out += 1;
+        if self.frames_out <= 3 || self.frames_out.is_multiple_of(300) {
+            tracing::info!(
+                "VtDecoder: frame #{} out, {width}x{height}",
+                self.frames_out
+            );
         }
+        let img = image::RgbaImage::from_raw(width, height, rgba)
+            .context("failed to create RgbaImage from decoded frame")?;
+        Ok(Some(DecodedFrame {
+            frame: image::Frame::new(img),
+            timestamp: Duration::from_micros(raw.timestamp_us),
+        }))
+    }
+
+    fn discard_frames(&mut self) -> Result<()> {
+        self.output
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock: {e}"))?
+            .clear();
+        Ok(())
     }
 
     fn set_viewport(&mut self, w: u32, h: u32) {
@@ -533,7 +590,7 @@ impl VideoDecoder for VtDecoder {
 
 impl VtDecoder {
     /// Create an uninitialized decoder that will be initialized on the first keyframe.
-    fn uninit(viewport_w: u32, viewport_h: u32) -> Self {
+    fn uninit(viewport_w: u32, viewport_h: u32, description: Option<Vec<u8>>) -> Self {
         Self {
             session: ptr::null_mut(),
             format_desc: ptr::null(),
@@ -543,7 +600,17 @@ impl VtDecoder {
             viewport_h,
             frame_count: 0,
             initialized: false,
+            description,
+            frames_out: 0,
         }
+    }
+
+    fn install(&mut self, (session, format_desc, output, callback_context): DecoderSession) {
+        self.session = session;
+        self.format_desc = format_desc;
+        self.output = output;
+        self.callback_context = callback_context;
+        self.initialized = true;
     }
 
     /// Create a VTDecompressionSession from avcC description bytes.
@@ -1011,88 +1078,92 @@ unsafe fn vt_decompress_callback_inner(
         return;
     }
 
-    // SAFETY: the callback contract establishes live VideoToolbox/CoreVideo
-    // objects. CoreVideo-reported dimensions and strides are validated before
-    // dereferencing the pixel memory.
+    let timestamp_us = if presentation_timestamp.flags & K_CM_TIME_FLAGS_VALID != 0
+        && presentation_timestamp.timescale > 0
+    {
+        (presentation_timestamp.value as f64 / presentation_timestamp.timescale as f64
+            * 1_000_000.0) as u64
+    } else {
+        0
+    };
+
+    // SAFETY: the context is the session's retained output queue, and the
+    // image buffer is live for the callback; retaining it keeps it alive
+    // until the queued frame is dropped.
     unsafe {
         let output = &*(decompress_output_ref_con as *const Mutex<VecDeque<RawDecodedFrame>>);
-
-        let lock_status = CVPixelBufferLockBaseAddress(image_buffer, 1);
-        if lock_status != 0 {
-            tracing::warn!("CVPixelBufferLockBaseAddress failed: {lock_status}");
-            return;
-        }
-        let _pixel_buffer_lock = PixelBufferLock(image_buffer);
-
-        let base = CVPixelBufferGetBaseAddress(image_buffer);
-        let bytes_per_row = CVPixelBufferGetBytesPerRow(image_buffer);
-        let Ok(width) = u32::try_from(CVPixelBufferGetWidth(image_buffer)) else {
-            return;
+        CFRetain(image_buffer as CFTypeRef);
+        let frame = RawDecodedFrame {
+            pixel_buffer: image_buffer,
+            timestamp_us,
         };
-        let Ok(height) = u32::try_from(CVPixelBufferGetHeight(image_buffer)) else {
-            return;
-        };
-        let Some(expected_row) = (width as usize).checked_mul(4) else {
-            return;
-        };
-        let Some(total) = expected_row.checked_mul(height as usize) else {
-            return;
-        };
-
-        if !base.is_null() && width > 0 && height > 0 && bytes_per_row >= expected_row {
-            let mut rgba = Vec::with_capacity(total);
-            for y in 0..height as usize {
-                let Some(row_offset) = y.checked_mul(bytes_per_row) else {
-                    return;
-                };
-                let row_ptr = base.cast::<u8>().add(row_offset);
-                for x in 0..width as usize {
-                    let px = row_ptr.add(x * 4);
-                    let b = *px;
-                    let g = *px.add(1);
-                    let r = *px.add(2);
-                    let a = *px.add(3);
-                    rgba.push(r);
-                    rgba.push(g);
-                    rgba.push(b);
-                    rgba.push(a);
-                }
-            }
-
-            let timestamp_us = if presentation_timestamp.flags & K_CM_TIME_FLAGS_VALID != 0
-                && presentation_timestamp.timescale > 0
-            {
-                (presentation_timestamp.value as f64 / presentation_timestamp.timescale as f64
-                    * 1_000_000.0) as u64
-            } else {
-                0
-            };
-
-            let frame = RawDecodedFrame {
-                rgba_data: rgba,
-                width,
-                height,
-                timestamp_us,
-            };
-
-            if let Ok(mut q) = output.lock() {
-                let qlen = q.len();
-                q.push_back(frame);
-                // Log first 3 decoded frames and every 50th queued frame
-                if qlen == 0 || qlen == 1 || qlen == 2 || (qlen + 1) % 50 == 0 {
-                    tracing::info!(
-                        "VT callback: decoded frame queued, {width}x{height}, queue_len={}, ts={timestamp_us}us",
-                        qlen + 1
-                    );
-                }
-            }
-        } else {
-            tracing::warn!(
-                "VT callback: invalid buffer layout, base_null={}, stride={bytes_per_row}, expected_stride={expected_row}, {width}x{height}",
-                base.is_null()
-            );
+        if let Ok(mut q) = output.lock() {
+            // Nobody wants an older picture once a newer one exists.
+            q.clear();
+            q.push_back(frame);
         }
     }
+}
+
+/// Copy a BGRA pixel buffer out as tightly packed RGBA.
+///
+/// # Safety
+/// `pixel_buffer` must be a live, retained CoreVideo pixel buffer.
+unsafe fn copy_bgra_as_rgba(pixel_buffer: CVPixelBufferRef) -> Option<(Vec<u8>, u32, u32)> {
+    // SAFETY: the caller keeps the buffer alive; the base address is read
+    // only while the read-only lock is held, within the CoreVideo-reported
+    // height and stride.
+    unsafe {
+        let lock_status = CVPixelBufferLockBaseAddress(pixel_buffer, 1);
+        if lock_status != 0 {
+            tracing::warn!("CVPixelBufferLockBaseAddress failed: {lock_status}");
+            return None;
+        }
+        let _pixel_buffer_lock = PixelBufferLock(pixel_buffer);
+
+        let base = CVPixelBufferGetBaseAddress(pixel_buffer);
+        let bytes_per_row = CVPixelBufferGetBytesPerRow(pixel_buffer);
+        let width = u32::try_from(CVPixelBufferGetWidth(pixel_buffer)).ok()?;
+        let height = u32::try_from(CVPixelBufferGetHeight(pixel_buffer)).ok()?;
+        let row_bytes = (width as usize).checked_mul(4)?;
+        let total = bytes_per_row.checked_mul(height as usize)?;
+        if base.is_null() || width == 0 || height == 0 || bytes_per_row < row_bytes {
+            tracing::warn!(
+                "VT frame: invalid buffer layout, base_null={}, stride={bytes_per_row}, {width}x{height}",
+                base.is_null()
+            );
+            return None;
+        }
+        let src = std::slice::from_raw_parts(base.cast::<u8>(), total);
+        Some((
+            bgra_rows_to_rgba(src, bytes_per_row, row_bytes),
+            width,
+            height,
+        ))
+    }
+}
+
+/// Repack BGRA rows (each `stride` bytes, `row_bytes` of them pixels) as
+/// tightly packed RGBA. Written as whole-row slice work so the compiler
+/// vectorizes it; a per-pixel push loop cost ~70 ms a 1080p frame on iPhone.
+fn bgra_rows_to_rgba(src: &[u8], stride: usize, row_bytes: usize) -> Vec<u8> {
+    let rows = src.len() / stride;
+    let mut rgba = vec![0u8; rows * row_bytes];
+    for (out_row, in_row) in rgba
+        .chunks_exact_mut(row_bytes)
+        .zip(src.chunks_exact(stride))
+    {
+        for (out, px) in out_row
+            .chunks_exact_mut(4)
+            .zip(in_row[..row_bytes].chunks_exact(4))
+        {
+            out[0] = px[2];
+            out[1] = px[1];
+            out[2] = px[0];
+            out[3] = px[3];
+        }
+    }
+    rgba
 }
 
 struct PixelBufferLock(CVPixelBufferRef);
@@ -1104,5 +1175,23 @@ impl Drop for PixelBufferLock {
         unsafe {
             CVPixelBufferUnlockBaseAddress(self.0, 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bgra_rows_to_rgba;
+
+    #[test]
+    fn bgra_rows_become_packed_rgba_without_row_padding() {
+        // Two rows of two pixels, each row padded to a 12-byte stride.
+        let src = [
+            1, 2, 3, 4, 5, 6, 7, 8, 0xEE, 0xEE, 0xEE, 0xEE, //
+            9, 10, 11, 12, 13, 14, 15, 16, 0xEE, 0xEE, 0xEE, 0xEE,
+        ];
+        assert_eq!(
+            bgra_rows_to_rgba(&src, 12, 8),
+            vec![3, 2, 1, 4, 7, 6, 5, 8, 11, 10, 9, 12, 15, 14, 13, 16]
+        );
     }
 }
