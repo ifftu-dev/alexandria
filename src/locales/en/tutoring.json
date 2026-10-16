@@ -141,10 +141,10 @@
     "applying": "Applying…"
   },
   "leave": {
-    "title": "Leave Session?",
+    "title": "Leave the call?",
     "desc": "Your camera and microphone will stop. Other people will see you leave.",
     "stay": "Stay",
-    "confirm": "Leave Session"
+    "confirm": "Leave call"
   },
   "ticketFallback": {
     "title": "Invite",

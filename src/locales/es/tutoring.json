@@ -141,10 +141,10 @@
     "applying": "Aplicando…"
   },
   "leave": {
-    "title": "¿Abandonar la sesión?",
+    "title": "¿Salir de la llamada?",
     "desc": "Tu cámara y micrófono se detendrán. Otras personas verán que te vas.",
     "stay": "Quedarme",
-    "confirm": "Abandonar la sesión"
+    "confirm": "Salir de la llamada"
   },
   "ticketFallback": {
     "title": "Invitación",

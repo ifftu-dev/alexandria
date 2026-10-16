@@ -141,10 +141,10 @@
     "applying": "正在应用…"
   },
   "leave": {
-    "title": "离开会话？",
+    "title": "离开通话？",
     "desc": "你的摄像头和麦克风将停止。其他人会看到你离开。",
     "stay": "留下",
-    "confirm": "离开会话"
+    "confirm": "离开通话"
   },
   "ticketFallback": {
     "title": "邀请",
