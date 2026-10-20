@@ -36,14 +36,17 @@ Upstream ships no `NOTICE` file, so Apache-2.0 §4(d) has nothing to propagate.
 carrying it is N0's work, whether or not Alexandria has since edited it. Those
 headers must not be removed.
 
-- **`crates/iroh-moq`** (~490 lines) — entirely N0's, unmodified since import.
-- **`crates/moq-media`** (~9,000 lines) — overwhelmingly N0's: the MoQ
+- **`crates/iroh-moq`** (~610 lines) — entirely N0's; Alexandria has modified
+  `src/lib.rs` in place.
+- **`crates/moq-media`** (~10,300 lines) — overwhelmingly N0's: the MoQ
   container and catalog plumbing, the ffmpeg codec layer, Opus, the audio
   backends, and the VideoToolbox codecs. Alexandria wrote `src/android/mod.rs`
-  and `src/android/camera.rs` (the NDK Camera2 backend, ~720 lines, written
-  because no Rust capture crate supports Android) and has modified a number of
-  N0's files in place.
-- **`crates/live`** (~770 lines) — Alexandria's, and it *replaced* the vendored
+  and `src/android/camera.rs` (the NDK Camera2 backend, ~870 lines, written
+  because no Rust capture crate supports Android), `src/preview.rs` (JPEG
+  encoding of video frames for the webview) and `tests/live_latency.rs` (an
+  end-to-end check that a slow receiver does not build up delay), and has
+  modified a number of N0's files in place.
+- **`crates/live`** (~930 lines) — Alexandria's, and it *replaced* the vendored
   `iroh-live` crate rather than wrapping it (commit `19d3293`). It is listed here
   anyway because `src/rooms.rs` is a port of N0's room layer rather than a
   clean-room implementation, which makes it a derivative work.
@@ -63,10 +66,17 @@ in this repository's history:
    import already containing `AlexandriaFrameDelegate` and an
    `org.alexandria.camera` dispatch queue.
 2. **In this repository, since `19bb430`.** `git diff 19bb430 HEAD --
-   crates/moq-media` is authoritative. As of this writing: `Cargo.toml`,
-   `src/lib.rs`, `src/audio.rs`, `src/capture.rs`, `src/ffmpeg/video/encoder.rs`,
-   `src/ffmpeg/video/util.rs`, `src/videotoolbox/decoder.rs`, and the
-   Alexandria-authored `src/android/`.
+   crates/moq-media crates/iroh-moq` is authoritative. As of this writing, in
+   `crates/moq-media`: `Cargo.toml`, `src/lib.rs`, `src/audio.rs`, `src/av.rs`,
+   `src/capture.rs`, `src/publish.rs`, `src/subscribe.rs`, `src/ffmpeg/mod.rs`,
+   `src/ffmpeg/video/decoder.rs`, `src/ffmpeg/video/encoder.rs`,
+   `src/ffmpeg/video/util.rs`, `src/ffmpeg/video/util/rescaler.rs`,
+   `src/videotoolbox/mod.rs`, `src/videotoolbox/camera.rs`,
+   `src/videotoolbox/decoder.rs`, `src/videotoolbox/encoder.rs`, and the
+   Alexandria-authored `src/android/`, `src/preview.rs` and
+   `tests/live_latency.rs`; in `crates/iroh-moq`: `Cargo.toml` and
+   `src/lib.rs`. Each modified N0 file carries a *Modified by Alexandria*
+   line under N0's header.
 
 Because phase 1 cannot be enumerated precisely, **treat every file in
 `crates/moq-media` as potentially modified from upstream.** That is the honest

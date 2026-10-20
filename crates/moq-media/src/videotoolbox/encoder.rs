@@ -1,4 +1,5 @@
 // Copyright 2025 N0, INC
+// Modified by Alexandria Pvt. Ltd. — see crates/VENDORING.md
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
