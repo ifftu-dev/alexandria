@@ -108,5 +108,8 @@ keys/
 src-tauri/binaries/
 src-tauri/macos-frameworks/
 
+# Built by scripts/demo/ax.sh from axtool.swift on first run.
+scripts/demo/axtool
+
 # python bytecode from cardano/governance/deploy_*.py
 __pycache__/

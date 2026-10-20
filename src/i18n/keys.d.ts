@@ -2255,6 +2255,7 @@ export type MessageKey =
   | 'sentinel.debug.valIdle'
   | 'sentinel.debug.valNa'
   | 'sentinel.debug.valNo'
+  | 'sentinel.debug.valSuspended'
   | 'sentinel.debug.valYes'
   | 'sentinel.engine.aiModels'
   | 'sentinel.engine.calibrated'

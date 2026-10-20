@@ -492,6 +492,7 @@
     "rowInferLatency": "प्रतिक्रिया समय",
     "valActive": "सक्रिय",
     "valIdle": "निष्क्रिय",
+    "valSuspended": "निलंबित",
     "valYes": "हाँ",
     "valNo": "नहीं",
     "valNa": "n/a",

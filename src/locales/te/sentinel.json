@@ -492,6 +492,7 @@
     "rowInferLatency": "ప్రతిస్పందన సమయం",
     "valActive": "క్రియాశీలం",
     "valIdle": "నిష్క్రియం",
+    "valSuspended": "నిలిపివేయబడింది",
     "valYes": "అవును",
     "valNo": "కాదు",
     "valNa": "n/a",

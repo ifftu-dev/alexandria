@@ -136,23 +136,35 @@ function emptySentinelDebug() {
     screenCaptured: false,
     displayChanges: 0,
     displaySource: '' as string,
-    // Android environment (latest sample this window).
+    // Android environment (latest sample this window). An empty source
+    // means no report came back: the probe does not exist off Android.
+    androidEnvSource: '' as string,
     foreignAccessibility: [] as string[],
     adbEnabled: false,
+    developmentSettings: false,
+    overlayHidingSupported: false,
+    androidSdk: 0,
     shieldRequested: false,
     shieldActive: false,
     obscuredTouches: 0,
-    // Desktop hidden-overlay scan (latest sample this window).
+    // Desktop hidden-overlay scan (latest sample this window). Empty
+    // source = no scan on this platform (mobile, Wayland).
+    overlaySource: '' as string,
     overlayScanned: 0,
     overlayAllowlisted: 0,
     overlaySuspicious: [] as string[],
     // Camera device (dev view only; never persisted).
     cameraDeviceLabel: '' as string,
     cameraDeviceVirtual: false,
-    // Process watchlist (latest sample this window).
+    // Process watchlist (latest sample this window). Empty source = no
+    // scan on this platform (mobile).
+    processSource: '' as string,
     processesScanned: 0,
     watchedProcesses: [] as string[],
-    // Global hotkey monitor.
+    // Global hotkey monitor. `hotkeysSupported` is null until the session
+    // has asked (only assessment-purpose sessions do).
+    hotkeysSupported: null as boolean | null,
+    hotkeysSource: '' as string,
     hotkeysRunning: false,
     hotkeysPermission: false,
     nativeHotkeys: 0,
@@ -1131,18 +1143,26 @@ function createSentinelService() {
       sentinelDebug.screenCaptured = displayLatest?.mirrored ?? false
       sentinelDebug.displayChanges = displayChangeCount
       sentinelDebug.displaySource = displayLatest?.source ?? ''
+      sentinelDebug.androidEnvSource = androidEnvLatest?.source ?? ''
       sentinelDebug.foreignAccessibility = androidEnvLatest?.foreign_accessibility ?? []
       sentinelDebug.adbEnabled = androidEnvLatest?.adb_enabled ?? false
+      sentinelDebug.developmentSettings = androidEnvLatest?.development_settings_enabled ?? false
+      sentinelDebug.overlayHidingSupported = androidEnvLatest?.overlay_hiding_supported ?? false
+      sentinelDebug.androidSdk = androidEnvLatest?.sdk_int ?? 0
       sentinelDebug.shieldRequested = shieldRequested
       sentinelDebug.shieldActive = androidEnvLatest?.shield_active ?? false
       sentinelDebug.obscuredTouches = obscuredTouchesWindow
+      sentinelDebug.overlaySource = overlayLatest?.source ?? ''
       sentinelDebug.overlayScanned = overlayLatest?.scanned ?? 0
       sentinelDebug.overlayAllowlisted = overlayLatest?.allowlisted ?? 0
       sentinelDebug.overlaySuspicious = overlayLatest?.suspicious.map(w => `${w.owner}:${w.reason}`) ?? []
       sentinelDebug.cameraDeviceLabel = cameraDeviceLabel
       sentinelDebug.cameraDeviceVirtual = cameraDeviceVirtual
+      sentinelDebug.processSource = processLatest?.source ?? ''
       sentinelDebug.processesScanned = processLatest?.scanned ?? 0
       sentinelDebug.watchedProcesses = processLatest?.watched.map(w => `${w.name}:${w.category}`) ?? []
+      sentinelDebug.hotkeysSupported = hotkeyStatus ? hotkeyStatus.supported : null
+      sentinelDebug.hotkeysSource = hotkeyStatus?.source ?? ''
       sentinelDebug.hotkeysRunning = hotkeysRunning
       sentinelDebug.hotkeysPermission = hotkeyStatus?.permission_granted ?? false
       sentinelDebug.nativeHotkeys = nativeHotkeyCount
@@ -1319,7 +1339,10 @@ function createSentinelService() {
       sessionId.value = response.session_id
       clearTrainingBuffers()
       suspended.value = false
-      sentinelDebug.suspended = false
+      // A new session starts from a clean dev view: the previous session's
+      // readings would otherwise show until this one's first snapshot. The
+      // camera device can be reported before the session starts, so it stays.
+      Object.assign(sentinelDebug, emptySentinelDebug(), { cameraDeviceLabel, cameraDeviceVirtual })
       isActive.value = true
       // Device attestation (iOS App Attest / Android Play Integrity) binds
       // the platform's word to this session's nonce. Fire-and-forget: the
@@ -1331,7 +1354,6 @@ function createSentinelService() {
       // Do not attach new listeners while that cleanup is pending.
       if (generation !== lifecycleGeneration) return
       sentinelDebug.active = true
-      sentinelDebug.sessionGazeChecks = 0
       snapshotWindowStartMs = Date.now()
 
       // Report the bundled paste classifier version to dashboard cards.

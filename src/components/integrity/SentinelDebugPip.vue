@@ -41,14 +41,43 @@ const displaySummary = computed(() => {
   if (debug.displayChanges) tells.push(`Δ${debug.displayChanges}`)
   return `${debug.displayCount}·${debug.displaySource}${tells.length ? ' ' + tells.join(' ') : ''}`
 })
+// Native probes report only after the session's first snapshot, and only
+// on platforms that have them. Until then a row shows '—'; after it, a
+// probe that sent nothing back shows n/a rather than a clean zero.
+const sampled = computed(() => debug.active && debug.lastSnapshotAt > 0)
+const probeValue = (source: string, value: () => string) =>
+  !sampled.value ? '—' : source ? value() : t('sentinel.debug.valNa')
 // Android environment, compact: shield state plus any active tells.
-const androidEnvSummary = computed(() => {
+const androidEnvSummary = computed(() => probeValue(debug.androidEnvSource, () => {
   const tells: string[] = []
   tells.push(debug.shieldRequested ? (debug.shieldActive ? 'shield' : 'shield?') : 'no-shield')
+  if (!debug.overlayHidingSupported) tells.push('no-overlay-hide')
   if (debug.foreignAccessibility?.length) tells.push(`a11y×${debug.foreignAccessibility?.length}`)
   if (debug.adbEnabled) tells.push('adb')
+  else if (debug.developmentSettings) tells.push('dev-options')
   if (debug.obscuredTouches) tells.push(`obscured×${debug.obscuredTouches}`)
+  tells.push(`api${debug.androidSdk}`)
   return tells.join(' ')
+}))
+// Desktop overlay scan: hits, or "0/<scanned>", plus allowlisted skips.
+const overlaySummary = computed(() => probeValue(debug.overlaySource, () => {
+  const hits = debug.overlaySuspicious?.length ? debug.overlaySuspicious.join(', ') : `0/${debug.overlayScanned}`
+  const allowed = debug.overlayAllowlisted ? ` allow×${debug.overlayAllowlisted}` : ''
+  return `${hits}${allowed}·${debug.overlaySource}`
+}))
+const processSummary = computed(() => probeValue(debug.processSource, () => {
+  const hits = debug.watchedProcesses?.length ? debug.watchedProcesses.join(', ') : `0/${debug.processesScanned}`
+  return `${hits}·${debug.processSource}`
+}))
+// Hotkeys: asked only by assessment-purpose sessions; `supported` false
+// (mobile, Wayland) is n/a, not a missing permission.
+const hotkeySummary = computed(() => {
+  if (!sampled.value || debug.hotkeysSupported === null) return '—'
+  if (!debug.hotkeysSupported) return t('sentinel.debug.valNa')
+  if (!debug.hotkeysPermission) return `no-permission·${debug.hotkeysSource}`
+  if (!debug.hotkeysRunning) return `off·${debug.hotkeysSource}`
+  const hits = debug.phantomHotkeys?.length ? debug.phantomHotkeys.join(', ') : `0/${debug.nativeHotkeys}`
+  return `${hits}·${debug.hotkeysSource}`
 })
 
 const open = ref(props.initiallyOpen)
@@ -303,7 +332,7 @@ onBeforeUnmount(() => {
           <!-- Outcome -->
           <p class="col-span-2 mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionOutcome') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSession') }}</span>
-          <span class="text-end font-mono" :class="debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.active ? $t('sentinel.debug.valActive') : $t('sentinel.debug.valIdle') }}</span>
+          <span class="text-end font-mono" :class="debug.suspended ? 'text-red-500' : debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.suspended ? $t('sentinel.debug.valSuspended') : debug.active ? $t('sentinel.debug.valActive') : $t('sentinel.debug.valIdle') }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowIntegrity') }}</span>
           <span class="text-end font-mono text-foreground">{{ debug.active ? pct(debug.integrity) : '—' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowConsistency') }}</span>
@@ -349,13 +378,13 @@ onBeforeUnmount(() => {
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDisplays') }}</span>
           <span class="text-end font-mono truncate" :class="debug.splitScreen || debug.screenCaptured || debug.displayChanges ? 'text-red-500' : 'text-foreground'">{{ displaySummary }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowAndroidEnv') }}</span>
-          <span class="text-end font-mono truncate" :class="debug.obscuredTouches || debug.adbEnabled || debug.foreignAccessibility?.length ? 'text-red-500' : 'text-foreground'">{{ androidEnvSummary }}</span>
+          <span class="text-end font-mono truncate" :title="androidEnvSummary" :class="debug.androidEnvSource && (debug.obscuredTouches || debug.adbEnabled || debug.foreignAccessibility?.length) ? 'text-red-500' : 'text-foreground'">{{ androidEnvSummary }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowOverlays') }}</span>
-          <span class="text-end font-mono truncate" :class="debug.overlaySuspicious?.length ? 'text-red-500' : 'text-foreground'">{{ debug.overlaySuspicious?.length ? debug.overlaySuspicious.join(', ') : `0/${debug.overlayScanned}` }}</span>
+          <span class="text-end font-mono truncate" :title="overlaySummary" :class="debug.overlaySuspicious?.length ? 'text-red-500' : 'text-foreground'">{{ overlaySummary }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowProcesses') }}</span>
-          <span class="text-end font-mono truncate" :class="debug.watchedProcesses?.length ? 'text-red-500' : 'text-foreground'">{{ debug.watchedProcesses?.length ? debug.watchedProcesses.join(', ') : `0/${debug.processesScanned}` }}</span>
+          <span class="text-end font-mono truncate" :title="processSummary" :class="debug.watchedProcesses?.length ? 'text-red-500' : 'text-foreground'">{{ processSummary }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowHotkeys') }}</span>
-          <span class="text-end font-mono truncate" :class="debug.phantomHotkeys?.length ? 'text-red-500' : 'text-foreground'">{{ !debug.hotkeysRunning ? (debug.hotkeysPermission ? 'off' : 'no-permission') : debug.phantomHotkeys?.length ? debug.phantomHotkeys.join(', ') : `0/${debug.nativeHotkeys}` }}</span>
+          <span class="text-end font-mono truncate" :title="hotkeySummary" :class="debug.phantomHotkeys?.length ? 'text-red-500' : 'text-foreground'">{{ hotkeySummary }}</span>
 
           <!-- Camera -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>
