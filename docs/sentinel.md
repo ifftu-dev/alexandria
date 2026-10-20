@@ -170,6 +170,17 @@ opt-in. Outside an assessment, scores show unavailable and the panel explains
 that monitoring is idle. Preview-only frames do not enter the assessment evidence
 staging buffer. Profile lock closes the panel and stops capture.
 
+The native-check rows (Android environment, overlays, processes, hotkeys) show
+— until the session's first snapshot. After it, a check that returned nothing
+shows n/a rather than a clean zero: the probe failed, or the platform does not
+provide it. The Android environment report runs only on Android, the process
+scan only on desktop, and the overlay scan and hotkey monitor only on macOS,
+Windows, and Linux with an X11 display. Each reading names the probe that
+produced it (for example `cgwindow`, `nsworkspace`, `x11`). Hotkeys show —
+until the hotkey monitor has replied, and only assessment sessions ask it. A
+session the backend has suspended shows as suspended rather than active.
+Starting a session clears the previous session's readings.
+
 On macOS, trusted main-frame capture uses the normal WebKit/OS permission prompt.
 Plugin frames still require the host's recorded media grants. Capture and
 inference failures are shown in the panel; late permission results after closing

@@ -160,7 +160,7 @@ describe('Sentinel Dev panel', () => {
 
   it('reports the Android environment details the probe returns', () => {
     Object.assign(debug, {
-      lastSnapshotAt: 1, androidEnvSource: 'activity', shieldRequested: true, shieldActive: true,
+      lastSnapshotAt: 1, androidEnvSource: 'android', shieldRequested: true, shieldActive: true,
       overlayHidingSupported: false, developmentSettings: true, androidSdk: 30,
     })
     const wrapper = mountPanel()
