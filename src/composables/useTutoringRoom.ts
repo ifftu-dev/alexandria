@@ -11,7 +11,6 @@ import type {
   DeviceList,
   AudioLevelEvent,
 } from '@/types'
-import type { TauriCommand } from '@/generated/tauri-commands'
 import { useLocalApi } from './useLocalApi'
 import { onProfileLocked } from './useProfiles'
 
@@ -452,12 +451,12 @@ async function leaveRoom(): Promise<void> {
  * first (and swapping cameras takes a moment). While one runs, `mediaBusy` is
  * true and further changes are ignored.
  */
-async function changeMedia<T>(command: TauriCommand, args: Record<string, unknown>, current: () => T): Promise<T> {
+async function changeMedia<T>(change: () => Promise<T>, current: () => T): Promise<T> {
   if (mediaBusy.value) return current()
   const generation = profileGeneration
   mediaBusy.value = true
   try {
-    const result = await invoke<T>(command, args)
+    const result = await change()
     if (isCurrentProfile(generation)) await refreshStatus()
     return result
   } catch (e: unknown) {
@@ -469,7 +468,7 @@ async function changeMedia<T>(command: TauriCommand, args: Record<string, unknow
 }
 
 function toggleVideo(enable: boolean): Promise<boolean> {
-  return changeMedia('tutoring_toggle_video', { enable }, () => sessionStatus.value?.video_enabled ?? false)
+  return changeMedia(() => invoke<boolean>('tutoring_toggle_video', { enable }), () => sessionStatus.value?.video_enabled ?? false)
 }
 
 /** Forget the last error, once a caller has handled it. */
@@ -478,16 +477,16 @@ function clearError() {
 }
 
 function toggleAudio(enable: boolean): Promise<boolean> {
-  return changeMedia('tutoring_toggle_audio', { enable }, () => sessionStatus.value?.audio_enabled ?? false)
+  return changeMedia(() => invoke<boolean>('tutoring_toggle_audio', { enable }), () => sessionStatus.value?.audio_enabled ?? false)
 }
 
 function toggleScreenShare(enable: boolean): Promise<boolean> {
-  return changeMedia('tutoring_toggle_screen_share', { enable }, () => sessionStatus.value?.screen_sharing ?? false)
+  return changeMedia(() => invoke<boolean>('tutoring_toggle_screen_share', { enable }), () => sessionStatus.value?.screen_sharing ?? false)
 }
 
 /** Use another camera for the rest of the call. Returns the camera in use. */
 function setCamera(cameraId: string | null): Promise<string | null> {
-  return changeMedia('tutoring_set_camera', { cameraId }, () => sessionStatus.value?.camera_name ?? null)
+  return changeMedia(() => invoke<string | null>('tutoring_set_camera', { cameraId }), () => sessionStatus.value?.camera_name ?? null)
 }
 
 async function sendChat(text: string): Promise<void> {
