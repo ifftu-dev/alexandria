@@ -393,7 +393,7 @@ onUnmounted(() => {
         <h2 class="text-base font-semibold text-foreground">{{ t('organisations.requests.title') }}</h2>
         <p class="mt-1 text-sm text-muted-foreground">{{ t('organisations.requests.note') }}</p>
       </div>
-      <AppButton variant="outline" size="sm" :disabled="loading" @click="refresh">
+      <AppButton variant="outline" size="sm" class="shrink-0 whitespace-nowrap" :disabled="loading" @click="refresh">
         {{ loading ? t('organisations.requests.checking') : t('organisations.requests.refresh') }}
       </AppButton>
     </header>

@@ -61,7 +61,8 @@
   "call": {
     "active": "Llamada de voz activa",
     "join": "Unirse a la llamada",
-    "start": "Iniciar llamada"
+    "start": "Iniciar llamada",
+    "end": "Finalizar llamada"
   },
   "channels": {
     "heading": "Canales",

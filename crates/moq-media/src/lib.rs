@@ -27,6 +27,8 @@ pub mod capture;
 #[cfg(feature = "video")]
 pub mod ffmpeg;
 pub mod opus;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub mod preview;
 pub mod publish;
 pub mod subscribe;
 mod util;

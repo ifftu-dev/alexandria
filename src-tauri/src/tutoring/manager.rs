@@ -11,14 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use std::io::Cursor;
-
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use base64::Engine;
 use bytes::Bytes;
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh::EndpointId;
 use iroh_gossip::net::Gossip;
@@ -166,6 +159,88 @@ pub struct DeviceSelection {
     pub speaker_device_id: Option<String>,
 }
 
+/// The system's name for an open camera, as a webview labels the same device.
+#[cfg(all(
+    any(feature = "tutoring-video", feature = "tutoring-video-static"),
+    not(target_os = "android")
+))]
+fn camera_label(camera: &CameraCapturer) -> String {
+    camera.device_name().to_string()
+}
+
+/// Android's Camera2 source does not name its device; the webview preview is
+/// not matched against it there.
+#[cfg(all(
+    any(feature = "tutoring-video", feature = "tutoring-video-static"),
+    target_os = "android"
+))]
+fn camera_label(_camera: &CameraCapturer) -> String {
+    String::new()
+}
+
+/// How long a camera or screen source may take to open mid-call.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+const SOURCE_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// An opened video source, ready to swap into the broadcast: its camera name
+/// (none for a screen) and its renditions.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+type OpenedSource = (Option<String>, VideoRenditions);
+
+/// Open a video source away from the call's lock.
+///
+/// Opening a camera can block for seconds, or forever when the device is
+/// gone; doing it under `inner` froze every call command (14 Oct). This runs
+/// on a detached blocking thread, not the session's task set, so a source
+/// that never answers stalls neither the call's other controls nor leaving
+/// the call. On timeout the thread is abandoned and whatever it eventually
+/// opens is dropped.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+async fn open_video_source(
+    open: impl FnOnce() -> Result<OpenedSource, String> + Send + 'static,
+) -> Result<OpenedSource, String> {
+    match tokio::time::timeout(SOURCE_OPEN_TIMEOUT, tokio::task::spawn_blocking(open)).await {
+        Ok(Ok(opened)) => opened,
+        Ok(Err(join)) => Err(format!("the video source failed to open: {join}")),
+        Err(_) => Err(format!(
+            "the video source did not open within {}s",
+            SOURCE_OPEN_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+/// Open a camera by index (or the preferred one) and build its renditions.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+fn open_camera(camera_idx: Option<CameraIndex>) -> Result<OpenedSource, String> {
+    let camera =
+        CameraCapturer::with_index(camera_idx).map_err(|e| format!("camera unavailable: {e}"))?;
+    let name = camera_label(&camera);
+    let presets = camera_presets(&camera);
+    Ok((
+        Some(name),
+        VideoRenditions::new::<H264Encoder>(camera, presets),
+    ))
+}
+
+/// The renditions a camera can fill: none above its capture height. Offering
+/// 1080p from a 720p capture made the encoder upscale and every phone decode
+/// 2.25x the pixels for nothing (15 Oct).
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+fn camera_presets(camera: &CameraCapturer) -> Vec<VideoPreset> {
+    use live::media::av::VideoSource;
+    VideoPreset::up_to(camera.format().dimensions[1])
+}
+
+/// Open the screen for sharing and build its renditions.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+fn open_screen() -> Result<OpenedSource, String> {
+    let screen = ScreenCapturer::new().map_err(|e| format!("screen capture unavailable: {e}"))?;
+    Ok((
+        None,
+        VideoRenditions::new::<H264Encoder>(screen, VideoPreset::all()),
+    ))
+}
+
 /// Parse a camera index string (Debug-formatted `CameraIndex`) back to the enum.
 ///
 /// Accepts formats: "Index(0)", "String(\"FaceTime HD Camera\")", or a plain
@@ -205,6 +280,9 @@ pub struct SessionStatus {
     pub video_enabled: bool,
     pub audio_enabled: bool,
     pub screen_sharing: bool,
+    /// The camera peers are seeing, by the system's name for it. `None` when
+    /// the camera is off or the screen is shared instead.
+    pub camera_name: Option<String>,
     /// Session start time (millis since Unix epoch).
     pub started_at: u64,
 }
@@ -274,6 +352,7 @@ struct ActiveSession {
     video_enabled: bool,
     audio_enabled: bool,
     screen_sharing: bool,
+    camera_name: Option<String>,
     /// Chat sender for the derived gossip topic.
     chat_sender: Option<iroh_gossip::api::GossipSender>,
     /// Names sender for the /names gossip topic. Kept alongside `chat_sender`
@@ -425,7 +504,7 @@ impl TutoringManager {
             }
 
             // Start publishing local media (using selected camera if any)
-            let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+            let (mut broadcast, mic_input, camera_name) = Self::create_broadcast(
                 tasks.clone(),
                 audio_ctx.as_ref(),
                 true,
@@ -433,6 +512,7 @@ impl TutoringManager {
                 devices.camera_index.clone(),
             )
             .await?;
+            let has_video = camera_name.is_some();
             room.publish(BROADCAST_NAME, broadcast.producer())
                 .await
                 .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -511,6 +591,7 @@ impl TutoringManager {
                 video_enabled: has_video,
                 audio_enabled: has_audio,
                 screen_sharing: false,
+                camera_name,
                 chat_sender,
                 names_sender,
                 our_node_id,
@@ -600,7 +681,7 @@ impl TutoringManager {
             }
 
             // Start publishing local media (using selected camera if any)
-            let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+            let (mut broadcast, mic_input, camera_name) = Self::create_broadcast(
                 tasks.clone(),
                 audio_ctx.as_ref(),
                 true,
@@ -608,6 +689,7 @@ impl TutoringManager {
                 devices.camera_index.clone(),
             )
             .await?;
+            let has_video = camera_name.is_some();
             room.publish(BROADCAST_NAME, broadcast.producer())
                 .await
                 .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -685,6 +767,7 @@ impl TutoringManager {
                 video_enabled: has_video,
                 audio_enabled: has_audio,
                 screen_sharing: false,
+                camera_name,
                 chat_sender,
                 names_sender,
                 our_node_id,
@@ -732,12 +815,23 @@ impl TutoringManager {
         self.stop_room(false).await
     }
 
+    /// Leave the room without letting a stuck media task hold leaving hostage.
+    ///
+    /// The session leaves the lock first, so every other call command keeps
+    /// answering. Cleanup then gets a few seconds; a task that cannot be
+    /// aborted (one blocked in native code, which only yields at its next
+    /// await) finishes in the background. Starting another room is still
+    /// refused until it does, because [`SessionTasks::open`] waits for an
+    /// empty registry: no second camera opens on top of the first.
     async fn stop_room(&self, require_active: bool) -> Result<(), String> {
-        let mut inner = self.inner.lock().await;
-        if require_active && inner.is_none() {
-            return Err("not in a tutoring session".into());
-        }
-        if let Some(session) = inner.as_ref() {
+        let session = {
+            let mut inner = self.inner.lock().await;
+            if require_active && inner.is_none() {
+                return Err("not in a tutoring session".into());
+            }
+            inner.take()
+        };
+        if let Some(session) = session.as_ref() {
             if let Some(preview) = &session.self_preview_task {
                 preview.abort();
             }
@@ -745,78 +839,127 @@ impl TutoringManager {
                 task.abort();
             }
         }
-        self.tasks.shutdown().await;
-        *inner = None;
+        // Stop admitting work and abort what can be aborted now, so nothing
+        // new starts even if the cleanup below has to finish later.
+        self.tasks.close();
+        let tasks = self.tasks.clone();
+        let mut cleanup = tokio::spawn(async move {
+            tasks.shutdown().await;
+            drop(session);
+        });
+        if tokio::time::timeout(Duration::from_secs(3), &mut cleanup)
+            .await
+            .is_err()
+        {
+            log::warn!("tutoring: media cleanup still running 3s after leaving; finishing in the background");
+        }
         Ok(())
     }
 
     // ── Media controls ─────────────────────────────────────────────
 
+    /// The session a video change started on, if it is still the one running.
+    /// The lock is released while a source opens, so the call may have ended
+    /// or been replaced in the meantime.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    fn same_session<'a>(
+        &self,
+        inner: &'a mut Option<ActiveSession>,
+        session_id: &str,
+    ) -> Result<&'a mut ActiveSession, String> {
+        inner
+            .as_mut()
+            .filter(|session| self.tasks.is_open() && session.session_id == session_id)
+            .ok_or_else(|| "the call ended while its video source was opening".to_string())
+    }
+
+    /// Swap an opened source into the broadcast and restart the self view.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    fn install_video(
+        tasks: &Arc<SessionTasks>,
+        session: &mut ActiveSession,
+        (camera_name, renditions): OpenedSource,
+        screen: bool,
+    ) -> Result<(), String> {
+        if let Some(task) = session.self_preview_task.take() {
+            task.abort();
+        }
+        session
+            .broadcast
+            .set_video(Some(renditions))
+            .map_err(|e| format!("failed to enable video: {e}"))?;
+        session.video_enabled = true;
+        session.screen_sharing = screen;
+        session.camera_name = camera_name;
+        let app_handle = session.app_handle.clone();
+        session.self_preview_task =
+            Self::start_self_preview(tasks.clone(), &mut session.broadcast, app_handle);
+        Ok(())
+    }
+
+    /// Stop sending video and tell the webview the self view ended.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    fn remove_video(session: &mut ActiveSession) -> Result<(), String> {
+        if let Some(task) = session.self_preview_task.take() {
+            task.abort();
+        }
+        session
+            .broadcast
+            .set_video(None)
+            .map_err(|e| format!("failed to disable video: {e}"))?;
+        session.video_enabled = false;
+        session.screen_sharing = false;
+        session.camera_name = None;
+        // Emit a "self" video ended so frontend can show placeholder
+        let _ = session.app_handle.emit(
+            "tutoring:peer-video-ended",
+            PeerVideoEndedEvent {
+                node_id: "self".into(),
+            },
+        );
+        Ok(())
+    }
+
     /// Toggle local camera on/off.
+    ///
+    /// Turning it on opens the camera with the call's lock released, then
+    /// swaps it in only if the session is still the same one and the camera
+    /// is still wanted.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
-        let tasks = self.tasks.clone();
-        let mut inner = self.inner.lock().await;
-        let session = inner
-            .as_mut()
-            .filter(|_| self.tasks.is_open())
-            .ok_or("not in a tutoring session")?;
+        let (session_id, camera_idx) = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
 
-        if enable == session.video_enabled && !session.screen_sharing {
-            return Ok(session.video_enabled);
-        }
-
-        // Abort old self-preview
-        if let Some(t) = session.self_preview_task.take() {
-            t.abort();
-        }
-
-        if enable {
-            // If screen sharing is active, switch back to camera
-            if session.screen_sharing {
-                session.screen_sharing = false;
+            if enable == session.video_enabled && !session.screen_sharing {
+                return Ok(session.video_enabled);
+            }
+            if !enable {
+                Self::remove_video(session)?;
+                return Ok(session.video_enabled);
             }
             let camera_idx = session
                 .device_selection
                 .camera_index
                 .as_deref()
                 .and_then(parse_camera_index);
-            match CameraCapturer::with_index(camera_idx) {
-                Ok(camera) => {
-                    let renditions =
-                        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to enable video: {e}"))?;
-                    session.video_enabled = true;
-                    // Restart self-preview
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                }
-                Err(e) => {
-                    log::warn!("tutoring: camera unavailable: {e}");
-                    return Err(format!("camera unavailable: {e}"));
-                }
-            }
-        } else {
-            session
-                .broadcast
-                .set_video(None)
-                .map_err(|e| format!("failed to disable video: {e}"))?;
-            session.video_enabled = false;
-            // Emit a "self" video ended so frontend can show placeholder
-            let _ = session.app_handle.emit(
-                "tutoring:peer-video-ended",
-                PeerVideoEndedEvent {
-                    node_id: "self".into(),
-                },
-            );
-        }
+            (session.session_id.clone(), camera_idx)
+        };
 
+        let opened = open_video_source(move || open_camera(camera_idx))
+            .await
+            .inspect_err(|e| log::warn!("tutoring: {e}"))?;
+
+        let mut inner = self.inner.lock().await;
+        let session = self.same_session(&mut inner, &session_id)?;
+        if session.video_enabled && !session.screen_sharing {
+            // Another change turned the camera on meanwhile; keep that one.
+            return Ok(true);
+        }
+        Self::install_video(&self.tasks, session, opened, false)?;
         Ok(session.video_enabled)
     }
 
@@ -874,86 +1017,98 @@ impl TutoringManager {
         Ok(session.audio_enabled)
     }
 
+    /// Use a different camera. Remembered for the rest of the session; when
+    /// the camera is on (and the screen is not being shared) it switches now.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    pub async fn set_camera(&self, camera_index: Option<String>) -> Result<Option<String>, String> {
+        let (session_id, camera_idx) = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
+            session.device_selection.camera_index = camera_index;
+            if !session.video_enabled || session.screen_sharing {
+                return Ok(session.camera_name.clone());
+            }
+            let camera_idx = session
+                .device_selection
+                .camera_index
+                .as_deref()
+                .and_then(parse_camera_index);
+            (session.session_id.clone(), camera_idx)
+        };
+
+        let opened = open_video_source(move || open_camera(camera_idx)).await?;
+
+        let mut inner = self.inner.lock().await;
+        let session = self.same_session(&mut inner, &session_id)?;
+        if !session.video_enabled || session.screen_sharing {
+            // The camera was turned off or the screen shared meanwhile; the
+            // choice is remembered for the next time the camera turns on.
+            return Ok(session.camera_name.clone());
+        }
+        Self::install_video(&self.tasks, session, opened, false)?;
+        Ok(session.camera_name.clone())
+    }
+
+    #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+    pub async fn set_camera(
+        &self,
+        _camera_index: Option<String>,
+    ) -> Result<Option<String>, String> {
+        Err(VIDEO_DISABLED_ERROR.into())
+    }
+
     /// Toggle screen sharing on/off.
     ///
     /// Screen sharing replaces the camera video track. When disabled,
     /// the camera is restored if it was previously enabled.
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_screen_share(&self, enable: bool) -> Result<bool, String> {
-        let tasks = self.tasks.clone();
-        let mut inner = self.inner.lock().await;
-        let session = inner
-            .as_mut()
-            .filter(|_| self.tasks.is_open())
-            .ok_or("not in a tutoring session")?;
-
-        if enable == session.screen_sharing {
-            return Ok(session.screen_sharing);
-        }
-
-        // Abort old self-preview
-        if let Some(t) = session.self_preview_task.take() {
-            t.abort();
-        }
-
-        if enable {
-            match ScreenCapturer::new() {
-                Ok(screen) => {
-                    let renditions =
-                        VideoRenditions::new::<H264Encoder>(screen, VideoPreset::all());
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to start screen share: {e}"))?;
-                    session.screen_sharing = true;
-                    session.video_enabled = true;
-                    // Self-preview now shows screen share
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                }
-                Err(e) => {
-                    return Err(format!("screen capture unavailable: {e}"));
-                }
+        let (session_id, camera_idx) = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|_| self.tasks.is_open())
+                .ok_or("not in a tutoring session")?;
+            if enable == session.screen_sharing {
+                return Ok(session.screen_sharing);
             }
-        } else {
-            // Stop screen share, restore camera (using stored device selection)
-            session.screen_sharing = false;
             let camera_idx = session
                 .device_selection
                 .camera_index
                 .as_deref()
                 .and_then(parse_camera_index);
-            match CameraCapturer::with_index(camera_idx) {
-                Ok(camera) => {
-                    let renditions =
-                        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to restore camera: {e}"))?;
-                    session.video_enabled = true;
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                }
-                Err(_) => {
-                    let _ = session.broadcast.set_video(None);
-                    session.video_enabled = false;
-                    let _ = session.app_handle.emit(
-                        "tutoring:peer-video-ended",
-                        PeerVideoEndedEvent {
-                            node_id: "self".into(),
-                        },
-                    );
+            (session.session_id.clone(), camera_idx)
+        };
+
+        // The screen (to share) or the camera (to restore) opens with the
+        // lock released; sharing continues until the camera is ready.
+        let opened = if enable {
+            open_video_source(open_screen).await?
+        } else {
+            match open_video_source(move || open_camera(camera_idx)).await {
+                Ok(opened) => opened,
+                Err(e) => {
+                    log::warn!("tutoring: {e}; screen share stopped without a camera");
+                    let mut inner = self.inner.lock().await;
+                    let session = self.same_session(&mut inner, &session_id)?;
+                    if session.screen_sharing {
+                        Self::remove_video(session)?;
+                    }
+                    return Ok(session.screen_sharing);
                 }
             }
-        }
+        };
 
+        let mut inner = self.inner.lock().await;
+        let session = self.same_session(&mut inner, &session_id)?;
+        if session.screen_sharing == enable {
+            // Another change got there first; keep it.
+            return Ok(session.screen_sharing);
+        }
+        Self::install_video(&self.tasks, session, opened, enable)?;
         Ok(session.screen_sharing)
     }
 
@@ -1067,6 +1222,7 @@ impl TutoringManager {
             video_enabled: session.video_enabled,
             audio_enabled: session.audio_enabled,
             screen_sharing: session.screen_sharing,
+            camera_name: session.camera_name.clone(),
             started_at: session.started_at,
         })
     }
@@ -1341,7 +1497,10 @@ impl TutoringManager {
                     video,
                     node_id.to_string(),
                     app_handle.clone(),
-                    (640, 360),
+                    // Fit inside 960x960: a landscape camera arrives at
+                    // 960x540 and a phone held upright at 540x960, instead
+                    // of both squeezed into 640x360.
+                    (960, 960),
                     82,
                     30,
                     Some(inner.clone()),
@@ -1424,9 +1583,9 @@ impl TutoringManager {
 
     /// Create a PublishBroadcast with camera + mic.
     ///
-    /// Returns `(broadcast, mic_input, has_video)` — the mic_input is a clone
-    /// of the InputStream for peak metering, and `has_video` reflects whether
-    /// camera initialization actually succeeded.
+    /// Returns `(broadcast, mic_input, camera_name)` — the mic_input is a clone
+    /// of the InputStream for peak metering, and `camera_name` is the camera
+    /// that opened, or `None` when none did.
     ///
     /// `camera_index` selects a specific camera; `None` uses the default.
     async fn create_broadcast(
@@ -1435,16 +1594,16 @@ impl TutoringManager {
         video: bool,
         audio: bool,
         camera_index: Option<String>,
-    ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
+    ) -> Result<(PublishBroadcast, Option<InputStream>, Option<String>), String> {
         if !tasks.is_open() {
             return Err("media session is closing".into());
         }
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
         #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-        let mut has_video = false;
+        let mut camera_name: Option<String> = None;
         #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
-        let has_video = false;
+        let camera_name: Option<String> = None;
 
         if audio {
             if let Some(ctx) = audio_ctx {
@@ -1479,12 +1638,13 @@ impl TutoringManager {
 
             match camera_result {
                 Ok(camera) => {
-                    let video_renditions =
-                        VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
+                    let name = camera_label(&camera);
+                    let presets = camera_presets(&camera);
+                    let video_renditions = VideoRenditions::new::<H264Encoder>(camera, presets);
                     broadcast
                         .set_video(Some(video_renditions))
                         .map_err(|e| format!("failed to set video: {e}"))?;
-                    has_video = true;
+                    camera_name = Some(name);
                     log::info!("tutoring: camera initialized");
                 }
                 Err(e) => {
@@ -1498,7 +1658,7 @@ impl TutoringManager {
             log::info!("tutoring: ignoring requested camera — {VIDEO_DISABLED_ERROR}");
         }
 
-        Ok((broadcast, mic_input, has_video))
+        Ok((broadcast, mic_input, camera_name))
     }
 
     /// Start a self-preview from the broadcast's local video source.
@@ -1521,8 +1681,11 @@ impl TutoringManager {
             watch,
             "self".into(),
             app_handle,
-            (1280, 720),
-            82,
+            // The page shows the camera itself when it can; these frames are
+            // the fallback (and the shared screen). 960x540 fills a tile
+            // without the IPC cost of full 720p frames thirty times a second.
+            (960, 540),
+            80,
             30,
         ))
     }
@@ -2087,8 +2250,10 @@ impl TutoringManager {
             );
 
             let frame_interval = Duration::from_millis(1000 / fps as u64);
+            let gate = frame_interval.saturating_sub(Duration::from_millis(8));
             let mut last_emit = std::time::Instant::now();
             let mut frame_count: u64 = 0;
+            let mut stats = BridgeStats::default();
 
             let initial_timeout = Duration::from_secs(10);
             let stall_timeout = Duration::from_secs(30);
@@ -2137,50 +2302,33 @@ impl TutoringManager {
                                 );
                             }
                         }
-                        // Rate-limit to ~15 fps
+                        // Frames arrive on the source's clock; a gate exactly
+                        // one interval wide drops every other one whenever
+                        // they arrive a hair early.
                         let now = std::time::Instant::now();
-                        if now.duration_since(last_emit) < frame_interval {
+                        if now.duration_since(last_emit) < gate {
                             continue;
                         }
                         last_emit = now;
 
-                        let img = frame.img();
-                        let (width, height) = img.dimensions();
-
-                        // Convert RGBA -> RGB (JPEG does not support alpha channel).
-                        // `as_chunks` rather than `chunks_exact`: the pixel
-                        // stride is a constant, so this hands back `[u8; 4]`
-                        // and the per-element bounds checks go with it.
-                        let rgb_data: Vec<u8> = img
-                            .as_raw()
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .flat_map(|px| [px[0], px[1], px[2]])
-                            .collect();
-
-                        // Encode to JPEG (quality 60 for good size/quality tradeoff)
-                        let mut jpeg_buf = Vec::with_capacity((width * height) as usize / 4);
-                        let mut cursor = Cursor::new(&mut jpeg_buf);
-                        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-                            &mut cursor,
-                            quality,
-                        );
-                        match encoder.write_image(
-                            &rgb_data,
-                            width,
-                            height,
-                            image::ExtendedColorType::Rgb8,
-                        ) {
-                            Ok(()) => {}
-                            Err(e) => {
+                        // The decoder already fitted the frame to the
+                        // viewport; encoding runs off the async workers.
+                        let encode_started = std::time::Instant::now();
+                        let img = frame.img().clone();
+                        let encoded = tokio::task::spawn_blocking(move || {
+                            super::preview_jpeg::encode(img, (u32::MAX, u32::MAX), quality)
+                        })
+                        .await;
+                        let (jpeg_b64, width, height) = match encoded {
+                            Ok(Ok(frame)) => frame,
+                            Ok(Err(e)) => {
                                 log::warn!("tutoring: JPEG encode failed for {node_id}: {e}");
                                 continue;
                             }
-                        }
+                            Err(_) => continue,
+                        };
 
-                        let jpeg_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
-
+                        let emit_started = std::time::Instant::now();
                         let _ = app_handle.emit(
                             "tutoring:video-frame",
                             VideoFrameEvent {
@@ -2190,6 +2338,11 @@ impl TutoringManager {
                                 height,
                             },
                         );
+                        if let Some(summary) =
+                            stats.record(emit_started - encode_started, emit_started.elapsed())
+                        {
+                            log::info!("tutoring: frame bridge {node_id}: {summary}");
+                        }
                     }
                     None => {
                         log::info!("tutoring: frame bridge ended for {node_id} (track closed)");
@@ -2208,6 +2361,41 @@ impl TutoringManager {
                 }
             }
         })
+    }
+}
+
+/// Rolling numbers for a frame bridge, so a slow preview can be pinned on
+/// the JPEG encode, the hand-off to the webview, or the frames arriving.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+#[derive(Default)]
+struct BridgeStats {
+    since: Option<std::time::Instant>,
+    sent: u32,
+    encode: Duration,
+    emit: Duration,
+}
+
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+impl BridgeStats {
+    const WINDOW: u32 = 150;
+
+    /// Count one sent frame; every [`Self::WINDOW`] frames, describe them.
+    fn record(&mut self, encode: Duration, emit: Duration) -> Option<String> {
+        let since = *self.since.get_or_insert_with(std::time::Instant::now);
+        self.sent += 1;
+        self.encode += encode;
+        self.emit += emit;
+        if self.sent < Self::WINDOW {
+            return None;
+        }
+        let summary = format!(
+            "sent {:.1} fps, encode {:.1} ms, emit {:.1} ms",
+            f64::from(self.sent) / since.elapsed().as_secs_f64(),
+            self.encode.as_secs_f64() * 1000.0 / f64::from(self.sent),
+            self.emit.as_secs_f64() * 1000.0 / f64::from(self.sent),
+        );
+        *self = Self::default();
+        Some(summary)
     }
 }
 

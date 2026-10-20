@@ -56,7 +56,10 @@
     "textOnly": "Vous pouvez tout de même rejoindre — cette session utilisera uniquement le chat texte.",
     "checking": "Vérification…",
     "starting": "Démarrage…",
-    "joining": "Connexion…"
+    "joining": "Connexion…",
+    "automatic": "Automatique",
+    "audioNextJoin": "Les changements de micro et de haut-parleur s’appliquent la prochaine fois que vous rejoignez.",
+    "devices": "Appareils"
   },
   "qr": {
     "scanTitle": "Scanner l'invitation QR",
@@ -138,10 +141,10 @@
     "applying": "Application…"
   },
   "leave": {
-    "title": "Quitter la session ?",
+    "title": "Quitter l'appel ?",
     "desc": "Votre caméra et votre microphone s'arrêteront. Les autres personnes vous verront partir.",
     "stay": "Rester",
-    "confirm": "Quitter la session"
+    "confirm": "Quitter l'appel"
   },
   "ticketFallback": {
     "title": "Invitation",

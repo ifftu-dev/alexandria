@@ -63,7 +63,8 @@ fn apply(conn: &Connection, p: &Presence) -> Result<(), String> {
     Ok(())
 }
 pub(crate) fn expire(conn: &Connection, now: i64) -> Result<(), String> {
-    conn.execute("UPDATE tutoring_sessions SET status='ended',ended_at=datetime(?1,'unixepoch') WHERE status='active' AND COALESCE(last_occupied_at,unixepoch(created_at),0)<=?1-?2",params![now,EMPTY_SECONDS]).map_err(|e|e.to_string())?;
+    // Classroom calls end through the classroom, not through attendance leases.
+    conn.execute("UPDATE tutoring_sessions SET status='ended',ended_at=datetime(?1,'unixepoch') WHERE status='active' AND kind<>'classroom' AND COALESCE(last_occupied_at,unixepoch(created_at),0)<=?1-?2",params![now,EMPTY_SECONDS]).map_err(|e|e.to_string())?;
     Ok(())
 }
 

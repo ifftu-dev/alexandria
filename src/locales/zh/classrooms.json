@@ -61,7 +61,8 @@
   "call": {
     "active": "语音通话进行中",
     "join": "加入通话",
-    "start": "发起通话"
+    "start": "发起通话",
+    "end": "结束通话"
   },
   "channels": {
     "heading": "频道",

@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useInterviews } from '@/composables/useInterviews'
 import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecognition'
 import { usePanel, type PanelInterview } from '@/composables/usePanel'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSentinel } from '@/composables/useSentinel'
-import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useTutoringRoom, type CallContext } from '@/composables/useTutoringRoom'
+import { useCallDevices } from '@/composables/useCallDevices'
+import { openCameraPreview } from '@/utils/callCamera'
+import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
-import { LiveDiagnosticsModal, LiveParticipantTile, LiveSessionControls } from '@/components/live'
+import { LiveDiagnosticsModal, LiveParticipantTile, LiveSessionControls, VideoGrid } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import PanelIntegrity from '@/components/organisations/PanelIntegrity.vue'
 import { AppAlert, AppBadge, AppButton, AppModal, AppTextarea } from '@/components/ui'
@@ -21,11 +25,18 @@ import type {
 } from '@/types'
 
 const route = useRoute()
+const { t } = useI18n()
 const router = useRouter()
 const interviewId = computed(() => String(route.params.id))
 // A seat on an organisation's panel lives under /panel, which a learner
 // account can open without instructor mode; a local interview under /interviews.
 const basePath = computed(() => (route.path.startsWith('/panel') ? '/panel' : '/interviews'))
+// A panel seat and the in-person assistant are different kinds of call; both
+// belong to this interview, which is where the mini window brings you back.
+const callContext = computed<CallContext>(() => ({
+  kind: route.path.startsWith('/panel') ? 'interview_panel' : 'interview_assistant',
+  contextId: interviewId.value,
+}))
 const panelApi = usePanel()
 const panel = ref<PanelInterview | null>(null)
 const panelError = ref<string | null>(null)
@@ -45,6 +56,9 @@ const {
   generateSummary,
 } = useInterviews()
 const tutoring = useTutoringRoom()
+const callDevices = useCallDevices()
+const deviceChoice = callDevices.choice
+const showCallDevices = ref(false)
 const sentinel = useSentinel()
 const speech = useLocalSpeechRecognition()
 const { isMobilePlatform, isIOS } = usePlatform()
@@ -98,6 +112,25 @@ const criteria = computed(() => activeInterview.value?.criteria ?? [])
 const allRequestedConsentsReady = computed(() => participants.value.every(
   participant => participant.consented_at !== null,
 ))
+// A panel seat's room can only be handed to the candidate once they have
+// accepted; Cloud refuses it before then, so the call would run for nobody.
+const awaitingCandidate = computed(() => !!panel.value && panel.value.status !== 'accepted' && !panel.value.room.ticket)
+// Ask Cloud again while waiting, so Start turns on when the candidate accepts.
+let panelRefresh: ReturnType<typeof setInterval> | null = null
+watch(awaitingCandidate, (waiting) => {
+  if (waiting && !panelRefresh) {
+    panelRefresh = setInterval(() => {
+      const id = session.value?.id
+      if (!id) return
+      void panelApi.status(id).then((current) => {
+        if (session.value?.id === id) panel.value = current
+      }).catch(() => undefined)
+    }, 5000)
+  } else if (!waiting && panelRefresh) {
+    clearInterval(panelRefresh)
+    panelRefresh = null
+  }
+})
 const connectionQuality = computed(() => {
   if (!tutoringActive.value) return 'Offline'
   if (peers.value.length === 0) return 'Ready'
@@ -116,6 +149,7 @@ const formattedDuration = computed(() => {
 })
 
 onMounted(async () => {
+  if (!isMobilePlatform) void callDevices.refresh().catch(() => undefined)
   const bundle = await getInterview(interviewId.value)
   if (!bundle) return
   selectedSpeakerId.value = bundle.participants.find(item => item.role === 'candidate')?.id
@@ -123,6 +157,11 @@ onMounted(async () => {
     ?? ''
   if (bundle.notes[0]) privateNote.value = bundle.notes[0].text
   panel.value = await panelApi.status(bundle.session.id).catch(() => null)
+  // On a panel seat the candidate is on their own device, so this
+  // microphone is the panelist's.
+  if (panel.value) {
+    selectedSpeakerId.value = bundle.participants.find(item => item.role === 'interviewer')?.id ?? selectedSpeakerId.value
+  }
   await tutoring.setupEventListeners()
   await tutoring.refreshStatus()
   if (bundle.session.status === 'live') {
@@ -135,16 +174,26 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (panelRefresh) clearInterval(panelRefresh)
   speech.stop()
   stopSelfPreview()
   stopSentinelCameraLoops()
   if (elapsedTimer) window.clearInterval(elapsedTimer)
 })
 
-watch(() => tutoring.sessionStatus.value?.video_enabled, (enabled) => {
-  if (enabled) startSelfPreview()
-  else stopSelfPreview()
-})
+// The self view follows the published camera: off with the camera, off while
+// the screen is shared (the JPEG self frame shows the screen then), and
+// reopened when the camera is switched.
+watch(
+  () => {
+    const status = tutoring.sessionStatus.value
+    return status?.video_enabled && !status.screen_sharing ? (status.camera_name ?? null) : null
+  },
+  (camera) => {
+    stopSelfPreview()
+    if (camera) void startSelfPreview()
+  },
+)
 
 watch(selfVideo, () => {
   if (selfVideo.value && selfStream.value) {
@@ -195,10 +244,30 @@ async function enterPanelRoom(title: string, name: string) {
   panelError.value = null
   const current = await panelApi.status(session.value.id)
   panel.value = current
-  if (current.room.ticket) return tutoring.joinRoom(current.room.ticket, title, name)
-  const room = await tutoring.createRoom(title, name)
-  if (!room.ticket) throw new Error('the room has no ticket to share')
-  panel.value = await panelApi.setRoom(session.value.id, room.ticket)
+  if (!current.room.ticket && current.status !== 'accepted') {
+    throw new Error(t('interviews.panel.notAccepted'))
+  }
+  if (current.room.ticket) {
+    try {
+      return await tutoring.joinRoom(current.room.ticket, title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
+    } catch (cause) {
+      // Nobody is left in the room Cloud knows about (every panelist's app
+      // closed): open a new one below and hand Cloud its ticket instead.
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (!/^SESSION_(UNAVAILABLE|ENDED)/.test(message)) throw cause
+      tutoring.clearError()
+    }
+  }
+  const room = await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
+  try {
+    if (!room.ticket) throw new Error('the room has no ticket to share')
+    panel.value = await panelApi.setRoom(session.value.id, room.ticket)
+  } catch (cause) {
+    // Nobody else can find a room Cloud does not know about; close it rather
+    // than leave this device's camera and microphone running for no one.
+    await tutoring.leaveRoom()
+    throw cause
+  }
   return room
 }
 
@@ -208,7 +277,9 @@ async function startInterview() {
   const name = interviewer.value?.display_name ?? 'Interviewer'
   let room
   try {
-    room = panel.value ? await enterPanelRoom(title, name) : await tutoring.createRoom(title, name)
+    room = panel.value
+      ? await enterPanelRoom(title, name)
+      : await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
   } catch (cause) {
     panelError.value = cause instanceof Error ? cause.message : String(cause)
     return
@@ -241,21 +312,27 @@ async function endInterview() {
 
 async function startSelfPreview() {
   if (selfStream.value || isMobilePlatform) return
+  // Open the camera the call is publishing, not the system default, so the
+  // self view shows what the panel and candidate see.
+  const cameraName = tutoring.sessionStatus.value?.camera_name
   try {
-    selfStream.value = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-      audio: false,
-    })
-    sentinel.reportCameraDevice(selfStream.value.getVideoTracks?.()[0]?.label ?? null)
+    const stream = await openCameraPreview(cameraName)
+    if (!stream) return
+    if (selfStream.value || tutoring.sessionStatus.value?.camera_name !== cameraName) {
+      for (const track of stream.getTracks()) track.stop()
+      return
+    }
+    selfStream.value = stream
+    sentinel.reportCameraDevice(stream.getVideoTracks?.()[0]?.label ?? null)
     await nextTick()
     if (selfVideo.value) {
-      selfVideo.value.srcObject = selfStream.value
+      selfVideo.value.srcObject = stream
       await selfVideo.value.play().catch(() => undefined)
     }
     if (sentinel.cameraOptedIn.value) startSentinelCameraLoops()
   } catch {
-    // The tutoring backend may already own the camera; its JPEG self frame
-    // remains the visual fallback and non-camera Sentinel signals continue.
+    // The camera may not open twice on this system; the call's own JPEG self
+    // frame remains the visual fallback and non-camera signals continue.
   }
 }
 
@@ -390,6 +467,11 @@ async function openAudioDevices() {
   }
 }
 
+async function openCallDevices() {
+  await callDevices.refresh().catch(() => undefined)
+  showCallDevices.value = true
+}
+
 async function applyAudioDevices() {
   await tutoring.setAudioDevices(selectedMic.value, selectedOutput.value)
   showAudioDevices.value = false
@@ -441,6 +523,7 @@ function formatTime(ms: number) {
         <AppButton variant="outline" size="xs" @click="showSentinelDebug = true">Sentinel</AppButton>
         <AppButton variant="outline" size="xs" @click="openDebug">{{ $t('interviews.session.diagnostics') }}</AppButton>
         <AppButton v-if="isIOS" variant="outline" size="xs" :loading="deviceLoading" @click="openAudioDevices">{{ $t('interviews.session.audio') }}</AppButton>
+        <AppButton v-else-if="!isMobilePlatform" variant="outline" size="xs" data-testid="call-devices" @click="openCallDevices">{{ $t('tutoring.device.devices') }}</AppButton>
         <AppButton v-if="tutoring.sessionStatus.value?.ticket" variant="outline" size="xs" @click="copyTicket">{{ ticketCopied ? $t('interviews.common.copied') : $t('interviews.session.invite') }}</AppButton>
         <AppButton variant="outline" size="xs" @click="showChat = !showChat">{{ $t('interviews.session.chat') }}<span v-if="tutoring.unreadChatCount.value"> · {{ tutoring.unreadChatCount.value }}</span></AppButton>
       </template>
@@ -456,7 +539,7 @@ function formatTime(ms: number) {
         {{ $t('interviews.panel.panelists', { names: panel.panel.map(member => member.name).join(', ') }) }}
       </p>
       <p class="mt-1 text-sm text-muted-foreground">
-        {{ panel.room.ticket ? $t('interviews.panel.roomOpen') : $t('interviews.panel.roomClosed') }}
+        {{ panel.room.ticket ? $t('interviews.panel.roomOpen') : awaitingCandidate ? $t('interviews.panel.notAccepted') : $t('interviews.panel.roomClosed') }}
       </p>
       <!-- The scorecard is reached at the end of the call; this is the way to it
            for a conversation the panel held some other way. -->
@@ -533,8 +616,16 @@ function formatTime(ms: number) {
               <li class="flex items-start gap-2"><span class="mt-1 h-2 w-2 rounded-full bg-success" /><span class="text-muted-foreground">{{ $t('interviews.session.notGossiped') }}</span></li>
               <li class="flex items-start gap-2"><span class="mt-1 h-2 w-2 rounded-full bg-success" /><span class="text-muted-foreground">{{ $t('interviews.session.expires', { date: new Date(session?.expires_at ?? '').toLocaleDateString() }) }}</span></li>
             </ul>
-            <AppButton class="mt-5 w-full" :loading="loading" :disabled="!allRequestedConsentsReady" @click="startInterview">{{ $t('interviews.session.start') }}</AppButton>
+            <CallDevicePicker
+              v-if="!isMobilePlatform"
+              class="mt-5"
+              :model-value="deviceChoice"
+              :devices="callDevices.devices.value"
+              @update:model-value="value => Object.assign(deviceChoice, value)"
+            />
+            <AppButton class="mt-5 w-full" :loading="loading" :disabled="!allRequestedConsentsReady || awaitingCandidate" @click="startInterview">{{ $t('interviews.session.start') }}</AppButton>
             <p v-if="!allRequestedConsentsReady" class="mt-2 text-center text-xs text-muted-foreground">{{ $t('interviews.session.recordChoicesFirst') }}</p>
+            <p v-else-if="awaitingCandidate" class="mt-2 text-center text-xs text-muted-foreground">{{ $t('interviews.panel.notAccepted') }}</p>
           </div>
         </aside>
       </div>
@@ -542,11 +633,17 @@ function formatTime(ms: number) {
 
     <main v-else class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(20rem,1fr)_22rem_20rem]">
       <section class="flex min-h-0 flex-col border-e border-border bg-muted/20">
-        <div class="flex-1 overflow-auto p-3">
-          <div class="grid min-h-full content-center gap-3" :class="peers.length > 0 ? 'grid-cols-2' : 'grid-cols-1'">
+        <div class="flex min-h-0 flex-1 flex-col p-3">
+          <div v-if="!tutoringActive" class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3" data-testid="rejoin-call">
+            <p class="text-sm text-foreground">{{ $t('interviews.session.callLost') }}</p>
+            <AppButton size="sm" :loading="loading" @click="startInterview">{{ $t('interviews.session.rejoin') }}</AppButton>
+          </div>
+          <VideoGrid v-slot="{ tileStyle }" class="flex-1" :count="peers.length + 1">
             <LiveParticipantTile
               v-for="peer in peers"
               :key="peer.node_id"
+              class="shrink-0"
+              :style="tileStyle"
               :name="peer.display_name || peer.node_id.slice(0, 8)"
               :initials="participantInitials(peer.display_name || peer.node_id)"
               :video-src="tutoring.videoFrames.value[peer.node_id]"
@@ -559,14 +656,15 @@ function formatTime(ms: number) {
               :video-src="tutoring.videoFrames.value.self"
               :muted="!tutoring.sessionStatus.value?.audio_enabled"
               self
-              :compact="peers.length > 0"
+              class="shrink-0"
+              :style="tileStyle"
               label="This device"
             >
               <template v-if="selfStream" #video>
-                <video ref="selfVideo" autoplay muted playsinline class="absolute inset-0 h-full w-full scale-x-[-1] object-cover" />
+                <video ref="selfVideo" autoplay muted playsinline class="absolute inset-0 h-full w-full scale-x-[-1] object-contain" />
               </template>
             </LiveParticipantTile>
-          </div>
+          </VideoGrid>
         </div>
         <LiveSessionControls
           :audio-enabled="tutoring.sessionStatus.value?.audio_enabled ?? false"
@@ -575,6 +673,7 @@ function formatTime(ms: number) {
           :mic-level="tutoring.micLevel.value"
           :incoming-level="tutoring.outputLevel.value"
           :can-share-screen="!isMobilePlatform"
+          :busy="tutoring.mediaBusy.value"
           end-label="End interview"
           @toggle-audio="tutoring.toggleAudio(!(tutoring.sessionStatus.value?.audio_enabled ?? false))"
           @toggle-video="tutoring.toggleVideo(!(tutoring.sessionStatus.value?.video_enabled ?? false))"
@@ -707,6 +806,17 @@ function formatTime(ms: number) {
         <p class="text-xs leading-relaxed text-muted-foreground">{{ $t('interviews.session.deviceHelp') }}</p>
       </div>
       <template #footer><div class="flex justify-end gap-2"><AppButton variant="outline" @click="showAudioDevices = false">{{ $t('interviews.common.cancel') }}</AppButton><AppButton @click="applyAudioDevices">{{ $t('interviews.common.apply') }}</AppButton></div></template>
+    </AppModal>
+
+    <AppModal :open="showCallDevices" :title="$t('tutoring.device.devices')" max-width="30rem" @close="showCallDevices = false">
+      <CallDevicePicker
+        in-call
+        :model-value="deviceChoice"
+        :devices="callDevices.devices.value"
+        :disabled="tutoring.mediaBusy.value"
+        @update:model-value="value => Object.assign(deviceChoice, value)"
+        @camera-change="camera => tutoring.setCamera(camera).catch(() => undefined)"
+      />
     </AppModal>
 
     <LiveDiagnosticsModal :open="showDiagnostics" :diagnostics="diagnostics" @close="showDiagnostics = false" @refresh="openDebug" />

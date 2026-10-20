@@ -402,6 +402,7 @@ export const TAURI_COMMANDS = [
   "tutoring_send_chat",
   "tutoring_send_transcript",
   "tutoring_set_audio_devices",
+  "tutoring_set_camera",
   "tutoring_status",
   "tutoring_toggle_audio",
   "tutoring_toggle_screen_share",

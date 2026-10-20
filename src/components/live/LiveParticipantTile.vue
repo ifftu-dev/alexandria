@@ -22,15 +22,15 @@ withDefaults(defineProps<Props>(), {
 
 <template>
   <article
-    class="group relative isolate overflow-hidden border border-border bg-card shadow-sm"
-    :class="compact ? 'min-h-32 rounded-xl' : 'min-h-52 rounded-2xl'"
+    class="group relative isolate aspect-video overflow-hidden border border-border bg-black shadow-sm"
+    :class="compact ? 'rounded-xl' : 'rounded-2xl'"
   >
     <slot name="video">
       <img
         v-if="videoSrc"
         :src="videoSrc"
         :alt="name"
-        class="absolute inset-0 h-full w-full object-cover"
+        class="absolute inset-0 h-full w-full object-contain"
       />
       <div v-else class="absolute inset-0 grid place-items-center bg-gradient-to-br from-muted/90 to-background">
         <div class="flex h-16 w-16 items-center justify-center rounded-full border border-border bg-card text-xl font-semibold text-foreground shadow-sm">

@@ -5,7 +5,7 @@ edition = "2024"
 description = "native audio and video capturing, playback, encoding, decoding"
 authors = ["Franz Heinzmann <frando@n0.computer>"]
 repository = "https://github.com/n0-computer/iroh-live"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.100"
@@ -22,7 +22,7 @@ hang = "0.19"
 # Producer/Consumer that hang 0.19 moved out of its core (replacing the old
 # `hang::TrackProducer`/`CatalogProducer`).
 moq-mux = "0.7"
-image = { version = "0.25.8", optional = true, default-features = false }
+image = { version = "0.25.8", optional = true, default-features = false, features = ["jpeg"] }
 moq-lite = "0.17"
 n0-error = { version = "1", features = ["anyhow"] }
 n0-future = "0.3.1"

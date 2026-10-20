@@ -11,8 +11,8 @@ fn main() {
     // references macOS-only SCDynamicStore symbols from SystemConfiguration.
     // These symbols don't exist in iOS's SystemConfiguration framework.
     // We compile a small C stub that provides no-op implementations so the
-    // linker succeeds. The code paths using SCDynamicStore are never reached
-    // on iOS (mDNS is disabled, and if-watch falls back to polling).
+    // linker succeeds. if-watch never reaches them on iOS (mDNS is disabled,
+    // and it falls back to polling); anything else that does gets NULL back.
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     // The Wasmtime grader sandbox now runs on every platform. Desktop and
@@ -47,7 +47,8 @@ fn main() {
             r#"
 // Stub implementations for macOS-only SCDynamicStore symbols.
 // These satisfy the linker on iOS where the symbols don't exist.
-// The code paths that call these are never reached on iOS.
+// They return NULL, so any caller that wraps the result without checking
+// panics: hickory's system DNS reader did (org_trust.rs avoids it on iOS).
 #include <stddef.h>
 #include <stdint.h>
 

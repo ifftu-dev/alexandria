@@ -56,7 +56,10 @@
     "textOnly": "你仍可加入——本次会话将仅使用文字聊天。",
     "checking": "检查中…",
     "starting": "启动中…",
-    "joining": "加入中…"
+    "joining": "加入中…",
+    "automatic": "自动",
+    "audioNextJoin": "麦克风和扬声器的更改将在你下次加入时生效。",
+    "devices": "设备"
   },
   "qr": {
     "scanTitle": "扫描二维码邀请",
@@ -138,10 +141,10 @@
     "applying": "正在应用…"
   },
   "leave": {
-    "title": "离开会话？",
+    "title": "离开通话？",
     "desc": "你的摄像头和麦克风将停止。其他人会看到你离开。",
     "stay": "留下",
-    "confirm": "离开会话"
+    "confirm": "离开通话"
   },
   "ticketFallback": {
     "title": "邀请",

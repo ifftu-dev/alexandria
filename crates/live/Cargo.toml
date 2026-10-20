@@ -3,7 +3,7 @@ name = "live"
 version = "0.1.0"
 edition = "2024"
 description = "Live tutoring networking: MoQ media + gossip room presence over iroh"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 
 [dependencies]
 derive_more = { version = "2.0.1", features = ["display", "debug", "eq"] }

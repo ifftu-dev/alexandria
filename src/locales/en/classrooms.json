@@ -61,7 +61,8 @@
   "call": {
     "active": "Voice call active",
     "join": "Join call",
-    "start": "Start call"
+    "start": "Start call",
+    "end": "End call"
   },
   "channels": {
     "heading": "Channels",

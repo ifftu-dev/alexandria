@@ -83,7 +83,30 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // The candidate's own copy of each integrity result they sent an
     // organisation: what they signed, and where it went.
     (17, "interview_integrity_reports", MIGRATION_017_INTERVIEW_INTEGRITY),
+    // What each call is for (tutoring, classroom, interview seat or
+    // candidate, assistant, plugin) and the thing it belongs to.
+    (18, "call_kinds", MIGRATION_018_CALL_KINDS),
 ];
+
+pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
+ALTER TABLE tutoring_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'tutoring'
+    CHECK (kind IN ('tutoring', 'classroom', 'interview_panel', 'interview_candidate', 'interview_assistant', 'plugin'));
+ALTER TABLE tutoring_sessions ADD COLUMN context_id TEXT;
+CREATE INDEX idx_tutoring_sessions_kind ON tutoring_sessions(kind, created_at);
+-- Calls made before kinds existed: interview rooms are known through the
+-- interview that recorded them (a Cloud link marks a panel seat), and
+-- classroom calls through their call id. A candidate's old rows cannot be
+-- told apart and stay tutoring.
+UPDATE tutoring_sessions
+   SET kind = CASE WHEN s.cloud_interview_id IS NOT NULL THEN 'interview_panel' ELSE 'interview_assistant' END,
+       context_id = s.id
+  FROM interview_sessions AS s
+ WHERE s.tutoring_session_id = tutoring_sessions.id;
+UPDATE tutoring_sessions
+   SET kind = 'classroom',
+       context_id = (SELECT c.classroom_id FROM classroom_calls AS c WHERE c.id = tutoring_sessions.id)
+ WHERE id IN (SELECT id FROM classroom_calls);
+"#;
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
 ALTER TABLE assessment_attempts ADD COLUMN submitted_answers_json TEXT CHECK (submitted_answers_json IS NULL OR json_valid(submitted_answers_json));

@@ -1134,6 +1134,15 @@ export type PeerInfo = string
 
 // ---- Tutoring ----
 
+/** What a call is for; see src/utils/callKinds.ts. */
+export type CallKind =
+  | 'tutoring'
+  | 'classroom'
+  | 'interview_panel'
+  | 'interview_candidate'
+  | 'interview_assistant'
+  | 'plugin'
+
 export interface TutoringSessionInfo {
   id: string
   title: string
@@ -1141,6 +1150,9 @@ export interface TutoringSessionInfo {
   status: 'active' | 'ended' | 'cancelled'
   created_at: string
   ended_at: string | null
+  kind: CallKind
+  /** The classroom, interview or plugin element the call belongs to. */
+  context_id: string | null
 }
 
 export interface TutoringPeer {
@@ -1158,6 +1170,8 @@ export interface TutoringSessionStatus {
   video_enabled: boolean
   audio_enabled: boolean
   screen_sharing: boolean
+  /** The camera peers see, by the system's name for it; null when the camera is off or the screen is shared. */
+  camera_name?: string | null
   started_at: number
 }
 

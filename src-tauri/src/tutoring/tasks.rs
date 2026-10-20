@@ -120,7 +120,7 @@ impl SessionTasks {
         }
     }
 
-    fn close(&self) {
+    pub(super) fn close(&self) {
         let mut state = self.0.lock().expect("media task registry poisoned");
         state.accepting = false;
         state.tasks.abort_all();
