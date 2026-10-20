@@ -492,6 +492,7 @@
     "rowInferLatency": "প্রতিক্রিয়া সময়",
     "valActive": "সক্রিয়",
     "valIdle": "নিষ্ক্রিয়",
+    "valSuspended": "স্থগিত",
     "valYes": "হ্যাঁ",
     "valNo": "না",
     "valNa": "প্রযোজ্য নয়",

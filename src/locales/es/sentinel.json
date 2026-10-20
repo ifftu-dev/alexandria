@@ -492,6 +492,7 @@
     "rowInferLatency": "tiempo de respuesta",
     "valActive": "activo",
     "valIdle": "inactivo",
+    "valSuspended": "suspendido",
     "valYes": "sí",
     "valNo": "no",
     "valNa": "n/d",

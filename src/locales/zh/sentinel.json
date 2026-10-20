@@ -492,6 +492,7 @@
     "rowInferLatency": "响应时间",
     "valActive": "活跃",
     "valIdle": "空闲",
+    "valSuspended": "已暂停",
     "valYes": "是",
     "valNo": "否",
     "valNa": "不适用",

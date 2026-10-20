@@ -4,7 +4,16 @@ import { reactive, ref } from 'vue'
 import SentinelDebugPip from './SentinelDebugPip.vue'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), getUserMedia: vi.fn(), setCameraOptedIn: vi.fn(), scoreGaze: vi.fn(), verifyFace: vi.fn() }))
-const debug = reactive({ active: true, integrity: 0.85, consistency: 0.9, flags: [] as string[] })
+const probeDefaults = () => ({
+  suspended: false, lastSnapshotAt: 0,
+  androidEnvSource: '', shieldRequested: false, shieldActive: false, overlayHidingSupported: false,
+  developmentSettings: false, adbEnabled: false, foreignAccessibility: [] as string[], obscuredTouches: 0, androidSdk: 0,
+  overlaySource: '', overlayScanned: 0, overlayAllowlisted: 0, overlaySuspicious: [] as string[],
+  processSource: '', processesScanned: 0, watchedProcesses: [] as string[],
+  hotkeysSupported: null as boolean | null, hotkeysSource: '', hotkeysPermission: false, hotkeysRunning: false,
+  nativeHotkeys: 0, phantomHotkeys: [] as string[],
+})
+const debug = reactive({ active: true, integrity: 0.85, consistency: 0.9, flags: [] as string[], ...probeDefaults() })
 const optedIn = ref(false)
 const stakeAddress = ref('stake_test_active')
 vi.mock('@/composables/useProfiles', () => ({ useProfiles: () => ({ stakeAddress }) }))
@@ -21,6 +30,7 @@ const mountPanel = () => mount(SentinelDebugPip, { props: { initiallyOpen: true 
 beforeEach(() => {
   vi.clearAllMocks()
   debug.active = true; debug.integrity = 0.85; optedIn.value = false
+  Object.assign(debug, probeDefaults())
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: mocks.getUserMedia } })
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
 })
@@ -109,6 +119,60 @@ describe('Sentinel Dev panel', () => {
     }))
     expect(wrapper.text()).toContain('Face model unavailable')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('shows native probe rows as pending until the first snapshot', () => {
+    debug.hotkeysSupported = true
+    const wrapper = mountPanel()
+    expect(wrapper.text()).not.toContain('0/0')
+    expect(wrapper.text()).not.toContain('no-shield')
+    expect(wrapper.text()).not.toContain('no-permission')
+    wrapper.unmount()
+  })
+
+  it('shows n/a for probes the platform does not have, not clean zeros', () => {
+    // A phone: no overlay scan, no process scan, no hotkey probe, and no
+    // Android report (iOS) even though the shield was requested.
+    Object.assign(debug, { lastSnapshotAt: 1, shieldRequested: true, hotkeysSupported: false, hotkeysSource: 'unsupported' })
+    const wrapper = mountPanel()
+    const text = wrapper.text()
+    expect(text.match(/sentinel\.debug\.valNa/g)?.length).toBeGreaterThanOrEqual(4)
+    expect(text).not.toContain('0/0')
+    expect(text).not.toContain('shield?')
+    expect(text).not.toContain('no-permission')
+    wrapper.unmount()
+  })
+
+  it('names the desktop probe sources and allowlisted overlays', () => {
+    Object.assign(debug, {
+      lastSnapshotAt: 1,
+      overlaySource: 'cgwindow', overlayScanned: 412, overlayAllowlisted: 2,
+      processSource: 'nsworkspace', processesScanned: 318,
+      hotkeysSupported: true, hotkeysSource: 'cgeventtap', hotkeysPermission: true, hotkeysRunning: true, nativeHotkeys: 3,
+    })
+    const wrapper = mountPanel()
+    const text = wrapper.text()
+    expect(text).toContain('0/412 allow×2·cgwindow')
+    expect(text).toContain('0/318·nsworkspace')
+    expect(text).toContain('0/3·cgeventtap')
+    wrapper.unmount()
+  })
+
+  it('reports the Android environment details the probe returns', () => {
+    Object.assign(debug, {
+      lastSnapshotAt: 1, androidEnvSource: 'android', shieldRequested: true, shieldActive: true,
+      overlayHidingSupported: false, developmentSettings: true, androidSdk: 30,
+    })
+    const wrapper = mountPanel()
+    expect(wrapper.text()).toContain('shield no-overlay-hide dev-options api30')
+    wrapper.unmount()
+  })
+
+  it('shows a suspended session as suspended, not active', () => {
+    debug.suspended = true
+    const wrapper = mountPanel()
+    expect(wrapper.text()).toContain('sentinel.debug.valSuspended')
+    expect(wrapper.text()).not.toContain('sentinel.debug.valActive')
     wrapper.unmount()
   })
 })
