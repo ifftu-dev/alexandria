@@ -93,4 +93,34 @@ ignore = [
     # immediately if the release profile stops aborting on panic, or if code
     # starts catching panics (`catch_unwind`) around the audio stack.
     "RUSTSEC-2026-0293",
+
+    # zip 1.1.4, 4.6.1 and 8.6.0 — `ZipArchive::extract` and
+    # `ZipStreamReader::extract` keep SUID/SGID bits (RUSTSEC-2026-0367),
+    # create symlinks whose targets leave the destination (RUSTSEC-2026-0368),
+    # and apply permissions through those symlinks (RUSTSEC-2026-0369).
+    #
+    # Ignored because the upgrade is blocked: the fix is zip >= 9.0.0, and no
+    # release of any of the three dependents accepts it yet — candle-core
+    # 0.11 wants ^8.6, tauri-plugin-updater 2.14 and the 3.0 alphas want ^4,
+    # and libsodium-sys-stable 1.24.3 wants ^8.6.
+    #
+    # All three bugs live in `extract`, and nothing extracts an archive that
+    # an attacker can supply:
+    #   - candle-core 0.8.4 (zip 1.1.4) reads PyTorch archives with `by_name`
+    #     only and never calls `extract`.
+    #   - tauri-plugin-updater 2.10.1 (zip 4.6.1) extracts only on Windows,
+    #     only for a .zip update bundle, and only after `download_and_install`
+    #     has verified the bytes against the minisign `pubkey` in
+    #     tauri.conf.json. It extracts into a fresh temporary directory.
+    #   - libsodium-sys-stable 1.24.0 (zip 8.6.0) is a build dependency. Its
+    #     build script extracts the prebuilt MSVC libsodium on Windows builds
+    #     only, after verifying the archive's minisign signature.
+    #
+    # Revisit when any of the three releases against zip >= 9. Remove this
+    # acceptance immediately if our code calls `extract` itself, if the
+    # updater stops verifying signatures before install, or if candle starts
+    # extracting archives.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
