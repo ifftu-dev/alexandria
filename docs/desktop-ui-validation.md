@@ -71,6 +71,15 @@ eyebrow uses the full text color. Native progress elements use the app's theme
 colors instead of the OS's green/gray styling.
 Desktop theme changes also update native window decorations. Selecting System
 restores OS-controlled decorations; mobile and browser previews skip this API.
+The AppImage GTK launcher also forced `GTK_THEME=Adwaita:light` (or `:dark`) at
+startup, preventing GTK popups from following subsequent app theme changes.
+The Linux entry point clears that default AppImage override before GTK or worker
+threads start. Explicit exported `APPIMAGE_GTK_THEME` overrides and non-AppImage
+installs are preserved. The entry-point tests cover both default variants and
+the preservation cases; the normal workspace CI test run includes them.
+On Omarchy ARM64, removing the override from an extracted `.8` package made the
+native goal popup switch between dark and light without restarting. The rebuilt
+AppImage must also pass this check through its normal launcher.
 Home's Add a goal action now opens the goal picker on the Goals page instead of
 sending the user to Skills & Credentials.
 The goal picker's prompt remains in the closed control but is excluded from the
