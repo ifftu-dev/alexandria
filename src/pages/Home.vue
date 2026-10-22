@@ -771,12 +771,17 @@ onMounted(async () => {
   transform: translateY(-1px);
   box-shadow: 0 12px 30px -10px color-mix(in srgb, var(--app-primary) 70%, transparent);
 }
+:global(.dark .home-hero) {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--app-accent) 20%, transparent), transparent 60%),
+    linear-gradient(120deg, color-mix(in srgb, var(--app-primary) 55%, black), color-mix(in srgb, var(--app-primary) 45%, black));
+}
 .home-hero-eyebrow {
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: color-mix(in srgb, white 80%, transparent);
+  color: inherit;
 }
 .home-hero-title {
   margin-top: 0.15rem;

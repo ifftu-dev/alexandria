@@ -2,8 +2,8 @@
 
 Desktop changes need both automated regressions and a native package check. The
 browser fixture uses production Vue components, onboarding, and theme CSS. It stubs
-goal templates and pre-account platform/profile calls and never opens or changes
-a real user profile.
+goal templates, pre-account platform/profile calls, and an empty offline dashboard.
+It never opens or changes a real user profile.
 
 ## Automated checks
 
@@ -24,6 +24,7 @@ screenshots, and traces for 14 days. The suite checks:
 
 - Light and dark select contrast even when the OS theme disagrees, using rendered
   background pixels rather than only computed CSS.
+- Progress bars using the app's accent color in both browser engines and themes.
 - Goal-picker layout in a 420-pixel-wide tiled window.
 - Long dialogs in a short window: visible title/actions and scrolling content.
 - Initial focus, Tab/Shift+Tab containment, Escape, and focus restoration.
@@ -32,6 +33,7 @@ screenshots, and traces for 14 days. The suite checks:
 - Input errors connected to their fields for assistive technology.
 - Onboarding keyboard focus on buttons with decorative shadows, plus scrolling
   and navigation through the initial steps in a short window.
+- Dashboard hero contrast across its gradient in both themes.
 
 Chromium and Playwright WebKit are regression coverage, not a substitute for the
 installed Windows WebView2 or Linux WebKitGTK package. Native decorations, GPU
@@ -62,6 +64,10 @@ Dialogs also manage focus and nested scroll locks. Compact navigation is below
 modal overlays, and clicking the modal backdrop dismisses the dialog.
 The shared keyboard-focus style also supplies an outline, so a component's
 decorative box shadow cannot hide the focus indicator on onboarding buttons.
+Native dark-mode inspection also exposed low-contrast white text on the dashboard
+hero's light purple gradient. Its dark-theme background is now darker, and its
+eyebrow uses the full text color. Native progress elements use the app's theme
+colors instead of the OS's green/gray styling.
 
 Windows startup could fail before rendering because Git converted embedded,
 hash-verified resources to CRLF. `.gitattributes` preserves exact resource and

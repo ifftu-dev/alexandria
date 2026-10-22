@@ -29,6 +29,14 @@ for (const theme of ['light', 'dark']) {
     await page.keyboard.press('Tab')
     await expect(page.getByRole('button', { name: 'Set as goal' })).toBeFocused()
     await expect(page.getByLabel('Invalid name')).toHaveAccessibleDescription('Enter a display name')
+    const progress = page.getByRole('progressbar', { name: 'Sample download' })
+    const accent = await progress.evaluate((element) => getComputedStyle(element).getPropertyValue('--app-primary'))
+    const expected = (accent.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+    const bar = PNG.sync.read(await progress.screenshot())
+    const filled = (Math.floor(bar.height / 2) * bar.width + Math.floor(bar.width / 4)) * 4
+    for (let channel = 0; channel < 3; channel++) {
+      expect(Math.abs((bar.data[filled + channel] ?? 0) - (expected[channel] ?? 0))).toBeLessThanOrEqual(2)
+    }
   })
 }
 
@@ -118,3 +126,18 @@ test('onboarding keeps keyboard focus visible on buttons with decorative shadows
   await page.keyboard.press('Enter')
   await expect(page.getByRole('combobox', { name: 'Day', exact: true })).toBeVisible()
 })
+
+for (const theme of ['light', 'dark']) {
+  test(`${theme} dashboard hero text contrasts with its entire gradient`, async ({ page }) => {
+    await page.goto(`/tests/desktop-ui/?screen=home&theme=${theme}`)
+    const hero = page.locator('.home-hero')
+    await expect(hero).toBeVisible()
+    const pixels = PNG.sync.read(await hero.screenshot())
+    for (const fraction of [0.1, 0.5, 0.9]) {
+      const offset = (10 * pixels.width + Math.floor(pixels.width * fraction)) * 4
+      const background = [pixels.data[offset] ?? 0, pixels.data[offset + 1] ?? 0, pixels.data[offset + 2] ?? 0]
+      expect((1.05) / (luminance(background) + 0.05)).toBeGreaterThanOrEqual(4.5)
+    }
+    await expect(hero.locator('.home-hero-title')).toHaveCSS('color', 'rgb(255, 255, 255)')
+  })
+}

@@ -21,6 +21,7 @@ const nestedOpen = ref(false)
     <section aria-label="Profile form">
       <AppInput v-model="name" label="Display name" />
       <AppInput model-value="" label="Invalid name" error="Enter a display name" />
+      <progress value="50" max="100" aria-label="Sample download" class="w-full" />
       <AppButton @click="open = true">Open long dialog</AppButton>
     </section>
     <AppModal :open="open" title="Long settings dialog" @close="open = false">
