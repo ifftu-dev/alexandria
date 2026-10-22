@@ -47,6 +47,22 @@ function applyDesktopValidationConfig() {
   writeJson(configPath, config);
 }
 
+function applyIosVersionConfig(buildVersion) {
+  if (!buildVersion || !/^\d+(?:\.\d+){0,2}$/.test(buildVersion)) {
+    throw new Error("iOS build version must contain one to three dot-separated integers");
+  }
+  const version = normalizeVersion(readJson(configPath).version);
+  const iosConfigPath = path.resolve("src-tauri/tauri.ios.conf.json");
+  const config = readJson(iosConfigPath);
+  // Apple's marketing version excludes semver prerelease/build metadata.
+  // Keep the complete immutable tag in Cargo/package metadata and artifact names.
+  config.version = version.split(/[-+]/, 1)[0];
+  config.bundle ??= {};
+  config.bundle.iOS ??= {};
+  config.bundle.iOS.bundleVersion = buildVersion;
+  writeJson(iosConfigPath, config);
+}
+
 function syncVersionAcrossReleaseMetadata(rawVersion) {
   const version = normalizeVersion(rawVersion);
 
@@ -98,6 +114,9 @@ switch (mode) {
       process.exit(1);
     }
     syncVersionAcrossReleaseMetadata(process.argv[3]);
+    break;
+  case "ios-version":
+    applyIosVersionConfig(process.argv[3]);
     break;
   default:
     console.error(`Unsupported prepare-tauri-config mode: ${mode ?? "(missing)"}`);

@@ -56,6 +56,15 @@ For real releases:
 
 Shared desktop/mobile build workflows now sync the app version from the immutable release tag before building, so a tag like `0.0.1-alpha` produces `0.0.1-alpha` bundle metadata and artifact names instead of reusing the in-repo development version.
 
+iOS uses a platform overlay for Apple's numeric version fields: the marketing
+version is the tag's `major.minor.patch`, and `CFBundleVersion` is the GitHub workflow
+run number plus attempt (for example, `317.2`). This keeps multi-part prerelease
+tags such as `0.7.0-alpha.seedfix.20261022.7` out of Apple's numeric fields while
+preserving the full tag in Cargo/package metadata and artifact names. The
+`ios-version` config mode is covered by the release-workflow regression tests in
+CI. Validation and release workflows have separate run-number sequences; validation
+artifacts are not uploaded to TestFlight.
+
 ## Desktop regression gates
 
 Frontend changes run the Chromium/WebKit UI regression suite in CI. Desktop

@@ -10,6 +10,35 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class PrepareTauriConfigTests(unittest.TestCase):
+    def test_ios_versions_accept_release_and_multi_part_prerelease_tags(self):
+        for version in ['0.7.0', '0.7.0-alpha.seedfix.20261022.7',
+                        '0.7.0-alpha.seedfix.20261022.10+audit.1']:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config_path = root / 'src-tauri/tauri.conf.json'
+                config_path.parent.mkdir(parents=True)
+                config_path.write_text(json.dumps({'version': version}))
+                ios_path = root / 'src-tauri/tauri.ios.conf.json'
+                original = {'build': {'features': ['tutoring-video-ios']},
+                            'bundle': {'iOS': {'minimumSystemVersion': '14.0'}}}
+                ios_path.write_text(json.dumps(original))
+                subprocess.run(['node', str(ROOT / 'scripts/prepare-tauri-config.mjs'),
+                                'ios-version', '317.2'], cwd=root, check=True, capture_output=True)
+                config = json.loads(ios_path.read_text())
+                self.assertEqual(config['version'], '0.7.0')
+                self.assertEqual(config['bundle']['iOS']['bundleVersion'], '317.2')
+                self.assertEqual(config['build'], original['build'])
+                self.assertEqual(config['bundle']['iOS']['minimumSystemVersion'], '14.0')
+                self.assertEqual(json.loads(config_path.read_text())['version'], version)
+
+    def test_ios_rejects_invalid_build_versions_before_writing(self):
+        for build in ['', '317.alpha', '1.2.3.4', '-1', '1e3']:
+            with self.subTest(build=build), tempfile.TemporaryDirectory() as tmp:
+                result = subprocess.run(['node', str(ROOT / 'scripts/prepare-tauri-config.mjs'),
+                                         'ios-version', build], cwd=tmp, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_version_sync_keeps_locked_sidecar_build_consistent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
