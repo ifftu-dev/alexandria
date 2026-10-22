@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
@@ -12,6 +12,7 @@ import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import type { LearningPath, Goal, GoalAssessmentStep } from '@/types'
 
 const router = useRouter()
+const route = useRoute()
 const { goals, removeGoal, pathFor, combinedPath } = useGoals()
 const { planGoal } = useAssessment()
 
@@ -75,6 +76,11 @@ async function loadAll() {
 }
 
 onMounted(async () => {
+  if (route.query.add === '1') {
+    openAddGoal()
+    const { add: _add, ...query } = route.query
+    await router.replace({ path: route.path, query, hash: route.hash })
+  }
   await useSettings().initialize()
   await loadAll()
 })
@@ -128,14 +134,14 @@ const dash = computed(() => 2 * Math.PI * 20)
 
 <template>
   <div>
-    <div class="mb-6 flex items-end justify-between">
+    <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 class="page-title">{{ $t('goals.index.title') }}</h1>
         <p class="mt-1 text-sm text-muted-foreground">
           {{ $t('goals.index.subtitle') }}
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
         <AppButton
           v-if="goals.length > 1"
           variant="outline"

@@ -7,6 +7,9 @@
 # this, ~704 vendored C/C++ files render a Rust project as ~36% C.
 patches/** linguist-vendored
 
+src-tauri/resources/** -text
+plugins/builtin/** -text
+
 # Compiled Plutus blueprints and Aiken build output are artifacts, not
 # hand-written source. (Aiken itself is detected natively by Linguist;
 # the validators under cardano/governance/validators are real source and

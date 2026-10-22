@@ -3,6 +3,15 @@ import test from "node:test"
 
 import { classifyChangedFiles } from "./classify-ci-changes.mjs"
 
+test("checkout attributes run backend, security and release gates", () => {
+  assert.deepEqual(classifyChangedFiles([".gitattributes"]), {
+    backend: true,
+    frontend: false,
+    security: true,
+    release: true,
+  })
+})
+
 test("verifier-only changes run backend and security gates", () => {
   assert.deepEqual(classifyChangedFiles(["crates/alexandria-verify/src/lib.rs"]), {
     backend: true,
@@ -37,6 +46,17 @@ test("frontend-only changes do not request a Rust build", () => {
     security: false,
     release: false,
   })
+})
+
+test("desktop UI fixtures and browser configuration run frontend gates", () => {
+  for (const path of ["tests/desktop-ui/controls.spec.ts", "playwright.config.ts"]) {
+    assert.deepEqual(classifyChangedFiles([path]), {
+      backend: false,
+      frontend: true,
+      security: false,
+      release: false,
+    })
+  }
 })
 
 test("future committee world and core packages run backend gates", () => {

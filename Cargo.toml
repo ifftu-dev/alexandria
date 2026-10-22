@@ -52,6 +52,18 @@ opt-level = 3
 [profile.dev.package.base64]
 opt-level = 3
 
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+
+[profile.dev.package.wasmparser]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true

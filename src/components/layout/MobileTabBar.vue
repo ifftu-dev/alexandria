@@ -47,7 +47,7 @@ function navigate(path: string) {
 </script>
 
 <template>
-  <div class="md:hidden fixed bottom-0 start-0 end-0 z-[70]">
+  <div class="md:hidden fixed bottom-0 start-0 end-0 z-40">
     <nav class="flex items-stretch border-t border-border bg-card safe-area-bottom">
       <button
         v-for="tab in tabs"

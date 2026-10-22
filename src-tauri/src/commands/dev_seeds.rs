@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
 
 use crate::crypto::hash::entity_id;
 use crate::db::{bundled::bundled_snapshot, executor::DatabaseWorkload, Database};
+use crate::plugins::registry::PreparedGrader;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -38,6 +40,21 @@ pub struct SeedResult {
     pub id: String,
     pub status: String,
     pub error: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeedPhase {
+    Installing,
+    Compiling,
+    Completed,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeedProgress {
+    pub id: String,
+    pub title: String,
+    pub completed: usize,
+    pub total: usize,
+    pub phase: SeedPhase,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeedDraft {
@@ -372,10 +389,20 @@ fn copy_rows(
     }
     Ok(())
 }
+#[cfg(test)]
 pub(super) fn install(
     db: &Database,
     plugins_dir: &std::path::Path,
     item: &SeedResource,
+) -> Result<(), String> {
+    install_prepared(db, plugins_dir, item, None)
+}
+
+fn install_prepared(
+    db: &Database,
+    plugins_dir: &std::path::Path,
+    item: &SeedResource,
+    prepared: Option<&PreparedGrader>,
 ) -> Result<(), String> {
     let (kind, id) = item.id.split_once(':').ok_or("Invalid seed ID")?;
     match kind {
@@ -390,7 +417,7 @@ pub(super) fn install(
                 .iter()
                 .find(|b| b.slug == id)
                 .ok_or("Unknown plugin")?;
-            crate::plugins::registry::install_builtin(db, plugins_dir, bundle)?;
+            crate::plugins::registry::install_builtin_prepared(db, plugins_dir, bundle, prepared)?;
             let manifest = crate::plugins::manifest::parse_and_validate(bundle.manifest_json)?;
             let cid = crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json);
             let announcement = crate::plugins::catalog::announcement_from_manifest(
@@ -486,6 +513,7 @@ pub async fn dev_seed_plan(
 pub async fn dev_seed_run(
     state: State<'_, AppState>,
     selected: Vec<String>,
+    on_progress: Channel<SeedProgress>,
 ) -> Result<Vec<SeedResult>, String> {
     require_enabled()?;
     let items = state
@@ -500,12 +528,68 @@ pub async fn dev_seed_run(
     let plugins_dir = state.plugins_dir()?;
     let mut results = vec![];
     let mut failed = BTreeSet::new();
+    let total = items.len();
     for item in items {
+        if !state.profile_lease().is_current() {
+            return Err("Profile session is locked or has changed".into());
+        }
         let id = item.id.clone();
+        let started = std::time::Instant::now();
+        let report = |completed, phase| {
+            let _ = on_progress.send(SeedProgress {
+                id: id.clone(),
+                title: item.title.clone(),
+                completed,
+                total,
+                phase,
+            });
+        };
+        report(results.len(), SeedPhase::Installing);
         let result = async {
             if item.dependencies.iter().any(|id| failed.contains(id)) {
                 return Err("A required resource failed. Retry after resolving its error.".into());
             }
+            let prepared = if let Some(slug) = id.strip_prefix("plugin:") {
+                let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+                    .iter()
+                    .find(|bundle| bundle.slug == slug)
+                    .ok_or("Unknown plugin")?;
+                let cid = crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json);
+                let existing = state
+                    .db_executor
+                    .execute(
+                        DatabaseWorkload::Instructor,
+                        state.profile_lease(),
+                        "dev_seeds.plugin-status",
+                        move |db| Ok(crate::plugins::registry::get_installed(db, &cid)?.is_some()),
+                    )
+                    .await?;
+                if existing {
+                    return Ok("kept".to_string());
+                }
+                if let Some(bytes) = bundle.grader_wasm {
+                    report(results.len(), SeedPhase::Compiling);
+                    let lease = state.profile_lease();
+                    let prepared = tokio::task::spawn_blocking(move || {
+                        if !lease.is_current() {
+                            return Err("Profile session is locked or has changed".to_string());
+                        }
+                        let prepared = crate::plugins::registry::prepare_grader(bytes);
+                        if !lease.is_current() {
+                            return Err("Profile session is locked or has changed".to_string());
+                        }
+                        Ok(prepared)
+                    })
+                    .await
+                    .map_err(|e| format!("Grader preparation failed: {e}"))??;
+                    report(results.len(), SeedPhase::Installing);
+                    Some(prepared)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             // Repair an evicted blob even when its pin row is still present.
             let bytes = if let Some(media_id) = id.strip_prefix("media:") {
                 Some(super::demo_resources::media_bytes(media_id)?)
@@ -529,6 +613,7 @@ pub async fn dev_seed_run(
                 }
             }
             let dir = plugins_dir.clone();
+            let item = item.clone();
             state
                 .db_executor
                 .execute(
@@ -542,7 +627,7 @@ pub async fn dev_seed_run(
                             .ok_or("Resource no longer available")?
                             .installed;
                         if !existing {
-                            install(db, &dir, &item)?;
+                            install_prepared(db, &dir, &item, prepared.as_ref())?;
                         }
                         Ok(if existing { "kept" } else { "added" }.to_string())
                     },
@@ -550,6 +635,12 @@ pub async fn dev_seed_run(
                 .await
         }
         .await;
+        report(results.len() + 1, SeedPhase::Completed);
+        log::info!(
+            "seed {id} completed in {:?}: {}",
+            started.elapsed(),
+            result.as_deref().unwrap_or("failed")
+        );
         match result {
             Ok(status) => results.push(SeedResult {
                 id,

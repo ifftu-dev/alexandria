@@ -2616,6 +2616,13 @@ export interface SeedResult {
   status: 'added' | 'kept' | 'failed' | 'removed'
   error: string | null
 }
+export interface SeedProgress {
+  id: string
+  title: string
+  completed: number
+  total: number
+  phase: 'installing' | 'compiling' | 'completed'
+}
 export interface SeedDraft {
   id: string
   title: string
