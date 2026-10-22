@@ -11,12 +11,13 @@ const BACKEND_PREFIXES = [
 ]
 
 const BACKEND_FILES = new Set([".gitattributes", "Cargo.lock", "Cargo.toml"])
-const FRONTEND_PREFIXES = ["src/"]
+const FRONTEND_PREFIXES = ["src/", "tests/desktop-ui/"]
 const FRONTEND_FILES = new Set([
   "index.html",
   "package-lock.json",
   "package.json",
   "vite.config.ts",
+  "playwright.config.ts",
 ])
 
 function isTypeScriptConfig(path) {

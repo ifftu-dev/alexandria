@@ -12,6 +12,7 @@
 
 /* CSS Custom Properties — Light Mode (real color values for Tailwind v4) */
 :root {
+  color-scheme: light;
   --app-background: rgb(247, 246, 243);
   --app-foreground: rgb(23, 25, 35);
   --app-muted: rgb(233, 231, 226);
@@ -94,6 +95,7 @@
 
 /* Dark Mode */
 .dark {
+  color-scheme: dark;
   --app-background: rgb(17, 24, 39);
   --app-foreground: rgb(249, 250, 251);
   --app-muted: rgb(31, 41, 55);
@@ -447,6 +449,26 @@ pre,
 }
 
 /* Form Inputs */
+select:not([multiple]):not([size]) {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236b7280' stroke-width='1.8'%3E%3Cpath d='m5 7.5 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  padding-inline-end: 2.5rem;
+}
+
+[dir='rtl'] select:not([multiple]):not([size]) {
+  background-position: left 0.75rem center;
+}
+
+select option,
+select optgroup {
+  background-color: var(--app-card);
+  color: var(--app-foreground);
+}
+
 .input {
   width: 100%;
   padding: 0.625rem 0.875rem;

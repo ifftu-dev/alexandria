@@ -56,6 +56,22 @@ For real releases:
 
 Shared desktop/mobile build workflows now sync the app version from the immutable release tag before building, so a tag like `0.0.1-alpha` produces `0.0.1-alpha` bundle metadata and artifact names instead of reusing the in-repo development version.
 
+## Desktop regression gates
+
+Frontend changes run the Chromium/WebKit UI regression suite in CI. Desktop
+packaging also runs a Windows startup smoke test against the extracted NSIS
+payload before uploading artifacts. It requires successful network-profile
+validation, completed app setup, a visible window, and no native menu bar.
+Hash-verified resources and built-in plugins must keep their exact bytes on
+Windows checkouts; the `.gitattributes` regression checks this with `core.autocrlf`.
+See [Desktop UI validation](desktop-ui-validation.md) for commands, coverage limits,
+the native VM checklist, and the tested Omarchy AppImage workaround.
+
+Validation builds may opt into `dev_seeding` for Settings → Developer → Test data.
+Plugin grader compilation runs outside the database executor and reports progress
+through the installing, compiling, and completed phases, keeping unrelated database
+work responsive. Production releases leave this development-only feature disabled.
+
 ## Workflow files
 
 - [`.github/workflows/ci.yml`](/Users/hack/Documents/Personal/Code/alexandria-mark3/alexandria/.github/workflows/ci.yml)

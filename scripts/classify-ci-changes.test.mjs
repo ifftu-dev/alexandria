@@ -48,6 +48,17 @@ test("frontend-only changes do not request a Rust build", () => {
   })
 })
 
+test("desktop UI fixtures and browser configuration run frontend gates", () => {
+  for (const path of ["tests/desktop-ui/controls.spec.ts", "playwright.config.ts"]) {
+    assert.deepEqual(classifyChangedFiles([path]), {
+      backend: false,
+      frontend: true,
+      security: false,
+      release: false,
+    })
+  }
+})
+
 test("future committee world and core packages run backend gates", () => {
   for (const path of [
     "committee/runtime/src/main.rs",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { watch, onMounted, onUnmounted } from 'vue'
+import { ref, useId } from 'vue'
+import { useModalFocus } from '@/composables/useModalFocus'
 
 interface Props {
   open: boolean
@@ -14,22 +15,16 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ close: [] }>()
 
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
-}
+const dialog = ref<HTMLElement | null>(null)
+const titleId = useId()
+useModalFocus(() => props.open, dialog, () => emit('close'))
 
 function onBackdropClick(e: MouseEvent) {
-  if ((e.target as HTMLElement).dataset.backdrop) {
+  if (e.target === e.currentTarget) {
     emit('close')
   }
 }
 
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onKeydown))
-
-watch(() => props.open, (val) => {
-  document.body.style.overflow = val ? 'hidden' : ''
-})
 </script>
 
 <template>
@@ -58,17 +53,22 @@ watch(() => props.open, (val) => {
         >
           <div
             v-if="open"
-            class="card p-6 w-full"
+            ref="dialog"
+            class="card p-6 w-full flex flex-col max-h-[calc(100dvh-2rem)]"
             :style="{ maxWidth }"
             role="dialog"
             aria-modal="true"
+            :aria-labelledby="title || $slots.header ? titleId : undefined"
+            tabindex="-1"
           >
-            <div v-if="title || $slots.header" class="flex items-center justify-between mb-4">
-              <slot name="header">
-                <h2 class="text-base font-semibold">{{ title }}</h2>
-              </slot>
+            <div v-if="title || $slots.header" class="flex shrink-0 items-center justify-between gap-3 mb-4">
+              <div :id="titleId" class="min-w-0 break-words">
+                <slot name="header">
+                  <h2 class="text-base font-semibold">{{ title }}</h2>
+                </slot>
+              </div>
               <button
-                class="p-1 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
+                class="shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
                 @click="emit('close')"
                 :aria-label="$t('common.actions.close')"
               >
@@ -78,9 +78,11 @@ watch(() => props.open, (val) => {
               </button>
             </div>
 
-            <slot />
+            <div class="min-h-0 overflow-y-auto overscroll-contain">
+              <slot />
+            </div>
 
-            <div v-if="$slots.footer" class="mt-4 pt-4 border-t border-border">
+            <div v-if="$slots.footer" class="shrink-0 mt-4 pt-4 border-t border-border">
               <slot name="footer" />
             </div>
           </div>

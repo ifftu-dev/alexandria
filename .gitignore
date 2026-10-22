@@ -113,3 +113,5 @@ scripts/demo/axtool
 
 # python bytecode from cardano/governance/deploy_*.py
 __pycache__/
+playwright-report/
+test-results/

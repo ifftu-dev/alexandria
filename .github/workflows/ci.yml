@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - '.gitattributes'
+      - 'tests/desktop-ui/**'
+      - 'playwright.config.ts'
       - '.github/workflows/**'
       - 'cli/**'
       - 'committee/**'
@@ -29,6 +31,8 @@ on:
     branches: [main]
     paths:
       - '.gitattributes'
+      - 'tests/desktop-ui/**'
+      - 'playwright.config.ts'
       - '.github/workflows/**'
       - 'cli/**'
       - 'committee/**'
@@ -92,6 +96,41 @@ jobs:
           mapfile -t changed_files < <(git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}")
 
           node scripts/classify-ci-changes.mjs "${changed_files[@]}" >> "${GITHUB_OUTPUT}"
+
+  desktop-ui:
+    name: Desktop UI (Chromium and WebKit)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout alexandria
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: alexandria
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: alexandria/package-lock.json
+      - name: Install dependencies and browser runtimes
+        working-directory: alexandria
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium webkit
+      - name: Test desktop layouts and keyboard interactions
+        working-directory: alexandria
+        run: npm run test:desktop-ui
+      - name: Upload browser reports and failure screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: desktop-ui-report
+          path: |
+            alexandria/playwright-report/
+            alexandria/test-results/
+          retention-days: 14
 
   check:
     name: Lint & Test

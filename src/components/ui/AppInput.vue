@@ -54,6 +54,7 @@ defineExpose({ focus, select, blur })
       :required="required"
       :autocomplete="autocomplete"
       :aria-invalid="error ? true : undefined"
+      :aria-describedby="error ? `${id ?? generatedId}-error` : undefined"
       ref="inputEl"
       :value="modelValue"
       :type="type"
@@ -63,6 +64,6 @@ defineExpose({ focus, select, blur })
       :class="{ 'input-error': error }"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     >
-    <p v-if="error" class="text-xs text-error mt-1">{{ error }}</p>
+    <p v-if="error" :id="`${id ?? generatedId}-error`" class="text-xs text-error mt-1">{{ error }}</p>
   </div>
 </template>
