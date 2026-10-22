@@ -240,6 +240,16 @@ compiling, then verify the resulting catalog. An all-kept retry only verifies
 idempotence, not compilation speed. Do not reset existing learner data merely to
 produce a fresh timing sample.
 
+The October 22, 2026 OnePlus Android 16 retest used an ARM64 debug APK from
+`44813ef4` with native debugging symbols stripped for transfer. The user ran the
+fresh-profile test successfully: logs recorded 53 added, 26 kept, and no failed
+resources, totaling 56.5 seconds of per-resource work. JavaScript, TypeScript,
+and C++ editor installation took about 8.5 seconds each; Python took 18.3 seconds,
+versus the earlier 74–156 seconds per code-editor plugin. A separate all-kept run
+logged 12.1 seconds. These are summed resource timings, not end-to-end UI timings;
+mirrored input was unreliable, so navigation during compilation was not independently
+verified on the phone.
+
 **Reset selected** and **Reset all seeds** preview local records to remove,
 including edits, enrollments, progress, notes, assessment attempts, and classroom
 messages. A confirmation checkbox is required. The backend binds confirmation

@@ -15,6 +15,9 @@ for (const theme of ['light', 'dark']) {
     await page.goto(`/tests/desktop-ui/?theme=${theme}`)
     const select = page.getByRole('combobox')
     await expect(select).toBeVisible()
+    await expect(select).toHaveValue('')
+    await expect(page.getByRole('button', { name: 'Set as goal' })).toBeDisabled()
+    await expect(select.getByRole('option')).toHaveText(['Software engineer'])
     const foreground = await select.evaluate((element) => getComputedStyle(element).color)
     const pixels = PNG.sync.read(await select.screenshot())
     const offset = (Math.floor(pixels.height / 2) * pixels.width + Math.floor(pixels.width * 0.75)) * 4

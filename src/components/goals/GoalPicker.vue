@@ -193,7 +193,7 @@ async function addJdGoal() {
         :aria-label="$t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label })"
         class="min-h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-base sm:text-sm text-foreground"
       >
-        <option value="" disabled>{{ $t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label }) }}</option>
+        <option value="" disabled hidden>{{ $t('goals.picker.selectPrompt', { type: tabs.find(t => t.id === tab)?.label }) }}</option>
         <option v-for="tpl in templates" :key="tpl.key" :value="tpl.key">{{ tpl.label }}</option>
       </select>
       <AppButton :disabled="!selectedKey || templatesLoading || !!templatesError" :loading="busy" @click="addTemplateGoal">

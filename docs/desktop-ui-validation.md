@@ -73,6 +73,10 @@ Desktop theme changes also update native window decorations. Selecting System
 restores OS-controlled decorations; mobile and browser previews skip this API.
 Home's Add a goal action now opens the goal picker on the Goals page instead of
 sending the user to Skills & Credentials.
+The goal picker's prompt remains in the closed control but is excluded from the
+choice list. Windows WebView2 painted that disabled row almost black in its dark
+native popup even after native window-theme synchronization; actual goal choices
+were legible.
 
 The Windows VM's username-availability failure was traced to unavailable internet
 access on its Parallels shared adapter. After switching to the working bridged
