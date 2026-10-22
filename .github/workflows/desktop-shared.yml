@@ -961,6 +961,16 @@ jobs:
           args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
           includeUpdaterJson: false
 
+      - name: Smoke-test packaged Windows startup
+        working-directory: alexandria
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem 'target/release/bundle/nsis/*-setup.exe')
+          if ($installers.Count -ne 1) {
+            throw "Expected one Windows installer, found $($installers.Count)"
+          }
+          ./scripts/ci/smoke-windows-startup.ps1 -InstallerPath $installers[0].FullName
+
       - name: Rename Windows release assets
         if: inputs.mode == 'release'
         env:

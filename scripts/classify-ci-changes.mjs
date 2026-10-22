@@ -10,7 +10,7 @@ const BACKEND_PREFIXES = [
   "world/",
 ]
 
-const BACKEND_FILES = new Set(["Cargo.lock", "Cargo.toml"])
+const BACKEND_FILES = new Set([".gitattributes", "Cargo.lock", "Cargo.toml"])
 const FRONTEND_PREFIXES = ["src/"]
 const FRONTEND_FILES = new Set([
   "index.html",
@@ -27,6 +27,7 @@ function isReleaseInput(path) {
   return (
     /^\.github\/workflows\/(?:release-|validate-)/.test(path) ||
     [
+      ".gitattributes",
       ".github/workflows/ci.yml",
       ".github/workflows/desktop-shared.yml",
       ".github/workflows/mobile-shared.yml",

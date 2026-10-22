@@ -3,6 +3,15 @@ import test from "node:test"
 
 import { classifyChangedFiles } from "./classify-ci-changes.mjs"
 
+test("checkout attributes run backend, security and release gates", () => {
+  assert.deepEqual(classifyChangedFiles([".gitattributes"]), {
+    backend: true,
+    frontend: false,
+    security: true,
+    release: true,
+  })
+})
+
 test("verifier-only changes run backend and security gates", () => {
   assert.deepEqual(classifyChangedFiles(["crates/alexandria-verify/src/lib.rs"]), {
     backend: true,

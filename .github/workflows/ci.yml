@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.gitattributes'
       - '.github/workflows/**'
       - 'cli/**'
       - 'committee/**'
@@ -27,6 +28,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - '.gitattributes'
       - '.github/workflows/**'
       - 'cli/**'
       - 'committee/**'
