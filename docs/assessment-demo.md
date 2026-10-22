@@ -226,6 +226,20 @@ on each development-profile unlock; existing content is preserved.
 Choose individual resources across categories or **Seed everything**. Review
 includes dependencies in installation order, then one run reports added, kept,
 and failed resources. Retry is idempotent and preserves edited existing rows.
+The running review shows the current resource and whether it is compiling a
+grader or installing data. Grader compilation runs on a blocking worker outside
+the shared database executor, so unrelated database queries can continue. Debug
+builds optimize the Wasmtime compiler dependencies; a first installation still
+does more work than an idempotent retry. Prepared grader artifacts remain bound
+to their source bytes and the active profile session.
+
+For an Android performance retest, use a profile with missing code-editor
+plugins and record the package commit, added/kept/failed counts, and per-resource
+`seed ... completed in ...` log timings. Exercise navigation while a grader is
+compiling, then verify the resulting catalog. An all-kept retry only verifies
+idempotence, not compilation speed. Do not reset existing learner data merely to
+produce a fresh timing sample.
+
 **Reset selected** and **Reset all seeds** preview local records to remove,
 including edits, enrollments, progress, notes, assessment attempts, and classroom
 messages. A confirmation checkbox is required. The backend binds confirmation
