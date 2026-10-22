@@ -48,6 +48,23 @@ test('goal picker fits a narrow tiled desktop window', async ({ page }) => {
   expect(overflow).toBe(false)
 })
 
+test('Home add-goal action opens goal selection and closes back to Goals', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 560 })
+  await page.goto('/tests/desktop-ui/?screen=home&theme=dark')
+  await page.getByRole('button', { name: /Add a goal/ }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('combobox')).toBeVisible()
+  await dialog.getByRole('combobox').selectOption('software-engineer')
+  await expect(dialog.getByRole('button', { name: 'Set as goal' })).toBeEnabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(page.getByTestId('add-goal-empty')).toBeVisible()
+  const headerAction = page.getByTestId('add-goal')
+  await expect(headerAction).toBeInViewport()
+  expect(await headerAction.evaluate((button) => button.scrollWidth <= button.clientWidth)).toBe(true)
+})
+
 test('a long dialog fits a short window and keeps its actions reachable', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 600 })
   await page.goto('/tests/desktop-ui/?theme=dark')

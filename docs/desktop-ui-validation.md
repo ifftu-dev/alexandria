@@ -34,6 +34,7 @@ screenshots, and traces for 14 days. The suite checks:
 - Onboarding keyboard focus on buttons with decorative shadows, plus scrolling
   and navigation through the initial steps in a short window.
 - Dashboard hero contrast across its gradient in both themes.
+- Home's Add a goal action opening goal selection, with dismissal returning to Goals.
 
 Chromium and Playwright WebKit are regression coverage, not a substitute for the
 installed Windows WebView2 or Linux WebKitGTK package. Native decorations, GPU
@@ -70,6 +71,8 @@ eyebrow uses the full text color. Native progress elements use the app's theme
 colors instead of the OS's green/gray styling.
 Desktop theme changes also update native window decorations. Selecting System
 restores OS-controlled decorations; mobile and browser previews skip this API.
+Home's Add a goal action now opens the goal picker on the Goals page instead of
+sending the user to Skills & Credentials.
 
 The Windows VM's username-availability failure was traced to unavailable internet
 access on its Parallels shared adapter. After switching to the working bridged

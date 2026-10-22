@@ -1,5 +1,5 @@
 import { createApp, h } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import { i18n } from '@/i18n'
 import '@/assets/css/main.css'
 import type { GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
@@ -45,11 +45,16 @@ const { default: Fixture } = await import('./Fixture.vue')
 const { default: Onboarding } = await import('@/pages/Onboarding.vue')
 const { default: BlankLayout } = await import('@/layouts/BlankLayout.vue')
 const { default: Home } = await import('@/pages/Home.vue')
-const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: Fixture }] })
+const { default: Goals } = await import('@/pages/goals/Index.vue')
+const router = createRouter({ history: createMemoryHistory(), routes: [
+  { path: '/', component: Home },
+  { path: '/goals', component: Goals },
+  { path: '/:pathMatch(.*)*', component: Fixture },
+] })
 const screen = new URLSearchParams(location.search).get('screen')
 const root = screen === 'onboarding'
   ? { render: () => h(BlankLayout, null, { default: () => h(Onboarding) }) }
   : screen === 'home'
-  ? { render: () => h(BlankLayout, null, { default: () => h('div', { class: 'p-6' }, [h(Home)]) }) }
+  ? { render: () => h(BlankLayout, null, { default: () => h('div', { class: 'p-6' }, [h(RouterView)]) }) }
   : Fixture
 createApp(root).use(i18n).use(router).mount('#app')

@@ -441,7 +441,7 @@ onMounted(async () => {
         </button>
 
         <!-- add goal -->
-        <button class="goal-card goal-card--add" @click="router.push('/skills')">
+        <button class="goal-card goal-card--add" @click="router.push({ path: '/goals', query: { add: '1' } })">
           <span class="text-2xl leading-none text-muted-foreground">+</span>
           <span class="text-sm font-medium text-muted-foreground">{{ $t('dashboard.home.goals.add') }}</span>
         </button>
