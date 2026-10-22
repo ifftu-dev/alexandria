@@ -8,6 +8,11 @@ $stage = Join-Path ([System.IO.Path]::GetTempPath()) "alexandria-startup-$([guid
 $previousDataDir = $env:ALEXANDRIA_DATA_DIR
 $process = $null
 
+Add-Type -Namespace AlexandriaSmoke -Name NativeWindow -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern System.IntPtr GetMenu(System.IntPtr window);
+'@
+
 try {
     & 7z x $InstallerPath "-o$stage" -y | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the Windows installer' }
@@ -28,7 +33,14 @@ try {
         $diagnostics -notmatch 'app setup complete') {
         throw 'Packaged app did not complete startup successfully'
     }
-    Write-Host 'Packaged Windows app completed setup and remained running for 30 seconds'
+    $process.Refresh()
+    if ($process.MainWindowHandle -eq [IntPtr]::Zero) {
+        throw 'Packaged app did not create a visible main window'
+    }
+    if ([AlexandriaSmoke.NativeWindow]::GetMenu($process.MainWindowHandle) -ne [IntPtr]::Zero) {
+        throw 'Packaged Windows app unexpectedly has a native menu bar'
+    }
+    Write-Host 'Packaged Windows app opened without a native menu bar and remained running for 30 seconds'
 } finally {
     if ($log -and (Test-Path $log)) { Get-Content $log | Write-Host }
     if ($process -and -not $process.HasExited) {
