@@ -2,10 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DeveloperSeedsPanel from './DeveloperSeedsPanel.vue'
-import type { SeedResource } from '@/types'
+import type { SeedResource, SeedProgress, SeedResult } from '@/types'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
+vi.mock('@tauri-apps/api/core', () => ({ Channel: class<T> { onmessage = (_message: T) => {} } }))
 vi.mock('@/composables/useProfiles', () => ({ useProfiles: () => ({ profiles: { value: [{ id: 'one', display_name: 'Test learner' }] }, activeProfileId: { value: 'one' } }) }))
 const resources: SeedResource[] = [
   { id: 'video:lab', title: 'Video lab', category: 'Courses', description: 'Local course', dependencies: ['media:clip'], installed: false },
@@ -50,10 +51,30 @@ describe('Developer seed picker', () => {
     await button(wrapper, 'Seed everything').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_plan', { selected: resources.map(r => r.id) })
     await button(wrapper, 'Seed these resources').trigger('click'); await flushPromises()
-    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_run', { selected: resources.map(r => r.id) })
+    expect(mocks.invoke).toHaveBeenCalledWith('dev_seed_run', { selected: resources.map(r => r.id), onProgress: expect.objectContaining({ onmessage: expect.any(Function) }) })
     expect(wrapper.text()).toContain('2 added · 1 kept · 0 failed')
     expect(mocks.invoke.mock.calls.filter(c => c[0] === 'dev_seed_run')).toHaveLength(1)
   })
+  it('shows compilation progress while seeding is pending and clears it on failure', async () => {
+    const wrapper = render(); await flushPromises()
+    await button(wrapper, 'Seed everything').trigger('click'); await flushPromises()
+    let rejectRun: ((reason: Error) => void) | undefined
+    mocks.invoke.mockImplementationOnce((_command: string, args: { onProgress: { onmessage: (value: SeedProgress) => void } }) => {
+      args.onProgress.onmessage({ id: 'plugin:python', title: 'Python', completed: 2, total: 5, phase: 'compiling' })
+      return new Promise<SeedResult[]>((_resolve, reject) => { rejectRun = reject })
+    })
+    await button(wrapper, 'Seed these resources').trigger('click'); await flushPromises()
+    expect(wrapper.get('[role=status]').text()).toContain('2 of 5 resources completed')
+    expect(wrapper.get('[role=status]').text()).toContain('Preparing grader: Python')
+    expect(wrapper.get('progress').attributes('value')).toBe('2')
+    expect(button(wrapper, 'Back to selection').attributes('disabled')).toBeDefined()
+    rejectRun?.(new Error('Profile session changed'))
+    await flushPromises()
+    expect(wrapper.find('[role=status]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Profile session changed')
+    expect(button(wrapper, 'Back to selection').attributes('disabled')).toBeUndefined()
+  })
+
   it('reviews affected data and requires confirmation before resetting all installed seeds', async () => {
     const wrapper = render(); await flushPromises()
     await button(wrapper, 'Reset all seeds').trigger('click'); await flushPromises()
