@@ -295,7 +295,8 @@ pre,
 
 /* Focus — WCAG 2.1 AA */
 :focus-visible {
-  outline: none;
+  outline: 2px solid var(--app-ring);
+  outline-offset: 3px;
   box-shadow: var(--focus-ring);
 }
 

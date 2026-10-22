@@ -1,8 +1,9 @@
 # Desktop UI validation
 
 Desktop changes need both automated regressions and a native package check. The
-browser fixture uses production Vue components and theme CSS; it stubs only the
-goal-template IPC response and never opens or changes a real user profile.
+browser fixture uses production Vue components, onboarding, and theme CSS. It stubs
+goal templates and pre-account platform/profile calls and never opens or changes
+a real user profile.
 
 ## Automated checks
 
@@ -29,6 +30,8 @@ screenshots, and traces for 14 days. The suite checks:
 - Nested dialogs retaining the outer scroll lock and handling one Escape at a time.
 - Dialogs covering compact navigation and dismissing from the backdrop only.
 - Input errors connected to their fields for assistive technology.
+- Onboarding keyboard focus on buttons with decorative shadows, plus scrolling
+  and navigation through the initial steps in a short window.
 
 Chromium and Playwright WebKit are regression coverage, not a substitute for the
 installed Windows WebView2 or Linux WebKitGTK package. Native decorations, GPU
@@ -57,6 +60,8 @@ appearance and chevron. Long shared dialogs previously extended beyond short
 windows; their body now scrolls while the header and footer remain reachable.
 Dialogs also manage focus and nested scroll locks. Compact navigation is below
 modal overlays, and clicking the modal backdrop dismisses the dialog.
+The shared keyboard-focus style also supplies an outline, so a component's
+decorative box shadow cannot hide the focus indicator on onboarding buttons.
 
 Windows startup could fail before rendering because Git converted embedded,
 hash-verified resources to CRLF. `.gitattributes` preserves exact resource and

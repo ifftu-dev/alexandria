@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, h } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { i18n } from '@/i18n'
 import '@/assets/css/main.css'
@@ -15,8 +15,13 @@ const templates: GoalTemplate[] = [{
 
 Object.defineProperty(window, '__TAURI_INTERNALS__', {
   value: {
+    transformCallback: () => 1,
     invoke: async (command: string) => {
       if (command === 'list_goal_templates') return templates
+      if (command === 'list_profiles') return []
+      if (command === 'personhood_lab_status') return { enabled: false }
+      if (command === 'plugin:event|listen') return 1
+      if (command === 'plugin:biometry|status') return { isAvailable: false }
       throw new Error(`Unexpected fixture IPC command: ${command}`)
     },
   },
@@ -24,5 +29,10 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
 
 document.documentElement.classList.toggle('dark', new URLSearchParams(location.search).get('theme') === 'dark')
 const { default: Fixture } = await import('./Fixture.vue')
+const { default: Onboarding } = await import('@/pages/Onboarding.vue')
+const { default: BlankLayout } = await import('@/layouts/BlankLayout.vue')
 const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: Fixture }] })
-createApp(Fixture).use(i18n).use(router).mount('#app')
+const root = new URLSearchParams(location.search).get('screen') === 'onboarding'
+  ? { render: () => h(BlankLayout, null, { default: () => h(Onboarding) }) }
+  : Fixture
+createApp(root).use(i18n).use(router).mount('#app')
