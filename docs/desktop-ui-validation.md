@@ -68,6 +68,15 @@ Native dark-mode inspection also exposed low-contrast white text on the dashboar
 hero's light purple gradient. Its dark-theme background is now darker, and its
 eyebrow uses the full text color. Native progress elements use the app's theme
 colors instead of the OS's green/gray styling.
+Desktop theme changes also update native window decorations. Selecting System
+restores OS-controlled decorations; mobile and browser previews skip this API.
+
+The Windows VM's username-availability failure was traced to unavailable internet
+access on its Parallels shared adapter. After switching to the working bridged
+Wi-Fi network, the native onboarding screen reported an available test name and
+rejected the reserved name `admin`. Unlocking the existing test profile restored
+Connected status and published its username to the primary relay registry. Network
+mode changes are VM-specific diagnostics, not an application requirement.
 
 Windows startup could fail before rendering because Git converted embedded,
 hash-verified resources to CRLF. `.gitattributes` preserves exact resource and
