@@ -258,6 +258,19 @@ pub struct Client {
 
 impl Client {
     pub fn new(config: Config) -> Result<Self, Error> {
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|_| Error::Unavailable)?;
+        Self::with_http(config, http)
+    }
+
+    /// Uses an HTTP client the host built, so the host can apply its own
+    /// endpoint policy, such as pinning resolved addresses. The client must
+    /// not follow redirects. Requests are still bounded to five seconds.
+    pub fn with_http(config: Config, http: reqwest::Client) -> Result<Self, Error> {
         let url = reqwest::Url::parse(&config.endpoint).map_err(|_| Error::Invalid)?;
         let loopback = url
             .host_str()
@@ -270,12 +283,6 @@ impl Client {
         {
             return Err(Error::Invalid);
         }
-        let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|_| Error::Unavailable)?;
         Ok(Self {
             config,
             http,

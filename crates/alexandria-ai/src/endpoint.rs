@@ -201,6 +201,16 @@ impl Endpoint {
             .map_err(|_| Error::Invalid("Invalid model endpoint path".into()))
     }
 
+    /// An HTTP client bound to this endpoint's policy, for a host that speaks
+    /// its own protocol to the same host (the Optional AI checks). Requests
+    /// to this endpoint's host go only to the pinned addresses, redirects are
+    /// not followed, and local traffic bypasses any system proxy. The pin is
+    /// fixed when the endpoint was resolved; rebuild periodically for a
+    /// long-lived client.
+    pub fn http_client(&self, total_timeout: Option<Duration>) -> Result<reqwest::Client> {
+        self.client(total_timeout)
+    }
+
     /// An HTTP client bound to this endpoint's policy.
     pub(crate) fn client(&self, total_timeout: Option<Duration>) -> Result<reqwest::Client> {
         let mut builder = reqwest::Client::builder()

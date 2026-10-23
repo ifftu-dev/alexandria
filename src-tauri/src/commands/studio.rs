@@ -10,7 +10,9 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 pub struct StudioRuntime {
-    pub decisions: Mutex<Option<(u64, i64, alexandria_decisions::Client)>>,
+    /// The Optional AI checks client: profile epoch, settings revision, when
+    /// its addresses were pinned, and the client.
+    pub decisions: Mutex<Option<(u64, i64, std::time::Instant, alexandria_decisions::Client)>>,
     pub grants: Mutex<alexandria_studio::grants::Grants>,
     pub broker_available: AtomicBool,
     pub broker_gate: tokio::sync::RwLock<()>,
