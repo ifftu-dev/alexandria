@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 22 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 124 tables, 123 indexes, 1 view, 3 triggers.
+**Schema**: 23 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 125 tables, 123 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -43,6 +43,7 @@ and requires a database's history to be an exact prefix of this list:
 20. `ai_chat_practice`
 21. `learning_memory`
 22. `ai_connection_approvals`
+23. `ai_chat_search`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1436,7 +1437,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `messages` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 
-### AI chat (12)
+### AI chat (13)
 
 #### `ai_connection_approvals`
 
@@ -1470,6 +1471,11 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 
 - `hash` TEXT PK
 - `text` TEXT NOT NULL
+
+#### `chat_message_search`
+
+- `message_id` ANY
+- `content` ANY
 
 #### `chat_messages`
 
@@ -1576,7 +1582,7 @@ CREATE VIEW current_reputation_assertions AS
 SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
 ```
 
-Triggers: `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
+Triggers: `chat_message_search_delete`, `chat_message_search_insert`, `chat_message_search_update`, `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
 
 ---
 

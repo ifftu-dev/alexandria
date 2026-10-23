@@ -98,6 +98,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Guardian approval of remote model connections for learners under 18,
     // carried over the sealed guardian link.
     (22, "ai_connection_approvals", include_str!("ai_connection_approvals.sql")),
+    // Local full-text search over complete chat messages.
+    (23, "ai_chat_search", include_str!("ai_chat_search.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

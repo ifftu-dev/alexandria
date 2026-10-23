@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import { chatOffers } from '@/composables/useChatOffers'
+import { snippetParts } from '@/utils/chatSnippet'
 import ChatMessageItem from './ChatMessageItem.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatReviewSheet from './ChatReviewSheet.vue'
@@ -12,7 +13,7 @@ import ChatPracticeCard from './ChatPracticeCard.vue'
 import ChatMemoryProposal from './ChatMemoryProposal.vue'
 import ChatMemoryView from './ChatMemoryView.vue'
 import { ConfirmDialog } from '@/components/ui'
-import type { ChatMessage, ChatSourceRef, StudioConnection, StudioDocument } from '@/types'
+import type { ChatMessage, ChatSearchHit, ChatSourceRef, StudioConnection, StudioDocument } from '@/types'
 
 defineProps<{ variant: 'docked' | 'expanded' | 'sheet' }>()
 const emit = defineEmits<{ close: [] }>()
@@ -133,6 +134,31 @@ async function confirmDelete() {
   deleting.value = null
   if (id) await chat.deleteThread(id)
 }
+const searchText = ref('')
+const searchHits = ref<ChatSearchHit[] | null>(null)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchSeq = 0
+watch(searchText, (text) => {
+  clearTimeout(searchTimer)
+  if (!text.trim()) {
+    searchHits.value = null
+    return
+  }
+  const seq = ++searchSeq
+  searchTimer = setTimeout(async () => {
+    const hits = await chat.searchThreads(text)
+    if (seq === searchSeq) searchHits.value = hits
+  }, 200)
+})
+watch(() => chat.showHistory.value, (open) => {
+  if (!open) searchText.value = ''
+})
+async function openHit(hit: ChatSearchHit) {
+  await chat.openThread(hit.thread.id)
+  if (!hit.message_id) return
+  await nextTick()
+  scroller.value?.querySelector(`[data-message-id="${CSS.escape(hit.message_id)}"]`)?.scrollIntoView({ block: 'center' })
+}
 function formatDate(value: string) {
   try {
     return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -186,8 +212,31 @@ function formatDate(value: string) {
 
     <!-- Thread history -->
     <div v-else-if="chat.showHistory.value" class="min-h-0 flex-1 overflow-y-auto p-2">
-      <p v-if="!chat.threads.value.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ t('chat.panel.noThreads') }}</p>
-      <ul class="space-y-0.5">
+      <input
+        v-if="chat.threads.value.length"
+        v-model="searchText"
+        type="search"
+        class="input mb-2 py-1.5 text-sm"
+        maxlength="200"
+        :placeholder="t('chat.panel.search')"
+        :aria-label="t('chat.panel.search')"
+      >
+      <template v-if="searchHits">
+        <p v-if="!searchHits.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ t('chat.panel.noResults') }}</p>
+        <ul class="space-y-0.5">
+          <li v-for="hit in searchHits" :key="hit.thread.id">
+            <button type="button" class="w-full rounded-lg px-2.5 py-2 text-start hover:bg-muted/60" @click="openHit(hit)">
+              <span class="block truncate text-sm font-medium">{{ hit.thread.title || t('chat.panel.untitled') }}</span>
+              <span v-if="hit.snippet" class="line-clamp-2 block text-xs text-muted-foreground">
+                <template v-for="(part, i) in snippetParts(hit.snippet)" :key="i"><mark v-if="part.hit" class="rounded-sm bg-warning/30 text-foreground">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
+              </span>
+              <span class="block text-[11px] text-muted-foreground">{{ formatDate(hit.thread.updated_at) }}</span>
+            </button>
+          </li>
+        </ul>
+      </template>
+      <p v-else-if="!chat.threads.value.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ t('chat.panel.noThreads') }}</p>
+      <ul v-if="!searchHits" class="space-y-0.5">
         <li v-for="item in chat.threads.value" :key="item.id" class="group flex items-center gap-1 rounded-lg hover:bg-muted/60">
           <input
             v-if="renaming === item.id"
@@ -248,9 +297,10 @@ function formatDate(value: string) {
           >{{ t('chat.practice.start') }}</button>
         </div>
         <template v-for="user in users" :key="user.id">
-          <ChatMessageItem :message="user" />
+          <ChatMessageItem :message="user" :data-message-id="user.id" />
           <ChatMessageItem
             v-if="shown(user)"
+            :data-message-id="shown(user)!.id"
             :message="shown(user)!"
             :live="chat.liveText.value[shown(user)!.id]"
             :version="{ current: answers(user).findIndex((m) => m.id === shown(user)!.id) + 1, total: answers(user).length }"

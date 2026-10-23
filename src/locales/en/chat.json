@@ -16,7 +16,9 @@
     "emptyTitle": "Ask about anything you are learning",
     "emptyBody": "Attach a lesson to ground answers in it. Nothing from the page you are on is sent unless you attach it.",
     "open": "Open chat",
-    "shortcut": "Chat"
+    "shortcut": "Chat",
+    "search": "Search your chats",
+    "noResults": "No chats match"
   },
   "modes": {
     "ask": "Ask",

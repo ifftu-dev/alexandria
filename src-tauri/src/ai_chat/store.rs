@@ -242,6 +242,116 @@ pub fn set_thread_mode(conn: &Connection, id: &str, mode: &str, now: &str) -> Re
 
 /// Deletes a thread with its messages, attachments, snapshots, runs and
 /// draft, then drops excerpts no remaining snapshot references.
+/// One thread found by search, with the best-matching message when the match
+/// was in a message rather than the title.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SearchHit {
+    pub thread: ChatThread,
+    pub message_id: Option<String>,
+    /// Text around the match. Matched terms are wrapped in U+0002 and
+    /// U+0003 so the UI can mark them without parsing markup.
+    pub snippet: Option<String>,
+}
+
+/// Longest query accepted, in characters, and most terms used.
+const MAX_QUERY_CHARS: usize = 200;
+const MAX_QUERY_TERMS: usize = 8;
+
+/// The query as an FTS5 expression: every term a quoted prefix phrase, so
+/// nothing the learner types is read as query syntax.
+fn match_expression(query: &str) -> Option<String> {
+    let terms: Vec<String> = query
+        .chars()
+        .take(MAX_QUERY_CHARS)
+        .collect::<String>()
+        .split_whitespace()
+        .map(|t| t.replace('"', ""))
+        .filter(|t| !t.is_empty())
+        .take(MAX_QUERY_TERMS)
+        .map(|t| format!("\"{t}\"*"))
+        .collect();
+    (!terms.is_empty()).then(|| terms.join(" "))
+}
+
+/// Searches the learner's threads: complete messages through the full-text
+/// index, best match first, then threads whose title contains the query.
+/// Each thread appears once.
+pub fn search_threads(conn: &Connection, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
+    let Some(expression) = match_expression(query) else {
+        return Ok(Vec::new());
+    };
+    let limit = limit.clamp(1, 100);
+    let mut hits: Vec<SearchHit> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT m.thread_id, m.id,
+                    snippet(chat_message_search, 1, char(2), char(3), '…', 12)
+               FROM chat_message_search
+               JOIN chat_messages m ON m.id = chat_message_search.message_id
+              WHERE chat_message_search MATCH ?1
+              ORDER BY bm25(chat_message_search)
+              LIMIT 500",
+        )?;
+        let rows = stmt
+            .query_map([&expression], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (thread_id, message_id, snippet) in rows {
+            if hits.len() >= limit {
+                break;
+            }
+            if seen.insert(thread_id.clone()) {
+                hits.push(SearchHit {
+                    thread: thread(conn, &thread_id)?,
+                    message_id: Some(message_id),
+                    snippet: Some(snippet),
+                });
+            }
+        }
+    }
+    if hits.len() < limit {
+        let needle = query
+            .trim()
+            .chars()
+            .take(MAX_QUERY_CHARS)
+            .collect::<String>();
+        let pattern = format!(
+            "%{}%",
+            needle
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {THREAD_COLUMNS} FROM chat_threads
+              WHERE title LIKE ?1 ESCAPE '\\'
+              ORDER BY updated_at DESC, id LIMIT 200"
+        ))?;
+        let titled = stmt
+            .query_map([&pattern], thread_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for thread in titled {
+            if hits.len() >= limit {
+                break;
+            }
+            if seen.insert(thread.id.clone()) {
+                hits.push(SearchHit {
+                    thread,
+                    message_id: None,
+                    snippet: None,
+                });
+            }
+        }
+    }
+    Ok(hits)
+}
+
 pub fn delete_thread(conn: &Connection, id: &str) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
@@ -1249,6 +1359,74 @@ mod tests {
             expected_revision: revision,
             now: NOW,
         }
+    }
+
+    #[test]
+    fn search_finds_complete_messages_and_titles_and_ignores_query_syntax() {
+        let conn = db();
+        create_thread(&conn, "t", Some("c1"), None, NOW).unwrap();
+        snapshot_row(&conn, "s1", "t", &[]);
+        begin_run(&conn, &start("r1", "q1", "s1", None, "u1", "a1", 1)).unwrap();
+        // The question is complete and indexed; the streaming answer is not.
+        let hits = search_threads(&conn, "positive", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].message_id.as_deref(), Some("u1"));
+        assert!(hits[0]
+            .snippet
+            .as_deref()
+            .unwrap()
+            .contains("\u{2}positive\u{3}"));
+        checkpoint(&conn, "a1", "Base rates matter").unwrap();
+        assert!(search_threads(&conn, "base rates", 10).unwrap().is_empty());
+        finish_run(
+            &conn,
+            &Finish {
+                run_id: "r1",
+                assistant_message_id: "a1",
+                state: "complete",
+                content: "Base rates matter more than the test's accuracy.",
+                error: None,
+                input_tokens: None,
+                output_tokens: None,
+                now: NOW,
+            },
+        )
+        .unwrap();
+        // Prefixes and diacritics match.
+        let hits = search_threads(&conn, "BASE accur", 10).unwrap();
+        assert_eq!(hits[0].message_id.as_deref(), Some("a1"));
+        assert_eq!(search_threads(&conn, "accúracy", 10).unwrap().len(), 1);
+        // Query syntax is literal text, never an error.
+        for hostile in [
+            "\"",
+            "NEAR(",
+            "a OR",
+            "content:x",
+            "*",
+            "-x",
+            "'; DROP TABLE x; --",
+        ] {
+            assert!(search_threads(&conn, hostile, 10).is_ok(), "{hostile}");
+        }
+        assert!(search_threads(&conn, "   ", 10).unwrap().is_empty());
+
+        create_thread(&conn, "t2", None, None, NOW).unwrap();
+        rename_thread(&conn, "t2", "Bayes 100% notes", NOW).unwrap();
+        let hits = search_threads(&conn, "100%", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].thread.id, "t2");
+        assert_eq!(hits[0].snippet, None);
+        assert!(
+            search_threads(&conn, "_", 10).unwrap().is_empty(),
+            "LIKE wildcards are literal"
+        );
+
+        delete_thread(&conn, "t").unwrap();
+        assert!(search_threads(&conn, "base", 10).unwrap().is_empty());
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM chat_message_search", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "deleting a thread empties its index rows");
     }
 
     #[test]

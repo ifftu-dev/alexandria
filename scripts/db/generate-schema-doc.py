@@ -121,10 +121,21 @@ def inventory():
     for _, _, sql in migrations():
         conn.executescript(sql)
     tables = {}
+    # FTS5 keeps its index in shadow tables named after the virtual table.
+    # They are SQLite's storage, not schema anyone writes, so only the
+    # virtual table is documented.
+    virtual = [
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'"
+        )
+    ]
+    shadows = {f"{v}_{s}" for v in virtual for s in ("data", "idx", "content", "docsize", "config")}
     for name, sql in conn.execute(
         "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
         "AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ):
+        if name in shadows:
+            continue
         comments = {}
         for line in sql.split("\n"):
             match = re.match(r"\s*([a-z_]+)\s.*?--\s*(.+)$", line)

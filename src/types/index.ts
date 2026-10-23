@@ -2300,6 +2300,8 @@ export interface TutorReply { thread: TutorThread; provider_location: 'local' | 
 // ─── Global AI chat (src-tauri/src/commands/ai_chat.rs) ─────────────────
 export type ChatLocation = 'device' | 'private_network' | 'remote'
 export type ChatMessageStatus = 'complete' | 'streaming' | 'interrupted' | 'failed' | 'cancelled'
+/** A thread found by local search. `snippet` marks matches with U+0002 and U+0003. */
+export interface ChatSearchHit { thread: ChatThread; message_id: string | null; snippet: string | null }
 export interface ChatThread { id: string; title: string; mode: 'ask' | 'learn' | 'practice'; connection_id: string | null; model_id: string | null; revision: number; reviewed_scope: string | null; created_at: string; updated_at: string }
 export interface ChatSourceRef { id: string; kind: 'lesson'; label: string; course_id: string; element_id: string }
 export interface ChatMessage { id: string; thread_id: string; position: number; role: 'user' | 'assistant'; reply_to: string | null; version: number; content: string; status: ChatMessageStatus; error: string | null; connection_id: string | null; connection_name: string | null; model_id: string | null; location: ChatLocation | null; input_tokens: number | null; output_tokens: number | null; sources: ChatSourceRef[]; created_at: string; completed_at: string | null }

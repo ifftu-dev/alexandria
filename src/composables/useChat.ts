@@ -14,6 +14,7 @@ import type {
   ChatStartedRun,
   ChatStatus,
   ChatThread,
+  ChatSearchHit,
   ChatThreadDetail,
   StudioConnection,
   StudioDocument,
@@ -203,6 +204,12 @@ export function useChat() {
     showHistory.value = false
     await reloadThread(id)
     await loadDraft()
+  }
+
+  /** Searches this device's chats. Nothing leaves the device. */
+  async function searchThreads(query: string): Promise<ChatSearchHit[]> {
+    if (!query.trim()) return []
+    return (await guard(() => invoke<ChatSearchHit[]>('chat_search_threads', { query }))) ?? []
   }
 
   async function newChat() {
@@ -619,6 +626,7 @@ export function useChat() {
     refreshStatus,
     refreshConnections,
     openThread,
+    searchThreads,
     newChat,
     setDraft,
     selectModel,

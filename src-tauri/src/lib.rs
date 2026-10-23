@@ -1548,6 +1548,7 @@ pub fn run() {
             commands::decisions::decision_tutor_review,
             commands::ai_chat::chat_status,
             commands::ai_chat::chat_list_threads,
+            commands::ai_chat::chat_search_threads,
             commands::ai_chat::chat_create_thread,
             commands::ai_chat::chat_get_thread,
             commands::ai_chat::chat_rename_thread,

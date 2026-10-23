@@ -128,6 +128,18 @@ pub async fn chat_list_threads(state: State<'_, AppState>) -> Result<Vec<ChatThr
     .await
 }
 
+/// Searches the learner's own threads on this device. Nothing is sent.
+#[tauri::command]
+pub async fn chat_search_threads(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<store::SearchHit>, String> {
+    with_conn(&state, "chat.search", move |conn| {
+        store::search_threads(conn, &query, 50).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn chat_create_thread(
     state: State<'_, AppState>,

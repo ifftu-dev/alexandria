@@ -38,6 +38,7 @@ export const TAURI_COMMANDS = [
   "chat_rename_thread",
   "chat_request_guardian_approval",
   "chat_save_draft",
+  "chat_search_threads",
   "chat_set_thread_mode",
   "chat_set_thread_model",
   "chat_start_run",
