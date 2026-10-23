@@ -61,6 +61,7 @@ DOMAINS = [
     ("P2P, content and sync", r"^(peers|pins|sync_log|devices|sync_state|sync_queue|pending_pairings|dht_records|peer_profiles|username_claims|content_mappings|stake_pubkey_registry)$"),
     ("Settings", r"^app_settings$"),
     ("Instructor studio", r"^(studio_|course_tutor_policies$|course_lesson_feedback$)"),
+    ("AI chat", r"^(chat_|learning_memory$|ai_connection_approvals$)"),
 ]
 
 
