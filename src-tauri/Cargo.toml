@@ -132,6 +132,7 @@ alexandria-verify = { path = "../crates/alexandria-verify" }
 alexandria-decisions = { path = "../crates/alexandria-decisions" }
 alexandria-learning-contracts = { path = "../crates/alexandria-learning-contracts" }
 alexandria-personhood = { path = "../crates/alexandria-personhood", optional = true }
+alexandria-ai = { path = "../crates/alexandria-ai" }
 alexandria-studio = { path = "../crates/alexandria-studio" }
 log = "0.4"
 tracing = "0.1"

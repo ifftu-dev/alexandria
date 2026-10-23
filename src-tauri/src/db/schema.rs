@@ -86,6 +86,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // What each call is for (tutoring, classroom, interview seat or
     // candidate, assistant, plugin) and the thing it belongs to.
     (18, "call_kinds", MIGRATION_018_CALL_KINDS),
+    // Global AI chat: threads, messages, runs, explicit attachments, prepared
+    // request snapshots with content-addressed excerpts, and drafts. Queried by
+    // `crate::ai_chat::store`, which includes the same file.
+    (19, "ai_chat", include_str!("ai_chat.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

@@ -193,6 +193,9 @@ pub async fn integrity_start_session(
     if !matches!(purpose.as_str(), "assessment" | "interview") {
         return Err(format!("invalid integrity session purpose: {purpose}"));
     }
+    // An assessment or interview check is starting: stop any chat answer that
+    // is still generating. The chat commands also refuse while it runs.
+    state.ai_chat.cancel_all();
     let session_id = entity_id(&[seed, &chrono::Utc::now().to_rfc3339()]);
     let persisted_session_id = session_id.clone();
     state

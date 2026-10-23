@@ -185,7 +185,9 @@ fn the_view_set_is_exact() {
 /// learner's hiring answers. The attempt role target adds 1 index; the
 /// device attestation adds a column only. Organisation access adds 3 tables
 /// (descriptor cache, grants, listing publications) and 1 index; the
-/// interview panel link adds 1 index.
+/// interview panel link adds 1 index. Global AI chat adds 8 tables (threads,
+/// messages, attachments, excerpts, snapshots, snapshot excerpts, runs,
+/// drafts) and 4 indexes.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -193,8 +195,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 111, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 115, "index count changed");
+    assert_eq!(tables, 119, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 119, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         3,
