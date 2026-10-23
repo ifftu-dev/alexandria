@@ -2,21 +2,110 @@
 //!
 //! This crate owns the parts of talking to a model that do not depend on who
 //! is asking or why: where a request may go ([`endpoint`]), what a request and
-//! its streamed answer look like ([`model`]), and how one wire protocol is
-//! spoken ([`compatible`]). It knows nothing about profiles, courses, learner
+//! its streamed answer look like ([`model`]), and how each wire protocol is
+//! spoken ([`compatible`], [`anthropic`]). [`Adapter`] picks one by
+//! [`Protocol`]. It knows nothing about profiles, courses, learner
 //! records, or the webview. The host resolves context, reads secrets, and
 //! hands an immutable [`model::ChatRequest`] to an adapter.
 //!
 //! Every failure is an [`Error`] whose message is safe to show a learner: it
 //! never contains a key, a request body, or a provider's response body.
 
+pub mod anthropic;
 pub mod compatible;
 pub mod endpoint;
+mod http;
 pub mod model;
 mod sse;
 
 pub use endpoint::{Endpoint, Location};
 pub use model::{ChatRequest, Completion, FinishReason, Message, Role, StreamEvent, Usage};
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+
+/// The wire protocol a connection speaks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Protocol {
+    /// OpenAI-compatible chat completions.
+    #[default]
+    Compatible,
+    /// The Anthropic Messages API.
+    Anthropic,
+}
+
+impl Protocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Protocol::Compatible => "compatible",
+            Protocol::Anthropic => "anthropic",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "compatible" => Some(Protocol::Compatible),
+            "anthropic" => Some(Protocol::Anthropic),
+            _ => None,
+        }
+    }
+}
+
+/// One adapter for a resolved endpoint, whichever protocol it speaks.
+#[derive(Debug)]
+pub enum Adapter {
+    Compatible(compatible::Compatible),
+    Anthropic(anthropic::Anthropic),
+}
+
+impl Adapter {
+    pub fn new(protocol: Protocol, endpoint: Endpoint, key: Option<String>) -> Self {
+        match protocol {
+            Protocol::Compatible => Adapter::Compatible(compatible::Compatible::new(endpoint, key)),
+            Protocol::Anthropic => Adapter::Anthropic(anthropic::Anthropic::new(endpoint, key)),
+        }
+    }
+
+    pub fn with_limits(self, limits: model::Limits) -> Self {
+        match self {
+            Adapter::Compatible(a) => Adapter::Compatible(a.with_limits(limits)),
+            Adapter::Anthropic(a) => Adapter::Anthropic(a.with_limits(limits)),
+        }
+    }
+
+    pub fn endpoint(&self) -> &Endpoint {
+        match self {
+            Adapter::Compatible(a) => a.endpoint(),
+            Adapter::Anthropic(a) => a.endpoint(),
+        }
+    }
+
+    pub async fn complete(&self, request: &ChatRequest) -> Result<Completion> {
+        match self {
+            Adapter::Compatible(a) => a.complete(request).await,
+            Adapter::Anthropic(a) => a.complete(request).await,
+        }
+    }
+
+    pub async fn stream(
+        &self,
+        request: &ChatRequest,
+        events: mpsc::Sender<StreamEvent>,
+    ) -> Result<Completion> {
+        match self {
+            Adapter::Compatible(a) => a.stream(request, events).await,
+            Adapter::Anthropic(a) => a.stream(request, events).await,
+        }
+    }
+
+    pub async fn list_models(&self) -> Result<Vec<String>> {
+        match self {
+            Adapter::Compatible(a) => a.list_models().await,
+            Adapter::Anthropic(a) => a.list_models().await,
+        }
+    }
+}
 
 /// A sanitized failure. Display strings are suitable for the UI.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]

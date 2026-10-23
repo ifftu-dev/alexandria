@@ -24,6 +24,7 @@ fn setup(db: &Connection) -> StudioDocument<StudioWorkflow> {
         enabled: true,
         has_key: false,
         context_tokens: None,
+        protocol: Default::default(),
     };
     store::save_connection(
         db,

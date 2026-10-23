@@ -15,10 +15,10 @@
 
 use std::time::{Duration, Instant};
 
-use alexandria_ai::compatible::Compatible;
 use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
 use alexandria_ai::StreamEvent;
+use alexandria_ai::{Adapter, Protocol};
 use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
 use chrono::SecondsFormat;
 use rusqlite::{Connection, OptionalExtension};
@@ -323,7 +323,7 @@ pub async fn chat_list_models(
     let endpoint = endpoint::resolve(&connection.endpoint, location)
         .await
         .map_err(|e| format!("{}: {e}", error_code(&e)))?;
-    Compatible::new(endpoint, key)
+    Adapter::new(connection.protocol, endpoint, key)
         .list_models()
         .await
         .map_err(|e| format!("{}: {e}", error_code(&e)))
@@ -1013,6 +1013,7 @@ struct Started {
     request: alexandria_ai::ChatRequest,
     endpoint: String,
     location: Location,
+    protocol: Protocol,
     key: Option<String>,
 }
 
@@ -1133,6 +1134,7 @@ fn begin(
         request,
         endpoint: manifest.destination.endpoint,
         location,
+        protocol: doc.value.protocol,
         key,
     })
 }
@@ -1435,7 +1437,7 @@ impl Stream {
                 return;
             }
         };
-        let adapter = Compatible::new(endpoint, self.started.key.take());
+        let adapter = Adapter::new(self.started.protocol, endpoint, self.started.key.take());
         let adapter = adapter.with_limits(Limits::default());
         let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
         let request = self.started.request.clone();
@@ -1758,6 +1760,7 @@ mod tests {
                     enabled: true,
                     has_key: false,
                     context_tokens: window,
+                    protocol: Default::default(),
                 },
             },
             Some("sk-secret"),
@@ -2218,6 +2221,99 @@ mod tests {
                 .await;
         });
         endpoint
+    }
+
+    /// Serves one answer over the Anthropic Messages protocol, with a
+    /// thinking block first, and reports the raw request.
+    async fn anthropic_model(
+        words: &'static [&'static str],
+    ) -> (String, tokio::sync::oneshot::Receiver<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (seen, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = vec![0u8; 1 << 16];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let _ = seen.send(String::from_utf8_lossy(&request).into_owned());
+            let mut body = String::from(
+                "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":30,\"cache_read_input_tokens\":10}}}\n\n\
+                 event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hidden\"}}\n\n",
+            );
+            for word in words {
+                let delta = serde_json::json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": word}});
+                body.push_str(&format!("event: content_block_delta\ndata: {delta}\n\n"));
+            }
+            body.push_str(
+                "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\n\
+                 event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+            );
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = socket.write_all(body.as_bytes()).await;
+        });
+        (endpoint, rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_anthropic_connection_streams_text_and_lifts_the_instructions() {
+        static WORDS: [&str; 2] = ["Rare ", "events."];
+        let (endpoint, seen) = anthropic_model(&WORDS).await;
+        let harness = Harness::new(&endpoint);
+        harness.conn(|conn| {
+            let mut doc = studio_store::connection(conn, "c1").unwrap();
+            doc.value.protocol = Protocol::Anthropic;
+            studio_store::save_connection(conn, &doc, Some("sk-ant-test")).unwrap();
+        });
+        let (task, _events) = harness.begin("Why?");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+
+        let saved = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(saved.status, "complete");
+        assert_eq!(saved.content, "Rare events.");
+        assert_eq!(
+            (saved.input_tokens, saved.output_tokens),
+            (Some(40), Some(3))
+        );
+        let raw = seen.await.unwrap();
+        let head = raw[..raw.find("\r\n\r\n").unwrap()].to_ascii_lowercase();
+        assert!(head.starts_with("post /v1/messages "));
+        assert!(head.contains("x-api-key: sk-ant-test"));
+        let body: serde_json::Value =
+            serde_json::from_str(&raw[raw.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+        assert!(
+            body["system"]
+                .as_str()
+                .unwrap()
+                .contains("<<<SOURCE id=\"S1\""),
+            "instructions and sources are the system prompt"
+        );
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.last().unwrap()["role"], "user");
+        assert!(messages.iter().all(|m| m["role"] != "system"));
     }
 
     fn kinds(events: &[serde_json::Value]) -> Vec<String> {

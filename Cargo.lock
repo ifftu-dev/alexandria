@@ -245,6 +245,7 @@ dependencies = [
 name = "alexandria-ai"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

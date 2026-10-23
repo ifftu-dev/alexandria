@@ -13,14 +13,17 @@ const { invoke } = useLocalApi()
 const { isMinor } = useAccountStatus()
 
 type Where = 'local' | 'private_network' | 'cloud'
+type Protocol = 'compatible' | 'anthropic'
 const defaults: Record<Where, string> = {
   local: 'http://localhost:11434/v1',
   private_network: 'http://192.168.1.10:1234/v1',
   cloud: 'https://api.openai.com/v1',
 }
+const anthropicEndpoint = 'https://api.anthropic.com/v1'
 
 const name = ref('')
 const where = ref<Where>('local')
+const protocol = ref<Protocol>('compatible')
 const endpoint = ref(defaults.local)
 const model = ref('')
 const apiKey = ref('')
@@ -34,9 +37,18 @@ const options = computed(() => [
   { value: 'cloud' as const, label: t('chat.location.remote'), hint: t('chat.connection.remoteHint'), dot: 'remote' },
 ])
 
+function defaultEndpoint(w: Where, p: Protocol) {
+  return w === 'cloud' && p === 'anthropic' ? anthropicEndpoint : defaults[w]
+}
+
 function choose(value: Where) {
-  if (endpoint.value === defaults[where.value]) endpoint.value = defaults[value]
+  if (endpoint.value === defaultEndpoint(where.value, protocol.value)) endpoint.value = defaultEndpoint(value, protocol.value)
   where.value = value
+}
+
+function chooseProtocol(value: Protocol) {
+  if (endpoint.value === defaultEndpoint(where.value, protocol.value)) endpoint.value = defaultEndpoint(where.value, value)
+  protocol.value = value
 }
 
 async function save() {
@@ -59,6 +71,7 @@ async function save() {
           enabled: true,
           has_key: false,
           context_tokens: Number.isFinite(window) && window > 0 ? window : null,
+          ...(protocol.value === 'anthropic' ? { protocol: 'anthropic' as const } : {}),
         },
       },
       apiKey: apiKey.value || null,
@@ -104,6 +117,21 @@ async function save() {
         </button>
       </div>
       <p v-if="where === 'cloud' && isMinor" class="mt-1.5 text-xs text-warning">{{ t('chat.connection.guardianNote') }}</p>
+    </fieldset>
+    <fieldset>
+      <legend class="label">{{ t('chat.connection.protocol') }}</legend>
+      <div class="flex gap-2" role="radiogroup" :aria-label="t('chat.connection.protocol')">
+        <button
+          v-for="option in (['compatible', 'anthropic'] as const)"
+          :key="option"
+          type="button"
+          role="radio"
+          class="rounded-full border px-3 py-1 text-xs transition-colors"
+          :class="protocol === option ? 'border-primary bg-primary/10 font-medium text-foreground' : 'border-border text-muted-foreground hover:bg-muted/50'"
+          :aria-checked="protocol === option"
+          @click="chooseProtocol(option)"
+        >{{ t(`chat.connection.protocols.${option}`) }}</button>
+      </div>
     </fieldset>
     <label class="block">
       <span class="label">{{ t('chat.connection.endpoint') }}</span>

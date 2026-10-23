@@ -6,10 +6,9 @@
 
 use std::time::Duration;
 
-use alexandria_ai::compatible::Compatible;
 use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
-use alexandria_ai::{ChatRequest, Message};
+use alexandria_ai::{Adapter, ChatRequest, Message};
 use url::Url;
 
 use crate::model::{bounded, StudioConnection};
@@ -58,7 +57,7 @@ pub fn validate_connection(connection: &StudioConnection) -> Result<Url> {
     })?;
     if connection.capability != "text" {
         return Err(Error::Invalid(
-            "Only OpenAI-compatible text endpoints are currently supported".into(),
+            "Only text connections are currently supported".into(),
         ));
     }
     Ok(url)
@@ -83,10 +82,11 @@ pub async fn complete(
     let endpoint = endpoint::resolve(&connection.endpoint, location)
         .await
         .map_err(map)?;
-    let adapter = Compatible::new(endpoint, key.map(str::to_owned)).with_limits(Limits {
-        total_timeout: Duration::from_secs(120),
-        ..Limits::default()
-    });
+    let adapter =
+        Adapter::new(connection.protocol, endpoint, key.map(str::to_owned)).with_limits(Limits {
+            total_timeout: Duration::from_secs(120),
+            ..Limits::default()
+        });
     let request = ChatRequest {
         model: connection.model.clone(),
         messages: vec![Message::system(system), Message::user(context)],

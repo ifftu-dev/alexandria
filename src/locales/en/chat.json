@@ -147,7 +147,12 @@
     "contextHint": "Leave empty to assume 8,000 tokens.",
     "save": "Save",
     "cancel": "Cancel",
-    "guardianNote": "Remote models need a guardian's approval. After saving, ask a guardian from the chat."
+    "guardianNote": "Remote models need a guardian's approval. After saving, ask a guardian from the chat.",
+    "protocol": "API type",
+    "protocols": {
+      "compatible": "OpenAI-compatible",
+      "anthropic": "Anthropic Messages"
+    }
   },
   "paused": "Chat is paused during assessments. Your draft is saved and comes back when you finish.",
   "practice": {

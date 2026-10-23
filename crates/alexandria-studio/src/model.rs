@@ -63,6 +63,14 @@ pub struct StudioConnection {
     /// conservative default otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u32>,
+    /// The wire protocol. Documents written before it existed are
+    /// OpenAI-compatible, and so is the default.
+    #[serde(default, skip_serializing_if = "is_compatible")]
+    pub protocol: alexandria_ai::Protocol,
+}
+
+fn is_compatible(protocol: &alexandria_ai::Protocol) -> bool {
+    *protocol == alexandria_ai::Protocol::Compatible
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
