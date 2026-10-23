@@ -1555,6 +1555,7 @@ pub fn run() {
             commands::ai_chat::chat_set_thread_model,
             commands::ai_chat::chat_delete_thread,
             commands::ai_chat::chat_attach_lesson,
+            commands::ai_chat::chat_attach_goal,
             commands::ai_chat::chat_detach,
             commands::ai_chat::chat_get_draft,
             commands::ai_chat::chat_save_draft,

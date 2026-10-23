@@ -102,7 +102,8 @@ watch(
 )
 
 function cite(source: ChatSourceRef) {
-  void router.push({ path: `/learn/${source.course_id}`, query: { element: source.element_id } })
+  if (source.kind === 'goal') void router.push('/goals')
+  else void router.push({ path: `/learn/${source.course_id}`, query: { element: source.element_id } })
 }
 
 async function connectionSaved(saved: StudioDocument<StudioConnection>) {
@@ -340,7 +341,7 @@ function formatDate(value: string) {
           :title="t('chat.context.removeHint')"
         >
           <svg class="h-3 w-3 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
-          <span class="truncate">{{ t('chat.context.lesson', { title: b.label }) }}</span>
+          <span class="truncate">{{ b.kind === 'goal' ? t('chat.context.goal', { title: b.label }) : t('chat.context.lesson', { title: b.label }) }}</span>
           <button type="button" class="grid h-4 w-4 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" :aria-label="t('chat.context.remove')" @click="chat.detach(b.id)">×</button>
         </span>
         <button
@@ -350,7 +351,7 @@ function formatDate(value: string) {
           class="inline-flex max-w-full items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-muted-foreground hover:text-foreground"
           @click="chat.attach(o)"
         >
-          <span aria-hidden="true">+</span><span class="truncate">{{ t('chat.context.attachLesson') }} · {{ o.label }}</span>
+          <span aria-hidden="true">+</span><span class="truncate">{{ o.kind === 'goal' ? t('chat.context.attachGoal') : t('chat.context.attachLesson') }} · {{ o.label }}</span>
         </button>
       </div>
 

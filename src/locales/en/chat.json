@@ -53,7 +53,9 @@
     "lesson": "Lesson · {title}",
     "remove": "Remove from future messages",
     "removeHint": "Removing stops it being sent with future messages. Earlier messages and what a provider already received are not changed.",
-    "attachLesson": "Attach this lesson"
+    "attachLesson": "Attach this lesson",
+    "goal": "Goal · {title}",
+    "attachGoal": "Use this goal"
   },
   "review": {
     "title": "Review before sending",

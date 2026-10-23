@@ -287,6 +287,35 @@ fn attach(
     .map_err(|e| e.to_string())
 }
 
+/// Attaches one of the learner's goals. Its path is recomputed at every
+/// prepare, so the model sees proven skills as they are then.
+#[tauri::command]
+pub async fn chat_attach_goal(
+    state: State<'_, AppState>,
+    thread_id: String,
+    goal_id: String,
+) -> Result<ChatBinding, String> {
+    with_conn(&state, "chat.attach-goal", move |conn| {
+        attach_goal(conn, &thread_id, &goal_id)
+    })
+    .await
+}
+
+fn attach_goal(conn: &Connection, thread_id: &str, goal_id: &str) -> Result<ChatBinding, String> {
+    refuse_during_assessment(conn)?;
+    let label = crate::ai_chat::goal::label(conn, goal_id)?
+        .ok_or_else(|| "not_found: that goal no longer exists".to_string())?;
+    store::add_goal_binding(
+        conn,
+        &uuid::Uuid::new_v4().to_string(),
+        thread_id,
+        goal_id,
+        &label,
+        &now(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn chat_detach(
     state: State<'_, AppState>,
@@ -394,9 +423,17 @@ struct Gathered {
     user_text: String,
     regenerate_of: Option<String>,
     turns: Vec<(String, String, String, String)>,
-    lessons: Vec<(ChatBinding, learning::LessonTarget, bool)>,
+    /// Attachments in order, each with whether this send includes it.
+    lessons: Vec<(ChatBinding, Attached, bool)>,
     /// Approved, active memory, each with whether this send includes it.
     memory: Vec<(store::MemoryItem, bool)>,
+}
+
+/// What an attachment resolved to when the request was gathered.
+enum Attached {
+    Lesson(learning::LessonTarget),
+    /// Rendered from the goal's current path at assembly.
+    Goal,
 }
 
 fn is_minor(conn: &Connection) -> Result<bool, String> {
@@ -602,14 +639,22 @@ fn gather(
     let mut lessons = Vec::new();
     for binding in store::bindings(conn, thread_id).map_err(e)? {
         let included = !excluded.contains(&binding.id);
-        let target = learning::lesson_target(conn, &binding.course_id, &binding.element_id)
-            .map_err(|_| {
-                format!(
-                    "source_unavailable: {} is no longer available",
-                    binding.label
-                )
-            })?;
-        lessons.push((binding, target, included));
+        let gone = || {
+            format!(
+                "source_unavailable: {} is no longer available",
+                binding.label
+            )
+        };
+        let attached = if binding.kind == "goal" {
+            crate::ai_chat::goal::label(conn, &binding.element_id)?.ok_or_else(gone)?;
+            Attached::Goal
+        } else {
+            Attached::Lesson(
+                learning::lesson_target(conn, &binding.course_id, &binding.element_id)
+                    .map_err(|_| gone())?,
+            )
+        };
+        lessons.push((binding, attached, included));
     }
     let memory = store::sendable_memory(conn)
         .map_err(e)?
@@ -697,8 +742,12 @@ pub async fn chat_prepare_message(
 
     // Fetch lesson bodies that are not stored inline, outside the database.
     let mut fetched: Vec<Option<Result<Vec<u8>, String>>> = Vec::new();
-    for (_, target, included) in &gathered.lessons {
-        let Some(blob) = target.blob().filter(|_| *included) else {
+    for (_, attached, included) in &gathered.lessons {
+        let blob = match attached {
+            Attached::Lesson(target) => target.blob(),
+            Attached::Goal => None,
+        };
+        let Some(blob) = blob.filter(|_| *included) else {
             fetched.push(None);
             continue;
         };
@@ -762,10 +811,10 @@ fn assemble(
         truncated: false,
     }];
     let mut next_source = 1;
-    for ((binding, target, included), fetched) in gathered.lessons.iter().zip(&fetched) {
+    for ((binding, attached, included), fetched) in gathered.lessons.iter().zip(&fetched) {
         if !included {
             items.push(ReviewItem {
-                kind: "lesson".into(),
+                kind: binding.kind.clone(),
                 label: binding.label.clone(),
                 tokens: 0,
                 required: false,
@@ -776,14 +825,26 @@ fn assemble(
             });
             continue;
         }
-        let (raw, truncated) = render_excerpt(conn, target, fetched.as_ref())?;
+        let (raw, truncated) = match attached {
+            Attached::Lesson(target) => render_excerpt(conn, target, fetched.as_ref())?,
+            Attached::Goal => {
+                let (_, text) = crate::ai_chat::goal::render(conn, &binding.element_id)?
+                    .ok_or_else(|| {
+                        format!(
+                            "source_unavailable: {} is no longer available",
+                            binding.label
+                        )
+                    })?;
+                (text, false)
+            }
+        };
         let text = neutralize(&raw);
         let hash = store::put_excerpt(conn, &text).map_err(|e| e.to_string())?;
         let tokens = estimate_tokens(&text);
         let source = ManifestSource {
             source: SourceRef {
                 id: format!("S{next_source}"),
-                kind: "lesson".into(),
+                kind: binding.kind.clone(),
                 label: binding.label.clone(),
                 course_id: binding.course_id.clone(),
                 element_id: binding.element_id.clone(),
@@ -794,7 +855,7 @@ fn assemble(
         };
         next_source += 1;
         items.push(ReviewItem {
-            kind: "lesson".into(),
+            kind: binding.kind.clone(),
             label: binding.label.clone(),
             tokens,
             required: false,
@@ -1830,6 +1891,56 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    fn goal(conn: &Connection) {
+        conn.execute_batch(
+            r#"INSERT INTO subject_fields(id, name) VALUES ('f', 'Mathematics');
+               INSERT INTO subjects(id, name, subject_field_id) VALUES ('s', 'Probability', 'f');
+               INSERT INTO skills(id, name, subject_id, bloom_level) VALUES
+                 ('sk-counting', 'Counting outcomes', 's', 'apply'),
+                 ('sk-bayes', 'Bayes rule', 's', 'analyze');
+               INSERT INTO skill_prerequisites(skill_id, prerequisite_id) VALUES ('sk-bayes', 'sk-counting');
+               INSERT INTO app_settings(key, value) VALUES ('learner.targets',
+                 '[{"id":"g1","label":"Data analyst","goal_skill_ids":["sk-bayes"],"created_at":"2026-10-01"}]');"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_attached_goal_sends_its_current_path_and_disappears_with_the_goal() {
+        let conn = db();
+        goal(&conn);
+        thread(&conn);
+        assert!(attach_goal(&conn, "t", "missing").is_err());
+        let binding = attach_goal(&conn, "t", "g1").unwrap();
+        assert_eq!(
+            (binding.kind.as_str(), binding.label.as_str()),
+            ("goal", "Data analyst")
+        );
+        // Attaching twice keeps one attachment.
+        assert_eq!(attach_goal(&conn, "t", "g1").unwrap().id, binding.id);
+
+        let prepared = prepare(&conn, "What should I study next?").unwrap();
+        assert!(prepared
+            .items
+            .iter()
+            .any(|i| i.kind == "goal" && i.tokens > 0));
+        let started = start(&conn, &prepared, "q1").unwrap();
+        let system = &started.request.messages[0].content;
+        assert!(system.contains("Goal: Data analyst"));
+        assert!(system.contains("Counting outcomes"), "{system}");
+        assert!(system.contains("needs: Counting outcomes"), "{system}");
+        assert_eq!(started.run.assistant_message.sources[0].kind, "goal");
+
+        // Removing the goal makes the attachment unavailable, not stale text.
+        conn.execute(
+            "UPDATE app_settings SET value = '[]' WHERE key = 'learner.targets'",
+            [],
+        )
+        .unwrap();
+        let err = prepare(&conn, "And now?").unwrap_err();
+        assert!(err.starts_with("source_unavailable"), "{err}");
     }
 
     #[test]

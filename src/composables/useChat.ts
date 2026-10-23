@@ -271,11 +271,13 @@ export function useChat() {
       const t = await ensureThread()
       if (!t) return
       await guard(() =>
-        invoke<ChatBinding>('chat_attach_lesson', {
-          threadId: t.id,
-          courseId: offer.course_id,
-          elementId: offer.element_id,
-        }),
+        offer.kind === 'goal'
+          ? invoke<ChatBinding>('chat_attach_goal', { threadId: t.id, goalId: offer.element_id })
+          : invoke<ChatBinding>('chat_attach_lesson', {
+              threadId: t.id,
+              courseId: offer.course_id,
+              elementId: offer.element_id,
+            }),
       )
       await reloadThread(t.id)
     } catch (e) {

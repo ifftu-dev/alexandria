@@ -9,12 +9,18 @@ import { AppButton, AppModal, EmptyState, AppSpinner } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
+import { useChatOfferList } from '@/composables/useChatOffers'
 import type { LearningPath, Goal, GoalAssessmentStep } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
 const { goals, removeGoal, pathFor, combinedPath } = useGoals()
 const { planGoal } = useAssessment()
+
+// Offer each goal to chat. Offering attaches and sends nothing.
+useChatOfferList(
+  computed(() => goals.value.map((g) => ({ kind: 'goal' as const, course_id: '', element_id: g.id, label: g.label }))),
+)
 
 /** Turn a goal plan into a skill_id -> step map for LearningPathView. */
 function assessMap(steps: GoalAssessmentStep[]): Record<string, GoalAssessmentStep> {

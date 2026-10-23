@@ -7,7 +7,7 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 23 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Schema**: 24 migrations from a baseline, family `alexandria.profile`, epoch 1.
 **Objects**: 125 tables, 123 indexes, 1 view, 6 triggers.
 
 ---
@@ -44,6 +44,7 @@ and requires a database's history to be an exact prefix of this list:
 21. `learning_memory`
 22. `ai_connection_approvals`
 23. `ai_chat_search`
+24. `ai_chat_goal_bindings`
 
 A database is stamped with its schema family before any normal query runs:
 

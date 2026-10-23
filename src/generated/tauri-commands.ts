@@ -19,6 +19,7 @@ export const TAURI_COMMANDS = [
   "bootstrap_extract_text",
   "chat_add_memory",
   "chat_approve_memory",
+  "chat_attach_goal",
   "chat_attach_lesson",
   "chat_cancel_run",
   "chat_create_thread",

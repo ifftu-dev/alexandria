@@ -2303,9 +2303,9 @@ export type ChatMessageStatus = 'complete' | 'streaming' | 'interrupted' | 'fail
 /** A thread found by local search. `snippet` marks matches with U+0002 and U+0003. */
 export interface ChatSearchHit { thread: ChatThread; message_id: string | null; snippet: string | null }
 export interface ChatThread { id: string; title: string; mode: 'ask' | 'learn' | 'practice'; connection_id: string | null; model_id: string | null; revision: number; reviewed_scope: string | null; created_at: string; updated_at: string }
-export interface ChatSourceRef { id: string; kind: 'lesson'; label: string; course_id: string; element_id: string }
+export interface ChatSourceRef { id: string; kind: 'lesson' | 'goal'; label: string; course_id: string; element_id: string }
 export interface ChatMessage { id: string; thread_id: string; position: number; role: 'user' | 'assistant'; reply_to: string | null; version: number; content: string; status: ChatMessageStatus; error: string | null; connection_id: string | null; connection_name: string | null; model_id: string | null; location: ChatLocation | null; input_tokens: number | null; output_tokens: number | null; sources: ChatSourceRef[]; created_at: string; completed_at: string | null }
-export interface ChatBinding { id: string; thread_id: string; kind: 'lesson'; course_id: string; element_id: string; label: string; created_at: string }
+export interface ChatBinding { id: string; thread_id: string; kind: 'lesson' | 'goal'; course_id: string; element_id: string; label: string; created_at: string }
 export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
 export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
 export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; requested_at: string; decided_at: string | null }
@@ -2314,7 +2314,7 @@ export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'
 export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; active_run_id: string | null }
 export interface ChatStatus { assessment_active: boolean }
 export interface ChatDestination { connection_id: string; connection_name: string; location: ChatLocation; host: string; model_id: string }
-export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson' | 'memory'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; memory_id: string | null; truncated: boolean }
+export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson' | 'goal' | 'memory'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; memory_id: string | null; truncated: boolean }
 export interface ChatPreparedMessage { prepare_id: string; digest: string; expires_at: string; destination: ChatDestination; items: ChatReviewItem[]; omitted_turns: number; estimated_input_tokens: number; budget_tokens: number; output_reserve_tokens: number; estimate_kind: 'conservative'; requires_review: boolean; fits: boolean }
 export interface ChatStartedRun { run_id: string; thread_id: string; user_message: ChatMessage; assistant_message: ChatMessage; existing: boolean }
 export type ChatEvent = { run_id: string; thread_id: string; seq: number } & (
@@ -2326,7 +2326,8 @@ export type ChatEvent = { run_id: string; thread_id: string; seq: number } & (
   | { kind: 'run_cancelled'; error: string | null }
 )
 /** Something the current page offers to attach. Offering attaches nothing. */
-export interface ChatOffer { kind: 'lesson'; course_id: string; element_id: string; label: string }
+/** Something a page offers to chat. A goal offer leaves `course_id` empty and carries the goal id in `element_id`, as its attachment does. */
+export interface ChatOffer { kind: 'lesson' | 'goal'; course_id: string; element_id: string; label: string }
 
 export interface LessonFeedback { id: string; course_id: string; element_id: string; element_title: string; rating: number; comment: string; created_at: string }
 

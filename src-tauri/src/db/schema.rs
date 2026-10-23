@@ -100,6 +100,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (22, "ai_connection_approvals", include_str!("ai_connection_approvals.sql")),
     // Local full-text search over complete chat messages.
     (23, "ai_chat_search", include_str!("ai_chat_search.sql")),
+    // Goals as chat attachments.
+    (24, "ai_chat_goal_bindings", include_str!("ai_chat_goal_bindings.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

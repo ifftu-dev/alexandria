@@ -455,13 +455,41 @@ pub fn add_binding(
     label: &str,
     now: &str,
 ) -> Result<ChatBinding> {
+    attach_binding(
+        conn, "lesson", id, thread_id, course_id, element_id, label, now,
+    )
+}
+
+/// Attaches one of the learner's goals. The caller has checked it exists.
+pub fn add_goal_binding(
+    conn: &Connection,
+    id: &str,
+    thread_id: &str,
+    goal_id: &str,
+    label: &str,
+    now: &str,
+) -> Result<ChatBinding> {
+    attach_binding(conn, "goal", id, thread_id, "", goal_id, label, now)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attach_binding(
+    conn: &Connection,
+    kind: &str,
+    id: &str,
+    thread_id: &str,
+    course_id: &str,
+    element_id: &str,
+    label: &str,
+    now: &str,
+) -> Result<ChatBinding> {
     let tx = conn.unchecked_transaction()?;
     thread(&tx, thread_id)?;
     let existing: Option<String> = tx
         .query_row(
             "SELECT id FROM chat_bindings
-              WHERE thread_id = ?1 AND kind = 'lesson' AND course_id = ?2 AND element_id = ?3",
-            params![thread_id, course_id, element_id],
+              WHERE thread_id = ?1 AND kind = ?4 AND course_id = ?2 AND element_id = ?3",
+            params![thread_id, course_id, element_id, kind],
             |r| r.get(0),
         )
         .optional()?;
@@ -473,8 +501,8 @@ pub fn add_binding(
         }
         tx.execute(
             "INSERT INTO chat_bindings (id, thread_id, kind, course_id, element_id, label, created_at)
-             VALUES (?1, ?2, 'lesson', ?3, ?4, ?5, ?6)",
-            params![id, thread_id, course_id, element_id, label, now],
+             VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6)",
+            params![id, thread_id, course_id, element_id, label, now, kind],
         )?;
         bump(&tx, thread_id, now)?;
     }

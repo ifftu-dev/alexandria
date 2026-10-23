@@ -13,24 +13,29 @@ import type { ChatOffer } from '@/types'
  */
 
 let nextId = 0
-const offers = ref(new Map<number, ChatOffer>())
+const offers = ref(new Map<number, ChatOffer[]>())
 const restrictions = ref(new Set<number>())
 
-export const chatOffers = computed(() => [...offers.value.values()])
+export const chatOffers = computed(() => [...offers.value.values()].flat())
 export const chatRestrictedByPage = computed(() => restrictions.value.size > 0)
 
 /** Offer `source` to chat while the calling component is mounted. */
 export function useChatOffer(source: Ref<ChatOffer | null>) {
+  useChatOfferList(computed(() => (source.value ? [source.value] : [])))
+}
+
+/** Offer several items, such as each of the learner's goals. */
+export function useChatOfferList(source: Ref<ChatOffer[]>) {
   const id = ++nextId
   const stop = watch(
     source,
-    (offer) => {
+    (list) => {
       const next = new Map(offers.value)
-      if (offer) next.set(id, { ...offer })
+      if (list.length) next.set(id, list.map((o) => ({ ...o })))
       else next.delete(id)
       offers.value = next
     },
-    { immediate: true },
+    { immediate: true, deep: true },
   )
   onBeforeUnmount(() => {
     stop()

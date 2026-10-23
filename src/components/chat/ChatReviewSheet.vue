@@ -24,7 +24,7 @@ const sheet = ref<HTMLElement | null>(null)
 const destination = computed(() => props.prepared.destination)
 const required = computed(() => props.prepared.items.filter((i) => i.kind === 'instructions' || i.kind === 'message'))
 const history = computed(() => props.prepared.items.find((i) => i.kind === 'history') ?? null)
-const lessons = computed(() => props.prepared.items.filter((i) => i.kind === 'lesson'))
+const lessons = computed(() => props.prepared.items.filter((i) => i.kind === 'lesson' || i.kind === 'goal'))
 const memory = computed(() => props.prepared.items.filter((i) => i.kind === 'memory'))
 const memoryTokens = computed(() => memory.value.reduce((sum, i) => sum + (i.included ? i.tokens : 0), 0))
 const requiredTokens = computed(() => required.value.reduce((sum, i) => sum + i.tokens, 0))
@@ -112,7 +112,7 @@ onMounted(async () => {
         <header>{{ t('chat.review.attached') }}<span>~{{ n(attachedTokens) }}</span></header>
         <div v-for="item in lessons" :key="item.binding_id ?? item.label" class="chat-rv-row" :class="{ 'chat-rv-row--off': !item.included }">
           <div class="min-w-0 flex-1">
-            <p>{{ t('chat.context.lesson', { title: item.label }) }}</p>
+            <p>{{ item.kind === 'goal' ? t('chat.context.goal', { title: item.label }) : t('chat.context.lesson', { title: item.label }) }}</p>
             <p v-if="item.truncated" class="chat-rv-detail">{{ t('chat.review.partly') }}</p>
           </div>
           <span v-if="item.included" class="text-[11px] text-muted-foreground">~{{ n(item.tokens) }}</span>
