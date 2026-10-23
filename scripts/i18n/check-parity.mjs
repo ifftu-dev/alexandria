@@ -49,6 +49,18 @@ const PENDING_TRANSLATION = [
   // Global AI chat: English-first while the feature is in alpha.
   'chat.',
   'settings.personalization.shortcutNames.toggle-chat',
+  // External-assistant disclosure, new scopes and activity log (2026-10-24).
+  'settings.assistants.learningContent',
+  'settings.assistants.privateSkillsScope',
+  'settings.assistants.verifyScope',
+  'settings.assistants.scopePrivateSkills',
+  'settings.assistants.scopeVerify',
+  'settings.assistants.disclosureTitle',
+  'settings.assistants.disclosureBody',
+  'settings.assistants.pauses',
+  'settings.assistants.activity',
+  'settings.assistants.activityEmpty',
+  'settings.assistants.outcome',
   // Jev goal entry: English fallback pending the next learner translation pass.
   'goals.picker.learningGoal',
   'goals.picker.goalPlaceholder',

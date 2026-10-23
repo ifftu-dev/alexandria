@@ -366,11 +366,20 @@ async fn learners_read_their_own_graph_progress_and_goals() {
                  ('p2','e1','g2','in_progress',NULL);"#,
         )
         .unwrap();
-    let (_, learner_file) = a.grant("Learner", &["learning:read"]);
+    let (_, learner_file) = a.grant("Learner", &["learning:read", "learning:private_skills"]);
+    let (_, public_file) = a.grant("Public only", &["learning:read"]);
     let (_, drafts_file) = a.grant("Drafts", &["drafts:read"]);
     let (learner, drafter) = (client(&learner_file).await, client(&drafts_file).await);
 
-    // The owner's own view keeps private skills, flagged as such.
+    // Without the opt-in, private skills stay on the device.
+    let public_only = client(&public_file).await;
+    let (error, graph) = call(&public_only, "get_skill_graph", json!({})).await;
+    assert!(!error, "{graph}");
+    assert_eq!(graph["structuredContent"]["includes_private"], false);
+    assert!(!graph.to_string().contains("\"b\""));
+    public_only.cancel().await.unwrap();
+
+    // With it, the owner's own view keeps private skills, flagged as such.
     let (error, graph) = call(&learner, "get_skill_graph", json!({})).await;
     assert!(!error, "{graph}");
     let graph = &graph["structuredContent"];
@@ -505,7 +514,7 @@ async fn credential_summaries_never_carry_the_signed_document() {
                   '{"proof":"SECRET SIGNED DOCUMENT"}','hash-3',0,'2026-02-03');"#,
         )
         .unwrap();
-    let (_, credentials_file) = a.grant("Credentials", &["credentials:read"]);
+    let (_, credentials_file) = a.grant("Credentials", &["credentials:read", "credentials:verify"]);
     let (_, learning_file) = a.grant("Learning", &["learning:read"]);
     let (holder, learner) = (
         client(&credentials_file).await,
@@ -873,7 +882,7 @@ async fn restart_malformed_frames_and_capacity_fail_cleanly() {
 async fn assistant_access_pauses_while_an_assessment_is_in_progress() {
     let a = Profile::new("A");
     let _server = a.serve();
-    let (_, file) = a.grant("Reader", &["drafts:read"]);
+    let (grant_id, file) = a.grant("Reader", &["drafts:read"]);
     let assistant = client(&file).await;
     let (error, before) = call(&assistant, "read_lesson_draft", lesson()).await;
     assert!(!error);
@@ -914,5 +923,13 @@ async fn assistant_access_pauses_while_an_assessment_is_in_progress() {
     let (error, body) = call(&assistant, "read_lesson_draft", lesson()).await;
     assert!(!error);
     assert_eq!(body["structuredContent"]["text"], "Profile A lesson");
+
+    // The learner can see what the assistant read and what it was refused.
+    let log = a.grants.lock().unwrap().activity(&grant_id);
+    let outcomes: Vec<&str> = log.iter().map(|e| e.outcome.as_str()).collect();
+    assert_eq!(outcomes, ["returned", "assessment_active", "returned"]);
+    assert!(log
+        .iter()
+        .all(|e| e.tool == "read_lesson_draft" && e.detail == "course/lesson"));
     assistant.cancel().await.unwrap();
 }

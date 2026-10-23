@@ -278,7 +278,6 @@
     "unavailable": "Local assistant access is unavailable. It currently requires Alexandria running on macOS or Linux.",
     "name": "Assistant name",
     "permissions": "Permissions",
-    "learningScope": "Read published courses: the catalog, course outlines, lesson text, video chapters, and quiz questions without answers. Lessons not stored on this device may be fetched from peers. Assessments are never shared.",
     "draftsScope": "Read your own course drafts: titles, text lessons, instructor instructions and selected source notes.",
     "credentialsScope": "Read your credentials: issuer, skill, dates and revocation status. The signed credential documents themselves are never shared.",
     "proposeScope": "Also allow submitting lesson proposals for my review.",
@@ -293,6 +292,21 @@
     "scopePropose": "Propose drafts",
     "expiresAt": "Expires {time}",
     "revoke": "Revoke access",
-    "none": "No active assistant grants."
+    "none": "No active assistant grants.",
+    "learningContent": "Read published courses: the catalog, course outlines, lesson text and video chapters. Up to 20 lessons an hour that are not stored on this device may be fetched from peers. Quizzes and assessments are never shared.",
+    "privateSkillsScope": "Include skills you have kept private in your skill graph. Off by default.",
+    "verifyScope": "Verify credentials someone shows you. This records that a presentation was seen, so it cannot be accepted twice.",
+    "scopePrivateSkills": "Private skills",
+    "scopeVerify": "Verify presentations",
+    "disclosureTitle": "What it reads leaves Alexandria",
+    "disclosureBody": "The assistant can read everything you allow below without asking you each time, and usually sends it to its own AI provider. Alexandria cannot control what happens to it next.",
+    "pauses": "Access pauses automatically while an assessment or interview check is in progress, and ends when this profile locks.",
+    "activity": "Activity ({count})",
+    "activityEmpty": "Nothing read yet.",
+    "outcomeReturned": "Returned",
+    "outcomeWithheld": "Withheld",
+    "outcomeUnavailable": "Unavailable",
+    "outcomePaused": "Paused: assessment in progress",
+    "outcomeRefused": "Refused"
   }
 }

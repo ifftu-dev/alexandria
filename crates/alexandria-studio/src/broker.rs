@@ -18,7 +18,7 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::{
     credentials,
-    grants::{Grants, StudioGrant},
+    grants::{Activity, Grants, StudioGrant},
     learning, skills, store, Error, Result,
 };
 
@@ -226,7 +226,8 @@ fn dispatch(
         | "get_learning_progress"
         | "resolve_goal"
         | "compute_learning_path" => "learning:read",
-        "list_my_credentials" | "get_credential" | "verify_presentation" => "credentials:read",
+        "list_my_credentials" | "get_credential" => "credentials:read",
+        "verify_presentation" => "credentials:verify",
         "list_course_drafts" | "read_lesson_draft" => "drafts:read",
         "propose_lesson_draft" => "drafts:propose",
         _ => return Err(Error::Permission),
@@ -238,7 +239,76 @@ fn dispatch(
         now,
     )?;
     // After authorization, so an invalid token learns nothing about state.
-    crate::gate::require_no_assessment(db)?;
+    let outcome =
+        crate::gate::require_no_assessment(db).and_then(|()| operate(db, &grant, request, fetched));
+    // A lesson that must come from peers spends the grant's fetch budget.
+    let outcome = match outcome {
+        Ok(Dispatched::NeedsContent(blob)) => {
+            let allowed = grants
+                .lock()
+                .map_err(|_| Error::Permission)?
+                .take_fetch(&grant.id, now);
+            if allowed {
+                return Ok(Dispatched::NeedsContent(blob));
+            }
+            Err(Error::Unavailable(
+                "this assistant has fetched its hourly limit of lessons from peers; lessons stored on this device are still readable".into(),
+            ))
+        }
+        other => other,
+    };
+    let label = match &outcome {
+        Ok(Dispatched::Value(value)) => value
+            .get("status")
+            .and_then(Value::as_str)
+            .filter(|_| request.operation == "read_lesson")
+            .unwrap_or("returned")
+            .to_string(),
+        Ok(Dispatched::NeedsContent(_)) => "fetching".into(),
+        Err(error) => error
+            .to_string()
+            .split(':')
+            .next()
+            .unwrap_or("error")
+            .to_string(),
+    };
+    if let Ok(mut grants) = grants.lock() {
+        grants.record(
+            &grant.id,
+            Activity {
+                at: now,
+                tool: request.operation.clone(),
+                detail: activity_detail(request),
+                outcome: label,
+            },
+        );
+    }
+    outcome
+}
+
+/// What a request asked about, for the learner's activity log.
+fn activity_detail(request: &Request) -> String {
+    let clip = |s: &str| s.chars().take(80).collect::<String>();
+    match request.operation.as_str() {
+        "read_lesson" | "read_lesson_draft" | "propose_lesson_draft" => {
+            clip(&format!("{}/{}", request.course_id, request.element_id))
+        }
+        "get_course" | "get_learning_progress" => clip(&request.course_id),
+        "search_catalog" => clip(&request.query),
+        "get_credential" => clip(&request.credential_id),
+        "resolve_goal" => clip(&request.goal_kind),
+        "verify_presentation" => clip(&request.audience),
+        _ => String::new(),
+    }
+}
+
+/// Runs one authorized operation.
+fn operate(
+    db: &Connection,
+    grant: &StudioGrant,
+    request: &Request,
+    fetched: Option<&Fetched>,
+) -> Result<Dispatched> {
     let value = match request.operation.as_str() {
         "search_catalog" => learning::search_catalog(
             db,
@@ -264,9 +334,11 @@ fn dispatch(
         }
         // The owner's own view: every earned skill, each flagged with whether
         // it is one the owner shares with peers.
+        // Private skills only when the learner opted in for this grant.
         "get_skill_graph" => {
             let did = skills::local_did(db);
-            serde_json::to_value(skills::skill_graph(db, &did, true)?)?
+            let private = grant.has("learning:private_skills");
+            serde_json::to_value(skills::skill_graph(db, &did, private)?)?
         }
         "get_learning_progress" => {
             let course = (!request.course_id.is_empty()).then_some(request.course_id.as_str());

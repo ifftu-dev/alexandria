@@ -2330,9 +2330,11 @@ export interface StudioAssistantGrant {
   scopes: string[]
   expires_at: number
 }
+export interface StudioAssistantActivity { at: number; tool: string; detail: string; outcome: string }
 export interface StudioAssistantAccess {
   available: boolean
   grants: StudioAssistantGrant[]
+  activity: Record<string, StudioAssistantActivity[]>
 }
 export interface StudioAssistantConnection {
   grant: StudioAssistantGrant
