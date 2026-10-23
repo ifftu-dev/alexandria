@@ -49,6 +49,9 @@ const PENDING_TRANSLATION = [
   // Global AI chat: English-first while the feature is in alpha.
   'chat.',
   'settings.personalization.shortcutNames.toggle-chat',
+  // Integrity flags recorded when AI is used during an attempt.
+  'sentinel.flags.items.inAppAssistantDuringAttempt',
+  'sentinel.flags.items.mcpCallDuringAttempt',
   // External-assistant disclosure, new scopes and activity log (2026-10-24).
   'settings.assistants.learningContent',
   'settings.assistants.privateSkillsScope',

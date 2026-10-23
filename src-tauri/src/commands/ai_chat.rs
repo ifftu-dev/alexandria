@@ -82,8 +82,19 @@ where
         .await
 }
 
+/// Refuses while an assessment is in progress, and records the attempt as an
+/// integrity flag: the chat panel is not mounted then, so a call that gets
+/// here did not come from the normal interface.
 fn refuse_during_assessment(conn: &Connection) -> Result<(), String> {
-    gate::require_no_assessment(conn).map_err(|e| e.to_string())
+    let gated = gate::require_no_assessment(conn);
+    if matches!(gated, Err(alexandria_studio::Error::AssessmentActive)) {
+        if let Err(error) =
+            super::integrity::record_backend_flag(conn, "in_app_assistant_during_attempt")
+        {
+            log::warn!("chat: could not record an integrity flag: {error}");
+        }
+    }
+    gated.map_err(|e| e.to_string())
 }
 
 fn recover(conn: &Connection, runtime: &ChatRuntime) -> Result<(), String> {
@@ -1785,6 +1796,18 @@ mod tests {
         assert!(start(&conn, &prepared, "q1")
             .unwrap_err()
             .starts_with("assessment_active"));
+        // Each refusal is an integrity flag on the attempt, recorded once.
+        let (critical, flagged): (i64, i64) = conn
+            .query_row(
+                "SELECT critical_count,
+                        (SELECT COUNT(*) FROM integrity_snapshots
+                          WHERE session_id = 'attempt' AND anomaly_flags LIKE '%in_app_assistant_during_attempt%')
+                   FROM integrity_sessions WHERE id = 'attempt'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((critical, flagged), (1, 1));
     }
 
     #[test]

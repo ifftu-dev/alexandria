@@ -232,6 +232,14 @@
       "obscuredTouch": {
         "description": "A touch came through an overlay",
         "trigger": "A tap was delivered while another window was drawn over the assessment (Android)"
+      },
+      "inAppAssistantDuringAttempt": {
+        "description": "Alexandria's AI chat or tutor was used during the attempt",
+        "trigger": "A chat or tutor request reached Alexandria while the attempt was open"
+      },
+      "mcpCallDuringAttempt": {
+        "description": "A connected external assistant asked for data during the attempt",
+        "trigger": "An assistant with access to this profile made a request while the attempt was open"
       }
     }
   },

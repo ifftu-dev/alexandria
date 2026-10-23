@@ -47,6 +47,9 @@ pub trait BrokerHost: Send + Sync + 'static {
         &self,
         f: &mut dyn FnMut(&Connection) -> Result<Value>,
     ) -> std::result::Result<Value, String>;
+    /// Records that an assistant called while an assessment was in progress.
+    /// The app writes it as an integrity flag; test hosts ignore it.
+    fn report_attempt_flag(&self, _db: &Connection, _flag: &str) {}
     /// Fetches a published content blob by hash: from this device, else from
     /// peers. Hosts without a content store report it unavailable.
     fn fetch_content(&self, _blob: &str) -> ContentFuture<'_> {
@@ -196,6 +199,7 @@ fn authorized_step<H: BrokerHost>(host: &H, request: &Request, fetched: Option<&
         host.now(),
         request,
         fetched,
+        &|db| host.report_attempt_flag(db, "mcp_call_during_attempt"),
     )? {
         Dispatched::Value(value) => Ok(value),
         Dispatched::NeedsContent(needed) => {
@@ -217,6 +221,7 @@ fn dispatch(
     now: i64,
     request: &Request,
     fetched: Option<&Fetched>,
+    on_attempt: &dyn Fn(&Connection),
 ) -> Result<Dispatched> {
     let scope = match request.operation.as_str() {
         "search_catalog"
@@ -239,8 +244,11 @@ fn dispatch(
         now,
     )?;
     // After authorization, so an invalid token learns nothing about state.
-    let outcome =
-        crate::gate::require_no_assessment(db).and_then(|()| operate(db, &grant, request, fetched));
+    let gated = crate::gate::require_no_assessment(db);
+    if matches!(gated, Err(Error::AssessmentActive)) {
+        on_attempt(db);
+    }
+    let outcome = gated.and_then(|()| operate(db, &grant, request, fetched));
     // A lesson that must come from peers spends the grant's fetch budget.
     let outcome = match outcome {
         Ok(Dispatched::NeedsContent(blob)) => {

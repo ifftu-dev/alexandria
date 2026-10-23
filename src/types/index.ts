@@ -739,6 +739,8 @@ export type FlagType =
   | 'screen_share_running'
   | 'phantom_hotkey'
   | 'phantom_hotkey_repeated'
+  | 'in_app_assistant_during_attempt'
+  | 'mcp_call_during_attempt'
   | 'foreign_accessibility_service'
   | 'debug_bridge_enabled'
   | 'obscured_touch'

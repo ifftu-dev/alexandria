@@ -32,6 +32,21 @@ pub fn assessment_in_progress(db: &Connection) -> Result<bool> {
     )?)
 }
 
+/// The integrity sessions that currently gate AI assistance.
+pub fn live_session_ids(db: &Connection) -> Result<Vec<String>> {
+    let window = format!("-{MAX_GATED_SESSION_HOURS} hours");
+    let mut stmt = db.prepare(
+        "SELECT id FROM integrity_sessions
+          WHERE ended_at IS NULL
+            AND julianday(started_at) > julianday('now', ?1)
+          ORDER BY started_at",
+    )?;
+    let ids = stmt
+        .query_map([window], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(ids)
+}
+
 /// Fails with [`Error::AssessmentActive`] while an assessment is in progress.
 pub fn require_no_assessment(db: &Connection) -> Result<()> {
     if assessment_in_progress(db)? {

@@ -91,6 +91,8 @@ const FLAG_CATALOG: ReadonlyArray<{ type: FlagType; key: string; severity: FlagS
   { type: 'screen_share_running', key: 'screenShareRunning', severity: 'info' },
   { type: 'phantom_hotkey', key: 'phantomHotkey', severity: 'warning' },
   { type: 'phantom_hotkey_repeated', key: 'phantomHotkeyRepeated', severity: 'critical' },
+  { type: 'in_app_assistant_during_attempt', key: 'inAppAssistantDuringAttempt', severity: 'critical' },
+  { type: 'mcp_call_during_attempt', key: 'mcpCallDuringAttempt', severity: 'critical' },
   { type: 'foreign_accessibility_service', key: 'foreignAccessibilityService', severity: 'warning' },
   { type: 'debug_bridge_enabled', key: 'debugBridgeEnabled', severity: 'warning' },
   { type: 'obscured_touch', key: 'obscuredTouch', severity: 'critical' },

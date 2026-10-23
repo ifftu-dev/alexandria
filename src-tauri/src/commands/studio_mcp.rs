@@ -151,6 +151,12 @@ impl alexandria_studio::broker::BrokerHost for AppBroker {
         with_db(self.state(), |db| f(db))
     }
 
+    fn report_attempt_flag(&self, db: &rusqlite::Connection, flag: &str) {
+        if let Err(error) = super::integrity::record_backend_flag(db, flag) {
+            log::warn!("assistant broker: could not record {flag}: {error}");
+        }
+    }
+
     fn fetch_content(&self, blob: &str) -> alexandria_studio::broker::ContentFuture<'_> {
         let blob = blob.to_string();
         Box::pin(async move {
