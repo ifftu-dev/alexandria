@@ -242,6 +242,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "alexandria-ai"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "alexandria-decisions"
 version = "0.1.0"
 dependencies = [
@@ -289,6 +301,7 @@ version = "0.7.0-alpha"
 dependencies = [
  "aes",
  "aes-gcm",
+ "alexandria-ai",
  "alexandria-decisions",
  "alexandria-learning-contracts",
  "alexandria-personhood",
@@ -411,6 +424,7 @@ dependencies = [
 name = "alexandria-studio"
 version = "0.1.0"
 dependencies = [
+ "alexandria-ai",
  "alexandria-verify",
  "blake3",
  "chrono",

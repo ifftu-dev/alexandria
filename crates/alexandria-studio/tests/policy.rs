@@ -23,6 +23,7 @@ fn setup(db: &Connection) -> StudioDocument<StudioWorkflow> {
         capability: "text".into(),
         enabled: true,
         has_key: false,
+        context_tokens: None,
     };
     store::save_connection(
         db,

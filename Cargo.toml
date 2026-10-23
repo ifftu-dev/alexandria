@@ -8,6 +8,7 @@ members = [
     "crates/alexandria-decisions",
     "crates/alexandria-personhood",
     "crates/alexandria-studio",
+    "crates/alexandria-ai",
     "crates/alexandria-mcp",
     "crates/iroh-moq",
     "crates/moq-media",

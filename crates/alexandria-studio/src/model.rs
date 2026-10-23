@@ -59,6 +59,10 @@ pub struct StudioConnection {
     pub enabled: bool,
     #[serde(default)]
     pub has_key: bool,
+    /// Context window in tokens, when the user knows it. Chat assumes a
+    /// conservative default otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
