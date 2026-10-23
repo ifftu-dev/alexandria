@@ -93,6 +93,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Chat practice: validated questions and the learner's attempts, checked
     // locally. Practice never writes progress, credentials, or assessments.
     (20, "ai_chat_practice", include_str!("ai_chat_practice.sql")),
+    // Learning memory: learner-approved preferences and observations.
+    (21, "learning_memory", include_str!("ai_chat_memory.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

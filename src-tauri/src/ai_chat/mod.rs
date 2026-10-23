@@ -6,6 +6,7 @@
 
 pub mod bank_guard;
 pub mod context;
+pub mod memory;
 pub mod practice;
 pub mod store;
 

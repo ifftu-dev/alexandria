@@ -123,7 +123,8 @@
     "cancelled": "Stopped.",
     "invalid": "This connection's settings are not valid.",
     "generic": "Something went wrong. Try again.",
-    "assessment_item": "That looks like an assessment question. Chat can't help with assessment questions."
+    "assessment_item": "That looks like an assessment question. Chat can't help with assessment questions.",
+    "memory": "That couldn't be saved. Keep it to one short sentence."
   },
   "connection": {
     "title": "Add a model connection",
@@ -172,5 +173,29 @@
     "attempts": "No attempts | 1 attempt | {count} attempts",
     "rejected": "The question looked too much like an assessment question, so it was not shown. Ask for another one.",
     "unreadableQuestion": "This reply's question could not be checked, so it is shown as written."
+  },
+  "memory": {
+    "title": "Learning memory",
+    "open": "Learning memory",
+    "intro": "What chats remember about how you learn. Only items you save are sent, and you can switch any of them off. Saved items are listed whenever you review a message.",
+    "forgetNote": "Forgetting stops an item being sent with future messages. Earlier messages may still mention it, and a provider that already received it is not affected.",
+    "saved": "Saved",
+    "suggested": "Suggested",
+    "noneSaved": "Nothing saved yet.",
+    "preference": "Preference",
+    "observation": "Noticed",
+    "on": "Sent with messages",
+    "off": "Not sent",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "forget": "Forget",
+    "dismiss": "Dismiss",
+    "suggestion": "Suggested for your learning memory",
+    "suggestionHint": "Save it to have future chats use it. Nothing is remembered unless you save it.",
+    "add": "Add",
+    "addPlaceholder": "For example: explain with worked numbers first",
+    "full": "Learning memory is full. Forget something first.",
+    "reviewTitle": "Learning memory"
   }
 }

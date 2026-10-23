@@ -8,6 +8,7 @@ import type {
   ChatEvent,
   ChatOffer,
   ChatPracticeView,
+  ChatMemoryItem,
   ChatPreparedMessage,
   ChatStartedRun,
   ChatStatus,
@@ -46,6 +47,9 @@ const pendingModelId = ref<string | null>(null)
 /** Mode chosen before the first message creates a thread. */
 const pendingMode = ref<'ask' | 'learn' | 'practice'>('ask')
 const excludedBindings = ref<string[]>([])
+const excludedMemory = ref<string[]>([])
+const showMemory = ref(false)
+const memoryItems = ref<ChatMemoryItem[]>([])
 const includeHistory = ref(true)
 const loaded = ref(false)
 
@@ -80,6 +84,9 @@ function reset() {
   pendingModelId.value = null
   pendingMode.value = 'ask'
   excludedBindings.value = []
+  excludedMemory.value = []
+  showMemory.value = false
+  memoryItems.value = []
   includeHistory.value = true
   loaded.value = false
   pendingText = null
@@ -218,7 +225,7 @@ export function useChat() {
     const text = draft.value
     void invoke('chat_save_draft', { scope: NEW_SCOPE, text: '' }).catch(() => {})
     if (text) void invoke('chat_save_draft', { scope: created.id, text }).catch(() => {})
-    detail.value = { thread: created, messages: [], bindings: [], practice: [], active_run_id: null }
+    detail.value = { thread: created, messages: [], bindings: [], practice: [], memory_proposals: [], active_run_id: null }
     threads.value = [created, ...threads.value]
     if (pendingMode.value !== 'ask') {
       const withMode = await guard(() =>
@@ -289,6 +296,7 @@ export function useChat() {
           text: pendingRegenerate ? null : pendingText,
           regenerateOf: pendingRegenerate,
           excludedBindings: excludedBindings.value,
+          excludedMemory: excludedMemory.value,
           includeHistory: includeHistory.value,
         }),
       )
@@ -372,7 +380,13 @@ export function useChat() {
   }
 
   /** Re-prepare after the learner switched an optional item in review. */
-  async function revise(change: { binding?: string; history?: boolean }) {
+  async function revise(change: { binding?: string; memory?: string; history?: boolean }) {
+    if (change.memory) {
+      const m = change.memory
+      excludedMemory.value = excludedMemory.value.includes(m)
+        ? excludedMemory.value.filter((x) => x !== m)
+        : [...excludedMemory.value, m]
+    }
     if (change.binding) {
       const b = change.binding
       excludedBindings.value = excludedBindings.value.includes(b)
@@ -444,6 +458,7 @@ export function useChat() {
     pendingText = null
     pendingRegenerate = null
     excludedBindings.value = []
+    excludedMemory.value = []
     liveText.value = { ...liveText.value, [result.assistant_message.id]: '' }
     await reloadThread(result.thread_id)
     for (const event of early.splice(0)) apply(event)
@@ -477,6 +492,56 @@ export function useChat() {
     const id = activeRunId.value
     if (!id) return
     await invoke<boolean>('chat_cancel_run', { runId: id }).catch(() => false)
+  }
+
+  async function refreshMemory() {
+    const next = await guard(() => invoke<ChatMemoryItem[]>('chat_list_memory'))
+    if (next) memoryItems.value = next
+  }
+
+  function syncMemory(item: ChatMemoryItem | undefined) {
+    if (!item) return
+    const exists = memoryItems.value.some((m) => m.id === item.id)
+    memoryItems.value = exists
+      ? memoryItems.value.map((m) => (m.id === item.id ? item : m))
+      : [...memoryItems.value, item]
+    if (detail.value) {
+      detail.value = {
+        ...detail.value,
+        memory_proposals: detail.value.memory_proposals.filter((m) => m.id !== item.id || item.status === 'proposed'),
+      }
+    }
+  }
+
+  async function addMemory(kind: 'preference' | 'observation', content: string) {
+    syncMemory(await guard(() => invoke<ChatMemoryItem>('chat_add_memory', { kind, content })))
+  }
+
+  async function approveMemory(memoryId: string, content?: string) {
+    syncMemory(await guard(() => invoke<ChatMemoryItem>('chat_approve_memory', { memoryId, content: content ?? null })))
+  }
+
+  async function updateMemory(memoryId: string, change: { content?: string; active?: boolean }) {
+    syncMemory(
+      await guard(() =>
+        invoke<ChatMemoryItem>('chat_update_memory', {
+          memoryId,
+          content: change.content ?? null,
+          active: change.active ?? null,
+        }),
+      ),
+    )
+  }
+
+  async function forgetMemory(memoryId: string) {
+    await guard(() => invoke('chat_forget_memory', { memoryId }))
+    memoryItems.value = memoryItems.value.filter((m) => m.id !== memoryId)
+    if (detail.value) {
+      detail.value = {
+        ...detail.value,
+        memory_proposals: detail.value.memory_proposals.filter((m) => m.id !== memoryId),
+      }
+    }
   }
 
   async function renameThread(id: string, title: string) {
@@ -535,6 +600,13 @@ export function useChat() {
     send,
     retry,
     ask,
+    showMemory,
+    memoryItems: readonly(memoryItems),
+    refreshMemory,
+    addMemory,
+    approveMemory,
+    updateMemory,
+    forgetMemory,
     mode,
     setMode,
     practiceAttempt,

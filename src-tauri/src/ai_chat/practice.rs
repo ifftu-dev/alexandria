@@ -97,25 +97,10 @@ struct Raw {
     explanation: Option<String>,
 }
 
-const FENCE: &str = "```practice";
-
 /// Splits a reply into the prose to show and the practice block, if any.
 /// The block is removed from the prose whether or not it is valid.
 pub fn split(reply: &str) -> (String, Option<&str>) {
-    let Some(start) = reply.find(FENCE) else {
-        return (reply.to_string(), None);
-    };
-    let body_start = start + FENCE.len();
-    let Some(len) = reply[body_start..].find("```") else {
-        // An unterminated block: show the prose before it only.
-        return (reply[..start].trim_end().to_string(), None);
-    };
-    let body = &reply[body_start..body_start + len];
-    let parts: Vec<&str> = [reply[..start].trim(), reply[body_start + len + 3..].trim()]
-        .into_iter()
-        .filter(|p| !p.is_empty())
-        .collect();
-    (parts.join("\n\n"), Some(body.trim()))
+    super::memory::split_block(reply, "practice")
 }
 
 fn clip(text: &str, max: usize) -> Option<String> {

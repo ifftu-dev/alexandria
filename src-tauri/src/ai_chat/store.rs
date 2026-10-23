@@ -244,11 +244,16 @@ pub fn set_thread_mode(conn: &Connection, id: &str, mode: &str, now: &str) -> Re
 /// draft, then drops excerpts no remaining snapshot references.
 pub fn delete_thread(conn: &Connection, id: &str) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM learning_memory WHERE status = 'proposed' AND thread_id = ?1",
+        [id],
+    )?;
     let changed = tx.execute("DELETE FROM chat_threads WHERE id = ?1", [id])?;
     if changed == 0 {
         return Err(StoreError::NotFound);
     }
     tx.execute("DELETE FROM chat_drafts WHERE scope = ?1", [id])?;
+
     collect_excerpts(&tx)?;
     tx.commit()?;
     Ok(())
@@ -988,6 +993,197 @@ pub fn practice_reveal(conn: &Connection, id: &str) -> Result<PracticeView> {
     practice_view(conn, id)
 }
 
+// ─── learning memory ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryItem {
+    pub id: String,
+    pub kind: String,
+    pub content: String,
+    pub status: String,
+    pub active: bool,
+    pub thread_id: Option<String>,
+    pub source_message_id: Option<String>,
+    pub revision: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+const MEMORY_COLUMNS: &str =
+    "id, kind, content, status, active, thread_id, source_message_id, revision, created_at, updated_at";
+
+fn memory_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryItem> {
+    Ok(MemoryItem {
+        id: r.get(0)?,
+        kind: r.get(1)?,
+        content: r.get(2)?,
+        status: r.get(3)?,
+        active: r.get(4)?,
+        thread_id: r.get(5)?,
+        source_message_id: r.get(6)?,
+        revision: r.get(7)?,
+        created_at: r.get(8)?,
+        updated_at: r.get(9)?,
+    })
+}
+
+fn memory_query(conn: &Connection, filter: &str, arg: &str) -> Result<Vec<MemoryItem>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MEMORY_COLUMNS} FROM learning_memory WHERE {filter} ORDER BY created_at, id"
+    ))?;
+    let rows = stmt
+        .query_map([arg], memory_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Approved items and open proposals.
+pub fn list_memory(conn: &Connection) -> Result<Vec<MemoryItem>> {
+    memory_query(conn, "?1 = ?1", "")
+}
+
+/// What may be sent: approved and switched on.
+pub fn sendable_memory(conn: &Connection) -> Result<Vec<MemoryItem>> {
+    memory_query(conn, "status = 'approved' AND active = 1 AND ?1 = ?1", "")
+}
+
+pub fn memory_proposals_for_thread(conn: &Connection, thread_id: &str) -> Result<Vec<MemoryItem>> {
+    memory_query(conn, "status = 'proposed' AND thread_id = ?1", thread_id)
+}
+
+pub fn memory_item(conn: &Connection, id: &str) -> Result<MemoryItem> {
+    conn.query_row(
+        &format!("SELECT {MEMORY_COLUMNS} FROM learning_memory WHERE id = ?1"),
+        [id],
+        memory_row,
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound)
+}
+
+fn approved_count(conn: &Connection) -> Result<usize> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM learning_memory WHERE status = 'approved'",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(n as usize)
+}
+
+fn duplicate(conn: &Connection, content: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM learning_memory WHERE lower(content) = lower(?1))",
+        [content],
+        |r| r.get(0),
+    )?)
+}
+
+/// Stores a model's proposal for the learner to decide on. Repeats of an
+/// existing item or proposal are ignored.
+#[allow(clippy::too_many_arguments)]
+pub fn propose_memory(
+    conn: &Connection,
+    id: &str,
+    kind: super::memory::Kind,
+    content: &str,
+    thread_id: &str,
+    message_id: &str,
+    now: &str,
+) -> Result<bool> {
+    if duplicate(conn, content)? {
+        return Ok(false);
+    }
+    conn.execute(
+        "INSERT INTO learning_memory (id, kind, content, status, thread_id, source_message_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'proposed', ?4, ?5, ?6, ?6)",
+        params![id, kind.as_str(), content, thread_id, message_id, now],
+    )?;
+    Ok(true)
+}
+
+/// The learner adds an item directly; it is approved.
+pub fn add_memory(
+    conn: &Connection,
+    id: &str,
+    kind: super::memory::Kind,
+    content: &str,
+    now: &str,
+) -> Result<MemoryItem> {
+    let content = super::memory::clean(content)
+        .ok_or_else(|| StoreError::Invalid("memory must be one short sentence".into()))?;
+    if approved_count(conn)? >= super::memory::MAX_ITEMS {
+        return Err(StoreError::Invalid(
+            "learning memory is full; forget something first".into(),
+        ));
+    }
+    conn.execute(
+        "INSERT INTO learning_memory (id, kind, content, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'approved', ?4, ?4)",
+        params![id, kind.as_str(), content, now],
+    )?;
+    memory_item(conn, id)
+}
+
+/// The learner saves a proposal, optionally editing it first.
+pub fn approve_memory(
+    conn: &Connection,
+    id: &str,
+    content: Option<&str>,
+    now: &str,
+) -> Result<MemoryItem> {
+    let item = memory_item(conn, id)?;
+    let content = match content {
+        Some(c) => super::memory::clean(c)
+            .ok_or_else(|| StoreError::Invalid("memory must be one short sentence".into()))?,
+        None => item.content.clone(),
+    };
+    if item.status != "approved" && approved_count(conn)? >= super::memory::MAX_ITEMS {
+        return Err(StoreError::Invalid(
+            "learning memory is full; forget something first".into(),
+        ));
+    }
+    conn.execute(
+        "UPDATE learning_memory SET status = 'approved', content = ?2, revision = revision + 1, updated_at = ?3
+          WHERE id = ?1",
+        params![id, content, now],
+    )?;
+    memory_item(conn, id)
+}
+
+/// Edits an approved item or switches it on or off for future messages.
+pub fn update_memory(
+    conn: &Connection,
+    id: &str,
+    content: Option<&str>,
+    active: Option<bool>,
+    now: &str,
+) -> Result<MemoryItem> {
+    let item = memory_item(conn, id)?;
+    if item.status != "approved" {
+        return Err(StoreError::Invalid("save the suggestion first".into()));
+    }
+    let content = match content {
+        Some(c) => super::memory::clean(c)
+            .ok_or_else(|| StoreError::Invalid("memory must be one short sentence".into()))?,
+        None => item.content,
+    };
+    conn.execute(
+        "UPDATE learning_memory SET content = ?2, active = ?3, revision = revision + 1, updated_at = ?4
+          WHERE id = ?1",
+        params![id, content, active.unwrap_or(item.active), now],
+    )?;
+    memory_item(conn, id)
+}
+
+/// Removes an item or dismisses a proposal. Earlier messages and what a
+/// provider already received are not affected.
+pub fn forget_memory(conn: &Connection, id: &str) -> Result<()> {
+    if conn.execute("DELETE FROM learning_memory WHERE id = ?1", [id])? == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1316,5 +1512,94 @@ mod tests {
         let v = practice_attempt(&conn, &id, "x1", "2/3", NOW).unwrap();
         assert!(v.solved && !v.solved_independently);
         assert_eq!(practice_for_thread(&conn, "t").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn memory_is_proposed_then_approved_and_every_change_bumps_its_revision() {
+        use super::super::memory::Kind;
+        let conn = db();
+        create_thread(&conn, "t", None, None, NOW).unwrap();
+        snapshot_row(&conn, "s1", "t", &[]);
+        begin_run(&conn, &start("r1", "q1", "s1", None, "u1", "a1", 1)).unwrap();
+        assert!(propose_memory(
+            &conn,
+            "m1",
+            Kind::Preference,
+            "Prefers worked numbers",
+            "t",
+            "a1",
+            NOW
+        )
+        .unwrap());
+        assert!(!propose_memory(
+            &conn,
+            "m2",
+            Kind::Preference,
+            "prefers WORKED numbers",
+            "t",
+            "a1",
+            NOW
+        )
+        .unwrap());
+        assert!(
+            sendable_memory(&conn).unwrap().is_empty(),
+            "a proposal is never sent"
+        );
+        assert_eq!(memory_proposals_for_thread(&conn, "t").unwrap().len(), 1);
+
+        let saved = approve_memory(
+            &conn,
+            "m1",
+            Some("Prefers worked numbers before formulas"),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!((saved.status.as_str(), saved.revision), ("approved", 2));
+        assert_eq!(sendable_memory(&conn).unwrap().len(), 1);
+        let off = update_memory(&conn, "m1", None, Some(false), NOW).unwrap();
+        assert_eq!(off.revision, 3);
+        assert!(sendable_memory(&conn).unwrap().is_empty());
+        forget_memory(&conn, "m1").unwrap();
+        assert!(list_memory(&conn).unwrap().is_empty());
+        assert!(forget_memory(&conn, "m1").is_err());
+    }
+
+    #[test]
+    fn deleting_a_chat_drops_its_proposals_but_keeps_saved_memory() {
+        use super::super::memory::Kind;
+        let conn = db();
+        create_thread(&conn, "t", None, None, NOW).unwrap();
+        snapshot_row(&conn, "s1", "t", &[]);
+        begin_run(&conn, &start("r1", "q1", "s1", None, "u1", "a1", 1)).unwrap();
+        propose_memory(
+            &conn,
+            "p",
+            Kind::Observation,
+            "Mixes up P(A|B) and P(B|A)",
+            "t",
+            "a1",
+            NOW,
+        )
+        .unwrap();
+        propose_memory(
+            &conn,
+            "k",
+            Kind::Preference,
+            "Explain in Hindi when stuck",
+            "t",
+            "a1",
+            NOW,
+        )
+        .unwrap();
+        approve_memory(&conn, "k", None, NOW).unwrap();
+        delete_thread(&conn, "t").unwrap();
+        let left = list_memory(&conn).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(
+            (left[0].id.as_str(), left[0].thread_id.as_ref()),
+            ("k", None)
+        );
+        assert!(add_memory(&conn, "x", Kind::Preference, "   ", NOW).is_err());
+        assert!(add_memory(&conn, "y", Kind::Preference, "Short answers please", NOW).is_ok());
     }
 }

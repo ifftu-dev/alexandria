@@ -16,6 +16,7 @@ const emit = defineEmits<{
   fresh: []
   toggleBinding: [bindingId: string]
   toggleHistory: [include: boolean]
+  toggleMemory: [memoryId: string]
 }>()
 const { t } = useI18n()
 const sheet = ref<HTMLElement | null>(null)
@@ -24,6 +25,8 @@ const destination = computed(() => props.prepared.destination)
 const required = computed(() => props.prepared.items.filter((i) => i.kind === 'instructions' || i.kind === 'message'))
 const history = computed(() => props.prepared.items.find((i) => i.kind === 'history') ?? null)
 const lessons = computed(() => props.prepared.items.filter((i) => i.kind === 'lesson'))
+const memory = computed(() => props.prepared.items.filter((i) => i.kind === 'memory'))
+const memoryTokens = computed(() => memory.value.reduce((sum, i) => sum + (i.included ? i.tokens : 0), 0))
 const requiredTokens = computed(() => required.value.reduce((sum, i) => sum + i.tokens, 0))
 const attachedTokens = computed(() => lessons.value.reduce((sum, i) => sum + (i.included ? i.tokens : 0), 0))
 const meter = computed(() =>
@@ -122,6 +125,25 @@ onMounted(async () => {
             :aria-label="item.label"
             :disabled="busy"
             @click="item.binding_id && emit('toggleBinding', item.binding_id)"
+          />
+        </div>
+      </section>
+
+      <section v-if="memory.length" class="chat-rv">
+        <header>{{ t('chat.memory.reviewTitle') }}<span>~{{ n(memoryTokens) }}</span></header>
+        <div v-for="item in memory" :key="item.memory_id ?? item.label" class="chat-rv-row" :class="{ 'chat-rv-row--off': !item.included }">
+          <div class="min-w-0 flex-1">
+            <p class="break-words">{{ item.label }}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            class="chat-switch"
+            :data-on="item.included"
+            :aria-checked="item.included"
+            :aria-label="item.label"
+            :disabled="busy"
+            @click="item.memory_id && emit('toggleMemory', item.memory_id)"
           />
         </div>
       </section>

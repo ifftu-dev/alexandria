@@ -9,6 +9,8 @@ import ChatComposer from './ChatComposer.vue'
 import ChatReviewSheet from './ChatReviewSheet.vue'
 import ChatConnectionForm from './ChatConnectionForm.vue'
 import ChatPracticeCard from './ChatPracticeCard.vue'
+import ChatMemoryProposal from './ChatMemoryProposal.vue'
+import ChatMemoryView from './ChatMemoryView.vue'
 import { ConfirmDialog } from '@/components/ui'
 import type { ChatMessage, ChatSourceRef, StudioConnection, StudioDocument } from '@/types'
 
@@ -29,6 +31,9 @@ const shownVersion = ref<Record<string, number>>({})
 const messages = computed(() => chat.detail.value?.messages ?? [])
 const practice = computed(() => chat.detail.value?.practice ?? [])
 const latestPracticeId = computed(() => practice.value[practice.value.length - 1]?.id ?? null)
+function proposalsFor(messageId: string) {
+  return (chat.detail.value?.memory_proposals ?? []).filter((m) => m.source_message_id === messageId)
+}
 function practiceFor(messageId: string) {
   return practice.value.find((p) => p.message_id === messageId) ?? null
 }
@@ -70,7 +75,7 @@ const errorText = computed(() => {
   const known = [
     'assessment_active', 'no_connection', 'guardian_required', 'context_stale', 'too_many_runs',
     'source_unavailable', 'unreachable', 'timeout', 'auth', 'rate_limited', 'invalid',
-    'assessment_item',
+    'assessment_item', 'memory',
   ]
   return t(`chat.errors.${known.includes(code) ? code : 'generic'}`)
 })
@@ -141,18 +146,21 @@ function formatDate(value: string) {
   <section class="relative flex h-full min-h-0 flex-col bg-card" :aria-label="t('chat.panel.title')">
     <header class="flex flex-none items-center gap-1 border-b border-border py-2 pe-2 ps-3.5">
       <button
-        v-if="chat.showHistory.value"
+        v-if="chat.showHistory.value || chat.showMemory.value"
         type="button"
         class="chat-head-btn"
         :aria-label="t('chat.panel.back')"
-        @click="chat.showHistory.value = false"
+        @click="chat.showHistory.value = false; chat.showMemory.value = false"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
       </button>
       <h2 class="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
-        {{ chat.showHistory.value ? t('chat.panel.history') : title }}
+        {{ chat.showHistory.value ? t('chat.panel.history') : chat.showMemory.value ? t('chat.memory.title') : title }}
       </h2>
-      <button type="button" class="chat-head-btn" :title="t('chat.panel.history')" :aria-label="t('chat.panel.history')" :aria-pressed="chat.showHistory.value" @click="chat.showHistory.value = !chat.showHistory.value">
+      <button type="button" class="chat-head-btn" :title="t('chat.memory.open')" :aria-label="t('chat.memory.open')" :aria-pressed="chat.showMemory.value" @click="chat.showMemory.value = !chat.showMemory.value; chat.showHistory.value = false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.7 2.4 4.8.8.7 1.1 1.4 1.1 2.2V17h5v-1c0-.8.3-1.5 1.1-2.2C16.8 12.7 18 11.2 18 9a6 6 0 0 0-6-6z" /><path d="M10 20h4" /></svg>
+      </button>
+      <button type="button" class="chat-head-btn" :title="t('chat.panel.history')" :aria-label="t('chat.panel.history')" :aria-pressed="chat.showHistory.value" @click="chat.showHistory.value = !chat.showHistory.value; chat.showMemory.value = false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>
       </button>
       <button type="button" class="chat-head-btn" :title="t('chat.panel.newChat')" :aria-label="t('chat.panel.newChat')" @click="chat.newChat()">
@@ -174,8 +182,10 @@ function formatDate(value: string) {
       </button>
     </header>
 
+    <ChatMemoryView v-if="chat.showMemory.value" />
+
     <!-- Thread history -->
-    <div v-if="chat.showHistory.value" class="min-h-0 flex-1 overflow-y-auto p-2">
+    <div v-else-if="chat.showHistory.value" class="min-h-0 flex-1 overflow-y-auto p-2">
       <p v-if="!chat.threads.value.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ t('chat.panel.noThreads') }}</p>
       <ul class="space-y-0.5">
         <li v-for="item in chat.threads.value" :key="item.id" class="group flex items-center gap-1 rounded-lg hover:bg-muted/60">
@@ -248,6 +258,9 @@ function formatDate(value: string) {
             @cite="cite"
             @version="(delta) => step(user, delta)"
           />
+          <template v-if="shown(user)">
+            <ChatMemoryProposal v-for="m in proposalsFor(shown(user)!.id)" :key="m.id" :item="m" />
+          </template>
           <ChatPracticeCard
             v-if="shown(user) && practiceFor(shown(user)!.id)"
             :item="practiceFor(shown(user)!.id)!"
@@ -295,6 +308,7 @@ function formatDate(value: string) {
         @fresh="freshChat"
         @toggle-binding="(id) => chat.revise({ binding: id })"
         @toggle-history="(include) => chat.revise({ history: include })"
+        @toggle-memory="(id) => chat.revise({ memory: id })"
       />
     </template>
     <ConfirmDialog

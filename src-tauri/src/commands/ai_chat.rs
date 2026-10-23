@@ -28,13 +28,14 @@ use tokio::sync::mpsc;
 
 use crate::ai_chat::context::{
     self, build_request, digest, estimate_tokens, fit_history, input_budget, neutralize,
-    scope_digest, Destination, Manifest, ManifestSource, OUTPUT_RESERVE_TOKENS, POLICY_VERSION,
+    scope_digest, Destination, Manifest, ManifestMemory, ManifestSource, OUTPUT_RESERVE_TOKENS,
+    POLICY_VERSION,
 };
 use crate::ai_chat::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use crate::ai_chat::{bank_guard, error_code, practice, ChatRuntime, RunGuard};
+use crate::ai_chat::{bank_guard, error_code, memory, practice, ChatRuntime, RunGuard};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
@@ -143,6 +144,8 @@ pub struct ThreadDetail {
     pub messages: Vec<ChatMessage>,
     pub bindings: Vec<ChatBinding>,
     pub practice: Vec<store::PracticeView>,
+    /// Memory suggestions from this chat that wait for the learner.
+    pub memory_proposals: Vec<store::MemoryItem>,
     pub active_run_id: Option<String>,
 }
 
@@ -160,6 +163,7 @@ pub async fn chat_get_thread(
             messages: store::messages(conn, &thread_id).map_err(e)?,
             bindings: store::bindings(conn, &thread_id).map_err(e)?,
             practice: store::practice_for_thread(conn, &thread_id).map_err(e)?,
+            memory_proposals: store::memory_proposals_for_thread(conn, &thread_id).map_err(e)?,
             active_run_id: store::active_run(conn, &thread_id).map_err(e)?,
         })
     })
@@ -335,6 +339,8 @@ pub struct ReviewItem {
     pub required: bool,
     pub included: bool,
     pub binding_id: Option<String>,
+    /// For a learning-memory item: its id, so review can leave it out.
+    pub memory_id: Option<String>,
     pub truncated: bool,
 }
 
@@ -366,6 +372,8 @@ struct Gathered {
     regenerate_of: Option<String>,
     turns: Vec<(String, String, String, String)>,
     lessons: Vec<(ChatBinding, learning::LessonTarget, bool)>,
+    /// Approved, active memory, each with whether this send includes it.
+    memory: Vec<(store::MemoryItem, bool)>,
 }
 
 fn is_minor(conn: &Connection) -> Result<bool, String> {
@@ -389,6 +397,7 @@ fn gather(
     text: Option<String>,
     regenerate_of: Option<String>,
     excluded: &[String],
+    excluded_memory: &[String],
     include_history: bool,
 ) -> Result<Gathered, String> {
     refuse_during_assessment(conn)?;
@@ -456,6 +465,14 @@ fn gather(
             })?;
         lessons.push((binding, target, included));
     }
+    let memory = store::sendable_memory(conn)
+        .map_err(e)?
+        .into_iter()
+        .map(|m| {
+            let included = !excluded_memory.contains(&m.id);
+            (m, included)
+        })
+        .collect();
     Ok(Gathered {
         thread,
         connection_revision: doc.revision,
@@ -466,6 +483,7 @@ fn gather(
         regenerate_of,
         turns,
         lessons,
+        memory,
     })
 }
 
@@ -509,9 +527,11 @@ pub async fn chat_prepare_message(
     text: Option<String>,
     regenerate_of: Option<String>,
     excluded_bindings: Option<Vec<String>>,
+    excluded_memory: Option<Vec<String>>,
     include_history: Option<bool>,
 ) -> Result<PreparedMessage, String> {
     let excluded = excluded_bindings.unwrap_or_default();
+    let excluded_memory = excluded_memory.unwrap_or_default();
     let include_history = include_history.unwrap_or(true);
     let gathered = {
         let thread_id = thread_id.clone();
@@ -522,6 +542,7 @@ pub async fn chat_prepare_message(
                 text,
                 regenerate_of,
                 &excluded,
+                &excluded_memory,
                 include_history,
             )
         })
@@ -591,6 +612,7 @@ fn assemble(
         required: true,
         included: true,
         binding_id: None,
+        memory_id: None,
         truncated: false,
     }];
     let mut next_source = 1;
@@ -603,6 +625,7 @@ fn assemble(
                 required: false,
                 included: false,
                 binding_id: Some(binding.id.clone()),
+                memory_id: None,
                 truncated: false,
             });
             continue;
@@ -631,14 +654,45 @@ fn assemble(
             required: false,
             included: true,
             binding_id: Some(binding.id.clone()),
+            memory_id: None,
             truncated,
         });
         sources.push((source, text));
     }
+    let mut manifest_memory = Vec::new();
+    let mut remembered: Vec<(String, String)> = Vec::new();
+    for (item, included) in &gathered.memory {
+        let tokens = if *included {
+            estimate_tokens(&item.content) + 4
+        } else {
+            0
+        };
+        items.push(ReviewItem {
+            kind: "memory".into(),
+            label: item.content.clone(),
+            tokens,
+            required: false,
+            included: *included,
+            binding_id: None,
+            memory_id: Some(item.id.clone()),
+            truncated: false,
+        });
+        if *included {
+            manifest_memory.push(ManifestMemory {
+                id: item.id.clone(),
+                revision: item.revision,
+                kind: item.kind.clone(),
+                tokens,
+            });
+            remembered.push((item.kind.clone(), item.content.clone()));
+        }
+    }
     let mode = gathered.thread.mode.clone();
-    let system = context::system_prompt(POLICY_VERSION, &mode, &sources).unwrap_or_default();
+    let system =
+        context::system_prompt(POLICY_VERSION, &mode, &sources, &remembered).unwrap_or_default();
     let system_tokens = estimate_tokens(&system);
-    let attached: u32 = sources.iter().map(|(s, _)| s.tokens).sum();
+    let attached: u32 = sources.iter().map(|(s, _)| s.tokens).sum::<u32>()
+        + manifest_memory.iter().map(|m| m.tokens).sum::<u32>();
     items[0].tokens = system_tokens.saturating_sub(attached);
     let user_tokens = estimate_tokens(&gathered.user_text);
     items.push(ReviewItem {
@@ -648,6 +702,7 @@ fn assemble(
         required: true,
         included: true,
         binding_id: None,
+        memory_id: None,
         truncated: false,
     });
     let fixed = system_tokens + user_tokens + 16;
@@ -673,12 +728,13 @@ fn assemble(
                 required: false,
                 included: !history.is_empty(),
                 binding_id: None,
+                memory_id: None,
                 truncated: omitted_turns > 0,
             },
         );
     }
     let manifest_sources: Vec<ManifestSource> = sources.iter().map(|(s, _)| s.clone()).collect();
-    let reviewed_scope = scope_digest(&destination, &manifest_sources);
+    let reviewed_scope = scope_digest(&destination, &manifest_sources, &manifest_memory);
     let manifest = Manifest {
         policy_version: POLICY_VERSION,
         mode,
@@ -686,6 +742,7 @@ fn assemble(
         thread_revision: gathered.thread.revision,
         destination: destination.clone(),
         sources: manifest_sources,
+        memory: manifest_memory,
         history,
         omitted_turns,
         user_text: gathered.user_text.clone(),
@@ -707,9 +764,18 @@ fn assemble(
             ]
         })
         .collect();
-    let request = build_request(&manifest, &|hash| texts.get(hash).cloned(), &|id| {
-        turn_text.get(id).cloned()
-    })
+    let request = build_request(
+        &manifest,
+        &|hash| texts.get(hash).cloned(),
+        &|id| turn_text.get(id).cloned(),
+        &|id| {
+            gathered
+                .memory
+                .iter()
+                .find(|(m, included)| *included && m.id == id)
+                .map(|(m, _)| (m.revision, m.content.clone()))
+        },
+    )
     .ok_or("storage_error: the request could not be assembled")?;
     let request_digest = digest(&request);
     let bytes = serde_json::to_vec(&request)
@@ -853,12 +919,22 @@ fn begin(
         return Err(stale());
     }
     let manifest: Manifest = serde_json::from_str(&snapshot.manifest_json).map_err(|_| stale())?;
-    let request = build_request(&manifest, &|hash| store::excerpt(conn, hash).ok(), &|id| {
-        store::message(conn, id)
-            .ok()
-            .filter(|m| m.thread_id == manifest.thread_id && m.status == "complete")
-            .map(|m| (m.role, m.content))
-    })
+    let request = build_request(
+        &manifest,
+        &|hash| store::excerpt(conn, hash).ok(),
+        &|id| {
+            store::message(conn, id)
+                .ok()
+                .filter(|m| m.thread_id == manifest.thread_id && m.status == "complete")
+                .map(|m| (m.role, m.content))
+        },
+        &|id| {
+            store::memory_item(conn, id)
+                .ok()
+                .filter(|m| m.status == "approved" && m.active)
+                .map(|m| (m.revision, m.content))
+        },
+    )
     .ok_or_else(stale)?;
     if digest(&request) != snapshot.digest {
         return Err(stale());
@@ -1103,45 +1179,52 @@ impl Stream {
             .unwrap_or(false)
     }
 
-    /// Completes a Practice answer: the question block becomes a stored,
-    /// checkable practice item and is removed from the shown text. A block
-    /// that cannot be validated leaves the reply as written; one that
+    /// Completes an answer. A memory suggestion becomes a proposal for the
+    /// learner. In Practice, the question block becomes a stored, checkable
+    /// practice item. Both blocks are removed from the shown text; a question
+    /// that cannot be validated leaves the reply as written, and anything that
     /// resembles an assessment item is dropped.
-    async fn finish_practice(
+    async fn finish_completion(
         &self,
         run_id: &str,
         message_id: &str,
         reply: &str,
         usage: Option<alexandria_ai::Usage>,
     ) {
-        let (prose, block) = practice::split(reply);
+        let (without_memory, memory_block) = memory::split_block(reply, "memory");
+        let proposal = memory_block.and_then(memory::parse);
+        let practice_mode = self.started.mode == "practice";
+        let (prose, block) = if practice_mode {
+            practice::split(&without_memory)
+        } else {
+            (without_memory.clone(), None)
+        };
         let question = block.and_then(practice::parse);
-        let (run_id, message_id, thread_id, reply) = (
+        let (run_id, message_id, thread_id) = (
             run_id.to_string(),
             message_id.to_string(),
             self.started.run.thread_id.clone(),
-            reply.to_string(),
         );
         let saved = self
             .executor
             .execute(
                 DatabaseWorkload::Background,
                 self.lease.clone(),
-                "chat.finish-practice",
+                "chat.finish",
                 move |db| {
                     let conn = db.conn();
                     let accepted = question.filter(|q| {
                         let text = format!("{} {}", q.prompt, q.options.join(" "));
                         !bank_guard::matches_assessment_item(conn, &text)
                     });
-                    let (content, note) = match (&accepted, block_present(&reply)) {
-                        (Some(_), _) => (prose.clone(), None),
-                        (None, true) if prose.is_empty() => {
-                            (String::new(), Some("practice_rejected"))
-                        }
-                        (None, true) => (prose.clone(), Some("practice_rejected")),
-                        (None, false) => (reply.clone(), None),
-                    };
+                    let (content, note) =
+                        match (&accepted, practice_mode && block_present(&without_memory)) {
+                            (Some(_), _) => (prose.clone(), None),
+                            (None, true) => (prose.clone(), Some("practice_rejected")),
+                            (None, false) => (without_memory.clone(), None),
+                        };
+                    let proposal =
+                        proposal.filter(|p| !bank_guard::matches_assessment_item(conn, &p.content));
                     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
                     let finished = store::finish_run_in(
                         &tx,
@@ -1163,13 +1246,26 @@ impl Stream {
                             store::insert_practice(&tx, &id, &thread_id, &message_id, q, &now())
                                 .map_err(|e| e.to_string())?;
                         }
+                        if let Some(p) = &proposal {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            store::propose_memory(
+                                &tx,
+                                &id,
+                                p.kind,
+                                &p.content,
+                                &thread_id,
+                                &message_id,
+                                &now(),
+                            )
+                            .map_err(|e| e.to_string())?;
+                        }
                     }
                     tx.commit().map_err(|e| e.to_string())
                 },
             )
             .await;
         if let Err(error) = saved {
-            log::warn!("chat: could not save a practice answer: {error}");
+            log::warn!("chat: could not save an answer: {error}");
         }
     }
 
@@ -1274,22 +1370,8 @@ impl Stream {
                     .ok()
                     .and_then(|v| v.as_str().map(str::to_owned))
                     .unwrap_or_else(|| "unknown".into());
-                if self.started.mode == "practice" {
-                    self.finish_practice(&run_id, &message_id, &completion.text, usage)
-                        .await;
-                } else {
-                    finish(
-                        &self.executor,
-                        &self.lease,
-                        &run_id,
-                        &message_id,
-                        "complete",
-                        &completion.text,
-                        None,
-                        usage,
-                    )
+                self.finish_completion(&run_id, &message_id, &completion.text, usage)
                     .await;
-                }
                 self.emit(
                     &mut seq,
                     ChatEventBody::RunCompleted {
@@ -1404,6 +1486,85 @@ pub async fn chat_practice_reveal(
     .await
 }
 
+#[tauri::command]
+pub async fn chat_list_memory(
+    state: State<'_, AppState>,
+) -> Result<Vec<store::MemoryItem>, String> {
+    with_conn(&state, "chat.list-memory", |conn| {
+        store::list_memory(conn).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// The learner adds an item directly. It is approved: they wrote it.
+#[tauri::command]
+pub async fn chat_add_memory(
+    state: State<'_, AppState>,
+    kind: String,
+    content: String,
+) -> Result<store::MemoryItem, String> {
+    with_conn(&state, "chat.add-memory", move |conn| {
+        let kind = memory::Kind::parse(&kind).ok_or("invalid_input: unknown memory kind")?;
+        if bank_guard::matches_assessment_item(conn, &content) {
+            return Err("assessment_item: memory cannot hold assessment questions".into());
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        store::add_memory(conn, &id, kind, &content, &now()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn chat_approve_memory(
+    state: State<'_, AppState>,
+    memory_id: String,
+    content: Option<String>,
+) -> Result<store::MemoryItem, String> {
+    with_conn(&state, "chat.approve-memory", move |conn| {
+        if content
+            .as_deref()
+            .is_some_and(|c| bank_guard::matches_assessment_item(conn, c))
+        {
+            return Err("assessment_item: memory cannot hold assessment questions".into());
+        }
+        store::approve_memory(conn, &memory_id, content.as_deref(), &now())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn chat_update_memory(
+    state: State<'_, AppState>,
+    memory_id: String,
+    content: Option<String>,
+    active: Option<bool>,
+) -> Result<store::MemoryItem, String> {
+    with_conn(&state, "chat.update-memory", move |conn| {
+        if content
+            .as_deref()
+            .is_some_and(|c| bank_guard::matches_assessment_item(conn, c))
+        {
+            return Err("assessment_item: memory cannot hold assessment questions".into());
+        }
+        store::update_memory(conn, &memory_id, content.as_deref(), active, &now())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Forgets an item or dismisses a suggestion.
+#[tauri::command]
+pub async fn chat_forget_memory(
+    state: State<'_, AppState>,
+    memory_id: String,
+) -> Result<(), String> {
+    with_conn(&state, "chat.forget-memory", move |conn| {
+        store::forget_memory(conn, &memory_id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1484,7 +1645,7 @@ mod tests {
         text: Option<String>,
         regenerate_of: Option<String>,
     ) -> Result<PreparedMessage, String> {
-        let gathered = gather(conn, "t", text, regenerate_of, &[], true)?;
+        let gathered = gather(conn, "t", text, regenerate_of, &[], &[], true)?;
         let fetched = gathered.lessons.iter().map(|_| None).collect();
         let (destination, budget) = destination(&gathered)?;
         assemble(conn, gathered, fetched, destination, budget)
@@ -1726,7 +1887,16 @@ mod tests {
         let binding = attach(&conn, "t", "course", "lesson").unwrap();
         let started = start(&conn, &prepare(&conn, "Hi").unwrap(), "q1").unwrap();
         complete(&conn, &started, "Hello");
-        let gathered = gather(&conn, "t", Some("Hi".into()), None, &[binding.id], true).unwrap();
+        let gathered = gather(
+            &conn,
+            "t",
+            Some("Hi".into()),
+            None,
+            &[binding.id],
+            &[],
+            true,
+        )
+        .unwrap();
         let (destination, budget) = destination(&gathered).unwrap();
         let fetched = gathered.lessons.iter().map(|_| None).collect();
         let prepared = assemble(&conn, gathered, fetched, destination, budget).unwrap();
@@ -2075,5 +2245,96 @@ mod tests {
         assert!(harness
             .conn(|c| store::practice_for_thread(c, "t").unwrap())
             .is_empty());
+    }
+
+    #[test]
+    fn approved_memory_is_reviewed_sent_and_bound_to_its_text() {
+        use crate::ai_chat::memory::Kind;
+        let conn = db();
+        thread(&conn);
+        store::add_memory(
+            &conn,
+            "k",
+            Kind::Preference,
+            "Prefers worked numbers",
+            &now(),
+        )
+        .unwrap();
+        let prepared = prepare(&conn, "Explain Bayes").unwrap();
+        assert!(prepared.requires_review);
+        let item = prepared.items.iter().find(|i| i.kind == "memory").unwrap();
+        assert_eq!(
+            (item.memory_id.as_deref(), item.included),
+            (Some("k"), true)
+        );
+        // Editing after review makes the reviewed request stale.
+        store::update_memory(&conn, "k", Some("Prefers proofs"), None, &now()).unwrap();
+        assert!(start(&conn, &prepared, "q1")
+            .unwrap_err()
+            .starts_with("context_stale"));
+        let prepared = prepare(&conn, "Explain Bayes").unwrap();
+        let started = start(&conn, &prepared, "q2").unwrap();
+        assert!(started.request.messages[0]
+            .content
+            .contains("- (preference) Prefers proofs"));
+    }
+
+    #[test]
+    fn a_memory_item_can_be_left_out_of_one_send() {
+        use crate::ai_chat::memory::Kind;
+        let conn = db();
+        thread(&conn);
+        store::add_memory(&conn, "k", Kind::Preference, "Explain in Hindi", &now()).unwrap();
+        let gathered = gather(
+            &conn,
+            "t",
+            Some("Hi".into()),
+            None,
+            &[],
+            &["k".to_string()],
+            true,
+        )
+        .unwrap();
+        let (destination, budget) = destination(&gathered).unwrap();
+        let fetched = gathered.lessons.iter().map(|_| None).collect();
+        let prepared = assemble(&conn, gathered, fetched, destination, budget).unwrap();
+        assert!(prepared
+            .items
+            .iter()
+            .any(|i| i.kind == "memory" && !i.included));
+        let started = start(&conn, &prepared, "q1").unwrap();
+        assert!(!started.request.messages[0]
+            .content
+            .contains("Explain in Hindi"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_memory_suggestion_waits_for_the_learner_and_is_not_shown_as_text() {
+        static WORDS: [&str; 2] = [
+            "Sure, here it is with numbers.\n",
+            "```memory\n{\"kind\":\"preference\",\"content\":\"Prefers worked numbers before formulas\"}\n```",
+        ];
+        let endpoint = model(&WORDS, 5).await;
+        let harness = Harness::new(&endpoint);
+        let (task, _) = harness.begin("Use numbers please");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+        let (message, proposals, sendable) = harness.conn(|c| {
+            (
+                store::message(c, &message_id).unwrap(),
+                store::memory_proposals_for_thread(c, "t").unwrap(),
+                store::sendable_memory(c).unwrap(),
+            )
+        });
+        assert_eq!(message.content, "Sure, here it is with numbers.");
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].source_message_id.as_deref(),
+            Some(message_id.as_str())
+        );
+        assert!(
+            sendable.is_empty(),
+            "nothing is sent until the learner saves it"
+        );
     }
 }

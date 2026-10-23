@@ -25,8 +25,10 @@ const streaming = computed(() => props.message.status === 'streaming')
 // streams, show only the prose before it.
 const text = computed(() => {
   const raw = streaming.value ? (props.live || props.message.content) : props.message.content
-  const fence = raw.indexOf('```practice')
-  return fence >= 0 ? raw.slice(0, fence).trimEnd() : raw
+  // Practice questions and memory suggestions arrive as fenced blocks that
+  // become cards; while streaming, hide them from the first fence on.
+  const fences = ['```practice', '```memory'].map((f) => raw.indexOf(f)).filter((i) => i >= 0)
+  return fences.length ? raw.slice(0, Math.min(...fences)).trimEnd() : raw
 })
 
 // Markdown is parsed once the answer is final. While it streams the raw text

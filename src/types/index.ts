@@ -2304,10 +2304,11 @@ export interface ChatMessage { id: string; thread_id: string; position: number; 
 export interface ChatBinding { id: string; thread_id: string; kind: 'lesson'; course_id: string; element_id: string; label: string; created_at: string }
 export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
 export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
-export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; active_run_id: string | null }
+export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'; content: string; status: 'proposed' | 'approved'; active: boolean; thread_id: string | null; source_message_id: string | null; revision: number; created_at: string; updated_at: string }
+export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; active_run_id: string | null }
 export interface ChatStatus { assessment_active: boolean }
 export interface ChatDestination { connection_id: string; connection_name: string; location: ChatLocation; host: string; model_id: string }
-export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; truncated: boolean }
+export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson' | 'memory'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; memory_id: string | null; truncated: boolean }
 export interface ChatPreparedMessage { prepare_id: string; digest: string; expires_at: string; destination: ChatDestination; items: ChatReviewItem[]; omitted_turns: number; estimated_input_tokens: number; budget_tokens: number; output_reserve_tokens: number; estimate_kind: 'conservative'; requires_review: boolean; fits: boolean }
 export interface ChatStartedRun { run_id: string; thread_id: string; user_message: ChatMessage; assistant_message: ChatMessage; existing: boolean }
 export type ChatEvent = { run_id: string; thread_id: string; seq: number } & (
