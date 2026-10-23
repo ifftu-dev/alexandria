@@ -192,7 +192,7 @@ fn the_view_set_is_exact() {
 /// indexes; learning memory adds 1 table and 1 index;
 /// guardian approval of remote models adds 2 tables and 1 index; chat
 /// search adds one FTS5 table (6 schema tables with its shadows) and 3
-/// triggers.
+/// triggers; chat artifacts add 1 table and 2 indexes.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -200,8 +200,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 130, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 123, "index count changed");
+    assert_eq!(tables, 131, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 125, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         6,

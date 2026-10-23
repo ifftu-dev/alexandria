@@ -13,6 +13,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   retry: []
+  saveNote: []
   cite: [source: ChatSourceRef]
   version: [delta: number]
 }>()
@@ -150,6 +151,16 @@ async function copy() {
       </template>
       <button v-if="message.content" type="button" class="chat-icon-btn" :title="copied ? t('chat.message.copied') : t('chat.message.copy')" :aria-label="t('chat.message.copy')" @click="copy">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></svg>
+      </button>
+      <button
+        v-if="message.status === 'complete' && message.content"
+        type="button"
+        class="chat-icon-btn"
+        :title="t('chat.artifacts.saveNote')"
+        :aria-label="t('chat.artifacts.saveNote')"
+        @click="emit('saveNote')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z" /></svg>
       </button>
       <button type="button" class="chat-icon-btn" :title="t('chat.message.retryHint')" :aria-label="t('chat.message.retry')" @click="emit('retry')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4v6h6M20 20v-6h-6" /><path d="M20 10a8 8 0 0 0-14-4L4 10M4 14a8 8 0 0 0 14 4l2-4" /></svg>

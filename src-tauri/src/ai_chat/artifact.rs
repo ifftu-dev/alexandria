@@ -1,0 +1,158 @@
+//! Study artifacts: notes and flashcards made from a conversation.
+//!
+//! A model may propose one by ending its reply with a fenced `artifact`
+//! block; the learner can also save any answer as a note. A proposal is
+//! stored for the learner to save or dismiss and is never saved on its own.
+//! Saved artifacts keep the sources the originating answer carried, and they
+//! outlive the chat they came from. Their text is checked against stored
+//! assessment items like every other model output.
+
+use serde::{Deserialize, Serialize};
+
+pub const MAX_TITLE_CHARS: usize = 120;
+pub const MAX_NOTE_CHARS: usize = 8_000;
+pub const MAX_CARDS: usize = 20;
+pub const MAX_CARD_CHARS: usize = 400;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Card {
+    pub front: String,
+    pub back: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Body {
+    Note { text: String },
+    Flashcards { cards: Vec<Card> },
+}
+
+impl Body {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Body::Note { .. } => "note",
+            Body::Flashcards { .. } => "flashcards",
+        }
+    }
+
+    /// Everything a learner would read, for the assessment-item check.
+    pub fn text(&self) -> String {
+        match self {
+            Body::Note { text } => text.clone(),
+            Body::Flashcards { cards } => cards
+                .iter()
+                .map(|c| format!("{} {}", c.front, c.back))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proposal {
+    pub title: String,
+    pub body: Body,
+}
+
+#[derive(Deserialize)]
+struct RawCard {
+    front: String,
+    back: String,
+}
+
+#[derive(Deserialize)]
+struct Raw {
+    #[serde(rename = "type")]
+    kind: String,
+    title: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    cards: Option<Vec<RawCard>>,
+}
+
+/// A single-line title, trimmed and bounded.
+pub fn clean_title(title: &str) -> Option<String> {
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!title.is_empty() && title.chars().count() <= MAX_TITLE_CHARS).then_some(title)
+}
+
+/// Note text keeps its line breaks; it is trimmed and bounded.
+pub fn clean_note(text: &str) -> Option<String> {
+    let text = text.trim();
+    (!text.is_empty() && text.chars().count() <= MAX_NOTE_CHARS).then(|| text.to_string())
+}
+
+fn clean_side(text: &str) -> Option<String> {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!text.is_empty() && text.chars().count() <= MAX_CARD_CHARS).then_some(text)
+}
+
+pub fn parse(block: &str) -> Option<Proposal> {
+    let raw: Raw = serde_json::from_str(block).ok()?;
+    let title = clean_title(&raw.title)?;
+    let body = match raw.kind.trim() {
+        "note" => Body::Note {
+            text: clean_note(raw.text.as_deref()?)?,
+        },
+        "flashcards" => {
+            let cards = raw.cards?;
+            if cards.is_empty() || cards.len() > MAX_CARDS {
+                return None;
+            }
+            Body::Flashcards {
+                cards: cards
+                    .iter()
+                    .map(|c| {
+                        Some(Card {
+                            front: clean_side(&c.front)?,
+                            back: clean_side(&c.back)?,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?,
+            }
+        }
+        _ => return None,
+    };
+    Some(Proposal { title, body })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notes_and_flashcards_parse_and_are_bounded() {
+        let note =
+            parse(r#"{"type":"note","title":"  Bayes\nrule ","text":"P(A|B)\n= ..."}"#).unwrap();
+        assert_eq!(note.title, "Bayes rule");
+        assert_eq!(
+            note.body,
+            Body::Note {
+                text: "P(A|B)\n= ...".into()
+            }
+        );
+        let cards = parse(
+            r#"{"type":"flashcards","title":"Terms","cards":[{"front":"Prior","back":"Belief before evidence"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(cards.body.kind(), "flashcards");
+        assert!(cards.body.text().contains("Belief before evidence"));
+
+        let many = format!(
+            r#"{{"type":"flashcards","title":"T","cards":[{}]}}"#,
+            vec![r#"{"front":"a","back":"b"}"#; MAX_CARDS + 1].join(",")
+        );
+        for bad in [
+            many.as_str(),
+            r#"{"type":"flashcards","title":"T","cards":[]}"#,
+            r#"{"type":"flashcards","title":"T","cards":[{"front":"","back":"b"}]}"#,
+            r#"{"type":"note","title":"","text":"x"}"#,
+            r#"{"type":"note","title":"T"}"#,
+            r#"{"type":"grade","title":"T","text":"A+"}"#,
+            "not json",
+        ] {
+            assert!(parse(bad).is_none(), "{bad}");
+        }
+    }
+}

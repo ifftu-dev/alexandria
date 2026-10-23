@@ -2311,7 +2311,10 @@ export interface ChatPracticeView { id: string; message_id: string; skill: strin
 export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; requested_at: string; decided_at: string | null }
 export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; received_at: string; decided_at: string | null; delivered: boolean }
 export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'; content: string; status: 'proposed' | 'approved'; active: boolean; thread_id: string | null; source_message_id: string | null; revision: number; created_at: string; updated_at: string }
-export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; active_run_id: string | null }
+export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; artifacts: ChatArtifact[]; active_run_id: string | null }
+export type ChatArtifactBody = { kind: 'note'; text: string } | { kind: 'flashcards'; cards: { front: string; back: string }[] }
+/** A note or flashcard set from chat. Proposals wait for the learner; saved ones outlive their chat. */
+export interface ChatArtifact { id: string; status: 'proposed' | 'saved'; title: string; body: ChatArtifactBody; sources: ChatSourceRef[]; thread_id: string | null; message_id: string | null; created_at: string; updated_at: string }
 export interface ChatStatus { assessment_active: boolean }
 export interface ChatDestination { connection_id: string; connection_name: string; location: ChatLocation; host: string; model_id: string }
 export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson' | 'goal' | 'memory'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; memory_id: string | null; truncated: boolean }

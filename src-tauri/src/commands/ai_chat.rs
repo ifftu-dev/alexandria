@@ -35,7 +35,7 @@ use crate::ai_chat::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use crate::ai_chat::{bank_guard, error_code, memory, practice, ChatRuntime, RunGuard};
+use crate::ai_chat::{artifact, bank_guard, error_code, memory, practice, ChatRuntime, RunGuard};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
@@ -169,6 +169,8 @@ pub struct ThreadDetail {
     pub practice: Vec<store::PracticeView>,
     /// Memory suggestions from this chat that wait for the learner.
     pub memory_proposals: Vec<store::MemoryItem>,
+    /// Notes and flashcards from this chat, proposed or saved.
+    pub artifacts: Vec<store::Artifact>,
     pub active_run_id: Option<String>,
 }
 
@@ -187,6 +189,7 @@ pub async fn chat_get_thread(
             bindings: store::bindings(conn, &thread_id).map_err(e)?,
             practice: store::practice_for_thread(conn, &thread_id).map_err(e)?,
             memory_proposals: store::memory_proposals_for_thread(conn, &thread_id).map_err(e)?,
+            artifacts: store::artifacts_for_thread(conn, &thread_id).map_err(e)?,
             active_run_id: store::active_run(conn, &thread_id).map_err(e)?,
         })
     })
@@ -1400,7 +1403,9 @@ impl Stream {
         reply: &str,
         usage: Option<alexandria_ai::Usage>,
     ) {
-        let (without_memory, memory_block) = memory::split_block(reply, "memory");
+        let (without_artifact, artifact_block) = memory::split_block(reply, "artifact");
+        let made = artifact_block.and_then(artifact::parse);
+        let (without_memory, memory_block) = memory::split_block(&without_artifact, "memory");
         let proposal = memory_block.and_then(memory::parse);
         let practice_mode = self.started.mode == "practice";
         let (prose, block) = if practice_mode {
@@ -1434,6 +1439,10 @@ impl Stream {
                         };
                     let proposal =
                         proposal.filter(|p| !bank_guard::matches_assessment_item(conn, &p.content));
+                    let made = made.filter(|a| {
+                        let text = format!("{} {}", a.title, a.body.text());
+                        !bank_guard::matches_assessment_item(conn, &text)
+                    });
                     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
                     let finished = store::finish_run_in(
                         &tx,
@@ -1467,6 +1476,11 @@ impl Stream {
                                 &now(),
                             )
                             .map_err(|e| e.to_string())?;
+                        }
+                        if let Some(a) = &made {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            store::propose_artifact(&tx, &id, a, &message_id, &now())
+                                .map_err(|e| e.to_string())?;
                         }
                     }
                     tx.commit().map_err(|e| e.to_string())
@@ -1770,6 +1784,69 @@ pub async fn chat_forget_memory(
 ) -> Result<(), String> {
     with_conn(&state, "chat.forget-memory", move |conn| {
         store::forget_memory(conn, &memory_id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Saves a finished answer as a note.
+#[tauri::command]
+pub async fn chat_save_note(
+    state: State<'_, AppState>,
+    message_id: String,
+    title: String,
+) -> Result<store::Artifact, String> {
+    with_conn(&state, "chat.save-note", move |conn| {
+        save_note(conn, &message_id, &title)
+    })
+    .await
+}
+
+fn save_note(conn: &Connection, message_id: &str, title: &str) -> Result<store::Artifact, String> {
+    let origin = store::message(conn, message_id).map_err(|e| e.to_string())?;
+    if bank_guard::matches_assessment_item(conn, &origin.content) {
+        return Err("assessment_item: notes cannot hold assessment questions".into());
+    }
+    store::save_message_as_note(
+        conn,
+        &uuid::Uuid::new_v4().to_string(),
+        message_id,
+        title,
+        &now(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Saves a proposed note or flashcard set.
+#[tauri::command]
+pub async fn chat_save_artifact(
+    state: State<'_, AppState>,
+    artifact_id: String,
+) -> Result<store::Artifact, String> {
+    with_conn(&state, "chat.save-artifact", move |conn| {
+        store::save_artifact(conn, &artifact_id, &now()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Dismisses a proposal or deletes a saved artifact.
+#[tauri::command]
+pub async fn chat_delete_artifact(
+    state: State<'_, AppState>,
+    artifact_id: String,
+) -> Result<(), String> {
+    with_conn(&state, "chat.delete-artifact", move |conn| {
+        store::delete_artifact(conn, &artifact_id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Every saved note and flashcard set, newest first.
+#[tauri::command]
+pub async fn chat_list_artifacts(
+    state: State<'_, AppState>,
+) -> Result<Vec<store::Artifact>, String> {
+    with_conn(&state, "chat.list-artifacts", move |conn| {
+        store::saved_artifacts(conn).map_err(|e| e.to_string())
     })
     .await
 }
@@ -2444,6 +2521,50 @@ mod tests {
             .iter()
             .map(|e| e["kind"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_proposed_flashcard_set_waits_to_be_saved_and_outlives_its_chat() {
+        static WORDS: [&str; 2] = [
+            "Here are your cards.\n",
+            "```artifact\n{\"type\":\"flashcards\",\"title\":\"Bayes terms\",\"cards\":[{\"front\":\"Prior\",\"back\":\"Belief before evidence\"}]}\n```",
+        ];
+        let endpoint = model(&WORDS, 1).await;
+        let harness = Harness::new(&endpoint);
+        let (task, _events) = harness.begin("Make flashcards");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+
+        harness.conn(|conn| {
+            let saved = store::message(conn, &message_id).unwrap();
+            assert_eq!(saved.content, "Here are your cards.");
+            let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+            assert_eq!(artifacts.len(), 1);
+            let proposal = &artifacts[0];
+            assert_eq!(
+                (proposal.status.as_str(), proposal.title.as_str()),
+                ("proposed", "Bayes terms")
+            );
+            assert_eq!(
+                proposal.sources.len(),
+                1,
+                "keeps the sources the answer carried"
+            );
+            assert!(store::saved_artifacts(conn).unwrap().is_empty());
+
+            // A note from the same answer, and the proposal saved.
+            let note = save_note(conn, &message_id, "Why rare events mislead").unwrap();
+            assert_eq!(note.status, "saved");
+            store::save_artifact(conn, &proposal.id, &now()).unwrap();
+            assert_eq!(store::saved_artifacts(conn).unwrap().len(), 2);
+
+            store::delete_thread(conn, "t").unwrap();
+            let kept = store::saved_artifacts(conn).unwrap();
+            assert_eq!(kept.len(), 2, "saved artifacts outlive the chat");
+            assert!(kept
+                .iter()
+                .all(|a| a.thread_id.is_none() && a.message_id.is_none()));
+        });
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

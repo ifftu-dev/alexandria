@@ -9,6 +9,7 @@ import type {
   ChatOffer,
   ChatPracticeView,
   ChatMemoryItem,
+  ChatArtifact,
   ChatGuardianApproval,
   ChatPreparedMessage,
   ChatStartedRun,
@@ -52,6 +53,8 @@ const excludedBindings = ref<string[]>([])
 const excludedMemory = ref<string[]>([])
 const showMemory = ref(false)
 const memoryItems = ref<ChatMemoryItem[]>([])
+const showSaved = ref(false)
+const savedArtifacts = ref<ChatArtifact[]>([])
 const approvals = ref<ChatGuardianApproval[]>([])
 const includeHistory = ref(true)
 const loaded = ref(false)
@@ -90,6 +93,8 @@ function reset() {
   excludedMemory.value = []
   showMemory.value = false
   memoryItems.value = []
+  showSaved.value = false
+  savedArtifacts.value = []
   approvals.value = []
   includeHistory.value = true
   loaded.value = false
@@ -235,7 +240,7 @@ export function useChat() {
     const text = draft.value
     void invoke('chat_save_draft', { scope: NEW_SCOPE, text: '' }).catch(() => {})
     if (text) void invoke('chat_save_draft', { scope: created.id, text }).catch(() => {})
-    detail.value = { thread: created, messages: [], bindings: [], practice: [], memory_proposals: [], active_run_id: null }
+    detail.value = { thread: created, messages: [], bindings: [], practice: [], memory_proposals: [], artifacts: [], active_run_id: null }
     threads.value = [created, ...threads.value]
     if (pendingMode.value !== 'ask') {
       const withMode = await guard(() =>
@@ -545,6 +550,38 @@ export function useChat() {
     )
   }
 
+  /** Replaces or removes an artifact in the open thread and the saved list. */
+  function syncArtifact(item: ChatArtifact | null | undefined, removedId?: string) {
+    if (item === undefined) return
+    const id = item?.id ?? removedId
+    if (detail.value) {
+      const rest = detail.value.artifacts.filter((a) => a.id !== id)
+      const inThread = item && item.thread_id === detail.value.thread.id
+      detail.value = { ...detail.value, artifacts: inThread ? [...rest, item].sort((a, b) => a.created_at.localeCompare(b.created_at)) : rest }
+    }
+    const others = savedArtifacts.value.filter((a) => a.id !== id)
+    savedArtifacts.value = item && item.status === 'saved' ? [item, ...others] : others
+  }
+
+  async function refreshSaved() {
+    const next = await guard(() => invoke<ChatArtifact[]>('chat_list_artifacts'))
+    if (next) savedArtifacts.value = next
+  }
+
+  async function saveArtifact(artifactId: string) {
+    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_save_artifact', { artifactId })))
+  }
+
+  async function deleteArtifact(artifactId: string) {
+    await guard(() => invoke('chat_delete_artifact', { artifactId }))
+    syncArtifact(null, artifactId)
+  }
+
+  /** Saves a finished answer as a note. */
+  async function saveNote(messageId: string, title: string) {
+    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_save_note', { messageId, title })))
+  }
+
   async function forgetMemory(memoryId: string) {
     await guard(() => invoke('chat_forget_memory', { memoryId }))
     memoryItems.value = memoryItems.value.filter((m) => m.id !== memoryId)
@@ -642,6 +679,12 @@ export function useChat() {
     refreshApprovals,
     approvalFor,
     showMemory,
+    showSaved,
+    savedArtifacts: readonly(savedArtifacts),
+    refreshSaved,
+    saveArtifact,
+    deleteArtifact,
+    saveNote,
     memoryItems: readonly(memoryItems),
     refreshMemory,
     addMemory,

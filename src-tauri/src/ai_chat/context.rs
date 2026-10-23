@@ -17,7 +17,7 @@ use super::store::SourceRef;
 
 /// Version of the application instructions. Bump on any wording change so a
 /// snapshot always rebuilds with the text it was reviewed with.
-pub const POLICY_VERSION: u32 = 3;
+pub const POLICY_VERSION: u32 = 4;
 
 /// Context window assumed when a connection does not state one.
 pub const DEFAULT_CONTEXT_TOKENS: u32 = 8_000;
@@ -89,6 +89,15 @@ suggestion for their learning memory:\n\
 Use \"observation\" as the kind for a recurring difficulty. The learner decides \
 whether to save it. Never suggest anything about health, beliefs, ethnicity, \
 family, or other personal traits, and never suggest grades or skill levels.\n\
+\n\
+When the learner asks for notes or flashcards, write them and end your reply \
+with one fenced block the app can offer to save:\n\
+```artifact\n\
+{{\"type\": \"note\", \"title\": \"short title\", \"text\": \"the note\"}}\n\
+```\n\
+For flashcards use {{\"type\": \"flashcards\", \"title\": \"short title\", \"cards\": \
+[{{\"front\": \"prompt\", \"back\": \"answer\"}}]}} with at most 20 cards. Only \
+make one when asked. Never turn assessment or exam questions into cards.\n\
 \n\
 You cannot see or help with assessments, and you cannot change the learner's \
 goals, progress, or credentials."
@@ -442,6 +451,11 @@ mod tests {
             assert!(prompt.contains("cannot see or help with assessments"));
         }
         assert!(system_prompt(POLICY_VERSION, "exam", &[], &[]).is_none());
+        assert!(
+            ask.contains("```artifact\n{\"type\": \"note\", \"title\""),
+            "{ask}"
+        );
+        assert!(ask.contains("\"cards\": [{\"front\": \"prompt\", \"back\": \"answer\"}]"));
         let mut m = manifest();
         m.mode = "practice".into();
         let excerpt = |_: &str| Some("x".to_string());

@@ -218,5 +218,29 @@
       "approved": "Approved by your guardian",
       "declined": "Not approved by your guardian"
     }
+  },
+  "artifacts": {
+    "open": "Saved notes",
+    "title": "Saved notes",
+    "intro": "Notes and flashcards you saved from chats. They stay on this device and are kept when you delete a chat.",
+    "empty": "Nothing saved yet. Save an answer as a note, or ask for notes or flashcards.",
+    "suggestedNote": "Suggested note",
+    "suggestedCards": "Suggested flashcards",
+    "suggestionHint": "Nothing is saved unless you save it.",
+    "save": "Save",
+    "dismiss": "Dismiss",
+    "saved": "Saved to your notes",
+    "saveNote": "Save as note",
+    "cards": "{count} card | {count} cards",
+    "study": "Study",
+    "showAnswer": "Show answer",
+    "next": "Next card",
+    "previous": "Previous card",
+    "cardPosition": "Card {current} of {total}",
+    "delete": "Delete",
+    "deleteTitle": "Delete this note?",
+    "deleteBody": "It is removed from this device. The chat it came from is not changed.",
+    "fromChat": "From a chat",
+    "untitledNote": "Note"
   }
 }

@@ -102,6 +102,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (23, "ai_chat_search", include_str!("ai_chat_search.sql")),
     // Goals as chat attachments.
     (24, "ai_chat_goal_bindings", include_str!("ai_chat_goal_bindings.sql")),
+    // Notes and flashcards made from chat.
+    (25, "ai_chat_artifacts", include_str!("ai_chat_artifacts.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

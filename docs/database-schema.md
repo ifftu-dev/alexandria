@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 24 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 125 tables, 123 indexes, 1 view, 6 triggers.
+**Schema**: 25 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 126 tables, 125 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -45,6 +45,7 @@ and requires a database's history to be an exact prefix of this list:
 22. `ai_connection_approvals`
 23. `ai_chat_search`
 24. `ai_chat_goal_bindings`
+25. `ai_chat_artifacts`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1438,7 +1439,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `messages` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 
-### AI chat (13)
+### AI chat (14)
 
 #### `ai_connection_approvals`
 
@@ -1451,6 +1452,19 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `decided_by_link` TEXT
 - `requested_at` TEXT NOT NULL
 - `decided_at` TEXT
+
+#### `chat_artifacts`
+
+- `id` TEXT PK
+- `kind` TEXT NOT NULL
+- `status` TEXT NOT NULL
+- `title` TEXT NOT NULL
+- `body_json` TEXT NOT NULL
+- `sources_json` TEXT NOT NULL default `'[]'`
+- `thread_id` TEXT → `chat_threads.id`
+- `message_id` TEXT → `chat_messages.id`
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
 
 #### `chat_bindings`
 
@@ -1601,6 +1615,8 @@ erDiagram
     chain_submissions ||--o{ chain_submission_members : network
     chain_submissions ||--o{ chain_submission_members : operation_kind
     chain_submissions ||--o{ chain_submission_members : operation_id
+    chat_messages ||--o{ chat_artifacts : message_id
+    chat_threads ||--o{ chat_artifacts : thread_id
     chat_threads ||--o{ chat_bindings : thread_id
     chat_messages ||--o{ chat_messages : reply_to
     chat_threads ||--o{ chat_messages : thread_id

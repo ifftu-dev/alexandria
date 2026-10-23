@@ -358,6 +358,11 @@ pub fn delete_thread(conn: &Connection, id: &str) -> Result<()> {
         "DELETE FROM learning_memory WHERE status = 'proposed' AND thread_id = ?1",
         [id],
     )?;
+    // Proposals go with the chat; saved artifacts stay.
+    tx.execute(
+        "DELETE FROM chat_artifacts WHERE status = 'proposed' AND thread_id = ?1",
+        [id],
+    )?;
     let changed = tx.execute("DELETE FROM chat_threads WHERE id = ?1", [id])?;
     if changed == 0 {
         return Err(StoreError::NotFound);
@@ -1322,6 +1327,188 @@ pub fn forget_memory(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+// ─── study artifacts ──────────────────────────────────────────────────────
+
+/// Most saved artifacts kept at once.
+pub const MAX_SAVED_ARTIFACTS: usize = 500;
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Artifact {
+    pub id: String,
+    pub status: String,
+    pub title: String,
+    pub body: super::artifact::Body,
+    pub sources: Vec<SourceRef>,
+    pub thread_id: Option<String>,
+    pub message_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+const ARTIFACT_COLUMNS: &str =
+    "id, status, title, body_json, sources_json, thread_id, message_id, created_at, updated_at";
+
+fn artifact_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Artifact> {
+    let body: String = r.get(3)?;
+    let sources: String = r.get(4)?;
+    let body = serde_json::from_str(&body).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
+    })?;
+    Ok(Artifact {
+        id: r.get(0)?,
+        status: r.get(1)?,
+        title: r.get(2)?,
+        body,
+        sources: serde_json::from_str(&sources).unwrap_or_default(),
+        thread_id: r.get(5)?,
+        message_id: r.get(6)?,
+        created_at: r.get(7)?,
+        updated_at: r.get(8)?,
+    })
+}
+
+pub fn artifact(conn: &Connection, id: &str) -> Result<Artifact> {
+    conn.query_row(
+        &format!("SELECT {ARTIFACT_COLUMNS} FROM chat_artifacts WHERE id = ?1"),
+        [id],
+        artifact_row,
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound)
+}
+
+fn insert_artifact(
+    conn: &Connection,
+    id: &str,
+    status: &str,
+    proposal: &super::artifact::Proposal,
+    message_id: &str,
+    now: &str,
+) -> Result<()> {
+    let origin = message(conn, message_id)?;
+    let body =
+        serde_json::to_string(&proposal.body).map_err(|e| StoreError::Invalid(e.to_string()))?;
+    let sources =
+        serde_json::to_string(&origin.sources).map_err(|e| StoreError::Invalid(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO chat_artifacts (id, kind, status, title, body_json, sources_json, thread_id, message_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+        params![
+            id,
+            proposal.body.kind(),
+            status,
+            proposal.title,
+            body,
+            sources,
+            origin.thread_id,
+            message_id,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+/// Stores a model's proposal for the learner to save or dismiss.
+pub fn propose_artifact(
+    conn: &Connection,
+    id: &str,
+    proposal: &super::artifact::Proposal,
+    message_id: &str,
+    now: &str,
+) -> Result<()> {
+    insert_artifact(conn, id, "proposed", proposal, message_id, now)
+}
+
+fn saved_count(conn: &Connection) -> Result<usize> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM chat_artifacts WHERE status = 'saved'",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(n as usize)
+}
+
+fn ensure_room(conn: &Connection) -> Result<()> {
+    if saved_count(conn)? >= MAX_SAVED_ARTIFACTS {
+        return Err(StoreError::Invalid(
+            "saved notes are full; delete some first".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The learner saves a complete answer as a note.
+pub fn save_message_as_note(
+    conn: &Connection,
+    id: &str,
+    message_id: &str,
+    title: &str,
+    now: &str,
+) -> Result<Artifact> {
+    let origin = message(conn, message_id)?;
+    if origin.role != "assistant" || origin.status != "complete" {
+        return Err(StoreError::Invalid(
+            "only a finished answer can be saved".into(),
+        ));
+    }
+    let proposal = super::artifact::Proposal {
+        title: super::artifact::clean_title(title)
+            .ok_or_else(|| StoreError::Invalid("a note needs a short title".into()))?,
+        body: super::artifact::Body::Note {
+            text: super::artifact::clean_note(&origin.content).ok_or_else(|| {
+                StoreError::Invalid("this answer is too long to save as a note".into())
+            })?,
+        },
+    };
+    ensure_room(conn)?;
+    insert_artifact(conn, id, "saved", &proposal, message_id, now)?;
+    artifact(conn, id)
+}
+
+/// Saves a proposal. Saving twice is harmless.
+pub fn save_artifact(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
+    let current = artifact(conn, id)?;
+    if current.status == "proposed" {
+        ensure_room(conn)?;
+        conn.execute(
+            "UPDATE chat_artifacts SET status = 'saved', updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+    }
+    artifact(conn, id)
+}
+
+/// Dismisses a proposal or deletes a saved artifact.
+pub fn delete_artifact(conn: &Connection, id: &str) -> Result<()> {
+    if conn.execute("DELETE FROM chat_artifacts WHERE id = ?1", [id])? == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+/// Proposals and saved artifacts that came from one thread, oldest first.
+pub fn artifacts_for_thread(conn: &Connection, thread_id: &str) -> Result<Vec<Artifact>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ARTIFACT_COLUMNS} FROM chat_artifacts WHERE thread_id = ?1 ORDER BY created_at, id"
+    ))?;
+    let rows = stmt
+        .query_map([thread_id], artifact_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Every saved artifact, newest first.
+pub fn saved_artifacts(conn: &Connection) -> Result<Vec<Artifact>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ARTIFACT_COLUMNS} FROM chat_artifacts WHERE status = 'saved'
+          ORDER BY updated_at DESC, id LIMIT {MAX_SAVED_ARTIFACTS}"
+    ))?;
+    let rows = stmt
+        .query_map([], artifact_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1455,6 +1642,40 @@ mod tests {
             .query_row("SELECT count(*) FROM chat_message_search", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 0, "deleting a thread empties its index rows");
+    }
+
+    #[test]
+    fn proposals_go_with_their_chat_and_only_finished_answers_become_notes() {
+        let conn = db();
+        create_thread(&conn, "t", Some("c1"), None, NOW).unwrap();
+        snapshot_row(&conn, "s1", "t", &[]);
+        begin_run(&conn, &start("r1", "q1", "s1", None, "u1", "a1", 1)).unwrap();
+        let proposal = super::super::artifact::Proposal {
+            title: "Terms".into(),
+            body: super::super::artifact::Body::Note {
+                text: "Prior: belief before evidence".into(),
+            },
+        };
+        propose_artifact(&conn, "p1", &proposal, "a1", NOW).unwrap();
+        // The answer is still streaming, and a question is not an answer.
+        assert!(save_message_as_note(&conn, "n1", "a1", "T", NOW).is_err());
+        assert!(save_message_as_note(&conn, "n1", "u1", "T", NOW).is_err());
+        assert!(matches!(
+            artifact(&conn, "missing"),
+            Err(StoreError::NotFound)
+        ));
+        assert_eq!(save_artifact(&conn, "p1", NOW).unwrap().status, "saved");
+        assert_eq!(
+            save_artifact(&conn, "p1", NOW).unwrap().status,
+            "saved",
+            "saving twice is harmless"
+        );
+        propose_artifact(&conn, "p2", &proposal, "a1", NOW).unwrap();
+        delete_thread(&conn, "t").unwrap();
+        assert!(matches!(artifact(&conn, "p2"), Err(StoreError::NotFound)));
+        assert_eq!(saved_artifacts(&conn).unwrap().len(), 1);
+        delete_artifact(&conn, "p1").unwrap();
+        assert!(delete_artifact(&conn, "p1").is_err());
     }
 
     #[test]
