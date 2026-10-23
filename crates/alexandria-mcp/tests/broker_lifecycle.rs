@@ -224,8 +224,8 @@ async fn learners_read_published_content_without_answers_or_drafts() {
         [
             "text",
             "text",
-            "questions",
-            "questions",
+            "withheld",
+            "withheld",
             "withheld",
             "video_chapters",
             "text"
@@ -259,20 +259,15 @@ async fn learners_read_published_content_without_answers_or_drafts() {
     assert_eq!(blob["structuredContent"]["text"], "Blob lesson body");
     let (_, gone) = call(&learner, "read_lesson", learn("pub", "gone")).await;
     assert_eq!(gone["structuredContent"]["status"], "unavailable");
+    // Quizzes are graded like assessments in the player: an assistant gets
+    // the reason, never the questions.
     let (_, quiz) = call(&learner, "read_lesson", learn("pub", "quiz")).await;
-    assert_eq!(
-        quiz["structuredContent"]["questions"][0]["prompt"],
-        "Pick one"
-    );
-    assert_eq!(
-        quiz["structuredContent"]["questions"][0]["options"],
-        json!(["a", "b"])
-    );
+    assert_eq!(quiz["structuredContent"]["status"], "withheld");
+    assert_eq!(quiz["structuredContent"]["questions"], json!([]));
+    assert!(!quiz.to_string().contains("Pick one"));
     let (_, mcq) = call(&learner, "read_lesson", learn("pub", "mcq")).await;
-    assert_eq!(
-        mcq["structuredContent"]["questions"][0]["options"],
-        json!(["x", "y"])
-    );
+    assert_eq!(mcq["structuredContent"]["status"], "withheld");
+    assert_eq!(mcq["structuredContent"]["questions"], json!([]));
     let (_, exam) = call(&learner, "read_lesson", learn("pub", "final")).await;
     assert_eq!(exam["structuredContent"]["status"], "withheld");
     let (_, video) = call(&learner, "read_lesson", learn("pub", "vid")).await;
@@ -871,5 +866,53 @@ async fn restart_malformed_frames_and_capacity_fail_cleanly() {
     assert!(raw_read(socket, &token)
         .await
         .starts_with("permission_denied"));
+    assistant.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn assistant_access_pauses_while_an_assessment_is_in_progress() {
+    let a = Profile::new("A");
+    let _server = a.serve();
+    let (_, file) = a.grant("Reader", &["drafts:read"]);
+    let assistant = client(&file).await;
+    let (error, before) = call(&assistant, "read_lesson_draft", lesson()).await;
+    assert!(!error);
+
+    // An attempt (or interview check) holds a live integrity session.
+    a.db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO integrity_sessions(id, status, purpose) VALUES ('attempt', 'active', 'assessment')",
+            [],
+        )
+        .unwrap();
+    let (error, body) = call(&assistant, "read_lesson_draft", lesson()).await;
+    assert!(error, "assistant must not read during an assessment");
+    assert!(body.to_string().contains("assessment_active"));
+    assert!(!body.to_string().contains("Profile A lesson"));
+
+    // A token that does not authorize learns nothing about assessment state.
+    let proposal = json!({
+        "course_id": "course",
+        "element_id": "lesson",
+        "fingerprint": before["structuredContent"]["fingerprint"],
+        "text": "Rewrite",
+        "request_id": "request-1"
+    });
+    let (error, denied) = call(&assistant, "propose_lesson_draft", proposal).await;
+    assert!(error);
+    assert!(denied.to_string().contains("permission_denied"));
+    assert!(!denied.to_string().contains("assessment_active"));
+
+    a.db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE integrity_sessions SET ended_at = datetime('now'), status = 'completed'",
+            [],
+        )
+        .unwrap();
+    let (error, body) = call(&assistant, "read_lesson_draft", lesson()).await;
+    assert!(!error);
+    assert_eq!(body["structuredContent"]["text"], "Profile A lesson");
     assistant.cancel().await.unwrap();
 }

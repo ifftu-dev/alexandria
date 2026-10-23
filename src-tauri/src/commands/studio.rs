@@ -123,6 +123,7 @@ pub async fn studio_ask_tutor(
     }
     let epoch = state.studio.epoch.load(Ordering::SeqCst);
     let context = with_db(&state, |db| {
+        alexandria_studio::gate::require_no_assessment(db)?;
         store::tutor_context(db, &course_id, &element_id, &connection_id)
     })?;
     let expected_messages = context.thread.messages.len();
@@ -179,6 +180,8 @@ pub async fn studio_ask_tutor(
         if state.studio.epoch.load(Ordering::SeqCst) != epoch {
             return Err(StudioError::Locked);
         }
+        // An attempt that started while the answer was generating discards it.
+        alexandria_studio::gate::require_no_assessment(db)?;
         store::save_tutor_exchange(db, context.thread, expected_messages, &question, &answer)
     })?;
     Ok(TutorReply {
@@ -387,6 +390,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
             let Some(index) = run.value.steps.iter().position(|s| s.output.is_none()) else {
                 return Ok(None);
             };
+            alexandria_studio::gate::require_no_assessment(db)?;
             let step = run.value.steps[index].clone();
             let current = store::connection(db, &step.connection.id)?.value;
             if !current.enabled
@@ -430,6 +434,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
                         return Err(StudioError::Locked);
                     }
+                    alexandria_studio::gate::require_no_assessment(db)?;
                     let current = store::run(db, &id)?;
                     if current.revision != run.revision || current.value.status != "running" {
                         return Err(StudioError::Conflict);

@@ -237,6 +237,8 @@ fn dispatch(
         epoch,
         now,
     )?;
+    // After authorization, so an invalid token learns nothing about state.
+    crate::gate::require_no_assessment(db)?;
     let value = match request.operation.as_str() {
         "search_catalog" => learning::search_catalog(
             db,
