@@ -102,7 +102,7 @@
   "errors": {
     "assessment_active": "Chat is paused while an assessment is in progress. Your draft is saved.",
     "no_connection": "Choose a model connection before sending.",
-    "guardian_required": "Remote models need a guardian's approval. Use a model on this device or on your own network.",
+    "guardian_required": "Remote models need a guardian's approval. Ask a guardian, or use a model on this device or your own network.",
     "context_stale": "Something in this message changed after you reviewed it. Review it again before sending.",
     "too_many_runs": "Two answers are already being written. Wait for one to finish.",
     "source_unavailable": "An attached lesson is no longer available. Remove it to continue.",
@@ -124,7 +124,10 @@
     "invalid": "This connection's settings are not valid.",
     "generic": "Something went wrong. Try again.",
     "assessment_item": "That looks like an assessment question. Chat can't help with assessment questions.",
-    "memory": "That couldn't be saved. Keep it to one short sentence."
+    "memory": "That couldn't be saved. Keep it to one short sentence.",
+    "guardian_pending": "Your guardian has been asked to approve this model. You can use it once they do.",
+    "guardian_declined": "Your guardian did not approve this model. Use a model on this device or your own network.",
+    "no_guardian": "Link a guardian in Settings first, then ask them to approve this model."
   },
   "connection": {
     "title": "Add a model connection",
@@ -144,7 +147,7 @@
     "contextHint": "Leave empty to assume 8,000 tokens.",
     "save": "Save",
     "cancel": "Cancel",
-    "guardianNote": "Remote models need a guardian's approval, which is not available yet."
+    "guardianNote": "Remote models need a guardian's approval. After saving, ask a guardian from the chat."
   },
   "paused": "Chat is paused during assessments. Your draft is saved and comes back when you finish.",
   "practice": {
@@ -197,5 +200,14 @@
     "addPlaceholder": "For example: explain with worked numbers first",
     "full": "Learning memory is full. Forget something first.",
     "reviewTitle": "Learning memory"
+  },
+  "guardian": {
+    "ask": "Ask a guardian",
+    "status": {
+      "none": "Needs a guardian's approval",
+      "pending": "Waiting for your guardian",
+      "approved": "Approved by your guardian",
+      "declined": "Not approved by your guardian"
+    }
   }
 }

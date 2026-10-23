@@ -402,6 +402,118 @@ fn is_minor(conn: &Connection) -> Result<bool, String> {
         .is_some_and(|b| crate::domain::identity::is_minor(b, chrono::Utc::now().date_naive())))
 }
 
+/// The latest guardian decision for a connection at its current endpoint.
+fn latest_approval(
+    conn: &Connection,
+    connection_id: &str,
+    endpoint: &str,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT status FROM ai_connection_approvals
+          WHERE connection_id = ?1 AND endpoint = ?2
+          ORDER BY requested_at DESC, rowid DESC LIMIT 1",
+        [connection_id, endpoint],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|_| "storage_error: approvals could not be read".to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GuardianApproval {
+    pub id: String,
+    pub connection_id: String,
+    pub connection_name: String,
+    pub endpoint: String,
+    pub model: String,
+    pub status: String,
+    pub requested_at: String,
+    pub decided_at: Option<String>,
+}
+
+fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, connection_id, connection_name, endpoint, model, status, requested_at, decided_at
+               FROM ai_connection_approvals ORDER BY requested_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(GuardianApproval {
+                id: r.get(0)?,
+                connection_id: r.get(1)?,
+                connection_name: r.get(2)?,
+                endpoint: r.get(3)?,
+                model: r.get(4)?,
+                status: r.get(5)?,
+                requested_at: r.get(6)?,
+                decided_at: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Asks the learner's guardians to approve a remote connection at its current
+/// endpoint. The request travels with the next guardian sync.
+fn request_approval(conn: &Connection, connection_id: &str) -> Result<GuardianApproval, String> {
+    let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
+    if studio_provider::location(&doc.value).map_err(|e| e.to_string())? != Location::Remote {
+        return Err("invalid_input: only remote models need a guardian's approval".into());
+    }
+    let has_guardian: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM guardian_links WHERE side = 'ward' AND status = 'active')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !has_guardian {
+        return Err("no_guardian: link a guardian in Settings first".into());
+    }
+    if matches!(
+        latest_approval(conn, &doc.id, &doc.value.endpoint)?.as_deref(),
+        Some("pending" | "approved")
+    ) {
+        return approvals(conn)?
+            .into_iter()
+            .find(|a| a.connection_id == doc.id && a.endpoint == doc.value.endpoint)
+            .ok_or_else(|| "storage_error: approval missing".to_string());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+        rusqlite::params![id, doc.id, doc.value.name, doc.value.endpoint, doc.value.model, now()],
+    )
+    .map_err(|e| e.to_string())?;
+    approvals(conn)?
+        .into_iter()
+        .find(|a| a.id == id)
+        .ok_or_else(|| "storage_error: approval missing".to_string())
+}
+
+#[tauri::command]
+pub async fn chat_request_guardian_approval(
+    state: State<'_, AppState>,
+    connection_id: String,
+) -> Result<GuardianApproval, String> {
+    with_conn(&state, "chat.request-approval", move |conn| {
+        request_approval(conn, &connection_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn chat_list_guardian_approvals(
+    state: State<'_, AppState>,
+) -> Result<Vec<GuardianApproval>, String> {
+    with_conn(&state, "chat.list-approvals", approvals).await
+}
+
 fn gather(
     conn: &Connection,
     thread_id: &str,
@@ -425,7 +537,18 @@ fn gather(
     }
     let location = studio_provider::location(&doc.value).map_err(|e| e.to_string())?;
     if location == Location::Remote && is_minor(conn)? {
-        return Err("guardian_required: remote models need a guardian's approval; use a model on this device or your own network".into());
+        match latest_approval(conn, &doc.id, &doc.value.endpoint)?.as_deref() {
+            Some("approved") => {}
+            Some("pending") => {
+                return Err("guardian_pending: waiting for a guardian to approve this model".into())
+            }
+            Some(_) => {
+                return Err("guardian_declined: a guardian did not approve this model".into())
+            }
+            None => {
+                return Err("guardian_required: remote models need a guardian's approval; use a model on this device or your own network".into())
+            }
+        }
     }
     let model_id = thread
         .model_id
@@ -1824,7 +1947,7 @@ mod tests {
     }
 
     #[test]
-    fn minors_cannot_send_to_remote_models_but_can_use_their_own() {
+    fn minors_need_a_guardians_approval_for_remote_models_at_that_endpoint() {
         let conn = db();
         thread(&conn);
         conn.execute("UPDATE local_identity SET birthdate = '2015-03-10'", [])
@@ -1834,6 +1957,38 @@ mod tests {
         assert!(prepare(&conn, "Hello")
             .unwrap_err()
             .starts_with("guardian_required"));
+        // Asking needs a linked guardian.
+        assert!(request_approval(&conn, "c1")
+            .unwrap_err()
+            .starts_with("no_guardian"));
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
+             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
+            [],
+        )
+        .unwrap();
+        let asked = request_approval(&conn, "c1").unwrap();
+        assert_eq!(asked.status, "pending");
+        assert_eq!(
+            request_approval(&conn, "c1").unwrap().id,
+            asked.id,
+            "no duplicate request"
+        );
+        assert!(prepare(&conn, "Hello")
+            .unwrap_err()
+            .starts_with("guardian_pending"));
+        conn.execute("UPDATE ai_connection_approvals SET status = 'approved'", [])
+            .unwrap();
+        assert_eq!(
+            prepare(&conn, "Hello").unwrap().destination.location,
+            "remote"
+        );
+        // A different endpoint is a different approval.
+        connection(&conn, "c1", "cloud", "https://api.anthropic.com/v1", None);
+        assert!(prepare(&conn, "Hello")
+            .unwrap_err()
+            .starts_with("guardian_required"));
+        // Models on the learner's own network never need approval.
         connection(
             &conn,
             "c1",
@@ -1841,8 +1996,17 @@ mod tests {
             "http://192.168.1.40:1234/v1",
             None,
         );
-        let prepared = prepare(&conn, "Hello").unwrap();
-        assert_eq!(prepared.destination.location, "private_network");
+        assert_eq!(
+            prepare(&conn, "Hello").unwrap().destination.location,
+            "private_network"
+        );
+        // A declined request says so.
+        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
+        conn.execute("UPDATE ai_connection_approvals SET status = 'declined'", [])
+            .unwrap();
+        assert!(prepare(&conn, "Hello")
+            .unwrap_err()
+            .starts_with("guardian_declined"));
     }
 
     #[test]

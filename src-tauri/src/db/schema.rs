@@ -95,6 +95,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (20, "ai_chat_practice", include_str!("ai_chat_practice.sql")),
     // Learning memory: learner-approved preferences and observations.
     (21, "learning_memory", include_str!("ai_chat_memory.sql")),
+    // Guardian approval of remote model connections for learners under 18,
+    // carried over the sealed guardian link.
+    (22, "ai_connection_approvals", include_str!("ai_connection_approvals.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

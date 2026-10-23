@@ -188,7 +188,8 @@ fn the_view_set_is_exact() {
 /// interview panel link adds 1 index. Global AI chat adds 8 tables (threads,
 /// messages, attachments, excerpts, snapshots, snapshot excerpts, runs,
 /// drafts) and 4 indexes; chat practice adds 2 tables (items, attempts) and 2
-/// indexes; learning memory adds 1 table and 1 index.
+/// indexes; learning memory adds 1 table and 1 index;
+/// guardian approval of remote models adds 2 tables and 1 index.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -196,8 +197,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 122, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 122, "index count changed");
+    assert_eq!(tables, 124, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 123, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         3,

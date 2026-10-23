@@ -9,6 +9,7 @@ import type {
   ChatOffer,
   ChatPracticeView,
   ChatMemoryItem,
+  ChatGuardianApproval,
   ChatPreparedMessage,
   ChatStartedRun,
   ChatStatus,
@@ -50,6 +51,7 @@ const excludedBindings = ref<string[]>([])
 const excludedMemory = ref<string[]>([])
 const showMemory = ref(false)
 const memoryItems = ref<ChatMemoryItem[]>([])
+const approvals = ref<ChatGuardianApproval[]>([])
 const includeHistory = ref(true)
 const loaded = ref(false)
 
@@ -87,6 +89,7 @@ function reset() {
   excludedMemory.value = []
   showMemory.value = false
   memoryItems.value = []
+  approvals.value = []
   includeHistory.value = true
   loaded.value = false
   pendingText = null
@@ -544,6 +547,31 @@ export function useChat() {
     }
   }
 
+  async function refreshApprovals() {
+    const next = await guard(() => invoke<ChatGuardianApproval[]>('chat_list_guardian_approvals'))
+    if (next) approvals.value = next
+  }
+
+  /** The latest guardian decision for a connection at its current endpoint. */
+  function approvalFor(connectionId: string, endpoint: string) {
+    return approvals.value.find((a) => a.connection_id === connectionId && a.endpoint === endpoint) ?? null
+  }
+
+  /** Ask the learner's guardians to approve the selected remote model. The
+   * request is sent now if a guardian is reachable, else on the next sync. */
+  async function requestGuardianApproval() {
+    const connectionId = selectedConnectionId.value
+    if (!connectionId) return
+    try {
+      await invoke('chat_request_guardian_approval', { connectionId })
+      error.value = 'guardian_pending'
+      void refreshApprovals().catch(() => {})
+      void invoke('guardian_sync_now').catch(() => {})
+    } catch (e) {
+      error.value = chatErrorCode(e)
+    }
+  }
+
   async function renameThread(id: string, title: string) {
     const updated = await guard(() => invoke<ChatThread>('chat_rename_thread', { threadId: id, title }))
     if (!updated) return
@@ -600,6 +628,9 @@ export function useChat() {
     send,
     retry,
     ask,
+    requestGuardianApproval,
+    refreshApprovals,
+    approvalFor,
     showMemory,
     memoryItems: readonly(memoryItems),
     refreshMemory,

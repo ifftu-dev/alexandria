@@ -49,6 +49,8 @@ const PENDING_TRANSLATION = [
   // Global AI chat: English-first while the feature is in alpha.
   'chat.',
   'settings.personalization.shortcutNames.toggle-chat',
+  // Guardian approval of remote AI models.
+  'guardian.aiRequests.',
   // Integrity flags recorded when AI is used during an attempt.
   'sentinel.flags.items.inAppAssistantDuringAttempt',
   'sentinel.flags.items.mcpCallDuringAttempt',

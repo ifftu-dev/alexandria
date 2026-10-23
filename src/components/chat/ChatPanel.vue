@@ -75,7 +75,7 @@ const errorText = computed(() => {
   const known = [
     'assessment_active', 'no_connection', 'guardian_required', 'context_stale', 'too_many_runs',
     'source_unavailable', 'unreachable', 'timeout', 'auth', 'rate_limited', 'invalid',
-    'assessment_item', 'memory',
+    'assessment_item', 'memory', 'guardian_pending', 'guardian_declined', 'no_guardian',
   ]
   return t(`chat.errors.${known.includes(code) ? code : 'generic'}`)
 })
@@ -270,7 +270,15 @@ function formatDate(value: string) {
       </div>
 
       <div v-if="errorText" class="mx-3 mb-1 flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs" role="alert">
-        <p class="flex-1">{{ errorText }}</p>
+        <div class="flex-1">
+          <p>{{ errorText }}</p>
+          <button
+            v-if="chat.error.value === 'guardian_required'"
+            type="button"
+            class="mt-1.5 rounded-full border border-border bg-background px-2.5 py-0.5 font-medium hover:bg-muted"
+            @click="chat.requestGuardianApproval()"
+          >{{ t('chat.guardian.ask') }}</button>
+        </div>
         <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('chat.panel.close')" @click="chat.error.value = null">×</button>
       </div>
 

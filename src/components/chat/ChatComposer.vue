@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChat } from '@/composables/useChat'
+import { useAccountStatus } from '@/composables/useAccountStatus'
 import type { ChatLocation } from '@/types'
 
 const emit = defineEmits<{ addConnection: [] }>()
 const { t } = useI18n()
 const chat = useChat()
+const { isMinor } = useAccountStatus()
 const input = ref<HTMLTextAreaElement | null>(null)
 const pickerOpen = ref(false)
 const models = ref<string[] | null>(null)
@@ -80,6 +82,7 @@ function closeOnOutside(event: MouseEvent) {
   if (!(event.target as HTMLElement).closest('[data-chat-picker]')) pickerOpen.value = false
 }
 watch(pickerOpen, (open) => {
+  if (open && isMinor.value) void chat.refreshApprovals().catch(() => {})
   if (open) document.addEventListener('mousedown', closeOnOutside)
   else document.removeEventListener('mousedown', closeOnOutside)
 })
@@ -131,6 +134,11 @@ defineExpose({ focus: () => input.value?.focus() })
                 <span class="min-w-0 flex-1">
                   <span class="block truncate font-medium text-foreground">{{ c.value.name }}</span>
                   <span class="block truncate text-muted-foreground">{{ c.value.model }} · {{ t(`chat.location.${locationOf(c.value.location)}`) }}</span>
+                  <span
+                    v-if="isMinor && c.value.location === 'cloud'"
+                    class="block truncate text-[11px]"
+                    :class="chat.approvalFor(c.id, c.value.endpoint)?.status === 'approved' ? 'text-success' : 'text-warning'"
+                  >{{ t(`chat.guardian.status.${chat.approvalFor(c.id, c.value.endpoint)?.status ?? 'none'}`) }}</span>
                 </span>
               </button>
               <div v-if="chat.selectedConnectionId.value === c.id" class="ms-5 border-s border-border ps-2">
