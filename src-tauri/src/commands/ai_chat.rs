@@ -34,7 +34,7 @@ use crate::ai_chat::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use crate::ai_chat::{error_code, ChatRuntime, RunGuard};
+use crate::ai_chat::{bank_guard, error_code, practice, ChatRuntime, RunGuard};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
@@ -142,6 +142,7 @@ pub struct ThreadDetail {
     pub thread: ChatThread,
     pub messages: Vec<ChatMessage>,
     pub bindings: Vec<ChatBinding>,
+    pub practice: Vec<store::PracticeView>,
     pub active_run_id: Option<String>,
 }
 
@@ -158,6 +159,7 @@ pub async fn chat_get_thread(
             thread: store::thread(conn, &thread_id).map_err(e)?,
             messages: store::messages(conn, &thread_id).map_err(e)?,
             bindings: store::bindings(conn, &thread_id).map_err(e)?,
+            practice: store::practice_for_thread(conn, &thread_id).map_err(e)?,
             active_run_id: store::active_run(conn, &thread_id).map_err(e)?,
         })
     })
@@ -427,6 +429,9 @@ fn gather(
             if trimmed.chars().count() > context::MAX_MESSAGE_CHARS {
                 return Err("invalid_input: this message is too long".into());
             }
+            if bank_guard::matches_assessment_item(conn, trimmed) {
+                return Err("assessment_item: this looks like an assessment question, which chat cannot help with".into());
+            }
             (trimmed.to_string(), None, i64::MAX)
         }
     };
@@ -581,7 +586,7 @@ fn assemble(
     let mut sources: Vec<(ManifestSource, String)> = Vec::new();
     let mut items = vec![ReviewItem {
         kind: "instructions".into(),
-        label: format!("ask · v{POLICY_VERSION}"),
+        label: format!("{} · v{POLICY_VERSION}", gathered.thread.mode),
         tokens: 0,
         required: true,
         included: true,
@@ -630,7 +635,8 @@ fn assemble(
         });
         sources.push((source, text));
     }
-    let system = context::system_prompt(POLICY_VERSION, &sources).unwrap_or_default();
+    let mode = gathered.thread.mode.clone();
+    let system = context::system_prompt(POLICY_VERSION, &mode, &sources).unwrap_or_default();
     let system_tokens = estimate_tokens(&system);
     let attached: u32 = sources.iter().map(|(s, _)| s.tokens).sum();
     items[0].tokens = system_tokens.saturating_sub(attached);
@@ -675,7 +681,7 @@ fn assemble(
     let reviewed_scope = scope_digest(&destination, &manifest_sources);
     let manifest = Manifest {
         policy_version: POLICY_VERSION,
-        mode: "ask".into(),
+        mode,
         thread_id: gathered.thread.id.clone(),
         thread_revision: gathered.thread.revision,
         destination: destination.clone(),
@@ -803,6 +809,7 @@ pub enum ChatEventBody {
 
 struct Started {
     run: StartedRun,
+    mode: String,
     request: alexandria_ai::ChatRequest,
     endpoint: String,
     location: Location,
@@ -912,6 +919,7 @@ fn begin(
             assistant_message: store::message(conn, &run.assistant_message_id).map_err(e)?,
             existing: false,
         },
+        mode: manifest.mode.clone(),
         request,
         endpoint: manifest.destination.endpoint,
         location,
@@ -1095,6 +1103,76 @@ impl Stream {
             .unwrap_or(false)
     }
 
+    /// Completes a Practice answer: the question block becomes a stored,
+    /// checkable practice item and is removed from the shown text. A block
+    /// that cannot be validated leaves the reply as written; one that
+    /// resembles an assessment item is dropped.
+    async fn finish_practice(
+        &self,
+        run_id: &str,
+        message_id: &str,
+        reply: &str,
+        usage: Option<alexandria_ai::Usage>,
+    ) {
+        let (prose, block) = practice::split(reply);
+        let question = block.and_then(practice::parse);
+        let (run_id, message_id, thread_id, reply) = (
+            run_id.to_string(),
+            message_id.to_string(),
+            self.started.run.thread_id.clone(),
+            reply.to_string(),
+        );
+        let saved = self
+            .executor
+            .execute(
+                DatabaseWorkload::Background,
+                self.lease.clone(),
+                "chat.finish-practice",
+                move |db| {
+                    let conn = db.conn();
+                    let accepted = question.filter(|q| {
+                        let text = format!("{} {}", q.prompt, q.options.join(" "));
+                        !bank_guard::matches_assessment_item(conn, &text)
+                    });
+                    let (content, note) = match (&accepted, block_present(&reply)) {
+                        (Some(_), _) => (prose.clone(), None),
+                        (None, true) if prose.is_empty() => {
+                            (String::new(), Some("practice_rejected"))
+                        }
+                        (None, true) => (prose.clone(), Some("practice_rejected")),
+                        (None, false) => (reply.clone(), None),
+                    };
+                    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+                    let finished = store::finish_run_in(
+                        &tx,
+                        &Finish {
+                            run_id: &run_id,
+                            assistant_message_id: &message_id,
+                            state: "complete",
+                            content: &content,
+                            error: note,
+                            input_tokens: usage.and_then(|u| u.input_tokens),
+                            output_tokens: usage.and_then(|u| u.output_tokens),
+                            now: &now(),
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
+                    if finished {
+                        if let Some(q) = &accepted {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            store::insert_practice(&tx, &id, &thread_id, &message_id, q, &now())
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
+                    tx.commit().map_err(|e| e.to_string())
+                },
+            )
+            .await;
+        if let Err(error) = saved {
+            log::warn!("chat: could not save a practice answer: {error}");
+        }
+    }
+
     async fn drive(mut self) {
         let mut seq = 0;
         self.emit(&mut seq, ChatEventBody::RunStarted);
@@ -1196,17 +1274,22 @@ impl Stream {
                     .ok()
                     .and_then(|v| v.as_str().map(str::to_owned))
                     .unwrap_or_else(|| "unknown".into());
-                finish(
-                    &self.executor,
-                    &self.lease,
-                    &run_id,
-                    &message_id,
-                    "complete",
-                    &completion.text,
-                    None,
-                    usage,
-                )
-                .await;
+                if self.started.mode == "practice" {
+                    self.finish_practice(&run_id, &message_id, &completion.text, usage)
+                        .await;
+                } else {
+                    finish(
+                        &self.executor,
+                        &self.lease,
+                        &run_id,
+                        &message_id,
+                        "complete",
+                        &completion.text,
+                        None,
+                        usage,
+                    )
+                    .await;
+                }
                 self.emit(
                     &mut seq,
                     ChatEventBody::RunCompleted {
@@ -1264,6 +1347,61 @@ impl Stream {
             }
         }
     }
+}
+
+fn block_present(reply: &str) -> bool {
+    reply.contains("```practice")
+}
+
+#[tauri::command]
+pub async fn chat_set_thread_mode(
+    state: State<'_, AppState>,
+    thread_id: String,
+    mode: String,
+) -> Result<ChatThread, String> {
+    with_conn(&state, "chat.set-mode", move |conn| {
+        store::set_thread_mode(conn, &thread_id, &mode, &now()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Checks a practice answer here, without asking a model.
+#[tauri::command]
+pub async fn chat_practice_attempt(
+    state: State<'_, AppState>,
+    item_id: String,
+    answer: String,
+) -> Result<store::PracticeView, String> {
+    with_conn(&state, "chat.practice-attempt", move |conn| {
+        refuse_during_assessment(conn)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        store::practice_attempt(conn, &item_id, &id, &answer, &now()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn chat_practice_hint(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> Result<store::PracticeView, String> {
+    with_conn(&state, "chat.practice-hint", move |conn| {
+        refuse_during_assessment(conn)?;
+        store::practice_hint(conn, &item_id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn chat_practice_reveal(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> Result<store::PracticeView, String> {
+    with_conn(&state, "chat.practice-reveal", move |conn| {
+        refuse_during_assessment(conn)?;
+        store::practice_reveal(conn, &item_id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -1646,11 +1784,20 @@ mod tests {
         /// Prepares and begins a run, and returns the stream task with the
         /// events it will emit.
         fn begin(&self, text: &str) -> (Stream, Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+            self.begin_in("ask", text)
+        }
+
+        fn begin_in(
+            &self,
+            mode: &str,
+            text: &str,
+        ) -> (Stream, Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
             let started = self.conn(|conn| {
                 if store::thread(conn, "t").is_err() {
                     thread(conn);
                     attach(conn, "t", "course", "lesson").unwrap();
                 }
+                store::set_thread_mode(conn, "t", mode, &now()).unwrap();
                 let prepared = prepare(conn, text).unwrap();
                 begin(
                     conn,
@@ -1698,8 +1845,12 @@ mod tests {
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
                 .await;
             for word in words {
-                let frame =
-                    format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{word}\"}}}}]}}\n\n");
+                let delta = serde_json::json!({"choices": [{"delta": {"content": word}}]});
+                let frame = format!(
+                    "data: {delta}
+
+"
+                );
                 if socket.write_all(frame.as_bytes()).await.is_err() {
                     return;
                 }
@@ -1821,5 +1972,108 @@ mod tests {
             (last["kind"].as_str(), last["partial"].as_bool()),
             (Some("run_failed"), Some(false))
         );
+    }
+    const BANK_ITEM: &str = "A bag has 4 red and 6 blue marbles. Two are drawn without replacement. What is the probability the second is red given the first was red?";
+
+    fn add_bank_item(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO assessment_items (id, item_kind, skill_id, content_public)
+             VALUES ('item', 'mcq', 'skill', json_object('prompt', ?1, 'options', json('[\"4/10\",\"3/9\"]')))",
+            [BANK_ITEM],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_pasted_assessment_item_is_refused_before_anything_is_prepared() {
+        let conn = db();
+        thread(&conn);
+        add_bank_item(&conn);
+        let error = prepare(&conn, &format!("Please solve: {BANK_ITEM}")).unwrap_err();
+        assert!(error.starts_with("assessment_item"), "{error}");
+        assert!(prepare(
+            &conn,
+            "Why does drawing without replacement change the odds?"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn practice_mode_uses_its_own_instructions() {
+        let conn = db();
+        thread(&conn);
+        store::set_thread_mode(&conn, "t", "practice", &now()).unwrap();
+        let prepared = prepare(&conn, "Give me a question").unwrap();
+        assert!(prepared.items[0].label.starts_with("practice"));
+        let started = start(&conn, &prepared, "q1").unwrap();
+        assert!(started.request.messages[0].content.contains("```practice"));
+        assert_eq!(started.mode, "practice");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_practice_answer_becomes_a_checkable_question_without_its_answer() {
+        static WORDS: [&str; 3] = [
+            "Here is one.\n\n",
+            "```practice\n{\"skill\":\"Conditional probability\",\"kind\":\"numeric\",",
+            "\"prompt\":\"A die shows an even number. What is P(greater than 3)?\",\"answer\":\"2/3\",\"hints\":[\"List the even faces.\"],\"explanation\":\"4 and 6.\"}\n```",
+        ];
+        let endpoint = model(&WORDS, 5).await;
+        let harness = Harness::new(&endpoint);
+        let (task, _) = harness.begin_in("practice", "Give me a question");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+        let (message, items) = harness.conn(|c| {
+            (
+                store::message(c, &message_id).unwrap(),
+                store::practice_for_thread(c, "t").unwrap(),
+            )
+        });
+        assert_eq!(message.content, "Here is one.");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].message_id, message_id);
+        assert_eq!(items[0].kind, "numeric");
+        assert_eq!(items[0].answer, None);
+        let solved = harness
+            .conn(|c| store::practice_attempt(c, &items[0].id, "x", "0.667", &now()).unwrap());
+        assert!(solved.solved_independently);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_generated_question_that_resembles_an_assessment_item_is_dropped() {
+        static WORDS: [&str; 2] = [
+            "Try this.\n```practice\n{\"kind\":\"multiple_choice\",\"prompt\":\"A bag has 4 red and 6 blue marbles. Two are drawn without replacement. What is the probability the second is red given the first was red?\",",
+            "\"options\":[\"4/10\",\"3/9\"],\"answer\":1}\n```",
+        ];
+        let endpoint = model(&WORDS, 5).await;
+        let harness = Harness::new(&endpoint);
+        harness.conn(add_bank_item);
+        let (task, _) = harness.begin_in("practice", "Another one please");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+        let (message, items) = harness.conn(|c| {
+            (
+                store::message(c, &message_id).unwrap(),
+                store::practice_for_thread(c, "t").unwrap(),
+            )
+        });
+        assert!(items.is_empty());
+        assert_eq!(message.error.as_deref(), Some("practice_rejected"));
+        assert!(!message.content.contains("4 red and 6 blue"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_malformed_practice_block_leaves_the_reply_as_written() {
+        static WORDS: [&str; 1] = ["Sure! What is 2+2? (answer: 4)"];
+        let endpoint = model(&WORDS, 5).await;
+        let harness = Harness::new(&endpoint);
+        let (task, _) = harness.begin_in("practice", "Quiz me");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+        let message = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(message.content, "Sure! What is 2+2? (answer: 4)");
+        assert_eq!(message.error, None);
+        assert!(harness
+            .conn(|c| store::practice_for_thread(c, "t").unwrap())
+            .is_empty());
     }
 }

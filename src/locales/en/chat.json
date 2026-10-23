@@ -22,7 +22,9 @@
     "ask": "Ask",
     "learn": "Learn",
     "practice": "Practice",
-    "comingSoon": "Coming soon"
+    "askHint": "Answers to your questions",
+    "learnHint": "One idea at a time, with a step for you to try",
+    "practiceHint": "Questions checked by Alexandria"
   },
   "location": {
     "device": "On this device",
@@ -40,7 +42,9 @@
     "loadingModels": "Loading models…",
     "noModelsListed": "This connection does not list its models.",
     "defaultModel": "Connection default",
-    "preparing": "Preparing…"
+    "preparing": "Preparing…",
+    "placeholderLearn": "What would you like to learn?",
+    "placeholderPractice": "Ask for a practice question…"
   },
   "context": {
     "label": "Sent with your next message",
@@ -118,7 +122,8 @@
     "unsupported": "This connection does not support that.",
     "cancelled": "Stopped.",
     "invalid": "This connection's settings are not valid.",
-    "generic": "Something went wrong. Try again."
+    "generic": "Something went wrong. Try again.",
+    "assessment_item": "That looks like an assessment question. Chat can't help with assessment questions."
   },
   "connection": {
     "title": "Add a model connection",
@@ -140,5 +145,32 @@
     "cancel": "Cancel",
     "guardianNote": "Remote models need a guardian's approval, which is not available yet."
   },
-  "paused": "Chat is paused during assessments. Your draft is saved and comes back when you finish."
+  "paused": "Chat is paused during assessments. Your draft is saved and comes back when you finish.",
+  "practice": {
+    "banner": "Practice doesn't earn credentials or change your progress. When you're ready, take the assessment.",
+    "start": "Give me a practice question",
+    "startPrompt": "Give me a practice question on what we have been discussing.",
+    "another": "Another question",
+    "anotherPrompt": "Give me a fresh practice question on the same skill, with different numbers and a different setting.",
+    "label": "Practice question",
+    "checked": "Checked by Alexandria",
+    "answer": "Your answer",
+    "answerNumeric": "A number, fraction, or percentage",
+    "check": "Check",
+    "hint": "Hint",
+    "hintCount": "Hint ({used} of {total})",
+    "noHints": "No hints for this one",
+    "reveal": "Show answer",
+    "correct": "Correct.",
+    "incorrect": "Not quite. Try again, or ask for a hint.",
+    "unreadable": "That answer could not be read. Check the format.",
+    "independent": "Solved on your own",
+    "assisted": "Solved with help",
+    "hintUsed": "Hint used",
+    "answerShown": "Answer shown",
+    "theAnswer": "Answer: {answer}",
+    "attempts": "No attempts | 1 attempt | {count} attempts",
+    "rejected": "The question looked too much like an assessment question, so it was not shown. Ask for another one.",
+    "unreadableQuestion": "This reply's question could not be checked, so it is shown as written."
+  }
 }

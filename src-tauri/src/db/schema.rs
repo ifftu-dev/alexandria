@@ -90,6 +90,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // request snapshots with content-addressed excerpts, and drafts. Queried by
     // `crate::ai_chat::store`, which includes the same file.
     (19, "ai_chat", include_str!("ai_chat.sql")),
+    // Chat practice: validated questions and the learner's attempts, checked
+    // locally. Practice never writes progress, credentials, or assessments.
+    (20, "ai_chat_practice", include_str!("ai_chat_practice.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

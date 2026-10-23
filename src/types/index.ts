@@ -2302,7 +2302,9 @@ export interface ChatThread { id: string; title: string; mode: 'ask' | 'learn' |
 export interface ChatSourceRef { id: string; kind: 'lesson'; label: string; course_id: string; element_id: string }
 export interface ChatMessage { id: string; thread_id: string; position: number; role: 'user' | 'assistant'; reply_to: string | null; version: number; content: string; status: ChatMessageStatus; error: string | null; connection_id: string | null; connection_name: string | null; model_id: string | null; location: ChatLocation | null; input_tokens: number | null; output_tokens: number | null; sources: ChatSourceRef[]; created_at: string; completed_at: string | null }
 export interface ChatBinding { id: string; thread_id: string; kind: 'lesson'; course_id: string; element_id: string; label: string; created_at: string }
-export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; active_run_id: string | null }
+export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
+export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
+export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; active_run_id: string | null }
 export interface ChatStatus { assessment_active: boolean }
 export interface ChatDestination { connection_id: string; connection_name: string; location: ChatLocation; host: string; model_id: string }
 export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; truncated: boolean }

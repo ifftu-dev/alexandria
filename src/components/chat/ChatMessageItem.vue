@@ -21,7 +21,13 @@ const copied = ref(false)
 
 const isUser = computed(() => props.message.role === 'user')
 const streaming = computed(() => props.message.status === 'streaming')
-const text = computed(() => (streaming.value ? (props.live || props.message.content) : props.message.content))
+// A Practice answer ends with a question block that becomes a card; while it
+// streams, show only the prose before it.
+const text = computed(() => {
+  const raw = streaming.value ? (props.live || props.message.content) : props.message.content
+  const fence = raw.indexOf('```practice')
+  return fence >= 0 ? raw.slice(0, fence).trimEnd() : raw
+})
 
 // Markdown is parsed once the answer is final. While it streams the raw text
 // is shown, so a long answer is never re-parsed on every token.
@@ -114,6 +120,9 @@ async function copy() {
         {{ message.status === 'interrupted' && message.error === 'interrupted' ? t('chat.message.interruptedBody') : errorText }}
       </p>
     </div>
+    <p v-else-if="message.error === 'practice_rejected'" class="mt-1 text-xs text-muted-foreground">
+      {{ t('chat.practice.rejected') }}
+    </p>
     <p v-else-if="message.status === 'cancelled'" class="mt-1 text-xs text-muted-foreground">
       {{ message.error === 'assessment_active' ? t('chat.errors.assessment_active') : t('chat.message.cancelled') }}
     </p>

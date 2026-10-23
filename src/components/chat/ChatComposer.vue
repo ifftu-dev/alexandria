@@ -15,6 +15,13 @@ const loadingModels = ref(false)
 const modelsError = ref('')
 
 const busy = computed(() => chat.preparing.value || chat.streaming.value)
+const placeholder = computed(() =>
+  chat.mode.value === 'practice'
+    ? t('chat.composer.placeholderPractice')
+    : chat.mode.value === 'learn'
+      ? t('chat.composer.placeholderLearn')
+      : t('chat.composer.placeholder'),
+)
 const canSend = computed(() => !!chat.draft.value.trim() && !chat.preparing.value && !!chat.selectedConnection.value)
 
 function locationOf(value: string | undefined): ChatLocation {
@@ -89,8 +96,8 @@ defineExpose({ focus: () => input.value?.focus() })
         :value="chat.draft.value"
         rows="2"
         class="block max-h-44 w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-        :placeholder="t('chat.composer.placeholder')"
-        :aria-label="t('chat.composer.placeholder')"
+        :placeholder="placeholder"
+        :aria-label="placeholder"
         @input="chat.setDraft(($event.target as HTMLTextAreaElement).value)"
         @keydown="onKeydown"
       />

@@ -8,6 +8,7 @@ import ChatMessageItem from './ChatMessageItem.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatReviewSheet from './ChatReviewSheet.vue'
 import ChatConnectionForm from './ChatConnectionForm.vue'
+import ChatPracticeCard from './ChatPracticeCard.vue'
 import { ConfirmDialog } from '@/components/ui'
 import type { ChatMessage, ChatSourceRef, StudioConnection, StudioDocument } from '@/types'
 
@@ -26,6 +27,16 @@ const deleting = ref<string | null>(null)
 const shownVersion = ref<Record<string, number>>({})
 
 const messages = computed(() => chat.detail.value?.messages ?? [])
+const practice = computed(() => chat.detail.value?.practice ?? [])
+const latestPracticeId = computed(() => practice.value[practice.value.length - 1]?.id ?? null)
+function practiceFor(messageId: string) {
+  return practice.value.find((p) => p.message_id === messageId) ?? null
+}
+const modes = computed(() => [
+  { value: 'ask' as const, label: t('chat.modes.ask'), hint: t('chat.modes.askHint') },
+  { value: 'learn' as const, label: t('chat.modes.learn'), hint: t('chat.modes.learnHint') },
+  { value: 'practice' as const, label: t('chat.modes.practice'), hint: t('chat.modes.practiceHint') },
+])
 const bindings = computed(() => chat.detail.value?.bindings ?? [])
 const users = computed(() => messages.value.filter((m) => m.role === 'user'))
 function answers(user: ChatMessage) {
@@ -59,6 +70,7 @@ const errorText = computed(() => {
   const known = [
     'assessment_active', 'no_connection', 'guardian_required', 'context_stale', 'too_many_runs',
     'source_unavailable', 'unreachable', 'timeout', 'auth', 'rate_limited', 'invalid',
+    'assessment_item',
   ]
   return t(`chat.errors.${known.includes(code) ? code : 'generic'}`)
 })
@@ -194,10 +206,20 @@ function formatDate(value: string) {
     <template v-else>
       <div class="flex-none px-3 pt-2">
         <div class="tabs" role="tablist" :aria-label="t('chat.panel.title')">
-          <button type="button" class="tab tab-active !py-1 text-xs" role="tab" aria-selected="true">{{ t('chat.modes.ask') }}</button>
-          <button type="button" class="tab !py-1 text-xs opacity-50" role="tab" aria-selected="false" aria-disabled="true" :title="t('chat.modes.comingSoon')" disabled>{{ t('chat.modes.learn') }}</button>
-          <button type="button" class="tab !py-1 text-xs opacity-50" role="tab" aria-selected="false" aria-disabled="true" :title="t('chat.modes.comingSoon')" disabled>{{ t('chat.modes.practice') }}</button>
+          <button
+            v-for="m in modes"
+            :key="m.value"
+            type="button"
+            class="tab !py-1 text-xs"
+            :class="{ 'tab-active': chat.mode.value === m.value }"
+            role="tab"
+            :aria-selected="chat.mode.value === m.value"
+            :title="m.hint"
+            :disabled="chat.streaming.value"
+            @click="chat.setMode(m.value)"
+          >{{ m.label }}</button>
         </div>
+        <p v-if="chat.mode.value === 'practice'" class="mt-1.5 text-[11px] text-muted-foreground">{{ t('chat.practice.banner') }}</p>
       </div>
 
       <div ref="scroller" class="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3" aria-live="off">
@@ -207,6 +229,13 @@ function formatDate(value: string) {
         <div v-else-if="!messages.length" class="px-2 py-8 text-center">
           <p class="text-sm font-semibold">{{ t('chat.panel.emptyTitle') }}</p>
           <p class="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">{{ t('chat.panel.emptyBody') }}</p>
+          <button
+            v-if="chat.mode.value === 'practice'"
+            type="button"
+            class="mt-3 rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-muted"
+            :disabled="chat.preparing.value"
+            @click="chat.ask(t('chat.practice.startPrompt'))"
+          >{{ t('chat.practice.start') }}</button>
         </div>
         <template v-for="user in users" :key="user.id">
           <ChatMessageItem :message="user" />
@@ -218,6 +247,11 @@ function formatDate(value: string) {
             @retry="chat.retry(user.id)"
             @cite="cite"
             @version="(delta) => step(user, delta)"
+          />
+          <ChatPracticeCard
+            v-if="shown(user) && practiceFor(shown(user)!.id)"
+            :item="practiceFor(shown(user)!.id)!"
+            :latest="practiceFor(shown(user)!.id)!.id === latestPracticeId"
           />
         </template>
       </div>

@@ -226,6 +226,20 @@ pub fn set_thread_model(
     thread(conn, id)
 }
 
+pub fn set_thread_mode(conn: &Connection, id: &str, mode: &str, now: &str) -> Result<ChatThread> {
+    if !super::context::is_mode(mode) {
+        return Err(StoreError::Invalid("unknown chat mode".into()));
+    }
+    let changed = conn.execute(
+        "UPDATE chat_threads SET mode = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, mode, now],
+    )?;
+    if changed == 0 {
+        return Err(StoreError::NotFound);
+    }
+    thread(conn, id)
+}
+
 /// Deletes a thread with its messages, attachments, snapshots, runs and
 /// draft, then drops excerpts no remaining snapshot references.
 pub fn delete_thread(conn: &Connection, id: &str) -> Result<()> {
@@ -705,14 +719,22 @@ pub struct Finish<'a> {
 /// (already recovered as interrupted) is left as it is.
 pub fn finish_run(conn: &Connection, finish: &Finish<'_>) -> Result<bool> {
     let tx = conn.unchecked_transaction()?;
-    let changed = tx.execute(
+    let finished = finish_run_in(&tx, finish)?;
+    tx.commit()?;
+    Ok(finished)
+}
+
+/// [`finish_run`] inside a transaction the caller owns, so related writes
+/// (a practice question) commit with it.
+pub fn finish_run_in(conn: &Connection, finish: &Finish<'_>) -> Result<bool> {
+    let changed = conn.execute(
         "UPDATE chat_runs SET state = ?2, finished_at = ?3 WHERE id = ?1 AND state = 'streaming'",
         params![finish.run_id, finish.state, finish.now],
     )?;
     if changed == 0 {
         return Ok(false);
     }
-    tx.execute(
+    conn.execute(
         "UPDATE chat_messages
             SET content = ?2, status = ?3, error = ?4, input_tokens = ?5, output_tokens = ?6, completed_at = ?7
           WHERE id = ?1",
@@ -726,7 +748,6 @@ pub fn finish_run(conn: &Connection, finish: &Finish<'_>) -> Result<bool> {
             finish.now
         ],
     )?;
-    tx.commit()?;
     Ok(true)
 }
 
@@ -761,6 +782,210 @@ pub fn recover_interrupted(
     }
     tx.commit()?;
     Ok(stale.len())
+}
+
+// ─── practice ──────────────────────────────────────────────────────────
+
+use super::practice::{self, Question};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeAttempt {
+    pub answer: String,
+    pub correct: bool,
+    pub assisted: bool,
+    pub created_at: String,
+}
+
+/// What the learner sees of a practice question. The answer and the
+/// explanation appear only once it is solved or the answer was shown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeView {
+    pub id: String,
+    pub message_id: String,
+    pub skill: String,
+    pub kind: String,
+    pub prompt: String,
+    pub options: Vec<String>,
+    pub hints: Vec<String>,
+    pub hints_total: usize,
+    pub revealed: bool,
+    pub solved: bool,
+    pub solved_independently: bool,
+    pub answer: Option<String>,
+    pub explanation: Option<String>,
+    pub attempts: Vec<PracticeAttempt>,
+}
+
+struct PracticeRow {
+    id: String,
+    message_id: String,
+    question: Question,
+    hints_used: usize,
+    revealed: bool,
+    solved: bool,
+    solved_independently: bool,
+}
+
+fn practice_row(conn: &Connection, id: &str) -> Result<PracticeRow> {
+    let (message_id, json, hints_used, revealed, solved, independent): (
+        String,
+        String,
+        i64,
+        bool,
+        bool,
+        bool,
+    ) = conn
+        .query_row(
+            "SELECT message_id, question_json, hints_used, revealed, solved, solved_independently
+               FROM chat_practice_items WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
+    let question: Question =
+        serde_json::from_str(&json).map_err(|_| StoreError::Invalid("practice question".into()))?;
+    Ok(PracticeRow {
+        id: id.to_string(),
+        message_id,
+        question,
+        hints_used: hints_used.max(0) as usize,
+        revealed,
+        solved,
+        solved_independently: independent,
+    })
+}
+
+fn view(conn: &Connection, row: &PracticeRow) -> Result<PracticeView> {
+    let mut stmt = conn.prepare(
+        "SELECT answer, correct, assisted, created_at FROM chat_practice_attempts
+          WHERE item_id = ?1 ORDER BY created_at, rowid",
+    )?;
+    let attempts = stmt
+        .query_map([&row.id], |r| {
+            Ok(PracticeAttempt {
+                answer: r.get(0)?,
+                correct: r.get(1)?,
+                assisted: r.get(2)?,
+                created_at: r.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let open = row.solved || row.revealed;
+    let q = &row.question;
+    Ok(PracticeView {
+        id: row.id.clone(),
+        message_id: row.message_id.clone(),
+        skill: q.skill.clone(),
+        kind: q.kind.as_str().to_string(),
+        prompt: q.prompt.clone(),
+        options: q.options.clone(),
+        hints: q.hints.iter().take(row.hints_used).cloned().collect(),
+        hints_total: q.hints.len(),
+        revealed: row.revealed,
+        solved: row.solved,
+        solved_independently: row.solved_independently,
+        answer: open.then(|| practice::display(q)),
+        explanation: (open && !q.explanation.is_empty()).then(|| q.explanation.clone()),
+        attempts,
+    })
+}
+
+pub fn insert_practice(
+    conn: &Connection,
+    id: &str,
+    thread_id: &str,
+    message_id: &str,
+    question: &Question,
+    now: &str,
+) -> Result<()> {
+    let json = serde_json::to_string(question)
+        .map_err(|_| StoreError::Invalid("practice question".into()))?;
+    conn.execute(
+        "INSERT INTO chat_practice_items (id, thread_id, message_id, question_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, thread_id, message_id, json, now],
+    )?;
+    Ok(())
+}
+
+pub fn practice_for_thread(conn: &Connection, thread_id: &str) -> Result<Vec<PracticeView>> {
+    let ids: Vec<String> = conn
+        .prepare(
+            "SELECT id FROM chat_practice_items WHERE thread_id = ?1 ORDER BY created_at, rowid",
+        )?
+        .query_map([thread_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    ids.iter()
+        .map(|id| practice_row(conn, id).and_then(|row| view(conn, &row)))
+        .collect()
+}
+
+pub fn practice_view(conn: &Connection, id: &str) -> Result<PracticeView> {
+    view(conn, &practice_row(conn, id)?)
+}
+
+/// Checks an answer and records the attempt. Answers after a solve are not
+/// recorded; an unreadable answer is refused without counting.
+pub fn practice_attempt(
+    conn: &Connection,
+    id: &str,
+    attempt_id: &str,
+    answer: &str,
+    now: &str,
+) -> Result<PracticeView> {
+    let tx = conn.unchecked_transaction()?;
+    let row = practice_row(&tx, id)?;
+    if !row.solved {
+        let correct = practice::check(&row.question.answer, answer).ok_or_else(|| {
+            StoreError::Invalid("that answer could not be read; check the format".into())
+        })?;
+        let assisted = row.hints_used > 0 || row.revealed;
+        tx.execute(
+            "INSERT INTO chat_practice_attempts (id, item_id, answer, correct, assisted, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![attempt_id, id, answer.trim(), correct, assisted, now],
+        )?;
+        if correct {
+            tx.execute(
+                "UPDATE chat_practice_items SET solved = 1, solved_independently = ?2 WHERE id = ?1",
+                params![id, !assisted],
+            )?;
+        }
+    }
+    tx.commit()?;
+    practice_view(conn, id)
+}
+
+/// Shows the next hint. Every later attempt on this question is assisted.
+pub fn practice_hint(conn: &Connection, id: &str) -> Result<PracticeView> {
+    let row = practice_row(conn, id)?;
+    if row.hints_used < row.question.hints.len() && !row.solved {
+        conn.execute(
+            "UPDATE chat_practice_items SET hints_used = hints_used + 1 WHERE id = ?1",
+            [id],
+        )?;
+    }
+    practice_view(conn, id)
+}
+
+/// Shows the answer. The question can no longer be solved independently.
+pub fn practice_reveal(conn: &Connection, id: &str) -> Result<PracticeView> {
+    practice_row(conn, id)?;
+    conn.execute(
+        "UPDATE chat_practice_items SET revealed = 1 WHERE id = ?1",
+        [id],
+    )?;
+    practice_view(conn, id)
 }
 
 #[cfg(test)]
@@ -1037,5 +1262,59 @@ mod tests {
             error.to_string(),
             "storage_error: chat data could not be accessed"
         );
+    }
+
+    fn practice_item(conn: &Connection) -> String {
+        create_thread(conn, "t", None, None, NOW).unwrap();
+        snapshot_row(conn, "s1", "t", &[]);
+        begin_run(conn, &start("r1", "q1", "s1", None, "u1", "a1", 1)).unwrap();
+        let q = super::practice::parse(
+            r#"{"skill":"Conditional probability","kind":"numeric","prompt":"P?","answer":"2/3","hints":["one","two"],"explanation":"Because."}"#,
+        )
+        .unwrap();
+        insert_practice(conn, "p1", "t", "a1", &q, NOW).unwrap();
+        "p1".into()
+    }
+
+    #[test]
+    fn the_answer_stays_hidden_until_solved_and_an_independent_solve_is_recorded() {
+        let conn = db();
+        let id = practice_item(&conn);
+        let v = practice_view(&conn, &id).unwrap();
+        assert_eq!(
+            (v.answer.as_ref(), v.explanation.as_ref(), v.hints_total),
+            (None, None, 2)
+        );
+        let v = practice_attempt(&conn, &id, "x1", "1/2", NOW).unwrap();
+        assert!(!v.solved && !v.attempts[0].correct && !v.attempts[0].assisted);
+        assert!(practice_attempt(&conn, &id, "x2", "two thirds", NOW).is_err());
+        let v = practice_attempt(&conn, &id, "x3", "0.667", NOW).unwrap();
+        assert!(v.solved && v.solved_independently);
+        assert_eq!(v.answer.as_deref(), Some("2/3"));
+        assert_eq!(v.explanation.as_deref(), Some("Because."));
+        // Further answers after a solve are not recorded.
+        let v = practice_attempt(&conn, &id, "x4", "5", NOW).unwrap();
+        assert_eq!(v.attempts.len(), 2);
+    }
+
+    #[test]
+    fn hints_and_a_shown_answer_make_later_attempts_assisted() {
+        let conn = db();
+        let id = practice_item(&conn);
+        let v = practice_hint(&conn, &id).unwrap();
+        assert_eq!(v.hints, vec!["one"]);
+        practice_hint(&conn, &id).unwrap();
+        let v = practice_hint(&conn, &id).unwrap();
+        assert_eq!(v.hints.len(), 2, "no more hints than written");
+        let v = practice_attempt(&conn, &id, "x1", "2/3", NOW).unwrap();
+        assert!(v.solved && !v.solved_independently && v.attempts[0].assisted);
+
+        let conn = db();
+        let id = practice_item(&conn);
+        let v = practice_reveal(&conn, &id).unwrap();
+        assert_eq!(v.answer.as_deref(), Some("2/3"));
+        let v = practice_attempt(&conn, &id, "x1", "2/3", NOW).unwrap();
+        assert!(v.solved && !v.solved_independently);
+        assert_eq!(practice_for_thread(&conn, "t").unwrap().len(), 1);
     }
 }

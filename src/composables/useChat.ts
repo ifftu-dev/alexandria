@@ -7,6 +7,7 @@ import type {
   ChatBinding,
   ChatEvent,
   ChatOffer,
+  ChatPracticeView,
   ChatPreparedMessage,
   ChatStartedRun,
   ChatStatus,
@@ -42,6 +43,8 @@ const activeRunId = ref<string | null>(null)
 /** Connection and model chosen before the first message creates a thread. */
 const pendingConnectionId = ref<string | null>(null)
 const pendingModelId = ref<string | null>(null)
+/** Mode chosen before the first message creates a thread. */
+const pendingMode = ref<'ask' | 'learn' | 'practice'>('ask')
 const excludedBindings = ref<string[]>([])
 const includeHistory = ref(true)
 const loaded = ref(false)
@@ -49,6 +52,8 @@ const loaded = ref(false)
 /** Pending review: what to send once the learner confirms. */
 let pendingText: string | null = null
 let pendingRegenerate: string | null = null
+/** The pending message came from the composer, so sending clears the draft. */
+let pendingFromDraft = false
 /** Bumped on lock/switch so late results from the old profile are dropped. */
 let generation = 0
 let draftTimer: ReturnType<typeof setTimeout> | null = null
@@ -73,6 +78,7 @@ function reset() {
   activeRunId.value = null
   pendingConnectionId.value = null
   pendingModelId.value = null
+  pendingMode.value = 'ask'
   excludedBindings.value = []
   includeHistory.value = true
   loaded.value = false
@@ -111,6 +117,7 @@ export function useChat() {
     () => thread.value?.model_id ?? pendingModelId.value ?? selectedConnection.value?.value.model ?? null,
   )
   const draftScope = computed(() => thread.value?.id ?? NEW_SCOPE)
+  const mode = computed(() => thread.value?.mode ?? pendingMode.value)
   const streaming = computed(() => activeRunId.value !== null)
 
   function guard<T>(run: () => Promise<T>): Promise<T | undefined> {
@@ -211,8 +218,15 @@ export function useChat() {
     const text = draft.value
     void invoke('chat_save_draft', { scope: NEW_SCOPE, text: '' }).catch(() => {})
     if (text) void invoke('chat_save_draft', { scope: created.id, text }).catch(() => {})
-    detail.value = { thread: created, messages: [], bindings: [], active_run_id: null }
+    detail.value = { thread: created, messages: [], bindings: [], practice: [], active_run_id: null }
     threads.value = [created, ...threads.value]
+    if (pendingMode.value !== 'ask') {
+      const withMode = await guard(() =>
+        invoke<ChatThread>('chat_set_thread_mode', { threadId: created.id, mode: pendingMode.value }),
+      )
+      if (withMode && detail.value) detail.value = { ...detail.value, thread: withMode }
+      return withMode ?? created
+    }
     return created
   }
 
@@ -290,7 +304,48 @@ export function useChat() {
     if (!text || streaming.value || preparing.value) return
     pendingText = text
     pendingRegenerate = null
+    pendingFromDraft = true
     await prepareAndMaybeStart()
+  }
+
+  /** Send a fixed request (such as "another practice question") without
+   * touching the draft. */
+  async function ask(text: string) {
+    if (!text.trim() || streaming.value || preparing.value) return
+    pendingText = text.trim()
+    pendingRegenerate = null
+    pendingFromDraft = false
+    await prepareAndMaybeStart()
+  }
+
+  async function setMode(next: 'ask' | 'learn' | 'practice') {
+    pendingMode.value = next
+    if (!detail.value) return
+    const updated = await guard(() =>
+      invoke<ChatThread>('chat_set_thread_mode', { threadId: detail.value!.thread.id, mode: next }),
+    )
+    if (updated && detail.value) detail.value = { ...detail.value, thread: updated }
+  }
+
+  function replacePractice(view: ChatPracticeView | undefined) {
+    if (!view || !detail.value) return
+    detail.value = {
+      ...detail.value,
+      practice: detail.value.practice.map((p) => (p.id === view.id ? view : p)),
+    }
+  }
+
+  /** Checks an answer locally; no model is asked. Throws on an unreadable answer. */
+  async function practiceAttempt(itemId: string, answer: string) {
+    replacePractice(await guard(() => invoke<ChatPracticeView>('chat_practice_attempt', { itemId, answer })))
+  }
+
+  async function practiceHint(itemId: string) {
+    replacePractice(await guard(() => invoke<ChatPracticeView>('chat_practice_hint', { itemId })))
+  }
+
+  async function practiceReveal(itemId: string) {
+    replacePractice(await guard(() => invoke<ChatPracticeView>('chat_practice_reveal', { itemId })))
   }
 
   /** Ask the same question again; the existing answer is kept. */
@@ -382,7 +437,7 @@ export function useChat() {
     runId = result.run_id
     runMessages.set(result.run_id, result.assistant_message.id)
     activeRunId.value = result.existing ? null : result.run_id
-    if (pendingText !== null) {
+    if (pendingText !== null && pendingFromDraft) {
       draft.value = ''
       void invoke('chat_save_draft', { scope: result.thread_id, text: '' }).catch(() => {})
     }
@@ -479,6 +534,12 @@ export function useChat() {
     detach,
     send,
     retry,
+    ask,
+    mode,
+    setMode,
+    practiceAttempt,
+    practiceHint,
+    practiceReveal,
     revise,
     cancelReview,
     confirmReview,
