@@ -1,0 +1,282 @@
+<script setup lang="ts">
+import { computed, nextTick, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { useChat } from '@/composables/useChat'
+import { chatOffers } from '@/composables/useChatOffers'
+import ChatMessageItem from './ChatMessageItem.vue'
+import ChatComposer from './ChatComposer.vue'
+import ChatReviewSheet from './ChatReviewSheet.vue'
+import ChatConnectionForm from './ChatConnectionForm.vue'
+import { ConfirmDialog } from '@/components/ui'
+import type { ChatMessage, ChatSourceRef, StudioConnection, StudioDocument } from '@/types'
+
+defineProps<{ variant: 'docked' | 'expanded' | 'sheet' }>()
+const emit = defineEmits<{ close: [] }>()
+const { t } = useI18n()
+const router = useRouter()
+const chat = useChat()
+const scroller = ref<HTMLElement | null>(null)
+const composer = ref<InstanceType<typeof ChatComposer> | null>(null)
+const addingConnection = ref(false)
+const renaming = ref<string | null>(null)
+const renameText = ref('')
+const deleting = ref<string | null>(null)
+/** Which answer version is shown per user message, when there are several. */
+const shownVersion = ref<Record<string, number>>({})
+
+const messages = computed(() => chat.detail.value?.messages ?? [])
+const bindings = computed(() => chat.detail.value?.bindings ?? [])
+const users = computed(() => messages.value.filter((m) => m.role === 'user'))
+function answers(user: ChatMessage) {
+  return messages.value.filter((m) => m.role === 'assistant' && m.reply_to === user.id)
+}
+function shown(user: ChatMessage) {
+  const all = answers(user)
+  if (!all.length) return null
+  const pick = shownVersion.value[user.id]
+  return all.find((m) => m.version === pick) ?? all[all.length - 1]!
+}
+function step(user: ChatMessage, delta: number) {
+  const all = answers(user)
+  const current = shown(user)
+  const index = all.findIndex((m) => m.id === current?.id) + delta
+  const next = all[Math.max(0, Math.min(all.length - 1, index))]
+  if (next) shownVersion.value = { ...shownVersion.value, [user.id]: next.version }
+}
+
+/** Offers from the page that are not attached yet. */
+const offers = computed(() =>
+  chatOffers.value.filter(
+    (o) => !bindings.value.some((b) => b.course_id === o.course_id && b.element_id === o.element_id),
+  ),
+)
+const title = computed(() => chat.thread.value?.title || t('chat.panel.untitled'))
+const noConnection = computed(() => chat.connections.value.length === 0)
+const errorText = computed(() => {
+  const code = chat.error.value
+  if (!code) return ''
+  const known = [
+    'assessment_active', 'no_connection', 'guardian_required', 'context_stale', 'too_many_runs',
+    'source_unavailable', 'unreachable', 'timeout', 'auth', 'rate_limited', 'invalid',
+  ]
+  return t(`chat.errors.${known.includes(code) ? code : 'generic'}`)
+})
+
+watch(
+  () => [messages.value.length, chat.liveText.value],
+  async () => {
+    await nextTick()
+    const el = scroller.value
+    if (!el) return
+    // Follow the answer only when the reader is already near the bottom.
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
+  },
+  { deep: true },
+)
+watch(
+  () => chat.thread.value?.id,
+  async () => {
+    shownVersion.value = {}
+    await nextTick()
+    if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
+  },
+)
+
+function cite(source: ChatSourceRef) {
+  void router.push({ path: `/learn/${source.course_id}`, query: { element: source.element_id } })
+}
+
+async function connectionSaved(saved: StudioDocument<StudioConnection>) {
+  addingConnection.value = false
+  await chat.refreshConnections()
+  await chat.selectModel(saved.id, null)
+  await nextTick()
+  composer.value?.focus()
+}
+
+async function freshChat() {
+  const text = chat.draft.value
+  chat.cancelReview()
+  await chat.newChat()
+  chat.setDraft(text)
+}
+
+function startRename(id: string, current: string) {
+  renaming.value = id
+  renameText.value = current
+}
+async function finishRename() {
+  const id = renaming.value
+  renaming.value = null
+  if (id && renameText.value.trim()) await chat.renameThread(id, renameText.value.trim())
+}
+async function confirmDelete() {
+  const id = deleting.value
+  deleting.value = null
+  if (id) await chat.deleteThread(id)
+}
+function formatDate(value: string) {
+  try {
+    return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  } catch {
+    return ''
+  }
+}
+</script>
+
+<template>
+  <section class="relative flex h-full min-h-0 flex-col bg-card" :aria-label="t('chat.panel.title')">
+    <header class="flex flex-none items-center gap-1 border-b border-border py-2 pe-2 ps-3.5">
+      <button
+        v-if="chat.showHistory.value"
+        type="button"
+        class="chat-head-btn"
+        :aria-label="t('chat.panel.back')"
+        @click="chat.showHistory.value = false"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+      </button>
+      <h2 class="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
+        {{ chat.showHistory.value ? t('chat.panel.history') : title }}
+      </h2>
+      <button type="button" class="chat-head-btn" :title="t('chat.panel.history')" :aria-label="t('chat.panel.history')" :aria-pressed="chat.showHistory.value" @click="chat.showHistory.value = !chat.showHistory.value">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>
+      </button>
+      <button type="button" class="chat-head-btn" :title="t('chat.panel.newChat')" :aria-label="t('chat.panel.newChat')" @click="chat.newChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+      <button
+        v-if="variant !== 'sheet'"
+        type="button"
+        class="chat-head-btn"
+        :title="variant === 'expanded' ? t('chat.panel.collapse') : t('chat.panel.expand')"
+        :aria-label="variant === 'expanded' ? t('chat.panel.collapse') : t('chat.panel.expand')"
+        @click="chat.expanded.value = !chat.expanded.value"
+      >
+        <svg v-if="variant === 'expanded'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>
+      </button>
+      <button type="button" class="chat-head-btn" :title="t('chat.panel.closeHint')" :aria-label="t('chat.panel.close')" @click="emit('close')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    </header>
+
+    <!-- Thread history -->
+    <div v-if="chat.showHistory.value" class="min-h-0 flex-1 overflow-y-auto p-2">
+      <p v-if="!chat.threads.value.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ t('chat.panel.noThreads') }}</p>
+      <ul class="space-y-0.5">
+        <li v-for="item in chat.threads.value" :key="item.id" class="group flex items-center gap-1 rounded-lg hover:bg-muted/60">
+          <input
+            v-if="renaming === item.id"
+            v-model="renameText"
+            class="input mx-1 my-1 py-1 text-sm"
+            maxlength="120"
+            :aria-label="t('chat.panel.rename')"
+            @keydown.enter.prevent="finishRename"
+            @keydown.esc="renaming = null"
+            @blur="finishRename"
+          >
+          <button v-else type="button" class="min-w-0 flex-1 px-2.5 py-2 text-start" @click="chat.openThread(item.id)">
+            <span class="block truncate text-sm" :class="chat.thread.value?.id === item.id ? 'font-semibold' : ''">{{ item.title || t('chat.panel.untitled') }}</span>
+            <span class="block text-[11px] text-muted-foreground">{{ formatDate(item.updated_at) }}</span>
+          </button>
+          <button type="button" class="chat-head-btn opacity-0 group-hover:opacity-100 focus:opacity-100" :aria-label="t('chat.panel.rename')" @click="startRename(item.id, item.title)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L19 9l-4-4L4 16v4z" /></svg>
+          </button>
+          <button type="button" class="chat-head-btn opacity-0 group-hover:opacity-100 focus:opacity-100" :aria-label="t('chat.panel.delete')" @click="deleting = item.id">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <template v-else>
+      <div class="flex-none px-3 pt-2">
+        <div class="tabs" role="tablist" :aria-label="t('chat.panel.title')">
+          <button type="button" class="tab tab-active !py-1 text-xs" role="tab" aria-selected="true">{{ t('chat.modes.ask') }}</button>
+          <button type="button" class="tab !py-1 text-xs opacity-50" role="tab" aria-selected="false" aria-disabled="true" :title="t('chat.modes.comingSoon')" disabled>{{ t('chat.modes.learn') }}</button>
+          <button type="button" class="tab !py-1 text-xs opacity-50" role="tab" aria-selected="false" aria-disabled="true" :title="t('chat.modes.comingSoon')" disabled>{{ t('chat.modes.practice') }}</button>
+        </div>
+      </div>
+
+      <div ref="scroller" class="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3" aria-live="off">
+        <div v-if="addingConnection || (noConnection && !messages.length)" class="rounded-xl border border-border bg-background p-3">
+          <ChatConnectionForm @saved="connectionSaved" @cancel="addingConnection = false" />
+        </div>
+        <div v-else-if="!messages.length" class="px-2 py-8 text-center">
+          <p class="text-sm font-semibold">{{ t('chat.panel.emptyTitle') }}</p>
+          <p class="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">{{ t('chat.panel.emptyBody') }}</p>
+        </div>
+        <template v-for="user in users" :key="user.id">
+          <ChatMessageItem :message="user" />
+          <ChatMessageItem
+            v-if="shown(user)"
+            :message="shown(user)!"
+            :live="chat.liveText.value[shown(user)!.id]"
+            :version="{ current: answers(user).findIndex((m) => m.id === shown(user)!.id) + 1, total: answers(user).length }"
+            @retry="chat.retry(user.id)"
+            @cite="cite"
+            @version="(delta) => step(user, delta)"
+          />
+        </template>
+      </div>
+
+      <div v-if="errorText" class="mx-3 mb-1 flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs" role="alert">
+        <p class="flex-1">{{ errorText }}</p>
+        <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('chat.panel.close')" @click="chat.error.value = null">×</button>
+      </div>
+
+      <div v-if="bindings.length || offers.length" class="flex flex-none flex-wrap gap-1.5 border-t border-border px-3 pt-2" :aria-label="t('chat.context.label')">
+        <span
+          v-for="b in bindings"
+          :key="b.id"
+          class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background py-0.5 pe-1 ps-2 text-[11.5px]"
+          :title="t('chat.context.removeHint')"
+        >
+          <svg class="h-3 w-3 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+          <span class="truncate">{{ t('chat.context.lesson', { title: b.label }) }}</span>
+          <button type="button" class="grid h-4 w-4 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" :aria-label="t('chat.context.remove')" @click="chat.detach(b.id)">×</button>
+        </span>
+        <button
+          v-for="o in offers"
+          :key="`${o.course_id}:${o.element_id}`"
+          type="button"
+          class="inline-flex max-w-full items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+          @click="chat.attach(o)"
+        >
+          <span aria-hidden="true">+</span><span class="truncate">{{ t('chat.context.attachLesson') }} · {{ o.label }}</span>
+        </button>
+      </div>
+
+      <ChatComposer ref="composer" class="flex-none" @add-connection="addingConnection = true" />
+
+      <ChatReviewSheet
+        v-if="chat.prepared.value"
+        :prepared="chat.prepared.value"
+        :continuing="messages.length > 0"
+        :busy="chat.preparing.value"
+        @send="chat.confirmReview()"
+        @cancel="chat.cancelReview()"
+        @fresh="freshChat"
+        @toggle-binding="(id) => chat.revise({ binding: id })"
+        @toggle-history="(include) => chat.revise({ history: include })"
+      />
+    </template>
+    <ConfirmDialog
+      :open="deleting !== null"
+      :title="t('chat.panel.delete')"
+      :message="t('chat.panel.deleteConfirm')"
+      :confirm-label="t('chat.panel.delete')"
+      confirm-variant="danger"
+      @confirm="confirmDelete"
+      @cancel="deleting = null"
+    />
+  </section>
+</template>
+
+<style scoped>
+.chat-head-btn { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; flex: none; border-radius: 0.5rem; color: var(--app-muted-foreground); }
+.chat-head-btn:hover { background: var(--app-muted); color: var(--app-foreground); }
+.chat-head-btn svg { width: 1rem; height: 1rem; }
+</style>

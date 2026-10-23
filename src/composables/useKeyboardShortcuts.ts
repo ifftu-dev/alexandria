@@ -80,6 +80,7 @@ function combo(key: string, mod = true, shift = false, alt = false, code?: strin
 const DEFAULT_SHORTCUTS: Record<string, { label: string; keys: KeyCombo }> = {
   search: { label: 'Search', keys: combo('f') },
   'toggle-sidebar': { label: 'Toggle sidebar', keys: combo('b') },
+  'toggle-chat': { label: 'Open or close chat', keys: combo('j') },
   settings: { label: 'Open settings', keys: combo(',') },
   'nav-back': { label: 'Navigate back', keys: combo('[') },
   'nav-forward': { label: 'Navigate forward', keys: combo(']') },

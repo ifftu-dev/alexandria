@@ -2284,7 +2284,7 @@ export interface CourseCompletionBinding {
 export interface StudioSource { id: string; title: string; text: string; selected: boolean }
 export interface TutorPolicy { enabled: boolean; guidance: 'socratic' | 'balanced' | 'direct'; initial_prompt: string }
 export interface CourseStudio { audience: string; prerequisites: string; outcome: string; initial_prompt: string; sources: StudioSource[]; tutor: TutorPolicy }
-export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean }
+export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'private_network' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean; context_tokens?: number | null }
 export interface StudioRole { role: string; connection_id: string | null; initial_prompt: string }
 export interface StudioSettings { roles: StudioRole[] }
 export interface StudioStep { id: string; role: string; connection_id: string | null; initial_prompt: string }
@@ -2295,6 +2295,30 @@ export interface StudioRun { id: string; course_id: string; element_id: string; 
 export interface TutorMessage { role: 'learner' | 'tutor'; text: string; created_at: string }
 export interface TutorThread { id: string; course_id: string; element_id: string; connection_id: string; messages: TutorMessage[] }
 export interface TutorReply { thread: TutorThread; provider_location: 'local' | 'cloud' }
+// ─── Global AI chat (src-tauri/src/commands/ai_chat.rs) ─────────────────
+export type ChatLocation = 'device' | 'private_network' | 'remote'
+export type ChatMessageStatus = 'complete' | 'streaming' | 'interrupted' | 'failed' | 'cancelled'
+export interface ChatThread { id: string; title: string; mode: 'ask' | 'learn' | 'practice'; connection_id: string | null; model_id: string | null; revision: number; reviewed_scope: string | null; created_at: string; updated_at: string }
+export interface ChatSourceRef { id: string; kind: 'lesson'; label: string; course_id: string; element_id: string }
+export interface ChatMessage { id: string; thread_id: string; position: number; role: 'user' | 'assistant'; reply_to: string | null; version: number; content: string; status: ChatMessageStatus; error: string | null; connection_id: string | null; connection_name: string | null; model_id: string | null; location: ChatLocation | null; input_tokens: number | null; output_tokens: number | null; sources: ChatSourceRef[]; created_at: string; completed_at: string | null }
+export interface ChatBinding { id: string; thread_id: string; kind: 'lesson'; course_id: string; element_id: string; label: string; created_at: string }
+export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; active_run_id: string | null }
+export interface ChatStatus { assessment_active: boolean }
+export interface ChatDestination { connection_id: string; connection_name: string; location: ChatLocation; host: string; model_id: string }
+export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; truncated: boolean }
+export interface ChatPreparedMessage { prepare_id: string; digest: string; expires_at: string; destination: ChatDestination; items: ChatReviewItem[]; omitted_turns: number; estimated_input_tokens: number; budget_tokens: number; output_reserve_tokens: number; estimate_kind: 'conservative'; requires_review: boolean; fits: boolean }
+export interface ChatStartedRun { run_id: string; thread_id: string; user_message: ChatMessage; assistant_message: ChatMessage; existing: boolean }
+export type ChatEvent = { run_id: string; thread_id: string; seq: number } & (
+  | { kind: 'run_started' }
+  | { kind: 'text_delta'; text: string }
+  | { kind: 'usage_updated'; input_tokens: number | null; output_tokens: number | null }
+  | { kind: 'run_completed'; finish: string }
+  | { kind: 'run_failed'; error: string; partial: boolean }
+  | { kind: 'run_cancelled'; error: string | null }
+)
+/** Something the current page offers to attach. Offering attaches nothing. */
+export interface ChatOffer { kind: 'lesson'; course_id: string; element_id: string; label: string }
+
 export interface LessonFeedback { id: string; course_id: string; element_id: string; element_title: string; rating: number; comment: string; created_at: string }
 
 export interface StudioAssistantGrant {

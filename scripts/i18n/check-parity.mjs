@@ -46,6 +46,9 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Global AI chat: English-first while the feature is in alpha.
+  'chat.',
+  'settings.personalization.shortcutNames.toggle-chat',
   // Jev goal entry: English fallback pending the next learner translation pass.
   'goals.picker.learningGoal',
   'goals.picker.goalPlaceholder',

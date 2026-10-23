@@ -7,6 +7,7 @@ import { useSentinel } from '@/composables/useSentinel'
 import { AppButton, AppModal, AppTextarea, ProvenanceBadge } from '@/components/ui'
 import InfoTip from '@/components/ui/InfoTip.vue'
 import LearnerTutor from '@/components/course/LearnerTutor.vue'
+import { useChatOffer, useChatRestriction } from '@/composables/useChatOffers'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { getProfileSessionToken } from '@/composables/profileSession'
@@ -244,6 +245,20 @@ const isAssessment = computed(() => {
   return isAssessmentElement(currentElement.value.element_type)
 })
 
+// Chat: offer the current text lesson, and unmount chat entirely while an
+// assessment element (quiz, essay, interactive, plugin) is open.
+useChatOffer(computed(() => {
+  const el = currentElement.value
+  if (!el || el.element_type !== 'text') return null
+  return { kind: 'lesson', course_id: courseId, element_id: el.id, label: el.title }
+}))
+useChatRestriction(isAssessment)
+watch(() => route.query?.element, (element) => {
+  if (typeof element !== 'string') return
+  const item = flatElements.value.find(entry => entry.element.id === element)
+  if (item) selectElement(item.chapterId, item.element.id)
+})
+
 // Whether the current element type supports "Mark Complete" manually
 const isContentElement = computed(() => {
   if (!currentElement.value) return false
@@ -416,7 +431,9 @@ onMounted(async () => {
     }
 
     const firstIncomplete = flattened.find(item => (progress.value[item.element.id]?.status ?? 'not_started') !== 'completed')
-    const firstItem = firstIncomplete ?? flattened[0]
+    // A chat citation links to a specific lesson.
+    const requested = flattened.find(item => item.element.id === route.query?.element)
+    const firstItem = requested ?? firstIncomplete ?? flattened[0]
     if (firstItem) {
       activeChapter.value = firstItem.chapterId
       activeElement.value = firstItem.element.id

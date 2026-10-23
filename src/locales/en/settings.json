@@ -130,7 +130,8 @@
       "focus-search": "Focus search",
       "switch-profile": "Switch user",
       "toggle-mode": "Switch learner/instructor mode",
-      "shortcuts-help": "Show keyboard shortcuts"
+      "shortcuts-help": "Show keyboard shortcuts",
+      "toggle-chat": "Open or close chat"
     }
   },
   "storage": {
