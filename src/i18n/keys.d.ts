@@ -48,6 +48,7 @@ export type MessageKey =
   | 'chat.connection.intro'
   | 'chat.connection.model'
   | 'chat.connection.modelPlaceholder'
+  | 'chat.connection.modelPlaceholderAnthropic'
   | 'chat.connection.name'
   | 'chat.connection.namePlaceholder'
   | 'chat.connection.privateHint'

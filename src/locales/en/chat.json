@@ -156,7 +156,8 @@
     "protocols": {
       "compatible": "OpenAI-compatible",
       "anthropic": "Anthropic Messages"
-    }
+    },
+    "modelPlaceholderAnthropic": "claude-opus-5-5"
   },
   "paused": "Chat is paused during assessments. Your draft is saved and comes back when you finish.",
   "practice": {

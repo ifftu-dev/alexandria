@@ -140,7 +140,7 @@ async function save() {
     <div class="grid gap-3 sm:grid-cols-2">
       <label class="block">
         <span class="label">{{ t('chat.connection.model') }}</span>
-        <input v-model="model" class="input text-sm" required maxlength="200" spellcheck="false" :placeholder="t('chat.connection.modelPlaceholder')">
+        <input v-model="model" class="input text-sm" required maxlength="200" spellcheck="false" :placeholder="protocol === 'anthropic' ? t('chat.connection.modelPlaceholderAnthropic') : t('chat.connection.modelPlaceholder')">
       </label>
       <label class="block">
         <span class="label">{{ where === 'cloud' ? t('chat.connection.apiKey') : t('chat.connection.apiKeyOptional') }}</span>
