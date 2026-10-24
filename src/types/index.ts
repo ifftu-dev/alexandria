@@ -2286,7 +2286,7 @@ export interface CourseCompletionBinding {
 export interface StudioSource { id: string; title: string; text: string; selected: boolean }
 export interface TutorPolicy { enabled: boolean; guidance: 'socratic' | 'balanced' | 'direct'; initial_prompt: string }
 export interface CourseStudio { audience: string; prerequisites: string; outcome: string; initial_prompt: string; sources: StudioSource[]; tutor: TutorPolicy }
-export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'private_network' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean; context_tokens?: number | null; protocol?: 'compatible' | 'anthropic' }
+export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'private_network' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean; context_tokens?: number | null; protocol?: 'compatible' | 'anthropic' | 'responses'; auth?: 'api_key' | 'chatgpt_plan' }
 export interface StudioRole { role: string; connection_id: string | null; initial_prompt: string }
 export interface StudioSettings { roles: StudioRole[] }
 export interface StudioStep { id: string; role: string; connection_id: string | null; initial_prompt: string }

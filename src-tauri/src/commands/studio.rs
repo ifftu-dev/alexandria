@@ -195,9 +195,16 @@ pub async fn studio_ask_tutor(
         "learner_question": question,
     }))
     .map_err(|error| error.to_string())?;
+    let secret = crate::ai_auth::credential::bearer_for(
+        &state.db_executor,
+        &state.profile_lease(),
+        &context.connection,
+        context.secret.clone(),
+    )
+    .await?;
     let answer = alexandria_studio::provider::complete(
         &context.connection,
-        context.secret.as_deref(),
+        secret.as_deref(),
         &system,
         &request,
     )
@@ -448,6 +455,30 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
         let (run, index, step, key, context) = match next {
             Ok(Some(next)) => next,
             Ok(None) => break,
+            Err(error) => {
+                fail_run(&state, &id, epoch, error);
+                break;
+            }
+        };
+        let connection_id = step.connection.id.clone();
+        let key = match crate::ai_auth::credential::bearer(
+            &crate::ai_auth::chatgpt::Endpoints::default(),
+            &step.connection,
+            key,
+            || {
+                let loaded = with_db(&state, |db| store::secret(db, &connection_id));
+                async move { loaded }
+            },
+            |next| {
+                let saved = with_db(&state, |db| {
+                    store::replace_secret(db, &connection_id, &next)
+                });
+                async move { saved }
+            },
+        )
+        .await
+        {
+            Ok(key) => key,
             Err(error) => {
                 fail_run(&state, &id, epoch, error);
                 break;

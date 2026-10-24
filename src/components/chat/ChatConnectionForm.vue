@@ -7,6 +7,7 @@ import { useAccountStatus } from '@/composables/useAccountStatus'
 import { chatErrorCode } from '@/composables/useChat'
 import type { StudioConnection, StudioDocument } from '@/types'
 import { restrictsAppsForMinors } from '@/utils/providerTerms'
+import { signInErrorCode, useProviderSignIn, type SignInProvider } from '@/composables/useProviderSignIn'
 
 const emit = defineEmits<{ saved: [connection: StudioDocument<StudioConnection>]; cancel: [] }>()
 const { t } = useI18n()
@@ -31,6 +32,35 @@ const apiKey = ref('')
 const contextTokens = ref('')
 const saving = ref(false)
 const message = ref('')
+
+const signIn = useProviderSignIn()
+const signInError = ref('')
+/** A ChatGPT connection just made: the welcome card OpenAI asks apps to show. */
+const planWelcome = ref<StudioDocument<StudioConnection> | null>(null)
+const signInMessages: Record<string, string> = {
+  signin_timeout: 'chat.signin.errors.timeout',
+  signin_declined: 'chat.signin.errors.declined',
+  plan_not_granted: 'chat.signin.errors.planNotGranted',
+  different_account: 'chat.signin.errors.differentAccount',
+  signin_busy: 'chat.signin.errors.busy',
+  unreachable: 'chat.signin.errors.unreachable',
+  under_13: 'chat.errors.under_13',
+  adults_only: 'chat.errors.adults_only',
+  model_unavailable: 'chat.signin.errors.noModels',
+}
+
+async function startSignIn(provider: SignInProvider) {
+  signInError.value = ''
+  try {
+    const saved = await signIn.signIn(provider)
+    if (provider === 'chatgpt' && saved.revision === 1) planWelcome.value = saved
+    else emit('saved', saved)
+  } catch (e) {
+    const code = signInErrorCode(e)
+    if (code === 'signin_cancelled') return
+    signInError.value = t(signInMessages[code] ?? 'chat.signin.errors.failed')
+  }
+}
 
 const options = computed(() => [
   { value: 'local' as const, label: t('chat.location.device'), hint: t('chat.connection.deviceHint'), dot: 'device' },
@@ -90,11 +120,42 @@ async function save() {
 </script>
 
 <template>
-  <form class="space-y-3 text-sm" @submit.prevent="save">
+  <div v-if="planWelcome" class="space-y-3 text-sm" role="dialog" aria-labelledby="chat-plan-welcome">
+    <h3 id="chat-plan-welcome" class="text-[15px] font-semibold">{{ t('chat.signin.welcomeTitle') }}</h3>
+    <p class="text-xs text-muted-foreground">{{ t('chat.signin.welcomeBody') }}</p>
+    <div class="flex flex-wrap gap-2">
+      <AppButton type="button" @click="emit('saved', planWelcome!)">{{ t('chat.signin.gotIt') }}</AppButton>
+      <AppButton type="button" variant="ghost" @click="signIn.openPage('chatgpt_usage')">{{ t('chat.signin.manageUsage') }}</AppButton>
+    </div>
+  </div>
+  <form v-else class="space-y-3 text-sm" @submit.prevent="save">
     <div>
       <h3 class="text-[15px] font-semibold">{{ t('chat.connection.title') }}</h3>
       <p class="mt-0.5 text-xs text-muted-foreground">{{ t('chat.connection.intro') }}</p>
     </div>
+    <section v-if="signIn.available" class="space-y-2 rounded-xl border border-border p-3" :aria-label="t('chat.signin.title')">
+      <div>
+        <p class="text-[13px] font-medium">{{ t('chat.signin.title') }}</p>
+        <p class="text-xs text-muted-foreground">{{ t('chat.signin.intro') }}</p>
+      </div>
+      <template v-if="signIn.signingIn.value">
+        <p class="text-xs" role="status">{{ t('chat.signin.waiting') }}</p>
+        <AppButton type="button" variant="ghost" size="sm" @click="signIn.cancel()">{{ t('chat.signin.cancel') }}</AppButton>
+      </template>
+      <template v-else>
+        <div>
+          <button type="button" class="chat-signin bg-black text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-200" @click="startSignIn('chatgpt')">{{ t('chat.signin.chatgpt') }}</button>
+          <p class="mt-1 text-xs text-muted-foreground">{{ t('chat.signin.chatgptHint') }}</p>
+          <p v-if="isMinor" class="mt-1 text-xs text-warning">{{ t('chat.connection.guardianNote') }}</p>
+        </div>
+        <div v-if="!isMinor">
+          <button type="button" class="chat-signin chat-signin--openrouter" @click="startSignIn('openrouter')">{{ t('chat.signin.openrouter') }}</button>
+          <p class="mt-1 text-xs text-muted-foreground">{{ t('chat.signin.openrouterHint') }}</p>
+        </div>
+      </template>
+      <p v-if="signInError" class="text-xs text-error" role="alert">{{ signInError }}</p>
+    </section>
+    <p v-if="signIn.available" class="text-xs text-muted-foreground">{{ t('chat.signin.or') }}</p>
     <label class="block">
       <span class="label">{{ t('chat.connection.name') }}</span>
       <input v-model="name" class="input text-sm" required maxlength="200" :placeholder="t('chat.connection.namePlaceholder')">
@@ -163,6 +224,9 @@ async function save() {
 </template>
 
 <style scoped>
+.chat-signin { display: flex; width: 100%; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 999px; padding: 0.55rem 1rem; font-size: 0.875rem; font-weight: 600; }
+.chat-signin--openrouter { border: 1px solid var(--app-border); color: var(--app-foreground); }
+.chat-signin--openrouter:hover { background: var(--app-muted); }
 .chat-loc { width: 7px; height: 7px; flex: none; border-radius: 999px; }
 .chat-loc--device { background: var(--app-success); }
 .chat-loc--private_network { background: var(--app-warning); }

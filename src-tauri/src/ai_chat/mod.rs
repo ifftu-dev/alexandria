@@ -134,6 +134,8 @@ pub fn error_code(error: &alexandria_ai::Error) -> String {
         E::Provider => "provider".into(),
         E::Unsupported(_) => "unsupported".into(),
         E::Cancelled => "cancelled".into(),
+        E::UsageLimit => "usage_limit".into(),
+        E::NotEligible => "plan_ineligible".into(),
     }
 }
 

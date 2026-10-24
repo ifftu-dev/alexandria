@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useProviderSignIn } from '@/composables/useProviderSignIn'
 import { renderChatMarkdown } from '@/utils/chatMarkdown'
 import type { ChatMessage, ChatSourceRef } from '@/types'
 
@@ -50,6 +51,11 @@ const attribution = computed(() => {
   return parts.join(' · ')
 })
 
+const { openPage } = useProviderSignIn()
+function openUsage() {
+  void openPage('chatgpt_usage').catch(() => {})
+}
+
 const errorText = computed(() => {
   const code = props.message.error ?? ''
   if (!code || code === 'cancelled') return ''
@@ -61,7 +67,7 @@ const errorText = computed(() => {
   const known = [
     'assessment_active', 'unreachable', 'timeout', 'interrupted', 'auth', 'rate_limited',
     'model_unavailable', 'http', 'malformed', 'too_large', 'empty', 'provider', 'unsupported',
-    'invalid', 'too_many_runs',
+    'invalid', 'too_many_runs', 'usage_limit', 'plan_ineligible', 'signin_required',
   ]
   return t(`chat.errors.${known.includes(key) ? key : 'generic'}`)
 })
@@ -117,11 +123,17 @@ async function copy() {
       role="alert"
     >
       <p class="font-semibold">
-        {{ message.status === 'interrupted' ? t('chat.message.interruptedTitle') : t('chat.message.failedTitle') }}
+        {{ message.error === 'usage_limit' ? t('chat.signin.limitTitle') : message.status === 'interrupted' ? t('chat.message.interruptedTitle') : t('chat.message.failedTitle') }}
       </p>
       <p class="mt-0.5 text-muted-foreground">
         {{ message.status === 'interrupted' && message.error === 'interrupted' ? t('chat.message.interruptedBody') : errorText }}
       </p>
+      <button
+        v-if="message.error === 'usage_limit'"
+        type="button"
+        class="mt-1.5 rounded-full bg-foreground px-3 py-1 text-[11px] font-medium text-background"
+        @click="openUsage"
+      >{{ t('chat.signin.manageUsage') }}</button>
     </div>
     <p v-else-if="message.error === 'practice_rejected'" class="mt-1 text-xs text-muted-foreground">
       {{ t('chat.practice.rejected') }}

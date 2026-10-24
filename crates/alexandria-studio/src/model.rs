@@ -67,10 +67,31 @@ pub struct StudioConnection {
     /// OpenAI-compatible, and so is the default.
     #[serde(default, skip_serializing_if = "is_compatible")]
     pub protocol: alexandria_ai::Protocol,
+    /// How the connection authenticates. An API key unless the user signed
+    /// in with a provider account through its own browser flow.
+    #[serde(default, skip_serializing_if = "is_api_key")]
+    pub auth: ConnectionAuth,
 }
 
 fn is_compatible(protocol: &alexandria_ai::Protocol) -> bool {
     *protocol == alexandria_ai::Protocol::Compatible
+}
+
+/// How a connection authenticates to its provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionAuth {
+    /// An API key the user pasted, or one a provider issued to Alexandria
+    /// through the provider's own sign-in (OpenRouter).
+    #[default]
+    ApiKey,
+    /// "Sign in with ChatGPT": requests use the user's ChatGPT plan. The
+    /// stored secret is the token set from OpenAI's sign-in, never a key.
+    ChatgptPlan,
+}
+
+fn is_api_key(auth: &ConnectionAuth) -> bool {
+    *auth == ConnectionAuth::ApiKey
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

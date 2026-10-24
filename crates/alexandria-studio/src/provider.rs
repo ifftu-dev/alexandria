@@ -59,6 +59,13 @@ pub fn validate_connection(connection: &StudioConnection) -> Result<Url> {
         }
         _ => Error::Invalid(LOCATION_ERROR.into()),
     })?;
+    if (connection.protocol == alexandria_ai::Protocol::Responses)
+        != (connection.auth == crate::model::ConnectionAuth::ChatgptPlan)
+    {
+        return Err(Error::Invalid(
+            "The Responses protocol is only used with Sign in with ChatGPT".into(),
+        ));
+    }
     if connection.capability != "text" {
         return Err(Error::Invalid(
             "Only text connections are currently supported".into(),

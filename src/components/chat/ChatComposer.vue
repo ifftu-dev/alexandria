@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChat } from '@/composables/useChat'
 import { useAccountStatus } from '@/composables/useAccountStatus'
-import type { ChatLocation } from '@/types'
+import { useProviderSignIn } from '@/composables/useProviderSignIn'
+import type { ChatLocation, StudioConnection, StudioDocument } from '@/types'
 
 const emit = defineEmits<{ addConnection: [] }>()
 const { t } = useI18n()
@@ -15,6 +16,30 @@ const models = ref<string[] | null>(null)
 const modelsFor = ref<string | null>(null)
 const loadingModels = ref(false)
 const modelsError = ref('')
+
+const signIn = useProviderSignIn()
+/** A connection the user asked to remove, awaiting confirmation. */
+const removing = ref<string | null>(null)
+/** What to tell the user after a removal, if anything. */
+const removedNote = ref<'' | 'chatgpt' | 'openrouter'>('')
+const usingPlan = computed(() => chat.selectedConnection.value?.value.auth === 'chatgpt_plan')
+
+async function remove(c: StudioDocument<StudioConnection>) {
+  if (removing.value !== c.id) {
+    removing.value = c.id
+    return
+  }
+  removing.value = null
+  removedNote.value = ''
+  try {
+    const result = await signIn.disconnect(c.id)
+    if (c.value.auth === 'chatgpt_plan' && !result.revoked) removedNote.value = 'chatgpt'
+    else if (c.id.startsWith('openrouter-')) removedNote.value = 'openrouter'
+    await chat.refreshConnections()
+  } catch {
+    chat.error.value = 'generic'
+  }
+}
 
 const busy = computed(() => chat.preparing.value || chat.streaming.value)
 const placeholder = computed(() =>
@@ -159,6 +184,11 @@ defineExpose({ focus: () => input.value?.focus() })
                   :aria-selected="chat.selectedModel.value === m"
                   @click="choose(c.id, m)"
                 >{{ m }}</button>
+                <button
+                  type="button"
+                  class="px-2 py-1 text-[11px] text-muted-foreground hover:text-error"
+                  @click="remove(c)"
+                >{{ removing === c.id ? t('chat.signin.removeConfirm') : t('chat.signin.remove') }}</button>
               </div>
             </template>
             <button
@@ -192,7 +222,21 @@ defineExpose({ focus: () => input.value?.focus() })
         </button>
       </div>
     </div>
-    <p v-if="destination" class="mt-1.5 truncate text-[11px] text-muted-foreground">{{ t('chat.composer.sendsTo', { destination }) }}</p>
+    <p v-if="usingPlan" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span class="font-medium text-foreground">{{ t('chat.signin.usingPlan') }}</span>
+      <span aria-hidden="true">·</span>
+      <button type="button" class="text-primary hover:underline" @click="signIn.openPage('chatgpt_usage')">{{ t('chat.signin.manageUsage') }}</button>
+    </p>
+    <p v-else-if="destination" class="mt-1.5 truncate text-[11px] text-muted-foreground">{{ t('chat.composer.sendsTo', { destination }) }}</p>
+    <p v-if="removedNote" class="mt-1 text-[11px] text-muted-foreground" role="status">
+      {{ removedNote === 'chatgpt' ? t('chat.signin.removedChatgpt') : t('chat.signin.removedOpenrouter') }}
+      <button
+        v-if="removedNote === 'openrouter'"
+        type="button"
+        class="ms-1 text-primary hover:underline"
+        @click="signIn.openPage('openrouter_keys')"
+      >{{ t('chat.signin.openKeys') }}</button>
+    </p>
   </div>
 </template>
 

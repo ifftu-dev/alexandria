@@ -3,6 +3,10 @@
 
 export const TAURI_COMMANDS = [
   "act_on_discussion",
+  "ai_disconnect",
+  "ai_open_provider_page",
+  "ai_signin",
+  "ai_signin_cancel",
   "allow_credential_fetch",
   "assessment_finalize_adaptive",
   "assessment_grade",

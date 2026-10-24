@@ -368,6 +368,13 @@ pub async fn chat_list_models(
     let endpoint = endpoint::resolve(&connection.endpoint, location)
         .await
         .map_err(|e| format!("{}: {e}", error_code(&e)))?;
+    let key = crate::ai_auth::credential::bearer_for(
+        &state.db_executor,
+        &state.profile_lease(),
+        &connection,
+        key,
+    )
+    .await?;
     Adapter::new(connection.protocol, endpoint, key)
         .list_models()
         .await
@@ -497,20 +504,33 @@ pub(crate) fn age_gate(conn: &Connection, connection: &StudioConnection) -> Resu
 
 /// Refusals no guardian approval can lift.
 fn refuse_for_minors(connection: &StudioConnection, band: AgeBand) -> Result<(), String> {
+    refuse_endpoint_for_minors(&connection.endpoint, band)
+}
+
+fn refuse_endpoint_for_minors(endpoint: &str, band: AgeBand) -> Result<(), String> {
     if band == AgeBand::Child {
         return Err(
             "under_13: learners under 13 can use models on this device or their own network only"
                 .into(),
         );
     }
-    let url = alexandria_ai::endpoint::parse(&connection.endpoint, Location::Remote)
-        .map_err(|e| e.to_string())?;
+    let url =
+        alexandria_ai::endpoint::parse(endpoint, Location::Remote).map_err(|e| e.to_string())?;
     if let Some(vendor) = alexandria_ai::terms::adults_only(&url) {
         return Err(format!(
             "adults_only: {vendor} requires users to be 18 or older"
         ));
     }
     Ok(())
+}
+
+/// Whether this profile may connect a remote provider at `endpoint` at all,
+/// before any guardian approval: used before a provider sign-in starts.
+pub(crate) fn remote_allowed_for_age(conn: &Connection, endpoint: &str) -> Result<(), String> {
+    match age_band(conn)? {
+        AgeBand::Adult => Ok(()),
+        band => refuse_endpoint_for_minors(endpoint, band),
+    }
 }
 
 /// The latest guardian decision for a connection at its current endpoint.
@@ -1141,6 +1161,8 @@ struct Started {
     location: Location,
     protocol: Protocol,
     key: Option<String>,
+    /// The connection as it was reviewed, to renew a sign-in before sending.
+    connection: StudioConnection,
 }
 
 impl std::fmt::Debug for Started {
@@ -1262,6 +1284,7 @@ fn begin(
         location,
         protocol: doc.value.protocol,
         key,
+        connection: doc.value,
     })
 }
 
@@ -1593,7 +1616,40 @@ impl Stream {
                 return;
             }
         };
-        let adapter = Adapter::new(self.started.protocol, endpoint, self.started.key.take());
+        // A ChatGPT sign-in renews its hour-long token here, before sending.
+        let key = match crate::ai_auth::credential::bearer_for(
+            &self.executor,
+            &self.lease,
+            &self.started.connection,
+            self.started.key.take(),
+        )
+        .await
+        {
+            Ok(key) => key,
+            Err(error) => {
+                let code = error.split(':').next().unwrap_or("auth").to_string();
+                finish(
+                    &self.executor,
+                    &self.lease,
+                    &run_id,
+                    &message_id,
+                    "failed",
+                    "",
+                    Some(&code),
+                    None,
+                )
+                .await;
+                self.emit(
+                    &mut seq,
+                    ChatEventBody::RunFailed {
+                        error: code,
+                        partial: false,
+                    },
+                );
+                return;
+            }
+        };
+        let adapter = Adapter::new(self.started.protocol, endpoint, key);
         let adapter = adapter.with_limits(Limits::default());
         let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
         let request = self.started.request.clone();
@@ -2027,6 +2083,7 @@ mod tests {
                     has_key: false,
                     context_tokens: window,
                     protocol: Default::default(),
+                    auth: Default::default(),
                 },
             },
             Some("sk-secret"),
@@ -2365,6 +2422,7 @@ mod tests {
                 has_key: false,
                 context_tokens: None,
                 protocol: Default::default(),
+                auth: Default::default(),
             },
         };
         let err = studio_store::save_connection(
@@ -2720,6 +2778,97 @@ mod tests {
             let _ = socket.write_all(body.as_bytes()).await;
         });
         (endpoint, rx)
+    }
+
+    /// Serves one answer over the Responses protocol and reports the raw
+    /// request.
+    async fn responses_model() -> (String, tokio::sync::oneshot::Receiver<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (seen, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = vec![0u8; 1 << 16];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let _ = seen.send(String::from_utf8_lossy(&request).into_owned());
+            let body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"On \"}\n\n\
+                        data: {\"type\":\"response.output_text.delta\",\"delta\":\"plan.\"}\n\n\
+                        data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":2}}}\n\n";
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = socket.write_all(body.as_bytes()).await;
+        });
+        (endpoint, rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_chatgpt_sign_in_streams_through_the_responses_route_with_its_token() {
+        let (endpoint, seen) = responses_model().await;
+        let harness = Harness::new(&endpoint);
+        harness.conn(|conn| {
+            let mut doc = studio_store::connection(conn, "c1").unwrap();
+            doc.value.protocol = Protocol::Responses;
+            doc.value.auth = alexandria_studio::model::ConnectionAuth::ChatgptPlan;
+            let credential = crate::ai_auth::chatgpt::Credential {
+                client_id: "oaiapp_9".into(),
+                sub: "u".into(),
+                email: None,
+                host_id: "h".into(),
+                access_token: "plan-token".into(),
+                refresh_token: "r".into(),
+                id_token: "i".into(),
+                expires_at: crate::ai_auth::now_secs() + 3000,
+                scopes: vec!["chatgpt.tokens.use.direct".into()],
+            };
+            studio_store::save_signed_in_connection(conn, &doc, &credential.encode()).unwrap();
+            // The generic editor cannot swap the sign-in for a key.
+            let doc = studio_store::connection(conn, "c1").unwrap();
+            assert!(studio_store::save_connection(conn, &doc, Some("sk-x")).is_err());
+        });
+        let (task, _events) = harness.begin("Why?");
+        let message_id = task.started.run.assistant_message.id.clone();
+        task.drive().await;
+
+        let saved = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(saved.status, "complete");
+        assert_eq!(saved.content, "On plan.");
+        assert_eq!(
+            (saved.input_tokens, saved.output_tokens),
+            (Some(12), Some(2))
+        );
+        let raw = seen.await.unwrap();
+        let head = raw[..raw.find("\r\n\r\n").unwrap()].to_ascii_lowercase();
+        assert!(head.starts_with("post /v1/responses "));
+        assert!(head.contains("authorization: bearer plan-token"));
+        let body: serde_json::Value =
+            serde_json::from_str(&raw[raw.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+        assert_eq!(body["store"], false);
+        assert!(body["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("study assistant"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

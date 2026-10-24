@@ -133,7 +133,10 @@
     "guardian_declined": "Your guardian did not approve this model. Use a model on this device or your own network.",
     "no_guardian": "Link a guardian in Settings first, then ask them to approve this model.",
     "under_13": "Learners under 13 can use models on this device or their own network only.",
-    "adults_only": "This provider's terms require users to be 18 or older. Use another provider, or a model on this device or your own network."
+    "adults_only": "This provider's terms require users to be 18 or older. Use another provider, or a model on this device or your own network.",
+    "usage_limit": "You've used what your ChatGPT plan allows for now. See your limits in ChatGPT settings.",
+    "plan_ineligible": "This ChatGPT account's plan can't be used here. Choose another connection or add an API key.",
+    "signin_required": "Your ChatGPT sign-in has ended. Sign in again from Add connection."
   },
   "connection": {
     "title": "Add a model connection",
@@ -277,5 +280,39 @@
     "saved": "Added to your notes on {lesson}",
     "notEnrolled": "Enroll in the course to keep notes there.",
     "failed": "That couldn't be added. Try again."
+  },
+  "signin": {
+    "title": "Use an account you already have",
+    "intro": "Sign in in your browser. No API key needed.",
+    "chatgpt": "Continue with ChatGPT",
+    "chatgptHint": "Uses your ChatGPT Plus or Pro plan.",
+    "openrouter": "Sign in with OpenRouter",
+    "openrouterHint": "Uses the credits on your OpenRouter account. For people 18 and over.",
+    "waiting": "Finish signing in in your browser…",
+    "cancel": "Cancel",
+    "or": "Or add a model with an API key, or one on this device or your own network:",
+    "donePageTitle": "You're signed in",
+    "donePageBody": "You can close this tab and go back to Alexandria.",
+    "welcomeTitle": "You're using your ChatGPT plan",
+    "welcomeBody": "Chats with this connection count toward your ChatGPT plan's usage. You can see and manage that usage in ChatGPT settings.",
+    "gotIt": "Got it",
+    "usingPlan": "Using ChatGPT plan",
+    "manageUsage": "Manage usage",
+    "limitTitle": "Usage limit reached",
+    "remove": "Remove connection",
+    "removeConfirm": "Click again to remove",
+    "removedChatgpt": "Removed. To be sure, also disconnect Alexandria in your ChatGPT settings.",
+    "removedOpenrouter": "Removed. The key still exists on your OpenRouter account; you can delete it there.",
+    "openKeys": "Open OpenRouter keys",
+    "errors": {
+      "timeout": "Sign-in took too long. Try again.",
+      "declined": "Access wasn't granted, so nothing was connected.",
+      "planNotGranted": "Alexandria wasn't allowed to use your ChatGPT plan. Sign in again and allow it, or add an API key instead.",
+      "differentAccount": "That's a different ChatGPT account. Remove the current ChatGPT connection first.",
+      "busy": "A sign-in is already open in your browser.",
+      "unreachable": "Couldn't reach the provider. Check your internet connection and try again.",
+      "noModels": "Signed in, but no models are available with this plan.",
+      "failed": "Sign-in didn't finish. Try again."
+    }
   }
 }

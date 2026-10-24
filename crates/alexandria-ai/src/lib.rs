@@ -16,6 +16,7 @@ pub mod compatible;
 pub mod endpoint;
 mod http;
 pub mod model;
+pub mod responses;
 mod sse;
 pub mod terms;
 
@@ -34,6 +35,8 @@ pub enum Protocol {
     Compatible,
     /// The Anthropic Messages API.
     Anthropic,
+    /// The OpenAI Responses API, used with a ChatGPT plan sign-in.
+    Responses,
 }
 
 impl Protocol {
@@ -41,6 +44,7 @@ impl Protocol {
         match self {
             Protocol::Compatible => "compatible",
             Protocol::Anthropic => "anthropic",
+            Protocol::Responses => "responses",
         }
     }
 
@@ -48,6 +52,7 @@ impl Protocol {
         match value {
             "compatible" => Some(Protocol::Compatible),
             "anthropic" => Some(Protocol::Anthropic),
+            "responses" => Some(Protocol::Responses),
             _ => None,
         }
     }
@@ -58,6 +63,7 @@ impl Protocol {
 pub enum Adapter {
     Compatible(compatible::Compatible),
     Anthropic(anthropic::Anthropic),
+    Responses(responses::Responses),
 }
 
 impl Adapter {
@@ -65,6 +71,7 @@ impl Adapter {
         match protocol {
             Protocol::Compatible => Adapter::Compatible(compatible::Compatible::new(endpoint, key)),
             Protocol::Anthropic => Adapter::Anthropic(anthropic::Anthropic::new(endpoint, key)),
+            Protocol::Responses => Adapter::Responses(responses::Responses::new(endpoint, key)),
         }
     }
 
@@ -72,6 +79,7 @@ impl Adapter {
         match self {
             Adapter::Compatible(a) => Adapter::Compatible(a.with_limits(limits)),
             Adapter::Anthropic(a) => Adapter::Anthropic(a.with_limits(limits)),
+            Adapter::Responses(a) => Adapter::Responses(a.with_limits(limits)),
         }
     }
 
@@ -79,17 +87,20 @@ impl Adapter {
         match self {
             Adapter::Compatible(a) => a.endpoint(),
             Adapter::Anthropic(a) => a.endpoint(),
+            Adapter::Responses(a) => a.endpoint(),
         }
     }
 
     /// Refuses a consumer sign-in token before anything is sent.
     fn admit(&self) -> Result<()> {
-        let key = match self {
-            Adapter::Compatible(a) => a.key(),
-            Adapter::Anthropic(a) => a.key(),
+        let (key, signed_in) = match self {
+            Adapter::Compatible(a) => (a.key(), false),
+            Adapter::Anthropic(a) => (a.key(), false),
+            // Only reachable through OpenAI's sanctioned ChatGPT sign-in.
+            Adapter::Responses(a) => (a.key(), true),
         };
         match key {
-            Some(key) => terms::check_credential(self.endpoint().base(), key),
+            Some(key) => terms::check_credential(self.endpoint().base(), key, signed_in),
             None => Ok(()),
         }
     }
@@ -99,6 +110,7 @@ impl Adapter {
         match self {
             Adapter::Compatible(a) => a.complete(request).await,
             Adapter::Anthropic(a) => a.complete(request).await,
+            Adapter::Responses(a) => a.complete(request).await,
         }
     }
 
@@ -111,6 +123,7 @@ impl Adapter {
         match self {
             Adapter::Compatible(a) => a.stream(request, events).await,
             Adapter::Anthropic(a) => a.stream(request, events).await,
+            Adapter::Responses(a) => a.stream(request, events).await,
         }
     }
 
@@ -119,6 +132,7 @@ impl Adapter {
         match self {
             Adapter::Compatible(a) => a.list_models().await,
             Adapter::Anthropic(a) => a.list_models().await,
+            Adapter::Responses(a) => a.list_models().await,
         }
     }
 }
@@ -164,6 +178,12 @@ pub enum Error {
     /// The consumer stopped listening before the stream finished.
     #[error("The response was stopped")]
     Cancelled,
+    /// A signed-in plan's usage allowance is used up for now.
+    #[error("The plan's usage limit was reached")]
+    UsageLimit,
+    /// The signed-in account's plan cannot be used for this request.
+    #[error("This account's plan cannot be used here")]
+    NotEligible,
 }
 
 impl Error {
@@ -173,7 +193,11 @@ impl Error {
     pub fn may_have_been_accepted(&self) -> bool {
         !matches!(
             self,
-            Error::Invalid(_) | Error::Unreachable | Error::Unsupported(_) | Error::Http { .. }
+            Error::Invalid(_)
+                | Error::Unreachable
+                | Error::Unsupported(_)
+                | Error::Http { .. }
+                | Error::NotEligible
         )
     }
 

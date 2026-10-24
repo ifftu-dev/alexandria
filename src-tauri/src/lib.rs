@@ -1,4 +1,5 @@
 pub mod aggregation;
+pub mod ai_auth;
 pub mod ai_chat;
 pub mod assessment;
 pub mod av_permissions;
@@ -1575,6 +1576,10 @@ pub fn run() {
             commands::ai_chat::chat_save_note,
             commands::ai_chat::chat_save_artifact,
             commands::ai_chat::chat_goal_added,
+            commands::ai_signin::ai_signin,
+            commands::ai_signin::ai_signin_cancel,
+            commands::ai_signin::ai_disconnect,
+            commands::ai_signin::ai_open_provider_page,
             commands::ai_chat::chat_goal_changed,
             commands::course_notes::chat_save_course_note,
             commands::course_notes::course_notes_list,

@@ -79,6 +79,7 @@ pub use tutoring_mobile as tutoring;
 pub mod tutoring_stubs;
 
 pub mod ai_chat;
+pub mod ai_signin;
 pub mod studio;
 
 pub mod studio_mcp;

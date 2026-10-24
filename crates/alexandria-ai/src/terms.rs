@@ -90,8 +90,11 @@ pub fn check_endpoint(url: &Url) -> Result<()> {
 }
 
 /// Refuses consumer sign-in tokens pasted where an API key belongs. Checked
-/// before any request is sent, whatever the endpoint.
-pub fn check_credential(url: &Url, key: &str) -> Result<()> {
+/// before any request is sent, whatever the endpoint. `signed_in` is true
+/// only for a token obtained through OpenAI's own "Sign in with ChatGPT"
+/// flow, which OpenAI permits for open-source local apps; such a token is
+/// then expected on OpenAI's API.
+pub fn check_credential(url: &Url, key: &str, signed_in: bool) -> Result<()> {
     let key = key.trim();
     if key.starts_with("sk-ant-oat") || key.starts_with("sk-ant-ort") {
         return Err(Error::Invalid(
@@ -99,7 +102,7 @@ pub fn check_credential(url: &Url, key: &str) -> Result<()> {
         ));
     }
     let on_openai = domain(url).is_some_and(|d| matches(&d, "openai.com"));
-    if on_openai && looks_like_jwt(key) {
+    if on_openai && !signed_in && looks_like_jwt(key) {
         return Err(Error::Invalid(
             "That is a ChatGPT sign-in token, not an API key. Create an API key in the OpenAI platform instead.".into(),
         ));
@@ -164,14 +167,18 @@ mod tests {
     fn subscription_tokens_are_refused_and_api_keys_are_not() {
         let anthropic = url("https://api.anthropic.com/v1");
         let openai = url("https://api.openai.com/v1");
-        assert!(check_credential(&anthropic, "sk-ant-oat01-abc").is_err());
-        assert!(check_credential(&openai, " sk-ant-ort01-abc").is_err());
-        assert!(check_credential(&anthropic, "sk-ant-api03-abc").is_ok());
+        assert!(check_credential(&anthropic, "sk-ant-oat01-abc", false).is_err());
+        assert!(check_credential(&openai, " sk-ant-ort01-abc", true).is_err());
+        assert!(check_credential(&anthropic, "sk-ant-api03-abc", false).is_ok());
         let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1In0.c2lnbmF0dXJl";
-        assert!(check_credential(&openai, jwt).is_err());
-        assert!(check_credential(&openai, "sk-proj-abc").is_ok());
+        assert!(check_credential(&openai, jwt, false).is_err());
+        assert!(
+            check_credential(&openai, jwt, true).is_ok(),
+            "the sanctioned sign-in"
+        );
+        assert!(check_credential(&openai, "sk-proj-abc", false).is_ok());
         // Other vendors may use signed tokens as keys.
-        assert!(check_credential(&url("https://example.com/v1"), jwt).is_ok());
+        assert!(check_credential(&url("https://example.com/v1"), jwt, false).is_ok());
     }
 
     #[test]
