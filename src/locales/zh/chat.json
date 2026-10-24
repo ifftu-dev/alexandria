@@ -133,7 +133,10 @@
     "guardian_declined": "你的监护人没有批准这个模型。请使用这台设备上或你自己网络中的模型。",
     "no_guardian": "请先在设置中关联一位监护人，然后请他们批准这个模型。",
     "under_13": "未满 13 岁的学习者只能使用这台设备上或自己网络中的模型。",
-    "adults_only": "该提供商的条款要求用户年满 18 岁。请换一个提供商，或使用这台设备上或你自己网络中的模型。"
+    "adults_only": "该提供商的条款要求用户年满 18 岁。请换一个提供商，或使用这台设备上或你自己网络中的模型。",
+    "usage_limit": "你已用完 ChatGPT 套餐目前允许的用量。请在 ChatGPT 设置中查看你的限额。",
+    "plan_ineligible": "此 ChatGPT 账户的套餐无法在这里使用。请选择其他连接，或添加 API key。",
+    "signin_required": "你的 ChatGPT 登录已失效。请在“添加模型连接”中重新登录。"
   },
   "connection": {
     "title": "添加模型连接",
@@ -277,5 +280,39 @@
     "saved": "已添加到你在 {lesson} 中的笔记",
     "notEnrolled": "报名这门课程后即可在其中保存笔记。",
     "failed": "无法添加。请重试。"
+  },
+  "signin": {
+    "title": "使用你已有的账户",
+    "intro": "在浏览器中登录，无需 API key。",
+    "chatgpt": "使用 ChatGPT 继续",
+    "chatgptHint": "使用你的 ChatGPT Plus 或 Pro 套餐。",
+    "openrouter": "使用 OpenRouter 登录",
+    "openrouterHint": "使用你 OpenRouter 账户中的额度。仅限 18 岁及以上用户。",
+    "waiting": "请在浏览器中完成登录…",
+    "cancel": "取消",
+    "or": "或者使用 API key 添加模型，或添加这台设备上或你自己网络中的模型：",
+    "donePageTitle": "你已登录",
+    "donePageBody": "你可以关闭此标签页，回到 Alexandria。",
+    "welcomeTitle": "你正在使用 ChatGPT 套餐",
+    "welcomeBody": "通过此连接进行的聊天会计入你 ChatGPT 套餐的用量。你可以在 ChatGPT 设置中查看和管理这些用量。",
+    "gotIt": "知道了",
+    "usingPlan": "正在使用 ChatGPT 套餐",
+    "manageUsage": "管理用量",
+    "limitTitle": "已达到使用上限",
+    "remove": "移除连接",
+    "removeConfirm": "再点一次以移除",
+    "removedChatgpt": "已移除。为确保断开，也请在 ChatGPT 设置中断开 Alexandria。",
+    "removedOpenrouter": "已移除。该密钥仍在你的 OpenRouter 账户中，你可以在那里删除它。",
+    "openKeys": "打开 OpenRouter 密钥",
+    "errors": {
+      "timeout": "登录用时过长。请重试。",
+      "declined": "未获得授权，因此没有建立任何连接。",
+      "planNotGranted": "Alexandria 未获准使用你的 ChatGPT 套餐。请重新登录并允许，或改为添加 API key。",
+      "differentAccount": "这是另一个 ChatGPT 账户。请先移除当前的 ChatGPT 连接。",
+      "busy": "浏览器中已经有一个登录页面打开了。",
+      "unreachable": "无法连接到提供方。请检查网络连接后重试。",
+      "noModels": "已登录，但此套餐没有可用的模型。",
+      "failed": "登录未完成。请重试。"
+    }
   }
 }

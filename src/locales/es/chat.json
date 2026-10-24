@@ -133,7 +133,10 @@
     "guardian_declined": "Tu tutor no aprobó este modelo. Usa un modelo en este dispositivo o en tu propia red.",
     "no_guardian": "Primero vincula a un tutor en Configuración y luego pídele que apruebe este modelo.",
     "under_13": "Los estudiantes menores de 13 años solo pueden usar modelos en este dispositivo o en su propia red.",
-    "adults_only": "Los términos de este proveedor exigen que los usuarios tengan 18 años o más. Usa otro proveedor, o un modelo en este dispositivo o en tu propia red."
+    "adults_only": "Los términos de este proveedor exigen que los usuarios tengan 18 años o más. Usa otro proveedor, o un modelo en este dispositivo o en tu propia red.",
+    "usage_limit": "Ya usaste lo que tu plan de ChatGPT permite por ahora. Consulta tus límites en la configuración de ChatGPT.",
+    "plan_ineligible": "El plan de esta cuenta de ChatGPT no se puede usar aquí. Elige otra conexión o agrega una API key.",
+    "signin_required": "Tu sesión de ChatGPT terminó. Vuelve a iniciar sesión desde Agregar una conexión de modelo."
   },
   "connection": {
     "title": "Agregar una conexión de modelo",
@@ -277,5 +280,39 @@
     "saved": "Agregado a tus notas de {lesson}",
     "notEnrolled": "Inscríbete en el curso para guardar notas ahí.",
     "failed": "No se pudo agregar. Inténtalo de nuevo."
+  },
+  "signin": {
+    "title": "Usa una cuenta que ya tienes",
+    "intro": "Inicia sesión en tu navegador. No necesitas una API key.",
+    "chatgpt": "Continuar con ChatGPT",
+    "chatgptHint": "Usa tu plan ChatGPT Plus o Pro.",
+    "openrouter": "Iniciar sesión con OpenRouter",
+    "openrouterHint": "Usa los créditos de tu cuenta de OpenRouter. Para personas de 18 años o más.",
+    "waiting": "Termina de iniciar sesión en tu navegador…",
+    "cancel": "Cancelar",
+    "or": "O agrega un modelo con una API key, o uno en este dispositivo o en tu propia red:",
+    "donePageTitle": "Sesión iniciada",
+    "donePageBody": "Puedes cerrar esta pestaña y volver a Alexandria.",
+    "welcomeTitle": "Estás usando tu plan de ChatGPT",
+    "welcomeBody": "Los chats con esta conexión cuentan para el uso de tu plan de ChatGPT. Puedes ver y administrar ese uso en la configuración de ChatGPT.",
+    "gotIt": "Entendido",
+    "usingPlan": "Usando el plan de ChatGPT",
+    "manageUsage": "Administrar uso",
+    "limitTitle": "Límite de uso alcanzado",
+    "remove": "Quitar conexión",
+    "removeConfirm": "Haz clic de nuevo para quitarla",
+    "removedChatgpt": "Se quitó. Para mayor seguridad, desconecta también Alexandria en la configuración de ChatGPT.",
+    "removedOpenrouter": "Se quitó. La clave sigue en tu cuenta de OpenRouter; puedes eliminarla allí.",
+    "openKeys": "Abrir claves de OpenRouter",
+    "errors": {
+      "timeout": "El inicio de sesión tardó demasiado. Inténtalo de nuevo.",
+      "declined": "No se concedió el acceso, así que no se conectó nada.",
+      "planNotGranted": "Alexandria no recibió permiso para usar tu plan de ChatGPT. Vuelve a iniciar sesión y permítelo, o agrega una API key.",
+      "differentAccount": "Esa es otra cuenta de ChatGPT. Primero quita la conexión de ChatGPT actual.",
+      "busy": "Ya hay un inicio de sesión abierto en tu navegador.",
+      "unreachable": "No se pudo conectar con el proveedor. Revisa tu conexión a internet e inténtalo de nuevo.",
+      "noModels": "Iniciaste sesión, pero no hay modelos disponibles con este plan.",
+      "failed": "El inicio de sesión no terminó. Inténtalo de nuevo."
+    }
   }
 }
