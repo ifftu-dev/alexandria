@@ -27,7 +27,7 @@ async function run(action: () => Promise<void>) {
 </script>
 
 <template>
-  <div class="rounded-xl border border-dashed border-border bg-background px-3 py-2 text-xs">
+  <div class="rounded-2xl bg-muted/60 px-3.5 py-3 text-[13px]">
     <p class="font-semibold">{{ t('chat.memory.suggestion') }}</p>
     <p class="mt-0.5 text-muted-foreground">{{ t('chat.memory.suggestionHint') }}</p>
     <input

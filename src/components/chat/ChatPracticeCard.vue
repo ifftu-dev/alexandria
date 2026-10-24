@@ -137,7 +137,7 @@ function another() {
       >{{ item.hints_total ? t('chat.practice.hintCount', { used: item.hints.length, total: item.hints_total }) : t('chat.practice.hint') }}</AppButton>
       <AppButton v-if="!done" variant="ghost" size="xs" type="button" :disabled="busy" @click="reveal">{{ t('chat.practice.reveal') }}</AppButton>
       <span class="flex-1" />
-      <span v-if="item.attempts.length" class="text-[11px] text-muted-foreground">{{ t('chat.practice.attempts', item.attempts.length) }}</span>
+      <span v-if="item.attempts.length" class="text-xs text-muted-foreground">{{ t('chat.practice.attempts', item.attempts.length) }}</span>
       <AppButton v-if="done && latest" variant="outline" size="xs" type="button" :disabled="chat.streaming.value || chat.preparing.value" @click="another">{{ t('chat.practice.another') }}</AppButton>
     </div>
   </div>

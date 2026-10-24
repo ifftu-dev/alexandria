@@ -18,7 +18,9 @@
     "open": "Abrir chat",
     "shortcut": "Chat",
     "search": "Buscar en tus chats",
-    "noResults": "Ningún chat coincide"
+    "noResults": "Ningún chat coincide",
+    "more": "Más",
+    "practiceTitle": "Practica lo que estás aprendiendo"
   },
   "modes": {
     "ask": "Preguntar",
@@ -46,7 +48,10 @@
     "defaultModel": "Predeterminado de la conexión",
     "preparing": "Preparando…",
     "placeholderLearn": "¿Qué te gustaría aprender?",
-    "placeholderPractice": "Pide una pregunta de práctica…"
+    "placeholderPractice": "Pide una pregunta de práctica…",
+    "attach": "Adjuntar una lección o meta",
+    "nothingToAttach": "Abre una lección o tus metas para adjuntarlas aquí.",
+    "mode": "Modo: {mode}"
   },
   "context": {
     "label": "Se envía con tu próximo mensaje",
@@ -138,15 +143,35 @@
     "plan_ineligible": "El plan de esta cuenta de ChatGPT no se puede usar aquí. Elige otra conexión o agrega una API key.",
     "signin_required": "Tu sesión de ChatGPT terminó. Vuelve a iniciar sesión desde Agregar una conexión de modelo."
   },
+  "connect": {
+    "title": "Conectar un modelo de IA",
+    "intro": "Elige cómo se conectará el chat con un modelo. Puedes agregar más después.",
+    "or": "o configura uno tú mismo",
+    "keyTitle": "Usar una API key",
+    "keyHint": "Anthropic, OpenAI, Gemini y otros",
+    "keySub": "Pega una clave de la consola de tu proveedor. Se guarda cifrada en este dispositivo.",
+    "localTitle": "Ejecutar un modelo por tu cuenta",
+    "localHint": "Ollama o LM Studio, aquí o en tu red",
+    "localSub": "Conecta el chat a un servidor de modelos en esta computadora o en tu propia red.",
+    "private": "Las claves y los inicios de sesión se guardan cifrados en este dispositivo.",
+    "back": "Atrás",
+    "advanced": "Avanzado",
+    "unnamed": "Mi modelo",
+    "step": "Paso {n} de {total}",
+    "codeTitle": "Pegar el código de OpenRouter",
+    "codeSub": "OpenRouter lo mostró después de que le diste permiso a Alexandria.",
+    "codeStep1": "Copia el código de la página de OpenRouter",
+    "codeStep2": "Vuelve aquí y pégalo abajo",
+    "codeHint": "El código funciona una sola vez, durante 10 minutos.",
+    "reopen": "Abrir OpenRouter de nuevo",
+    "providers": {
+      "anthropic": "Anthropic",
+      "compatible": "Compatible con OpenAI"
+    }
+  },
   "connection": {
-    "title": "Agregar una conexión de modelo",
-    "intro": "Usa un modelo en este dispositivo, un servidor en tu propia red o tu propia cuenta con un proveedor. Las claves se quedan en el almacenamiento cifrado de este perfil.",
     "name": "Nombre",
-    "namePlaceholder": "Ollama en esta computadora",
     "where": "¿Dónde se ejecuta?",
-    "deviceHint": "Solo loopback. Nada sale de este dispositivo.",
-    "privateHint": "Una computadora que tú controlas. Los datos salen de este dispositivo.",
-    "remoteHint": "Un proveedor en internet. Se requiere HTTPS.",
     "endpoint": "URL base de la API",
     "model": "Modelo",
     "modelPlaceholder": "llama3.1:8b",
@@ -282,18 +307,14 @@
     "failed": "No se pudo agregar. Inténtalo de nuevo."
   },
   "signin": {
-    "title": "Usa una cuenta que ya tienes",
-    "intro": "Inicia sesión en tu navegador. No necesitas una API key.",
     "chatgpt": "Continuar con ChatGPT",
     "chatgptHint": "Usa tu plan ChatGPT Plus o Pro.",
     "openrouter": "Iniciar sesión con OpenRouter",
     "openrouterHint": "Usa los créditos de tu cuenta de OpenRouter. Para personas de 18 años o más.",
     "waiting": "Termina de iniciar sesión en tu navegador…",
     "cancel": "Cancelar",
-    "codeIntro": "En tu navegador, inicia sesión en OpenRouter y permite Alexandria. Luego copia el código que aparece y pégalo aquí.",
     "codeLabel": "Código de OpenRouter",
     "connect": "Conectar",
-    "or": "O agrega un modelo con una API key, o uno en este dispositivo o en tu propia red:",
     "donePageTitle": "Sesión iniciada",
     "donePageBody": "Puedes cerrar esta pestaña y volver a Alexandria.",
     "welcomeTitle": "Estás usando tu plan de ChatGPT",

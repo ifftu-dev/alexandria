@@ -80,12 +80,12 @@ async function dismiss() {
 </script>
 
 <template>
-  <p v-if="item.status === 'added'" class="flex flex-wrap items-center gap-1 text-[11px]" :class="present ? 'text-success' : 'text-muted-foreground'">
+  <p v-if="item.status === 'added'" class="flex flex-wrap items-center gap-1 text-xs" :class="present ? 'text-success' : 'text-muted-foreground'">
     <svg v-if="present" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
     {{ present ? t('chat.goalProposal.added') : t('chat.goalProposal.removed') }} · {{ item.title }}
     <button v-if="present" type="button" class="underline underline-offset-2 hover:text-foreground" @click="router.push('/goals')">{{ t('chat.goalProposal.open') }}</button>
   </p>
-  <div v-else class="rounded-xl border border-dashed border-border bg-background px-3 py-2 text-xs">
+  <div v-else class="rounded-2xl bg-muted/60 px-3.5 py-3 text-[13px]">
     <p class="font-semibold">{{ t('chat.goalProposal.title') }}</p>
     <p class="mt-0.5 text-muted-foreground">{{ t('chat.goalProposal.hint') }}</p>
     <p class="mt-1.5 text-sm font-medium text-foreground">{{ item.title }}</p>
@@ -98,7 +98,7 @@ async function dismiss() {
         <label v-for="s in suggestions" :key="s.skill_id" class="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5 text-foreground">
           <input type="checkbox" :checked="chosen.has(s.skill_id)" :disabled="busy" @change="toggle(s.skill_id)" />
           <span class="flex-1">{{ s.name }}</span>
-          <span v-if="s.score >= 0.6" class="text-[10px] text-success">{{ t('chat.goalProposal.strong') }}</span>
+          <span v-if="s.score >= 0.6" class="text-xs text-success">{{ t('chat.goalProposal.strong') }}</span>
         </label>
       </template>
     </div>

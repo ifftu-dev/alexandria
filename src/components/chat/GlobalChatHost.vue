@@ -110,7 +110,7 @@ function resizeByKey(event: KeyboardEvent) {
       v-if="wide && chat.panelOpen.value && chat.expanded.value"
       class="fixed inset-x-0 bottom-0 top-12 z-30 flex justify-center bg-background"
     >
-      <ChatPanel class="w-full max-w-3xl border-x border-border" variant="expanded" @close="chat.setOpen(false)" />
+      <ChatPanel class="w-full" variant="expanded" @close="chat.setOpen(false)" />
     </div>
 
     <!-- Narrow windows and phones -->
@@ -123,9 +123,10 @@ function resizeByKey(event: KeyboardEvent) {
     >
       <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z" /></svg>
     </button>
-    <div v-if="!wide && chat.panelOpen.value" class="fixed inset-0 z-50 flex flex-col justify-end bg-foreground/20" @click.self="chat.setOpen(false)">
-      <div class="h-[88%] overflow-hidden rounded-t-2xl shadow-lg safe-area-bottom">
-        <ChatPanel variant="sheet" @close="chat.setOpen(false)" />
+    <div v-if="!wide && chat.panelOpen.value" class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40" @click.self="chat.setOpen(false)">
+      <div class="flex h-[94%] flex-col overflow-hidden rounded-t-[1.75rem] bg-background shadow-2xl">
+        <div class="mx-auto mt-2 h-1.5 w-10 flex-none rounded-full bg-border" aria-hidden="true" />
+        <ChatPanel class="min-h-0 flex-1" variant="sheet" @close="chat.setOpen(false)" />
       </div>
     </div>
   </template>

@@ -18,7 +18,9 @@
     "open": "Ouvrir le chat",
     "shortcut": "Chat",
     "search": "Rechercher dans tes chats",
-    "noResults": "Aucun chat ne correspond"
+    "noResults": "Aucun chat ne correspond",
+    "more": "Plus",
+    "practiceTitle": "Entraîne-toi sur ce que tu apprends"
   },
   "modes": {
     "ask": "Demander",
@@ -46,7 +48,10 @@
     "defaultModel": "Modèle par défaut de la connexion",
     "preparing": "Préparation…",
     "placeholderLearn": "Qu'aimerais-tu apprendre ?",
-    "placeholderPractice": "Demande une question d'entraînement…"
+    "placeholderPractice": "Demande une question d'entraînement…",
+    "attach": "Joindre une leçon ou un objectif",
+    "nothingToAttach": "Ouvre une leçon ou tes objectifs pour les joindre ici.",
+    "mode": "Mode : {mode}"
   },
   "context": {
     "label": "Envoyé avec ton prochain message",
@@ -138,15 +143,35 @@
     "plan_ineligible": "Le forfait de ce compte ChatGPT ne peut pas être utilisé ici. Choisis une autre connexion ou ajoute une API key.",
     "signin_required": "Ta connexion à ChatGPT a expiré. Reconnecte-toi depuis Ajouter une connexion de modèle."
   },
+  "connect": {
+    "title": "Connecter un modèle d'IA",
+    "intro": "Choisis comment le chat accède à un modèle. Tu pourras en ajouter d'autres plus tard.",
+    "or": "ou configure-en un toi-même",
+    "keyTitle": "Utiliser une API key",
+    "keyHint": "Anthropic, OpenAI, Gemini et d'autres",
+    "keySub": "Colle une clé depuis la console de ton fournisseur. Elle reste chiffrée sur cet appareil.",
+    "localTitle": "Faire tourner un modèle toi-même",
+    "localHint": "Ollama ou LM Studio, ici ou sur ton réseau",
+    "localSub": "Relie le chat à un serveur de modèles sur cet ordinateur ou sur ton propre réseau.",
+    "private": "Les clés et les connexions aux comptes restent chiffrées sur cet appareil.",
+    "back": "Retour",
+    "advanced": "Avancé",
+    "unnamed": "Mon modèle",
+    "step": "Étape {n} sur {total}",
+    "codeTitle": "Colle le code d'OpenRouter",
+    "codeSub": "OpenRouter l'a affiché après que tu as autorisé Alexandria.",
+    "codeStep1": "Copie le code sur la page OpenRouter",
+    "codeStep2": "Reviens ici et colle-le ci-dessous",
+    "codeHint": "Le code ne fonctionne qu'une fois, pendant 10 minutes.",
+    "reopen": "Rouvrir OpenRouter",
+    "providers": {
+      "anthropic": "Anthropic",
+      "compatible": "Compatible OpenAI"
+    }
+  },
   "connection": {
-    "title": "Ajouter une connexion de modèle",
-    "intro": "Utilise un modèle sur cet appareil, un serveur sur ton propre réseau ou ton propre compte chez un fournisseur. Les clés restent dans le stockage chiffré de ce profil.",
     "name": "Nom",
-    "namePlaceholder": "Ollama sur cet ordinateur",
     "where": "Où fonctionne-t-il ?",
-    "deviceHint": "Boucle locale uniquement. Rien ne quitte cet appareil.",
-    "privateHint": "Un ordinateur que tu contrôles. Les données quittent cet appareil.",
-    "remoteHint": "Un fournisseur sur Internet. HTTPS obligatoire.",
     "endpoint": "URL de base de l'API",
     "model": "Modèle",
     "modelPlaceholder": "llama3.1:8b",
@@ -282,18 +307,14 @@
     "failed": "Impossible de l'ajouter. Réessaie."
   },
   "signin": {
-    "title": "Utilise un compte que tu as déjà",
-    "intro": "Connecte-toi dans ton navigateur. Pas besoin d'API key.",
     "chatgpt": "Continuer avec ChatGPT",
     "chatgptHint": "Utilise ton forfait ChatGPT Plus ou Pro.",
     "openrouter": "Se connecter avec OpenRouter",
     "openrouterHint": "Utilise les crédits de ton compte OpenRouter. Réservé aux 18 ans et plus.",
     "waiting": "Termine la connexion dans ton navigateur…",
     "cancel": "Annuler",
-    "codeIntro": "Dans ton navigateur, connecte-toi à OpenRouter et autorise Alexandria. Copie ensuite le code affiché et colle-le ici.",
     "codeLabel": "Code d'OpenRouter",
     "connect": "Connecter",
-    "or": "Ou ajoute un modèle avec une API key, ou un modèle sur cet appareil ou sur ton propre réseau :",
     "donePageTitle": "Connexion réussie",
     "donePageBody": "Tu peux fermer cet onglet et revenir à Alexandria.",
     "welcomeTitle": "Tu utilises ton forfait ChatGPT",

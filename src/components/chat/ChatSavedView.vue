@@ -80,26 +80,26 @@ function formatDate(value: string) {
     <p class="mb-3 text-xs text-muted-foreground">{{ t('chat.artifacts.intro') }}</p>
     <p v-if="!chat.savedArtifacts.value.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ t('chat.artifacts.empty') }}</p>
     <ul class="space-y-2">
-      <li v-for="item in chat.savedArtifacts.value" :key="item.id" class="rounded-xl border border-border bg-background">
+      <li v-for="item in chat.savedArtifacts.value" :key="item.id" class="rounded-2xl bg-muted/50">
         <div class="flex items-start gap-2 px-3 py-2">
           <button type="button" class="min-w-0 flex-1 text-start" :aria-expanded="open === item.id" @click="open = open === item.id ? null : item.id">
             <span class="block truncate text-sm font-medium">{{ item.title }}</span>
-            <span class="block text-[11px] text-muted-foreground">
+            <span class="block text-xs text-muted-foreground">
               {{ item.body.kind === 'note' ? t('chat.artifacts.untitledNote') : t('chat.artifacts.cards', cardsOf(item).length) }} · {{ formatDate(item.updated_at) }}
             </span>
           </button>
           <button
             v-if="item.body.kind === 'flashcards'"
             type="button"
-            class="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-muted"
+            class="rounded-full border border-border px-2 py-0.5 text-xs font-medium hover:bg-muted"
             :aria-pressed="studying === item.id"
             @click="study(item)"
           >{{ t('chat.artifacts.study') }}</button>
-          <button type="button" class="rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" @click="deleting = item.id">{{ t('chat.artifacts.delete') }}</button>
+          <button type="button" class="rounded-full px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" @click="deleting = item.id">{{ t('chat.artifacts.delete') }}</button>
         </div>
 
         <div v-if="studying === item.id && cardsOf(item).length" class="border-t border-border px-3 py-3 text-sm">
-          <p class="text-[11px] text-muted-foreground">{{ t('chat.artifacts.cardPosition', { current: position + 1, total: cardsOf(item).length }) }}</p>
+          <p class="text-xs text-muted-foreground">{{ t('chat.artifacts.cardPosition', { current: position + 1, total: cardsOf(item).length }) }}</p>
           <p class="mt-1 font-medium">{{ cardsOf(item)[position]?.front }}</p>
           <p v-if="revealed" class="mt-1 text-muted-foreground">{{ cardsOf(item)[position]?.back }}</p>
           <div class="mt-2 flex items-center gap-1.5">
@@ -111,7 +111,7 @@ function formatDate(value: string) {
         <div v-else-if="open === item.id" class="border-t border-border px-3 py-2 text-sm">
           <template v-if="item.body.kind === 'note'">
             <p class="whitespace-pre-wrap">{{ item.body.text }}</p>
-            <div v-if="citedLesson(item)" class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+            <div v-if="citedLesson(item)" class="mt-2 flex flex-wrap items-center gap-2 text-xs">
               <span v-if="courseState[item.id] === 'saved'" class="text-success">{{ t('chat.courseNotes.saved', { lesson: citedLesson(item)!.label }) }}</span>
               <button
                 v-else
