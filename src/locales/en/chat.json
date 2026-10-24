@@ -20,7 +20,9 @@
     "search": "Search your chats",
     "noResults": "No chats match",
     "more": "More",
-    "practiceTitle": "Practise what you're learning"
+    "practiceTitle": "Practise what you're learning",
+    "review": "Review before sending",
+    "reviewHint": "Show what chat sends, and to which provider, before the first message of a chat and whenever that changes."
   },
   "modes": {
     "ask": "Ask",

@@ -20,7 +20,9 @@
     "search": "Rechercher dans tes chats",
     "noResults": "Aucun chat ne correspond",
     "more": "Plus",
-    "practiceTitle": "Entraîne-toi sur ce que tu apprends"
+    "practiceTitle": "Entraîne-toi sur ce que tu apprends",
+    "review": "Vérifier avant d'envoyer",
+    "reviewHint": "Montre ce que le chat envoie, et à quel fournisseur, avant le premier message de chaque chat et quand cela change."
   },
   "modes": {
     "ask": "Demander",

@@ -20,7 +20,9 @@
     "search": "搜索你的聊天",
     "noResults": "没有匹配的聊天",
     "more": "更多",
-    "practiceTitle": "练习你正在学的内容"
+    "practiceTitle": "练习你正在学的内容",
+    "review": "发送前检查",
+    "reviewHint": "在每个聊天的第一条消息之前以及内容变化时，显示聊天将发送什么、发送给哪个提供商。"
   },
   "modes": {
     "ask": "提问",

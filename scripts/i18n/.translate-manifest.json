@@ -2447,7 +2447,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "es": {
     "classrooms.index.title": "f1649526e859",
@@ -4897,7 +4899,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "fr": {
     "classrooms.index.title": "f1649526e859",
@@ -7347,7 +7351,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "hi": {
     "classrooms.index.title": "f1649526e859",
@@ -9797,7 +9803,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "ur": {
     "classrooms.index.title": "f1649526e859",
@@ -12247,7 +12255,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "te": {
     "classrooms.index.title": "f1649526e859",
@@ -14697,7 +14707,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "mr": {
     "classrooms.index.title": "f1649526e859",
@@ -17147,7 +17159,9 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   },
   "bn": {
     "classrooms.index.title": "f1649526e859",
@@ -19597,6 +19611,8 @@
     "chat.connect.codeHint": "272c4a47280d",
     "chat.connect.reopen": "a37e3d9499cc",
     "chat.connect.providers.anthropic": "b780a23b530e",
-    "chat.connect.providers.compatible": "b10d74b5bb37"
+    "chat.connect.providers.compatible": "b10d74b5bb37",
+    "chat.panel.review": "7c018bd66358",
+    "chat.panel.reviewHint": "71337d089e51"
   }
 }

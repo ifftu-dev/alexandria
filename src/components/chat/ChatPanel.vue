@@ -239,6 +239,11 @@ function formatDate(value: string) {
           <button type="button" role="menuitem" @click="show('memory')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.7 2.4 4.8.8.7 1.1 1.4 1.1 2.2V17h5v-1c0-.8.3-1.5 1.1-2.2C16.8 12.7 18 11.2 18 9a6 6 0 0 0-6-6z" /><path d="M10 20h4" /></svg>{{ t('chat.memory.open') }}
           </button>
+          <button type="button" role="menuitemcheckbox" :aria-checked="chat.reviewBeforeSend.value" :title="t('chat.panel.reviewHint')" @click="chat.setReviewBeforeSend(!chat.reviewBeforeSend.value)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
+            <span class="flex-1">{{ t('chat.panel.review') }}</span>
+            <span class="chat-more-switch" :class="{ on: chat.reviewBeforeSend.value }" aria-hidden="true" />
+          </button>
           <button v-if="variant !== 'sheet'" type="button" role="menuitem" @click="moreOpen = false; chat.expanded.value = !chat.expanded.value">
             <svg v-if="variant === 'expanded'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></svg>
             <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>
@@ -430,6 +435,11 @@ function formatDate(value: string) {
 .chat-more button { display: flex; width: 100%; align-items: center; gap: 0.625rem; padding: 0.5rem 0.625rem; border-radius: 0.5rem; text-align: start; font-size: 0.84375rem; }
 .chat-more button:hover { background: var(--app-muted); }
 .chat-more svg { width: 1rem; height: 1rem; flex: none; color: var(--app-muted-foreground); }
+.chat-more-switch { position: relative; width: 1.75rem; height: 1rem; flex: none; border-radius: 999px; background: var(--app-border); transition: background 0.15s; }
+.chat-more-switch::after { content: ""; position: absolute; top: 0.125rem; inset-inline-start: 0.125rem; width: 0.75rem; height: 0.75rem; border-radius: 999px; background: var(--app-card); transition: transform 0.15s; }
+.chat-more-switch.on { background: var(--app-primary); }
+.chat-more-switch.on::after { transform: translateX(0.75rem); }
+[dir="rtl"] .chat-more-switch.on::after { transform: translateX(-0.75rem); }
 .chat-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 0.25rem 1.125rem 1rem; }
 .chat-scroll--sheet { padding-inline: 1rem; }
 .chat-thread { display: flex; flex-direction: column; gap: 1.25rem; }

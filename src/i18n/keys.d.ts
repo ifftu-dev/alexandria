@@ -215,6 +215,8 @@ export type MessageKey =
   | 'chat.panel.open'
   | 'chat.panel.practiceTitle'
   | 'chat.panel.rename'
+  | 'chat.panel.review'
+  | 'chat.panel.reviewHint'
   | 'chat.panel.search'
   | 'chat.panel.shortcut'
   | 'chat.panel.title'

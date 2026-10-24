@@ -20,7 +20,9 @@
     "search": "Buscar en tus chats",
     "noResults": "Ningún chat coincide",
     "more": "Más",
-    "practiceTitle": "Practica lo que estás aprendiendo"
+    "practiceTitle": "Practica lo que estás aprendiendo",
+    "review": "Revisar antes de enviar",
+    "reviewHint": "Muestra qué envía el chat y a qué proveedor, antes del primer mensaje de cada chat y cuando eso cambia."
   },
   "modes": {
     "ask": "Preguntar",
