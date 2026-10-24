@@ -114,7 +114,10 @@
     "shortcutsHint": "नया रिकॉर्ड करने के लिए किसी शॉर्टकट की कुंजी-बाइंडिंग पर क्लिक करें। रद्द करने के लिए Escape दबाएँ।",
     "pressKeys": "कुंजियाँ दबाएँ…",
     "resetToDefault": "डिफ़ॉल्ट पर रीसेट करें",
-    "reset": "रीसेट"
+    "reset": "रीसेट",
+    "shortcutNames": {
+      "toggle-chat": "चैट खोलें या बंद करें"
+    }
   },
   "storage": {
     "title": "भंडारण",
@@ -260,7 +263,6 @@
     "unavailable": "Local assistant access is unavailable. It currently requires Alexandria running on macOS or Linux.",
     "name": "Assistant name",
     "permissions": "Permissions",
-    "learningScope": "Read published courses: the catalog, course outlines, lesson text, video chapters, and quiz questions without answers. Lessons not stored on this device may be fetched from peers. Assessments are never shared.",
     "draftsScope": "Allow reading your course titles, text lessons, instructor instructions and selected source notes.",
     "credentialsScope": "Read your credentials: issuer, skill, dates and revocation status. The signed credential documents themselves are never shared.",
     "proposeScope": "Also allow submitting lesson proposals for my review.",
@@ -275,6 +277,21 @@
     "scopePropose": "Propose drafts",
     "expiresAt": "Expires {time}",
     "revoke": "Revoke access",
-    "none": "No active assistant grants."
+    "none": "No active assistant grants.",
+    "learningContent": "प्रकाशित कोर्स पढ़ें: कैटलॉग, कोर्स की रूपरेखा, पाठ का टेक्स्ट और वीडियो चैप्टर। इस डिवाइस पर सेव न किए गए एक घंटे में 20 तक पाठ साथियों से मँगाए जा सकते हैं। क्विज़ और आकलन कभी साझा नहीं किए जाते।",
+    "privateSkillsScope": "अपने कौशल ग्राफ़ में वे कौशल भी शामिल करें जिन्हें तुमने निजी रखा है। डिफ़ॉल्ट रूप से बंद।",
+    "verifyScope": "कोई तुम्हें जो क्रेडेंशियल दिखाए, उनकी पुष्टि करें। इससे दर्ज होता है कि एक प्रस्तुति देखी गई, ताकि उसे दो बार स्वीकार न किया जा सके।",
+    "scopePrivateSkills": "निजी कौशल",
+    "scopeVerify": "प्रस्तुतियों की पुष्टि करें",
+    "disclosureTitle": "यह जो पढ़ता है, वह Alexandria से बाहर जाता है",
+    "disclosureBody": "असिस्टेंट नीचे दी गई हर अनुमति वाली चीज़ को हर बार पूछे बिना पढ़ सकता है, और आम तौर पर उसे अपने AI प्रदाता को भेजता है। उसके बाद उसके साथ क्या होता है, यह Alexandria नियंत्रित नहीं कर सकता।",
+    "pauses": "आकलन या इंटरव्यू जाँच चलते समय पहुँच अपने आप रुक जाती है, और इस प्रोफ़ाइल के लॉक होने पर खत्म हो जाती है।",
+    "activity": "गतिविधि ({count})",
+    "activityEmpty": "अभी तक कुछ नहीं पढ़ा गया।",
+    "outcomeReturned": "लौटाया गया",
+    "outcomeWithheld": "रोका गया",
+    "outcomeUnavailable": "उपलब्ध नहीं",
+    "outcomePaused": "रुका हुआ: आकलन चल रहा है",
+    "outcomeRefused": "मना किया गया"
   }
 }

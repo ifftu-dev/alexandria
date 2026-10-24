@@ -52,5 +52,19 @@
     "noClassroomsTitle": "没有教室",
     "noClassroomsDescription": "你的孩子加入的教室会显示在这里。",
     "roleJoined": "{role} · 加入于 {date}"
+  },
+  "aiRequests": {
+    "title": "AI 模型申请",
+    "intro": "将聊天消息发送给互联网上 AI 提供方的申请。批准后，这位学习者可以使用该地址上的这个提供方；你可以随时撤回。学习者自己设备或网络上的模型永远不需要批准。",
+    "none": "没有申请。",
+    "approve": "批准",
+    "decline": "拒绝",
+    "withdraw": "撤回批准",
+    "notDelivered": "将在下次同步时送达学习者",
+    "status": {
+      "pending": "等待你处理",
+      "approved": "已批准",
+      "declined": "未批准"
+    }
   }
 }

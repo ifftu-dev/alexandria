@@ -242,6 +242,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alexandria-ai"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "alexandria-decisions"
 version = "0.1.0"
 dependencies = [
@@ -289,6 +302,7 @@ version = "0.7.0-alpha"
 dependencies = [
  "aes",
  "aes-gcm",
+ "alexandria-ai",
  "alexandria-decisions",
  "alexandria-learning-contracts",
  "alexandria-personhood",
@@ -349,6 +363,7 @@ dependencies = [
  "rand 0.8.7",
  "rcgen 0.13.2",
  "reqwest 0.12.28",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
@@ -376,6 +391,7 @@ dependencies = [
  "uuid",
  "wasmtime",
  "wat",
+ "webbrowser",
  "windows 0.58.0",
  "x11rb",
  "x25519-dalek",
@@ -411,6 +427,7 @@ dependencies = [
 name = "alexandria-studio"
 version = "0.1.0"
 dependencies = [
+ "alexandria-ai",
  "alexandria-verify",
  "blake3",
  "chrono",
@@ -3075,9 +3092,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865"
 dependencies = [
  "cmov",
 ]

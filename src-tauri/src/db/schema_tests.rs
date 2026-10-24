@@ -161,7 +161,8 @@ fn the_schema_keeps_what_the_runtime_reads() {
     assert!(names(db.conn(), "view")
         .iter()
         .any(|v| v == "current_reputation_assertions"));
-    assert_eq!(names(db.conn(), "trigger").len(), 3);
+    // Three integrity triggers, and three keeping chat search in step.
+    assert_eq!(names(db.conn(), "trigger").len(), 6);
 }
 
 /// Asserting that a wanted object is present cannot catch an unwanted one
@@ -185,7 +186,13 @@ fn the_view_set_is_exact() {
 /// learner's hiring answers. The attempt role target adds 1 index; the
 /// device attestation adds a column only. Organisation access adds 3 tables
 /// (descriptor cache, grants, listing publications) and 1 index; the
-/// interview panel link adds 1 index.
+/// interview panel link adds 1 index. Global AI chat adds 8 tables (threads,
+/// messages, attachments, excerpts, snapshots, snapshot excerpts, runs,
+/// drafts) and 4 indexes; chat practice adds 2 tables (items, attempts) and 2
+/// indexes; learning memory adds 1 table and 1 index;
+/// guardian approval of remote models adds 2 tables and 1 index; chat
+/// search adds one FTS5 table (6 schema tables with its shadows) and 3
+/// triggers; chat artifacts add 1 table and 2 indexes.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -193,11 +200,11 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 111, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 115, "index count changed");
+    assert_eq!(tables, 131, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 126, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
-        3,
+        6,
         "trigger count changed"
     );
     assert_eq!(names(db.conn(), "view").len(), 1, "view count changed");

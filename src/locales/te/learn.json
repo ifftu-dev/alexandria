@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "కెమెరా ఆఫ్‌లో ఉంది — ఇక్కడ సంపాదించిన నైపుణ్యాలకు విశ్వాసం తక్కువగా ఉంటుంది."
+  },
+  "notes": {
+    "title": "మీ నోట్స్",
+    "thisLesson": "ఈ పాఠం",
+    "otherLessons": "ఇతర పాఠాలు",
+    "untitled": "నోట్",
+    "fromChat": "చాట్ నుండి సేవ్ చేయబడింది",
+    "openLesson": "పాఠం తెరువు",
+    "delete": "తొలగించు",
+    "deleteTitle": "ఈ నోట్‌ను తొలగించాలా?",
+    "deleteBody": "ఇది మీ అన్ని పరికరాల్లో ఈ కోర్సు నుండి తీసివేయబడుతుంది.",
+    "deleteFailed": "ఆ నోట్‌ను తొలగించలేకపోయాం. మళ్ళీ ప్రయత్నించండి."
   }
 }

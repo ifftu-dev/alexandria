@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "कॅमेरा बंद आहे — येथे मिळवलेल्या कौशल्यांची विश्वासार्हता कमी असेल."
+  },
+  "notes": {
+    "title": "तुमच्या नोंदी",
+    "thisLesson": "हा धडा",
+    "otherLessons": "इतर धडे",
+    "untitled": "नोंद",
+    "fromChat": "चॅटमधून जतन केलेली",
+    "openLesson": "धडा उघडा",
+    "delete": "हटवा",
+    "deleteTitle": "ही नोंद हटवायची?",
+    "deleteBody": "ती तुमच्या सर्व डिव्हाइसवरील या अभ्यासक्रमातून काढली जाते.",
+    "deleteFailed": "ती नोंद हटवता आली नाही. पुन्हा प्रयत्न करा."
   }
 }

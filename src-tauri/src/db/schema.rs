@@ -86,6 +86,26 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // What each call is for (tutoring, classroom, interview seat or
     // candidate, assistant, plugin) and the thing it belongs to.
     (18, "call_kinds", MIGRATION_018_CALL_KINDS),
+    // Global AI chat: threads, messages, runs, explicit attachments, prepared
+    // request snapshots with content-addressed excerpts, and drafts. Queried by
+    // `crate::ai_chat::store`, which includes the same file.
+    (19, "ai_chat", include_str!("ai_chat.sql")),
+    // Chat practice: validated questions and the learner's attempts, checked
+    // locally. Practice never writes progress, credentials, or assessments.
+    (20, "ai_chat_practice", include_str!("ai_chat_practice.sql")),
+    // Learning memory: learner-approved preferences and observations.
+    (21, "learning_memory", include_str!("ai_chat_memory.sql")),
+    // Guardian approval of remote model connections for learners under 18,
+    // carried over the sealed guardian link.
+    (22, "ai_connection_approvals", include_str!("ai_connection_approvals.sql")),
+    // Local full-text search over complete chat messages.
+    (23, "ai_chat_search", include_str!("ai_chat_search.sql")),
+    // Goals as chat attachments.
+    (24, "ai_chat_goal_bindings", include_str!("ai_chat_goal_bindings.sql")),
+    // Notes and flashcards made from chat.
+    (25, "ai_chat_artifacts", include_str!("ai_chat_artifacts.sql")),
+    // Course notes keep their text; deletes leave a synced tombstone.
+    (26, "course_notes_body", include_str!("course_notes_body.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

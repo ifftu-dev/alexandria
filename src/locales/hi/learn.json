@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "कैमरा बंद है — यहाँ अर्जित कौशल की विश्वसनीयता कम होगी।"
+  },
+  "notes": {
+    "title": "आपके नोट्स",
+    "thisLesson": "यह पाठ",
+    "otherLessons": "दूसरे पाठ",
+    "untitled": "नोट",
+    "fromChat": "चैट से सेव किया गया",
+    "openLesson": "पाठ खोलें",
+    "delete": "हटाएँ",
+    "deleteTitle": "यह नोट हटाएँ?",
+    "deleteBody": "यह आपके सभी डिवाइस पर इस कोर्स से हटा दिया जाता है।",
+    "deleteFailed": "यह नोट हटाया नहीं जा सका। फिर से कोशिश करें।"
   }
 }

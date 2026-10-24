@@ -79,6 +79,20 @@ export function useGoals() {
     return invoke<GoalResolution>('resolve_goal', { input })
   }
 
+  /** Renames a goal or replaces its target skills. Returns the updated
+   *  goal, or null when it no longer exists. A goal is never left empty. */
+  async function updateGoal(id: string, patch: { label?: string; goalSkillIds?: string[] }): Promise<Goal | null> {
+    const current = setting.ref.value ?? []
+    const existing = current.find((g) => g.id === id)
+    if (!existing) return null
+    const goalSkillIds = patch.goalSkillIds ? [...new Set(patch.goalSkillIds)] : existing.goal_skill_ids
+    if (!goalSkillIds.length) throw new Error('invalid_input: a goal needs at least one skill')
+    const label = patch.label?.trim() || existing.label
+    const updated: Goal = { ...existing, label, goal_skill_ids: goalSkillIds }
+    await setting.set(current.map((g) => (g.id === id ? updated : g)))
+    return updated
+  }
+
   async function removeGoal(id: string): Promise<void> {
     await setting.set((setting.ref.value ?? []).filter((t) => t.id !== id))
   }
@@ -104,6 +118,7 @@ export function useGoals() {
   return {
     goals,
     addGoal,
+    updateGoal,
     removeGoal,
     hasGoalForDid,
     pathFor,

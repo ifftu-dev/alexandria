@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, AppModal, AppTextarea } from '@/components/ui'
+import { restrictsAppsForMinors } from '@/utils/providerTerms'
 import type {
   DecisionJudgment,
   StudioConnection,
@@ -264,6 +265,7 @@ onMounted(load)
           </select>
         </label>
         <AppInput v-model="connection.value.endpoint" :label="t('learn.player.tutorEndpoint')" required />
+        <p v-if="restrictsAppsForMinors(connection.value.endpoint)" class="text-xs text-warning">{{ t('common.aiTerms.geminiNotice') }}</p>
         <AppInput v-model="connection.value.model" :label="t('learn.player.tutorModelId')" required :maxlength="200" />
         <AppInput v-if="connection.value.location === 'cloud'" v-model="apiKey" type="password" autocomplete="new-password" :label="t('learn.player.tutorApiKey')" required />
         <p class="text-xs text-muted-foreground">{{ t('learn.player.tutorKeyPrivacy') }}</p>

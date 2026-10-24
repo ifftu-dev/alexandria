@@ -77,6 +77,10 @@ ed25519-dalek = { version = "2", features = ["serde", "rand_core", "zeroize"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 blake2 = "0.10"
 sha2 = "0.10"
+# Verifies OpenAI ID tokens (RS256) for Sign in with ChatGPT; already in the tree via libp2p/quinn.
+ring = "0.17"
+# Opens the provider sign-in page in the system browser.
+webbrowser = "1"
 # Device attestation verification (Sentinel `device_attested` assurance):
 # App Attest = CBOR attestation object + X.509 chain to Apple's root (ring
 # signature checks via x509-parser's `verify`), ECDSA P-256 assertions;
@@ -132,6 +136,7 @@ alexandria-verify = { path = "../crates/alexandria-verify" }
 alexandria-decisions = { path = "../crates/alexandria-decisions" }
 alexandria-learning-contracts = { path = "../crates/alexandria-learning-contracts" }
 alexandria-personhood = { path = "../crates/alexandria-personhood", optional = true }
+alexandria-ai = { path = "../crates/alexandria-ai" }
 alexandria-studio = { path = "../crates/alexandria-studio" }
 log = "0.4"
 tracing = "0.1"

@@ -131,6 +131,8 @@ Per-snapshot checks:
 30. ≥ 1 phantom hotkey in the window (desktop) → `phantom_hotkey` warning
 31. ≥ 3 phantom hotkeys in the window (desktop) → `phantom_hotkey_repeated` critical
 32. More than half of ≥ 3 liveness ticks in the window scored as a possible spoof → `spoof_suspected` warning
+33. Alexandria's AI chat or lesson tutor reached the backend while the attempt was open → `in_app_assistant_during_attempt` critical. Recorded by the backend, never by a client: the request is refused, and the flag is written into the session's committed snapshot chain once per session, carrying the session's current score so the average is unchanged.
+34. A connected external (MCP) assistant called while the attempt was open → `mcp_call_during_attempt` critical, recorded the same way.
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 

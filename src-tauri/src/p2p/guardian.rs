@@ -90,6 +90,30 @@ pub enum GuardianRequest {
         link_id: String,
         sealed_marker: Vec<u8>,
     },
+    /// Child → guardian: sealed [`ApprovalRequestPayload`], asking the
+    /// guardian to approve a remote model connection.
+    ApprovalRequest { link_id: String, sealed: Vec<u8> },
+    /// Guardian → child: sealed [`ApprovalDecisionPayload`].
+    ApprovalDecision { link_id: String, sealed: Vec<u8> },
+}
+
+/// What a learner under 18 asks a guardian to approve: one model connection
+/// at one endpoint. Sent only inside the sealed link.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalRequestPayload {
+    pub request_id: String,
+    pub connection_name: String,
+    pub endpoint: String,
+    pub model: String,
+}
+
+/// The guardian's decision. The latest decision applies, so an approval can
+/// be withdrawn later.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalDecisionPayload {
+    pub request_id: String,
+    pub endpoint: String,
+    pub approved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +130,8 @@ pub enum GuardianResponse {
     Sealed {
         sealed: Vec<u8>,
     },
+    /// An approval request or decision was stored.
+    Acknowledged,
     Unauthorized,
     Error(String),
 }
@@ -437,6 +463,82 @@ pub fn handle_guardian_request(
             link_id,
             sealed_marker,
         } => handle_revoke(conn, link_id, sealed_marker),
+        GuardianRequest::ApprovalRequest { link_id, sealed } => {
+            handle_approval_request(conn, link_id, sealed)
+        }
+        GuardianRequest::ApprovalDecision { link_id, sealed } => {
+            handle_approval_decision(conn, link_id, sealed)
+        }
+    }
+}
+
+fn bounded_text(value: &str, max: usize) -> bool {
+    !value.trim().is_empty() && value.len() <= max
+}
+
+/// Guardian side: store a ward's request. Only a link on which this profile
+/// is the guardian can deliver one, and the payload must open under its key.
+fn handle_approval_request(conn: &Connection, link_id: &str, sealed: &[u8]) -> GuardianResponse {
+    let key = match get_link_key(conn, link_id, "guardian") {
+        Ok(Some(k)) => k,
+        Ok(None) => return GuardianResponse::Unauthorized,
+        Err(e) => return GuardianResponse::Error(e),
+    };
+    let request: ApprovalRequestPayload = match open(&key, sealed) {
+        Ok(r) => r,
+        Err(e) => return GuardianResponse::Error(format!("open approval request: {e}")),
+    };
+    if !bounded_text(&request.request_id, 64)
+        || !bounded_text(&request.connection_name, 200)
+        || !bounded_text(&request.endpoint, 2048)
+        || !bounded_text(&request.model, 200)
+    {
+        return GuardianResponse::Error("approval request out of bounds".into());
+    }
+    // Repeats are expected: the ward re-sends until it hears a decision.
+    match conn.execute(
+        "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', datetime('now'))
+         ON CONFLICT(id, link_id) DO NOTHING",
+        rusqlite::params![
+            request.request_id,
+            link_id,
+            request.connection_name,
+            request.endpoint,
+            request.model
+        ],
+    ) {
+        Ok(_) => GuardianResponse::Acknowledged,
+        Err(e) => GuardianResponse::Error(e.to_string()),
+    }
+}
+
+/// Ward side: apply a guardian's decision to a request this profile made,
+/// for the endpoint it asked about. Anything else is refused.
+fn handle_approval_decision(conn: &Connection, link_id: &str, sealed: &[u8]) -> GuardianResponse {
+    let key = match get_link_key(conn, link_id, "ward") {
+        Ok(Some(k)) => k,
+        Ok(None) => return GuardianResponse::Unauthorized,
+        Err(e) => return GuardianResponse::Error(e),
+    };
+    let decision: ApprovalDecisionPayload = match open(&key, sealed) {
+        Ok(d) => d,
+        Err(e) => return GuardianResponse::Error(format!("open approval decision: {e}")),
+    };
+    let status = if decision.approved {
+        "approved"
+    } else {
+        "declined"
+    };
+    match conn.execute(
+        "UPDATE ai_connection_approvals
+            SET status = ?3, decided_by_link = ?4, decided_at = datetime('now')
+          WHERE id = ?1 AND endpoint = ?2",
+        rusqlite::params![decision.request_id, decision.endpoint, status, link_id],
+    ) {
+        Ok(1) => GuardianResponse::Acknowledged,
+        Ok(_) => GuardianResponse::Error("no matching approval request".into()),
+        Err(e) => GuardianResponse::Error(e.to_string()),
     }
 }
 
@@ -695,6 +797,8 @@ mod tests {
             "guardian_links",
             "guardian_pending_invites",
             "guardian_activity_rows",
+            "guardian_ai_requests",
+            "ai_connection_approvals",
         ] {
             assert!(
                 !crate::domain::sync::SYNCABLE_TABLES.contains(&t),
@@ -1157,5 +1261,120 @@ mod tests {
             },
         );
         assert!(matches!(resp, GuardianResponse::Unauthorized));
+    }
+
+    #[test]
+    fn a_ward_request_reaches_only_its_guardian_and_the_decision_only_the_ward() {
+        let key = [7u8; 32];
+        // Guardian profile.
+        let guardian = test_db();
+        let g = guardian.conn();
+        seed_guardian_link(g, "link", "guardian", key);
+        let request = ApprovalRequestPayload {
+            request_id: "req".into(),
+            connection_name: "Work OpenAI".into(),
+            endpoint: "https://api.openai.com/v1".into(),
+            model: "gpt-5.1-mini".into(),
+        };
+        let sealed = seal(&key, &request).unwrap();
+        for _ in 0..2 {
+            assert!(matches!(
+                handle_guardian_request(
+                    g,
+                    "peer",
+                    &GuardianRequest::ApprovalRequest {
+                        link_id: "link".into(),
+                        sealed: sealed.clone()
+                    }
+                ),
+                GuardianResponse::Acknowledged
+            ));
+        }
+        let count: i64 = g
+            .query_row("SELECT COUNT(*) FROM guardian_ai_requests", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1, "repeats are idempotent");
+        // A wrong key or the wrong side is refused.
+        let forged = seal(&[9u8; 32], &request).unwrap();
+        assert!(matches!(
+            handle_guardian_request(
+                g,
+                "peer",
+                &GuardianRequest::ApprovalRequest {
+                    link_id: "link".into(),
+                    sealed: forged
+                }
+            ),
+            GuardianResponse::Error(_)
+        ));
+        assert!(matches!(
+            handle_guardian_request(
+                g,
+                "peer",
+                &GuardianRequest::ApprovalDecision {
+                    link_id: "link".into(),
+                    sealed: sealed.clone()
+                }
+            ),
+            GuardianResponse::Unauthorized
+        ));
+
+        // Ward profile.
+        let ward = test_db();
+        let w = ward.conn();
+        seed_guardian_link(w, "link", "ward", key);
+        w.execute(
+            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
+             VALUES ('req', 'c1', 'Work OpenAI', 'https://api.openai.com/v1', 'gpt-5.1-mini', 'pending', '2026-10-24T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let decide = |approved: bool, endpoint: &str| {
+            let d = ApprovalDecisionPayload {
+                request_id: "req".into(),
+                endpoint: endpoint.into(),
+                approved,
+            };
+            handle_guardian_request(
+                w,
+                "peer",
+                &GuardianRequest::ApprovalDecision {
+                    link_id: "link".into(),
+                    sealed: seal(&key, &d).unwrap(),
+                },
+            )
+        };
+        // A decision for a different endpoint does not apply.
+        assert!(matches!(
+            decide(true, "https://evil.example/v1"),
+            GuardianResponse::Error(_)
+        ));
+        assert!(matches!(
+            decide(true, "https://api.openai.com/v1"),
+            GuardianResponse::Acknowledged
+        ));
+        let status: String = w
+            .query_row(
+                "SELECT status FROM ai_connection_approvals WHERE id = 'req'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "approved");
+        // The guardian can withdraw it later.
+        assert!(matches!(
+            decide(false, "https://api.openai.com/v1"),
+            GuardianResponse::Acknowledged
+        ));
+        let status: String = w
+            .query_row(
+                "SELECT status FROM ai_connection_approvals WHERE id = 'req'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "declined");
     }
 }

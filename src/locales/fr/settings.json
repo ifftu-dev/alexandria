@@ -114,7 +114,10 @@
     "shortcutsHint": "Cliquez sur la combinaison de touches d'un raccourci pour en enregistrer une nouvelle. Appuyez sur Échap pour annuler.",
     "pressKeys": "Appuyez sur des touches…",
     "resetToDefault": "Réinitialiser par défaut",
-    "reset": "réinitialiser"
+    "reset": "réinitialiser",
+    "shortcutNames": {
+      "toggle-chat": "Ouvrir ou fermer le chat"
+    }
   },
   "storage": {
     "title": "Stockage",
@@ -260,7 +263,6 @@
     "unavailable": "Local assistant access is unavailable. It currently requires Alexandria running on macOS or Linux.",
     "name": "Assistant name",
     "permissions": "Permissions",
-    "learningScope": "Read published courses: the catalog, course outlines, lesson text, video chapters, and quiz questions without answers. Lessons not stored on this device may be fetched from peers. Assessments are never shared.",
     "draftsScope": "Allow reading your course titles, text lessons, instructor instructions and selected source notes.",
     "credentialsScope": "Read your credentials: issuer, skill, dates and revocation status. The signed credential documents themselves are never shared.",
     "proposeScope": "Also allow submitting lesson proposals for my review.",
@@ -275,6 +277,21 @@
     "scopePropose": "Propose drafts",
     "expiresAt": "Expires {time}",
     "revoke": "Revoke access",
-    "none": "No active assistant grants."
+    "none": "No active assistant grants.",
+    "learningContent": "Lire les cours publiés : le catalogue, les plans de cours, le texte des leçons et les chapitres vidéo. Jusqu'à 20 leçons par heure qui ne sont pas stockées sur cet appareil peuvent être récupérées auprès des pairs. Les quiz et les évaluations ne sont jamais partagés.",
+    "privateSkillsScope": "Inclure les compétences que tu as gardées privées dans ton graphe de compétences. Désactivé par défaut.",
+    "verifyScope": "Vérifier les certificats qu'on te présente. Cela enregistre qu'une présentation a été vue, pour qu'elle ne puisse pas être acceptée deux fois.",
+    "scopePrivateSkills": "Compétences privées",
+    "scopeVerify": "Vérifier les présentations",
+    "disclosureTitle": "Ce qu'il lit quitte Alexandria",
+    "disclosureBody": "L'assistant peut lire tout ce que tu autorises ci-dessous sans te demander à chaque fois, et l'envoie généralement à son propre fournisseur d'IA. Alexandria ne peut pas contrôler ce qu'il en advient ensuite.",
+    "pauses": "L'accès se met automatiquement en pause pendant une évaluation ou une vérification d'entretien, et prend fin quand ce profil se verrouille.",
+    "activity": "Activité ({count})",
+    "activityEmpty": "Rien n'a encore été lu.",
+    "outcomeReturned": "Renvoyé",
+    "outcomeWithheld": "Retenu",
+    "outcomeUnavailable": "Indisponible",
+    "outcomePaused": "En pause : évaluation en cours",
+    "outcomeRefused": "Refusé"
   }
 }

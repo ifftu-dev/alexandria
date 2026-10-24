@@ -4,6 +4,7 @@ import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
+import GlobalChatHost from '@/components/chat/GlobalChatHost.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
 import CourseCompletionModal from '@/components/course/CourseCompletionModal.vue'
 import UnreviewedLocaleBanner from '@/components/i18n/UnreviewedLocaleBanner.vue'
@@ -125,6 +126,10 @@ function toggleSidebar() {
           <slot />
         </div>
       </main>
+
+      <!-- Global chat: mounted once beside the routed page, so a thread and
+           its draft survive navigation. Unmounted during assessments. -->
+      <GlobalChatHost />
     </div>
 
     <AppBottomBar />

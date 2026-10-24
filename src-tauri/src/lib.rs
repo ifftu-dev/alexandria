@@ -1,4 +1,6 @@
 pub mod aggregation;
+pub mod ai_auth;
+pub mod ai_chat;
 pub mod assessment;
 pub mod av_permissions;
 pub mod cardano;
@@ -73,6 +75,8 @@ pub struct ActiveProfile {
 /// workers is a separate responsiveness concern to measure and address.
 pub struct AppState {
     pub studio: Arc<commands::studio::StudioRuntime>,
+    /// Live chat generations, so they can be stopped and recovered.
+    pub ai_chat: Arc<ai_chat::ChatRuntime>,
     // ─── per-device singletons ──────────────────────────────────────
     pub app_data_dir: PathBuf,
     pub profile_manager: Arc<ProfileManager>,
@@ -348,6 +352,9 @@ impl AppState {
             let _guard = self.db.lock().map_err(|_| "storage_error".to_string())?;
             self.studio.invalidate();
         }
+        // Chat answers hold the profile lease and stop when it closes; asking
+        // them first lets each record itself as cancelled.
+        self.ai_chat.cancel_all();
         #[cfg(all(desktop, unix))]
         commands::studio_mcp::remove_connection_files(&self.app_data_dir);
         // Revoke active-profile access immediately, but retain the path needed
@@ -1248,6 +1255,7 @@ pub fn run() {
 
             let app_state = AppState {
                 studio: Arc::new(commands::studio::StudioRuntime::default()),
+                ai_chat: Arc::new(ai_chat::ChatRuntime::default()),
                 app_data_dir: app_dir.clone(),
                 profile_manager,
                 active,
@@ -1539,6 +1547,49 @@ pub fn run() {
             commands::decisions::decision_content_review,
             commands::decisions::decision_search,
             commands::decisions::decision_tutor_review,
+            commands::ai_chat::chat_status,
+            commands::ai_chat::chat_list_threads,
+            commands::ai_chat::chat_search_threads,
+            commands::ai_chat::chat_create_thread,
+            commands::ai_chat::chat_get_thread,
+            commands::ai_chat::chat_rename_thread,
+            commands::ai_chat::chat_set_thread_model,
+            commands::ai_chat::chat_delete_thread,
+            commands::ai_chat::chat_attach_lesson,
+            commands::ai_chat::chat_attach_goal,
+            commands::ai_chat::chat_detach,
+            commands::ai_chat::chat_get_draft,
+            commands::ai_chat::chat_save_draft,
+            commands::ai_chat::chat_list_models,
+            commands::ai_chat::chat_prepare_message,
+            commands::ai_chat::chat_start_run,
+            commands::ai_chat::chat_cancel_run,
+            commands::ai_chat::chat_set_thread_mode,
+            commands::ai_chat::chat_practice_attempt,
+            commands::ai_chat::chat_practice_hint,
+            commands::ai_chat::chat_practice_reveal,
+            commands::ai_chat::chat_list_memory,
+            commands::ai_chat::chat_add_memory,
+            commands::ai_chat::chat_approve_memory,
+            commands::ai_chat::chat_update_memory,
+            commands::ai_chat::chat_forget_memory,
+            commands::ai_chat::chat_save_note,
+            commands::ai_chat::chat_save_artifact,
+            commands::ai_chat::chat_goal_added,
+            commands::ai_signin::ai_signin,
+            commands::ai_signin::ai_signin_cancel,
+            commands::ai_signin::ai_disconnect,
+            commands::ai_signin::ai_open_provider_page,
+            commands::ai_chat::chat_goal_changed,
+            commands::course_notes::chat_save_course_note,
+            commands::course_notes::course_notes_list,
+            commands::course_notes::course_note_delete,
+            commands::ai_chat::chat_delete_artifact,
+            commands::ai_chat::chat_list_artifacts,
+            commands::ai_chat::chat_request_guardian_approval,
+            commands::ai_chat::chat_list_guardian_approvals,
+            commands::guardian::guardian_list_ai_requests,
+            commands::guardian::guardian_decide_ai_request,
             commands::studio::studio_get_course,
             commands::studio::studio_save_course,
             commands::studio::studio_get_tutor_policy,

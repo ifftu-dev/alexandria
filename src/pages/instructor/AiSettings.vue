@@ -7,6 +7,7 @@ import { useStudio } from '@/composables/useStudio'
 import DecisionSettings from '@/components/DecisionSettings.vue'
 import { AppButton, AppInput, AppTextarea, AppTabs, ConfirmDialog } from '@/components/ui'
 import type { StudioConnection, StudioDocument, StudioSettings } from '@/types'
+import { restrictsAppsForMinors } from '@/utils/providerTerms'
 
 const { t } = useI18n()
 const { invoke } = useLocalApi()
@@ -89,6 +90,7 @@ async function saveConnection() {
         <AppInput v-model="connection.value.name" :label="t('instructor.studio.displayName')" required :maxlength="200" />
         <label class="block text-sm"><span class="mb-2 block">{{ t('instructor.studio.location') }}</span><select v-model="connection.value.location" class="w-full rounded-lg border border-border bg-background p-2.5"><option value="local">{{ t('instructor.studio.local') }}</option><option value="cloud">{{ t('instructor.studio.cloud') }}</option></select></label>
         <AppInput v-model="connection.value.endpoint" :label="t('instructor.studio.endpoint')" required />
+        <p v-if="restrictsAppsForMinors(connection.value.endpoint)" class="text-xs text-warning">{{ t('common.aiTerms.geminiNotice') }}</p>
         <AppInput v-model="connection.value.model" :label="t('instructor.studio.modelId')" required :maxlength="200" />
         <AppInput v-model="apiKey" type="password" :label="t('instructor.studio.apiKey')" autocomplete="new-password" :placeholder="connection.value.has_key ? t('instructor.studio.keepKey') : ''" />
         <p class="text-xs text-muted-foreground">{{ t('instructor.studio.keyPrivacy') }}</p>

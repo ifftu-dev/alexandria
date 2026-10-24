@@ -18,6 +18,7 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         tutoring: Arc::new(TutoringManager::new()),
         classroom: Arc::new(ClassroomManager::new()),
         studio: Arc::new(crate::commands::studio::StudioRuntime::default()),
+        ai_chat: Arc::new(crate::ai_chat::ChatRuntime::default()),
         #[cfg(grader)]
         grader_runtime: Arc::new(
             crate::plugins::wasm_runtime::GraderRuntime::new().expect("grader"),

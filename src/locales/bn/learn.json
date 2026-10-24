@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "ক্যামেরা বন্ধ — এখানে অর্জিত দক্ষতার আস্থা কম হবে।"
+  },
+  "notes": {
+    "title": "আপনার নোট",
+    "thisLesson": "এই পাঠ",
+    "otherLessons": "অন্যান্য পাঠ",
+    "untitled": "নোট",
+    "fromChat": "চ্যাট থেকে সংরক্ষিত",
+    "openLesson": "পাঠ খুলুন",
+    "delete": "মুছুন",
+    "deleteTitle": "এই নোটটি মুছবেন?",
+    "deleteBody": "এটি আপনার সব ডিভাইসে এই কোর্স থেকে সরিয়ে ফেলা হয়।",
+    "deleteFailed": "নোটটি মুছে ফেলা যায়নি। আবার চেষ্টা করুন।"
   }
 }

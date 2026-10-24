@@ -3,11 +3,11 @@
 //!
 //! Only published courses written by someone else are visible. An author's
 //! own courses, whose local copy may hold unpublished edits, stay behind
-//! `drafts:read`. Lessons return text, video chapter markers, and the
-//! questions of quizzes and essays rebuilt from an allowlist of learner-visible
-//! fields, so answer keys, explanations and anything a new format adds are
-//! never copied. Credential-bearing assessments, interactive elements and
-//! plugins are withheld.
+//! `drafts:read`. Lessons return text and video chapter markers. Quizzes,
+//! essays and multiple-choice elements are graded and monitored like
+//! assessments in the course player, so they are withheld along with
+//! credential-bearing assessments, interactive elements and plugins. The same
+//! rules serve every AI surface: the assistant broker and in-app chat.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -23,11 +23,6 @@ pub const SECTION_CHARS: usize = 60_000;
 /// Largest lesson body read from a content blob.
 pub const MAX_CONTENT_BYTES: usize = 512_000;
 const MAX_OUTLINE_ROWS: i64 = 1_000;
-const MAX_QUESTIONS: usize = 100;
-const MAX_QUESTION_BYTES: usize = 400_000;
-const MAX_FIELD_CHARS: usize = 4_000;
-const MAX_OPTION_CHARS: usize = 1_000;
-const MAX_OPTIONS: usize = 20;
 
 /// Courses a learning grant may see, for a query aliasing `courses` as `c`.
 const VISIBLE: &str = "c.status = 'published' AND NOT EXISTS(SELECT 1 FROM local_identity i WHERE i.id = 1 AND i.stake_address = c.author_address)";
@@ -111,9 +106,6 @@ pub fn content_kind(element_type: &str) -> &'static str {
     match element_type {
         "text" => "text",
         "video" => "video_chapters",
-        "quiz" | "objective_single_mcq" | "objective_multi_mcq" | "subjective_mcq" | "essay" => {
-            "questions"
-        }
         _ => "withheld",
     }
 }
@@ -246,7 +238,7 @@ impl LessonTarget {
     /// The content blob to fetch before rendering, when the body is not inline.
     pub fn blob(&self) -> Option<&str> {
         match content_kind(&self.element_type) {
-            "text" | "questions" if self.inline.is_none() => self.blob.as_deref(),
+            "text" if self.inline.is_none() => self.blob.as_deref(),
             _ => None,
         }
     }
@@ -323,7 +315,7 @@ pub fn render_lesson(
             lesson["video_chapters"] = Value::Array(chapters);
         }
         "withheld" => withhold(&mut lesson, withheld_reason(&target.element_type)),
-        kind => {
+        _ => {
             let content = match (&target.inline, body) {
                 (Some(inline), _) => Ok(inline.clone()),
                 (None, Body::Fetched(Ok(bytes))) if bytes.len() > MAX_CONTENT_BYTES => {
@@ -342,25 +334,11 @@ pub fn render_lesson(
                     lesson["status"] = "unavailable".into();
                     lesson["reason"] = reason.into();
                 }
-                Ok(content) if kind == "text" => {
+                Ok(content) => {
                     let (text, next_start) = section(&content, start);
                     lesson["text"] = text.into();
                     lesson["next_start"] = json!(next_start);
                 }
-                Ok(content) => match serde_json::from_str::<Value>(&content)
-                    .ok()
-                    .and_then(|value| questions(&target.element_type, &value))
-                {
-                    Some(parsed) => {
-                        lesson["instructions"] = json!(parsed.instructions);
-                        lesson["questions"] = Value::Array(parsed.questions);
-                        lesson["truncated"] = parsed.truncated.into();
-                    }
-                    None => withhold(
-                        &mut lesson,
-                        "the question format is not recognised, so nothing is shared".into(),
-                    ),
-                },
             }
         }
     }
@@ -375,6 +353,9 @@ fn withhold(lesson: &mut Value, reason: String) {
 fn withheld_reason(element_type: &str) -> String {
     match element_type {
         "assessment" => "credential-bearing assessments are not shared with assistants",
+        "quiz" | "objective_single_mcq" | "objective_multi_mcq" | "subjective_mcq" | "essay" => {
+            "quizzes are graded like assessments and are not shared with assistants"
+        }
         "interactive" | "plugin" => "interactive content runs only inside Alexandria",
         _ => "this kind of element has no content an assistant can read",
     }
@@ -394,147 +375,6 @@ fn section(text: &str, start: usize) -> (String, Option<usize>) {
         ),
         None => (text[from..].to_string(), None),
     }
-}
-
-struct Questions {
-    instructions: Option<String>,
-    questions: Vec<Value>,
-    truncated: bool,
-}
-
-/// Rebuilds an element's questions from the fields a learner sees before
-/// answering. Fields are copied by name; nothing else is.
-fn questions(element_type: &str, content: &Value) -> Option<Questions> {
-    match element_type {
-        "essay" => {
-            let prompt = clipped(content, "question").or_else(|| clipped(content, "prompt"))?;
-            let mut question = question(None, "essay", prompt, &Value::Null);
-            question["guidelines"] = json!(clipped(content, "guidelines"));
-            question["min_words"] = json!(content.get("min_words").and_then(Value::as_i64));
-            question["max_words"] = json!(content.get("max_words").and_then(Value::as_i64));
-            question["rubric_criteria"] = json!(strings(content.get("rubric_criteria")));
-            Some(Questions {
-                instructions: None,
-                questions: vec![question],
-                truncated: false,
-            })
-        }
-        "quiz" => items(
-            content.get("questions")?.as_array()?,
-            clipped(content, "description"),
-            |item| {
-                let kind = item
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .filter(|kind| {
-                        [
-                            "single_choice",
-                            "multiple_choice",
-                            "true_false",
-                            "short_answer",
-                        ]
-                        .contains(kind)
-                    })
-                    .unwrap_or("choice");
-                Some(kind)
-            },
-        ),
-        "objective_single_mcq" | "objective_multi_mcq" | "subjective_mcq" => {
-            match content.get("questions").and_then(Value::as_array) {
-                Some(list) => items(list, None, |_| Some(element_type)),
-                None => {
-                    let prompt = clipped(content, "question")?;
-                    Some(Questions {
-                        instructions: None,
-                        questions: vec![question(None, element_type, prompt, content)],
-                        truncated: false,
-                    })
-                }
-            }
-        }
-        _ => None,
-    }
-}
-
-fn items<'a>(
-    list: &'a [Value],
-    instructions: Option<String>,
-    kind: impl Fn(&'a Value) -> Option<&'a str>,
-) -> Option<Questions> {
-    let mut questions = Vec::new();
-    let mut bytes = 0;
-    let mut truncated = list.len() > MAX_QUESTIONS;
-    for item in list.iter().take(MAX_QUESTIONS) {
-        let Some(prompt) = clipped(item, "prompt").or_else(|| clipped(item, "question")) else {
-            continue;
-        };
-        let id = item.get("id").and_then(Value::as_str).map(clip_field);
-        let question = question(id, kind(item)?, prompt, item);
-        bytes += question.to_string().len();
-        if bytes > MAX_QUESTION_BYTES {
-            truncated = true;
-            break;
-        }
-        questions.push(question);
-    }
-    Some(Questions {
-        instructions,
-        questions,
-        truncated,
-    })
-}
-
-fn question(id: Option<String>, question_type: &str, prompt: String, item: &Value) -> Value {
-    let options = item
-        .get("options")
-        .and_then(Value::as_array)
-        .map(|options| {
-            options
-                .iter()
-                .take(MAX_OPTIONS)
-                .filter_map(|option| match option {
-                    Value::String(text) => Some(text.as_str()),
-                    Value::Object(_) => option.get("text").and_then(Value::as_str),
-                    _ => None,
-                })
-                .map(|text| text.chars().take(MAX_OPTION_CHARS).collect::<String>())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    json!({
-        "id": id,
-        "question_type": question_type,
-        "prompt": prompt,
-        "context": clipped(item, "context"),
-        "options": options,
-        "points": item.get("points").and_then(Value::as_f64),
-        "guidelines": null,
-        "min_words": null,
-        "max_words": null,
-        "rubric_criteria": [],
-    })
-}
-
-fn clipped(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(Value::as_str).map(clip_field)
-}
-
-fn clip_field(text: &str) -> String {
-    text.chars().take(MAX_FIELD_CHARS).collect()
-}
-
-fn strings(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .take(MAX_OPTIONS)
-                .filter_map(Value::as_str)
-                .map(clip_field)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn json_strings(json: Option<String>) -> Vec<String> {
@@ -559,79 +399,45 @@ fn bounded_id(id: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn leaks(value: &Questions) -> String {
-        json!(value.questions).to_string()
-    }
-
     #[test]
-    fn quiz_questions_keep_prompts_and_options_but_never_answers() {
-        let quiz = json!({"title": "Q", "description": "Read chapter 2 first", "pass_threshold": 0.7,
-        "questions": [
-            {"id": "q1", "type": "single_choice", "prompt": "Pick", "options": ["a", "b"],
-             "correct_indices": [1], "explanation": "because b", "points": 2, "difficulty": 1},
-            {"id": "q2", "type": "short_answer", "prompt": "Name it", "correct_answer": "graph", "points": 1},
-            {"id": "q3", "type": "novel_type", "prompt": "New", "options": ["x"], "answer_key": "x"},
-            {"id": "q4", "explanation": "no prompt, skipped"}
-        ]});
-        let parsed = questions("quiz", &quiz).unwrap();
-        assert_eq!(parsed.instructions.as_deref(), Some("Read chapter 2 first"));
-        assert_eq!(parsed.questions.len(), 3);
-        assert_eq!(parsed.questions[0]["options"], json!(["a", "b"]));
-        assert_eq!(parsed.questions[0]["points"], json!(2.0));
-        assert_eq!(parsed.questions[2]["question_type"], "choice");
-        let text = leaks(&parsed);
-        for secret in [
-            "correct",
-            "explanation",
-            "because b",
-            "graph",
-            "answer_key",
-            "difficulty",
-            "pass_threshold",
+    fn graded_and_interactive_elements_are_withheld_from_every_assistant() {
+        for kind in [
+            "quiz",
+            "objective_single_mcq",
+            "objective_multi_mcq",
+            "subjective_mcq",
+            "essay",
+            "assessment",
+            "interactive",
+            "plugin",
+            "a_format_added_later",
         ] {
-            assert!(!text.contains(secret), "{secret} leaked: {text}");
+            assert_eq!(content_kind(kind), "withheld", "{kind}");
         }
+        assert_eq!(content_kind("text"), "text");
+        assert_eq!(content_kind("video"), "video_chapters");
+        assert!(withheld_reason("quiz").contains("graded like assessments"));
+        assert!(withheld_reason("essay").contains("graded like assessments"));
     }
 
     #[test]
-    fn multiple_choice_and_essays_share_only_what_learners_see() {
-        let mcq = json!({"question": "Which?", "context": "Given a list", "options": [{"id": "o1", "text": "x", "is_correct": true}, {"id": "o2", "text": "y"}],
-            "correct_option_index": 0, "correct_option_indices": [0], "explanation": "x wins"});
-        let parsed = questions("objective_multi_mcq", &mcq).unwrap();
-        assert_eq!(parsed.questions[0]["options"], json!(["x", "y"]));
-        assert_eq!(parsed.questions[0]["context"], "Given a list");
-        let authored = json!({"questions": [{"id": "a", "question": "Q?", "options": ["1", "2"], "correct_index": 1}]});
-        let parsed_authored = questions("objective_single_mcq", &authored).unwrap();
-        assert_eq!(parsed_authored.questions[0]["prompt"], "Q?");
-
-        let essay = json!({"question": "Argue", "guidelines": "Cite sources", "min_words": 300, "max_words": 800,
-            "rubric_criteria": ["Clarity"], "rubric": "PRIVATE GRADING RUBRIC"});
-        let parsed_essay = questions("essay", &essay).unwrap();
-        assert_eq!(parsed_essay.questions[0]["min_words"], 300);
-        assert_eq!(
-            parsed_essay.questions[0]["rubric_criteria"],
-            json!(["Clarity"])
-        );
-
-        for text in [
-            leaks(&parsed),
-            leaks(&parsed_authored),
-            leaks(&parsed_essay),
-        ] {
-            for secret in ["correct", "is_correct", "x wins", "PRIVATE"] {
-                assert!(!text.contains(secret), "{secret} leaked: {text}");
-            }
-        }
-    }
-
-    #[test]
-    fn unrecognised_formats_and_withheld_types_share_nothing() {
-        assert!(questions("quiz", &json!({"items": []})).is_none());
-        assert!(questions("objective_single_mcq", &json!({"prompt_text": "?"})).is_none());
-        assert!(questions("assessment", &json!({"questions": []})).is_none());
-        assert_eq!(content_kind("assessment"), "withheld");
-        assert_eq!(content_kind("interactive"), "withheld");
-        assert_eq!(content_kind("plugin"), "withheld");
+    fn a_withheld_quiz_returns_its_reason_and_no_content() {
+        let conn = Connection::open_in_memory().unwrap();
+        let target = LessonTarget {
+            course_id: "c".into(),
+            element_id: "q".into(),
+            title: "Chapter quiz".into(),
+            element_type: "quiz".into(),
+            inline: Some(r#"{"questions":[{"prompt":"Pick","correct_indices":[1]}]}"#.into()),
+            blob: None,
+            duration_seconds: None,
+        };
+        assert!(target.blob().is_none());
+        let lesson = render_lesson(&conn, &target, Body::Stored, 0).unwrap();
+        assert_eq!(lesson["status"], "withheld");
+        assert_eq!(lesson["text"], Value::Null);
+        assert_eq!(lesson["questions"], json!([]));
+        assert!(!lesson.to_string().contains("Pick"));
     }
 
     #[test]
