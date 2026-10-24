@@ -23,7 +23,7 @@ async function load() {
   const started = ++generation
   try {
     const next = await notes.list(props.courseId)
-    if (started === generation) items.value = next
+    if (started === generation) items.value = Array.isArray(next) ? next : []
   } catch {
     if (started === generation) items.value = []
   }
