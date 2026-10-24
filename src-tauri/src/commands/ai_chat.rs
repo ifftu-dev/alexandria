@@ -1829,6 +1829,31 @@ pub async fn chat_save_artifact(
 }
 
 /// Dismisses a proposal or deletes a saved artifact.
+/// Marks a goal proposal as added once the learner added it on the Goals
+/// service. The goal must exist in the learner's saved goals.
+#[tauri::command]
+pub async fn chat_goal_added(
+    state: State<'_, AppState>,
+    artifact_id: String,
+    goal_id: String,
+) -> Result<store::Artifact, String> {
+    with_conn(&state, "chat.goal-added", move |conn| {
+        goal_added(conn, &artifact_id, &goal_id)
+    })
+    .await
+}
+
+fn goal_added(
+    conn: &Connection,
+    artifact_id: &str,
+    goal_id: &str,
+) -> Result<store::Artifact, String> {
+    if crate::ai_chat::goal::label(conn, goal_id)?.is_none() {
+        return Err("not_found: that goal is not in your goals".into());
+    }
+    store::mark_goal_added(conn, artifact_id, goal_id, &now()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn chat_delete_artifact(
     state: State<'_, AppState>,
@@ -2564,6 +2589,31 @@ mod tests {
             assert!(kept
                 .iter()
                 .all(|a| a.thread_id.is_none() && a.message_id.is_none()));
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_proposed_goal_is_marked_only_once_the_learner_has_it() {
+        static WORDS: [&str; 1] = [
+            "A goal could be:\n```artifact\n{\"type\":\"goal\",\"title\":\"Data analyst\",\"text\":\"Analyse data with probability\"}\n```",
+        ];
+        let endpoint = model(&WORDS, 1).await;
+        let harness = Harness::new(&endpoint);
+        let (task, _events) = harness.begin("Help me pick a goal");
+        task.drive().await;
+
+        harness.conn(|conn| {
+            let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+            assert_eq!(artifacts.len(), 1);
+            let proposal = &artifacts[0];
+            assert_eq!(proposal.status, "proposed");
+            assert!(
+                goal_added(conn, &proposal.id, "g1").is_err(),
+                "no such goal yet"
+            );
+            goal(conn);
+            let added = goal_added(conn, &proposal.id, "g1").unwrap();
+            assert_eq!(added.status, "added");
         });
     }
 

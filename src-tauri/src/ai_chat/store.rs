@@ -358,9 +358,10 @@ pub fn delete_thread(conn: &Connection, id: &str) -> Result<()> {
         "DELETE FROM learning_memory WHERE status = 'proposed' AND thread_id = ?1",
         [id],
     )?;
-    // Proposals go with the chat; saved artifacts stay.
+    // Proposals (and goal proposals already added) go with the chat; saved
+    // artifacts stay.
     tx.execute(
-        "DELETE FROM chat_artifacts WHERE status = 'proposed' AND thread_id = ?1",
+        "DELETE FROM chat_artifacts WHERE status IN ('proposed', 'added') AND thread_id = ?1",
         [id],
     )?;
     let changed = tx.execute("DELETE FROM chat_threads WHERE id = ?1", [id])?;
@@ -1465,14 +1466,41 @@ pub fn save_message_as_note(
     artifact(conn, id)
 }
 
-/// Saves a proposal. Saving twice is harmless.
+/// Saves a proposal. Saving twice is harmless. A goal proposal is not saved
+/// here; it is added through the Goals service and then marked.
 pub fn save_artifact(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
     let current = artifact(conn, id)?;
+    if matches!(current.body, super::artifact::Body::Goal { .. }) {
+        return Err(StoreError::Invalid(
+            "a goal is added from its preview".into(),
+        ));
+    }
     if current.status == "proposed" {
         ensure_room(conn)?;
         conn.execute(
             "UPDATE chat_artifacts SET status = 'saved', updated_at = ?2 WHERE id = ?1",
             params![id, now],
+        )?;
+    }
+    artifact(conn, id)
+}
+
+/// Records that the learner added a proposed goal, as `goal_id`. The caller
+/// checks the goal exists. Marking twice is harmless.
+pub fn mark_goal_added(conn: &Connection, id: &str, goal_id: &str, now: &str) -> Result<Artifact> {
+    let current = artifact(conn, id)?;
+    let super::artifact::Body::Goal { text, .. } = current.body else {
+        return Err(StoreError::Invalid("not a goal proposal".into()));
+    };
+    if current.status == "proposed" {
+        let body = super::artifact::Body::Goal {
+            text,
+            goal_id: Some(goal_id.to_string()),
+        };
+        let body = serde_json::to_string(&body).map_err(|e| StoreError::Invalid(e.to_string()))?;
+        conn.execute(
+            "UPDATE chat_artifacts SET status = 'added', body_json = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, body, now],
         )?;
     }
     artifact(conn, id)
@@ -1676,6 +1704,45 @@ mod tests {
         assert_eq!(saved_artifacts(&conn).unwrap().len(), 1);
         delete_artifact(&conn, "p1").unwrap();
         assert!(delete_artifact(&conn, "p1").is_err());
+    }
+
+    #[test]
+    fn a_goal_proposal_is_added_not_saved_and_goes_with_its_chat() {
+        let conn = db();
+        create_thread(&conn, "t", Some("c1"), None, NOW).unwrap();
+        snapshot_row(&conn, "s1", "t", &[]);
+        begin_run(&conn, &start("r1", "q1", "s1", None, "u1", "a1", 1)).unwrap();
+        let goal = super::super::artifact::Proposal {
+            title: "Data analyst".into(),
+            body: super::super::artifact::Body::Goal {
+                text: "Clean data and build dashboards".into(),
+                goal_id: None,
+            },
+        };
+        propose_artifact(&conn, "g1", &goal, "a1", NOW).unwrap();
+        assert!(save_artifact(&conn, "g1", NOW).is_err());
+        let added = mark_goal_added(&conn, "g1", "goal-7", NOW).unwrap();
+        assert_eq!(added.status, "added");
+        assert_eq!(
+            added.body,
+            super::super::artifact::Body::Goal {
+                text: "Clean data and build dashboards".into(),
+                goal_id: Some("goal-7".into()),
+            }
+        );
+        let again = mark_goal_added(&conn, "g1", "goal-8", NOW).unwrap();
+        assert_eq!(again.body, added.body, "marking twice keeps the first goal");
+        assert!(saved_artifacts(&conn).unwrap().is_empty());
+
+        let note = super::super::artifact::Proposal {
+            title: "T".into(),
+            body: super::super::artifact::Body::Note { text: "x".into() },
+        };
+        propose_artifact(&conn, "n1", &note, "a1", NOW).unwrap();
+        assert!(mark_goal_added(&conn, "n1", "goal-7", NOW).is_err());
+
+        delete_thread(&conn, "t").unwrap();
+        assert!(matches!(artifact(&conn, "g1"), Err(StoreError::NotFound)));
     }
 
     #[test]

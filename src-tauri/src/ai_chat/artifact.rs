@@ -1,7 +1,11 @@
-//! Study artifacts: notes and flashcards made from a conversation.
+//! Study artifacts: notes and flashcards made from a conversation, and
+//! proposed learning goals.
 //!
 //! A model may propose one by ending its reply with a fenced `artifact`
-//! block; the learner can also save any answer as a note. A proposal is
+//! block; the learner can also save any answer as a note. A goal proposal
+//! carries only a name and a description: the app matches skills to it with
+//! the Goals page's own resolver, and the learner picks them before the goal
+//! is added. A proposal is
 //! stored for the learner to save or dismiss and is never saved on its own.
 //! Saved artifacts keep the sources the originating answer carried, and they
 //! outlive the chat they came from. Their text is checked against stored
@@ -13,6 +17,7 @@ pub const MAX_TITLE_CHARS: usize = 120;
 pub const MAX_NOTE_CHARS: usize = 8_000;
 pub const MAX_CARDS: usize = 20;
 pub const MAX_CARD_CHARS: usize = 400;
+pub const MAX_GOAL_CHARS: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Card {
@@ -23,8 +28,18 @@ pub struct Card {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Body {
-    Note { text: String },
-    Flashcards { cards: Vec<Card> },
+    Note {
+        text: String,
+    },
+    Flashcards {
+        cards: Vec<Card>,
+    },
+    Goal {
+        text: String,
+        /// The learner's goal, once they added it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        goal_id: Option<String>,
+    },
 }
 
 impl Body {
@@ -32,13 +47,14 @@ impl Body {
         match self {
             Body::Note { .. } => "note",
             Body::Flashcards { .. } => "flashcards",
+            Body::Goal { .. } => "goal",
         }
     }
 
     /// Everything a learner would read, for the assessment-item check.
     pub fn text(&self) -> String {
         match self {
-            Body::Note { text } => text.clone(),
+            Body::Note { text } | Body::Goal { text, .. } => text.clone(),
             Body::Flashcards { cards } => cards
                 .iter()
                 .map(|c| format!("{} {}", c.front, c.back))
@@ -84,8 +100,12 @@ pub fn clean_note(text: &str) -> Option<String> {
 }
 
 fn clean_side(text: &str) -> Option<String> {
+    clean_side_bounded(text, MAX_CARD_CHARS)
+}
+
+fn clean_side_bounded(text: &str, max: usize) -> Option<String> {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!text.is_empty() && text.chars().count() <= MAX_CARD_CHARS).then_some(text)
+    (!text.is_empty() && text.chars().count() <= max).then_some(text)
 }
 
 pub fn parse(block: &str) -> Option<Proposal> {
@@ -112,6 +132,10 @@ pub fn parse(block: &str) -> Option<Proposal> {
                     .collect::<Option<Vec<_>>>()?,
             }
         }
+        "goal" => Body::Goal {
+            text: clean_side_bounded(raw.text.as_deref()?, MAX_GOAL_CHARS)?,
+            goal_id: None,
+        },
         _ => return None,
     };
     Some(Proposal { title, body })
@@ -143,8 +167,27 @@ mod tests {
             r#"{{"type":"flashcards","title":"T","cards":[{}]}}"#,
             vec![r#"{"front":"a","back":"b"}"#; MAX_CARDS + 1].join(",")
         );
+        let goal = parse(
+            r#"{"type":"goal","title":"Data analyst","text":"Clean data\nand build dashboards","goal_id":"forged"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            goal.body,
+            Body::Goal {
+                text: "Clean data and build dashboards".into(),
+                goal_id: None,
+            },
+            "a model cannot name an existing goal"
+        );
+
+        let long_goal = format!(
+            r#"{{"type":"goal","title":"T","text":"{}"}}"#,
+            "a".repeat(MAX_GOAL_CHARS + 1)
+        );
         for bad in [
             many.as_str(),
+            long_goal.as_str(),
+            r#"{"type":"goal","title":"T"}"#,
             r#"{"type":"flashcards","title":"T","cards":[]}"#,
             r#"{"type":"flashcards","title":"T","cards":[{"front":"","back":"b"}]}"#,
             r#"{"type":"note","title":"","text":"x"}"#,

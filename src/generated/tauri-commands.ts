@@ -29,6 +29,7 @@ export const TAURI_COMMANDS = [
   "chat_forget_memory",
   "chat_get_draft",
   "chat_get_thread",
+  "chat_goal_added",
   "chat_list_artifacts",
   "chat_list_guardian_approvals",
   "chat_list_memory",

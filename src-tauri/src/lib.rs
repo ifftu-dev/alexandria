@@ -1574,6 +1574,7 @@ pub fn run() {
             commands::ai_chat::chat_forget_memory,
             commands::ai_chat::chat_save_note,
             commands::ai_chat::chat_save_artifact,
+            commands::ai_chat::chat_goal_added,
             commands::ai_chat::chat_delete_artifact,
             commands::ai_chat::chat_list_artifacts,
             commands::ai_chat::chat_request_guardian_approval,

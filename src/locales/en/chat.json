@@ -243,5 +243,20 @@
     "deleteBody": "It is removed from this device. The chat it came from is not changed.",
     "fromChat": "From a chat",
     "untitledNote": "Note"
+  },
+  "goalProposal": {
+    "title": "Suggested goal",
+    "hint": "Find matching skills and choose the ones you want. Nothing is added unless you add it.",
+    "find": "Find skills",
+    "pick": "Choose the skills this goal should cover.",
+    "strong": "Strong match",
+    "add": "Add goal with {count} skill | Add goal with {count} skills",
+    "noSkills": "No matching skills were found. You can set a goal on the Goals page.",
+    "openGoals": "Open Goals",
+    "added": "Added to your goals",
+    "removed": "Added to your goals, then removed",
+    "open": "Open",
+    "resolveFailed": "Skills could not be matched. Try again.",
+    "addFailed": "That couldn't be done. Try again."
   }
 }

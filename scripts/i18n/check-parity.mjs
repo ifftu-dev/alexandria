@@ -46,26 +46,6 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
-  // Global AI chat: English-first while the feature is in alpha.
-  'chat.',
-  'settings.personalization.shortcutNames.toggle-chat',
-  // Guardian approval of remote AI models.
-  'guardian.aiRequests.',
-  // Integrity flags recorded when AI is used during an attempt.
-  'sentinel.flags.items.inAppAssistantDuringAttempt',
-  'sentinel.flags.items.mcpCallDuringAttempt',
-  // External-assistant disclosure, new scopes and activity log (2026-10-24).
-  'settings.assistants.learningContent',
-  'settings.assistants.privateSkillsScope',
-  'settings.assistants.verifyScope',
-  'settings.assistants.scopePrivateSkills',
-  'settings.assistants.scopeVerify',
-  'settings.assistants.disclosureTitle',
-  'settings.assistants.disclosureBody',
-  'settings.assistants.pauses',
-  'settings.assistants.activity',
-  'settings.assistants.activityEmpty',
-  'settings.assistants.outcome',
   // Jev goal entry: English fallback pending the next learner translation pass.
   'goals.picker.learningGoal',
   'goals.picker.goalPlaceholder',
