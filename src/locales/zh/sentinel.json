@@ -232,6 +232,14 @@
       "obscuredTouch": {
         "description": "有触摸穿过了悬浮窗",
         "trigger": "在另一个窗口覆盖测评时收到了点击（Android）"
+      },
+      "inAppAssistantDuringAttempt": {
+        "description": "作答期间使用了 Alexandria 的 AI 聊天或辅导",
+        "trigger": "作答进行中时，Alexandria 收到了聊天或辅导请求"
+      },
+      "mcpCallDuringAttempt": {
+        "description": "作答期间，一个已连接的外部助手请求了数据",
+        "trigger": "作答进行中时，一个可以访问此个人资料的助手发出了请求"
       }
     }
   },

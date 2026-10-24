@@ -232,6 +232,14 @@
       "obscuredTouch": {
         "description": "ایک ٹچ اوورلے کے ذریعے آیا",
         "trigger": "تشخیص کے اوپر دوسری ونڈو موجود ہوتے ہوئے ٹیپ موصول ہوا (Android)"
+      },
+      "inAppAssistantDuringAttempt": {
+        "description": "کوشش کے دوران Alexandria کی AI چیٹ یا ٹیوٹر استعمال ہوا",
+        "trigger": "کوشش کھلی ہونے کے دوران چیٹ یا ٹیوٹر کی درخواست Alexandria تک پہنچی"
+      },
+      "mcpCallDuringAttempt": {
+        "description": "کوشش کے دوران ایک منسلک بیرونی اسسٹنٹ نے ڈیٹا مانگا",
+        "trigger": "اس پروفائل تک رسائی رکھنے والے ایک اسسٹنٹ نے کوشش کھلی ہونے کے دوران درخواست کی"
       }
     }
   },

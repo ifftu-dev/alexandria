@@ -52,5 +52,19 @@
     "noClassroomsTitle": "No hay aulas",
     "noClassroomsDescription": "Las aulas a las que se una tu hijo aparecen aquí.",
     "roleJoined": "{role} · se unió {date}"
+  },
+  "aiRequests": {
+    "title": "Solicitudes de modelos de IA",
+    "intro": "Solicitudes para enviar mensajes del chat a un proveedor de IA en internet. Si apruebas una, este estudiante puede usar ese proveedor en esa dirección; puedes retirar la aprobación en cualquier momento. Los modelos en el propio dispositivo o red del estudiante nunca necesitan aprobación.",
+    "none": "No hay solicitudes.",
+    "approve": "Aprobar",
+    "decline": "Rechazar",
+    "withdraw": "Retirar aprobación",
+    "notDelivered": "le llega al estudiante en la próxima sincronización",
+    "status": {
+      "pending": "Esperando tu respuesta",
+      "approved": "Aprobada",
+      "declined": "No aprobada"
+    }
   }
 }
