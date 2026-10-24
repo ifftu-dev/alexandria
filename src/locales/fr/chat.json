@@ -290,6 +290,9 @@
     "openrouterHint": "Utilise les crédits de ton compte OpenRouter. Réservé aux 18 ans et plus.",
     "waiting": "Termine la connexion dans ton navigateur…",
     "cancel": "Annuler",
+    "codeIntro": "Dans ton navigateur, connecte-toi à OpenRouter et autorise Alexandria. Copie ensuite le code affiché et colle-le ici.",
+    "codeLabel": "Code d'OpenRouter",
+    "connect": "Connecter",
     "or": "Ou ajoute un modèle avec une API key, ou un modèle sur cet appareil ou sur ton propre réseau :",
     "donePageTitle": "Connexion réussie",
     "donePageBody": "Tu peux fermer cet onglet et revenir à Alexandria.",
@@ -313,7 +316,9 @@
       "unreachable": "Impossible de joindre le fournisseur. Vérifie ta connexion Internet et réessaie.",
       "noModels": "Connexion réussie, mais aucun modèle n'est disponible avec ce forfait.",
       "failed": "La connexion au compte n'a pas abouti. Réessaie.",
-      "failedCode": "La connexion au compte n'a pas abouti ({code}). Réessaie."
+      "failedCode": "La connexion au compte n'a pas abouti ({code}). Réessaie.",
+      "codeRejected": "OpenRouter n'a pas accepté ce code. Recommence et colle le nouveau code.",
+      "expired": "Cette connexion a expiré. Recommence."
     }
   }
 }

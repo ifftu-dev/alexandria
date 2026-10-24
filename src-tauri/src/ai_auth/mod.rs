@@ -48,6 +48,10 @@ pub enum SignInError {
     DifferentAccount,
     #[error("unreachable: the provider could not be reached")]
     Unreachable,
+    #[error("code_rejected: the provider did not accept that code; start again")]
+    CodeRejected,
+    #[error("signin_expired: that sign-in expired; start again")]
+    Expired,
     #[error("signin_failed: {0}")]
     Failed(String),
 }
@@ -77,6 +81,22 @@ pub fn http_client() -> Result<reqwest::Client, SignInError> {
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|_| SignInError::Failed("could not start a secure connection".into()))
+}
+
+/// Opens a provider page in the system browser from the app's main thread,
+/// which iOS requires. Works on every platform; phones use it for the
+/// paste-the-code sign-in and provider pages.
+pub async fn open_browser_on_main(app: &tauri::AppHandle, url: String) -> Result<(), SignInError> {
+    let failed = || SignInError::Failed("could not open the browser".into());
+    let (tx, rx) = oneshot::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(webbrowser::open(&url).is_ok());
+    })
+    .map_err(|_| failed())?;
+    match tokio::time::timeout(Duration::from_secs(10), rx).await {
+        Ok(Ok(true)) => Ok(()),
+        _ => Err(failed()),
+    }
 }
 
 /// Opens a provider page in the system browser.

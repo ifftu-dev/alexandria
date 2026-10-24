@@ -1578,6 +1578,8 @@ pub fn run() {
             commands::ai_chat::chat_goal_added,
             commands::ai_signin::ai_signin,
             commands::ai_signin::ai_signin_cancel,
+            commands::ai_signin::ai_signin_code_start,
+            commands::ai_signin::ai_signin_code_finish,
             commands::ai_signin::ai_disconnect,
             commands::ai_signin::ai_open_provider_page,
             commands::ai_chat::chat_goal_changed,

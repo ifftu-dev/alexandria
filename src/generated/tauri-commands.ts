@@ -7,6 +7,8 @@ export const TAURI_COMMANDS = [
   "ai_open_provider_page",
   "ai_signin",
   "ai_signin_cancel",
+  "ai_signin_code_finish",
+  "ai_signin_code_start",
   "allow_credential_fetch",
   "assessment_finalize_adaptive",
   "assessment_grade",
