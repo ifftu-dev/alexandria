@@ -32,6 +32,8 @@ export type MessageKey =
   | 'chat.actions.goal.noSkills'
   | 'chat.actions.goal.pick'
   | 'chat.actions.goal.pickOne'
+  | 'chat.actions.goal.search'
+  | 'chat.actions.goal.searchEmpty'
   | 'chat.actions.goal.strong'
   | 'chat.actions.less'
   | 'chat.actions.more'

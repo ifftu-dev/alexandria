@@ -6,7 +6,8 @@ import ChatActionCard from '../chat/ChatActionCard.vue'
 import en from '@/locales/en'
 import type { ChatArtifact, ChatArtifactBody, Goal } from '@/types'
 
-const { resolveGoal, allowAction, declineAction, push } = vi.hoisted(() => ({
+const { resolveGoal, allowAction, declineAction, push, invoke } = vi.hoisted(() => ({
+  invoke: vi.fn(),
   resolveGoal: vi.fn(),
   allowAction: vi.fn(),
   declineAction: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('@/composables/useChat', async (original) => ({
   ...(await original<typeof import('@/composables/useChat')>()),
   useChat: () => ({ allowAction, declineAction }),
 }))
+vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 
 const item = (body: ChatArtifactBody, over: Partial<ChatArtifact> = {}): ChatArtifact => ({
@@ -45,7 +47,7 @@ const goal = (over: Partial<Goal> = {}): Goal => ({
 })
 
 beforeEach(() => {
-  for (const f of [resolveGoal, allowAction, declineAction, push]) f.mockReset()
+  for (const f of [resolveGoal, allowAction, declineAction, push, invoke]) f.mockReset()
   goalList.value = []
 })
 
@@ -91,6 +93,25 @@ describe('something the chat asks to save or change', () => {
     await boxes[1]!.trigger('change')
     await button(wrapper, 'Allow')!.trigger('click')
     expect(allowAction).toHaveBeenCalledWith('a1', ['sk-viz'])
+  })
+
+  it('lets the learner search for skills when none match', async () => {
+    vi.useFakeTimers()
+    resolveGoal.mockResolvedValue({ label: 'x', goal_skill_ids: [], suggestions: [], resolution_provenance: 'goal_parsed' })
+    invoke.mockResolvedValue([{ id: 'sk-react', name: 'React', description: null }])
+    const wrapper = render(item({ kind: 'goal', text: 'Lead a team' }, { title: 'Engineering manager' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Alexandria has no skills that match this goal yet.')
+    expect(button(wrapper, 'Allow')!.attributes('disabled')).toBeDefined()
+    await wrapper.find('input[type="search"]').setValue('rea')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('list_skills', { search: 'rea' })
+    await button(wrapper, '+ React')!.trigger('click')
+    expect(button(wrapper, 'Allow')!.attributes('disabled')).toBeUndefined()
+    await button(wrapper, 'Allow')!.trigger('click')
+    expect(allowAction).toHaveBeenCalledWith('a1', ['sk-react'])
+    vi.useRealTimers()
   })
 
   it('shows a goal change against the goal as it is now and never empties it', async () => {

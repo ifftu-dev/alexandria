@@ -300,9 +300,11 @@
     },
     "goal": {
       "finding": "Recherche des compétences correspondantes…",
-      "noSkills": "Aucune compétence correspondante trouvée. Vous pouvez définir un objectif sur la page Objectifs.",
+      "noSkills": "Alexandria n'a pas encore de compétences correspondant à cet objectif. Cherchez des compétences à ajouter, ou ne l'autorisez pas.",
       "pick": "Choisissez les compétences que cet objectif doit couvrir.",
       "pickOne": "Choisissez au moins une compétence pour autoriser ceci.",
+      "search": "Rechercher des compétences à ajouter",
+      "searchEmpty": "Aucune compétence ne correspond à « {query} ».",
       "strong": "Forte correspondance"
     },
     "change": {

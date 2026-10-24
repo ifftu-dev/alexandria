@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { chatErrorCode, useChat } from '@/composables/useChat'
 import { useGoals } from '@/composables/useGoals'
-import type { ChatArtifact, SkillSuggestion } from '@/types'
+import { useLocalApi } from '@/composables/useLocalApi'
+import type { ChatArtifact, SkillInfo, SkillSuggestion } from '@/types'
 
 /** Something the chat asked to save or change, under the answer it came
  * from. Nothing is written until the learner allows it; the app then does
@@ -15,6 +16,7 @@ const { t } = useI18n()
 const router = useRouter()
 const chat = useChat()
 const { goals, resolveGoal } = useGoals()
+const { invoke } = useLocalApi()
 
 const busy = ref(false)
 const open = ref(false)
@@ -50,6 +52,32 @@ function toggle(id: string) {
 onMounted(() => {
   if (proposed.value && body.value.kind === 'goal') void findSkills()
 })
+
+// The matcher only knows the skills Alexandria has. When it finds none, or
+// misses one, the learner can search the catalog and add skills themselves.
+const query = ref('')
+const found = ref<SkillInfo[] | null>(null)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(query, (q) => {
+  clearTimeout(searchTimer)
+  const text = q.trim()
+  if (text.length < 2) {
+    found.value = null
+    return
+  }
+  searchTimer = setTimeout(async () => {
+    const shown = new Set((suggestions.value ?? []).map((s) => s.skill_id))
+    const res = await invoke<SkillInfo[]>('list_skills', { search: text }).catch(() => [])
+    if (query.value.trim() === text) found.value = (res ?? []).filter((s) => !shown.has(s.id)).slice(0, 6)
+  }, 250)
+})
+onBeforeUnmount(() => clearTimeout(searchTimer))
+function pickFound(skill: SkillInfo) {
+  suggestions.value = [...(suggestions.value ?? []), { skill_id: skill.id, name: skill.name, score: 0, matched: '' }]
+  chosen.value = new Set([...chosen.value, skill.id])
+  query.value = ''
+  found.value = null
+}
 
 // A goal change, measured against the goal as it is now.
 const goal = computed(() => {
@@ -222,6 +250,22 @@ async function decline() {
             <span v-if="s.score >= 0.6" class="text-xs text-success">{{ t('chat.actions.goal.strong') }}</span>
           </label>
         </div>
+        <div v-if="suggestions" class="mt-2">
+          <input
+            v-model="query"
+            type="search"
+            class="act-search"
+            :placeholder="t('chat.actions.goal.search')"
+            :aria-label="t('chat.actions.goal.search')"
+            :disabled="busy"
+          />
+          <ul v-if="found" class="mt-1 grid gap-1">
+            <li v-for="s in found" :key="s.id">
+              <button type="button" class="act-found" @click="pickFound(s)">+ {{ s.name }}</button>
+            </li>
+            <li v-if="!found.length" class="text-xs">{{ t('chat.actions.goal.searchEmpty', { query: query.trim() }) }}</li>
+          </ul>
+        </div>
       </template>
 
       <template v-else-if="body.kind === 'goal_change'">
@@ -269,7 +313,12 @@ async function decline() {
 .act-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; padding: 0.5rem 0.875rem 0.75rem 3.25rem; }
 .act-allow { border-radius: 999px; padding: 0.3rem 0.9rem; font-weight: 600; background: var(--app-primary); color: var(--app-primary-foreground); }
 .act-deny { border-radius: 999px; padding: 0.3rem 0.8rem; font-weight: 500; color: var(--app-foreground); background: color-mix(in srgb, var(--app-foreground) 7%, transparent); }
-.act-allow:disabled, .act-deny:disabled { opacity: 0.5; }
+.act-allow:disabled { background: color-mix(in srgb, var(--app-foreground) 8%, transparent); color: var(--app-muted-foreground); cursor: not-allowed; }
+.act-deny:disabled { opacity: 0.5; }
+.act-search { width: 100%; border-radius: 0.625rem; border: 1px solid var(--app-border); background: var(--app-background); padding: 0.4rem 0.625rem; color: var(--app-foreground); font-size: 0.8125rem; }
+.act-search:focus { outline: 2px solid color-mix(in srgb, var(--app-primary) 45%, transparent); outline-offset: 0; }
+.act-found { width: 100%; border-radius: 0.5rem; padding: 0.3rem 0.5rem; text-align: start; color: var(--app-foreground); background: color-mix(in srgb, var(--app-primary) 8%, transparent); }
+.act-found:hover { background: color-mix(in srgb, var(--app-primary) 14%, transparent); }
 .act-allow:not(:disabled):hover { filter: brightness(1.08); }
 .act-deny:not(:disabled):hover { background: color-mix(in srgb, var(--app-foreground) 11%, transparent); }
 .act-promise { margin-inline-start: auto; font-size: 0.75rem; }

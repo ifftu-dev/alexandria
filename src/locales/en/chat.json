@@ -300,9 +300,11 @@
     },
     "goal": {
       "finding": "Finding matching skills…",
-      "noSkills": "No matching skills were found. You can set a goal on the Goals page.",
+      "noSkills": "Alexandria has no skills that match this goal yet. Search for skills to add, or don't allow it.",
       "pick": "Choose the skills this goal should cover.",
       "pickOne": "Pick at least one skill to allow this.",
+      "search": "Search skills to add",
+      "searchEmpty": "No skills match “{query}”.",
       "strong": "Strong match"
     },
     "change": {

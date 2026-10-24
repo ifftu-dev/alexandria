@@ -300,9 +300,11 @@
     },
     "goal": {
       "finding": "Buscando habilidades que coincidan…",
-      "noSkills": "No se encontraron habilidades que coincidan. Puedes fijar un objetivo en la página Objetivos.",
+      "noSkills": "Alexandria aún no tiene habilidades que coincidan con este objetivo. Busca habilidades para añadir, o no lo permitas.",
       "pick": "Elige las habilidades que debe cubrir este objetivo.",
       "pickOne": "Elige al menos una habilidad para permitirlo.",
+      "search": "Buscar habilidades para añadir",
+      "searchEmpty": "Ninguna habilidad coincide con “{query}”.",
       "strong": "Coincidencia fuerte"
     },
     "change": {

@@ -2446,7 +2446,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -2458,7 +2458,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "es": {
     "classrooms.index.title": "f1649526e859",
@@ -4907,7 +4909,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -4919,7 +4921,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "fr": {
     "classrooms.index.title": "f1649526e859",
@@ -7368,7 +7372,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -7380,7 +7384,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "hi": {
     "classrooms.index.title": "f1649526e859",
@@ -9829,7 +9835,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -9841,7 +9847,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "ur": {
     "classrooms.index.title": "f1649526e859",
@@ -12290,7 +12298,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -12302,7 +12310,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "te": {
     "classrooms.index.title": "f1649526e859",
@@ -14751,7 +14761,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -14763,7 +14773,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "mr": {
     "classrooms.index.title": "f1649526e859",
@@ -17212,7 +17224,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -17224,7 +17236,9 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   },
   "bn": {
     "classrooms.index.title": "f1649526e859",
@@ -19673,7 +19687,7 @@
     "chat.actions.done.goalChange": "e65ca3956452",
     "chat.actions.done.enroll": "41d2bfcb3221",
     "chat.actions.goal.finding": "fa59d6e4f0a1",
-    "chat.actions.goal.noSkills": "56c3a69719b0",
+    "chat.actions.goal.noSkills": "c9153087be93",
     "chat.actions.goal.pick": "1b0f4c00d7f0",
     "chat.actions.goal.pickOne": "7a1993337ef6",
     "chat.actions.goal.strong": "a99cde5745e1",
@@ -19685,6 +19699,8 @@
     "chat.actions.errors.openCourse": "e7f357f62c42",
     "chat.actions.errors.stale": "43ea8b55bb03",
     "chat.actions.errors.assessmentItem": "f01452ef8d13",
-    "chat.actions.errors.generic": "0613f7bc8751"
+    "chat.actions.errors.generic": "0613f7bc8751",
+    "chat.actions.goal.search": "b5f040d2e18e",
+    "chat.actions.goal.searchEmpty": "a4b1c4fd1fb4"
   }
 }
