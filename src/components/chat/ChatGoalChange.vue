@@ -62,12 +62,12 @@ async function dismiss() {
 </script>
 
 <template>
-  <p v-if="item.status === 'added'" class="flex flex-wrap items-center gap-1 text-[11px] text-success">
+  <p v-if="item.status === 'added'" class="flex flex-wrap items-center gap-1 text-xs text-success">
     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
     {{ t('chat.goalChange.applied') }} · {{ item.title }}
     <button type="button" class="underline underline-offset-2 hover:text-foreground" @click="router.push('/goals')">{{ t('chat.goalProposal.open') }}</button>
   </p>
-  <div v-else-if="change" class="rounded-xl border border-dashed border-border bg-background px-3 py-2 text-xs">
+  <div v-else-if="change" class="rounded-2xl bg-muted/60 px-3.5 py-3 text-[13px]">
     <p class="font-semibold">{{ t('chat.goalChange.title') }}</p>
     <p class="mt-0.5 text-muted-foreground">{{ t('chat.goalChange.hint') }}</p>
     <p class="mt-1.5 text-sm font-medium text-foreground">{{ goal?.label ?? item.title }}</p>

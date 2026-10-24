@@ -11,6 +11,8 @@ const props = defineProps<{
   live?: string
   /** Position of this answer among the answers to the same question. */
   version?: { current: number; total: number }
+  /** The newest answer keeps its actions visible; older ones show them on hover. */
+  latest?: boolean
 }>()
 const emit = defineEmits<{
   retry: []
@@ -96,11 +98,11 @@ async function copy() {
 
 <template>
   <div v-if="isUser" class="flex justify-end">
-    <div class="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-foreground/[0.07] px-3 py-2 text-sm text-foreground">
+    <div class="chat-you">
       {{ message.content }}
     </div>
   </div>
-  <div v-else class="text-sm text-foreground">
+  <div v-else class="group text-foreground">
     <div
       v-if="message.status === 'interrupted' && text"
       class="border-s-[3px] border-warning ps-3"
@@ -118,7 +120,7 @@ async function copy() {
 
     <div
       v-if="message.status === 'interrupted' || message.status === 'failed'"
-      class="mt-2 rounded-lg border px-3 py-2 text-xs"
+      class="mt-2 rounded-xl border px-3.5 py-2.5 text-[13px]"
       :class="message.status === 'interrupted' ? 'border-warning/40 bg-warning/10' : 'border-error/35 bg-error/5'"
       role="alert"
     >
@@ -131,7 +133,7 @@ async function copy() {
       <button
         v-if="message.error === 'usage_limit'"
         type="button"
-        class="mt-1.5 rounded-full bg-foreground px-3 py-1 text-[11px] font-medium text-background"
+        class="mt-2 rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
         @click="openUsage"
       >{{ t('chat.signin.manageUsage') }}</button>
     </div>
@@ -142,8 +144,7 @@ async function copy() {
       {{ message.error === 'assessment_active' ? t('chat.errors.assessment_active') : t('chat.message.cancelled') }}
     </p>
 
-    <div v-if="!streaming" class="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-      <span>{{ attribution }}</span>
+    <div v-if="!streaming" class="chat-actions" :class="{ 'chat-actions--show': latest || message.status !== 'complete' }">
       <template v-if="version && version.total > 1">
         <button
           type="button"
@@ -177,12 +178,18 @@ async function copy() {
       <button type="button" class="chat-icon-btn" :title="t('chat.message.retryHint')" :aria-label="t('chat.message.retry')" @click="emit('retry')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4v6h6M20 20v-6h-6" /><path d="M20 10a8 8 0 0 0-14-4L4 10M4 14a8 8 0 0 0 14 4l2-4" /></svg>
       </button>
+      <span class="chat-attr">{{ attribution }}</span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.chat-prose :deep(p) { margin: 0 0 0.5rem; line-height: 1.6; }
+.chat-you { max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 1.125rem 1.125rem 0.375rem 1.125rem; background: color-mix(in srgb, var(--app-foreground) 8%, transparent); padding: 0.625rem 0.875rem; line-height: 1.5; color: var(--app-foreground); }
+.chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.125rem; margin-top: 0.375rem; font-size: 0.75rem; color: var(--app-muted-foreground); opacity: 0; transition: opacity 0.15s; }
+.group:hover .chat-actions, .group:focus-within .chat-actions, .chat-actions--show { opacity: 1; }
+@media (hover: none) { .chat-actions { opacity: 1; } }
+.chat-attr { margin-inline-start: 0.375rem; }
+.chat-prose :deep(p) { margin: 0 0 0.625rem; line-height: 1.6; }
 .chat-prose :deep(p:last-child) { margin-bottom: 0; }
 .chat-prose :deep(ul), .chat-prose :deep(ol) { margin: 0 0 0.5rem; padding-inline-start: 1.25rem; }
 .chat-prose :deep(ul) { list-style: disc; }
@@ -209,8 +216,8 @@ async function copy() {
 @keyframes chat-blink { 50% { opacity: 0; } }
 @keyframes chat-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .chat-caret, .chat-spin { animation: none; } }
-.chat-icon-btn { display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem; border-radius: 0.375rem; color: var(--app-muted-foreground); }
+.chat-icon-btn { display: inline-grid; place-items: center; min-width: 1.75rem; height: 1.75rem; border-radius: 0.5rem; color: var(--app-muted-foreground); }
 .chat-icon-btn:hover:not(:disabled) { background: var(--app-muted); color: var(--app-foreground); }
 .chat-icon-btn:disabled { opacity: 0.4; }
-.chat-icon-btn svg { width: 0.875rem; height: 0.875rem; }
+.chat-icon-btn svg { width: 0.9375rem; height: 0.9375rem; }
 </style>

@@ -470,6 +470,19 @@ pub mod keys {
         default: || JsonSetting(serde_json::json!({})),
     };
 
+    /// Whether chat shows what it will send, and to which provider, before
+    /// the first message of a chat and whenever that changes. Off by default:
+    /// the destination and attachments stay visible in the message box, and
+    /// a request too large for the model is always shown for trimming.
+    pub const CHAT_REVIEW_BEFORE_SEND: SettingKey<bool> = SettingKey {
+        key: "chat.review_before_send",
+        scope: Scope::Sync,
+        category: "Chat",
+        label: "Review before sending",
+        description: "Show what chat will send, and to which provider, before the first message of each chat and whenever that changes.",
+        default: || false,
+    };
+
     /// The learner's targeted skill graphs. Shape: array of
     /// `{ id, label, source_did?, goal_skill_ids: [..], created_at }`.
     pub const LEARNER_TARGETS: SettingKey<JsonSetting> = SettingKey {
@@ -598,6 +611,7 @@ pub fn all_entries(
         entry!(CLOUD_ORIGIN),
         entry!(TALENT_INDEX_SYNC),
         entry!(LEARNER_TARGETS),
+        entry!(CHAT_REVIEW_BEFORE_SEND),
         entry!(IDENTITY_LOCAL_DID),
     ]
 }
@@ -646,6 +660,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(CLOUD_ORIGIN);
     check!(TALENT_INDEX_SYNC);
     check!(LEARNER_TARGETS);
+    check!(CHAT_REVIEW_BEFORE_SEND);
     check!(IDENTITY_LOCAL_DID);
     None
 }

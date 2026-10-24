@@ -115,7 +115,7 @@ onMounted(async () => {
             <p>{{ item.kind === 'goal' ? t('chat.context.goal', { title: item.label }) : t('chat.context.lesson', { title: item.label }) }}</p>
             <p v-if="item.truncated" class="chat-rv-detail">{{ t('chat.review.partly') }}</p>
           </div>
-          <span v-if="item.included" class="text-[11px] text-muted-foreground">~{{ n(item.tokens) }}</span>
+          <span v-if="item.included" class="text-xs text-muted-foreground">~{{ n(item.tokens) }}</span>
           <button
             type="button"
             role="switch"
@@ -158,7 +158,7 @@ onMounted(async () => {
         </div>
       </section>
 
-      <p class="mb-1 mt-1 text-[11.5px] text-muted-foreground">
+      <p class="mb-1 mt-1 text-xs text-muted-foreground">
         {{ t('chat.review.estimate', { tokens: n(prepared.estimated_input_tokens), budget: n(prepared.budget_tokens), reserve: n(prepared.output_reserve_tokens) }) }}
       </p>
       <div class="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -166,7 +166,7 @@ onMounted(async () => {
       </div>
 
       <div class="mt-3 flex items-center justify-end gap-2">
-        <p v-if="prepared.fits" class="flex-1 text-[11.5px] text-muted-foreground">{{ t('chat.review.reuse') }}</p>
+        <p v-if="prepared.fits" class="flex-1 text-xs text-muted-foreground">{{ t('chat.review.reuse') }}</p>
         <AppButton variant="ghost" size="sm" type="button" @click="emit('cancel')">{{ t('chat.review.cancel') }}</AppButton>
         <AppButton v-if="prepared.fits" size="sm" type="button" :loading="busy" @click="emit('send')">{{ t('chat.review.send') }}</AppButton>
       </div>

@@ -18,7 +18,11 @@
     "open": "Open chat",
     "shortcut": "Chat",
     "search": "Search your chats",
-    "noResults": "No chats match"
+    "noResults": "No chats match",
+    "more": "More",
+    "practiceTitle": "Practise what you're learning",
+    "review": "Review before sending",
+    "reviewHint": "Show what chat sends, and to which provider, before the first message of a chat and whenever that changes."
   },
   "modes": {
     "ask": "Ask",
@@ -46,7 +50,10 @@
     "defaultModel": "Connection default",
     "preparing": "Preparing…",
     "placeholderLearn": "What would you like to learn?",
-    "placeholderPractice": "Ask for a practice question…"
+    "placeholderPractice": "Ask for a practice question…",
+    "attach": "Attach a lesson or goal",
+    "nothingToAttach": "Open a lesson or your goals to attach them here.",
+    "mode": "Mode: {mode}"
   },
   "context": {
     "label": "Sent with your next message",
@@ -138,15 +145,35 @@
     "plan_ineligible": "This ChatGPT account's plan can't be used here. Choose another connection or add an API key.",
     "signin_required": "Your ChatGPT sign-in has ended. Sign in again from Add connection."
   },
+  "connect": {
+    "title": "Connect an AI model",
+    "intro": "Pick how chat should reach a model. You can add more later.",
+    "or": "or set one up yourself",
+    "keyTitle": "Use an API key",
+    "keyHint": "Anthropic, OpenAI, Gemini and others",
+    "keySub": "Paste a key from your provider's console. It stays encrypted on this device.",
+    "localTitle": "Run a model yourself",
+    "localHint": "Ollama or LM Studio, here or on your network",
+    "localSub": "Point chat at a model server on this computer or on your own network.",
+    "private": "Keys and sign-ins stay encrypted on this device.",
+    "back": "Back",
+    "advanced": "Advanced",
+    "unnamed": "My model",
+    "step": "Step {n} of {total}",
+    "codeTitle": "Paste the code from OpenRouter",
+    "codeSub": "OpenRouter showed it after you allowed Alexandria.",
+    "codeStep1": "Copy the code on the OpenRouter page",
+    "codeStep2": "Come back here and paste it below",
+    "codeHint": "The code works once, for 10 minutes.",
+    "reopen": "Open OpenRouter again",
+    "providers": {
+      "anthropic": "Anthropic",
+      "compatible": "OpenAI-compatible"
+    }
+  },
   "connection": {
-    "title": "Add a model connection",
-    "intro": "Use a model on this device, a server on your own network, or your own account with a provider. Keys stay in this profile's encrypted storage.",
     "name": "Name",
-    "namePlaceholder": "Ollama on this computer",
     "where": "Where does it run?",
-    "deviceHint": "Loopback only. Nothing leaves this device.",
-    "privateHint": "A computer you control. Data leaves this device.",
-    "remoteHint": "A provider on the internet. HTTPS required.",
     "endpoint": "API base URL",
     "model": "Model",
     "modelPlaceholder": "llama3.1:8b",
@@ -282,18 +309,14 @@
     "failed": "That couldn't be added. Try again."
   },
   "signin": {
-    "title": "Use an account you already have",
-    "intro": "Sign in in your browser. No API key needed.",
     "chatgpt": "Continue with ChatGPT",
     "chatgptHint": "Uses your ChatGPT Plus or Pro plan.",
     "openrouter": "Sign in with OpenRouter",
     "openrouterHint": "Uses the credits on your OpenRouter account. For people 18 and over.",
     "waiting": "Finish signing in in your browser…",
     "cancel": "Cancel",
-    "codeIntro": "In your browser, sign in to OpenRouter and allow Alexandria. Then copy the code it shows and paste it here.",
     "codeLabel": "Code from OpenRouter",
     "connect": "Connect",
-    "or": "Or add a model with an API key, or one on this device or your own network:",
     "donePageTitle": "You're signed in",
     "donePageBody": "You can close this tab and go back to Alexandria.",
     "welcomeTitle": "You're using your ChatGPT plan",

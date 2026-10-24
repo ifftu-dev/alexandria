@@ -3,6 +3,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { useLocalApi } from './useLocalApi'
 import { getProfileSessionToken } from './profileSession'
 import { onProfileLocked } from './useProfiles'
+import { useSetting } from './useSettings'
 import type {
   ChatBinding,
   ChatEvent,
@@ -116,6 +117,13 @@ export function chatErrorCode(value: unknown): string {
 
 export function useChat() {
   const { invoke } = useLocalApi()
+  /** Off by default: chat sends without a review step unless the learner
+   *  asks for one. A request too large for the model is always reviewed. */
+  const reviewSetting = useSetting<boolean>('chat.review_before_send')
+  const reviewBeforeSend = computed(() => reviewSetting.ref.value === true)
+  async function setReviewBeforeSend(on: boolean) {
+    await reviewSetting.set(on)
+  }
 
   const usableConnections = computed(() =>
     connections.value.filter(
@@ -386,7 +394,7 @@ export function useChat() {
     try {
       const next = await prepare()
       if (!next) return
-      if (!next.fits || next.requires_review) {
+      if (!next.fits || (next.requires_review && reviewBeforeSend.value)) {
         prepared.value = next
         return
       }
@@ -695,6 +703,8 @@ export function useChat() {
     saveArtifact,
     deleteArtifact,
     goalAdded,
+    reviewBeforeSend,
+    setReviewBeforeSend,
     goalChanged,
     saveNote,
     memoryItems: readonly(memoryItems),

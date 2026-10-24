@@ -47,7 +47,7 @@ describe('signing in to OpenRouter on a phone', () => {
     await button(w, 'Sign in with OpenRouter')!.trigger('click')
     await flushPromises()
     expect(startCode).toHaveBeenCalledWith('openrouter')
-    expect(w.text()).toContain('copy the code it shows')
+    expect(w.text()).toContain('Paste the code from OpenRouter')
     expect(button(w, 'Connect')!.attributes('disabled')).toBeDefined()
     await w.get('input[autocomplete="one-time-code"]').setValue('  abc-123  ')
     await button(w, 'Connect')!.trigger('click')
@@ -77,6 +77,6 @@ describe('signing in to OpenRouter on a phone', () => {
     minor.value = true
     const w = render()
     expect(button(w, 'Sign in with OpenRouter')).toBeUndefined()
-    expect(w.text()).not.toContain(en.chat.signin.title)
+    expect(w.text()).not.toContain(en.chat.connect.or)
   })
 })

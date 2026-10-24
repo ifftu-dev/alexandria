@@ -108,7 +108,7 @@ async function add() {
       </div>
     </section>
 
-    <p class="text-[11px] text-muted-foreground">{{ t('chat.memory.forgetNote') }}</p>
+    <p class="text-xs text-muted-foreground">{{ t('chat.memory.forgetNote') }}</p>
   </div>
 </template>
 

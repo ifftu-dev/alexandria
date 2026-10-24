@@ -18,7 +18,11 @@
     "open": "打开聊天",
     "shortcut": "聊天",
     "search": "搜索你的聊天",
-    "noResults": "没有匹配的聊天"
+    "noResults": "没有匹配的聊天",
+    "more": "更多",
+    "practiceTitle": "练习你正在学的内容",
+    "review": "发送前检查",
+    "reviewHint": "在每个聊天的第一条消息之前以及内容变化时，显示聊天将发送什么、发送给哪个提供商。"
   },
   "modes": {
     "ask": "提问",
@@ -46,7 +50,10 @@
     "defaultModel": "连接默认值",
     "preparing": "正在准备…",
     "placeholderLearn": "你想学什么？",
-    "placeholderPractice": "来一道练习题…"
+    "placeholderPractice": "来一道练习题…",
+    "attach": "附上一节课或目标",
+    "nothingToAttach": "打开一节课或你的目标，就能在这里附上它们。",
+    "mode": "模式：{mode}"
   },
   "context": {
     "label": "将随你的下一条消息发送",
@@ -138,15 +145,35 @@
     "plan_ineligible": "此 ChatGPT 账户的套餐无法在这里使用。请选择其他连接，或添加 API key。",
     "signin_required": "你的 ChatGPT 登录已失效。请在“添加模型连接”中重新登录。"
   },
+  "connect": {
+    "title": "连接 AI 模型",
+    "intro": "选择聊天连接模型的方式。之后还可以添加更多。",
+    "or": "或者自己设置",
+    "keyTitle": "使用 API key",
+    "keyHint": "Anthropic、OpenAI、Gemini 等",
+    "keySub": "粘贴提供方控制台中的密钥。它会加密保存在这台设备上。",
+    "localTitle": "自己运行模型",
+    "localHint": "Ollama 或 LM Studio，在本机或你的网络中",
+    "localSub": "让聊天连接到这台电脑上或你自己网络中的模型服务器。",
+    "private": "密钥和登录信息都会加密保存在这台设备上。",
+    "back": "返回",
+    "advanced": "高级",
+    "unnamed": "我的模型",
+    "step": "第 {n} 步，共 {total} 步",
+    "codeTitle": "粘贴来自 OpenRouter 的代码",
+    "codeSub": "你允许 Alexandria 之后，OpenRouter 显示了这个代码。",
+    "codeStep1": "复制 OpenRouter 页面上的代码",
+    "codeStep2": "回到这里，粘贴到下方",
+    "codeHint": "这个代码只能用一次，10 分钟内有效。",
+    "reopen": "再次打开 OpenRouter",
+    "providers": {
+      "anthropic": "Anthropic",
+      "compatible": "OpenAI 兼容"
+    }
+  },
   "connection": {
-    "title": "添加模型连接",
-    "intro": "可以使用这台设备上的模型、你自己网络中的服务器，或你在某个提供方的账户。密钥保存在此个人资料的加密存储中。",
     "name": "名称",
-    "namePlaceholder": "这台电脑上的 Ollama",
     "where": "它在哪里运行？",
-    "deviceHint": "仅限本机回环地址。没有任何内容会离开这台设备。",
-    "privateHint": "一台由你控制的电脑。数据会离开这台设备。",
-    "remoteHint": "互联网上的提供方。必须使用 HTTPS。",
     "endpoint": "API 基础 URL",
     "model": "模型",
     "modelPlaceholder": "llama3.1:8b",
@@ -282,18 +309,14 @@
     "failed": "无法添加。请重试。"
   },
   "signin": {
-    "title": "使用你已有的账户",
-    "intro": "在浏览器中登录，无需 API key。",
     "chatgpt": "使用 ChatGPT 继续",
     "chatgptHint": "使用你的 ChatGPT Plus 或 Pro 套餐。",
     "openrouter": "使用 OpenRouter 登录",
     "openrouterHint": "使用你 OpenRouter 账户中的额度。仅限 18 岁及以上用户。",
     "waiting": "请在浏览器中完成登录…",
     "cancel": "取消",
-    "codeIntro": "在浏览器中登录 OpenRouter 并允许 Alexandria。然后复制它显示的代码，粘贴到这里。",
     "codeLabel": "来自 OpenRouter 的代码",
     "connect": "连接",
-    "or": "或者使用 API key 添加模型，或添加这台设备上或你自己网络中的模型：",
     "donePageTitle": "你已登录",
     "donePageBody": "你可以关闭此标签页，回到 Alexandria。",
     "welcomeTitle": "你正在使用 ChatGPT 套餐",
