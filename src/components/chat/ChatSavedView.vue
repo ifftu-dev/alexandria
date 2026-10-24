@@ -3,6 +3,7 @@ import { onMounted, ref, type DeepReadonly } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDialog } from '@/components/ui'
 import { chatErrorCode, useChat } from '@/composables/useChat'
+import { useCourseNotes } from '@/composables/useCourseNotes'
 import type { ChatArtifact } from '@/types'
 
 /** Saved notes and flashcard sets, with a one-card-at-a-time study mode. */
@@ -13,6 +14,25 @@ const studying = ref<string | null>(null)
 const position = ref(0)
 const revealed = ref(false)
 const deleting = ref<string | null>(null)
+const courseNotes = useCourseNotes()
+/** Per note: copying to its course, copied, or why it could not be. */
+const courseState = ref<Record<string, 'busy' | 'saved' | 'not_enrolled' | 'failed'>>({})
+
+function citedLesson(item: DeepReadonly<ChatArtifact>) {
+  return item.body.kind === 'note' ? item.sources.find((s) => s.kind === 'lesson') : undefined
+}
+
+/** Copies a saved note into the course of the lesson it cites. */
+async function toCourse(item: DeepReadonly<ChatArtifact>) {
+  courseState.value = { ...courseState.value, [item.id]: 'busy' }
+  let next: 'saved' | 'not_enrolled' | 'failed' = 'saved'
+  try {
+    await courseNotes.saveFromChat(item.id)
+  } catch (e) {
+    next = chatErrorCode(e) === 'not_enrolled' ? 'not_enrolled' : 'failed'
+  }
+  courseState.value = { ...courseState.value, [item.id]: next }
+}
 
 onMounted(() => {
   void chat.refreshSaved().catch((e) => (chat.error.value = chatErrorCode(e)))
@@ -89,7 +109,21 @@ function formatDate(value: string) {
           </div>
         </div>
         <div v-else-if="open === item.id" class="border-t border-border px-3 py-2 text-sm">
-          <p v-if="item.body.kind === 'note'" class="whitespace-pre-wrap">{{ item.body.text }}</p>
+          <template v-if="item.body.kind === 'note'">
+            <p class="whitespace-pre-wrap">{{ item.body.text }}</p>
+            <div v-if="citedLesson(item)" class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+              <span v-if="courseState[item.id] === 'saved'" class="text-success">{{ t('chat.courseNotes.saved', { lesson: citedLesson(item)!.label }) }}</span>
+              <button
+                v-else
+                type="button"
+                class="rounded-full border border-border px-2 py-0.5 font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="courseState[item.id] === 'busy'"
+                @click="toCourse(item)"
+              >{{ t('chat.courseNotes.add', { lesson: citedLesson(item)!.label }) }}</button>
+              <span v-if="courseState[item.id] === 'not_enrolled'" class="text-muted-foreground">{{ t('chat.courseNotes.notEnrolled') }}</span>
+              <span v-else-if="courseState[item.id] === 'failed'" class="text-error">{{ t('chat.courseNotes.failed') }}</span>
+            </div>
+          </template>
           <dl v-else class="space-y-1.5">
             <div v-for="(card, i) in cardsOf(item)" :key="i">
               <dt class="font-medium">{{ card.front }}</dt>

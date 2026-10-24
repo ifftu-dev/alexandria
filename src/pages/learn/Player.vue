@@ -7,6 +7,7 @@ import { useSentinel } from '@/composables/useSentinel'
 import { AppButton, AppModal, AppTextarea, ProvenanceBadge } from '@/components/ui'
 import InfoTip from '@/components/ui/InfoTip.vue'
 import LearnerTutor from '@/components/course/LearnerTutor.vue'
+import CourseNotesSection from '@/components/course/CourseNotesSection.vue'
 import { useChatOffer, useChatRestriction } from '@/composables/useChatOffers'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
@@ -584,6 +585,14 @@ function selectElement(chapterId: string, elementId: string) {
   activeElement.value = elementId
 }
 
+/** Opens the lesson a course note was written on. */
+function openNoteLesson(elementId: string) {
+  const item = flatElements.value.find(entry => entry.element.id === elementId)
+  if (!item) return
+  selectElement(item.chapterId, item.element.id)
+  mobileNavOpen.value = false
+}
+
 // --- Mobile chapter navigator (bottom sheet) ---
 const mobileNavOpen = ref(false)
 const expandedChapters = ref<Set<string>>(new Set())
@@ -1088,6 +1097,14 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <p v-if="claimError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ claimError }}</p>
             </div>
           </div>
+
+          <!-- The learner's notes on this course (none during assessments) -->
+          <CourseNotesSection
+            v-if="enrollment && !isAssessment && !sentinelStarted"
+            :course-id="courseId"
+            :element-id="currentElement?.id ?? null"
+            @open="openNoteLesson"
+          />
 
           <!-- Sentinel integrity monitoring (assessments only) -->
           <div
@@ -1606,6 +1623,13 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   </div>
                 </div>
               </div>
+              <CourseNotesSection
+                v-if="enrollment && !isAssessment && !sentinelStarted"
+                class="px-4 pb-4"
+                :course-id="courseId"
+                :element-id="currentElement?.id ?? null"
+                @open="openNoteLesson"
+              />
             </div>
           </Transition>
         </div>

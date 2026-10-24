@@ -8,9 +8,15 @@
 //!
 //! The rendering names skills and courses only. It carries no assessment
 //! items, answer keys, or attempt rows.
+//!
+//! A model may also propose a change to an attached goal. It names skills;
+//! [`resolve_change`] turns names into the learner's own skill ids, and the
+//! learner applies the change through the Goals service.
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
+
+use super::artifact::{Body, GoalChangeDraft, Proposal, SkillRef};
 
 /// Most skills listed per status, so a broad goal stays within budget.
 const MAX_LISTED: usize = 25;
@@ -125,4 +131,120 @@ pub fn render(conn: &Connection, goal_id: &str) -> Result<Option<(String, String
     });
     section("Proven", "earned", &|_| String::new());
     Ok(Some((goal.label, out)))
+}
+
+fn skill_name(conn: &Connection, id: &str) -> Result<Option<String>, String> {
+    conn.query_row("SELECT name FROM skills WHERE id = ?1", [id], |r| r.get(0))
+        .optional()
+        .map_err(|_| "storage_error: skills could not be read".to_string())
+}
+
+fn skill_named(conn: &Connection, name: &str) -> Result<Option<SkillRef>, String> {
+    conn.query_row(
+        "SELECT id, name FROM skills WHERE lower(name) = lower(?1) ORDER BY id LIMIT 1",
+        [name],
+        |r| {
+            Ok(SkillRef {
+                id: r.get(0)?,
+                name: r.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|_| "storage_error: skills could not be read".to_string())
+}
+
+/// Resolves a model's goal change against the goals attached to the chat.
+///
+/// The goal must be one the learner attached: named by its label, or the only
+/// attached goal. Removed skills must be on the goal; added skills must exist
+/// by exact name and not be on it yet. Names that resolve to nothing are
+/// dropped. Returns `None` when nothing would change or the goal would be
+/// left without skills.
+pub fn resolve_change(
+    conn: &Connection,
+    attached: &[String],
+    draft: &GoalChangeDraft,
+) -> Result<Option<Proposal>, String> {
+    let mut goals = Vec::new();
+    for id in attached {
+        if let Some(goal) = find(conn, id)? {
+            goals.push(goal);
+        }
+    }
+    let wanted = draft.goal.to_lowercase();
+    let goal = match goals
+        .iter()
+        .position(|g| g.label.trim().to_lowercase() == wanted)
+    {
+        Some(i) => goals.swap_remove(i),
+        None if goals.len() == 1 => goals.remove(0),
+        None => return Ok(None),
+    };
+    let mut remove = Vec::new();
+    for name in &draft.remove {
+        let wanted = name.to_lowercase();
+        for id in &goal.goal_skill_ids {
+            if remove.iter().any(|s: &SkillRef| &s.id == id) {
+                continue;
+            }
+            if let Some(found) = skill_name(conn, id)? {
+                if found.to_lowercase() == wanted {
+                    remove.push(SkillRef {
+                        id: id.clone(),
+                        name: found,
+                    });
+                }
+            }
+        }
+    }
+    let mut add: Vec<SkillRef> = Vec::new();
+    for name in &draft.add {
+        if let Some(skill) = skill_named(conn, name)? {
+            if !goal.goal_skill_ids.contains(&skill.id) && !add.iter().any(|s| s.id == skill.id) {
+                add.push(skill);
+            }
+        }
+    }
+    let rename = draft.rename.clone().filter(|r| r != &goal.label);
+    let remaining = goal
+        .goal_skill_ids
+        .iter()
+        .filter(|id| !remove.iter().any(|s| &s.id == *id))
+        .count()
+        + add.len();
+    if (add.is_empty() && remove.is_empty() && rename.is_none()) || remaining == 0 {
+        return Ok(None);
+    }
+    Ok(Some(Proposal {
+        title: goal.label,
+        body: Body::GoalChange {
+            goal_id: goal.id,
+            rename,
+            add,
+            remove,
+            text: draft.text.clone(),
+        },
+    }))
+}
+
+/// Whether the learner's goal now reflects a change: the skills added are on
+/// it, the skills removed are not, and a rename took effect.
+pub fn change_applied(conn: &Connection, change: &Body) -> Result<bool, String> {
+    let Body::GoalChange {
+        goal_id,
+        rename,
+        add,
+        remove,
+        ..
+    } = change
+    else {
+        return Ok(false);
+    };
+    let Some(goal) = find(conn, goal_id)? else {
+        return Ok(false);
+    };
+    Ok(add.iter().all(|s| goal.goal_skill_ids.contains(&s.id))
+        && remove.iter().all(|s| !goal.goal_skill_ids.contains(&s.id))
+        && rename.as_ref().is_none_or(|r| &goal.label == r))
 }

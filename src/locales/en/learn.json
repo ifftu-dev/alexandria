@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "Camera off — skills earned here will carry lower confidence."
+  },
+  "notes": {
+    "title": "Your notes",
+    "thisLesson": "This lesson",
+    "otherLessons": "Other lessons",
+    "untitled": "Note",
+    "fromChat": "Saved from chat",
+    "openLesson": "Open lesson",
+    "delete": "Delete",
+    "deleteTitle": "Delete this note?",
+    "deleteBody": "It is removed from this course on all your devices.",
+    "deleteFailed": "That note couldn't be deleted. Try again."
   }
 }

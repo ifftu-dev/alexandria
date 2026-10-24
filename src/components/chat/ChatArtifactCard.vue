@@ -5,6 +5,7 @@ import { AppButton } from '@/components/ui'
 import { chatErrorCode, useChat } from '@/composables/useChat'
 import type { ChatArtifact } from '@/types'
 import ChatGoalProposal from './ChatGoalProposal.vue'
+import ChatGoalChange from './ChatGoalChange.vue'
 
 /** A note or flashcard set under the answer it came from. A proposal is
  * saved only when the learner saves it. */
@@ -30,6 +31,7 @@ async function run(action: () => Promise<void>) {
 
 <template>
   <ChatGoalProposal v-if="item.body.kind === 'goal'" :item="item" />
+  <ChatGoalChange v-else-if="item.body.kind === 'goal_change'" :item="item" />
   <p v-else-if="item.status === 'saved'" class="flex items-center gap-1 text-[11px] text-success">
     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
     {{ t('chat.artifacts.saved') }} · {{ item.title }}

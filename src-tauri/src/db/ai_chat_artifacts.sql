@@ -1,14 +1,16 @@
--- Study artifacts from chat: notes, flashcard sets, and goal proposals.
+-- Study artifacts from chat: notes, flashcard sets, and goal proposals
+-- (a new goal, or a change to an existing one).
 --
 -- A proposal waits for the learner and is removed with its chat. A saved
 -- artifact outlives the chat; its thread and message links become NULL and
 -- it keeps the sources the originating answer carried. A goal proposal is
 -- never saved here: once the learner adds it through the Goals service it
 -- is marked 'added' (the goal itself lives in the learner's settings) and is
--- removed with its chat like any proposal.
+-- removed with its chat like any proposal. A goal change is marked 'added'
+-- once applied.
 CREATE TABLE chat_artifacts (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('note', 'flashcards', 'goal')),
+    kind TEXT NOT NULL CHECK (kind IN ('note', 'flashcards', 'goal', 'goal_change')),
     status TEXT NOT NULL CHECK (status IN ('proposed', 'saved', 'added')),
     title TEXT NOT NULL,
     body_json TEXT NOT NULL CHECK (json_valid(body_json)),

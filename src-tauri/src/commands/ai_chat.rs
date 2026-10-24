@@ -1405,6 +1405,12 @@ impl Stream {
     ) {
         let (without_artifact, artifact_block) = memory::split_block(reply, "artifact");
         let made = artifact_block.and_then(artifact::parse);
+        // A goal change needs the learner's goals to resolve, so it is
+        // resolved with the database below.
+        let change = made
+            .is_none()
+            .then(|| artifact_block.and_then(artifact::parse_goal_change))
+            .flatten();
         let (without_memory, memory_block) = memory::split_block(&without_artifact, "memory");
         let proposal = memory_block.and_then(memory::parse);
         let practice_mode = self.started.mode == "practice";
@@ -1439,6 +1445,19 @@ impl Stream {
                         };
                     let proposal =
                         proposal.filter(|p| !bank_guard::matches_assessment_item(conn, &p.content));
+                    let made = match (made, &change) {
+                        (Some(a), _) => Some(a),
+                        (None, Some(draft)) => {
+                            let attached: Vec<String> = store::bindings(conn, &thread_id)
+                                .map_err(|e| e.to_string())?
+                                .into_iter()
+                                .filter(|b| b.kind == "goal")
+                                .map(|b| b.element_id)
+                                .collect();
+                            crate::ai_chat::goal::resolve_change(conn, &attached, draft)?
+                        }
+                        (None, None) => None,
+                    };
                     let made = made.filter(|a| {
                         let text = format!("{} {}", a.title, a.body.text());
                         !bank_guard::matches_assessment_item(conn, &text)
@@ -1852,6 +1871,27 @@ fn goal_added(
         return Err("not_found: that goal is not in your goals".into());
     }
     store::mark_goal_added(conn, artifact_id, goal_id, &now()).map_err(|e| e.to_string())
+}
+
+/// Marks a goal change as applied once the learner changed the goal on the
+/// Goals service. The goal must reflect the change.
+#[tauri::command]
+pub async fn chat_goal_changed(
+    state: State<'_, AppState>,
+    artifact_id: String,
+) -> Result<store::Artifact, String> {
+    with_conn(&state, "chat.goal-changed", move |conn| {
+        goal_changed(conn, &artifact_id)
+    })
+    .await
+}
+
+fn goal_changed(conn: &Connection, artifact_id: &str) -> Result<store::Artifact, String> {
+    let item = store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
+    if item.status == "proposed" && !crate::ai_chat::goal::change_applied(conn, &item.body)? {
+        return Err("invalid_input: the goal does not reflect this change".into());
+    }
+    store::mark_goal_changed(conn, artifact_id, &now()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2615,6 +2655,85 @@ mod tests {
             let added = goal_added(conn, &proposal.id, "g1").unwrap();
             assert_eq!(added.status, "added");
         });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_goal_change_resolves_skill_names_and_is_marked_only_once_applied() {
+        static WORDS: [&str; 1] = [
+            "Try this:\n```artifact\n{\"type\":\"goal_change\",\"title\":\"data analyst\",\"add\":[\"counting outcomes\",\"Astrology\"],\"remove\":[],\"text\":\"Start from counting.\"}\n```",
+        ];
+        let endpoint = model(&WORDS, 1).await;
+        let harness = Harness::new(&endpoint);
+        harness.conn(|conn| {
+            goal(conn);
+            thread(conn);
+            attach_goal(conn, "t", "g1").unwrap();
+        });
+        let (task, _events) = harness.begin("Add counting to my goal");
+        task.drive().await;
+
+        harness.conn(|conn| {
+            let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+            assert_eq!(artifacts.len(), 1);
+            let change = &artifacts[0];
+            assert_eq!(change.title, "Data analyst");
+            assert_eq!(
+                change.body,
+                artifact::Body::GoalChange {
+                    goal_id: "g1".into(),
+                    rename: None,
+                    add: vec![artifact::SkillRef {
+                        id: "sk-counting".into(),
+                        name: "Counting outcomes".into()
+                    }],
+                    remove: vec![],
+                    text: "Start from counting.".into(),
+                },
+                "unknown skill names are dropped"
+            );
+            assert!(store::save_artifact(conn, &change.id, &now()).is_err());
+            assert!(goal_changed(conn, &change.id).is_err(), "not applied yet");
+            conn.execute(
+                "UPDATE app_settings SET value = json_set(value, '$[0].goal_skill_ids', json('[\"sk-bayes\",\"sk-counting\"]'))
+                  WHERE key = 'learner.targets'",
+                [],
+            )
+            .unwrap();
+            assert_eq!(goal_changed(conn, &change.id).unwrap().status, "added");
+        });
+    }
+
+    #[test]
+    fn a_goal_change_needs_an_attached_goal_and_a_real_difference() {
+        let conn = db();
+        goal(&conn);
+        let draft = |add: &[&str], remove: &[&str]| artifact::GoalChangeDraft {
+            goal: "Data analyst".into(),
+            rename: None,
+            add: add.iter().map(|s| s.to_string()).collect(),
+            remove: remove.iter().map(|s| s.to_string()).collect(),
+            text: "why".into(),
+        };
+        let resolve = |attached: &[&str], d: &artifact::GoalChangeDraft| {
+            let attached: Vec<String> = attached.iter().map(|s| s.to_string()).collect();
+            crate::ai_chat::goal::resolve_change(&conn, &attached, d).unwrap()
+        };
+        assert!(
+            resolve(&[], &draft(&["Counting outcomes"], &[])).is_none(),
+            "not attached"
+        );
+        assert!(
+            resolve(&["g1"], &draft(&["Bayes rule"], &[])).is_none(),
+            "already on it"
+        );
+        assert!(
+            resolve(&["g1"], &draft(&[], &["Bayes rule"])).is_none(),
+            "would leave no skills"
+        );
+        let swap = resolve(&["g1"], &draft(&["Counting outcomes"], &["Bayes rule"])).unwrap();
+        assert!(
+            matches!(swap.body, artifact::Body::GoalChange { ref remove, .. } if remove.len() == 1)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

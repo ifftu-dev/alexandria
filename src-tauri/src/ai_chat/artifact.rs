@@ -18,6 +18,8 @@ pub const MAX_NOTE_CHARS: usize = 8_000;
 pub const MAX_CARDS: usize = 20;
 pub const MAX_CARD_CHARS: usize = 400;
 pub const MAX_GOAL_CHARS: usize = 500;
+/// Most skills a goal change adds or removes.
+pub const MAX_GOAL_CHANGES: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Card {
@@ -40,6 +42,33 @@ pub enum Body {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         goal_id: Option<String>,
     },
+    /// A change to one of the learner's goals. Skills are resolved by the
+    /// app from names; the model never supplies ids.
+    GoalChange {
+        goal_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rename: Option<String>,
+        add: Vec<SkillRef>,
+        remove: Vec<SkillRef>,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillRef {
+    pub id: String,
+    pub name: String,
+}
+
+/// A goal change as the model wrote it, before the app resolves the goal and
+/// skill names against the learner's data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalChangeDraft {
+    pub goal: String,
+    pub rename: Option<String>,
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
+    pub text: String,
 }
 
 impl Body {
@@ -48,6 +77,7 @@ impl Body {
             Body::Note { .. } => "note",
             Body::Flashcards { .. } => "flashcards",
             Body::Goal { .. } => "goal",
+            Body::GoalChange { .. } => "goal_change",
         }
     }
 
@@ -55,6 +85,19 @@ impl Body {
     pub fn text(&self) -> String {
         match self {
             Body::Note { text } | Body::Goal { text, .. } => text.clone(),
+            Body::GoalChange {
+                rename,
+                add,
+                remove,
+                text,
+                ..
+            } => {
+                let names = add.iter().chain(remove).map(|s| s.name.as_str());
+                let mut parts: Vec<&str> = rename.iter().map(String::as_str).collect();
+                parts.extend(names);
+                parts.push(text);
+                parts.join("\n")
+            }
             Body::Flashcards { cards } => cards
                 .iter()
                 .map(|c| format!("{} {}", c.front, c.back))
@@ -85,6 +128,12 @@ struct Raw {
     text: Option<String>,
     #[serde(default)]
     cards: Option<Vec<RawCard>>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    add: Vec<String>,
+    #[serde(default)]
+    remove: Vec<String>,
 }
 
 /// A single-line title, trimmed and bounded.
@@ -141,6 +190,33 @@ pub fn parse(block: &str) -> Option<Proposal> {
     Some(Proposal { title, body })
 }
 
+fn clean_names(names: &[String]) -> Option<Vec<String>> {
+    if names.len() > MAX_GOAL_CHANGES {
+        return None;
+    }
+    names.iter().map(|n| clean_title(n)).collect()
+}
+
+/// Parses a `goal_change` block. The goal is named by its title; the app
+/// resolves it, and the skill names, before anything is stored.
+pub fn parse_goal_change(block: &str) -> Option<GoalChangeDraft> {
+    let raw: Raw = serde_json::from_str(block).ok()?;
+    if raw.kind.trim() != "goal_change" {
+        return None;
+    }
+    let rename = match raw.name.as_deref() {
+        Some(name) if !name.trim().is_empty() => Some(clean_title(name)?),
+        _ => None,
+    };
+    Some(GoalChangeDraft {
+        goal: clean_title(&raw.title)?,
+        rename,
+        add: clean_names(&raw.add)?,
+        remove: clean_names(&raw.remove)?,
+        text: clean_side_bounded(raw.text.as_deref()?, MAX_GOAL_CHARS)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +260,24 @@ mod tests {
             r#"{{"type":"goal","title":"T","text":"{}"}}"#,
             "a".repeat(MAX_GOAL_CHARS + 1)
         );
+        assert!(parse(r#"{"type":"goal_change","title":"T","text":"x"}"#).is_none());
+        let change = parse_goal_change(
+            r#"{"type":"goal_change","title":"Data analyst","name":"","add":["SQL"],"remove":["Bayes rule"],"text":"Focus on querying."}"#,
+        )
+        .unwrap();
+        assert_eq!(change.goal, "Data analyst");
+        assert_eq!(change.rename, None);
+        assert_eq!(
+            (change.add, change.remove),
+            (vec!["SQL".to_string()], vec!["Bayes rule".to_string()])
+        );
+        let too_many = format!(
+            r#"{{"type":"goal_change","title":"T","text":"x","add":[{}]}}"#,
+            vec![r#""s""#; MAX_GOAL_CHANGES + 1].join(",")
+        );
+        assert!(parse_goal_change(&too_many).is_none());
+        assert!(parse_goal_change(r#"{"type":"goal","title":"T","text":"x"}"#).is_none());
+
         for bad in [
             many.as_str(),
             long_goal.as_str(),

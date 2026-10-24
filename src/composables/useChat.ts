@@ -577,6 +577,11 @@ export function useChat() {
     syncArtifact(await guard(() => invoke<ChatArtifact>('chat_goal_added', { artifactId, goalId })))
   }
 
+  /** Records that the learner applied a proposed goal change. */
+  async function goalChanged(artifactId: string) {
+    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_goal_changed', { artifactId })))
+  }
+
   async function deleteArtifact(artifactId: string) {
     await guard(() => invoke('chat_delete_artifact', { artifactId }))
     syncArtifact(null, artifactId)
@@ -690,6 +695,7 @@ export function useChat() {
     saveArtifact,
     deleteArtifact,
     goalAdded,
+    goalChanged,
     saveNote,
     memoryItems: readonly(memoryItems),
     refreshMemory,

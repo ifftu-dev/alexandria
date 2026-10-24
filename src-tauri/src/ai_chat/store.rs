@@ -1470,7 +1470,10 @@ pub fn save_message_as_note(
 /// here; it is added through the Goals service and then marked.
 pub fn save_artifact(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
     let current = artifact(conn, id)?;
-    if matches!(current.body, super::artifact::Body::Goal { .. }) {
+    if matches!(
+        current.body,
+        super::artifact::Body::Goal { .. } | super::artifact::Body::GoalChange { .. }
+    ) {
         return Err(StoreError::Invalid(
             "a goal is added from its preview".into(),
         ));
@@ -1501,6 +1504,22 @@ pub fn mark_goal_added(conn: &Connection, id: &str, goal_id: &str, now: &str) ->
         conn.execute(
             "UPDATE chat_artifacts SET status = 'added', body_json = ?2, updated_at = ?3 WHERE id = ?1",
             params![id, body, now],
+        )?;
+    }
+    artifact(conn, id)
+}
+
+/// Records that the learner applied a proposed goal change. The caller
+/// checks the goal reflects it. Marking twice is harmless.
+pub fn mark_goal_changed(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
+    let current = artifact(conn, id)?;
+    if !matches!(current.body, super::artifact::Body::GoalChange { .. }) {
+        return Err(StoreError::Invalid("not a goal change".into()));
+    }
+    if current.status == "proposed" {
+        conn.execute(
+            "UPDATE chat_artifacts SET status = 'added', updated_at = ?2 WHERE id = ?1",
+            params![id, now],
         )?;
     }
     artifact(conn, id)

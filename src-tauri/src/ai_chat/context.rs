@@ -17,7 +17,7 @@ use super::store::SourceRef;
 
 /// Version of the application instructions. Bump on any wording change so a
 /// snapshot always rebuilds with the text it was reviewed with.
-pub const POLICY_VERSION: u32 = 5;
+pub const POLICY_VERSION: u32 = 6;
 
 /// Context window assumed when a connection does not state one.
 pub const DEFAULT_CONTEXT_TOKENS: u32 = 8_000;
@@ -102,7 +102,12 @@ make one when asked. Never turn assessment or exam questions into cards.\n\
 When the learner asks for help choosing a new learning goal, you may propose \
 one the same way: {{\"type\": \"goal\", \"title\": \"short goal name\", \
 \"text\": \"what the learner wants to be able to do, in one or two sentences\"}}. \
-The app matches skills to it and the learner decides whether to add it.\n\
+The app matches skills to it and the learner decides whether to add it. When \
+a goal is attached and the learner asks to change it, you may propose a change \
+instead: {{\"type\": \"goal_change\", \"title\": \"the goal's name\", \"name\": \
+\"a new name, only if renaming\", \"add\": [\"skill name\"], \"remove\": [\"skill \
+name\"], \"text\": \"why, in one sentence\"}}. Use skill names exactly as they \
+appear in the goal. The learner decides whether to apply it.\n\
 \n\
 You cannot see or help with assessments, and you cannot change the learner's \
 goals, progress, or credentials yourself."
@@ -462,6 +467,7 @@ mod tests {
         );
         assert!(ask.contains("\"cards\": [{\"front\": \"prompt\", \"back\": \"answer\"}]"));
         assert!(ask.contains("{\"type\": \"goal\", \"title\": \"short goal name\""));
+        assert!(ask.contains("{\"type\": \"goal_change\", \"title\": \"the goal's name\""));
         let mut m = manifest();
         m.mode = "practice".into();
         let excerpt = |_: &str| Some("x".to_string());

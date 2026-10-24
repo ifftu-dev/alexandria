@@ -104,6 +104,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (24, "ai_chat_goal_bindings", include_str!("ai_chat_goal_bindings.sql")),
     // Notes and flashcards made from chat.
     (25, "ai_chat_artifacts", include_str!("ai_chat_artifacts.sql")),
+    // Course notes keep their text; deletes leave a synced tombstone.
+    (26, "course_notes_body", include_str!("course_notes_body.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

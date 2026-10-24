@@ -8,6 +8,7 @@ pub mod chapters;
 pub mod classroom;
 pub mod cli_install;
 pub mod completion;
+pub mod course_notes;
 pub mod courses;
 pub mod credentials;
 pub mod demo_courses;

@@ -258,5 +258,22 @@
     "open": "Open",
     "resolveFailed": "Skills could not be matched. Try again.",
     "addFailed": "That couldn't be done. Try again."
+  },
+  "goalChange": {
+    "title": "Suggested change to a goal",
+    "hint": "Shown against your goal as it is now. Nothing changes unless you apply it.",
+    "rename": "Rename to “{name}”",
+    "apply": "Apply change",
+    "done": "Mark as done",
+    "applied": "Goal updated",
+    "goalMissing": "This goal is no longer in your goals.",
+    "nothingLeft": "Your goal already matches this change.",
+    "wouldEmpty": "This would leave the goal without skills, so it can't be applied."
+  },
+  "courseNotes": {
+    "add": "Add to course notes · {lesson}",
+    "saved": "Added to your notes on {lesson}",
+    "notEnrolled": "Enroll in the course to keep notes there.",
+    "failed": "That couldn't be added. Try again."
   }
 }
