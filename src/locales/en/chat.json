@@ -257,12 +257,6 @@
     "title": "Saved notes",
     "intro": "Notes and flashcards you saved from chats. They stay on this device and are kept when you delete a chat.",
     "empty": "Nothing saved yet. Save an answer as a note, or ask for notes or flashcards.",
-    "suggestedNote": "Suggested note",
-    "suggestedCards": "Suggested flashcards",
-    "suggestionHint": "Nothing is saved unless you save it.",
-    "save": "Save",
-    "dismiss": "Dismiss",
-    "saved": "Saved to your notes",
     "saveNote": "Save as note",
     "cards": "{count} card | {count} cards",
     "study": "Study",
@@ -276,31 +270,54 @@
     "fromChat": "From a chat",
     "untitledNote": "Note"
   },
-  "goalProposal": {
-    "title": "Suggested goal",
-    "hint": "Find matching skills and choose the ones you want. Nothing is added unless you add it.",
-    "find": "Find skills",
-    "pick": "Choose the skills this goal should cover.",
-    "strong": "Strong match",
-    "add": "Add goal with {count} skill | Add goal with {count} skills",
-    "noSkills": "No matching skills were found. You can set a goal on the Goals page.",
-    "openGoals": "Open Goals",
-    "added": "Added to your goals",
-    "removed": "Added to your goals, then removed",
+  "actions": {
+    "asking": "The chat is asking to",
+    "ask": {
+      "note": "Save a note to your chat notes",
+      "flashcards": "Save {count} flashcard to your chat notes | Save {count} flashcards to your chat notes",
+      "courseNote": "Add a note to “{lesson}”",
+      "goal": "Add a new learning goal",
+      "goalChange": "Change your goal “{goal}”",
+      "enroll": "Enroll you in a course"
+    },
+    "allow": "Allow",
+    "decline": "Don't allow",
+    "promise": "Nothing is saved unless you allow it.",
+    "more": "Show all",
+    "less": "Show less",
+    "moreCards": "Show {count} more | Show {count} more",
+    "enrollFor": "On the path for your goal “{goal}”.",
     "open": "Open",
-    "resolveFailed": "Skills could not be matched. Try again.",
-    "addFailed": "That couldn't be done. Try again."
-  },
-  "goalChange": {
-    "title": "Suggested change to a goal",
-    "hint": "Shown against your goal as it is now. Nothing changes unless you apply it.",
-    "rename": "Rename to “{name}”",
-    "apply": "Apply change",
-    "done": "Mark as done",
-    "applied": "Goal updated",
-    "goalMissing": "This goal is no longer in your goals.",
-    "nothingLeft": "Your goal already matches this change.",
-    "wouldEmpty": "This would leave the goal without skills, so it can't be applied."
+    "openCourse": "Open course",
+    "declined": "Not allowed",
+    "done": {
+      "saved": "Saved to your chat notes",
+      "courseNote": "Added to your notes on “{lesson}”",
+      "goal": "Added to your goals",
+      "goalRemoved": "Added to your goals, then removed",
+      "goalChange": "Goal updated",
+      "enroll": "Enrolled"
+    },
+    "goal": {
+      "finding": "Finding matching skills…",
+      "noSkills": "No matching skills were found. You can set a goal on the Goals page.",
+      "pick": "Choose the skills this goal should cover.",
+      "pickOne": "Pick at least one skill to allow this.",
+      "strong": "Strong match"
+    },
+    "change": {
+      "rename": "Rename to “{name}”",
+      "goalMissing": "This goal is no longer in your goals.",
+      "nothingLeft": "Your goal already matches this change.",
+      "wouldEmpty": "This would leave the goal without skills, so it can't be applied."
+    },
+    "errors": {
+      "notEnrolled": "Enroll in this course first to keep notes there.",
+      "openCourse": "Finish enrolling on the course page. It may need to set something up first.",
+      "stale": "This can no longer be applied. Ask again if you still want it.",
+      "assessmentItem": "This looks like an assessment question, so it can't be saved.",
+      "generic": "That couldn't be done. Try again."
+    }
   },
   "courseNotes": {
     "add": "Add to course notes · {lesson}",

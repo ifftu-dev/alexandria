@@ -1,12 +1,15 @@
-//! Study artifacts: notes and flashcards made from a conversation, and
-//! proposed learning goals.
+//! Chat actions: changes a model asks to make to the learner's data.
 //!
-//! A model may propose one by ending its reply with a fenced `artifact`
-//! block; the learner can also save any answer as a note. A goal proposal
-//! carries only a name and a description: the app matches skills to it with
-//! the Goals page's own resolver, and the learner picks them before the goal
-//! is added. A proposal is
-//! stored for the learner to save or dismiss and is never saved on its own.
+//! A model may end its reply with one fenced `artifact` block naming an
+//! action from a fixed list: save a note or flashcards, add a goal, change an
+//! attached goal, add a note to the attached lesson, or enroll in a course on
+//! an attached goal's path. The block is parsed here into a [`Draft`]; the
+//! app then resolves it against the learner's own data and stores it as a
+//! proposal. A model never supplies ids: goals, skills, lessons, and courses
+//! are matched by name to what the learner already has. Nothing is written
+//! until the learner allows the proposal (see [`super::action`]). The
+//! learner can also save any answer as a note.
+//!
 //! Saved artifacts keep the sources the originating answer carried, and they
 //! outlive the chat they came from. Their text is checked against stored
 //! assessment items like every other model output.
@@ -52,6 +55,22 @@ pub enum Body {
         remove: Vec<SkillRef>,
         text: String,
     },
+    /// A note for one lesson's course notes. The lesson is the one attached
+    /// to the chat; the title of the proposal is the note's title.
+    CourseNote {
+        course_id: String,
+        element_id: String,
+        /// The lesson's title, as shown to the learner.
+        lesson: String,
+        text: String,
+    },
+    /// Enrolling in a course recommended on an attached goal's path. The
+    /// title of the proposal is the course's title.
+    Enroll {
+        course_id: String,
+        goal_id: String,
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +90,25 @@ pub struct GoalChangeDraft {
     pub text: String,
 }
 
+/// An action as the model wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Draft {
+    /// Needs nothing from the learner's data: a note, flashcards, or a new
+    /// goal.
+    Ready(Proposal),
+    GoalChange(GoalChangeDraft),
+    /// A note for the lesson attached to the chat.
+    CourseNote {
+        title: String,
+        text: String,
+    },
+    /// A course to enroll in, named by its title.
+    Enroll {
+        course: String,
+        text: String,
+    },
+}
+
 impl Body {
     pub fn kind(&self) -> &'static str {
         match self {
@@ -78,13 +116,18 @@ impl Body {
             Body::Flashcards { .. } => "flashcards",
             Body::Goal { .. } => "goal",
             Body::GoalChange { .. } => "goal_change",
+            Body::CourseNote { .. } => "course_note",
+            Body::Enroll { .. } => "enroll",
         }
     }
 
     /// Everything a learner would read, for the assessment-item check.
     pub fn text(&self) -> String {
         match self {
-            Body::Note { text } | Body::Goal { text, .. } => text.clone(),
+            Body::Note { text }
+            | Body::Goal { text, .. }
+            | Body::CourseNote { text, .. }
+            | Body::Enroll { text, .. } => text.clone(),
             Body::GoalChange {
                 rename,
                 add,
@@ -157,7 +200,9 @@ fn clean_side_bounded(text: &str, max: usize) -> Option<String> {
     (!text.is_empty() && text.chars().count() <= max).then_some(text)
 }
 
-pub fn parse(block: &str) -> Option<Proposal> {
+/// Parses an `artifact` block. Unknown types, missing fields, and anything
+/// over its bounds are dropped.
+pub fn parse(block: &str) -> Option<Draft> {
     let raw: Raw = serde_json::from_str(block).ok()?;
     let title = clean_title(&raw.title)?;
     let body = match raw.kind.trim() {
@@ -185,9 +230,34 @@ pub fn parse(block: &str) -> Option<Proposal> {
             text: clean_side_bounded(raw.text.as_deref()?, MAX_GOAL_CHARS)?,
             goal_id: None,
         },
+        "goal_change" => {
+            let rename = match raw.name.as_deref() {
+                Some(name) if !name.trim().is_empty() => Some(clean_title(name)?),
+                _ => None,
+            };
+            return Some(Draft::GoalChange(GoalChangeDraft {
+                goal: title,
+                rename,
+                add: clean_names(&raw.add)?,
+                remove: clean_names(&raw.remove)?,
+                text: clean_side_bounded(raw.text.as_deref()?, MAX_GOAL_CHARS)?,
+            }));
+        }
+        "course_note" => {
+            return Some(Draft::CourseNote {
+                title,
+                text: clean_note(raw.text.as_deref()?)?,
+            });
+        }
+        "enroll" => {
+            return Some(Draft::Enroll {
+                course: title,
+                text: clean_side_bounded(raw.text.as_deref()?, MAX_GOAL_CHARS)?,
+            });
+        }
         _ => return None,
     };
-    Some(Proposal { title, body })
+    Some(Draft::Ready(Proposal { title, body }))
 }
 
 fn clean_names(names: &[String]) -> Option<Vec<String>> {
@@ -197,34 +267,20 @@ fn clean_names(names: &[String]) -> Option<Vec<String>> {
     names.iter().map(|n| clean_title(n)).collect()
 }
 
-/// Parses a `goal_change` block. The goal is named by its title; the app
-/// resolves it, and the skill names, before anything is stored.
-pub fn parse_goal_change(block: &str) -> Option<GoalChangeDraft> {
-    let raw: Raw = serde_json::from_str(block).ok()?;
-    if raw.kind.trim() != "goal_change" {
-        return None;
-    }
-    let rename = match raw.name.as_deref() {
-        Some(name) if !name.trim().is_empty() => Some(clean_title(name)?),
-        _ => None,
-    };
-    Some(GoalChangeDraft {
-        goal: clean_title(&raw.title)?,
-        rename,
-        add: clean_names(&raw.add)?,
-        remove: clean_names(&raw.remove)?,
-        text: clean_side_bounded(raw.text.as_deref()?, MAX_GOAL_CHARS)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn ready(block: &str) -> Proposal {
+        match parse(block) {
+            Some(Draft::Ready(p)) => p,
+            other => panic!("{block}: {other:?}"),
+        }
+    }
+
     #[test]
     fn notes_and_flashcards_parse_and_are_bounded() {
-        let note =
-            parse(r#"{"type":"note","title":"  Bayes\nrule ","text":"P(A|B)\n= ..."}"#).unwrap();
+        let note = ready(r#"{"type":"note","title":"  Bayes\nrule ","text":"P(A|B)\n= ..."}"#);
         assert_eq!(note.title, "Bayes rule");
         assert_eq!(
             note.body,
@@ -232,10 +288,9 @@ mod tests {
                 text: "P(A|B)\n= ...".into()
             }
         );
-        let cards = parse(
+        let cards = ready(
             r#"{"type":"flashcards","title":"Terms","cards":[{"front":"Prior","back":"Belief before evidence"}]}"#,
-        )
-        .unwrap();
+        );
         assert_eq!(cards.body.kind(), "flashcards");
         assert!(cards.body.text().contains("Belief before evidence"));
 
@@ -243,10 +298,9 @@ mod tests {
             r#"{{"type":"flashcards","title":"T","cards":[{}]}}"#,
             vec![r#"{"front":"a","back":"b"}"#; MAX_CARDS + 1].join(",")
         );
-        let goal = parse(
+        let goal = ready(
             r#"{"type":"goal","title":"Data analyst","text":"Clean data\nand build dashboards","goal_id":"forged"}"#,
-        )
-        .unwrap();
+        );
         assert_eq!(
             goal.body,
             Body::Goal {
@@ -260,11 +314,29 @@ mod tests {
             r#"{{"type":"goal","title":"T","text":"{}"}}"#,
             "a".repeat(MAX_GOAL_CHARS + 1)
         );
-        assert!(parse(r#"{"type":"goal_change","title":"T","text":"x"}"#).is_none());
-        let change = parse_goal_change(
+        for bad in [
+            many.as_str(),
+            long_goal.as_str(),
+            r#"{"type":"goal","title":"T"}"#,
+            r#"{"type":"flashcards","title":"T","cards":[]}"#,
+            r#"{"type":"flashcards","title":"T","cards":[{"front":"","back":"b"}]}"#,
+            r#"{"type":"note","title":"","text":"x"}"#,
+            r#"{"type":"note","title":"T"}"#,
+            r#"{"type":"grade","title":"T","text":"A+"}"#,
+            r#"{"type":"credential","title":"T","text":"issue one"}"#,
+            "not json",
+        ] {
+            assert!(parse(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn actions_that_need_the_learners_data_stay_drafts() {
+        let Some(Draft::GoalChange(change)) = parse(
             r#"{"type":"goal_change","title":"Data analyst","name":"","add":["SQL"],"remove":["Bayes rule"],"text":"Focus on querying."}"#,
-        )
-        .unwrap();
+        ) else {
+            panic!("goal change")
+        };
         assert_eq!(change.goal, "Data analyst");
         assert_eq!(change.rename, None);
         assert_eq!(
@@ -275,21 +347,29 @@ mod tests {
             r#"{{"type":"goal_change","title":"T","text":"x","add":[{}]}}"#,
             vec![r#""s""#; MAX_GOAL_CHANGES + 1].join(",")
         );
-        assert!(parse_goal_change(&too_many).is_none());
-        assert!(parse_goal_change(r#"{"type":"goal","title":"T","text":"x"}"#).is_none());
+        assert!(parse(&too_many).is_none());
 
-        for bad in [
-            many.as_str(),
-            long_goal.as_str(),
-            r#"{"type":"goal","title":"T"}"#,
-            r#"{"type":"flashcards","title":"T","cards":[]}"#,
-            r#"{"type":"flashcards","title":"T","cards":[{"front":"","back":"b"}]}"#,
-            r#"{"type":"note","title":"","text":"x"}"#,
-            r#"{"type":"note","title":"T"}"#,
-            r#"{"type":"grade","title":"T","text":"A+"}"#,
-            "not json",
-        ] {
-            assert!(parse(bad).is_none(), "{bad}");
-        }
+        assert_eq!(
+            parse(
+                r#"{"type":"course_note","title":"Bayes","text":"Update a prior.","course_id":"forged"}"#
+            ),
+            Some(Draft::CourseNote {
+                title: "Bayes".into(),
+                text: "Update a prior.".into()
+            }),
+            "the lesson comes from the chat, not the model"
+        );
+        assert_eq!(
+            parse(
+                r#"{"type":"enroll","title":" Intro to\nSQL ","text":"Covers joins.","course_id":"forged"}"#
+            ),
+            Some(Draft::Enroll {
+                course: "Intro to SQL".into(),
+                text: "Covers joins.".into()
+            }),
+            "a course is named by its title"
+        );
+        assert!(parse(r#"{"type":"enroll","title":"T"}"#).is_none());
+        assert!(parse(r#"{"type":"course_note","title":"T","text":""}"#).is_none());
     }
 }

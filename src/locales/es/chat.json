@@ -257,12 +257,6 @@
     "title": "Notas guardadas",
     "intro": "Notas y tarjetas de estudio que guardaste de los chats. Se quedan en este dispositivo y se conservan cuando eliminas un chat.",
     "empty": "Todavía no hay nada guardado. Guarda una respuesta como nota o pide notas o tarjetas de estudio.",
-    "suggestedNote": "Nota sugerida",
-    "suggestedCards": "Tarjetas de estudio sugeridas",
-    "suggestionHint": "No se guarda nada a menos que lo guardes.",
-    "save": "Guardar",
-    "dismiss": "Descartar",
-    "saved": "Guardado en tus notas",
     "saveNote": "Guardar como nota",
     "cards": "{count} tarjeta | {count} tarjetas",
     "study": "Estudiar",
@@ -276,31 +270,54 @@
     "fromChat": "De un chat",
     "untitledNote": "Nota"
   },
-  "goalProposal": {
-    "title": "Meta sugerida",
-    "hint": "Busca habilidades que coincidan y elige las que quieras. No se agrega nada a menos que lo agregues.",
-    "find": "Buscar habilidades",
-    "pick": "Elige las habilidades que debe cubrir esta meta.",
-    "strong": "Muy parecida",
-    "add": "Agregar meta con {count} habilidad | Agregar meta con {count} habilidades",
-    "noSkills": "No se encontraron habilidades que coincidan. Puedes crear una meta en la página Metas.",
-    "openGoals": "Abrir Metas",
-    "added": "Agregada a tus metas",
-    "removed": "Agregada a tus metas y luego quitada",
+  "actions": {
+    "asking": "El chat pide permiso para",
+    "ask": {
+      "note": "Guardar una nota en tus notas del chat",
+      "flashcards": "Guardar {count} tarjeta en tus notas del chat | Guardar {count} tarjetas en tus notas del chat",
+      "courseNote": "Añadir una nota a “{lesson}”",
+      "goal": "Añadir un nuevo objetivo de aprendizaje",
+      "goalChange": "Cambiar tu objetivo “{goal}”",
+      "enroll": "Inscribirte en un curso"
+    },
+    "allow": "Permitir",
+    "decline": "No permitir",
+    "promise": "No se guarda nada a menos que lo permitas.",
+    "more": "Mostrar todo",
+    "less": "Mostrar menos",
+    "moreCards": "Mostrar {count} más | Mostrar {count} más",
+    "enrollFor": "En la ruta de tu objetivo “{goal}”.",
     "open": "Abrir",
-    "resolveFailed": "No se pudieron encontrar habilidades que coincidan. Inténtalo de nuevo.",
-    "addFailed": "No se pudo hacer. Inténtalo de nuevo."
-  },
-  "goalChange": {
-    "title": "Cambio sugerido a una meta",
-    "hint": "Se muestra comparado con tu meta tal como está ahora. Nada cambia a menos que lo apliques.",
-    "rename": "Cambiar el nombre a “{name}”",
-    "apply": "Aplicar cambio",
-    "done": "Marcar como completada",
-    "applied": "Meta actualizada",
-    "goalMissing": "Esta meta ya no está en tus metas.",
-    "nothingLeft": "Tu meta ya coincide con este cambio.",
-    "wouldEmpty": "Esto dejaría la meta sin habilidades, así que no se puede aplicar."
+    "openCourse": "Abrir curso",
+    "declined": "No permitido",
+    "done": {
+      "saved": "Guardado en tus notas del chat",
+      "courseNote": "Añadido a tus notas de “{lesson}”",
+      "goal": "Añadido a tus objetivos",
+      "goalRemoved": "Añadido a tus objetivos y luego eliminado",
+      "goalChange": "Objetivo actualizado",
+      "enroll": "Inscrito"
+    },
+    "goal": {
+      "finding": "Buscando habilidades que coincidan…",
+      "noSkills": "No se encontraron habilidades que coincidan. Puedes fijar un objetivo en la página Objetivos.",
+      "pick": "Elige las habilidades que debe cubrir este objetivo.",
+      "pickOne": "Elige al menos una habilidad para permitirlo.",
+      "strong": "Coincidencia fuerte"
+    },
+    "change": {
+      "rename": "Renombrar a “{name}”",
+      "goalMissing": "Este objetivo ya no está entre tus objetivos.",
+      "nothingLeft": "Tu objetivo ya refleja este cambio.",
+      "wouldEmpty": "Esto dejaría el objetivo sin habilidades, así que no se puede aplicar."
+    },
+    "errors": {
+      "notEnrolled": "Inscríbete primero en este curso para guardar notas allí.",
+      "openCourse": "Termina la inscripción en la página del curso. Puede que primero necesite preparar algo.",
+      "stale": "Esto ya no se puede aplicar. Vuelve a pedirlo si aún lo quieres.",
+      "assessmentItem": "Esto parece una pregunta de evaluación, así que no se puede guardar.",
+      "generic": "No se pudo hacer. Inténtalo de nuevo."
+    }
   },
   "courseNotes": {
     "add": "Agregar a las notas del curso · {lesson}",

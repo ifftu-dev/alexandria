@@ -257,12 +257,6 @@
     "title": "已保存的笔记",
     "intro": "你从聊天中保存的笔记和抽认卡。它们保存在这台设备上，删除聊天时也会保留。",
     "empty": "还没有保存任何内容。可以把回答保存为笔记，或者请求生成笔记或抽认卡。",
-    "suggestedNote": "建议的笔记",
-    "suggestedCards": "建议的抽认卡",
-    "suggestionHint": "除非你保存，否则不会保存任何内容。",
-    "save": "保存",
-    "dismiss": "忽略",
-    "saved": "已保存到你的笔记",
     "saveNote": "保存为笔记",
     "cards": "{count} 张卡片 | {count} 张卡片",
     "study": "学习",
@@ -276,31 +270,54 @@
     "fromChat": "来自聊天",
     "untitledNote": "笔记"
   },
-  "goalProposal": {
-    "title": "建议的目标",
-    "hint": "查找匹配的技能，并选择你想要的。除非你添加，否则不会添加任何内容。",
-    "find": "查找技能",
-    "pick": "选择这个目标要涵盖的技能。",
-    "strong": "高度匹配",
-    "add": "添加目标（{count} 个技能）| 添加目标（{count} 个技能）",
-    "noSkills": "没有找到匹配的技能。你可以在“目标”页面设置目标。",
-    "openGoals": "打开目标",
-    "added": "已添加到你的目标",
-    "removed": "已添加到你的目标，随后又被移除",
+  "actions": {
+    "asking": "聊天请求",
+    "ask": {
+      "note": "将一条笔记保存到你的聊天笔记",
+      "flashcards": "将 {count} 张卡片保存到你的聊天笔记 | 将 {count} 张卡片保存到你的聊天笔记",
+      "courseNote": "为“{lesson}”添加一条笔记",
+      "goal": "添加一个新的学习目标",
+      "goalChange": "修改你的目标“{goal}”",
+      "enroll": "为你报名一门课程"
+    },
+    "allow": "允许",
+    "decline": "不允许",
+    "promise": "未经你允许，不会保存任何内容。",
+    "more": "显示全部",
+    "less": "收起",
+    "moreCards": "再显示 {count} 张 | 再显示 {count} 张",
+    "enrollFor": "在你的目标“{goal}”的路径上。",
     "open": "打开",
-    "resolveFailed": "无法匹配技能。请重试。",
-    "addFailed": "无法完成。请重试。"
-  },
-  "goalChange": {
-    "title": "建议的目标更改",
-    "hint": "与你当前的目标对照显示。除非你应用，否则不会有任何更改。",
-    "rename": "重命名为“{name}”",
-    "apply": "应用更改",
-    "done": "标记为已完成",
-    "applied": "目标已更新",
-    "goalMissing": "这个目标已不在你的目标中。",
-    "nothingLeft": "你的目标已经符合这项更改。",
-    "wouldEmpty": "这会让目标没有任何技能，因此无法应用。"
+    "openCourse": "打开课程",
+    "declined": "未允许",
+    "done": {
+      "saved": "已保存到你的聊天笔记",
+      "courseNote": "已添加到你在“{lesson}”的笔记",
+      "goal": "已添加到你的目标",
+      "goalRemoved": "已添加到你的目标，之后被移除",
+      "goalChange": "目标已更新",
+      "enroll": "已报名"
+    },
+    "goal": {
+      "finding": "正在查找匹配的技能…",
+      "noSkills": "没有找到匹配的技能。你可以在“目标”页面设置目标。",
+      "pick": "选择这个目标应涵盖的技能。",
+      "pickOne": "至少选择一项技能才能允许。",
+      "strong": "高度匹配"
+    },
+    "change": {
+      "rename": "重命名为“{name}”",
+      "goalMissing": "这个目标已不在你的目标中。",
+      "nothingLeft": "你的目标已经符合这项修改。",
+      "wouldEmpty": "这会让目标没有任何技能，因此无法应用。"
+    },
+    "errors": {
+      "notEnrolled": "请先报名这门课程，才能在其中保存笔记。",
+      "openCourse": "请在课程页面完成报名。可能需要先进行一些设置。",
+      "stale": "这已无法应用。如果仍需要，请再问一次。",
+      "assessmentItem": "这看起来像评估题目，因此无法保存。",
+      "generic": "无法完成，请重试。"
+    }
   },
   "courseNotes": {
     "add": "添加到课程笔记 · {lesson}",

@@ -576,20 +576,19 @@ export function useChat() {
     if (next) savedArtifacts.value = next
   }
 
-  async function saveArtifact(artifactId: string) {
-    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_save_artifact', { artifactId })))
+  /** Carries out something the chat asked for, once the learner allows it.
+   *  A new goal carries the skills the learner picked. Throws when the app
+   *  refuses, so the card can say why. */
+  async function allowAction(artifactId: string, skillIds?: string[]) {
+    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_allow_action', { artifactId, skillIds: skillIds ?? null })))
   }
 
-  /** Records that the learner added a proposed goal as `goalId`. */
-  async function goalAdded(artifactId: string, goalId: string) {
-    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_goal_added', { artifactId, goalId })))
+  /** Records that the learner declined something the chat asked for. */
+  async function declineAction(artifactId: string) {
+    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_decline_action', { artifactId })))
   }
 
-  /** Records that the learner applied a proposed goal change. */
-  async function goalChanged(artifactId: string) {
-    syncArtifact(await guard(() => invoke<ChatArtifact>('chat_goal_changed', { artifactId })))
-  }
-
+  /** Deletes a saved note or flashcard set. */
   async function deleteArtifact(artifactId: string) {
     await guard(() => invoke('chat_delete_artifact', { artifactId }))
     syncArtifact(null, artifactId)
@@ -700,12 +699,11 @@ export function useChat() {
     showSaved,
     savedArtifacts: readonly(savedArtifacts),
     refreshSaved,
-    saveArtifact,
+    allowAction,
+    declineAction,
     deleteArtifact,
-    goalAdded,
     reviewBeforeSend,
     setReviewBeforeSend,
-    goalChanged,
     saveNote,
     memoryItems: readonly(memoryItems),
     refreshMemory,

@@ -106,6 +106,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (25, "ai_chat_artifacts", include_str!("ai_chat_artifacts.sql")),
     // Course notes keep their text; deletes leave a synced tombstone.
     (26, "course_notes_body", include_str!("course_notes_body.sql")),
+    // Chat may propose course notes and enrollments; declined proposals stay.
+    (27, "ai_chat_actions", include_str!("ai_chat_actions.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

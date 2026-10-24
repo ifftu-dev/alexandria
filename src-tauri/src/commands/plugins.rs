@@ -114,7 +114,7 @@ struct PluginInstallProgress {
 }
 
 /// The distinct plugin CIDs a course's elements reference.
-fn course_plugin_cids(db: &Database, course_id: &str) -> Result<Vec<String>, String> {
+pub(crate) fn course_plugin_cids(db: &Database, course_id: &str) -> Result<Vec<String>, String> {
     let conn = db.conn();
     let mut stmt = conn
         .prepare(

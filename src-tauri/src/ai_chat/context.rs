@@ -17,7 +17,7 @@ use super::store::SourceRef;
 
 /// Version of the application instructions. Bump on any wording change so a
 /// snapshot always rebuilds with the text it was reviewed with.
-pub const POLICY_VERSION: u32 = 6;
+pub const POLICY_VERSION: u32 = 7;
 
 /// Context window assumed when a connection does not state one.
 pub const DEFAULT_CONTEXT_TOKENS: u32 = 8_000;
@@ -90,27 +90,35 @@ Use \"observation\" as the kind for a recurring difficulty. The learner decides 
 whether to save it. Never suggest anything about health, beliefs, ethnicity, \
 family, or other personal traits, and never suggest grades or skill levels.\n\
 \n\
-When the learner asks for notes or flashcards, write them and end your reply \
-with one fenced block the app can offer to save:\n\
+You cannot change anything yourself. When the learner asks you to save \
+or change something, end your reply with one fenced block describing it; \
+the app shows it to the learner, who allows or declines it, and only then \
+is it saved. Never say something was saved or changed. One block per \
+reply, and only when asked:\n\
 ```artifact\n\
 {{\"type\": \"note\", \"title\": \"short title\", \"text\": \"the note\"}}\n\
 ```\n\
-For flashcards use {{\"type\": \"flashcards\", \"title\": \"short title\", \"cards\": \
-[{{\"front\": \"prompt\", \"back\": \"answer\"}}]}} with at most 20 cards. Only \
-make one when asked. Never turn assessment or exam questions into cards.\n\
+That saves a note with the learner's chat notes. Other types:\n\
+- Flashcards: {{\"type\": \"flashcards\", \"title\": \"short title\", \"cards\": \
+[{{\"front\": \"prompt\", \"back\": \"answer\"}}]}}, at most 20 cards. Never turn \
+assessment or exam questions into cards.\n\
+- A note on the attached lesson, kept with that course: {{\"type\": \
+\"course_note\", \"title\": \"short title\", \"text\": \"the note\"}}. Only \
+when a lesson is attached.\n\
+- A new learning goal, when the learner wants help choosing one: \
+{{\"type\": \"goal\", \"title\": \"short goal name\", \"text\": \"what the \
+learner wants to be able to do, in one or two sentences\"}}. The app \
+matches skills to it and the learner picks them.\n\
+- A change to an attached goal: {{\"type\": \"goal_change\", \"title\": \
+\"the goal's name\", \"name\": \"a new name, only if renaming\", \"add\": \
+[\"skill name\"], \"remove\": [\"skill name\"], \"text\": \"why, in one \
+sentence\"}}. Use skill names exactly as they appear in the goal.\n\
+- Enrolling in a course listed on an attached goal's path: {{\"type\": \
+\"enroll\", \"title\": \"the course title exactly as listed\", \"text\": \
+\"why, in one sentence\"}}.\n\
 \n\
-When the learner asks for help choosing a new learning goal, you may propose \
-one the same way: {{\"type\": \"goal\", \"title\": \"short goal name\", \
-\"text\": \"what the learner wants to be able to do, in one or two sentences\"}}. \
-The app matches skills to it and the learner decides whether to add it. When \
-a goal is attached and the learner asks to change it, you may propose a change \
-instead: {{\"type\": \"goal_change\", \"title\": \"the goal's name\", \"name\": \
-\"a new name, only if renaming\", \"add\": [\"skill name\"], \"remove\": [\"skill \
-name\"], \"text\": \"why, in one sentence\"}}. Use skill names exactly as they \
-appear in the goal. The learner decides whether to apply it.\n\
-\n\
-You cannot see or help with assessments, and you cannot change the learner's \
-goals, progress, or credentials yourself."
+You cannot see or help with assessments, and you cannot change the \
+learner's progress or credentials."
     ))
 }
 
@@ -468,6 +476,9 @@ mod tests {
         assert!(ask.contains("\"cards\": [{\"front\": \"prompt\", \"back\": \"answer\"}]"));
         assert!(ask.contains("{\"type\": \"goal\", \"title\": \"short goal name\""));
         assert!(ask.contains("{\"type\": \"goal_change\", \"title\": \"the goal's name\""));
+        assert!(ask.contains("{\"type\": \"course_note\", \"title\""));
+        assert!(ask.contains("{\"type\": \"enroll\", \"title\""));
+        assert!(ask.contains("who allows or declines it"));
         let mut m = manifest();
         m.mode = "practice".into();
         let excerpt = |_: &str| Some("x".to_string());
