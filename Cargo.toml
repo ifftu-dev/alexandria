@@ -29,6 +29,14 @@ exclude = ["plugins"]
 [profile.dev.package.scrypt]
 opt-level = 3
 
+# Unlocking derives the vault key with Argon2id (64 MB, 3 passes), which
+# runs on BLAKE2b. Unoptimised, one derivation takes seconds on a phone.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 # Call video reaches the webview as JPEG frames encoded by `image`. Unoptimised,
 # the encoder keeps a phone's CPU pinned and the self view drops to a few
 # frames a second, so development builds would misreport how calls behave.
