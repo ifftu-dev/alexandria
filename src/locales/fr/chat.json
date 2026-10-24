@@ -258,5 +258,22 @@
     "open": "Ouvrir",
     "resolveFailed": "Impossible de trouver les compétences correspondantes. Réessaie.",
     "addFailed": "Impossible de faire cela. Réessaie."
+  },
+  "goalChange": {
+    "title": "Modification suggérée d'un objectif",
+    "hint": "Comparée à ton objectif actuel. Rien ne change si tu ne l'appliques pas.",
+    "rename": "Renommer en « {name} »",
+    "apply": "Appliquer la modification",
+    "done": "Marquer comme terminé",
+    "applied": "Objectif mis à jour",
+    "goalMissing": "Cet objectif ne fait plus partie de tes objectifs.",
+    "nothingLeft": "Ton objectif correspond déjà à cette modification.",
+    "wouldEmpty": "L'objectif n'aurait plus aucune compétence, donc cette modification ne peut pas être appliquée."
+  },
+  "courseNotes": {
+    "add": "Ajouter aux notes du cours · {lesson}",
+    "saved": "Ajouté à tes notes sur {lesson}",
+    "notEnrolled": "Inscris-toi au cours pour y garder des notes.",
+    "failed": "Impossible de l'ajouter. Réessaie."
   }
 }

@@ -258,5 +258,22 @@
     "open": "Abrir",
     "resolveFailed": "No se pudieron encontrar habilidades que coincidan. Inténtalo de nuevo.",
     "addFailed": "No se pudo hacer. Inténtalo de nuevo."
+  },
+  "goalChange": {
+    "title": "Cambio sugerido a una meta",
+    "hint": "Se muestra comparado con tu meta tal como está ahora. Nada cambia a menos que lo apliques.",
+    "rename": "Cambiar el nombre a “{name}”",
+    "apply": "Aplicar cambio",
+    "done": "Marcar como completada",
+    "applied": "Meta actualizada",
+    "goalMissing": "Esta meta ya no está en tus metas.",
+    "nothingLeft": "Tu meta ya coincide con este cambio.",
+    "wouldEmpty": "Esto dejaría la meta sin habilidades, así que no se puede aplicar."
+  },
+  "courseNotes": {
+    "add": "Agregar a las notas del curso · {lesson}",
+    "saved": "Agregado a tus notas de {lesson}",
+    "notEnrolled": "Inscríbete en el curso para guardar notas ahí.",
+    "failed": "No se pudo agregar. Inténtalo de nuevo."
   }
 }

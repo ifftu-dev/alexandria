@@ -258,5 +258,22 @@
     "open": "打开",
     "resolveFailed": "无法匹配技能。请重试。",
     "addFailed": "无法完成。请重试。"
+  },
+  "goalChange": {
+    "title": "建议的目标更改",
+    "hint": "与你当前的目标对照显示。除非你应用，否则不会有任何更改。",
+    "rename": "重命名为“{name}”",
+    "apply": "应用更改",
+    "done": "标记为已完成",
+    "applied": "目标已更新",
+    "goalMissing": "这个目标已不在你的目标中。",
+    "nothingLeft": "你的目标已经符合这项更改。",
+    "wouldEmpty": "这会让目标没有任何技能，因此无法应用。"
+  },
+  "courseNotes": {
+    "add": "添加到课程笔记 · {lesson}",
+    "saved": "已添加到你在 {lesson} 中的笔记",
+    "notEnrolled": "报名这门课程后即可在其中保存笔记。",
+    "failed": "无法添加。请重试。"
   }
 }

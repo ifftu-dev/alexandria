@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "Caméra désactivée — les compétences obtenues ici auront une confiance moindre."
+  },
+  "notes": {
+    "title": "Vos notes",
+    "thisLesson": "Cette leçon",
+    "otherLessons": "Autres leçons",
+    "untitled": "Note",
+    "fromChat": "Enregistrée depuis un chat",
+    "openLesson": "Ouvrir la leçon",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer cette note ?",
+    "deleteBody": "Elle est supprimée de ce cours sur tous vos appareils.",
+    "deleteFailed": "Impossible de supprimer cette note. Réessayez."
   }
 }
