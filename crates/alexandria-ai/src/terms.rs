@@ -16,8 +16,11 @@
 //! Some developer APIs also set an age floor. Google's Gemini API requires
 //! users to be 18 or older and forbids use in apps likely to be accessed by
 //! people under 18 (Gemini API Additional Terms, effective 2026-03-23).
-//! OpenRouter requires users to be 18 or older. The host refuses these for
-//! minors; [`adults_only`] names them.
+//! OpenRouter, Groq, and xAI's API require users to be 18 or older. The host
+//! refuses these for minors; [`adults_only`] names them. Mistral's commercial
+//! terms set no age floor but require a parent's consent for minors and bar
+//! children's data under 13, which the host's guardian approval and under-13
+//! rule cover. Checked 2026-10-24.
 //!
 //! The lists are deliberately small and conservative: they name hosts and
 //! credential shapes, not every vendor. Review them when vendor terms change.
@@ -44,6 +47,12 @@ const CONSUMER_BACKENDS: &[(&str, &str)] = &[
 const ADULTS_ONLY: &[(&str, &str)] = &[
     ("generativelanguage.googleapis.com", "Google's Gemini API"),
     ("openrouter.ai", "OpenRouter"),
+    // Groq Services Agreement s.2: "You must be 18 years of age or older to
+    // access or use the Cloud Services."
+    ("groq.com", "Groq"),
+    // xAI Enterprise Terms: for business users of the API "who are at least
+    // 18 years old" (consumer Grok has separate terms).
+    ("x.ai", "xAI"),
 ];
 
 /// Developer APIs whose terms also restrict apps that minors are likely to
@@ -177,6 +186,17 @@ mod tests {
         assert!(!restricts_apps_for_minors(&url(
             "https://openrouter.ai/api/v1"
         )));
+        assert_eq!(
+            adults_only(&url("https://api.groq.com/openai/v1")),
+            Some("Groq")
+        );
+        assert_eq!(adults_only(&url("https://api.x.ai/v1")), Some("xAI"));
+        assert_eq!(adults_only(&url("https://api.mistral.ai/v1")), None);
+        assert_eq!(
+            adults_only(&url("https://box.ai/v1")),
+            None,
+            "suffix match is per label"
+        );
         assert_eq!(adults_only(&url("https://api.openai.com/v1")), None);
     }
 }
