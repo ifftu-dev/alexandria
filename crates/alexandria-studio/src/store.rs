@@ -455,12 +455,15 @@ pub fn save_connection(
     doc: &StudioDocument<StudioConnection>,
     key: Option<&str>,
 ) -> Result<StudioDocument<StudioConnection>> {
-    crate::provider::validate_connection(&doc.value)?;
+    let url = crate::provider::validate_connection(&doc.value)?;
     if doc.id != doc.value.id {
         return Err(Error::Invalid("Connection identifier mismatch".into()));
     }
     if let Some(key) = key {
         bounded(key, 4096, "API key")?;
+        // Consumer sign-in tokens are never stored, not just never sent.
+        alexandria_ai::terms::check_credential(&url, key)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
     }
     let tx = conn.unchecked_transaction()?;
     if let Some(key) = key {

@@ -53,6 +53,10 @@ pub fn validate_connection(connection: &StudioConnection) -> Result<Url> {
         alexandria_ai::Error::Invalid(message) if message.starts_with("Enter a valid") => {
             Error::Invalid(message)
         }
+        // A vendor-terms refusal explains itself.
+        alexandria_ai::Error::Invalid(message) if message.contains("consumer app") => {
+            Error::Invalid(message)
+        }
         _ => Error::Invalid(LOCATION_ERROR.into()),
     })?;
     if connection.capability != "text" {

@@ -17,6 +17,7 @@ pub mod endpoint;
 mod http;
 pub mod model;
 mod sse;
+pub mod terms;
 
 pub use endpoint::{Endpoint, Location};
 pub use model::{ChatRequest, Completion, FinishReason, Message, Role, StreamEvent, Usage};
@@ -81,7 +82,20 @@ impl Adapter {
         }
     }
 
+    /// Refuses a consumer sign-in token before anything is sent.
+    fn admit(&self) -> Result<()> {
+        let key = match self {
+            Adapter::Compatible(a) => a.key(),
+            Adapter::Anthropic(a) => a.key(),
+        };
+        match key {
+            Some(key) => terms::check_credential(self.endpoint().base(), key),
+            None => Ok(()),
+        }
+    }
+
     pub async fn complete(&self, request: &ChatRequest) -> Result<Completion> {
+        self.admit()?;
         match self {
             Adapter::Compatible(a) => a.complete(request).await,
             Adapter::Anthropic(a) => a.complete(request).await,
@@ -93,6 +107,7 @@ impl Adapter {
         request: &ChatRequest,
         events: mpsc::Sender<StreamEvent>,
     ) -> Result<Completion> {
+        self.admit()?;
         match self {
             Adapter::Compatible(a) => a.stream(request, events).await,
             Adapter::Anthropic(a) => a.stream(request, events).await,
@@ -100,6 +115,7 @@ impl Adapter {
     }
 
     pub async fn list_models(&self) -> Result<Vec<String>> {
+        self.admit()?;
         match self {
             Adapter::Compatible(a) => a.list_models().await,
             Adapter::Anthropic(a) => a.list_models().await,

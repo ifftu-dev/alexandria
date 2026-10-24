@@ -89,15 +89,21 @@ pub struct AccountStatus {
 /// An unparseable birthdate is treated as adult (birthdates are validated
 /// on write; this only guards against hand-edited rows).
 pub fn is_minor(birthdate: &str, today: chrono::NaiveDate) -> bool {
+    is_younger_than(birthdate, 18, today)
+}
+
+/// Whether a birthdate makes the holder younger than `years` as of `today`.
+/// An unparseable birthdate is treated as old enough, as in [`is_minor`].
+pub fn is_younger_than(birthdate: &str, years: i32, today: chrono::NaiveDate) -> bool {
     match chrono::NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
         Ok(born) => {
-            let adult_at = match born.with_year(born.year() + 18) {
+            let birthday = match born.with_year(born.year() + years) {
                 Some(d) => d,
-                // Feb 29 birthdate in a non-leap target year: adulthood on Mar 1.
-                None => chrono::NaiveDate::from_ymd_opt(born.year() + 18, 3, 1)
+                // Feb 29 birthdate in a non-leap target year: the birthday is Mar 1.
+                None => chrono::NaiveDate::from_ymd_opt(born.year() + years, 3, 1)
                     .expect("Mar 1 always exists"),
             };
-            today < adult_at
+            today < birthday
         }
         Err(_) => false,
     }

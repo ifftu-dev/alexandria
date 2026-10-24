@@ -71,6 +71,10 @@ impl Anthropic {
         &self.endpoint
     }
 
+    pub(crate) fn key(&self) -> Option<&str> {
+        self.key.as_deref()
+    }
+
     /// One request, one complete answer.
     pub async fn complete(&self, request: &ChatRequest) -> Result<Completion> {
         let mut response = self.post(request, false).await?;

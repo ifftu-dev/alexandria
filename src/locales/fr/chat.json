@@ -131,7 +131,9 @@
     "memory": "Impossible d'enregistrer cela. Limite-toi à une phrase courte.",
     "guardian_pending": "Ton responsable a reçu une demande d'accord pour ce modèle. Tu pourras l'utiliser dès qu'il l'aura accepté.",
     "guardian_declined": "Ton responsable n'a pas accepté ce modèle. Utilise un modèle sur cet appareil ou sur ton propre réseau.",
-    "no_guardian": "Associe d'abord un responsable dans les Réglages, puis demande-lui d'accepter ce modèle."
+    "no_guardian": "Associe d'abord un responsable dans les Réglages, puis demande-lui d'accepter ce modèle.",
+    "under_13": "Les apprenants de moins de 13 ans ne peuvent utiliser que des modèles sur cet appareil ou sur leur propre réseau.",
+    "adults_only": "Les conditions de ce fournisseur exigent que les utilisateurs aient 18 ans ou plus. Utilise un autre fournisseur, ou un modèle sur cet appareil ou sur ton propre réseau."
   },
   "connection": {
     "title": "Ajouter une connexion de modèle",

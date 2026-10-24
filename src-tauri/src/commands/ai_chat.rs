@@ -19,6 +19,7 @@ use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
 use alexandria_ai::StreamEvent;
 use alexandria_ai::{Adapter, Protocol};
+use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
 use chrono::SecondsFormat;
 use rusqlite::{Connection, OptionalExtension};
@@ -439,7 +440,20 @@ enum Attached {
     Goal,
 }
 
-fn is_minor(conn: &Connection) -> Result<bool, String> {
+/// How vendor terms and guardian rules see the profile's holder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgeBand {
+    Adult,
+    /// 13 to 17: remote models with a guardian's approval, except vendors
+    /// whose terms require users to be 18 or older.
+    Teen,
+    /// Under 13: models on the device or the user's own network only.
+    /// Vendors expect zero data retention or COPPA-grade handling for
+    /// children's data, which Alexandria cannot verify on a user's key.
+    Child,
+}
+
+fn age_band(conn: &Connection) -> Result<AgeBand, String> {
     let birthdate: Option<String> = conn
         .query_row(
             "SELECT birthdate FROM local_identity WHERE id = 1",
@@ -449,9 +463,54 @@ fn is_minor(conn: &Connection) -> Result<bool, String> {
         .optional()
         .map_err(|_| "storage_error: profile could not be read".to_string())?
         .flatten();
-    Ok(birthdate
-        .as_deref()
-        .is_some_and(|b| crate::domain::identity::is_minor(b, chrono::Utc::now().date_naive())))
+    let today = chrono::Utc::now().date_naive();
+    Ok(match birthdate.as_deref() {
+        Some(b) if crate::domain::identity::is_younger_than(b, 13, today) => AgeBand::Child,
+        Some(b) if crate::domain::identity::is_minor(b, today) => AgeBand::Teen,
+        _ => AgeBand::Adult,
+    })
+}
+
+/// The age rules for sending to a connection, shared by chat, the lesson
+/// tutor, and Studio runs. Remote models are refused under 13, vendors with
+/// an 18+ floor are refused for every minor, and other remote models need a
+/// guardian's approval at the connection's current endpoint.
+pub(crate) fn age_gate(conn: &Connection, connection: &StudioConnection) -> Result<(), String> {
+    let location = studio_provider::location(connection).map_err(|e| e.to_string())?;
+    if location != Location::Remote {
+        return Ok(());
+    }
+    let band = age_band(conn)?;
+    if band == AgeBand::Adult {
+        return Ok(());
+    }
+    refuse_for_minors(connection, band)?;
+    match latest_approval(conn, &connection.id, &connection.endpoint)?.as_deref() {
+        Some("approved") => Ok(()),
+        Some("pending") => {
+            Err("guardian_pending: waiting for a guardian to approve this model".into())
+        }
+        Some(_) => Err("guardian_declined: a guardian did not approve this model".into()),
+        None => Err("guardian_required: remote models need a guardian's approval; use a model on this device or your own network".into()),
+    }
+}
+
+/// Refusals no guardian approval can lift.
+fn refuse_for_minors(connection: &StudioConnection, band: AgeBand) -> Result<(), String> {
+    if band == AgeBand::Child {
+        return Err(
+            "under_13: learners under 13 can use models on this device or their own network only"
+                .into(),
+        );
+    }
+    let url = alexandria_ai::endpoint::parse(&connection.endpoint, Location::Remote)
+        .map_err(|e| e.to_string())?;
+    if let Some(vendor) = alexandria_ai::terms::adults_only(&url) {
+        return Err(format!(
+            "adults_only: {vendor} requires users to be 18 or older"
+        ));
+    }
+    Ok(())
 }
 
 /// The latest guardian decision for a connection at its current endpoint.
@@ -526,6 +585,10 @@ fn request_approval(conn: &Connection, connection_id: &str) -> Result<GuardianAp
     if !has_guardian {
         return Err("no_guardian: link a guardian in Settings first".into());
     }
+    let band = age_band(conn)?;
+    if band != AgeBand::Adult {
+        refuse_for_minors(&doc.value, band)?;
+    }
     if matches!(
         latest_approval(conn, &doc.id, &doc.value.endpoint)?.as_deref(),
         Some("pending" | "approved")
@@ -588,20 +651,7 @@ fn gather(
         return Err("no_connection: the chosen model connection is disabled".into());
     }
     let location = studio_provider::location(&doc.value).map_err(|e| e.to_string())?;
-    if location == Location::Remote && is_minor(conn)? {
-        match latest_approval(conn, &doc.id, &doc.value.endpoint)?.as_deref() {
-            Some("approved") => {}
-            Some("pending") => {
-                return Err("guardian_pending: waiting for a guardian to approve this model".into())
-            }
-            Some(_) => {
-                return Err("guardian_declined: a guardian did not approve this model".into())
-            }
-            None => {
-                return Err("guardian_required: remote models need a guardian's approval; use a model on this device or your own network".into())
-            }
-        }
-    }
+    age_gate(conn, &doc.value)?;
     let model_id = thread
         .model_id
         .clone()
@@ -1919,7 +1969,8 @@ pub async fn chat_list_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alexandria_studio::model::{StudioConnection, StudioDocument};
+    use alexandria_studio::model::StudioDocument;
+    use chrono::Datelike;
     use std::sync::Arc;
 
     fn db() -> Connection {
@@ -2214,12 +2265,141 @@ mod tests {
         assert!(store::bindings(&conn, "t").unwrap().is_empty());
     }
 
+    /// Sets the profile's birthdate `years` years and a day before today.
+    fn born_years_ago(conn: &Connection, years: i32) {
+        let today = chrono::Utc::now().date_naive();
+        let born = chrono::NaiveDate::from_ymd_opt(today.year() - years, today.month(), 1).unwrap()
+            - chrono::Duration::days(1);
+        conn.execute(
+            "UPDATE local_identity SET birthdate = ?1",
+            [born.format("%Y-%m-%d").to_string()],
+        )
+        .unwrap();
+    }
+
+    fn link_guardian(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
+             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn under_13_learners_use_local_models_only_whatever_a_guardian_approves() {
+        let conn = db();
+        thread(&conn);
+        born_years_ago(&conn, 11);
+        link_guardian(&conn);
+        assert_eq!(
+            prepare(&conn, "Hello").unwrap().destination.location,
+            "device"
+        );
+        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
+        assert!(request_approval(&conn, "c1")
+            .unwrap_err()
+            .starts_with("under_13"));
+        conn.execute(
+            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
+             VALUES ('a', 'c1', 'Ollama', 'https://api.openai.com/v1', 'm', 'approved', '2026-10-24T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        assert!(prepare(&conn, "Hello").unwrap_err().starts_with("under_13"));
+        connection(
+            &conn,
+            "c1",
+            "private_network",
+            "http://192.168.1.40:1234/v1",
+            None,
+        );
+        assert_eq!(
+            prepare(&conn, "Hello").unwrap().destination.location,
+            "private_network"
+        );
+    }
+
+    #[test]
+    fn vendors_with_an_18_plus_floor_are_refused_for_minors_and_allowed_for_adults() {
+        let conn = db();
+        thread(&conn);
+        let gemini = "https://generativelanguage.googleapis.com/v1beta/openai";
+        connection(&conn, "c1", "cloud", gemini, None);
+        assert_eq!(
+            prepare(&conn, "Hello").unwrap().destination.location,
+            "remote"
+        );
+        born_years_ago(&conn, 16);
+        link_guardian(&conn);
+        assert!(request_approval(&conn, "c1")
+            .unwrap_err()
+            .starts_with("adults_only"));
+        conn.execute(
+            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
+             VALUES ('a', 'c1', 'Ollama', ?1, 'm', 'approved', '2026-10-24T00:00:00Z')",
+            [gemini],
+        )
+        .unwrap();
+        let err = prepare(&conn, "Hello").unwrap_err();
+        assert!(
+            err.starts_with("adults_only") && err.contains("Gemini"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn consumer_sign_ins_are_never_stored_or_used() {
+        let conn = db();
+        let doc = |endpoint: &str| StudioDocument {
+            id: "c2".into(),
+            revision: 0,
+            value: StudioConnection {
+                id: "c2".into(),
+                name: "Mine".into(),
+                endpoint: endpoint.into(),
+                model: "m".into(),
+                location: "cloud".into(),
+                capability: "text".into(),
+                enabled: true,
+                has_key: false,
+                context_tokens: None,
+                protocol: Default::default(),
+            },
+        };
+        let err = studio_store::save_connection(
+            &conn,
+            &doc("https://api.anthropic.com/v1"),
+            Some("sk-ant-oat01-x"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("subscription sign-in token"), "{err}");
+        assert!(
+            studio_store::connection(&conn, "c2").is_err(),
+            "nothing saved"
+        );
+        let err = studio_store::save_connection(
+            &conn,
+            &doc("https://chatgpt.com/backend-api/codex"),
+            Some("k"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("consumer app"), "{err}");
+        studio_store::save_connection(
+            &conn,
+            &doc("https://api.anthropic.com/v1"),
+            Some("sk-ant-api03-x"),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn minors_need_a_guardians_approval_for_remote_models_at_that_endpoint() {
         let conn = db();
         thread(&conn);
-        conn.execute("UPDATE local_identity SET birthdate = '2015-03-10'", [])
-            .unwrap();
+        born_years_ago(&conn, 15);
         prepare(&conn, "Hello").unwrap();
         connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
         assert!(prepare(&conn, "Hello")

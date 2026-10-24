@@ -2388,7 +2388,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "es": {
     "classrooms.index.title": "f1649526e859",
@@ -4779,7 +4782,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "fr": {
     "classrooms.index.title": "f1649526e859",
@@ -7170,7 +7176,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "hi": {
     "classrooms.index.title": "f1649526e859",
@@ -9561,7 +9570,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "ur": {
     "classrooms.index.title": "f1649526e859",
@@ -11952,7 +11964,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "te": {
     "classrooms.index.title": "f1649526e859",
@@ -14343,7 +14358,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "mr": {
     "classrooms.index.title": "f1649526e859",
@@ -16734,7 +16752,10 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   },
   "bn": {
     "classrooms.index.title": "f1649526e859",
@@ -19125,6 +19146,9 @@
     "learn.notes.delete": "f6fdbe48dc54",
     "learn.notes.deleteTitle": "bbe3fa151609",
     "learn.notes.deleteBody": "46df13bb7a8c",
-    "learn.notes.deleteFailed": "a5dcf1b28a76"
+    "learn.notes.deleteFailed": "a5dcf1b28a76",
+    "chat.errors.under_13": "cea6cdf6e33f",
+    "chat.errors.adults_only": "9a091e6efa8e",
+    "common.aiTerms.geminiNotice": "7955a4f2af63"
   }
 }

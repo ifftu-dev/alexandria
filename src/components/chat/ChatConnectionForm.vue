@@ -6,6 +6,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { chatErrorCode } from '@/composables/useChat'
 import type { StudioConnection, StudioDocument } from '@/types'
+import { restrictsAppsForMinors } from '@/utils/providerTerms'
 
 const emit = defineEmits<{ saved: [connection: StudioDocument<StudioConnection>]; cancel: [] }>()
 const { t } = useI18n()
@@ -136,6 +137,7 @@ async function save() {
     <label class="block">
       <span class="label">{{ t('chat.connection.endpoint') }}</span>
       <input v-model="endpoint" class="input text-sm" required inputmode="url" spellcheck="false">
+      <span v-if="restrictsAppsForMinors(endpoint)" class="mt-1 block text-xs text-warning">{{ t('common.aiTerms.geminiNotice') }}</span>
     </label>
     <div class="grid gap-3 sm:grid-cols-2">
       <label class="block">

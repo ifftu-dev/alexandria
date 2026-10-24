@@ -90,6 +90,7 @@ const errorText = computed(() => {
     'assessment_active', 'no_connection', 'guardian_required', 'context_stale', 'too_many_runs',
     'source_unavailable', 'unreachable', 'timeout', 'auth', 'rate_limited', 'invalid',
     'assessment_item', 'memory', 'guardian_pending', 'guardian_declined', 'no_guardian',
+    'under_13', 'adults_only',
   ]
   return t(`chat.errors.${known.includes(code) ? code : 'generic'}`)
 })

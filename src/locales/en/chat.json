@@ -131,7 +131,9 @@
     "memory": "That couldn't be saved. Keep it to one short sentence.",
     "guardian_pending": "Your guardian has been asked to approve this model. You can use it once they do.",
     "guardian_declined": "Your guardian did not approve this model. Use a model on this device or your own network.",
-    "no_guardian": "Link a guardian in Settings first, then ask them to approve this model."
+    "no_guardian": "Link a guardian in Settings first, then ask them to approve this model.",
+    "under_13": "Learners under 13 can use models on this device or their own network only.",
+    "adults_only": "This provider's terms require users to be 18 or older. Use another provider, or a model on this device or your own network."
   },
   "connection": {
     "title": "Add a model connection",

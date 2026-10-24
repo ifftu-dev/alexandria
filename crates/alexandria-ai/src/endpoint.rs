@@ -166,6 +166,7 @@ pub fn parse(raw: &str, location: Location) -> Result<Url> {
             }
         }
     }
+    crate::terms::check_endpoint(&url)?;
     let path = format!("{}/", url.path().trim_end_matches('/'));
     url.set_path(&path);
     Ok(url)

@@ -131,7 +131,9 @@
     "memory": "No se pudo guardar. Escríbelo en una sola oración corta.",
     "guardian_pending": "Le pedimos a tu tutor que apruebe este modelo. Podrás usarlo cuando lo haga.",
     "guardian_declined": "Tu tutor no aprobó este modelo. Usa un modelo en este dispositivo o en tu propia red.",
-    "no_guardian": "Primero vincula a un tutor en Configuración y luego pídele que apruebe este modelo."
+    "no_guardian": "Primero vincula a un tutor en Configuración y luego pídele que apruebe este modelo.",
+    "under_13": "Los estudiantes menores de 13 años solo pueden usar modelos en este dispositivo o en su propia red.",
+    "adults_only": "Los términos de este proveedor exigen que los usuarios tengan 18 años o más. Usa otro proveedor, o un modelo en este dispositivo o en tu propia red."
   },
   "connection": {
     "title": "Agregar una conexión de modelo",

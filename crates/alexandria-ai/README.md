@@ -3,6 +3,7 @@
 Provider-independent model access shared by Studio, the lesson tutor, and global chat.
 
 - `endpoint`: where a request may go. A connection declares `device`, `private_network`, or `remote`; the URL and every resolved address must agree, and requests are pinned to the resolved addresses. Redirects are never followed.
+- `terms`: what AI vendors allow third-party apps to do. Consumer-app backends (ChatGPT, Claude.ai, the Gemini app and CLI sign-in service, GitHub Copilot) are refused when an endpoint is parsed, and consumer sign-in tokens (Claude subscription tokens, ChatGPT tokens sent to OpenAI) are refused before any request is sent. It also names developer APIs whose terms require users to be 18 or older; the host applies age rules.
 - `model`: canonical requests, streamed events, completions, and request bounds.
 - `compatible`: the OpenAI-compatible chat-completions protocol, streamed or not, plus model discovery.
 - `anthropic`: the Anthropic Messages protocol at API version `2026-10-21`. System messages become the top-level `system` field, same-role turns merge, and a trailing assistant turn is refused before sending. Sampling parameters are never sent. History is replayed as text without thinking blocks. A fixed thinking allowance is added to `max_tokens` because current models think by default.
