@@ -290,6 +290,9 @@
     "openrouterHint": "Usa los créditos de tu cuenta de OpenRouter. Para personas de 18 años o más.",
     "waiting": "Termina de iniciar sesión en tu navegador…",
     "cancel": "Cancelar",
+    "codeIntro": "En tu navegador, inicia sesión en OpenRouter y permite Alexandria. Luego copia el código que aparece y pégalo aquí.",
+    "codeLabel": "Código de OpenRouter",
+    "connect": "Conectar",
     "or": "O agrega un modelo con una API key, o uno en este dispositivo o en tu propia red:",
     "donePageTitle": "Sesión iniciada",
     "donePageBody": "Puedes cerrar esta pestaña y volver a Alexandria.",
@@ -312,7 +315,10 @@
       "busy": "Ya hay un inicio de sesión abierto en tu navegador.",
       "unreachable": "No se pudo conectar con el proveedor. Revisa tu conexión a internet e inténtalo de nuevo.",
       "noModels": "Iniciaste sesión, pero no hay modelos disponibles con este plan.",
-      "failed": "El inicio de sesión no terminó. Inténtalo de nuevo."
+      "failed": "El inicio de sesión no terminó. Inténtalo de nuevo.",
+      "failedCode": "El inicio de sesión no terminó ({code}). Inténtalo de nuevo.",
+      "codeRejected": "OpenRouter no aceptó ese código. Empieza de nuevo y pega el código nuevo.",
+      "expired": "Ese inicio de sesión caducó. Empieza de nuevo."
     }
   }
 }

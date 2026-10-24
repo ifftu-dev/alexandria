@@ -155,3 +155,39 @@ async fn model_discovery_keeps_listed_models_in_server_order() {
     assert!(raw.starts_with("get /v1/models "));
     assert!(raw.contains("authorization: bearer t"));
 }
+
+#[tokio::test]
+async fn a_large_plan_model_list_is_read_in_full() {
+    // The plan route describes each model at length: ~570 KB for nine.
+    let instructions = "x".repeat(80_000);
+    let entries: Vec<String> = (0..9)
+        .map(|i| {
+            format!(
+                r#"{{"slug":"gpt-{i}","visibility":"list","base_instructions":"{instructions}"}}"#
+            )
+        })
+        .collect();
+    let json = format!(r#"{{"models":[{}]}}"#, entries.join(","));
+    assert!(json.len() > 256_000);
+    let (base, _seen) = serve(Reply::json("200 OK", "", &json)).await;
+    let ids = adapter(&base, Some("t")).await.list_models().await.unwrap();
+    assert_eq!(ids.len(), 9);
+}
+
+#[tokio::test]
+async fn a_long_answer_survives_the_completed_event_that_repeats_it() {
+    let answer = "word ".repeat(16_000); // 80 KB, past the default line bound
+    let delta = serde_json::json!({"type": "response.output_text.delta", "delta": answer});
+    let done = serde_json::json!({"type": "response.completed", "response": {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": answer}]}],
+        "usage": {"input_tokens": 3, "output_tokens": 16000}}});
+    let body = format!("data: {delta}\n\ndata: {done}\n\n");
+    let (base, _seen) = serve(Reply::sse(&[body.as_bytes()])).await;
+    let completion = adapter(&base, None)
+        .await
+        .complete(&request())
+        .await
+        .unwrap();
+    assert_eq!(completion.text.len(), answer.len());
+    assert_eq!(completion.finish, FinishReason::Stop);
+}

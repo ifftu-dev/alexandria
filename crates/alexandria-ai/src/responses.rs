@@ -31,6 +31,15 @@ use crate::{Error, Result};
 /// Most bytes of an error body read to find its code.
 const ERROR_BODY_BYTES: usize = 16 * 1024;
 
+/// Most bytes of a model list. The plan route describes each model in
+/// detail (instructions, tool settings), about 570 KB for nine models in
+/// October 2026, well past the default response bound.
+const MODEL_LIST_BYTES: usize = 4 * 1024 * 1024;
+
+/// Room on one event line beyond the answer itself: `response.completed`
+/// repeats the whole answer alongside usage and item metadata.
+const COMPLETED_EVENT_OVERHEAD: usize = 64 * 1024;
+
 /// A connection to one Responses endpoint. The token is never printed.
 pub struct Responses {
     endpoint: Endpoint,
@@ -103,7 +112,13 @@ impl Responses {
             return Err(status_error(&mut response).await);
         }
 
-        let mut decoder = Decoder::new(self.limits.max_line_bytes);
+        // `response.completed` carries the full answer on one line, so a line
+        // may be as long as the largest answer allowed, plus metadata.
+        let mut decoder = Decoder::new(
+            self.limits
+                .max_line_bytes
+                .max(self.limits.max_output_bytes * 2 + COMPLETED_EVENT_OVERHEAD),
+        );
         let mut state = StreamState::default();
         loop {
             let chunk = next_chunk(&mut response, &self.limits).await?;
@@ -139,7 +154,11 @@ impl Responses {
             s if !(200..300).contains(&s) => return Err(status_error(&mut response).await),
             _ => {}
         }
-        let bytes = crate::http::read_bounded(&mut response, &self.limits).await?;
+        let limits = Limits {
+            max_response_bytes: self.limits.max_response_bytes.max(MODEL_LIST_BYTES),
+            ..self.limits
+        };
+        let bytes = crate::http::read_bounded(&mut response, &limits).await?;
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| Error::Malformed)?;
         let Some(models) = value.get("models").and_then(Value::as_array) else {
             return model_ids(&value);

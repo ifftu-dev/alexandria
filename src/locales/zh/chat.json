@@ -290,6 +290,9 @@
     "openrouterHint": "使用你 OpenRouter 账户中的额度。仅限 18 岁及以上用户。",
     "waiting": "请在浏览器中完成登录…",
     "cancel": "取消",
+    "codeIntro": "在浏览器中登录 OpenRouter 并允许 Alexandria。然后复制它显示的代码，粘贴到这里。",
+    "codeLabel": "来自 OpenRouter 的代码",
+    "connect": "连接",
     "or": "或者使用 API key 添加模型，或添加这台设备上或你自己网络中的模型：",
     "donePageTitle": "你已登录",
     "donePageBody": "你可以关闭此标签页，回到 Alexandria。",
@@ -312,7 +315,10 @@
       "busy": "浏览器中已经有一个登录页面打开了。",
       "unreachable": "无法连接到提供方。请检查网络连接后重试。",
       "noModels": "已登录，但此套餐没有可用的模型。",
-      "failed": "登录未完成。请重试。"
+      "failed": "登录未完成。请重试。",
+      "failedCode": "登录未完成（{code}）。请重试。",
+      "codeRejected": "OpenRouter 不接受这个代码。请重新开始，并粘贴新的代码。",
+      "expired": "这次登录已过期。请重新开始。"
     }
   }
 }

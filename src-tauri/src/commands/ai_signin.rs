@@ -101,10 +101,28 @@ pub async fn ai_signin(
                 .into(),
         );
     }
-    match provider.as_str() {
+    let result = match provider.as_str() {
         "chatgpt" => sign_in_chatgpt(&state, &page).await,
         "openrouter" => sign_in_openrouter(&state, &page).await,
         _ => Err("invalid_input: unknown provider".into()),
+    };
+    // Messages are sanitized (codes and short reasons, never tokens), so they
+    // are safe to log; they are what a failed sign-in leaves behind.
+    match &result {
+        Ok(doc) => log::info!("ai sign-in ({provider}): connected {}", doc.id),
+        Err(e) if e.starts_with("signin_cancelled") => {}
+        Err(e) => log::warn!("ai sign-in ({provider}) failed: {e}"),
+    }
+    result
+}
+
+/// Logs which step of a sign-in failed, then passes the error on.
+fn step(name: &'static str) -> impl Fn(String) -> String {
+    move |e| {
+        if !e.starts_with("signin_cancelled") {
+            log::warn!("ai sign-in step '{name}' failed: {e}");
+        }
+        e
     }
 }
 
@@ -131,11 +149,13 @@ async fn sign_in_chatgpt(
         ai_auth::open_browser,
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+    .map_err(step("chatgpt authorize and verify"))?;
 
     let endpoint = endpoint::resolve(chatgpt::API_BASE, Location::Remote)
         .await
-        .map_err(|e| format!("unreachable: {e}"))?;
+        .map_err(|e| format!("unreachable: {e}"))
+        .map_err(step("resolve api.openai.com"))?;
     let models = Adapter::new(
         Protocol::Responses,
         endpoint,
@@ -143,7 +163,8 @@ async fn sign_in_chatgpt(
     )
     .list_models()
     .await
-    .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))?;
+    .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))
+    .map_err(step("list ChatGPT plan models"))?;
     let current = existing.as_ref().map(|(doc, _)| doc.value.model.clone());
     let model = current
         .filter(|m| models.contains(m))
@@ -179,6 +200,7 @@ async fn sign_in_chatgpt(
         studio_store::save_signed_in_connection(conn, &doc, &encoded).map_err(|e| e.to_string())
     })
     .await
+    .map_err(step("save ChatGPT connection"))
 }
 
 async fn sign_in_openrouter(
@@ -197,7 +219,16 @@ async fn sign_in_openrouter(
         ai_auth::open_browser,
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+    .map_err(step("openrouter authorize and exchange"))?;
+    save_openrouter(state, key).await
+}
+
+/// Saves an OpenRouter key issued by its sign-in as a connection.
+async fn save_openrouter(
+    state: &State<'_, AppState>,
+    key: String,
+) -> Result<StudioDocument<StudioConnection>, String> {
     let id = format!("openrouter-{}", uuid::Uuid::new_v4());
     let doc = StudioDocument {
         id: id.clone(),
@@ -223,6 +254,76 @@ async fn sign_in_openrouter(
         studio_store::save_signed_in_connection(conn, &doc, &key).map_err(|e| e.to_string())
     })
     .await
+    .map_err(step("save OpenRouter connection"))
+}
+
+/// A paste-the-code sign-in waiting for its code: the PKCE verifier and when
+/// it started. One at a time; starting again replaces it.
+static PENDING_CODE: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+
+/// How long a paste-the-code sign-in waits for its code.
+const CODE_LIFETIME: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Starts the paste-the-code sign-in (`openrouter` only), used on phones:
+/// opens OpenRouter in the browser, which then shows a code for the user to
+/// paste back with [`ai_signin_code_finish`].
+#[tauri::command]
+pub async fn ai_signin_code_start(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<(), String> {
+    if provider != "openrouter" {
+        return Err("invalid_input: unknown provider".into());
+    }
+    with_conn(&state, "ai-signin.code-check", |conn| {
+        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+    })
+    .await?;
+    let (verifier, challenge) = ai_auth::pkce();
+    let url = openrouter::code_url(&openrouter::Endpoints::default(), &challenge)
+        .map_err(|e| e.to_string())?;
+    *PENDING_CODE
+        .lock()
+        .map_err(|_| "signin_failed: busy".to_string())? =
+        Some((verifier, std::time::Instant::now()));
+    ai_auth::open_browser_on_main(&app, url)
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(step("open OpenRouter"))
+}
+
+/// Finishes the paste-the-code sign-in with the code OpenRouter showed.
+#[tauri::command]
+pub async fn ai_signin_code_finish(
+    state: State<'_, AppState>,
+    code: String,
+) -> Result<StudioDocument<StudioConnection>, String> {
+    let code = openrouter::clean_code(&code)
+        .ok_or_else(|| SignInError::CodeRejected.to_string())?
+        .to_owned();
+    with_conn(&state, "ai-signin.code-check", |conn| {
+        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+    })
+    .await?;
+    let verifier = take_pending(std::time::Instant::now()).map_err(|e| e.to_string())?;
+    let key = openrouter::exchange(&openrouter::Endpoints::default(), &code, &verifier)
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(step("openrouter code exchange"))?;
+    save_openrouter(&state, key).await
+}
+
+/// The waiting verifier, once: a code is single-use and expires.
+fn take_pending(now: std::time::Instant) -> Result<String, SignInError> {
+    let pending = PENDING_CODE
+        .lock()
+        .map_err(|_| SignInError::Expired)?
+        .take();
+    match pending {
+        Some((verifier, started)) if now.duration_since(started) <= CODE_LIFETIME => Ok(verifier),
+        _ => Err(SignInError::Expired),
+    }
 }
 
 /// Stops the sign-in waiting for the browser, if any.
@@ -275,6 +376,7 @@ pub async fn ai_disconnect(
 #[tauri::command]
 pub async fn ai_open_provider_page(
     _state: State<'_, AppState>,
+    app: tauri::AppHandle,
     page: String,
 ) -> Result<(), String> {
     let url = match page.as_str() {
@@ -282,5 +384,27 @@ pub async fn ai_open_provider_page(
         "openrouter_keys" => openrouter::KEYS_URL,
         _ => return Err("invalid_input: unknown page".into()),
     };
-    ai_auth::open_browser(url).map_err(|e: SignInError| e.to_string())
+    ai_auth::open_browser_on_main(&app, url.into())
+        .await
+        .map_err(|e: SignInError| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pasted_code_needs_a_live_single_use_sign_in() {
+        let now = std::time::Instant::now();
+        *PENDING_CODE.lock().unwrap() = Some(("v1".into(), now));
+        assert_eq!(take_pending(now).unwrap(), "v1");
+        assert_eq!(
+            take_pending(now).unwrap_err(),
+            SignInError::Expired,
+            "single use"
+        );
+        *PENDING_CODE.lock().unwrap() = Some(("v2".into(), now));
+        let later = now + CODE_LIFETIME + std::time::Duration::from_secs(1);
+        assert_eq!(take_pending(later).unwrap_err(), SignInError::Expired);
+    }
 }

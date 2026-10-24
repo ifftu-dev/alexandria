@@ -2,8 +2,10 @@
 //
 // Only providers whose terms allow it for third-party apps are offered
 // (ChatGPT's plan sign-in for open-source local apps, OpenRouter's PKCE
-// sign-in). The backend runs the flow on a loopback listener and saves an
-// ordinary connection; mobile builds offer API keys only.
+// sign-in). On desktop the backend runs the flow on a loopback listener.
+// Phones cannot keep that listener alive behind the browser, so they offer
+// OpenRouter's paste-the-code flow instead; ChatGPT allows only a loopback
+// return and is desktop-only for now.
 
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -28,7 +30,10 @@ export function useProviderSignIn() {
   const { invoke } = useLocalApi()
   const { t } = useI18n()
 
+  /** Browser sign-in that returns to the app on its own (desktop). */
   const available = !isMobilePlatform
+  /** Sign-in where the user pastes the provider's code back (phones). */
+  const codeAvailable = isMobilePlatform
 
   async function signIn(provider: SignInProvider): Promise<StudioDocument<StudioConnection>> {
     signingIn.value = provider
@@ -40,6 +45,15 @@ export function useProviderSignIn() {
     } finally {
       signingIn.value = null
     }
+  }
+
+  /** Opens OpenRouter; it then shows a code for {@link finishCode}. */
+  function startCode(provider: 'openrouter'): Promise<void> {
+    return invoke('ai_signin_code_start', { provider })
+  }
+
+  function finishCode(code: string): Promise<StudioDocument<StudioConnection>> {
+    return invoke<StudioDocument<StudioConnection>>('ai_signin_code_finish', { code })
   }
 
   async function cancel(): Promise<void> {
@@ -55,5 +69,5 @@ export function useProviderSignIn() {
     return invoke('ai_open_provider_page', { page })
   }
 
-  return { available, signingIn, signIn, cancel, disconnect, openPage }
+  return { available, codeAvailable, signingIn, signIn, startCode, finishCode, cancel, disconnect, openPage }
 }

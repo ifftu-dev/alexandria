@@ -290,6 +290,9 @@
     "openrouterHint": "Uses the credits on your OpenRouter account. For people 18 and over.",
     "waiting": "Finish signing in in your browser…",
     "cancel": "Cancel",
+    "codeIntro": "In your browser, sign in to OpenRouter and allow Alexandria. Then copy the code it shows and paste it here.",
+    "codeLabel": "Code from OpenRouter",
+    "connect": "Connect",
     "or": "Or add a model with an API key, or one on this device or your own network:",
     "donePageTitle": "You're signed in",
     "donePageBody": "You can close this tab and go back to Alexandria.",
@@ -312,7 +315,10 @@
       "busy": "A sign-in is already open in your browser.",
       "unreachable": "Couldn't reach the provider. Check your internet connection and try again.",
       "noModels": "Signed in, but no models are available with this plan.",
-      "failed": "Sign-in didn't finish. Try again."
+      "failed": "Sign-in didn't finish. Try again.",
+      "failedCode": "Sign-in didn't finish ({code}). Try again.",
+      "codeRejected": "OpenRouter didn't accept that code. Start again and paste the new code.",
+      "expired": "That sign-in expired. Start again."
     }
   }
 }

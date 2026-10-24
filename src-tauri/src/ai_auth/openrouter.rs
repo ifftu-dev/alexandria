@@ -5,6 +5,12 @@
 //! (openrouter.ai/docs, "OAuth PKCE"). Localhost callbacks are accepted on
 //! any port. The key is then used like any pasted key. OpenRouter requires
 //! users to be 18 or older, which the host enforces before starting.
+//!
+//! Phones cannot keep a loopback listener alive while the browser is in
+//! front, so they use OpenRouter's documented headless mode instead: the
+//! authorize URL has no `callback_url`, OpenRouter shows the code on screen,
+//! and the user pastes it into Alexandria, which exchanges it with the PKCE
+//! verifier it kept ([`code_url`], [`exchange`]).
 
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
@@ -57,6 +63,39 @@ pub async fn sign_in(
         .wait(CALLBACK_PATH, &state, page, cancel, super::SIGN_IN_TIMEOUT)
         .await?;
     let code = query.get("code").ok_or(SignInError::Declined)?;
+    exchange(endpoints, code, &verifier).await
+}
+
+/// The authorize URL for the paste-the-code flow: no callback, so OpenRouter
+/// shows the code to the user. A PKCE challenge is required in this mode.
+pub fn code_url(endpoints: &Endpoints, challenge: &str) -> Result<String, SignInError> {
+    let mut url = url::Url::parse(&endpoints.authorize)
+        .map_err(|_| SignInError::Failed("bad sign-in address".into()))?;
+    url.query_pairs_mut()
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("key_label", "Alexandria");
+    Ok(url.into())
+}
+
+/// Whether `code` looks like an authorization code. Pasted text is trimmed
+/// first; anything else is refused before it is sent anywhere.
+pub fn clean_code(code: &str) -> Option<&str> {
+    let code = code.trim();
+    (!code.is_empty()
+        && code.len() <= 512
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')))
+    .then_some(code)
+}
+
+/// Exchanges an authorization code and its PKCE verifier for the user's key.
+pub async fn exchange(
+    endpoints: &Endpoints,
+    code: &str,
+    verifier: &str,
+) -> Result<String, SignInError> {
     let response = http_client()?
         .post(&endpoints.keys)
         .json(&json!({
@@ -71,9 +110,7 @@ pub async fn sign_in(
         return Err(SignInError::Unreachable);
     }
     if !response.status().is_success() {
-        return Err(SignInError::Failed(
-            "OpenRouter did not accept the sign-in; try again".into(),
-        ));
+        return Err(SignInError::CodeRejected);
     }
     let body: Value = response
         .json()
@@ -92,6 +129,39 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn the_code_url_has_no_callback_and_pasted_codes_are_checked() {
+        let url = code_url(&Endpoints::default(), "ch").unwrap();
+        assert!(url.starts_with("https://openrouter.ai/auth?"));
+        assert!(url.contains("code_challenge=ch") && url.contains("code_challenge_method=S256"));
+        assert!(!url.contains("callback_url"));
+        assert_eq!(clean_code("  abc-123_x.y \n"), Some("abc-123_x.y"));
+        for bad in ["", "   ", "a b", "<script>", "a/b", &"x".repeat(513)] {
+            assert_eq!(clean_code(bad), None, "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_code_is_reported_as_such() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let keys = format!("http://{}/keys", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = s.read(&mut buf).await;
+            let resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+            s.write_all(resp.as_bytes()).await.unwrap();
+        });
+        let endpoints = Endpoints {
+            authorize: "https://openrouter.example/auth".into(),
+            keys,
+        };
+        assert_eq!(
+            exchange(&endpoints, "c1", "v").await.unwrap_err(),
+            SignInError::CodeRejected
+        );
+    }
 
     #[tokio::test]
     async fn the_code_is_exchanged_for_a_key_with_the_verifier() {

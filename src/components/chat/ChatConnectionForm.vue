@@ -47,6 +47,48 @@ const signInMessages: Record<string, string> = {
   under_13: 'chat.errors.under_13',
   adults_only: 'chat.errors.adults_only',
   model_unavailable: 'chat.signin.errors.noModels',
+  code_rejected: 'chat.signin.errors.codeRejected',
+  signin_expired: 'chat.signin.errors.expired',
+}
+
+/** Phones: OpenRouter is open in the browser and the user pastes its code. */
+const awaitingCode = ref(false)
+const pastedCode = ref('')
+const connecting = ref(false)
+
+function showSignInError(e: unknown) {
+  const code = signInErrorCode(e)
+  if (code === 'signin_cancelled') return
+  const known = signInMessages[code]
+  signInError.value = known ? t(known) : t('chat.signin.errors.failedCode', { code })
+}
+
+async function startCodeSignIn() {
+  signInError.value = ''
+  pastedCode.value = ''
+  try {
+    await signIn.startCode('openrouter')
+    awaitingCode.value = true
+  } catch (e) {
+    showSignInError(e)
+  }
+}
+
+async function finishCodeSignIn() {
+  if (!pastedCode.value.trim()) return
+  signInError.value = ''
+  connecting.value = true
+  try {
+    const saved = await signIn.finishCode(pastedCode.value)
+    awaitingCode.value = false
+    pastedCode.value = ''
+    emit('saved', saved)
+  } catch (e) {
+    showSignInError(e)
+    if (signInErrorCode(e) === 'signin_expired') awaitingCode.value = false
+  } finally {
+    connecting.value = false
+  }
 }
 
 async function startSignIn(provider: SignInProvider) {
@@ -56,9 +98,7 @@ async function startSignIn(provider: SignInProvider) {
     if (provider === 'chatgpt' && saved.revision === 1) planWelcome.value = saved
     else emit('saved', saved)
   } catch (e) {
-    const code = signInErrorCode(e)
-    if (code === 'signin_cancelled') return
-    signInError.value = t(signInMessages[code] ?? 'chat.signin.errors.failed')
+    showSignInError(e)
   }
 }
 
@@ -133,12 +173,29 @@ async function save() {
       <h3 class="text-[15px] font-semibold">{{ t('chat.connection.title') }}</h3>
       <p class="mt-0.5 text-xs text-muted-foreground">{{ t('chat.connection.intro') }}</p>
     </div>
-    <section v-if="signIn.available" class="space-y-2 rounded-xl border border-border p-3" :aria-label="t('chat.signin.title')">
+    <section v-if="signIn.available || (signIn.codeAvailable && !isMinor)" class="space-y-2 rounded-xl border border-border p-3" :aria-label="t('chat.signin.title')">
       <div>
         <p class="text-[13px] font-medium">{{ t('chat.signin.title') }}</p>
         <p class="text-xs text-muted-foreground">{{ t('chat.signin.intro') }}</p>
       </div>
-      <template v-if="signIn.signingIn.value">
+      <template v-if="signIn.codeAvailable && awaitingCode">
+        <p class="text-xs" role="status">{{ t('chat.signin.codeIntro') }}</p>
+        <label class="block">
+          <span class="label">{{ t('chat.signin.codeLabel') }}</span>
+          <input v-model="pastedCode" class="input text-sm" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" maxlength="512">
+        </label>
+        <div class="flex flex-wrap gap-2">
+          <AppButton type="button" size="sm" :loading="connecting" :disabled="!pastedCode.trim()" @click="finishCodeSignIn">{{ t('chat.signin.connect') }}</AppButton>
+          <AppButton type="button" variant="ghost" size="sm" @click="awaitingCode = false">{{ t('chat.signin.cancel') }}</AppButton>
+        </div>
+      </template>
+      <template v-else-if="signIn.codeAvailable">
+        <div>
+          <button type="button" class="chat-signin chat-signin--openrouter" @click="startCodeSignIn">{{ t('chat.signin.openrouter') }}</button>
+          <p class="mt-1 text-xs text-muted-foreground">{{ t('chat.signin.openrouterHint') }}</p>
+        </div>
+      </template>
+      <template v-else-if="signIn.signingIn.value">
         <p class="text-xs" role="status">{{ t('chat.signin.waiting') }}</p>
         <AppButton type="button" variant="ghost" size="sm" @click="signIn.cancel()">{{ t('chat.signin.cancel') }}</AppButton>
       </template>
@@ -155,7 +212,7 @@ async function save() {
       </template>
       <p v-if="signInError" class="text-xs text-error" role="alert">{{ signInError }}</p>
     </section>
-    <p v-if="signIn.available" class="text-xs text-muted-foreground">{{ t('chat.signin.or') }}</p>
+    <p v-if="signIn.available || (signIn.codeAvailable && !isMinor)" class="text-xs text-muted-foreground">{{ t('chat.signin.or') }}</p>
     <label class="block">
       <span class="label">{{ t('chat.connection.name') }}</span>
       <input v-model="name" class="input text-sm" required maxlength="200" :placeholder="t('chat.connection.namePlaceholder')">
