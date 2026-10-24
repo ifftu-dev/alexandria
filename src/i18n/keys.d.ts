@@ -257,6 +257,7 @@ export type MessageKey =
   | 'chat.signin.errors.declined'
   | 'chat.signin.errors.differentAccount'
   | 'chat.signin.errors.failed'
+  | 'chat.signin.errors.failedCode'
   | 'chat.signin.errors.noModels'
   | 'chat.signin.errors.planNotGranted'
   | 'chat.signin.errors.timeout'

@@ -58,7 +58,8 @@ async function startSignIn(provider: SignInProvider) {
   } catch (e) {
     const code = signInErrorCode(e)
     if (code === 'signin_cancelled') return
-    signInError.value = t(signInMessages[code] ?? 'chat.signin.errors.failed')
+    const known = signInMessages[code]
+    signInError.value = known ? t(known) : t('chat.signin.errors.failedCode', { code })
   }
 }
 

@@ -312,7 +312,8 @@
       "busy": "Ya hay un inicio de sesión abierto en tu navegador.",
       "unreachable": "No se pudo conectar con el proveedor. Revisa tu conexión a internet e inténtalo de nuevo.",
       "noModels": "Iniciaste sesión, pero no hay modelos disponibles con este plan.",
-      "failed": "El inicio de sesión no terminó. Inténtalo de nuevo."
+      "failed": "El inicio de sesión no terminó. Inténtalo de nuevo.",
+      "failedCode": "El inicio de sesión no terminó ({code}). Inténtalo de nuevo."
     }
   }
 }

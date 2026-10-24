@@ -101,10 +101,28 @@ pub async fn ai_signin(
                 .into(),
         );
     }
-    match provider.as_str() {
+    let result = match provider.as_str() {
         "chatgpt" => sign_in_chatgpt(&state, &page).await,
         "openrouter" => sign_in_openrouter(&state, &page).await,
         _ => Err("invalid_input: unknown provider".into()),
+    };
+    // Messages are sanitized (codes and short reasons, never tokens), so they
+    // are safe to log; they are what a failed sign-in leaves behind.
+    match &result {
+        Ok(doc) => log::info!("ai sign-in ({provider}): connected {}", doc.id),
+        Err(e) if e.starts_with("signin_cancelled") => {}
+        Err(e) => log::warn!("ai sign-in ({provider}) failed: {e}"),
+    }
+    result
+}
+
+/// Logs which step of a sign-in failed, then passes the error on.
+fn step(name: &'static str) -> impl Fn(String) -> String {
+    move |e| {
+        if !e.starts_with("signin_cancelled") {
+            log::warn!("ai sign-in step '{name}' failed: {e}");
+        }
+        e
     }
 }
 
@@ -131,11 +149,13 @@ async fn sign_in_chatgpt(
         ai_auth::open_browser,
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+    .map_err(step("chatgpt authorize and verify"))?;
 
     let endpoint = endpoint::resolve(chatgpt::API_BASE, Location::Remote)
         .await
-        .map_err(|e| format!("unreachable: {e}"))?;
+        .map_err(|e| format!("unreachable: {e}"))
+        .map_err(step("resolve api.openai.com"))?;
     let models = Adapter::new(
         Protocol::Responses,
         endpoint,
@@ -143,7 +163,8 @@ async fn sign_in_chatgpt(
     )
     .list_models()
     .await
-    .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))?;
+    .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))
+    .map_err(step("list ChatGPT plan models"))?;
     let current = existing.as_ref().map(|(doc, _)| doc.value.model.clone());
     let model = current
         .filter(|m| models.contains(m))
@@ -179,6 +200,7 @@ async fn sign_in_chatgpt(
         studio_store::save_signed_in_connection(conn, &doc, &encoded).map_err(|e| e.to_string())
     })
     .await
+    .map_err(step("save ChatGPT connection"))
 }
 
 async fn sign_in_openrouter(
@@ -197,7 +219,8 @@ async fn sign_in_openrouter(
         ai_auth::open_browser,
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+    .map_err(step("openrouter authorize and exchange"))?;
     let id = format!("openrouter-{}", uuid::Uuid::new_v4());
     let doc = StudioDocument {
         id: id.clone(),

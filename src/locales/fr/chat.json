@@ -312,7 +312,8 @@
       "busy": "Une fenêtre de connexion est déjà ouverte dans ton navigateur.",
       "unreachable": "Impossible de joindre le fournisseur. Vérifie ta connexion Internet et réessaie.",
       "noModels": "Connexion réussie, mais aucun modèle n'est disponible avec ce forfait.",
-      "failed": "La connexion au compte n'a pas abouti. Réessaie."
+      "failed": "La connexion au compte n'a pas abouti. Réessaie.",
+      "failedCode": "La connexion au compte n'a pas abouti ({code}). Réessaie."
     }
   }
 }

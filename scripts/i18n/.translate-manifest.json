@@ -2424,7 +2424,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "es": {
     "classrooms.index.title": "f1649526e859",
@@ -4851,7 +4852,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "fr": {
     "classrooms.index.title": "f1649526e859",
@@ -7278,7 +7280,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "hi": {
     "classrooms.index.title": "f1649526e859",
@@ -9705,7 +9708,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "ur": {
     "classrooms.index.title": "f1649526e859",
@@ -12132,7 +12136,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "te": {
     "classrooms.index.title": "f1649526e859",
@@ -14559,7 +14564,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "mr": {
     "classrooms.index.title": "f1649526e859",
@@ -16986,7 +16992,8 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   },
   "bn": {
     "classrooms.index.title": "f1649526e859",
@@ -19413,6 +19420,7 @@
     "chat.signin.errors.busy": "8b424bf42063",
     "chat.signin.errors.unreachable": "4a9d1abea403",
     "chat.signin.errors.noModels": "eb2bb4822cf6",
-    "chat.signin.errors.failed": "fe915f9b07cf"
+    "chat.signin.errors.failed": "fe915f9b07cf",
+    "chat.signin.errors.failedCode": "a4bb87787889"
   }
 }

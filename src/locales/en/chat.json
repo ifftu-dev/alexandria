@@ -312,7 +312,8 @@
       "busy": "A sign-in is already open in your browser.",
       "unreachable": "Couldn't reach the provider. Check your internet connection and try again.",
       "noModels": "Signed in, but no models are available with this plan.",
-      "failed": "Sign-in didn't finish. Try again."
+      "failed": "Sign-in didn't finish. Try again.",
+      "failedCode": "Sign-in didn't finish ({code}). Try again."
     }
   }
 }
