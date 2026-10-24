@@ -257,12 +257,6 @@
     "title": "Notes enregistrées",
     "intro": "Les notes et fiches mémo que tu as enregistrées depuis les chats. Elles restent sur cet appareil et sont conservées quand tu supprimes un chat.",
     "empty": "Rien d'enregistré pour l'instant. Enregistre une réponse comme note, ou demande des notes ou des fiches mémo.",
-    "suggestedNote": "Note suggérée",
-    "suggestedCards": "Fiches mémo suggérées",
-    "suggestionHint": "Rien n'est enregistré si tu ne l'enregistres pas.",
-    "save": "Enregistrer",
-    "dismiss": "Ignorer",
-    "saved": "Enregistré dans tes notes",
     "saveNote": "Enregistrer comme note",
     "cards": "{count} fiche | {count} fiches",
     "study": "Réviser",
@@ -276,31 +270,56 @@
     "fromChat": "Issue d'un chat",
     "untitledNote": "Note"
   },
-  "goalProposal": {
-    "title": "Objectif suggéré",
-    "hint": "Trouve les compétences correspondantes et choisis celles que tu veux. Rien n'est ajouté si tu ne l'ajoutes pas.",
-    "find": "Trouver des compétences",
-    "pick": "Choisis les compétences que cet objectif doit couvrir.",
-    "strong": "Très bonne correspondance",
-    "add": "Ajouter l'objectif avec {count} compétence | Ajouter l'objectif avec {count} compétences",
-    "noSkills": "Aucune compétence correspondante trouvée. Tu peux définir un objectif sur la page Objectifs.",
-    "openGoals": "Ouvrir Objectifs",
-    "added": "Ajouté à tes objectifs",
-    "removed": "Ajouté à tes objectifs, puis retiré",
+  "actions": {
+    "asking": "Le chat demande à",
+    "ask": {
+      "note": "Enregistrer une note dans vos notes de chat",
+      "flashcards": "Enregistrer {count} carte dans vos notes de chat | Enregistrer {count} cartes dans vos notes de chat",
+      "courseNote": "Ajouter une note à « {lesson} »",
+      "goal": "Ajouter un nouvel objectif d'apprentissage",
+      "goalChange": "Modifier votre objectif « {goal} »",
+      "enroll": "Vous inscrire à un cours"
+    },
+    "allow": "Autoriser",
+    "decline": "Ne pas autoriser",
+    "promise": "Rien n'est enregistré sans votre autorisation.",
+    "more": "Tout afficher",
+    "less": "Afficher moins",
+    "moreCards": "Afficher {count} de plus | Afficher {count} de plus",
+    "enrollFor": "Sur le parcours de votre objectif « {goal} ».",
     "open": "Ouvrir",
-    "resolveFailed": "Impossible de trouver les compétences correspondantes. Réessaie.",
-    "addFailed": "Impossible de faire cela. Réessaie."
-  },
-  "goalChange": {
-    "title": "Modification suggérée d'un objectif",
-    "hint": "Comparée à ton objectif actuel. Rien ne change si tu ne l'appliques pas.",
-    "rename": "Renommer en « {name} »",
-    "apply": "Appliquer la modification",
-    "done": "Marquer comme terminé",
-    "applied": "Objectif mis à jour",
-    "goalMissing": "Cet objectif ne fait plus partie de tes objectifs.",
-    "nothingLeft": "Ton objectif correspond déjà à cette modification.",
-    "wouldEmpty": "L'objectif n'aurait plus aucune compétence, donc cette modification ne peut pas être appliquée."
+    "openCourse": "Ouvrir le cours",
+    "declined": "Non autorisé",
+    "done": {
+      "saved": "Enregistré dans vos notes de chat",
+      "courseNote": "Ajouté à vos notes sur « {lesson} »",
+      "goal": "Ajouté à vos objectifs",
+      "goalRemoved": "Ajouté à vos objectifs, puis retiré",
+      "goalChange": "Objectif mis à jour",
+      "enroll": "Inscrit"
+    },
+    "goal": {
+      "finding": "Recherche des compétences correspondantes…",
+      "noSkills": "Alexandria n'a pas encore de compétences correspondant à cet objectif. Cherchez des compétences à ajouter, ou ne l'autorisez pas.",
+      "pick": "Choisissez les compétences que cet objectif doit couvrir.",
+      "pickOne": "Choisissez au moins une compétence pour autoriser ceci.",
+      "search": "Rechercher des compétences à ajouter",
+      "searchEmpty": "Aucune compétence ne correspond à « {query} ».",
+      "strong": "Forte correspondance"
+    },
+    "change": {
+      "rename": "Renommer en « {name} »",
+      "goalMissing": "Cet objectif ne fait plus partie de vos objectifs.",
+      "nothingLeft": "Votre objectif correspond déjà à ce changement.",
+      "wouldEmpty": "L'objectif se retrouverait sans compétences, ce changement ne peut donc pas être appliqué."
+    },
+    "errors": {
+      "notEnrolled": "Inscrivez-vous d'abord à ce cours pour y garder des notes.",
+      "openCourse": "Terminez l'inscription sur la page du cours. Il faudra peut-être d'abord préparer quelque chose.",
+      "stale": "Ceci ne peut plus être appliqué. Redemandez si vous le voulez toujours.",
+      "assessmentItem": "Cela ressemble à une question d'évaluation, donc cela ne peut pas être enregistré.",
+      "generic": "Cela n'a pas pu être fait. Réessayez."
+    }
   },
   "courseNotes": {
     "add": "Ajouter aux notes du cours · {lesson}",

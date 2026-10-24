@@ -2317,8 +2317,10 @@ export type ChatArtifactBody =
   | { kind: 'flashcards'; cards: { front: string; back: string }[] }
   | { kind: 'goal'; text: string; goal_id?: string }
   | { kind: 'goal_change'; goal_id: string; rename?: string; add: { id: string; name: string }[]; remove: { id: string; name: string }[]; text: string }
-/** A note, flashcard set, or goal proposal from chat. Proposals wait for the learner; saved notes and cards outlive their chat; a goal proposal is marked added once the learner adds the goal. */
-export interface ChatArtifact { id: string; status: 'proposed' | 'saved' | 'added'; title: string; body: ChatArtifactBody; sources: ChatSourceRef[]; thread_id: string | null; message_id: string | null; created_at: string; updated_at: string }
+  | { kind: 'course_note'; course_id: string; element_id: string; lesson: string; text: string }
+  | { kind: 'enroll'; course_id: string; goal_id: string; text: string }
+/** Something a chat asked to save or change. A proposal waits for the learner to allow or decline it; once allowed, notes and flashcards are `saved` (and outlive their chat) and everything else is `added` where it belongs; a declined one stays as a record. */
+export interface ChatArtifact { id: string; status: 'proposed' | 'saved' | 'added' | 'declined'; title: string; body: ChatArtifactBody; sources: ChatSourceRef[]; thread_id: string | null; message_id: string | null; created_at: string; updated_at: string }
 /** A learner's note on a course, at a lesson when it has one. */
 export interface CourseNote { id: string; course_id: string; element_id: string | null; element_title: string | null; title: string | null; body: string; origin: 'chat' | null; created_at: string; updated_at: string }
 export interface ChatStatus { assessment_active: boolean }

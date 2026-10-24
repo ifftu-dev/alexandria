@@ -4,6 +4,7 @@
 //! See `docs/ai-chat-spec.md`. Requests go from Rust straight to the configured
 //! endpoint; the webview never talks to a provider and never sees a key.
 
+pub mod action;
 pub mod artifact;
 pub mod bank_guard;
 pub mod context;

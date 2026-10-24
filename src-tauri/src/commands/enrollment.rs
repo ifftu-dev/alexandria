@@ -100,7 +100,7 @@ pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enr
         .await
 }
 
-fn enroll_db(db: &crate::db::Database, course_id: String) -> Result<Enrollment, String> {
+pub(crate) fn enroll_db(db: &crate::db::Database, course_id: String) -> Result<Enrollment, String> {
     // Get the local user's stake address for deterministic ID
     let stake_address: String = db
         .conn()

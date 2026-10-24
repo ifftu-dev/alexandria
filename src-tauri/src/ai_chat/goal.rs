@@ -9,14 +9,22 @@
 //! The rendering names skills and courses only. It carries no assessment
 //! items, answer keys, or attempt rows.
 //!
-//! A model may also propose a change to an attached goal. It names skills;
-//! [`resolve_change`] turns names into the learner's own skill ids, and the
-//! learner applies the change through the Goals service.
+//! A model may also propose a new goal, a change to an attached goal, or
+//! enrolling in a course on an attached goal's path. It names skills and
+//! courses; [`resolve_change`] and [`resolve_enroll`] turn names into the
+//! learner's own ids. When the learner allows a proposal, [`add`] and
+//! [`apply_change`] write the goal through the settings store, checking
+//! every skill again.
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
+use serde_json::{json, Value};
 
 use super::artifact::{Body, GoalChangeDraft, Proposal, SkillRef};
+use crate::settings::{registry::keys::LEARNER_TARGETS, registry::JsonSetting, SettingsStore};
+
+/// Most target skills on a goal added or changed from chat.
+pub const MAX_GOAL_SKILLS: usize = 50;
 
 /// Most skills listed per status, so a broad goal stays within budget.
 const MAX_LISTED: usize = 25;
@@ -36,7 +44,9 @@ pub fn label(conn: &Connection, goal_id: &str) -> Result<Option<String>, String>
     Ok(find(conn, goal_id)?.map(|g| g.label))
 }
 
-fn find(conn: &Connection, goal_id: &str) -> Result<Option<StoredGoal>, String> {
+/// Every saved goal as stored, so a write keeps fields this module does not
+/// know about.
+fn stored(conn: &Connection) -> Result<Vec<Value>, String> {
     let raw: Option<String> = conn
         .query_row(
             "SELECT value FROM app_settings WHERE key = 'learner.targets'",
@@ -45,10 +55,117 @@ fn find(conn: &Connection, goal_id: &str) -> Result<Option<StoredGoal>, String> 
         )
         .optional()
         .map_err(|_| "storage_error: goals could not be read".to_string())?;
-    let goals: Vec<StoredGoal> = raw
+    Ok(raw
         .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default())
+}
+
+fn save(conn: &Connection, goals: Vec<Value>) -> Result<(), String> {
+    SettingsStore::set(conn, LEARNER_TARGETS, JsonSetting(Value::Array(goals)))
+        .map_err(|_| "storage_error: goals could not be saved".to_string())
+}
+
+fn find(conn: &Connection, goal_id: &str) -> Result<Option<StoredGoal>, String> {
+    Ok(stored(conn)?
+        .into_iter()
+        .filter_map(|g| serde_json::from_value::<StoredGoal>(g).ok())
+        .find(|g| g.id == goal_id))
+}
+
+/// Skill ids, de-duplicated in order, each checked to exist.
+fn known_skills(conn: &Connection, ids: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        if out.contains(id) {
+            continue;
+        }
+        if skill_name(conn, id)?.is_none() {
+            return Err("invalid_input: a skill on this goal no longer exists".into());
+        }
+        out.push(id.clone());
+    }
+    if out.is_empty() || out.len() > MAX_GOAL_SKILLS {
+        return Err(format!(
+            "invalid_input: a goal needs between 1 and {MAX_GOAL_SKILLS} skills"
+        ));
+    }
+    Ok(out)
+}
+
+/// Adds a goal the learner allowed, with the skills they picked. A goal
+/// with the same skills already saved is returned instead of a copy.
+pub fn add(
+    conn: &Connection,
+    label: &str,
+    skill_ids: &[String],
+    now: &str,
+) -> Result<String, String> {
+    let label = super::artifact::clean_title(label)
+        .ok_or_else(|| "invalid_input: a goal needs a short name".to_string())?;
+    let ids = known_skills(conn, skill_ids)?;
+    let mut goals = stored(conn)?;
+    let mut wanted = ids.clone();
+    wanted.sort();
+    for goal in goals
+        .iter()
+        .filter_map(|g| serde_json::from_value::<StoredGoal>(g.clone()).ok())
+    {
+        let mut have = goal.goal_skill_ids.clone();
+        have.sort();
+        have.dedup();
+        if have == wanted {
+            return Ok(goal.id);
+        }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    goals.push(json!({
+        "id": id,
+        "label": label,
+        "source_did": null,
+        "goal_skill_ids": ids,
+        "created_at": now,
+        "kind": "learning_goal",
+        "resolution_provenance": "goal_parsed",
+    }));
+    save(conn, goals)?;
+    Ok(id)
+}
+
+/// Applies a goal change the learner allowed to the goal as it is now. A
+/// skill already added or removed is skipped; the goal is never left empty.
+pub fn apply_change(conn: &Connection, change: &Body) -> Result<(), String> {
+    let Body::GoalChange {
+        goal_id,
+        rename,
+        add,
+        remove,
+        ..
+    } = change
+    else {
+        return Err("invalid_input: not a goal change".into());
+    };
+    let mut goals = stored(conn)?;
+    let Some(goal) = goals
+        .iter_mut()
+        .find(|g| g.get("id").and_then(Value::as_str) == Some(goal_id.as_str()))
+    else {
+        return Err("not_found: that goal is not in your goals".into());
+    };
+    let current: Vec<String> = goal
+        .get("goal_skill_ids")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    Ok(goals.into_iter().find(|g| g.id == goal_id))
+    let mut next: Vec<String> = current
+        .into_iter()
+        .filter(|id| !remove.iter().any(|s| &s.id == id))
+        .collect();
+    next.extend(add.iter().map(|s| s.id.clone()));
+    let next = known_skills(conn, &next)?;
+    goal["goal_skill_ids"] = json!(next);
+    if let Some(name) = rename {
+        goal["label"] = json!(name);
+    }
+    save(conn, goals)
 }
 
 /// The goal's label and its current path as text, or `None` when the goal
@@ -228,23 +345,49 @@ pub fn resolve_change(
     }))
 }
 
-/// Whether the learner's goal now reflects a change: the skills added are on
-/// it, the skills removed are not, and a rename took effect.
-pub fn change_applied(conn: &Connection, change: &Body) -> Result<bool, String> {
-    let Body::GoalChange {
-        goal_id,
-        rename,
-        add,
-        remove,
-        ..
-    } = change
-    else {
-        return Ok(false);
-    };
-    let Some(goal) = find(conn, goal_id)? else {
-        return Ok(false);
-    };
-    Ok(add.iter().all(|s| goal.goal_skill_ids.contains(&s.id))
-        && remove.iter().all(|s| !goal.goal_skill_ids.contains(&s.id))
-        && rename.as_ref().is_none_or(|r| &goal.label == r))
+/// Resolves a course a model suggested enrolling in. It must be recommended
+/// for a skill not yet proven on one of the attached goals' paths, named by
+/// its exact title, and not one the learner is already taking.
+pub fn resolve_enroll(
+    conn: &Connection,
+    attached: &[String],
+    course: &str,
+    text: &str,
+) -> Result<Option<Proposal>, String> {
+    let wanted = course.trim().to_lowercase();
+    for id in attached {
+        let Some(goal) = find(conn, id)? else {
+            continue;
+        };
+        let path = alexandria_studio::skills::my_learning_path(conn, &goal.goal_skill_ids)
+            .map_err(|_| "storage_error: the goal's path could not be computed".to_string())?;
+        let found = path
+            .steps
+            .iter()
+            .filter(|s| s.status != "earned")
+            .flat_map(|s| &s.course_recs)
+            .find(|c| c.title.trim().to_lowercase() == wanted);
+        let Some(found) = found else {
+            continue;
+        };
+        let taking: bool = conn
+            .query_row(
+                "SELECT count(*) > 0 FROM enrollments WHERE course_id = ?1 AND status = 'active'",
+                [&found.course_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| "storage_error: enrollments could not be read".to_string())?;
+        if taking {
+            return Ok(None);
+        }
+        return Ok(Some(Proposal {
+            title: found.title.clone(),
+            body: Body::Enroll {
+                course_id: found.course_id.clone(),
+                goal_id: goal.id,
+                text: text.to_string(),
+            },
+        }));
+    }
+    Ok(None)
 }

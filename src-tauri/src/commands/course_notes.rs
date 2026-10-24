@@ -1,7 +1,8 @@
 //! Course notes: the learner's own notes on a course's lessons.
 //!
 //! Notes reach a course from chat: a saved chat note that cites a lesson can
-//! be copied into that course, at that lesson. The course player lists a
+//! be copied into that course, at that lesson, and a note the chat proposes
+//! for the attached lesson lands there once the learner allows it. The course player lists a
 //! course's notes and lets the learner delete them. Notes are hidden while an
 //! assessment is in progress, like chat itself.
 //!
@@ -150,6 +151,24 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
     let Some(lesson) = item.sources.iter().find(|s| s.kind == "lesson") else {
         return Err("no_lesson: this note does not cite a lesson".into());
     };
+    let title = if item.title.is_empty() {
+        preview(text)
+    } else {
+        item.title.clone()
+    };
+    insert(conn, &lesson.course_id, &lesson.element_id, &title, text)
+}
+
+/// Adds a note from chat to a course, at a lesson. The learner must be
+/// taking the course. The same text at the same lesson is kept once.
+pub fn insert(
+    conn: &Connection,
+    course_id: &str,
+    element_id: &str,
+    title: &str,
+    text: &str,
+) -> Result<CourseNote, String> {
+    no_assessment(conn)?;
     if bank_guard::matches_assessment_item(conn, text) {
         return Err("assessment_item: notes cannot hold assessment questions".into());
     }
@@ -157,7 +176,7 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
         .query_row(
             "SELECT id FROM enrollments WHERE course_id = ?1 AND status != 'dropped'
               ORDER BY enrolled_at DESC, id LIMIT 1",
-            [&lesson.course_id],
+            [course_id],
             |r| r.get(0),
         )
         .optional()
@@ -172,7 +191,7 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
             "SELECT el.id, el.chapter_id FROM course_elements el
                JOIN course_chapters ch ON ch.id = el.chapter_id
               WHERE el.id = ?1 AND ch.course_id = ?2",
-            params![lesson.element_id, lesson.course_id],
+            params![element_id, course_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
@@ -195,18 +214,7 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
     conn.execute(
         "INSERT INTO course_notes (id, enrollment_id, chapter_id, element_id, preview_text, body, origin)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'chat')",
-        params![
-            id,
-            enrollment,
-            chapter_id,
-            element_id,
-            if item.title.is_empty() {
-                preview(text)
-            } else {
-                item.title.clone()
-            },
-            text
-        ],
+        params![id, enrollment, chapter_id, element_id, title, text],
     )
     .map_err(|_| "storage_error: the note could not be saved".to_string())?;
     note(conn, &id)

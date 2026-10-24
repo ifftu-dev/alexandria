@@ -12,7 +12,7 @@ import ChatConnectionForm from './ChatConnectionForm.vue'
 import ChatPracticeCard from './ChatPracticeCard.vue'
 import ChatMemoryProposal from './ChatMemoryProposal.vue'
 import ChatMemoryView from './ChatMemoryView.vue'
-import ChatArtifactCard from './ChatArtifactCard.vue'
+import ChatActionCard from './ChatActionCard.vue'
 import ChatSavedView from './ChatSavedView.vue'
 import { ConfirmDialog } from '@/components/ui'
 import type { ChatMessage, ChatSearchHit, ChatSourceRef, StudioConnection, StudioDocument } from '@/types'
@@ -359,7 +359,7 @@ function formatDate(value: string) {
           />
           <template v-if="shown(user)">
             <ChatMemoryProposal v-for="m in proposalsFor(shown(user)!.id)" :key="m.id" :item="m" />
-            <ChatArtifactCard v-for="a in artifactsFor(shown(user)!.id)" :key="a.id" :item="a" />
+            <ChatActionCard v-for="a in artifactsFor(shown(user)!.id)" :key="a.id" :item="a" />
           </template>
           <ChatPracticeCard
             v-if="shown(user) && practiceFor(shown(user)!.id)"

@@ -36,7 +36,9 @@ use crate::ai_chat::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use crate::ai_chat::{artifact, bank_guard, error_code, memory, practice, ChatRuntime, RunGuard};
+use crate::ai_chat::{
+    action, artifact, bank_guard, error_code, memory, practice, ChatRuntime, RunGuard,
+};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
@@ -1372,6 +1374,43 @@ pub async fn chat_cancel_run(state: State<'_, AppState>, run_id: String) -> Resu
     Ok(state.ai_chat.cancel(&run_id))
 }
 
+/// Resolves a model's action against the chat's attachments. A course note
+/// goes to the attached lesson; a goal change and an enrollment need an
+/// attached goal. Anything that does not resolve is dropped.
+fn resolve_draft(
+    conn: &Connection,
+    thread_id: &str,
+    draft: artifact::Draft,
+) -> Result<Option<artifact::Proposal>, String> {
+    let bindings = store::bindings(conn, thread_id).map_err(|e| e.to_string())?;
+    let goals: Vec<String> = bindings
+        .iter()
+        .filter(|b| b.kind == "goal")
+        .map(|b| b.element_id.clone())
+        .collect();
+    Ok(match draft {
+        artifact::Draft::Ready(proposal) => Some(proposal),
+        artifact::Draft::GoalChange(change) => {
+            crate::ai_chat::goal::resolve_change(conn, &goals, &change)?
+        }
+        artifact::Draft::Enroll { course, text } => {
+            crate::ai_chat::goal::resolve_enroll(conn, &goals, &course, &text)?
+        }
+        artifact::Draft::CourseNote { title, text } => bindings
+            .iter()
+            .find(|b| b.kind == "lesson")
+            .map(|lesson| artifact::Proposal {
+                title,
+                body: artifact::Body::CourseNote {
+                    course_id: lesson.course_id.clone(),
+                    element_id: lesson.element_id.clone(),
+                    lesson: lesson.label.clone(),
+                    text,
+                },
+            }),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn finish(
     executor: &DatabaseExecutor,
@@ -1477,13 +1516,9 @@ impl Stream {
         usage: Option<alexandria_ai::Usage>,
     ) {
         let (without_artifact, artifact_block) = memory::split_block(reply, "artifact");
-        let made = artifact_block.and_then(artifact::parse);
-        // A goal change needs the learner's goals to resolve, so it is
+        // Most actions need the chat's attachments to resolve, so they are
         // resolved with the database below.
-        let change = made
-            .is_none()
-            .then(|| artifact_block.and_then(artifact::parse_goal_change))
-            .flatten();
+        let draft = artifact_block.and_then(artifact::parse);
         let (without_memory, memory_block) = memory::split_block(&without_artifact, "memory");
         let proposal = memory_block.and_then(memory::parse);
         let practice_mode = self.started.mode == "practice";
@@ -1518,18 +1553,9 @@ impl Stream {
                         };
                     let proposal =
                         proposal.filter(|p| !bank_guard::matches_assessment_item(conn, &p.content));
-                    let made = match (made, &change) {
-                        (Some(a), _) => Some(a),
-                        (None, Some(draft)) => {
-                            let attached: Vec<String> = store::bindings(conn, &thread_id)
-                                .map_err(|e| e.to_string())?
-                                .into_iter()
-                                .filter(|b| b.kind == "goal")
-                                .map(|b| b.element_id)
-                                .collect();
-                            crate::ai_chat::goal::resolve_change(conn, &attached, draft)?
-                        }
-                        (None, None) => None,
+                    let made = match draft {
+                        Some(draft) => resolve_draft(conn, &thread_id, draft)?,
+                        None => None,
                     };
                     let made = made.filter(|a| {
                         let text = format!("{} {}", a.title, a.body.text());
@@ -1941,65 +1967,52 @@ fn save_note(conn: &Connection, message_id: &str, title: &str) -> Result<store::
     .map_err(|e| e.to_string())
 }
 
-/// Saves a proposed note or flashcard set.
+/// Carries out a proposal from the chat, once the learner allows it. A new
+/// goal carries the skills the learner picked. See [`crate::ai_chat::action`].
 #[tauri::command]
-pub async fn chat_save_artifact(
+pub async fn chat_allow_action(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     artifact_id: String,
+    skill_ids: Option<Vec<String>>,
 ) -> Result<store::Artifact, String> {
-    with_conn(&state, "chat.save-artifact", move |conn| {
-        store::save_artifact(conn, &artifact_id, &now()).map_err(|e| e.to_string())
-    })
-    .await
-}
-
-/// Dismisses a proposal or deletes a saved artifact.
-/// Marks a goal proposal as added once the learner added it on the Goals
-/// service. The goal must exist in the learner's saved goals.
-#[tauri::command]
-pub async fn chat_goal_added(
-    state: State<'_, AppState>,
-    artifact_id: String,
-    goal_id: String,
-) -> Result<store::Artifact, String> {
-    with_conn(&state, "chat.goal-added", move |conn| {
-        goal_added(conn, &artifact_id, &goal_id)
-    })
-    .await
-}
-
-fn goal_added(
-    conn: &Connection,
-    artifact_id: &str,
-    goal_id: &str,
-) -> Result<store::Artifact, String> {
-    if crate::ai_chat::goal::label(conn, goal_id)?.is_none() {
-        return Err("not_found: that goal is not in your goals".into());
+    let allowed = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "chat.allow-action",
+            move |db| action::allow(db, &artifact_id, skill_ids.as_deref(), &now()),
+        )
+        .await?;
+    if allowed.goals_changed {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "settings-changed",
+            serde_json::json!({ "key": "learner.targets" }),
+        );
     }
-    store::mark_goal_added(conn, artifact_id, goal_id, &now()).map_err(|e| e.to_string())
+    Ok(allowed.artifact)
 }
 
-/// Marks a goal change as applied once the learner changed the goal on the
-/// Goals service. The goal must reflect the change.
+/// Records that the learner declined a proposal from the chat.
 #[tauri::command]
-pub async fn chat_goal_changed(
+pub async fn chat_decline_action(
     state: State<'_, AppState>,
     artifact_id: String,
 ) -> Result<store::Artifact, String> {
-    with_conn(&state, "chat.goal-changed", move |conn| {
-        goal_changed(conn, &artifact_id)
-    })
-    .await
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "chat.decline-action",
+            move |db| action::decline(db, &artifact_id, &now()),
+        )
+        .await
 }
 
-fn goal_changed(conn: &Connection, artifact_id: &str) -> Result<store::Artifact, String> {
-    let item = store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
-    if item.status == "proposed" && !crate::ai_chat::goal::change_applied(conn, &item.body)? {
-        return Err("invalid_input: the goal does not reflect this change".into());
-    }
-    store::mark_goal_changed(conn, artifact_id, &now()).map_err(|e| e.to_string())
-}
-
+/// Deletes a saved note or flashcard set.
 #[tauri::command]
 pub async fn chat_delete_artifact(
     state: State<'_, AppState>,
@@ -2644,6 +2657,11 @@ mod tests {
             f(guard.as_ref().unwrap().conn())
         }
 
+        fn database<T>(&self, f: impl FnOnce(&Database) -> T) -> T {
+            let guard = self.shared.lock().unwrap();
+            f(guard.as_ref().unwrap())
+        }
+
         /// Prepares and begins a run, and returns the stream task with the
         /// events it will emit.
         fn begin(&self, text: &str) -> (Stream, Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
@@ -2962,7 +2980,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_proposed_goal_is_marked_only_once_the_learner_has_it() {
+    async fn a_proposed_goal_is_added_only_when_the_learner_allows_it() {
         static WORDS: [&str; 1] = [
             "A goal could be:\n```artifact\n{\"type\":\"goal\",\"title\":\"Data analyst\",\"text\":\"Analyse data with probability\"}\n```",
         ];
@@ -2971,23 +2989,25 @@ mod tests {
         let (task, _events) = harness.begin("Help me pick a goal");
         task.drive().await;
 
-        harness.conn(|conn| {
+        let id = harness.conn(|conn| {
             let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
             assert_eq!(artifacts.len(), 1);
-            let proposal = &artifacts[0];
-            assert_eq!(proposal.status, "proposed");
-            assert!(
-                goal_added(conn, &proposal.id, "g1").is_err(),
-                "no such goal yet"
-            );
+            assert_eq!(artifacts[0].status, "proposed");
             goal(conn);
-            let added = goal_added(conn, &proposal.id, "g1").unwrap();
-            assert_eq!(added.status, "added");
+            artifacts[0].id.clone()
+        });
+        harness.database(|db| {
+            let picked = ["sk-counting".to_string()];
+            let allowed = action::allow(db, &id, Some(&picked), &now()).unwrap();
+            assert_eq!(allowed.artifact.status, "added");
+            assert!(crate::ai_chat::goal::label(db.conn(), "g1")
+                .unwrap()
+                .is_some());
         });
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_goal_change_resolves_skill_names_and_is_marked_only_once_applied() {
+    async fn a_goal_change_resolves_skill_names_and_applies_only_when_allowed() {
         static WORDS: [&str; 1] = [
             "Try this:\n```artifact\n{\"type\":\"goal_change\",\"title\":\"data analyst\",\"add\":[\"counting outcomes\",\"Astrology\"],\"remove\":[],\"text\":\"Start from counting.\"}\n```",
         ];
@@ -3001,7 +3021,7 @@ mod tests {
         let (task, _events) = harness.begin("Add counting to my goal");
         task.drive().await;
 
-        harness.conn(|conn| {
+        let id = harness.conn(|conn| {
             let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
             assert_eq!(artifacts.len(), 1);
             let change = &artifacts[0];
@@ -3021,15 +3041,91 @@ mod tests {
                 "unknown skill names are dropped"
             );
             assert!(store::save_artifact(conn, &change.id, &now()).is_err());
-            assert!(goal_changed(conn, &change.id).is_err(), "not applied yet");
-            conn.execute(
-                "UPDATE app_settings SET value = json_set(value, '$[0].goal_skill_ids', json('[\"sk-bayes\",\"sk-counting\"]'))
-                  WHERE key = 'learner.targets'",
-                [],
-            )
-            .unwrap();
-            assert_eq!(goal_changed(conn, &change.id).unwrap().status, "added");
+            change.id.clone()
         });
+        harness.database(|db| {
+            assert_eq!(
+                action::allow(db, &id, None, &now()).unwrap().artifact.status,
+                "added"
+            );
+            let skills: String = db
+                .conn()
+                .query_row(
+                    "SELECT json_extract(value, '$[0].goal_skill_ids') FROM app_settings WHERE key = 'learner.targets'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(skills, r#"["sk-bayes","sk-counting"]"#);
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_course_note_goes_to_the_attached_lesson_and_is_dropped_without_one() {
+        static WORDS: [&str; 1] = [
+            "Here:\n```artifact\n{\"type\":\"course_note\",\"title\":\"Bayes\",\"text\":\"Update a prior.\"}\n```",
+        ];
+        let endpoint = model(&WORDS, 1).await;
+        let harness = Harness::new(&endpoint);
+        let (task, _events) = harness.begin("Add that to my notes");
+        task.drive().await;
+        harness.conn(|conn| {
+            let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+            assert_eq!(artifacts.len(), 1);
+            assert_eq!(artifacts[0].title, "Bayes");
+            assert!(matches!(
+                &artifacts[0].body,
+                artifact::Body::CourseNote { course_id, element_id, text, .. }
+                    if course_id == "course" && element_id == "lesson" && text == "Update a prior."
+            ));
+        });
+
+        let conn = db();
+        thread(&conn);
+        let draft = artifact::Draft::CourseNote {
+            title: "Bayes".into(),
+            text: "Update a prior.".into(),
+        };
+        assert!(
+            resolve_draft(&conn, "t", draft).unwrap().is_none(),
+            "no lesson attached"
+        );
+    }
+
+    #[test]
+    fn an_enrollment_must_be_a_course_on_an_attached_goals_path() {
+        let conn = db();
+        goal(&conn);
+        conn.execute_batch(
+            r#"INSERT INTO courses(id, title, author_address, status, skill_ids)
+                 VALUES ('c-count', 'Counting 101', 'author', 'published', '["sk-counting"]');"#,
+        )
+        .unwrap();
+        let resolve = |attached: &[&str], course: &str| {
+            let attached: Vec<String> = attached.iter().map(|s| s.to_string()).collect();
+            crate::ai_chat::goal::resolve_enroll(&conn, &attached, course, "why").unwrap()
+        };
+        assert!(resolve(&[], "Counting 101").is_none(), "no goal attached");
+        assert!(
+            resolve(&["g1"], "Astrology 101").is_none(),
+            "not on the path"
+        );
+        let found = resolve(&["g1"], "counting 101").unwrap();
+        assert_eq!(found.title, "Counting 101");
+        assert_eq!(
+            found.body,
+            artifact::Body::Enroll {
+                course_id: "c-count".into(),
+                goal_id: "g1".into(),
+                text: "why".into(),
+            }
+        );
+        conn.execute_batch("INSERT INTO enrollments(id, course_id) VALUES ('en', 'c-count');")
+            .unwrap();
+        assert!(
+            resolve(&["g1"], "Counting 101").is_none(),
+            "already taking it"
+        );
     }
 
     #[test]

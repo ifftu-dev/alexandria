@@ -358,10 +358,10 @@ pub fn delete_thread(conn: &Connection, id: &str) -> Result<()> {
         "DELETE FROM learning_memory WHERE status = 'proposed' AND thread_id = ?1",
         [id],
     )?;
-    // Proposals (and goal proposals already added) go with the chat; saved
-    // artifacts stay.
+    // Proposals, and the record of actions allowed or declined, go with the
+    // chat; saved notes and flashcards stay.
     tx.execute(
-        "DELETE FROM chat_artifacts WHERE status IN ('proposed', 'added') AND thread_id = ?1",
+        "DELETE FROM chat_artifacts WHERE status IN ('proposed', 'added', 'declined') AND thread_id = ?1",
         [id],
     )?;
     let changed = tx.execute("DELETE FROM chat_threads WHERE id = ?1", [id])?;
@@ -1466,17 +1466,20 @@ pub fn save_message_as_note(
     artifact(conn, id)
 }
 
-/// Saves a proposal. Saving twice is harmless. A goal proposal is not saved
-/// here; it is added through the Goals service and then marked.
+/// Saves a proposed note or flashcard set. Saving twice is harmless. Other
+/// actions write elsewhere and are marked added instead.
 pub fn save_artifact(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
     let current = artifact(conn, id)?;
-    if matches!(
+    if !matches!(
         current.body,
-        super::artifact::Body::Goal { .. } | super::artifact::Body::GoalChange { .. }
+        super::artifact::Body::Note { .. } | super::artifact::Body::Flashcards { .. }
     ) {
         return Err(StoreError::Invalid(
-            "a goal is added from its preview".into(),
+            "only notes and flashcards are saved here".into(),
         ));
+    }
+    if current.status == "declined" {
+        return Err(StoreError::Invalid("this was not allowed".into()));
     }
     if current.status == "proposed" {
         ensure_room(conn)?;
@@ -1509,12 +1512,18 @@ pub fn mark_goal_added(conn: &Connection, id: &str, goal_id: &str, now: &str) ->
     artifact(conn, id)
 }
 
-/// Records that the learner applied a proposed goal change. The caller
-/// checks the goal reflects it. Marking twice is harmless.
-pub fn mark_goal_changed(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
+/// Records that an action the learner allowed was carried out where it
+/// belongs: a goal change, a course note, or an enrollment. The caller does
+/// the write. Marking twice is harmless.
+pub fn mark_added(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
     let current = artifact(conn, id)?;
-    if !matches!(current.body, super::artifact::Body::GoalChange { .. }) {
-        return Err(StoreError::Invalid("not a goal change".into()));
+    if !matches!(
+        current.body,
+        super::artifact::Body::GoalChange { .. }
+            | super::artifact::Body::CourseNote { .. }
+            | super::artifact::Body::Enroll { .. }
+    ) {
+        return Err(StoreError::Invalid("not an action".into()));
     }
     if current.status == "proposed" {
         conn.execute(
@@ -1525,9 +1534,31 @@ pub fn mark_goal_changed(conn: &Connection, id: &str, now: &str) -> Result<Artif
     artifact(conn, id)
 }
 
-/// Dismisses a proposal or deletes a saved artifact.
+/// Records that the learner declined a proposal. It stays in the chat,
+/// marked, until the chat is deleted.
+pub fn decline_artifact(conn: &Connection, id: &str, now: &str) -> Result<Artifact> {
+    let current = artifact(conn, id)?;
+    match current.status.as_str() {
+        "proposed" => {
+            conn.execute(
+                "UPDATE chat_artifacts SET status = 'declined', updated_at = ?2 WHERE id = ?1",
+                params![id, now],
+            )?;
+            artifact(conn, id)
+        }
+        "declined" => Ok(current),
+        _ => Err(StoreError::Invalid("this was already allowed".into())),
+    }
+}
+
+/// Deletes a saved artifact. A proposal is declined instead, so the chat
+/// keeps the record.
 pub fn delete_artifact(conn: &Connection, id: &str) -> Result<()> {
-    if conn.execute("DELETE FROM chat_artifacts WHERE id = ?1", [id])? == 0 {
+    if conn.execute(
+        "DELETE FROM chat_artifacts WHERE id = ?1 AND status = 'saved'",
+        [id],
+    )? == 0
+    {
         return Err(StoreError::NotFound);
     }
     Ok(())
@@ -1718,8 +1749,31 @@ mod tests {
             "saving twice is harmless"
         );
         propose_artifact(&conn, "p2", &proposal, "a1", NOW).unwrap();
+        propose_artifact(&conn, "p3", &proposal, "a1", NOW).unwrap();
+        assert_eq!(
+            decline_artifact(&conn, "p3", NOW).unwrap().status,
+            "declined"
+        );
+        assert_eq!(
+            decline_artifact(&conn, "p3", NOW).unwrap().status,
+            "declined",
+            "declining twice is harmless"
+        );
+        assert!(
+            save_artifact(&conn, "p3", NOW).is_err(),
+            "a declined note stays unsaved"
+        );
+        assert!(
+            decline_artifact(&conn, "p1", NOW).is_err(),
+            "a saved note is not declined"
+        );
+        assert!(
+            delete_artifact(&conn, "p3").is_err(),
+            "a decision is kept, not deleted"
+        );
         delete_thread(&conn, "t").unwrap();
         assert!(matches!(artifact(&conn, "p2"), Err(StoreError::NotFound)));
+        assert!(matches!(artifact(&conn, "p3"), Err(StoreError::NotFound)));
         assert_eq!(saved_artifacts(&conn).unwrap().len(), 1);
         delete_artifact(&conn, "p1").unwrap();
         assert!(delete_artifact(&conn, "p1").is_err());
