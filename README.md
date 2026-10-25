@@ -213,8 +213,13 @@ For the local assessment-to-credential and Cloud candidate walkthrough, see [the
 ### Prerequisites
 
 - **Rust 1.91+** with `cargo` (iroh 1.0 sets the MSRV; see `rust-version` in `src-tauri/Cargo.toml`)
-- **Node.js 22+** with `npm`
+- **Node.js 24.22.1** with `npm` (see [`.nvmrc`](.nvmrc)); supported alternatives are 22.23.4+ within 22.x, 24.22.1+ within 24.x, and 26.12.1+ within 26.x.
 - **Tauri CLI**: `cargo install tauri-cli`
+
+If you use nvm, run `nvm install` and `nvm use` from the repository root.
+[`package.json`](package.json) declares the supported Node versions, and
+[`.npmrc`](.npmrc) makes `npm install` and `npm ci` reject versions outside that
+range. These minimum versions include the CVE-2026-111497 Brotli decoder fix.
 
 For fresh desktop builds with full audio-video live tutoring:
 
