@@ -1,7 +1,7 @@
 # Demo course corpus
 
 Non-authoritative source material. Profile creation, mnemonic restore, and
-unlock import the seven full courses as profile-owned drafts using inline
+unlock import the eight full courses as profile-owned drafts using inline
 text and quizzes, plus Plugins Showcase and all nine bundled plugins.
 Existing course edits are preserved. The seven video tutorials and external
 placeholder media are excluded. **Instructor → My courses → Load example
@@ -9,11 +9,11 @@ courses** remains available to restore missing example drafts.
 Nothing in this source corpus is authoritative: there are no signed rows, identities,
 credentials, enrolments, opinions or governance records.
 
-- `courses.json` — 15 example courses and tutorials with their chapters,
+- `courses.json` — 16 example courses and tutorials with their chapters,
   elements, inline lesson content, skill tags and video chapters. It was
   exported from the retired startup seed with its fabricated authorship,
   publication, chain and content-address fields removed. Courses marked
-  `provenance: "ai_generated"` (the civics material) are AI-generated example
+  `provenance: "ai_generated"` (every course except Plugins Showcase) are AI-generated example
   content. Plugin elements reference built-in plugin bundles by exact content
   identity (`plugin_cid`).
 - `media.json` — the remote video, PDF and text files the retired seed

@@ -210,9 +210,9 @@ unverified.
 
 In debug builds or optimized builds compiled with Cargo feature `dev-seeding`,
 **Settings → Developer → Test data** lists the actual bundled resources:
-eight example course drafts, two video courses, nine plugins, two question banks,
+nine example course drafts, two video courses, nine plugins, fifteen question banks,
 individual goal templates, three classrooms, fifteen videos, seven thumbnails,
-six local discussion prompts, and seven proposal-style discussion drafts (one
+six local discussion prompts, and eight proposal-style discussion drafts (one
 per bundled subject field, bound to that field so the composer preselects it).
 No governance proposal, ballot or tally rows exist to seed; the local DAO tables
 were retired and only the pinned demo genesis remains. Required taxonomy/synonyms and global plugins
