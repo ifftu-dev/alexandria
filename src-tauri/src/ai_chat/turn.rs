@@ -977,7 +977,7 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use super::fixtures::*;
-    use super::{artifact, now, store, Inputs};
+    use super::{artifact, now, store, Inputs, Refused};
     use crate::commands::ai_chat::{attach, attach_goal};
 
     #[test]
@@ -1370,5 +1370,59 @@ mod tests {
         assert!(!started.request.messages[0]
             .content
             .contains("Explain in Hindi"));
+    }
+
+    #[test]
+    fn a_completed_turn_splits_its_blocks_into_cards_and_says_what_was_dropped() {
+        let conn = db();
+        thread(&conn);
+        add_bank_item(&conn);
+        store::set_thread_mode(&conn, "t", "practice", &now()).unwrap();
+        let started = start(&conn, &prepare(&conn, "Quiz me").unwrap(), "q1").unwrap();
+        let reply = format!(
+            "Here you go.\n```practice\n{{\"kind\":\"multiple_choice\",\"prompt\":\"{BANK_ITEM}\",\
+             \"options\":[\"4/10\",\"3/9\"],\"answer\":1}}\n```\n\
+             ```memory\n{{\"kind\":\"preference\",\"content\":\"Prefers worked numbers\"}}\n```\n\
+             ```artifact\n{{\"type\":\"note\",\"title\":\"Marbles\",\"text\":\"Draw without replacement.\"}}\n```"
+        );
+        let outcome = complete(&conn, &started, &reply);
+
+        assert!(outcome.content.starts_with("Here you go."));
+        assert!(!outcome.content.contains("```"), "{}", outcome.content);
+        assert_eq!(outcome.note, Some("practice_rejected"));
+        assert!(outcome.practice.is_none());
+        assert_eq!(outcome.refused, vec![Refused::PracticeResemblesItem]);
+        assert_eq!(
+            outcome.memory.as_ref().map(|m| m.content.as_str()),
+            Some("Prefers worked numbers")
+        );
+        assert_eq!(
+            outcome.proposal.as_ref().map(|p| p.title.as_str()),
+            Some("Marbles")
+        );
+        assert!(outcome.saved);
+
+        // The rows match the outcome.
+        let message = store::message(&conn, &started.run.assistant_message.id).unwrap();
+        assert_eq!(
+            (message.status.as_str(), message.content),
+            ("complete", outcome.content)
+        );
+        assert_eq!(message.error.as_deref(), Some("practice_rejected"));
+        assert!(store::practice_for_thread(&conn, "t").unwrap().is_empty());
+        assert_eq!(
+            store::memory_proposals_for_thread(&conn, "t")
+                .unwrap()
+                .len(),
+            1
+        );
+        let artifacts = store::artifacts_for_thread(&conn, "t").unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].status, "proposed");
+
+        // A run that already ended is not completed again.
+        let again = complete(&conn, &started, "Something else");
+        assert!(!again.saved);
+        assert_eq!(store::artifacts_for_thread(&conn, "t").unwrap().len(), 1);
     }
 }
