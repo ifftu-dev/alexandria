@@ -363,7 +363,7 @@ pub fn fit_history(
     let mut budget = remaining;
     let mut kept: Vec<&(String, String, String, String)> = Vec::new();
     for turn in turns.iter().rev() {
-        let cost = estimate_tokens(&turn.1) + estimate_tokens(&turn.3) + 8;
+        let cost = turn_tokens(&turn.1, &turn.3);
         if cost > budget {
             break;
         }
@@ -377,6 +377,194 @@ pub fn fit_history(
         .flat_map(|t| [t.0.clone(), t.2.clone()])
         .collect();
     (ids, omitted)
+}
+
+// ─── review and token accounting ─────────────────────────────────────────
+
+/// Fixed allowance for a remembered item's bullet, beyond its text.
+pub const MEMORY_TOKEN_ALLOWANCE: u32 = 4;
+/// Fixed allowance for a history turn's role framing, beyond its text.
+pub const TURN_TOKEN_ALLOWANCE: u32 = 8;
+/// Fixed allowance for the new message's framing.
+pub const MESSAGE_TOKEN_ALLOWANCE: u32 = 16;
+
+/// What one history turn costs: both texts plus its framing.
+pub fn turn_tokens(user: &str, assistant: &str) -> u32 {
+    estimate_tokens(user) + estimate_tokens(assistant) + TURN_TOKEN_ALLOWANCE
+}
+
+/// What one remembered item costs when it is sent.
+pub fn memory_tokens(content: &str) -> u32 {
+    estimate_tokens(content) + MEMORY_TOKEN_ALLOWANCE
+}
+
+/// One line of the review sheet.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReviewItem {
+    /// `instructions`, `message`, `history`, `lesson`, `goal`, or `memory`.
+    pub kind: String,
+    pub label: String,
+    pub tokens: u32,
+    /// Required items cannot be left out.
+    pub required: bool,
+    pub included: bool,
+    pub binding_id: Option<String>,
+    /// For a learning-memory item: its id, so review can leave it out.
+    pub memory_id: Option<String>,
+    pub truncated: bool,
+}
+
+/// The review sheet for one request, and the token accounting behind it.
+///
+/// Items are added in the order the sheet shows them: instructions first,
+/// then attachments, then memory; [`Review::fit`] adds the new message and,
+/// when the chat has history, a history line after the instructions.
+pub struct Review {
+    items: Vec<ReviewItem>,
+    /// Tokens of attached material that the instructions already carry.
+    attached_tokens: u32,
+}
+
+/// A review fitted to the budget.
+pub struct Fitted {
+    pub items: Vec<ReviewItem>,
+    /// Message ids kept from history, oldest first.
+    pub history: Vec<String>,
+    pub omitted_turns: usize,
+    /// Instructions, the message, and the kept history.
+    pub estimated_tokens: u32,
+    /// The instructions and the message fit; history was fitted after them.
+    pub fits: bool,
+}
+
+impl Review {
+    pub fn new(mode: &str) -> Self {
+        Self {
+            items: vec![ReviewItem {
+                kind: "instructions".into(),
+                label: format!("{mode} · v{POLICY_VERSION}"),
+                tokens: 0,
+                required: true,
+                included: true,
+                binding_id: None,
+                memory_id: None,
+                truncated: false,
+            }],
+            attached_tokens: 0,
+        }
+    }
+
+    /// An attachment this send leaves out.
+    pub fn left_out(&mut self, kind: &str, label: &str, binding_id: &str) {
+        self.items.push(ReviewItem {
+            kind: kind.into(),
+            label: label.into(),
+            tokens: 0,
+            required: false,
+            included: false,
+            binding_id: Some(binding_id.into()),
+            memory_id: None,
+            truncated: false,
+        });
+    }
+
+    /// An attachment rendered into the instructions.
+    pub fn attached(
+        &mut self,
+        kind: &str,
+        label: &str,
+        binding_id: &str,
+        tokens: u32,
+        truncated: bool,
+    ) {
+        self.attached_tokens += tokens;
+        self.items.push(ReviewItem {
+            kind: kind.into(),
+            label: label.into(),
+            tokens,
+            required: false,
+            included: true,
+            binding_id: Some(binding_id.into()),
+            memory_id: None,
+            truncated,
+        });
+    }
+
+    /// A remembered item. Returns the tokens it costs: none when left out.
+    pub fn memory(&mut self, id: &str, content: &str, included: bool) -> u32 {
+        let tokens = if included { memory_tokens(content) } else { 0 };
+        self.attached_tokens += tokens;
+        self.items.push(ReviewItem {
+            kind: "memory".into(),
+            label: content.into(),
+            tokens,
+            required: false,
+            included,
+            binding_id: None,
+            memory_id: Some(id.into()),
+            truncated: false,
+        });
+        tokens
+    }
+
+    /// Adds the message, charges the instructions for what they carry beyond
+    /// the attachments, and keeps the newest history turns that fit what is
+    /// left of `budget`.
+    pub fn fit(
+        mut self,
+        system: &str,
+        user_text: &str,
+        turns: &[(String, String, String, String)],
+        budget: u32,
+    ) -> Fitted {
+        let system_tokens = estimate_tokens(system);
+        self.items[0].tokens = system_tokens.saturating_sub(self.attached_tokens);
+        let user_tokens = estimate_tokens(user_text);
+        self.items.push(ReviewItem {
+            kind: "message".into(),
+            label: user_text.chars().take(120).collect(),
+            tokens: user_tokens,
+            required: true,
+            included: true,
+            binding_id: None,
+            memory_id: None,
+            truncated: false,
+        });
+        let fixed = system_tokens + user_tokens + MESSAGE_TOKEN_ALLOWANCE;
+        let fits = fixed <= budget;
+        let (history, omitted_turns) = if fits {
+            fit_history(turns, budget - fixed)
+        } else {
+            (Vec::new(), turns.len())
+        };
+        let history_tokens: u32 = turns
+            .iter()
+            .filter(|t| history.contains(&t.0))
+            .map(|t| turn_tokens(&t.1, &t.3))
+            .sum();
+        if !turns.is_empty() {
+            self.items.insert(
+                1,
+                ReviewItem {
+                    kind: "history".into(),
+                    label: format!("{}", history.len() / 2),
+                    tokens: history_tokens,
+                    required: false,
+                    included: !history.is_empty(),
+                    binding_id: None,
+                    memory_id: None,
+                    truncated: omitted_turns > 0,
+                },
+            );
+        }
+        Fitted {
+            items: self.items,
+            history,
+            omitted_turns,
+            estimated_tokens: system_tokens + user_tokens + history_tokens,
+            fits,
+        }
+    }
 }
 
 #[cfg(test)]

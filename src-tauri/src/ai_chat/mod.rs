@@ -12,11 +12,18 @@ pub mod goal;
 pub mod memory;
 pub mod practice;
 pub mod store;
+pub mod turn;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use chrono::SecondsFormat;
 use tokio::sync::oneshot;
+
+/// The moment, as stored: RFC 3339 in UTC with millisecond precision.
+pub(crate) fn now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
 
 /// Most answers generating at once across all threads of a profile.
 pub const MAX_CONCURRENT_RUNS: usize = 2;
