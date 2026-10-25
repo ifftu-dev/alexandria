@@ -1,6 +1,6 @@
 Alexandria by [IFFTU](https://www.ifftu.dev)
 
-Copyright (C) 2025-2026 Alexandria Pvt. Ltd.
+Copyright (C) 2025-2026 Pratyush Pundir <pratyush@alexandria.ifftu.dev>
 
 Alexandria is free software: you can redistribute it and/or modify it under the
 terms of the GNU Affero General Public License as published by the Free Software
@@ -16,7 +16,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 One part of this repository is deliberately **not** copyleft.
 `crates/alexandria-verify` — the credential verification library — is
-Copyright (C) 2025-2026 Alexandria Pvt. Ltd. and licensed **MIT OR Apache-2.0**,
+Copyright (C) 2025-2026 Pratyush Pundir <pratyush@alexandria.ifftu.dev> and licensed **MIT OR Apache-2.0**,
 with both texts in that directory.
 
 That is not a loophole; it is the guarantee made operable. Verification is
@@ -35,7 +35,7 @@ from https://github.com/n0-computer/iroh-live, are Copyright (C) 2025 N0, INC,
 and are offered by their owner under MIT OR Apache-2.0. Alexandria distributes
 them under the **Apache License 2.0**; the full text is in each of those three
 directories as `LICENSE-APACHE`. `crates/moq-media` has been modified by
-Alexandria Pvt. Ltd. and the modified files say so, as Apache-2.0 § 4(b)
+Pratyush Pundir <pratyush@alexandria.ifftu.dev> and the modified files say so, as Apache-2.0 § 4(b)
 requires. The provenance chain, the fork revision they were taken from, and the
 division between N0's work and Alexandria's are recorded in
 `crates/VENDORING.md`.

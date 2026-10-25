@@ -85,6 +85,7 @@ pub(super) const PROPOSALS: &[(&str, &str, &str, &str)] = &[
     ("math", "sf_math", "Proposal: accept multiple valid proof styles in graded mathematics items", "Testing proposal: Mathematics graders should accept direct, contrapositive and inductive proofs where each is valid, with a published rubric for partial credit. Discuss how graders would be calibrated."),
     ("web", "sf_web", "Proposal: set a performance budget for published web development projects", "Testing proposal: Web Development capstone submissions should ship under an agreed performance budget measured on a mid-range phone. Propose the budget, the measurement tool and the exceptions process."),
     ("civics", "sf_civics", "Proposal: require a source list on civic engagement discussion posts", "Testing proposal: posts in Civic Engagement that make factual claims should link their sources, with moderators able to request them before a post is promoted. Discuss the trade-off between rigour and participation."),
+    ("leadership", "sf_leadership", "Proposal: require a written decision record for team-wide changes", "Testing proposal: Leadership & Management courses should teach a short decision record (options, choice, reasons, who decided) and ask learners to write one for any change that affects a whole team. Discuss how long it should be and when it is overkill."),
 ];
 
 fn subject_field_name(conn: &Connection, id: &str) -> Result<Option<String>, String> {
@@ -785,11 +786,11 @@ mod tests {
         for item in &selected {
             install(&db, dir.path(), item).unwrap();
         }
-        assert_eq!(count(&db, "courses"), 10);
+        assert_eq!(count(&db, "courses"), 11);
         assert_eq!(count(&db, "classrooms"), 3);
         assert_eq!(count(&db, "plugin_installed"), 9);
-        assert_eq!(count(&db, "question_banks"), 2);
-        assert_eq!(count(&db, "developer_discussion_drafts"), 13);
+        assert_eq!(count(&db, "question_banks"), 15);
+        assert_eq!(count(&db, "developer_discussion_drafts"), 14);
         assert_eq!(count(&db, "discussion_events"), 0);
         assert_eq!(count(&db, "assessment_attempts"), 0);
         assert_eq!(count(&db, "credentials"), 0);

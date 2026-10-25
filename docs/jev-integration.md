@@ -37,7 +37,7 @@ cargo run -p alexandria-learning-contracts --example export_taxonomy -- \
   src-tauri/resources/networks/preprod.json bootstrap/public_taxonomy.json > taxonomy.json
 ```
 
-The exporter takes the network ID from the profile, retains canonical IDs and prerequisite edges, uses `bundled-v1`, sorts the content, and computes a SHA-256 digest. Review authority and redistribution terms before activating an artifact in Cloud. Cloud's documented import requires its exact digest and network ID. Do not map `skill_kubernetes` to `skill_k8s`, or any other legacy ID, automatically. Existing signed talent records stay byte-for-byte intact.
+The exporter takes the network ID from the profile, retains canonical IDs and prerequisite edges, uses `bundled-v2` (the revision changes whenever bundled skills or prerequisites change, which changes the digest), sorts the content, and computes a SHA-256 digest. Review authority and redistribution terms before activating an artifact in Cloud. Cloud's documented import requires its exact digest and network ID. Do not map `skill_kubernetes` to `skill_k8s`, or any other legacy ID, automatically. Existing signed talent records stay byte-for-byte intact.
 
 ## Transport and evaluation
 
