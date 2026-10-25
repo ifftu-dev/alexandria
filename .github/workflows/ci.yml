@@ -111,7 +111,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
       - name: Install dependencies and browser runtimes
@@ -194,7 +194,7 @@ jobs:
         if: needs.changes.outputs.frontend == 'true'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: 'npm'
           cache-dependency-path: alexandria/package-lock.json
 
@@ -593,7 +593,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
 
       - name: Check release readiness
         working-directory: alexandria
@@ -635,7 +635,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "22"
+          node-version: "22.23.4"
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
