@@ -270,7 +270,7 @@ fn taxonomy() -> Result<TaxonomySnapshot, String> {
     let profile = crate::network_profile::embedded_preprod().map_err(|e| e.to_string())?;
     TaxonomySnapshot::from_reference(
         &profile.network_id,
-        "bundled-v1",
+        "bundled-v2",
         include_str!("../../../bootstrap/public_taxonomy.json"),
     )
     .map_err(|e| e.to_string())

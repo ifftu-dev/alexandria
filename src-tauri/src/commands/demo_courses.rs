@@ -303,7 +303,7 @@ mod tests {
             crate::db::bundled::install_bundled_data(db.conn()).unwrap();
             db.conn().execute("INSERT INTO local_identity (id,stake_address,payment_address) VALUES (1,?1,'key')", [author]).unwrap();
             let dir = tempfile::tempdir().unwrap();
-            assert_eq!(install_profile_content(&db, dir.path()).unwrap(), 8);
+            assert_eq!(install_profile_content(&db, dir.path()).unwrap(), 9);
             let id = entity_id(&["example-course-v1", author, "course_algo_101"]);
             db.conn()
                 .execute("UPDATE courses SET title='Keep my edit' WHERE id=?1", [&id])
@@ -322,7 +322,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(owned, 8);
+            assert_eq!(owned, 9);
             for bundle in crate::plugins::builtins::BUILTIN_PLUGINS {
                 let cid = crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json);
                 let plugin = crate::plugins::registry::get_installed(&db, &cid)
@@ -408,7 +408,7 @@ mod tests {
         db.run_migrations().unwrap();
         crate::db::bundled::install_bundled_data(db.conn()).unwrap();
         db.conn().execute("INSERT INTO local_identity (id,stake_address,payment_address) VALUES (1,'demo-owner','demo-key')",[]).unwrap();
-        assert_eq!(import_examples(db.conn(), false).unwrap(), 7);
+        assert_eq!(import_examples(db.conn(), false).unwrap(), 8);
         let bad:i64=db.conn().query_row("SELECT count(*) FROM courses WHERE author_address!='demo-owner' OR status!='draft' OR provenance!='ai_generated' OR content_cid IS NOT NULL",[],|r|r.get(0)).unwrap();
         assert_eq!(bad, 0);
         let external:i64=db.conn().query_row("SELECT count(*) FROM course_elements WHERE element_type NOT IN ('text','quiz','objective_multi_mcq') OR content_cid IS NOT NULL",[],|r|r.get(0)).unwrap();

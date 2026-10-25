@@ -2090,6 +2090,356 @@
       ]
     },
     {
+      "description": "A practical introduction to leading a team: one-on-ones, delegation, feedback, coaching, goals and priorities, meetings, hiring, performance reviews, decisions, stakeholders, conflict, and change.",
+      "id": "course_leadership_101",
+      "kind": "course",
+      "provenance": "ai_generated",
+      "skill_ids": [
+        "skill_one_on_ones",
+        "skill_delegation",
+        "skill_giving_feedback",
+        "skill_coaching",
+        "skill_goal_setting",
+        "skill_prioritization",
+        "skill_effective_meetings",
+        "skill_hiring_interviews",
+        "skill_performance_reviews",
+        "skill_decision_making",
+        "skill_stakeholder_comm",
+        "skill_conflict_resolution",
+        "skill_change_management"
+      ],
+      "tags": [
+        "leadership",
+        "management",
+        "people-management",
+        "teams"
+      ],
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0%\" stop-color=\"#0f766e\"/><stop offset=\"100%\" stop-color=\"#1d4ed8\"/></linearGradient></defs><rect width=\"640\" height=\"360\" fill=\"url(#g)\"/><g opacity=\"0.14\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"><circle cx=\"320\" cy=\"96\" r=\"22\"/><circle cx=\"220\" cy=\"250\" r=\"18\"/><circle cx=\"320\" cy=\"270\" r=\"18\"/><circle cx=\"420\" cy=\"250\" r=\"18\"/><line x1=\"310\" y1=\"117\" x2=\"228\" y2=\"233\"/><line x1=\"320\" y1=\"118\" x2=\"320\" y2=\"252\"/><line x1=\"330\" y1=\"117\" x2=\"412\" y2=\"233\"/></g><text x=\"320\" y=\"175\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"24\" font-weight=\"700\" opacity=\"0.92\">Leading People and Teams</text><text x=\"320\" y=\"205\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"13\" opacity=\"0.7\">Foundations of Leadership</text></svg>",
+      "title": "Leading People and Teams",
+      "chapters": [
+        {
+          "id": "ch_lead_1",
+          "title": "Your First Weeks as a Lead",
+          "description": "Building trust and handing off work",
+          "position": 0,
+          "elements": [
+            {
+              "id": "el_lead_1_1",
+              "title": "From Doing to Leading",
+              "element_type": "text",
+              "position": 0,
+              "content_inline": "<h2>From Doing to Leading</h2>\n<p>Most new leads were promoted for being good at the work. The job now is different: your output is <strong>the team's output</strong>, not your own. The hardest habit to break is reaching for the keyboard when a problem appears.</p>\n<p>In the first weeks, aim to <em>listen more than you change</em>:</p>\n<ul>\n  <li>Meet each person one-on-one and ask what is going well, what is frustrating, and what they want to grow into.</li>\n  <li>Learn the team's current commitments before adding new ones.</li>\n  <li>Write down what you hear. Patterns across conversations matter more than any single complaint.</li>\n</ul>\n<p>Early credibility comes from small promises kept: following up on what people raised, and saying plainly when you do not yet know.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_one_on_ones",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_1_2",
+              "title": "Running One-on-Ones",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Running One-on-Ones</h2>\n<p>A one-on-one is the report's meeting, not a status update. Keep it regular (weekly or every two weeks), protect it from cancellation, and let the report bring the agenda first.</p>\n<p>A simple shared document helps: each side adds topics during the week, and decisions and follow-ups are noted under the date.</p>\n<p>Useful questions when the agenda is thin:</p>\n<ul>\n  <li>What is taking more energy than it should?</li>\n  <li>What would you change about how the team works?</li>\n  <li>Is there anything I should be doing differently?</li>\n</ul>\n<p>Status can travel in writing. Use this time for the things that do not: worries, growth, and feedback in both directions.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_one_on_ones",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_1_3",
+              "title": "Delegating Well",
+              "element_type": "text",
+              "position": 2,
+              "content_inline": "<h2>Delegating Well</h2>\n<p>Delegation is handing off an <strong>outcome</strong>, not a list of steps. A clear handoff covers:</p>\n<ul>\n  <li><strong>What done looks like</strong> and why it matters.</li>\n  <li><strong>Constraints:</strong> deadline, budget, anything that must not change.</li>\n  <li><strong>Authority:</strong> which decisions the person can make alone.</li>\n  <li><strong>Check-ins:</strong> how often you will look in, set by their experience with this kind of work.</li>\n</ul>\n<p>Match support to experience: someone new to a task needs closer check-ins; someone who has done it many times needs only the goal. Expect results that differ from how you would have done it. If the goal is met, that difference is fine.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_delegation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_1_4",
+              "title": "First Weeks Quiz",
+              "element_type": "quiz",
+              "position": 3,
+              "content_inline": "{\n  \"title\": \"First Weeks Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"In your first month as a new lead, what should you mostly do?\",\n      \"options\": [\n        \"Reorganize the team\",\n        \"Listen and learn current commitments\",\n        \"Rewrite the roadmap\",\n        \"Take on the hardest tickets yourself\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Listening first builds trust and shows you what actually needs to change.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Where should routine project status mainly travel?\",\n      \"options\": [\n        \"In one-on-ones\",\n        \"In writing, such as a shared update\",\n        \"Only in all-hands meetings\",\n        \"Nowhere\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Written status frees one-on-ones for growth, worries and feedback.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"multiple_choice\",\n      \"prompt\": \"Which belong in a clear delegation handoff?\",\n      \"options\": [\n        \"What done looks like\",\n        \"Which decisions the person can make alone\",\n        \"Exact keystrokes to use\",\n        \"How often you will check in\"\n      ],\n      \"correct_indices\": [\n        0,\n        1,\n        3\n      ],\n      \"explanation\": \"Delegate the outcome, the authority and the check-ins, not the method.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_one_on_ones",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_delegation",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_lead_2",
+          "title": "Feedback and Coaching",
+          "description": "Helping people improve and grow",
+          "position": 1,
+          "elements": [
+            {
+              "id": "el_lead_2_1",
+              "title": "Feedback People Can Use",
+              "element_type": "text",
+              "position": 0,
+              "content_inline": "<h2>Feedback People Can Use</h2>\n<p>Useful feedback names a <strong>situation</strong>, the <strong>behaviour</strong> you saw, and its <strong>impact</strong>. Then it asks a question.</p>\n<blockquote>In yesterday's planning meeting (situation), you cut Priya off twice (behaviour), and she stopped contributing (impact). What was going on for you?</blockquote>\n<p>Guidelines:</p>\n<ul>\n  <li>Give it soon, while the event is fresh. Give corrective feedback in private.</li>\n  <li>Describe what you observed, not what you assume about motives.</li>\n  <li>Give positive feedback with the same detail, so good work is repeated on purpose.</li>\n  <li>Ask for feedback on yourself regularly. People copy what you model.</li>\n</ul>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_giving_feedback",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_2_2",
+              "title": "Coaching with Questions",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Coaching with Questions</h2>\n<p>When someone brings you a problem, the fastest response is the answer. The most useful response is often a question, because people remember solutions they reach themselves.</p>\n<p>A simple coaching sequence:</p>\n<ol>\n  <li><strong>Goal:</strong> What would a good outcome look like?</li>\n  <li><strong>Reality:</strong> What has happened so far? What have you tried?</li>\n  <li><strong>Options:</strong> What could you do? What else?</li>\n  <li><strong>Will:</strong> What will you do first, and by when?</li>\n</ol>\n<p>Coaching is not always right. When there is real urgency or risk, say what to do and explain later. Mentoring differs again: there you share your own experience, clearly labelled as one view.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_coaching",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_2_3",
+              "title": "Feedback and Coaching Quiz",
+              "element_type": "quiz",
+              "position": 2,
+              "content_inline": "{\n  \"title\": \"Feedback and Coaching Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which statement describes behaviour rather than motive?\",\n      \"options\": [\n        \"You don't care about deadlines\",\n        \"You delivered the report two days after the agreed date\",\n        \"You're lazy about details\",\n        \"You want to look good\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Observable behaviour can be discussed; guessed motives start arguments.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"In a coaching conversation, the Options step asks:\",\n      \"options\": [\n        \"What could you do?\",\n        \"Who is to blame?\",\n        \"What did I do at your age?\",\n        \"Why didn't you ask sooner?\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Options widens the person's view of possible actions before they choose.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"multiple_choice\",\n      \"prompt\": \"Which are good habits when giving feedback?\",\n      \"options\": [\n        \"Giving it soon after the event\",\n        \"Asking for the other person's view\",\n        \"Saving it all for the annual review\",\n        \"Being as specific with praise as with criticism\"\n      ],\n      \"correct_indices\": [\n        0,\n        1,\n        3\n      ],\n      \"explanation\": \"Timely, specific, two-way feedback is the kind people can act on.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_giving_feedback",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_coaching",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_lead_3",
+          "title": "Planning the Team's Work",
+          "description": "Goals, priorities and meetings",
+          "position": 2,
+          "elements": [
+            {
+              "id": "el_lead_3_1",
+              "title": "Goals and OKRs",
+              "element_type": "text",
+              "position": 0,
+              "content_inline": "<h2>Goals and OKRs</h2>\n<p>Objectives and key results (OKRs) separate <em>where</em> you are going from <em>how you will know</em> you got there.</p>\n<ul>\n  <li><strong>Objective:</strong> qualitative and motivating. <em>Make new engineers productive fast.</em></li>\n  <li><strong>Key results:</strong> two to four measurable outcomes. <em>Median time to first merged change falls from 10 days to 3.</em></li>\n</ul>\n<p>Key results measure outcomes, not activity: \"launch the onboarding page\" is a task; \"new hires rate onboarding 4 out of 5 or better\" is a result.</p>\n<p>Write goals with the team, keep them few, and review progress openly during the period. If a key result turns out to be wrong, change it and say why. That is better than steering by a broken number.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_goal_setting",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_3_2",
+              "title": "Prioritizing",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Prioritizing</h2>\n<p>Every team has more requests than capacity. Prioritizing means choosing what not to do.</p>\n<p>Two quick lenses:</p>\n<ul>\n  <li><strong>Impact against effort:</strong> do high-impact, low-effort work first; question high-effort, low-impact work hard.</li>\n  <li><strong>Urgent against important:</strong> urgent but unimportant work can usually be batched, time-boxed, or handed off.</li>\n</ul>\n<p>When new work arrives, make the trade-off visible: <em>\"We can take this on if we move the reporting work to next month. Which matters more?\"</em> A list of ten top priorities is no priority at all.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_prioritization",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_3_3",
+              "title": "Meetings That Earn Their Time",
+              "element_type": "text",
+              "position": 2,
+              "content_inline": "<h2>Meetings That Earn Their Time</h2>\n<p>A meeting is expensive: an hour with eight people is a full day of work. Before calling one, check that the goal really needs people talking at the same time. One-way updates usually work better written.</p>\n<p>For meetings worth holding:</p>\n<ul>\n  <li>State the purpose and the outcome you need (a decision, a plan, a list of risks) in the invitation.</li>\n  <li>Invite the people needed for that outcome, not everyone who might be interested.</li>\n  <li>When discussion circles, name the decision needed and who will make it.</li>\n  <li>End with written decisions, owners, and dates, and send them out.</li>\n</ul>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_effective_meetings",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_3_4",
+              "title": "Planning Quiz",
+              "element_type": "quiz",
+              "position": 3,
+              "content_inline": "{\n  \"title\": \"Planning Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which is an outcome rather than an activity?\",\n      \"options\": [\n        \"Hold five customer calls\",\n        \"Support tickets per week fall by 30%\",\n        \"Write the new FAQ\",\n        \"Attend the training\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Outcomes describe a change in the world; activities describe effort.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"A stakeholder asks your full team to take on new work. A good response is to:\",\n      \"options\": [\n        \"Accept and work weekends\",\n        \"Show what would move to fit it in and ask which matters more\",\n        \"Refuse without discussion\",\n        \"Accept and hope for the best\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Making the trade-off visible lets the right person choose.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"multiple_choice\",\n      \"prompt\": \"Which should every meeting end with?\",\n      \"options\": [\n        \"Written decisions\",\n        \"Owners for each action\",\n        \"Due dates\",\n        \"A follow-up meeting by default\"\n      ],\n      \"correct_indices\": [\n        0,\n        1,\n        2\n      ],\n      \"explanation\": \"Decisions, owners and dates turn talk into action; extra meetings are not a default.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_goal_setting",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_prioritization",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_effective_meetings",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_lead_4",
+          "title": "Building and Growing the Team",
+          "description": "Hiring and reviewing performance",
+          "position": 3,
+          "elements": [
+            {
+              "id": "el_lead_4_1",
+              "title": "Hiring with Structure",
+              "element_type": "text",
+              "position": 0,
+              "content_inline": "<h2>Hiring with Structure</h2>\n<p>Unstructured interviews mostly measure how much the interviewer liked the candidate. Structure makes hiring fairer and more predictive.</p>\n<ol>\n  <li><strong>Define the role first:</strong> the three to five skills that matter most, and what good looks like for each.</li>\n  <li><strong>Ask every candidate the same core questions</strong>, mapped to those skills.</li>\n  <li><strong>Use behavioural questions:</strong> \"Tell me about a time you had to deliver bad news to a customer. What did you do?\"</li>\n  <li><strong>Score independently</strong> against a written rubric before the panel discusses, so the loudest voice does not set everyone's view.</li>\n</ol>\n<p>\"Culture fit\" judged by gut feel tends to hire people like the interviewers. Ask instead what the candidate would <em>add</em>.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_hiring_interviews",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_4_2",
+              "title": "Fair Performance Reviews",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Fair Performance Reviews</h2>\n<p>A review should hold <strong>no surprises</strong>. Anything serious should already have been raised when it happened. The review summarizes a conversation that has been going on all along.</p>\n<p>To keep reviews fair:</p>\n<ul>\n  <li>Agree expectations at the start of the period.</li>\n  <li>Keep short notes throughout, to counter <em>recency bias</em> (over-weighting the last few weeks).</li>\n  <li>Compare evidence against the expectations, not people against each other.</li>\n  <li>Calibrate with other managers so the same work earns the same rating across teams.</li>\n</ul>\n<p>End every review with agreed next steps: what to keep doing, what to change, and how you will help.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_performance_reviews",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_4_3",
+              "title": "Team Building Quiz",
+              "element_type": "quiz",
+              "position": 2,
+              "content_inline": "{\n  \"title\": \"Team Building Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Why should interviewers score before the panel discusses?\",\n      \"options\": [\n        \"To save time\",\n        \"So one strong opinion does not sway everyone\",\n        \"It is required by law everywhere\",\n        \"To avoid writing notes\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Independent scoring keeps each interviewer's evidence intact.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Keeping notes throughout a review period mainly reduces:\",\n      \"options\": [\n        \"Recency bias\",\n        \"Salary costs\",\n        \"Meeting length\",\n        \"Turnover\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Notes make the whole period visible, not just the last few weeks.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"multiple_choice\",\n      \"prompt\": \"Which are signs of a fair review process?\",\n      \"options\": [\n        \"Expectations agreed in advance\",\n        \"No surprises in the review\",\n        \"Ratings set before evidence is gathered\",\n        \"Calibration across managers\"\n      ],\n      \"correct_indices\": [\n        0,\n        1,\n        3\n      ],\n      \"explanation\": \"Agreed expectations, ongoing feedback and calibration make ratings comparable and fair.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_hiring_interviews",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_performance_reviews",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_lead_5",
+          "title": "Deciding and Leading Change",
+          "description": "Decisions, stakeholders, conflict and change",
+          "position": 4,
+          "elements": [
+            {
+              "id": "el_lead_5_1",
+              "title": "Making Decisions",
+              "element_type": "text",
+              "position": 0,
+              "content_inline": "<h2>Making Decisions</h2>\n<p>Many decisions stall not because they are hard but because nobody knows who decides. Before a contested decision, say <strong>who decides, who is consulted, and by when</strong>.</p>\n<p>Match speed to reversibility:</p>\n<ul>\n  <li><strong>Two-way doors</strong> are easy to undo. Decide quickly, with whoever is closest to the work.</li>\n  <li><strong>One-way doors</strong> are costly to undo. Slow down, gather input, and write the options down.</li>\n</ul>\n<p>Record important decisions briefly: the options, the choice, the reasons, and who decided. Once a decision is made, ask the team to <em>disagree and commit</em>: say your objection, then support the choice fully.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_decision_making",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_5_2",
+              "title": "Keeping Stakeholders Aligned",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Keeping Stakeholders Aligned</h2>\n<p>Stakeholders are the people affected by your team's work, or able to affect it. List them, note what each needs to know and how often, and choose a channel for each.</p>\n<p>A good update leads with what changed, what is at risk, and what you need, before the detail. Bad news travels best early, with options attached: <em>\"We will miss 1 March. We can ship the core on time and the export a week later, or ship everything on 8 March.\"</em></p>\n<p>When stakeholders disagree, do not tell each one what they want to hear. Put the trade-off on the table, name who decides, and write down the result.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_stakeholder_comm",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_5_3",
+              "title": "Working Through Conflict",
+              "element_type": "text",
+              "position": 2,
+              "content_inline": "<h2>Working Through Conflict</h2>\n<p>Disagreement about ideas is healthy. It turns harmful when it becomes personal or blocks work. The key move is separating <strong>positions</strong> (what people say they want) from <strong>interests</strong> (why they want it).</p>\n<p>Two engineers arguing over a database may share an interest in reliability and differ only on a worry about migration time. Once that is named, options appear.</p>\n<ul>\n  <li>Let people try to resolve it themselves first.</li>\n  <li>Step in when it blocks work or harms people.</li>\n  <li>Ask each side to state the other's view fairly before arguing their own.</li>\n  <li>Close with an agreed next step, and check back later.</li>\n</ul>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_conflict_resolution",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_5_4",
+              "title": "Leading Change",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>Leading Change</h2>\n<p>People rarely resist change itself. They resist uncertainty about what it means for them. Leading change means answering three questions early and often:</p>\n<ol>\n  <li><strong>Why</strong> is this happening, and why now?</li>\n  <li><strong>What</strong> changes for me, and what stays the same?</li>\n  <li><strong>How</strong> do I get help, and how can I shape the details?</li>\n</ol>\n<p>Involve the people affected before the plan is final, look for early wins you can show, and change processes and incentives to match, or the old way will quietly return. Treat resistance as information: it usually points to a real cost you have not addressed yet.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_change_management",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_lead_5_5",
+              "title": "Deciding and Change Quiz",
+              "element_type": "quiz",
+              "position": 4,
+              "content_inline": "{\n  \"title\": \"Deciding and Change Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"A decision is cheap to undo. You should usually:\",\n      \"options\": [\n        \"Decide quickly, close to the work\",\n        \"Form a committee\",\n        \"Wait for full consensus\",\n        \"Escalate it to the top\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Reversible decisions reward speed; slow processes cost more than mistakes.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Separating positions from interests means asking:\",\n      \"options\": [\n        \"Why each person wants what they want\",\n        \"Who is more senior\",\n        \"Who spoke first\",\n        \"What the policy says\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Interests reveal shared goals that positions hide.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"multiple_choice\",\n      \"prompt\": \"Which help people through a change?\",\n      \"options\": [\n        \"Explaining why it is happening\",\n        \"Involving them before the plan is final\",\n        \"Announcing it once and moving on\",\n        \"Updating processes to match\"\n      ],\n      \"correct_indices\": [\n        0,\n        1,\n        3\n      ],\n      \"explanation\": \"Clear reasons, early involvement and matching processes make change stick.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_decision_making",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_conflict_resolution",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_change_management",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_stakeholder_comm",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "description": "A fast, visual tour of time complexity: what it is, why it matters, and how to read the common classes (O(1), O(log n), O(n), O(n log n), O(n²)) without getting lost in the math.",
       "id": "course_tut_bigO",
       "kind": "tutorial",
