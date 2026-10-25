@@ -37,7 +37,7 @@ use crate::ai_chat::store::{
     StoredSnapshot,
 };
 use crate::ai_chat::{
-    action, artifact, bank_guard, error_code, memory, practice, ChatRuntime, RunGuard,
+    action, artifact, bank_guard, error_code, memory, practice, vocab, ChatRuntime, RunGuard,
 };
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
@@ -1515,11 +1515,13 @@ impl Stream {
         reply: &str,
         usage: Option<alexandria_ai::Usage>,
     ) {
-        let (without_artifact, artifact_block) = memory::split_block(reply, "artifact");
+        let (without_artifact, artifact_block) =
+            memory::split_block(reply, vocab::ReplyFence::Artifact);
         // Most actions need the chat's attachments to resolve, so they are
         // resolved with the database below.
         let draft = artifact_block.and_then(artifact::parse);
-        let (without_memory, memory_block) = memory::split_block(&without_artifact, "memory");
+        let (without_memory, memory_block) =
+            memory::split_block(&without_artifact, vocab::ReplyFence::Memory);
         let proposal = memory_block.and_then(memory::parse);
         let practice_mode = self.started.mode == "practice";
         let (prose, block) = if practice_mode {

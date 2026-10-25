@@ -1396,7 +1396,7 @@ fn insert_artifact(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
         params![
             id,
-            proposal.body.kind(),
+            proposal.body.kind().as_str(),
             status,
             proposal.title,
             body,

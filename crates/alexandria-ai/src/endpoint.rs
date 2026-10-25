@@ -44,6 +44,15 @@ impl Location {
         }
     }
 
+    /// The stable name chat uses for this place; equal to its serde form.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Device => "device",
+            Self::PrivateNetwork => "private_network",
+            Self::Remote => "remote",
+        }
+    }
+
     /// Whether a request to this location leaves the device.
     pub fn leaves_device(self) -> bool {
         !matches!(self, Self::Device)

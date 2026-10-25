@@ -165,7 +165,7 @@ mod tests {
             .execute(
                 "INSERT INTO chat_artifacts (id, kind, status, title, body_json, created_at, updated_at)
                  VALUES (?1, ?2, 'proposed', ?3, ?4, ?5, ?5)",
-                params![id, body.kind(), title, serde_json::to_string(body).unwrap(), NOW],
+                params![id, body.kind().as_str(), title, serde_json::to_string(body).unwrap(), NOW],
             )
             .unwrap();
     }

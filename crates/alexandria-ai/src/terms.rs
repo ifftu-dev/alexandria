@@ -56,8 +56,9 @@ const ADULTS_ONLY: &[(&str, &str)] = &[
 ];
 
 /// Developer APIs whose terms also restrict apps that minors are likely to
-/// use, so adults are told before they connect one.
-const RESTRICTS_APPS_FOR_MINORS: &[&str] = &["generativelanguage.googleapis.com"];
+/// use, so adults are told before they connect one. The webview does the
+/// telling: this list reaches it through the generated chat vocabulary.
+pub const RESTRICTS_APPS_FOR_MINORS: &[&str] = &["generativelanguage.googleapis.com"];
 
 fn domain(url: &Url) -> Option<String> {
     match url.host()? {
@@ -126,12 +127,6 @@ pub fn adults_only(url: &Url) -> Option<&'static str> {
     lookup(url, ADULTS_ONLY)
 }
 
-/// Whether the vendor's terms also restrict use inside apps that minors are
-/// likely to use, which adults should know before connecting.
-pub fn restricts_apps_for_minors(url: &Url) -> bool {
-    domain(url).is_some_and(|d| RESTRICTS_APPS_FOR_MINORS.iter().any(|s| matches(&d, s)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,14 +180,11 @@ mod tests {
     fn age_floors_are_named() {
         let gemini = url("https://generativelanguage.googleapis.com/v1beta/openai/");
         assert_eq!(adults_only(&gemini), Some("Google's Gemini API"));
-        assert!(restricts_apps_for_minors(&gemini));
+        assert!(RESTRICTS_APPS_FOR_MINORS.contains(&"generativelanguage.googleapis.com"));
         assert_eq!(
             adults_only(&url("https://openrouter.ai/api/v1")),
             Some("OpenRouter")
         );
-        assert!(!restricts_apps_for_minors(&url(
-            "https://openrouter.ai/api/v1"
-        )));
         assert_eq!(
             adults_only(&url("https://api.groq.com/openai/v1")),
             Some("Groq")
