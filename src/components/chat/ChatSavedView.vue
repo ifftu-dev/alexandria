@@ -2,7 +2,8 @@
 import { onMounted, ref, type DeepReadonly } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDialog } from '@/components/ui'
-import { chatErrorCode, useChat } from '@/composables/useChat'
+import { useChat } from '@/composables/useChat'
+import { chatErrorCode } from '@/utils/chatErrors'
 import { useCourseNotes } from '@/composables/useCourseNotes'
 import type { ChatArtifact } from '@/types'
 

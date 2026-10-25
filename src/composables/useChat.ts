@@ -4,6 +4,9 @@ import { useLocalApi } from './useLocalApi'
 import { getProfileSessionToken } from './profileSession'
 import { onProfileLocked } from './useProfiles'
 import { useSetting } from './useSettings'
+import { CHAT_LOCATION_OF_CONNECTION } from '@/generated/chat-vocab'
+import type { ChatErrorDisplay } from '@/utils/chatErrors'
+import { chatErrorCode } from '@/utils/chatErrors'
 import type {
   ChatBinding,
   ChatEvent,
@@ -41,7 +44,7 @@ const connections = ref<StudioDocument<StudioConnection>[]>([])
 const status = ref<ChatStatus>({ assessment_active: false })
 const prepared = shallowRef<ChatPreparedMessage | null>(null)
 const preparing = ref(false)
-const error = ref<string | null>(null)
+const error = ref<ChatErrorDisplay | null>(null)
 /** Live text of answers being written, by assistant message id. */
 const liveText = ref<Record<string, string>>({})
 const activeRunId = ref<string | null>(null)
@@ -108,13 +111,6 @@ function reset() {
 
 onProfileLocked(reset)
 
-/** The error code before the first colon of a backend message. */
-export function chatErrorCode(value: unknown): string {
-  const text = String(value instanceof Error ? value.message : value)
-  const code = text.split(':')[0]?.trim() ?? ''
-  return /^[a-z_]+$/.test(code) ? code : 'generic'
-}
-
 export function useChat() {
   const { invoke } = useLocalApi()
   /** Off by default: chat sends without a review step unless the learner
@@ -127,7 +123,7 @@ export function useChat() {
 
   const usableConnections = computed(() =>
     connections.value.filter(
-      (c) => c.value.enabled && c.value.capability === 'text' && c.value.location !== 'external',
+      (c) => c.value.enabled && c.value.capability === 'text' && CHAT_LOCATION_OF_CONNECTION[c.value.location] !== null,
     ),
   )
   const thread = computed(() => detail.value?.thread ?? null)

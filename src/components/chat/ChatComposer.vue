@@ -5,7 +5,8 @@ import { useChat } from '@/composables/useChat'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { useProviderSignIn } from '@/composables/useProviderSignIn'
 import { chatOffers } from '@/composables/useChatOffers'
-import type { ChatLocation, StudioConnection, StudioDocument } from '@/types'
+import { CHAT_LOCATION_OF_CONNECTION, type ChatLocation, type ConnectionLocation } from '@/generated/chat-vocab'
+import type { StudioConnection, StudioDocument } from '@/types'
 
 /**
  * The message box and its one row of tools: attachments ("+"), the mode,
@@ -73,10 +74,9 @@ const placeholder = computed(() =>
 )
 const canSend = computed(() => !!chat.draft.value.trim() && !chat.preparing.value && !!chat.selectedConnection.value)
 
-function locationOf(value: string | undefined): ChatLocation {
-  if (value === 'cloud') return 'remote'
-  if (value === 'private_network') return 'private_network'
-  return 'device'
+/** The composer lists only connections chat can use, so every one has a chat location. */
+function locationOf(value: ConnectionLocation | undefined): ChatLocation {
+  return (value && CHAT_LOCATION_OF_CONNECTION[value]) ?? 'device'
 }
 const location = computed(() => locationOf(chat.selectedConnection.value?.value.location))
 function hostOf(endpoint: string) {

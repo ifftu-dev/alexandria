@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
-import { chatErrorCode, useChat } from '@/composables/useChat'
+import { useChat } from '@/composables/useChat'
+import { chatErrorCode } from '@/utils/chatErrors'
 import type { ChatMemoryItem } from '@/types'
 
 /** A model's suggestion for learning memory. Nothing is remembered unless

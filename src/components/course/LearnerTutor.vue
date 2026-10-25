@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, AppModal, AppTextarea } from '@/components/ui'
 import { restrictsAppsForMinors } from '@/utils/providerTerms'
+import { CHAT_LOCATION_OF_CONNECTION } from '@/generated/chat-vocab'
 import type {
   DecisionJudgment,
   StudioConnection,
@@ -35,7 +36,7 @@ const apiKey = ref('')
 const connection = ref<StudioDocument<StudioConnection> | null>(null)
 
 const availableConnections = computed(() => connections.value.filter(item =>
-  item.value.enabled && item.value.capability === 'text' && item.value.location !== 'external',
+  item.value.enabled && item.value.capability === 'text' && CHAT_LOCATION_OF_CONNECTION[item.value.location] !== null,
 ))
 const selected = computed(() => availableConnections.value.find(item => item.id === selectedConnection.value))
 const providerLocation = computed(() => selected.value?.value.location ?? 'local')
