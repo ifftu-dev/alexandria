@@ -1,9 +1,10 @@
 //! Messages protocol contract tests against a real local HTTP server.
 
 use alexandria_ai::anthropic::{API_VERSION, THINKING_HEADROOM};
-use alexandria_ai::endpoint::{self, Location};
+use alexandria_ai::model::Limits;
 use alexandria_ai::{
-    Adapter, ChatRequest, Error, FinishReason, Message, Protocol, StreamEvent, Usage,
+    connect, Adapter, ChatRequest, Connection, Error, FinishReason, Location, Message, Protocol,
+    StreamEvent, Usage,
 };
 use tokio::sync::mpsc;
 
@@ -11,8 +12,12 @@ mod support;
 use support::{drain, serve, Reply};
 
 async fn adapter(base: &str, key: Option<&str>) -> Adapter {
-    let endpoint = endpoint::resolve(base, Location::Device).await.unwrap();
-    Adapter::new(Protocol::Anthropic, endpoint, key.map(str::to_owned))
+    let connection = Connection {
+        endpoint: base.into(),
+        location: Location::Device,
+        protocol: Protocol::Anthropic,
+    };
+    connect(&connection, key, Limits::default()).await.unwrap()
 }
 
 fn request() -> ChatRequest {

@@ -1,14 +1,19 @@
-//! Studio's model calls, served by the shared `alexandria-ai` runtime.
+//! Studio's view of a model connection.
 //!
-//! The public functions keep the shape Studio and the lesson tutor already
-//! use. Endpoint policy, transport bounds, and error sanitizing live in
-//! `alexandria-ai`, so Studio, the tutor, and global chat cannot drift apart.
+//! A Studio connection document names its location in Studio's words
+//! (`local`, `private_network`, `cloud`). This module maps it to what the
+//! shared `alexandria-ai` runtime needs, validates a document before it is
+//! saved, fixes the shape of a Studio run's request, and maps the runtime's
+//! typed errors to Studio's vocabulary once. Reaching a model is
+//! `alexandria_ai::connect`; endpoint policy, credential admission,
+//! transport bounds, and error sanitizing live there, so Studio, the lesson
+//! tutor, and global chat cannot drift apart.
 
 use std::time::Duration;
 
 use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
-use alexandria_ai::{Adapter, ChatRequest, Message};
+use alexandria_ai::{ChatRequest, Message};
 use url::Url;
 
 use crate::model::{bounded, StudioConnection};
@@ -27,7 +32,19 @@ pub fn location(connection: &StudioConnection) -> Result<Location> {
     }
 }
 
-fn map(error: alexandria_ai::Error) -> Error {
+/// The connection as `alexandria_ai::connect` takes it.
+pub fn connection(connection: &StudioConnection) -> Result<alexandria_ai::Connection> {
+    Ok(alexandria_ai::Connection {
+        endpoint: connection.endpoint.clone(),
+        location: location(connection)?,
+        protocol: connection.protocol,
+    })
+}
+
+/// Studio's reading of a runtime failure: a configuration problem is
+/// invalid input; anything else is the model being unavailable, in the
+/// runtime's own learner-safe words.
+pub fn map_error(error: alexandria_ai::Error) -> Error {
     match error {
         alexandria_ai::Error::Invalid(message) => Error::Invalid(message),
         alexandria_ai::Error::TooLarge => {
@@ -74,37 +91,22 @@ pub fn validate_connection(connection: &StudioConnection) -> Result<Url> {
     Ok(url)
 }
 
-pub async fn complete(
-    connection: &StudioConnection,
-    key: Option<&str>,
-    system: &str,
-    context: &str,
-) -> Result<String> {
-    if !connection.enabled {
-        return Err(Error::Unavailable("Model connection is disabled".into()));
+/// Bounds for one Studio run step or tutor turn: a single answer within two
+/// minutes.
+pub fn limits() -> Limits {
+    Limits {
+        total_timeout: Duration::from_secs(120),
+        ..Limits::default()
     }
-    validate_connection(connection)?;
-    let location = location(connection)?;
-    if location == Location::Remote && key.is_none_or(str::is_empty) {
-        return Err(Error::Invalid(
-            "Add an API key for this cloud connection".into(),
-        ));
-    }
-    let endpoint = endpoint::resolve(&connection.endpoint, location)
-        .await
-        .map_err(map)?;
-    let adapter =
-        Adapter::new(connection.protocol, endpoint, key.map(str::to_owned)).with_limits(Limits {
-            total_timeout: Duration::from_secs(120),
-            ..Limits::default()
-        });
-    let request = ChatRequest {
+}
+
+/// The request a Studio run step or tutor turn sends: the effective prompt
+/// as instructions, the assembled context as the one user message.
+pub fn request(connection: &StudioConnection, system: &str, context: &str) -> ChatRequest {
+    ChatRequest {
         model: connection.model.clone(),
         messages: vec![Message::system(system), Message::user(context)],
         max_output_tokens: 4096,
         temperature: None,
-    };
-    let completion = adapter.complete(&request).await.map_err(map)?;
-    bounded(&completion.text, 128_000, "Model output")?;
-    Ok(completion.text)
+    }
 }

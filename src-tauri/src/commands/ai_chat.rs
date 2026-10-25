@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
+use alexandria_ai::Protocol;
 use alexandria_ai::StreamEvent;
-use alexandria_ai::{Adapter, Protocol};
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
 use chrono::SecondsFormat;
@@ -366,10 +366,7 @@ pub async fn chat_list_models(
         Ok((doc.value, key))
     })
     .await?;
-    let location = studio_provider::location(&connection).map_err(|e| e.to_string())?;
-    let endpoint = endpoint::resolve(&connection.endpoint, location)
-        .await
-        .map_err(|e| format!("{}: {e}", error_code(&e)))?;
+    let target = studio_provider::connection(&connection).map_err(|e| e.to_string())?;
     let key = crate::ai_auth::credential::bearer_for(
         &state.db_executor,
         &state.profile_lease(),
@@ -377,7 +374,10 @@ pub async fn chat_list_models(
         key,
     )
     .await?;
-    Adapter::new(connection.protocol, endpoint, key)
+    let adapter = alexandria_ai::connect(&target, key.as_deref(), Limits::default())
+        .await
+        .map_err(|e| format!("{}: {e}", error_code(&e)))?;
+    adapter
         .list_models()
         .await
         .map_err(|e| format!("{}: {e}", error_code(&e)))
@@ -1616,32 +1616,6 @@ impl Stream {
         let run_id = self.started.run.run_id.clone();
         let message_id = self.started.run.assistant_message.id.clone();
 
-        let endpoint = match endpoint::resolve(&self.started.endpoint, self.started.location).await
-        {
-            Ok(endpoint) => endpoint,
-            Err(error) => {
-                let code = error_code(&error);
-                finish(
-                    &self.executor,
-                    &self.lease,
-                    &run_id,
-                    &message_id,
-                    "failed",
-                    "",
-                    Some(&code),
-                    None,
-                )
-                .await;
-                self.emit(
-                    &mut seq,
-                    ChatEventBody::RunFailed {
-                        error: code,
-                        partial: false,
-                    },
-                );
-                return;
-            }
-        };
         // A ChatGPT sign-in renews its hour-long token here, before sending.
         let key = match crate::ai_auth::credential::bearer_for(
             &self.executor,
@@ -1675,8 +1649,37 @@ impl Stream {
                 return;
             }
         };
-        let adapter = Adapter::new(self.started.protocol, endpoint, key);
-        let adapter = adapter.with_limits(Limits::default());
+        let target = alexandria_ai::Connection {
+            endpoint: self.started.endpoint.clone(),
+            location: self.started.location,
+            protocol: self.started.protocol,
+        };
+        let adapter = match alexandria_ai::connect(&target, key.as_deref(), Limits::default()).await
+        {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                let code = error_code(&error);
+                finish(
+                    &self.executor,
+                    &self.lease,
+                    &run_id,
+                    &message_id,
+                    "failed",
+                    "",
+                    Some(&code),
+                    None,
+                )
+                .await;
+                self.emit(
+                    &mut seq,
+                    ChatEventBody::RunFailed {
+                        error: code,
+                        partial: false,
+                    },
+                );
+                return;
+            }
+        };
         let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
         let request = self.started.request.clone();
         let stream = adapter.stream(&request, tx);

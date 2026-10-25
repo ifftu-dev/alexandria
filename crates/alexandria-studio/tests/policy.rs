@@ -325,15 +325,16 @@ async fn real_http_boundary_sends_effective_prompt_and_handles_provider_failure(
         let body = r#"{"choices":[{"message":{"content":"A real HTTP response"}}]}"#;
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",body.len(),body).as_bytes()).await.unwrap();
     });
-    let result = provider::complete(
-        &connection,
+    let adapter = alexandria_ai::connect(
+        &provider::connection(&connection).unwrap(),
         None,
-        "Personal instructor prompt",
-        "Lesson context",
+        provider::limits(),
     )
     .await
     .unwrap();
-    assert_eq!(result, "A real HTTP response");
+    let request = provider::request(&connection, "Personal instructor prompt", "Lesson context");
+    let result = adapter.complete(&request).await.unwrap();
+    assert_eq!(result.text, "A real HTTP response");
     server.await.unwrap();
 }
 
@@ -433,10 +434,15 @@ async fn provider_failure_does_not_disclose_response_body() {
         let body = "sensitive provider diagnostic";
         socket.write_all(format!("HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
     });
-    let error = provider::complete(&connection, Some("private-key"), "Prompt", "Context")
-        .await
-        .unwrap_err()
-        .to_string();
+    let adapter = alexandria_ai::connect(
+        &provider::connection(&connection).unwrap(),
+        Some("private-key"),
+        provider::limits(),
+    )
+    .await
+    .unwrap();
+    let request = provider::request(&connection, "Prompt", "Context");
+    let error = provider::map_error(adapter.complete(&request).await.unwrap_err()).to_string();
     assert!(error.contains("401"));
     assert!(!error.contains("private-key"));
     assert!(!error.contains("sensitive"));

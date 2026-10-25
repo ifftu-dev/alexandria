@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use alexandria_studio::{model::*, store, Error as StudioError};
+use alexandria_studio::{model::*, provider, store, Error as StudioError};
 use tauri::Manager;
 
+use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
 
 use crate::AppState;
@@ -138,6 +139,37 @@ fn age_checked(
     })
 }
 
+/// One answer from a Studio connection: the tutor's reply or a run step's
+/// output. `key` is the bearer the host already looked up for it.
+async fn complete(
+    connection: &StudioConnection,
+    key: Option<&str>,
+    system: &str,
+    context: &str,
+) -> Result<String, StudioError> {
+    if !connection.enabled {
+        return Err(StudioError::Unavailable(
+            "Model connection is disabled".into(),
+        ));
+    }
+    provider::validate_connection(connection)?;
+    let target = provider::connection(connection)?;
+    if target.location == alexandria_ai::Location::Remote && key.is_none_or(str::is_empty) {
+        return Err(StudioError::Invalid(
+            "Add an API key for this cloud connection".into(),
+        ));
+    }
+    let adapter = alexandria_ai::connect(&target, key, provider::limits())
+        .await
+        .map_err(provider::map_error)?;
+    let completion = adapter
+        .complete(&provider::request(connection, system, context))
+        .await
+        .map_err(provider::map_error)?;
+    bounded(&completion.text, 128_000, "Model output")?;
+    Ok(completion.text)
+}
+
 #[tauri::command]
 pub async fn studio_ask_tutor(
     state: State<'_, AppState>,
@@ -202,14 +234,9 @@ pub async fn studio_ask_tutor(
         context.secret.clone(),
     )
     .await?;
-    let answer = alexandria_studio::provider::complete(
-        &context.connection,
-        secret.as_deref(),
-        &system,
-        &request,
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    let answer = complete(&context.connection, secret.as_deref(), &system, &request)
+        .await
+        .map_err(|error| error.to_string())?;
     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
         return Err(StudioError::Locked.to_string());
     }
@@ -388,6 +415,9 @@ pub async fn studio_start_run(
     run_id: String,
     revision: i64,
 ) -> Result<StudioDocument<StudioRun>, String> {
+    // The run keeps the lease of the session that started it, as a chat
+    // answer does, so a locked profile ends it.
+    let lease = state.profile_lease();
     with_db(&state, |db| {
         let epoch = state.studio.epoch.load(Ordering::SeqCst);
         let mut jobs = state
@@ -407,14 +437,20 @@ pub async fn studio_start_run(
         let id = run_id.clone();
         let worker_revision = result.revision;
         let handle = tauri::async_runtime::spawn(async move {
-            execute_run(app, id, epoch, worker_revision).await;
+            execute_run(app, lease, id, epoch, worker_revision).await;
         });
         jobs.insert(run_id, (worker_revision, handle));
         Ok(result)
     })
 }
 
-async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revision: i64) {
+async fn execute_run(
+    app: tauri::AppHandle,
+    lease: ProfileLease,
+    id: String,
+    epoch: u64,
+    worker_revision: i64,
+) {
     loop {
         let state = app.state::<AppState>();
         let next = with_db(&state, |db| {
@@ -460,21 +496,12 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                 break;
             }
         };
-        let connection_id = step.connection.id.clone();
-        let key = match crate::ai_auth::credential::bearer(
-            &crate::ai_auth::chatgpt::Endpoints::default(),
+        // A ChatGPT sign-in renews its hour-long token here, before sending.
+        let key = match crate::ai_auth::credential::bearer_for(
+            &state.db_executor,
+            &lease,
             &step.connection,
             key,
-            || {
-                let loaded = with_db(&state, |db| store::secret(db, &connection_id));
-                async move { loaded }
-            },
-            |next| {
-                let saved = with_db(&state, |db| {
-                    store::replace_secret(db, &connection_id, &next)
-                });
-                async move { saved }
-            },
         )
         .await
         {
@@ -484,7 +511,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                 break;
             }
         };
-        let output = alexandria_studio::provider::complete(
+        let output = complete(
             &step.connection,
             key.as_deref(),
             &step.effective_prompt,

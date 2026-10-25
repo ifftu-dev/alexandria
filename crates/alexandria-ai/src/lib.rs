@@ -2,17 +2,20 @@
 //!
 //! This crate owns the parts of talking to a model that do not depend on who
 //! is asking or why: where a request may go ([`endpoint`]), what a request and
-//! its streamed answer look like ([`model`]), and how each wire protocol is
-//! spoken ([`compatible`], [`anthropic`]). [`Adapter`] picks one by
-//! [`Protocol`]. It knows nothing about profiles, courses, learner
-//! records, or the webview. The host resolves context, reads secrets, and
-//! hands an immutable [`model::ChatRequest`] to an adapter.
+//! its streamed answer look like ([`model`]), what vendors allow
+//! ([`terms`]), and how each wire protocol is spoken ([`compatible`],
+//! [`anthropic`], [`responses`]). [`connect`] is the one way from a saved
+//! connection and its credential to an [`Adapter`], which dispatches by
+//! [`Protocol`]. The crate knows nothing about profiles, courses, learner
+//! records, or the webview. The host resolves context, reads secrets, calls
+//! [`connect`], and hands an immutable [`model::ChatRequest`] to the adapter.
 //!
 //! Every failure is an [`Error`] whose message is safe to show a learner: it
 //! never contains a key, a request body, or a provider's response body.
 
 pub mod anthropic;
 pub mod compatible;
+pub mod connection;
 pub mod endpoint;
 mod http;
 pub mod model;
@@ -20,6 +23,7 @@ pub mod responses;
 mod sse;
 pub mod terms;
 
+pub use connection::{connect, Connection};
 pub use endpoint::{Endpoint, Location};
 pub use model::{ChatRequest, Completion, FinishReason, Message, Role, StreamEvent, Usage};
 
@@ -67,7 +71,7 @@ pub enum Adapter {
 }
 
 impl Adapter {
-    pub fn new(protocol: Protocol, endpoint: Endpoint, key: Option<String>) -> Self {
+    pub(crate) fn new(protocol: Protocol, endpoint: Endpoint, key: Option<String>) -> Self {
         match protocol {
             Protocol::Compatible => Adapter::Compatible(compatible::Compatible::new(endpoint, key)),
             Protocol::Anthropic => Adapter::Anthropic(anthropic::Anthropic::new(endpoint, key)),
@@ -75,7 +79,7 @@ impl Adapter {
         }
     }
 
-    pub fn with_limits(self, limits: model::Limits) -> Self {
+    pub(crate) fn with_limits(self, limits: model::Limits) -> Self {
         match self {
             Adapter::Compatible(a) => Adapter::Compatible(a.with_limits(limits)),
             Adapter::Anthropic(a) => Adapter::Anthropic(a.with_limits(limits)),
@@ -91,22 +95,7 @@ impl Adapter {
         }
     }
 
-    /// Refuses a consumer sign-in token before anything is sent.
-    fn admit(&self) -> Result<()> {
-        let (key, signed_in) = match self {
-            Adapter::Compatible(a) => (a.key(), false),
-            Adapter::Anthropic(a) => (a.key(), false),
-            // Only reachable through OpenAI's sanctioned ChatGPT sign-in.
-            Adapter::Responses(a) => (a.key(), true),
-        };
-        match key {
-            Some(key) => terms::check_credential(self.endpoint().base(), key, signed_in),
-            None => Ok(()),
-        }
-    }
-
     pub async fn complete(&self, request: &ChatRequest) -> Result<Completion> {
-        self.admit()?;
         match self {
             Adapter::Compatible(a) => a.complete(request).await,
             Adapter::Anthropic(a) => a.complete(request).await,
@@ -119,7 +108,6 @@ impl Adapter {
         request: &ChatRequest,
         events: mpsc::Sender<StreamEvent>,
     ) -> Result<Completion> {
-        self.admit()?;
         match self {
             Adapter::Compatible(a) => a.stream(request, events).await,
             Adapter::Anthropic(a) => a.stream(request, events).await,
@@ -128,7 +116,6 @@ impl Adapter {
     }
 
     pub async fn list_models(&self) -> Result<Vec<String>> {
-        self.admit()?;
         match self {
             Adapter::Compatible(a) => a.list_models().await,
             Adapter::Anthropic(a) => a.list_models().await,

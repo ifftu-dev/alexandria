@@ -8,8 +8,8 @@
 
 use std::sync::Mutex;
 
-use alexandria_ai::endpoint::{self, Location};
-use alexandria_ai::{Adapter, Protocol};
+use alexandria_ai::model::Limits;
+use alexandria_ai::{Connection, Location, Protocol};
 use alexandria_studio::model::{ConnectionAuth, StudioConnection, StudioDocument};
 use alexandria_studio::store as studio_store;
 use serde::Serialize;
@@ -152,19 +152,24 @@ async fn sign_in_chatgpt(
     .map_err(|e| e.to_string())
     .map_err(step("chatgpt authorize and verify"))?;
 
-    let endpoint = endpoint::resolve(chatgpt::API_BASE, Location::Remote)
-        .await
-        .map_err(|e| format!("unreachable: {e}"))
-        .map_err(step("resolve api.openai.com"))?;
-    let models = Adapter::new(
-        Protocol::Responses,
-        endpoint,
-        Some(credential.access_token.clone()),
+    let target = Connection {
+        endpoint: chatgpt::API_BASE.into(),
+        location: Location::Remote,
+        protocol: Protocol::Responses,
+    };
+    let adapter = alexandria_ai::connect(
+        &target,
+        Some(credential.access_token.as_str()),
+        Limits::default(),
     )
-    .list_models()
     .await
     .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))
-    .map_err(step("list ChatGPT plan models"))?;
+    .map_err(step("connect api.openai.com"))?;
+    let models = adapter
+        .list_models()
+        .await
+        .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))
+        .map_err(step("list ChatGPT plan models"))?;
     let current = existing.as_ref().map(|(doc, _)| doc.value.model.clone());
     let model = current
         .filter(|m| models.contains(m))
@@ -248,9 +253,6 @@ async fn save_openrouter(
         },
     };
     with_conn(state, "ai-signin.openrouter-save", move |conn| {
-        let url = alexandria_ai::endpoint::parse(openrouter::API_BASE, Location::Remote)
-            .map_err(|e| e.to_string())?;
-        alexandria_ai::terms::check_credential(&url, &key, false).map_err(|e| e.to_string())?;
         studio_store::save_signed_in_connection(conn, &doc, &key).map_err(|e| e.to_string())
     })
     .await
