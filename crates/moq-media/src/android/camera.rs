@@ -1,4 +1,4 @@
-// Copyright 2026 Alexandria Pvt. Ltd.
+// Copyright 2026 Pratyush Pundir <pratyush@alexandria.ifftu.dev>
 // Licensed under the Apache License, Version 2.0 — see LICENSE-APACHE.
 //
 // Original Alexandria work, not derived from n0-computer/iroh-live.

@@ -75,7 +75,7 @@ in this repository's history:
    `src/videotoolbox/decoder.rs`, `src/videotoolbox/encoder.rs`, and the
    Alexandria-authored `src/android/`, `src/preview.rs` and
    `tests/live_latency.rs`; in `crates/iroh-moq`: `Cargo.toml` and
-   `src/lib.rs`. Each modified N0 file carries a *Modified by Alexandria*
+   `src/lib.rs`. Each modified N0 file carries a *Modified by Pratyush Pundir*
    line under N0's header.
 
 Because phase 1 cannot be enumerated precisely, **treat every file in
@@ -86,7 +86,8 @@ position and the one this notice takes.
 
 Keep N0's copyright headers. Add a modification notice beneath the existing
 header rather than replacing it. New files that contain no upstream code get an
-Alexandria copyright header instead, as `src/android/` does.
+`Pratyush Pundir <pratyush@alexandria.ifftu.dev>` copyright header instead,
+as `src/android/` does.
 
 Taking an upstream fix requires reconciling by hand — there is no shared history
 with `n0-computer/iroh-live` to rebase onto.

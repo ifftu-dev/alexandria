@@ -58,7 +58,7 @@
     "category": "Education",
     "shortDescription": "Free learning, credentials you own",
     "longDescription": "Alexandria is a free, open-source learning app. Earn verified credentials that are truly yours, study offline, and keep your learning and identity on your own device.",
-    "copyright": "Alexandria Contributors",
+    "copyright": "Copyright (C) 2025-2026 Pratyush Pundir <pratyush@alexandria.ifftu.dev> and contributors",
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": "./Entitlements.plist",
