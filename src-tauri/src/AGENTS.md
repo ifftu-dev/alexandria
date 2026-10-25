@@ -8,7 +8,7 @@
 
 ## Overview
 
-Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a network-bound per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), domain-oriented Tauri commands, a 90-migration SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Inspect the handler list and schema directly for command/table counts.
+Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a network-bound per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), domain-oriented Tauri commands, a 27-migration SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Inspect the handler list and schema directly for command/table counts.
 
 ## WHERE TO LOOK
 
@@ -20,7 +20,7 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
 | P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), profile-fetch, username-reg (registry receipts), sync, stress. `sync.rs` also fans settings rows out/in. |
-| Database | `db/` | SQLite + 94 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks; standard release profile activation also installs ten labelled, profile-owned course drafts, all bundled plugins, and three owned classroom templates through `commands/demo_courses.rs` and `commands/demo_resources.rs`; development builds instead offer the opt-in, profile-scoped picker in `commands/dev_seeds.rs`; no content seed creates personas, credentials or enrollments. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
+| Database | `db/` | SQLite + 27 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks on every profile open: bundled taxonomy rows are upserted by id (adding new skills and overwriting local edits to bundled names, descriptions and Bloom levels) and goal templates are replaced by id; standard release profile activation also installs eleven labelled, profile-owned course drafts, all bundled plugins, and three owned classroom templates through `commands/demo_courses.rs` and `commands/demo_resources.rs`; development builds instead offer the opt-in, profile-scoped picker in `commands/dev_seeds.rs`; no content seed creates personas, credentials or enrollments. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
 | Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
 | Cardano | `cardano/` | Pallas wallet/tx building; reference scripts deployed on preprod (UTxOs in `cardano/script_refs.rs`) |
 | Content storage | `content_store/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock; `ContentNode::shutdown` calls both `Router::shutdown` and `Store::shutdown` so the redb lock releases between profile switches. |
@@ -97,7 +97,7 @@ Line counts drift with every PR; regenerate with `wc -l` before relying on them.
 |------|-------|------|
 | `p2p/network.rs` | 3382 | Swarm behavior and protocol orchestration |
 | `tutoring/manager_mobile.rs` | 3286 | Mobile tutoring logic |
-| `db/schema.rs` | 3781 | 94 migrations |
+| `db/schema.rs` | 1460 | 27 migrations |
 | `tutoring/manager.rs` | 2136 | Desktop/Android tutoring |
 | `evidence/reputation.rs` | 830 | Credential-backed reputation system |
 | `p2p/sync.rs` | 1498 | P2P sync protocol |

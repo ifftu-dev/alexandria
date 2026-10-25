@@ -4,7 +4,7 @@ This demo runs from the `main` branches of Alexandria and Alexandria Cloud. It s
 
 ## Prepare this Mac
 
-1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and ten profile-owned course drafts (seven examples, Plugins Showcase, and two video labs), and three classroom/channel templates. This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
+1. Open the installed **Alexandria** application and unlock the demo profile. Profile activation runs migrations and the current bundled seeds automatically: the public taxonomy, synonyms, goal templates, question banks/items, bootstrap trust data, all nine bundled plugins, and eleven profile-owned course drafts (eight examples, Plugins Showcase, and two video labs), and three classroom/channel templates. This applies to every profile on creation, mnemonic restore, and unlock; locked profiles are seeded on their next unlock. There is no separate `db seed` CLI command in this branch. Unlock must succeed before assessment content is ready. Existing learner attempts and credentials are preserved.
 2. Start Docker Desktop. From the Cloud checkout run `scripts/demo-assessment.sh`. Open <http://127.0.0.1:8787> and choose **Continue**. This is a loopback-only development sign-in, not a production identity-provider deployment. The launcher claims `alexandria.ifftu.dev` for the demo organization as **IFFTU**, using the signing key seeded from `.demo/org-signing-seed`, and verifies it against the DNS TXT record `_alexandria.alexandria.ifftu.dev` (`v=alexandria-org1; name=IFFTU; key=<did:key>`). That record must list the key: until the claim verifies, Cloud refuses to send requests, invitations or offers, and the launcher prints a warning. Cloud **Settings → Organisation identity** shows the status and the exact record.
 3. In Alexandria, open **Settings → Developer → Alexandria Cloud address** and enter `http://127.0.0.1:8787`. **Settings → Organisations → Receive requests from organisations** is on by default. Both applications use the exported bundled taxonomy. The launcher creates only an organization; it does not seed candidate assessment results.
 4. Use **JavaScript** (`skill_javascript`) or **Big-O Analysis** (`skill_big_o`). These have bundled MCQ banks. Each attempt draws three questions and requires at least 70%; with three equally weighted questions, all three must be correct. Questions/options are randomized.
@@ -210,9 +210,9 @@ unverified.
 
 In debug builds or optimized builds compiled with Cargo feature `dev-seeding`,
 **Settings → Developer → Test data** lists the actual bundled resources:
-eight example course drafts, two video courses, nine plugins, two question banks,
+nine example course drafts, two video courses, nine plugins, fifteen question banks,
 individual goal templates, three classrooms, fifteen videos, seven thumbnails,
-six local discussion prompts, and seven proposal-style discussion drafts (one
+six local discussion prompts, and eight proposal-style discussion drafts (one
 per bundled subject field, bound to that field so the composer preselects it).
 No governance proposal, ballot or tally rows exist to seed; the local DAO tables
 were retired and only the pinned demo genesis remains. Required taxonomy/synonyms and global plugins

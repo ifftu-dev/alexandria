@@ -73,7 +73,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |                | cmds    |  +----------------+  |  |
 |  |  Vue pages     |         |  |   SQLite DB    |  |  |
 |  |  + components |         |  |  local schema  |  |  |
-|  |  + composables|         |  |   94 migrations|  |  |
+|  |  + composables|         |  |   27 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -249,7 +249,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Schema**: 94 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
+**Schema**: 27 versioned migrations in `src-tauri/src/db/schema.rs`. The domain table below is a selected map, not a complete live-table inventory.
 
 | Domain | Tables |
 |--------|--------|

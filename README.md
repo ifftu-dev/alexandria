@@ -148,7 +148,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including interviews and profile lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite schema (94 migrations + bundled built-in data) — one encrypted DB per profile
+│       ├── db/       # SQLite schema (27 migrations + bundled built-in data) — one encrypted DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine; legacy evidence/challenge pipeline retired
@@ -266,7 +266,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
+The app launches a native window backed by a local webview. First launch generates the SQLite database. Every profile open runs migrations, installs or refreshes the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
 
 ### Building for iOS
 

@@ -266,16 +266,6 @@ fn current(state: &State<'_, AppState>, revision: i64) -> Result<(), String> {
     })
 }
 
-fn taxonomy() -> Result<TaxonomySnapshot, String> {
-    let profile = crate::network_profile::embedded_preprod().map_err(|e| e.to_string())?;
-    TaxonomySnapshot::from_reference(
-        &profile.network_id,
-        "bundled-v1",
-        include_str!("../../../bootstrap/public_taxonomy.json"),
-    )
-    .map_err(|e| e.to_string())
-}
-
 fn check_local_taxonomy(
     state: &AppState,
     snapshot: &TaxonomySnapshot,
@@ -317,7 +307,7 @@ pub async fn decision_learning_review(
         return Err("Invalid learning task".into());
     }
     let (client, revision) = prepare(&state, task).await?;
-    let snapshot = taxonomy()?;
+    let snapshot = crate::db::bundled::taxonomy_snapshot()?;
     let candidates = learning::shortlist(&source, &snapshot);
     let request =
         learning::request(&source, &snapshot, &candidates, task).map_err(|e| e.to_string())?;
