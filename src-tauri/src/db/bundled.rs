@@ -39,6 +39,24 @@ pub(crate) fn bundled_snapshot() -> Result<MutexGuard<'static, Database>, String
 
 const PUBLIC_TAXONOMY_JSON: &str = include_str!("../../../bootstrap/public_taxonomy.json");
 
+/// Revision of the bundled taxonomy as an exchanged snapshot. Bump it, and the
+/// exporter example in `alexandria-learning-contracts`, whenever bundled
+/// skills or prerequisites change: the digest changes with them.
+pub(crate) const TAXONOMY_SNAPSHOT_REVISION: &str = "bundled-v2";
+
+/// The bundled taxonomy as the snapshot organisations and optional AI checks
+/// pin by digest, bound to this build's network.
+pub(crate) fn taxonomy_snapshot() -> Result<alexandria_learning_contracts::TaxonomySnapshot, String>
+{
+    let profile = crate::network_profile::embedded_preprod().map_err(|e| e.to_string())?;
+    alexandria_learning_contracts::TaxonomySnapshot::from_reference(
+        &profile.network_id,
+        TAXONOMY_SNAPSHOT_REVISION,
+        PUBLIC_TAXONOMY_JSON,
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Deserialize)]
 struct BootstrapTaxonomyPayload {
     subject_fields: Vec<BootstrapSubjectField>,
@@ -132,6 +150,8 @@ pub(crate) fn subject_catalog() -> &'static str {
 pub fn install_bundled_data(conn: &Connection) -> Result<i64, String> {
     crate::db::with_transaction(conn, || {
         let skills = install_taxonomy(conn)?;
+        conn.execute_batch(SKILL_SYNONYMS_SQL)
+            .map_err(|e| format!("install bundled skill synonyms: {e}"))?;
         conn.execute_batch(GOAL_TEMPLATES_SQL)
             .map_err(|e| format!("install bundled goal templates: {e}"))?;
         conn.execute_batch(QUESTION_BANKS_SQL)
@@ -144,10 +164,8 @@ pub fn install_bundled_data(conn: &Connection) -> Result<i64, String> {
 pub(crate) fn install_foundation(conn: &Connection) -> Result<i64, String> {
     crate::db::with_transaction(conn, || {
         let count = install_taxonomy(conn)?;
-        let (synonyms, _) = GOAL_TEMPLATES_SQL
-            .split_once("INSERT OR REPLACE INTO goal_templates")
-            .ok_or("Bundled synonyms boundary missing")?;
-        conn.execute_batch(synonyms).map_err(|e| e.to_string())?;
+        conn.execute_batch(SKILL_SYNONYMS_SQL)
+            .map_err(|e| e.to_string())?;
         Ok(count)
     })
 }
@@ -168,7 +186,8 @@ pub(crate) fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
              (id, name, description, icon_emoji, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), COALESCE(?6, datetime('now')))
              ON CONFLICT(id) DO UPDATE SET name = excluded.name,
-               description = excluded.description, icon_emoji = excluded.icon_emoji",
+               description = excluded.description, icon_emoji = excluded.icon_emoji,
+               updated_at = excluded.updated_at",
             params![
                 f.id,
                 f.name,
@@ -187,7 +206,8 @@ pub(crate) fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
              (id, name, description, subject_field_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), COALESCE(?6, datetime('now')))
              ON CONFLICT(id) DO UPDATE SET name = excluded.name,
-               description = excluded.description, subject_field_id = excluded.subject_field_id",
+               description = excluded.description, subject_field_id = excluded.subject_field_id,
+               updated_at = excluded.updated_at",
             params![
                 s.id,
                 s.name,
@@ -207,7 +227,7 @@ pub(crate) fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
              VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, datetime('now')), COALESCE(?7, datetime('now')))
              ON CONFLICT(id) DO UPDATE SET name = excluded.name,
                description = excluded.description, subject_id = excluded.subject_id,
-               bloom_level = excluded.bloom_level",
+               bloom_level = excluded.bloom_level, updated_at = excluded.updated_at",
             params![
                 sk.id,
                 sk.name,
@@ -422,10 +442,8 @@ INSERT OR IGNORE INTO assessment_item_skills (item_id, skill_id, weight)
 SELECT id, skill_id, 1.0 FROM assessment_items WHERE taxonomy_version = 'bundled';
 "#;
 
-/// Skill synonyms for on-device JD and document matching, and bundled goal
-/// templates mapping exams, curricula and job roles onto bundled skills.
-const GOAL_TEMPLATES_SQL: &str = r#"
--- Synonyms/aliases for on-device JD + document skill matching.
+/// Skill synonyms for on-device JD and document matching.
+const SKILL_SYNONYMS_SQL: &str = r#"
 UPDATE skills SET synonyms = 'js,ecmascript,node.js,node' WHERE id = 'skill_javascript';
 UPDATE skills SET synonyms = 'ts' WHERE id = 'skill_typescript';
 UPDATE skills SET synonyms = 'vue.js,vuejs' WHERE id = 'skill_vue';
@@ -451,7 +469,11 @@ UPDATE skills SET synonyms = 'stakeholders,stakeholder management,communication,
 UPDATE skills SET synonyms = 'conflict,conflicts,disagreement,difficult conversations,negotiation,mediation' WHERE id = 'skill_conflict_resolution';
 UPDATE skills SET synonyms = 'decisions,make decisions,decision making,leadership,leader' WHERE id = 'skill_decision_making';
 UPDATE skills SET synonyms = 'change management,lead change,leading change,reorg,reorganization,reorganisation,transformation' WHERE id = 'skill_change_management';
+"#;
 
+/// Bundled goal templates mapping exams, curricula and job roles onto
+/// bundled skills.
+const GOAL_TEMPLATES_SQL: &str = r#"
 -- Bundled goal templates, labelled taxonomy_version 'bundled'. Replaced by id on
 -- every install so a profile picks up changed skill lists.
 INSERT OR REPLACE INTO goal_templates (id, kind, key, label, board, grade, skill_ids, taxonomy_version, ratified) VALUES
@@ -713,13 +735,15 @@ mod tests {
         let all = count(&db, "SELECT COUNT(*) FROM skills");
         db.conn()
             .execute_batch(
-                "DELETE FROM assessment_item_skills WHERE skill_id LIKE 'skill_coaching';
+                "DELETE FROM assessment_item_skills WHERE skill_id = 'skill_coaching';
                  DELETE FROM assessment_items WHERE bank_id = 'qb_coaching';
                  DELETE FROM question_banks WHERE id = 'qb_coaching';
                  DELETE FROM skill_prerequisites WHERE 'skill_coaching' IN (skill_id, prerequisite_id);
                  DELETE FROM skill_relations WHERE 'skill_coaching' IN (skill_id, related_skill_id);
                  DELETE FROM skills WHERE id = 'skill_coaching';
-                 UPDATE goal_templates SET skill_ids = '[\"skill_big_o\"]' WHERE id = 'gt_role_em';",
+                 UPDATE goal_templates SET skill_ids = '[\"skill_big_o\"]' WHERE id = 'gt_role_em';
+                 UPDATE skills SET name = 'Old name', updated_at = '2000-01-01 00:00:00'
+                  WHERE id = 'skill_delegation';",
             )
             .expect("simulate an older profile");
 
@@ -746,6 +770,31 @@ mod tests {
                 "SELECT COUNT(*) FROM goal_templates WHERE id = 'gt_role_em' AND skill_ids LIKE '%skill_one_on_ones%'"
             ),
             1
+        );
+        // A changed bundled row takes the bundled text and timestamp, so
+        // anything ordered or cached by updated_at sees the change.
+        let (name, updated): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT name, updated_at FROM skills WHERE id = 'skill_delegation'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read refreshed skill");
+        assert_eq!(name, "Delegation");
+        assert_eq!(updated, "2026-10-25 00:00:00");
+    }
+
+    #[test]
+    fn the_taxonomy_snapshot_carries_every_bundled_skill() {
+        let snapshot = taxonomy_snapshot().expect("bundled snapshot");
+        let payload: BootstrapTaxonomyPayload =
+            serde_json::from_str(PUBLIC_TAXONOMY_JSON).expect("bundled taxonomy");
+        assert_eq!(snapshot.revision, TAXONOMY_SNAPSHOT_REVISION);
+        assert_eq!(snapshot.skills.len(), payload.skills.len());
+        assert_eq!(
+            snapshot.prerequisites.len(),
+            payload.skill_prerequisites.len()
         );
     }
 

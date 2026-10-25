@@ -70,7 +70,7 @@ answer away unless they ask for it."
         }
         _ => return None,
     };
-    let catalog = crate::db::bundled::subject_catalog();
+    let scope = goal_scope(crate::db::bundled::subject_catalog());
     Some(format!(
         "{intro} {behaviour}\n\
 \n\
@@ -109,10 +109,7 @@ when a lesson is attached.\n\
 - A new learning goal, when the learner wants help choosing one: \
 {{\"type\": \"goal\", \"title\": \"short goal name\", \"text\": \"what the \
 learner wants to be able to do, in one or two sentences\"}}. The app \
-matches skills to it and the learner picks them. Alexandria's skills cover \
-only these subjects: {catalog}. If what the learner wants is outside them, \
-say so plainly and suggest the closest goal they could set from these \
-subjects, or none.\n\
+matches skills to it and the learner picks them.{scope}\n\
 - A change to an attached goal: {{\"type\": \"goal_change\", \"title\": \
 \"the goal's name\", \"name\": \"a new name, only if renaming\", \"add\": \
 [\"skill name\"], \"remove\": [\"skill name\"], \"text\": \"why, in one \
@@ -124,6 +121,19 @@ sentence\"}}. Use skill names exactly as they appear in the goal.\n\
 You cannot see or help with assessments, and you cannot change the \
 learner's progress or credentials."
     ))
+}
+
+/// What the model is told about which goals Alexandria can match. Nothing,
+/// rather than an empty list, when the catalog is unavailable.
+fn goal_scope(catalog: &str) -> String {
+    if catalog.is_empty() {
+        return String::new();
+    }
+    format!(
+        " Alexandria's skills cover only these subjects: {catalog}. If what the \
+learner wants is outside them, say so plainly and suggest the closest goal \
+they could set from these subjects, or none."
+    )
 }
 
 /// One attached excerpt as it appears in a manifest.
@@ -486,6 +496,7 @@ mod tests {
         // model is told which subjects exist.
         assert!(ask.contains("cover only these subjects: Civic Engagement (Civic Participation"));
         assert!(ask.contains("Mathematics (Calculus, Discrete Mathematics"));
+        assert_eq!(goal_scope(""), "");
         assert!(ask.contains("who allows or declines it"));
         let mut m = manifest();
         m.mode = "practice".into();

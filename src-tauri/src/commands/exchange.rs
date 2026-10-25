@@ -1,4 +1,3 @@
-use alexandria_learning_contracts::TaxonomySnapshot;
 use alexandria_verify::exchange::{
     present_credential, shared_credential, verify_share, CredentialRequest, IssuerState,
 };
@@ -105,13 +104,7 @@ async fn requests(
 }
 
 pub(crate) fn validate_request(request: &CredentialRequest, did: &str) -> Result<(), String> {
-    let profile = crate::network_profile::embedded_preprod().map_err(|e| e.to_string())?;
-    let snapshot = TaxonomySnapshot::from_reference(
-        &profile.network_id,
-        "bundled-v2",
-        include_str!("../../../bootstrap/public_taxonomy.json"),
-    )
-    .map_err(|e| e.to_string())?;
+    let snapshot = crate::db::bundled::taxonomy_snapshot()?;
     if request.subject_did != did {
         return Err("request belongs to another identity".into());
     }
