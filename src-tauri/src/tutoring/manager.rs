@@ -890,9 +890,6 @@ impl<M: MediaDevices> CallManager<M> {
             if enable == session.screen_sharing {
                 return Ok(session.screen_sharing);
             }
-            if enable && !core.profile.screen_share {
-                return Err("Screen sharing is not available on this device".into());
-            }
             (
                 session.session_id.clone(),
                 session.devices.camera_index.clone(),

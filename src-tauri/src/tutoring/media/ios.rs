@@ -1003,9 +1003,10 @@ fn remember_selection(selection: Option<DeviceSelection>) {
 }
 
 pub struct IosMedia {
-    /// Set while a session runs; the lifecycle watcher thread stops when it
-    /// clears.
-    session_running: Arc<AtomicBool>,
+    /// Bumped each time a session starts or ends; a lifecycle watcher runs
+    /// only while the generation it was started under is current, so a
+    /// watcher still asleep from the last call never overlaps the next.
+    generation: Arc<AtomicU64>,
 }
 
 impl Default for IosMedia {
@@ -1019,7 +1020,7 @@ impl IosMedia {
         // Register the AVAudioSession observer once, at app start.
         register_audio_session_observer();
         Self {
-            session_running: Arc::new(AtomicBool::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -1113,13 +1114,12 @@ impl MediaDevices for IosMedia {
 
     fn session_started(&self) {
         set_idle_timer_disabled(true);
-        if !self.session_running.swap(true, Ordering::SeqCst) {
-            start_lifecycle_watcher(self.session_running.clone());
-        }
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        start_lifecycle_watcher(self.generation.clone(), generation);
     }
 
     fn session_ended(&self) {
-        self.session_running.store(false, Ordering::SeqCst);
+        self.generation.fetch_add(1, Ordering::SeqCst);
         remember_selection(None);
         set_idle_timer_disabled(false);
     }
@@ -1165,6 +1165,11 @@ fn schedule_audio_session_recovery(reason: &'static str) {
         log::info!("tutoring: skipping iOS audio recovery after {reason} (debounced)");
         return;
     }
+    // Outside a call the audio session is not ours to reactivate.
+    if remembered_selection().is_none() {
+        log::info!("tutoring: no call running; skipping iOS audio recovery after {reason}");
+        return;
+    }
     LAST_AUDIO_RECOVERY_MS.store(now_ms, Ordering::SeqCst);
 
     log::info!("tutoring: scheduling iOS audio recovery after {reason}");
@@ -1185,7 +1190,7 @@ fn schedule_audio_session_recovery(reason: &'static str) {
 /// Poll `UIApplication.applicationState` while a session runs and raise
 /// background/foreground transitions, so the camera is released on the way
 /// out and reopened after unlock.
-fn start_lifecycle_watcher(running: Arc<AtomicBool>) {
+fn start_lifecycle_watcher(current: Arc<AtomicU64>, generation: u64) {
     std::thread::Builder::new()
         .name("call-lifecycle".into())
         .spawn(move || {
@@ -1193,8 +1198,11 @@ fn start_lifecycle_watcher(running: Arc<AtomicBool>) {
             // treated as inactive for capture teardown.
             const STATE_ACTIVE: i64 = 0;
             let mut was_active = get_application_state() == STATE_ACTIVE;
-            while running.load(Ordering::SeqCst) {
+            loop {
                 std::thread::sleep(Duration::from_millis(1500));
+                if current.load(Ordering::SeqCst) != generation {
+                    break;
+                }
                 let state = get_application_state();
                 if state < 0 {
                     continue; // UIApplication not available
