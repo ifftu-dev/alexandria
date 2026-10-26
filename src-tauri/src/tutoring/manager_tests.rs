@@ -360,6 +360,36 @@ async fn chat_transcript_and_names_reach_the_other_device_and_never_echo() {
         .iter()
         .any(|p| p.display_name.as_deref() == Some("Guest")));
 
+    // With video built in, each side's test pattern reaches the other as
+    // webview frames, and each sees its own self view.
+    #[cfg(tutoring_video)]
+    {
+        let guest_id = guest_node.endpoint.id().to_string();
+        let frame = host_events
+            .wait_for("tutoring:video-frame", Duration::from_secs(20), |p| {
+                p["node_id"] == guest_id.as_str()
+            })
+            .await
+            .expect("the guest's video reaches the host");
+        assert!(frame["width"].as_u64().unwrap() > 0);
+        assert!(!frame["jpeg_b64"].as_str().unwrap().is_empty());
+        host_events
+            .wait_for("tutoring:video-frame", Duration::from_secs(10), |p| {
+                p["node_id"] == "self"
+            })
+            .await
+            .expect("the host sees its own camera");
+        assert!(host.status().await.unwrap().video_enabled);
+        assert!(!host.toggle_video(false).await.unwrap());
+        host_events
+            .wait_for("tutoring:peer-video-ended", Duration::from_secs(5), |p| {
+                p["node_id"] == "self"
+            })
+            .await
+            .expect("turning the camera off ends the self view");
+        assert!(host.toggle_video(true).await.unwrap());
+    }
+
     assert!(
         guest_events.payloads("tutoring:chat").is_empty()
             && guest_events.payloads("tutoring:transcript").is_empty(),
