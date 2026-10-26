@@ -1237,7 +1237,10 @@ pub fn run() {
             }
 
             diag::log("creating TutoringManager");
-            let tutoring = Arc::new(TutoringManager::new());
+            let tutoring = Arc::new(TutoringManager::new(
+                tutoring::PlatformMedia::new(),
+                app.handle().clone(),
+            ));
 
             diag::log("creating ClassroomManager");
             let classroom = Arc::new(ClassroomManager::new());

@@ -1,33 +1,56 @@
-use super::TutoringManager;
+//! The call manager through its own interface, over the synthetic adapter.
+//!
+//! Nothing here opens a device. Lifecycle tests drive task admission and
+//! shutdown without a room; room tests bind iroh endpoints on this machine
+//! and never leave it (no relay, no address lookup beyond memory).
+
+use std::sync::Arc;
 use std::time::Duration;
+
 use tokio::sync::oneshot;
+
+use super::events::RecordedEvents;
+use super::manager::CallManager;
+use super::media::synthetic::SyntheticMedia;
+
+type Manager = CallManager<SyntheticMedia>;
+
+fn manager() -> (Manager, Arc<RecordedEvents>) {
+    let events = Arc::new(RecordedEvents::default());
+    (
+        CallManager::new(SyntheticMedia::new(), events.clone()),
+        events,
+    )
+}
+
+// ── Lifecycle without a room ───────────────────────────────────────
 
 #[tokio::test]
 async fn shutdown_joins_partial_startup_tasks_without_a_published_room() {
-    let manager = TutoringManager::new();
-    manager.tasks.open().expect("startup admission");
+    let (manager, _) = manager();
+    manager.tasks().open().expect("startup admission");
     let (owner, mut released) = oneshot::channel::<()>();
-    manager.tasks.spawn(async move {
+    manager.tasks().spawn(async move {
         let _owner = owner;
         std::future::pending::<()>().await;
     });
-    assert!(manager.inner.lock().await.is_none());
+    assert!(!manager.has_session().await);
     manager.shutdown().await.expect("partial startup cleanup");
     assert!(matches!(
         released.try_recv(),
         Err(oneshot::error::TryRecvError::Closed)
     ));
-    assert!(!manager.tasks.is_open());
+    assert!(!manager.tasks().is_open());
     assert!(!manager.is_active().await);
     manager.shutdown().await.expect("idempotent cleanup");
 }
 
 #[tokio::test]
 async fn interrupted_shutdown_still_blocks_task_admission_until_retry() {
-    let manager = TutoringManager::new();
-    manager.tasks.open().expect("startup admission");
+    let (manager, _) = manager();
+    manager.tasks().open().expect("startup admission");
     let (owner, released) = oneshot::channel::<()>();
-    manager.tasks.spawn(async move {
+    manager.tasks().spawn(async move {
         let _owner = owner;
         std::future::pending::<()>().await;
     });
@@ -35,21 +58,21 @@ async fn interrupted_shutdown_still_blocks_task_admission_until_retry() {
         let mut cleanup = Box::pin(manager.shutdown());
         assert!(futures::poll!(&mut cleanup).is_pending());
     }
-    assert!(!manager.tasks.is_open());
-    assert!(manager.tasks.open().is_err());
+    assert!(!manager.tasks().is_open());
+    assert!(manager.tasks().open().is_err());
     manager.shutdown().await.expect("retry cleanup");
     assert!(released.await.is_err());
-    manager.tasks.open().expect("next room may start");
+    manager.tasks().open().expect("next room may start");
     manager.shutdown().await.expect("finish fixture");
 }
 
 #[tokio::test]
 async fn leaving_returns_while_a_blocked_native_task_finishes_in_the_background() {
-    let manager = TutoringManager::new();
-    manager.tasks.open().expect("startup admission");
+    let (manager, _) = manager();
+    manager.tasks().open().expect("startup admission");
     let (release, released) = std::sync::mpsc::channel::<()>();
     let (started, running) = oneshot::channel::<()>();
-    let tasks = manager.tasks.clone();
+    let tasks = manager.tasks().clone();
     let native = tokio::spawn(async move {
         // Stands in for a camera open stuck in native code: it cannot be
         // aborted, only waited for.
@@ -68,14 +91,14 @@ async fn leaving_returns_while_a_blocked_native_task_finishes_in_the_background(
         .await
         .expect("leave returns while native work is stuck")
         .expect("leave");
-    assert!(!manager.tasks.is_open());
+    assert!(!manager.tasks().is_open());
     // No second room starts while the first one's camera may still be held.
-    assert!(manager.tasks.open().is_err());
+    assert!(manager.tasks().open().is_err());
 
     release.send(()).expect("finish native work");
     native.await.expect("native task");
     for _ in 0..100 {
-        if manager.tasks.open().is_ok() {
+        if manager.tasks().open().is_ok() {
             manager.shutdown().await.expect("finish fixture");
             return;
         }

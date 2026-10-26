@@ -33,6 +33,23 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(grader)");
     println!("cargo:rustc-cfg=grader");
 
+    // `tutoring_video`: any of the three video features is on, so the media
+    // crate's video types (sources, encoders, decoders, frames) exist. The
+    // call manager and the media adapters gate their video paths on this one
+    // cfg instead of repeating the three-feature union; which adapter fills
+    // the seam is decided per target in `tutoring/media/mod.rs`.
+    println!("cargo::rustc-check-cfg=cfg(tutoring_video)");
+    if [
+        "TUTORING_VIDEO",
+        "TUTORING_VIDEO_STATIC",
+        "TUTORING_VIDEO_IOS",
+    ]
+    .iter()
+    .any(|feature| std::env::var(format!("CARGO_FEATURE_{feature}")).is_ok())
+    {
+        println!("cargo:rustc-cfg=tutoring_video");
+    }
+
     if target_os == "macos" {
         // Carbon provides IsSecureEventInputEnabled / DisableSecureEventInput,
         // used to clear a WKWebView Secure Event Input leak that otherwise

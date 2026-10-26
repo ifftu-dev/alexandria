@@ -1349,6 +1349,30 @@ pub async fn classroom_unsubscribe(
 
 // ── Live Calls ─────────────────────────────────────────────────────
 
+/// The profile's database, for the call manager's session rows.
+fn call_records(state: &State<'_, AppState>) -> crate::tutoring::records::ProfileRecords {
+    crate::tutoring::records::ProfileRecords {
+        executor: state.db_executor.clone(),
+        lease: state.profile_lease(),
+    }
+}
+
+/// The iroh node a classroom call rides on.
+#[cfg(desktop)]
+async fn call_network(
+    state: &State<'_, AppState>,
+) -> Result<crate::tutoring::manager::Network, String> {
+    let content_node = &state.content_node;
+    Ok(crate::tutoring::manager::Network {
+        endpoint: content_node
+            .endpoint()
+            .await
+            .ok_or("iroh node not running")?,
+        gossip: content_node.gossip().await.ok_or("gossip not available")?,
+        live: content_node.live().await.ok_or("live not available")?,
+    })
+}
+
 /// Start a voice/video call in a classroom (desktop only).
 ///
 /// Creates a live-crate room and broadcasts the ticket to all members
@@ -1366,7 +1390,7 @@ pub async fn classroom_start_call(
     camera_id: Option<String>,
     mic_id: Option<String>,
     speaker_id: Option<String>,
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ClassroomCall, String> {
     let w = get_wallet(&state).await?;
@@ -1384,36 +1408,24 @@ pub async fn classroom_start_call(
     })
     .await?;
 
-    let content_node = &state.content_node;
-    let endpoint = content_node
-        .endpoint()
-        .await
-        .ok_or("iroh node not running")?;
-    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
-    let live = content_node.live().await.ok_or("live not available")?;
-
+    let network = call_network(&state).await?;
     let call_id = uuid::Uuid::new_v4().to_string();
     let title = format!("{classroom_name} call");
-    let name = display_name.unwrap_or_else(|| w.stake_address.clone());
-
-    let devices = crate::tutoring::manager::DeviceSelection {
-        camera_index: camera_id,
-        mic_device_id: mic_id,
-        speaker_device_id: speaker_id,
+    let request = crate::tutoring::manager::RoomRequest {
+        session_id: call_id.clone(),
+        title: title.clone(),
+        display_name: display_name.unwrap_or_else(|| w.stake_address.clone()),
+        kind: crate::tutoring::call_kind::CallKind::Classroom,
+        context_id: Some(classroom_id.clone()),
+        devices: crate::tutoring::media::DeviceSelection {
+            camera_index: camera_id,
+            mic_device_id: mic_id,
+            speaker_device_id: speaker_id,
+        },
     };
-
     let ticket = state
         .tutoring
-        .create_room(
-            call_id.clone(),
-            title.clone(),
-            name,
-            &endpoint,
-            gossip,
-            live,
-            app,
-            devices,
-        )
+        .create_room(request, network, &call_records(&state))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -1466,7 +1478,7 @@ pub async fn classroom_start_call(
     let call = match call {
         Ok(call) => call,
         Err(error) => {
-            if let Err(cleanup_error) = state.tutoring.leave_room().await {
+            if let Err(cleanup_error) = state.tutoring.leave_room(&call_records(&state)).await {
                 log::error!(
                     "classroom_start_call: failed to clean up unpersisted room: {cleanup_error}"
                 );
@@ -1508,7 +1520,7 @@ pub async fn classroom_join_call(
     camera_id: Option<String>,
     mic_id: Option<String>,
     speaker_id: Option<String>,
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let w = get_wallet(&state).await?;
@@ -1532,35 +1544,23 @@ pub async fn classroom_join_call(
         })
         .await?;
 
-    let content_node = &state.content_node;
-    let endpoint = content_node
-        .endpoint()
-        .await
-        .ok_or("iroh node not running")?;
-    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
-    let live = content_node.live().await.ok_or("live not available")?;
-
-    let name = display_name.unwrap_or_else(|| w.stake_address.clone());
-    let devices = crate::tutoring::manager::DeviceSelection {
-        camera_index: camera_id,
-        mic_device_id: mic_id,
-        speaker_device_id: speaker_id,
-    };
-
+    let network = call_network(&state).await?;
     let title = format!("{classroom_name} call");
+    let request = crate::tutoring::manager::RoomRequest {
+        session_id: call_id.clone(),
+        title: title.clone(),
+        display_name: display_name.unwrap_or_else(|| w.stake_address.clone()),
+        kind: crate::tutoring::call_kind::CallKind::Classroom,
+        context_id: Some(classroom_id.clone()),
+        devices: crate::tutoring::media::DeviceSelection {
+            camera_index: camera_id,
+            mic_device_id: mic_id,
+            speaker_device_id: speaker_id,
+        },
+    };
     state
         .tutoring
-        .join_room(
-            call_id.clone(),
-            title.clone(),
-            name,
-            &ticket,
-            &endpoint,
-            gossip,
-            live,
-            app,
-            devices,
-        )
+        .join_room(request, &ticket, network, &call_records(&state))
         .await
         .map_err(|e| e.to_string())?;
     classroom_db(&state, "classroom.join-call.record", move |db| {
@@ -1621,7 +1621,7 @@ pub async fn classroom_end_call(call_id: String, state: State<'_, AppState>) -> 
     .await?;
 
     // Leave the live-crate room if we're in it
-    let _ = state.tutoring.leave_room().await;
+    let _ = state.tutoring.leave_room(&call_records(&state)).await;
 
     // Broadcast call ended
     let node_lock = state.p2p_node.lock().await;
