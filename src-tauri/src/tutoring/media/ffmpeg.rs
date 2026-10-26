@@ -123,7 +123,8 @@ pub(super) fn open_camera(
     })
 }
 
-/// Open the screen for sharing, at every rendition.
+/// Open the screen for sharing, at every rendition. Desktop only.
+#[cfg(desktop)]
 pub(super) fn open_screen() -> Result<OpenedVideo<Source>, String> {
     let screen = ScreenCapturer::new().map_err(|e| format!("screen capture unavailable: {e}"))?;
     Ok(OpenedVideo {
