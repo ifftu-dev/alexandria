@@ -196,7 +196,7 @@ a login, or a local row never makes a policy applicable.
 | Talent-index claims | `talent_index` | verified credentials only; no privilege is granted | none | claims show provenance, not approval |
 | Governance eligibility | none; the legacy local proficiency gate is deleted | qualification policy bound to the pinned genesis/opening (G02/G06), evaluated at certified submission | committee genesis, not the network profile | not active |
 | Role evidence | cloud role specification (C04) | signed organisation specification plus learner-signed result | organisation signature | out of scope for T03 |
-| Derived skill states | `commands/aggregation.rs`, `db/scoring_inputs.rs` | re-verified proofs; self-issued claims gain no independence weight; fingerprinted cache invalidation | calculation version `1.2` | implemented; no privilege is granted |
+| Derived skill states | `aggregation/store.rs`, `db/scoring_inputs.rs` | re-verified proofs; self-issued claims gain no independence weight; fingerprinted cache invalidation | calculation version `1.2` | implemented; no privilege is granted |
 | Reputation rows and snapshots | `evidence/reputation.rs`, `commands/snapshot.rs` | re-verified proofs; instructor credit only from verified issuer-signed credentials; empty samples excluded; snapshots cite the same verified set | computation spec `v4-verified-vc` | implemented; no privilege is granted |
 
 A policy lists accepted `did:key` issuers, permitted routes
@@ -321,7 +321,7 @@ Schemas are designed as authoritative inputs for LLM reasoning:
 
 - All credentials are Ed25519 signed by the issuer DID's key
 - The stake-based credential-challenge and escrow experiment is retired. Old tables may remain until cleanup migration D03 but grant no authority.
-- Exact course-version endorsement policies with allowlisted attestor keys and distinct-signer thresholds (`commands::attestation`)
+- Exact course-version endorsement policies with allowlisted attestor keys and distinct-signer thresholds (`evidence::completion`, behind the `commands::attestation` wrappers)
 - Behavioral integrity scores from the Sentinel anti-cheat system feed the trust signal on flagged assessments
 - Identity binding via the persistent `stake_pubkey_registry` in the P2P validation pipeline (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md))
 
@@ -554,8 +554,8 @@ implementation-status preamble.
 | Type weights, freshness, **provenance-weighted quality**, independence (§14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, calc version 1.2) | PR 6 / mig 068 |
 | Anti-gaming (cluster cap, inflation z-score, §15) | `aggregation::antigaming` | PR 7 |
 | Issuer clustering / pairwise dependence | `aggregation::independence` | PR 7 (per-DID v1; richer signals deferred) |
-| Persisted derived-state cache (§16) | `commands::aggregation` (`derived_skill_states` table) | PR 13 |
-| Verified scoring inputs, fingerprinted skill-state caches and reputation revalidation (§6.3, §12.3) | `db::scoring_inputs`, `commands::aggregation`, `evidence::reputation` | mig 093 / 094 |
+| Persisted derived-state cache (§16) | `aggregation::store` (`derived_skill_states` table) | PR 13 |
+| Verified scoring inputs, fingerprinted skill-state caches and reputation revalidation (§6.3, §12.3) | `db::scoring_inputs`, `aggregation::store`, `evidence::reputation` | mig 093 / 094 |
 | Recruiter / consumer query API (§17) | `get_derived_skill_state`, `list_derived_states`, `recompute_all` IPC | PR 13 |
 
 The §26 worked example is reproduced end-to-end by the four

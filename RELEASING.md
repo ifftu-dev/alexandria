@@ -125,4 +125,4 @@ cargo check -p alexandria-node --target aarch64-apple-ios --features tutoring-vi
 cargo check -p alexandria-node --target aarch64-linux-android --features tutoring-video-android
 ```
 
-Checking a mobile target without those features reports misleading "unresolved import" errors in `src/tutoring/manager_mobile.rs`.
+Without those features the `tutoring_video` cfg (set per target by `src-tauri/build.rs`) is off, so a mobile check compiles only the audio-only call path and skips the adapter's video code in `src/tutoring/media/ios.rs`, or `android.rs` and `ffmpeg.rs`.

@@ -17,11 +17,12 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Network identity | `network_profile.rs`, `../resources/networks/preprod.json` | Strict network/service/trust-root profile plus embedded-resource identity checks. Currently supplies DHT provider-record namespacing; remaining wire IDs await the coordinated app/relay/monitoring N01 slice. |
 | Profile lifecycle | `profile/` | ProfileManager, network-bound format-v2 `profiles_index.json` sidecar; the pre-profile single-vault layout is detected, reported and left untouched rather than migrated. Startup uses `ProfileManager::open_for_app`: an older index version or a profile from another network opens the manager blocked (empty index, `create` refused) instead of failing, and `move_incompatible_data_aside` moves it into `incompatible-profile-data-<timestamp>/` without deleting anything. Other open errors still fail |
 | Settings | `settings/` | Typed registry (`registry::keys`) + R/W store. Drives the unified per-profile `app_settings` table; `scope='sync'` rows propagate via cross-device sync (`p2p::sync::settings_outbound_snapshot` / `settings_apply_inbound`). See [`docs/settings.md`](../../docs/settings.md). |
-| Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
+| Tauri commands | `commands/` | Domain-oriented IPC handlers. Keep new ones thin over a domain module; no module outside `commands/` except `lib.rs` may import it (see Conventions). `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
 | P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), profile-fetch, username-reg (registry receipts), sync, stress. `sync.rs` also fans settings rows out/in. |
 | Database | `db/` | SQLite + 27 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks on every profile open: bundled taxonomy rows are upserted by id (adding new skills and overwriting local edits to bundled names, descriptions and Bloom levels) and goal templates are replaced by id; standard release profile activation also installs eleven labelled, profile-owned course drafts, all bundled plugins, and three owned classroom templates through `commands/demo_courses.rs` and `commands/demo_resources.rs`; development builds instead offer the opt-in, profile-scoped picker in `commands/dev_seeds.rs`; no content seed creates personas, credentials or enrollments. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
-| Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
+| Live calls | `tutoring/` | One `CallManager` for every platform; per-platform media behind the `MediaDevices` seam in `tutoring/media/` (desktop, iOS, Android, synthetic for tests). `build.rs` sets the `tutoring_video` cfg per target |
+| AI chat and access | `ai_chat/`, `ai_access.rs` | Chat turn (`turn.rs`), streaming run (`run.rs`), other chat operations (`ops.rs`), generated vocabularies (`vocab.rs`); `ai_access.rs` decides who may use which model and when. See [`docs/ai-chat-spec.md`](../../docs/ai-chat-spec.md) |
 | Cardano | `cardano/` | Pallas wallet/tx building; reference scripts deployed on preprod (UTxOs in `cardano/script_refs.rs`) |
 | Content storage | `content_store/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock; `ContentNode::shutdown` calls both `Router::shutdown` and `Store::shutdown` so the redb lock releases between profile switches. |
 | Cryptography | `crypto/` | Ed25519, Blake2b, per-profile keystore (Stronghold desktop / portable AES-256-GCM mobile) |
@@ -59,6 +60,14 @@ pub async fn list_courses(
 - **Never** `.unwrap()` in command handlers — use `.map_err(...)?`
 - **Allowed**: `state.db.lock().unwrap()` (poisoned mutex = unrecoverable)
 - Platform gates: `#[cfg(desktop)]`, `#[cfg(target_os = "ios")]`, etc.
+- **Commands depend down, never sideways.** No Rust file outside `commands/`
+  imports the commands layer. The one exception is `lib.rs`, the composition
+  root. This covers `crate::commands`, `super::commands`, `self::commands`,
+  `commands::` and grouped imports. Put behaviour a command and something
+  else both need in a domain module (for example `ai_chat::ops`,
+  `crate::enrollment`, `evidence::completion`, `crate::clock`), and make the
+  command a wrapper that calls it. Command files share `commands::with_conn`.
+  `node scripts/check-tauri-commands.mjs` enforces this in CI.
 
 ## TESTING
 
@@ -96,9 +105,10 @@ Line counts drift with every PR; regenerate with `wc -l` before relying on them.
 | File | Lines | Risk |
 |------|-------|------|
 | `p2p/network.rs` | 3382 | Swarm behavior and protocol orchestration |
-| `tutoring/manager_mobile.rs` | 3286 | Mobile tutoring logic |
+| `ai_chat/turn.rs` | 1852 | Chat turn: what is sent, and what a reply becomes |
 | `db/schema.rs` | 1460 | 27 migrations |
-| `tutoring/manager.rs` | 2136 | Desktop/Android tutoring |
+| `tutoring/manager.rs` | 2328 | Call manager for every platform |
+| `tutoring/media/ios.rs` | 1236 | iOS media adapter (AVFoundation, VideoToolbox, audio session) |
 | `evidence/reputation.rs` | 830 | Credential-backed reputation system |
 | `p2p/sync.rs` | 1498 | P2P sync protocol |
 | `p2p/stress.rs` | 11 | Stub (retired in VC-first cutover; placeholder) |

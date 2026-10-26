@@ -134,7 +134,7 @@ More than the size of the crate suggests.
 | Data directory | `lib.rs:752`, and again in `commands/p2p.rs:65` instead of reading `state.app_data_dir` | an explicit path; the second lookup should read the state it already has |
 | Session-scoped command access | `profile/scope.rs` — `ProfileState` is a `tauri::ipc::CommandArg` extractor that reads a session header and admits a `ProfileLease` | a headless session/lease API over the same `ProfileOperations` |
 | Gossip UI events | `p2p/inbound.rs:239–244` | already shaped correctly: `gossip_ingest` takes a generic closure and only the command binds it to an `AppHandle` |
-| Tutoring events | `tutoring/manager.rs` stores an `AppHandle` per session and threads it through ~15 methods, used only to emit | an event-sink trait; lazy for headless, which does not start media |
+| Tutoring events | `tutoring/manager.rs` emits through a `CallEvents` sink (`tutoring/events.rs`); `tauri::AppHandle` is one implementation, set once at startup, and the tests use a recorder | already shaped correctly: a headless node passes its own sink, or omits calls, since it does not start media |
 | Progress events mid-operation | `commands/plugins.rs` `install_course_plugins` emits between install steps | event sink |
 | Logger | `tauri_plugin_log` inside `.setup()` (`lib.rs:701`) | an ordinary logger set once per process, with node-tagged records |
 | Plugin asset protocol | `register_uri_scheme_protocol("plugin", …)` (`lib.rs:1218`) | none needed — it serves the webview |
@@ -185,7 +185,7 @@ source tree; that is worth confirming at runtime once two nodes start.
 No camera, microphone or display code runs at startup. Camera enumeration,
 permission prompts, Secure Input, Sentinel focus tracking and the Sentinel ML
 models are all reached only through `#[tauri::command]` dispatch or window
-events. `TutoringManager::new()` constructs state without opening devices. A
+events. `TutoringManager::new(media, events)` constructs state without opening devices. A
 headless node can omit media entirely rather than disabling it.
 
 ## Proposed slice order for step 4
@@ -209,7 +209,8 @@ build a parallel core.
    `build_runtime(app_dir) -> AppState`, and make `p2p_start` read
    `state.app_data_dir` instead of asking Tauri again.
 3. **Introduce an event-sink trait** with a Tauri adapter, and route the gossip
-   closure, tutoring manager and plugin-install progress through it.
+   closure and plugin-install progress through it. The tutoring manager already
+   emits through its own `CallEvents` sink.
 4. **Grow the existing Tauri-free crate rather than creating another.** Move
    leaf modules into it first — `domain`, `db`, `crypto`, then `content_store`,
    `cardano` and `p2p` — checking before each move that the module does not

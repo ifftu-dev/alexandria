@@ -16,7 +16,7 @@
 > schema remains only as pre-launch legacy storage pending migration D03.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and explicit endorsement workflow, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
+**Last updated**: 2026-10-27 (AI chat turn, run and access policy modules, one call manager over platform media adapters, commands depend down); 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and explicit endorsement workflow, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
 
 ---
 
@@ -401,7 +401,27 @@ participant-controlled captions. Caption speech recognition is exposed only
 when the WebView supports the explicit `processLocally` control. Final text
 segments are sent over the encrypted iroh room gossip channel with the internal
 `ALXTR1` prefix; this is not a libp2p global gossip topic. Tutoring retains the
-caption list in memory and clears it when the room is left.
+caption list in memory and clears it when the room is left. Chat, captions and
+peer names derive their gossip topics from the room's topic id, which every
+participant shares.
+
+One call manager (`tutoring::CallManager<PlatformMedia>`, aliased
+`TutoringManager`) serves every platform and every call kind (tutoring,
+classroom, interview seat and candidate, interview assistant, plugin
+experience). It owns the room lifecycle, task admission, call kind, session
+records (through a `SessionRecords` seam), chat, transcript, presence, names,
+the frame bridge to the webview, diagnostics and audio levels, and emits
+through a `CallEvents` sink. What differs per device sits behind the
+`MediaDevices` seam in `tutoring/media/`: `desktop.rs` (nokhwa camera, xcap
+screen share, software H.264), `android.rs` (NDK Camera2 over the same ffmpeg
+pipeline, `ffmpeg.rs`, with no screen share), `ios.rs` (AVFoundation,
+VideoToolbox, AVAudioSession routes and interruptions, with main-thread
+dispatch in `main_thread.rs`), and `synthetic.rs` (generated frames and silent
+audio, for tests and targets with no adapter). Each adapter's `MediaProfile`
+carries its per-platform tuning: the rendition to watch (phones watch 720p),
+frame sizes, audio level interval, and start-of-call timeouts. `build.rs` sets
+a `tutoring_video` cfg per target when that target's video feature is on.
+Without it, every platform adapter still makes real audio-only calls.
 
 The interview assistant reuses that transport but persists a separate record in
 the active profile's SQLCipher database. A remote caption becomes an interview
@@ -632,10 +652,16 @@ The optional witness transaction is durably checkpointed before submission. A ti
 |--------|---------------|
 | `evidence/reputation` | Distribution-based reputation from verified credentials; rows are revalidated by input fingerprint before they are read |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
+| `evidence/completion` | Exact course-completion endorsement store: claim context, verified import, listing and threshold status |
+| `aggregation/store` | Derived skill state cache (`derived_skill_states`) and its dated history |
 
 Exact course-version endorsement policy and artifacts are handled by
-`commands::attestation`, outside the retired `skill_proof` aggregator. The
-credential-challenge command module, evidence challenge module, challenge domain
+`evidence::completion` (the store, also read by the trust and scoring readers
+in `db`) behind the `commands::attestation` wrappers, outside the retired
+`skill_proof` aggregator. A credential's integrity hash is
+`domain::vc::integrity_hash_of`.
+
+The credential-challenge command module, evidence challenge module, challenge domain
 types, escrow transaction builders, recovery worker, validator source, and
 frontend surfaces have been removed. Credential revocation, suspension, and
 reinstatement are issuer actions: the active profile must derive the same issuer
@@ -741,15 +767,16 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 The frontend communicates with the Rust backend through the handlers registered
 in `tauri::generate_handler!`. The `commands/` directory also contains internal
-helpers and platform-conditional tutoring variants, so source-file or attribute
-counts do not equal the command surface. The table below is a non-exhaustive
+helpers, so source-file or attribute counts do not equal the command surface.
+The table below is a non-exhaustive
 sample of command modules; inspect `lib.rs` for the authoritative registration
 list.
 
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
+| ai_chat | 33 | `chat_prepare_message`, `chat_start_run`, `chat_cancel_run`, `chat_list_threads`, `chat_allow_action` |
+| tutoring | 17 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
 | interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
 | taxonomy | 9 | `list_skills`, `list_subjects`, `list_skill_graph_edges`, `tag_element_skill` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
@@ -778,7 +805,46 @@ list.
 | plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, and the `irl_*` review inbox. Legacy attestation ingest/status IPC is retired. |
 | health | 4 | `check_health`, `read_diag_log`, `frontend_log`, `release_secure_input` |
 
-Note: `tutoring` has platform-specific variants. Desktop and Android share the full manager (`tutoring/manager.rs`); iOS has its own AVFoundation/VideoToolbox manager (`tutoring/manager_mobile.rs`); only targets that are neither desktop, iOS, nor Android fall back to `commands/tutoring_stubs.rs`. Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
+Note: `commands/tutoring.rs` serves every platform through one call manager; platform differences sit in its media adapters (see [Live rooms, captions, and interview records](#live-rooms-captions-and-interview-records)). Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
+
+### Commands depend down
+
+A command should be a thin wrapper that parses arguments, takes the profile
+lease, and calls one function in a domain module. The chat, enrolment, course
+note, endorsement and derived skill state commands already work this way
+(`ai_chat::ops`, `crate::enrollment`, `crate::course_notes`,
+`evidence::completion`, `aggregation::store`). Dependencies point one way. No
+Rust file outside `src-tauri/src/commands` imports the commands layer, except
+`lib.rs`, the composition root that registers the handlers. The types `AppState`
+holds (`crate::studio::StudioRuntime`, `crate::ratelimit::IpcRateLimiter`) and
+shared helpers such as `crate::clock::now_rfc3339` also live outside the
+commands layer.
+`scripts/check-tauri-commands.mjs` enforces the rule in CI. It lexes Rust
+source, so comments and strings are ignored, and it fails on any
+`commands::`, `crate::commands`, `super::commands` or `self::commands` path,
+and on a grouped `crate::{…}`, `super::{…}` or `self::{…}` import that names
+`commands`. Imports between command files are still allowed. Command files
+share one database helper, `commands::with_conn`.
+
+### AI chat and model access
+
+The chat backend is split by concept, not by command:
+
+| Module | Owns |
+|--------|------|
+| `ai_chat::turn` | One message: `gather` (thread, attachments, memory, history, gates), `prepare` (render, assemble, token budget via `ai_chat::context`, store the snapshot), `begin` (rebuild and refuse anything stale), `complete` (the reply becomes the answer and its cards, in one transaction) |
+| `ai_chat::run` | Streaming a begun turn to one terminal state, behind three seams: `EventSink` (IPC channel), `StreamSource` (provider adapter), `RunStore` (executor under the profile lease); tests use a vector, a scripted answer and a direct connection |
+| `ai_chat::ops` | Everything else the learner does with chats: threads, attachments, practice, memory, saved notes |
+| `ai_chat::vocab` | Error codes and other vocabularies the webview shares, generated into `src/generated/chat-vocab.ts` |
+| `ai_access` | Who may use which model and when: age band and vendor floors, guardian approvals, the attempt gate (which refusals are also integrity flags), and which lesson a model may see |
+| `alexandria_ai::connection` | The one path from a saved connection and its credential to an adapter: `Connection::resolve()` checks and pins the endpoint, then `Resolved::connect(credential, limits)` requires a key for a remote endpoint and admits it |
+
+Chat, the lesson tutor, Studio runs and provider sign-in all reach a model
+through `alexandria_ai::connection` with the same limits. The Optional AI checks
+client is the one exception. `alexandria-decisions` must stay MIT/Apache, so it
+cannot use the AGPL adapters, and the app gives it a pinned HTTP client that
+shares only endpoint resolution. See the
+[AI chat spec](ai-chat-spec.md#26-implementation-record).
 
 ---
 

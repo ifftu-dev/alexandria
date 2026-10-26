@@ -21,7 +21,7 @@ alexandria/
 ├── patches/                # Local crate patches (netdev, if-watch, audiopus_sys, webrtc-audio-processing-sys, ffmpeg-sys-next, ffmpeg-next)
 ├── docs/                   # Documentation
 ├── bootstrap/              # Bundled built-in data (public_taxonomy.json)
-└── scripts/                # Build/dev scripts (incl. check-tauri-commands.mjs: CI guard that every registered command has a frontend caller or is allowlisted)
+└── scripts/                # Build/dev scripts (incl. check-tauri-commands.mjs: CI guard that every registered command has a frontend caller or is allowlisted, the generated command and chat-vocabulary files are current, and no module outside commands/ imports the commands layer)
 ```
 
 ---
@@ -45,14 +45,13 @@ src-tauri/
     ├── lib.rs              # Tauri setup, startup tasks, ~300 command registrations
     ├── diag.rs             # File-based diagnostic logger + panic hook
     │
-    ├── commands/           # Domain-oriented Tauri IPC handlers
-    │   ├── mod.rs          # Module exports + platform gating
-    │   ├── ratelimit.rs    # Shared helper (not exposed as IPC)
+    ├── commands/           # Domain-oriented Tauri IPC handlers (thin wrappers; nothing outside commands/ but lib.rs imports them)
+    │   ├── mod.rs          # Module exports + shared `with_conn` database helper
+    │   ├── ai_chat.rs      # Chat command wrappers over ai_chat::{turn, run, ops}
+    │   ├── ai_signin.rs    # Provider sign-in (ChatGPT, OpenRouter)
     │   ├── classroom.rs    # Classrooms, members, channels, messages, calls
     │   ├── governance.rs   # DAOs, proposals, elections, votes
-    │   ├── tutoring.rs     # Desktop tutoring/session commands
-    │   ├── tutoring_mobile.rs # Mobile tutoring command variant
-    │   ├── tutoring_stubs.rs  # Stubbed tutoring surface for unsupported builds
+    │   ├── tutoring.rs     # Call commands for every platform, over the one call manager
     │   ├── taxonomy.rs     # Subject fields, subjects, skills, taxonomy graph
     │   ├── users.rs        # Public profile fetch + name resolution
     │   ├── username_registry.rs # DHT username claims (claim/resolve/availability)
@@ -62,7 +61,7 @@ src-tauri/
     │   ├── credentials.rs  # VC issue/list/verify/revoke/suspend/export/allowlist
     │   ├── sync.rs         # Cross-device sync
     │   ├── courses.rs      # Course/tutorial CRUD and publish flows
-    │   ├── attestation.rs  # Multi-party attestation
+    │   ├── attestation.rs  # Completion endorsement commands (store in evidence/completion.rs)
     │   ├── challenge.rs    # Evidence challenges and voting
     │   ├── opinions.rs     # Field Commentary opinions
     │   ├── integrity.rs    # Sentinel sessions and snapshots
@@ -76,22 +75,36 @@ src-tauri/
     │   ├── storage.rs      # Quota and cache management
     │   ├── snapshot.rs     # Reputation snapshot creation + anchor requests
     │   ├── reputation.rs   # Reputation assertions and impact
-    │   ├── enrollment.rs   # Enrollment and progress
+    │   ├── enrollment.rs   # Enrollment and progress wrappers (logic in enrollment.rs)
     │   ├── elements.rs     # Course element CRUD
     │   ├── chapters.rs     # Chapter CRUD
     │   ├── catalog.rs      # Search, browse, bootstrap, hydrate
     │   ├── p2p.rs          # Network status, peers, diagnostics
     │   ├── evidence.rs     # Evidence submission/query
-    │   ├── aggregation.rs  # Derived skill-state queries
+    │   ├── aggregation.rs  # Derived skill-state queries (store in aggregation/store.rs)
     │   ├── presentation.rs # Selective-disclosure presentation create/verify
     │   ├── health.rs       # Health check + diag log access
     │   └── graph.rs      # Skill-graph fetch + learning-path helpers
     │
+    ├── ai_chat/            # AI chat backend (see docs/ai-chat-spec.md)
+    │   ├── turn.rs         # One message: gather → prepare → begin → complete
+    │   ├── run.rs          # Streams a begun turn behind EventSink / StreamSource / RunStore seams
+    │   ├── ops.rs          # Threads, attachments, practice, memory, saved notes
+    │   ├── context.rs      # Request assembly, token budget, review items, digests
+    │   ├── vocab.rs        # Error codes and other vocabularies generated for the webview
+    │   └── store.rs        # Chat persistence
+    ├── ai_access.rs        # AI access policy: age rules, guardian approvals, attempt gate
+    ├── ai_auth/            # Provider sign-in (ChatGPT, OpenRouter) and stored credentials
+    ├── course_notes.rs     # The learner's notes on a course's lessons
+    ├── enrollment.rs       # Enrolment, progress, recorded built-in assessment answers
+    ├── studio.rs           # StudioRuntime: the active profile's Studio state (held by AppState)
+    ├── ratelimit.rs        # IpcRateLimiter for sensitive commands (held by AppState)
+    ├── clock.rs            # now_rfc3339, the stored time format
     ├── crypto/             # BIP-39 wallet, keystore, Ed25519, did:key
     ├── db/                 # SQLite, migrations, bundled built-in data
-    ├── domain/             # Core types and VC domain models
-    ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted)
-    ├── evidence/           # Reputation, challenge, thresholds logic
+    ├── domain/             # Core types and VC domain models (vc/ includes the credential integrity hash)
+    ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted); store.rs caches derived skill states
+    ├── evidence/           # Reputation, thresholds, completion endorsement store (completion.rs)
     ├── goals/              # Goal → skill-graph resolver + on-device JD/resume parser
     │   ├── mod.rs
     │   └── jd_parser.rs    # Pure n-gram matcher over skill names + synonyms
@@ -167,6 +180,7 @@ src-tauri/
     │   ├── gaze.rs         # Head-pose / second-device estimate + per-user calibration MLP
     │   ├── liveness.rs     # MiniFASNetV2 presentation-attack check (embedded ONNX)
     │   ├── evidence.rs     # Learner-consented retention of flagged-session frames
+    │   ├── snapshots.rs    # Integrity snapshot chain, flag severity catalog, backend-recorded flags
     │   ├── active_app.rs   # Frontmost-app (app_switch) watcher
     │   ├── display_topology.rs   # Monitors, mirroring, iPad Split View / Android multi-window
     │   ├── android_environment.rs # Assessment shield, accessibility services, ADB, obscured touches
@@ -178,8 +192,19 @@ src-tauri/
     │
     ├── tutoring/           # `live` crate integration (MoQ rooms/sessions)
     │   ├── mod.rs
-    │   ├── manager.rs      # Desktop + Android tutoring manager
-    │   └── manager_mobile.rs # iOS/mobile tutoring manager
+    │   ├── manager.rs      # CallManager: one call manager for every platform
+    │   ├── manager_tests.rs # Lifecycle, chat and frame tests over the synthetic adapter
+    │   ├── call_kind.rs    # Tutoring, classroom, interview, plugin call kinds
+    │   ├── events.rs       # CallEvents sink (webview in the app, a recorder in tests)
+    │   ├── records.rs      # SessionRecords seam for session rows
+    │   └── media/          # MediaDevices seam and its adapters
+    │       ├── mod.rs      # The seam, MediaProfile, PlatformMedia per target
+    │       ├── desktop.rs  # nokhwa camera, xcap screen, software H.264
+    │       ├── android.rs  # NDK Camera2 over the shared ffmpeg pipeline
+    │       ├── ffmpeg.rs   # Video pipeline shared by desktop and Android
+    │       ├── ios.rs      # AVFoundation, VideoToolbox, AVAudioSession
+    │       ├── main_thread.rs # iOS main-thread dispatch
+    │       └── synthetic.rs # Generated frames and silent audio (tests, unsupported targets)
     │
     └── cardano/            # Cardano integration
         ├── blockfrost.rs   # REST client (preprod)
@@ -317,7 +342,13 @@ src/
 ├── types/
 │   └── index.ts            # All TypeScript types
 │
+├── generated/              # Written by scripts/check-tauri-commands.mjs --write; never edit by hand
+│   ├── tauri-commands.ts   # Registered command names
+│   └── chat-vocab.ts       # Chat vocabularies from ai_chat/vocab.rs (npm run generate:chat-vocab)
+│
 └── utils/
+    ├── chatErrors.ts       # Chat error code parser and message table (generated codes)
+    ├── chatFences.ts       # Hides reply fence blocks while an answer streams
     ├── sanitize.ts         # DOMPurify wrappers for HTML and SVG sanitization
     └── sentinel/           # Frontend Sentinel helpers
         ├── face-embedder.ts  # LBP face embedding (pure pixel math)

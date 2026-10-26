@@ -134,7 +134,7 @@ Per-snapshot checks:
 33. Alexandria's AI chat or lesson tutor reached the backend while the attempt was open → `in_app_assistant_during_attempt` critical. Recorded by the backend, never by a client: the request is refused, and the flag is written into the session's committed snapshot chain once per session, carrying the session's current score so the average is unchanged.
 34. A connected external (MCP) assistant called while the attempt was open → `mcp_call_during_attempt` critical, recorded the same way.
 
-Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
+Flag severity is authoritative on the backend (`sentinel/snapshots.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
 Developer-tools detection is retired as both a score input and a misconduct rule.
 Window resizing does not generate a developer-tools flag. The backend rejects a
@@ -351,7 +351,7 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 
 **Storage**: calibration weights persist as a JSON blob in `sentinel_user_models` (`model_kind='gaze_calib'`), same convention as the keystroke AE / mouse CNN. Never broadcast over P2P. Reset by `sentinel_reset_user_models`.
 
-**Flags** (computed per snapshot window in `useSentinel`, severity authoritative in `commands/integrity.rs::flag_severity`):
+**Flags** (computed per snapshot window in `useSentinel`, severity authoritative in `sentinel/snapshots.rs::flag_severity`):
 - `gaze_wander` (warning) — off-screen ratio > 0.30
 - `device_glance` (critical) — ≥ 3 downward off-screen glances in the window (the phone-in-lap tell)
 - `gaze_occluded` (warning) — eyes hidden (no usable face geometry) for > 0.40 of ticks

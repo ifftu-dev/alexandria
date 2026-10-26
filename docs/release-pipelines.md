@@ -25,7 +25,7 @@ Before publishing a public release, the repo must pass the cheap `Release Readin
 
 - release metadata stays version-aligned across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`
 - desktop updater config is no longer using the placeholder public key
-- Android is not still routed through tutoring stubs
+- Android and iOS calls use their real media adapters (`PlatformMedia` in `src-tauri/src/tutoring/media/mod.rs`), never the synthetic test media
 - Android build config opts into its real mobile tutoring feature set
 - Windows uses the reduced desktop tutoring feature path while macOS/Linux use richer media support
 - real mobile publish defaults include both `Android` and `iOS`

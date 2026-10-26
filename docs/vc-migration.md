@@ -233,8 +233,9 @@ after the device last received that list.
 
 The auto-issuance path, credential-sourced reputation engine
 (`evidence/reputation.rs`), exact endorsement backend
-(`commands::attestation`), issuer-bound status-list lifecycle, and learner VC
-surface ship. Credential challenges do not. Hosted or peer delivery of an
+(`evidence::completion`, behind `commands::attestation`), issuer-bound
+status-list lifecycle, and learner VC surface ship. Credential challenges do
+not. Hosted or peer delivery of an
 endorsement request must authenticate the addressed instructor before it is a
 complete acquisition flow.
 
