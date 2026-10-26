@@ -22,7 +22,6 @@ use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::Protocol;
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{learning, provider as studio_provider, store as studio_store};
-use chrono::SecondsFormat;
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -35,7 +34,7 @@ use super::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use super::{artifact, bank_guard, memory, now, practice, ChatRuntime};
+use super::{artifact, bank_guard, memory, now, practice, timestamp, ChatRuntime};
 // TODO(ticket 03): the gates move to the policy module; until then the turn
 // calls them where the commands file keeps them.
 use crate::commands::ai_chat::{age_gate, refuse_during_assessment};
@@ -414,8 +413,7 @@ pub fn prepare(
         .map(|b| b.len())
         .unwrap_or(usize::MAX);
     let fits = fitted.fits && bytes <= context::MAX_REQUEST_BYTES;
-    let expires_at =
-        (chrono::Utc::now() + PREPARE_TTL).to_rfc3339_opts(SecondsFormat::Millis, true);
+    let expires_at = timestamp(chrono::Utc::now() + PREPARE_TTL);
     let prepare_id = if fits {
         let id = uuid::Uuid::new_v4().to_string();
         let hashes: Vec<String> = manifest.sources.iter().map(|s| s.hash.clone()).collect();

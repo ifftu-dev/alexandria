@@ -1187,11 +1187,7 @@ pub async fn chat_save_note(
     .await
 }
 
-pub(crate) fn save_note(
-    conn: &Connection,
-    message_id: &str,
-    title: &str,
-) -> Result<store::Artifact, String> {
+fn save_note(conn: &Connection, message_id: &str, title: &str) -> Result<store::Artifact, String> {
     let origin = store::message(conn, message_id).map_err(|e| e.to_string())?;
     if bank_guard::matches_assessment_item(conn, &origin.content) {
         return Err("assessment_item: notes cannot hold assessment questions".into());
