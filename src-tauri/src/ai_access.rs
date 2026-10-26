@@ -255,6 +255,8 @@ pub fn request_approval(
     if !remote(&doc.value)? {
         return Err(Refused::NotRemote);
     }
+    // A refusal no guardian can lift is the answer, before asking for a link.
+    may_connect(conn, &doc.value)?;
     let has_guardian: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM guardian_links WHERE side = 'ward' AND status = 'active')",
@@ -265,7 +267,6 @@ pub fn request_approval(
     if !has_guardian {
         return Err(Refused::NoGuardian);
     }
-    may_connect(conn, &doc.value)?;
     let open = matches!(
         latest_decision(conn, &doc.id, &doc.value.endpoint)?.as_deref(),
         Some("pending" | "approved")
@@ -340,28 +341,6 @@ mod tests {
     use super::*;
     use crate::ai_chat::turn::fixtures::*;
     use alexandria_studio::model::StudioDocument;
-    use chrono::Datelike;
-
-    /// Sets the profile's birthdate `years` years and a day before today.
-    fn born_years_ago(conn: &Connection, years: i32) {
-        let today = chrono::Utc::now().date_naive();
-        let born = chrono::NaiveDate::from_ymd_opt(today.year() - years, today.month(), 1).unwrap()
-            - chrono::Duration::days(1);
-        conn.execute(
-            "UPDATE local_identity SET birthdate = ?1",
-            [born.format("%Y-%m-%d").to_string()],
-        )
-        .unwrap();
-    }
-
-    fn link_guardian(conn: &Connection) {
-        conn.execute(
-            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
-             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
-            [],
-        )
-        .unwrap();
-    }
 
     /// The connection as it is stored now.
     fn current(conn: &Connection, id: &str) -> StudioConnection {
@@ -595,6 +574,28 @@ mod tests {
         assert!(refused.starts_with("under_13"), "{refused}");
         born_years_ago(&conn, 15);
         start(&conn, &prepared, "q3").unwrap();
+    }
+
+    #[test]
+    fn a_learner_hears_the_final_reason_before_being_asked_to_link_a_guardian() {
+        let conn = db();
+        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
+        born_years_ago(&conn, 11);
+        assert!(matches!(
+            request_approval(&conn, "c1"),
+            Err(Refused::TooYoungForRemote)
+        ));
+        born_years_ago(&conn, 16);
+        assert!(matches!(
+            request_approval(&conn, "c1"),
+            Err(Refused::NoGuardian)
+        ));
+        let gemini = "https://generativelanguage.googleapis.com/v1beta/openai";
+        connection(&conn, "c1", "cloud", gemini, None);
+        assert!(matches!(
+            request_approval(&conn, "c1"),
+            Err(Refused::AdultsOnly(_))
+        ));
     }
 
     #[test]

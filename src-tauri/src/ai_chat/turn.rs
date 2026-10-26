@@ -891,6 +891,28 @@ pub(crate) mod fixtures {
         .unwrap();
     }
 
+    /// Sets the profile's birthdate `years` years and a day before today.
+    pub(crate) fn born_years_ago(conn: &Connection, years: i32) {
+        use chrono::Datelike;
+        let today = chrono::Utc::now().date_naive();
+        let born = chrono::NaiveDate::from_ymd_opt(today.year() - years, today.month(), 1).unwrap()
+            - chrono::Duration::days(1);
+        conn.execute(
+            "UPDATE local_identity SET birthdate = ?1",
+            [born.format("%Y-%m-%d").to_string()],
+        )
+        .unwrap();
+    }
+
+    pub(crate) fn link_guardian(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
+             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
+            [],
+        )
+        .unwrap();
+    }
+
     /// Opens an attempt `id`, ending any other first, so each refusal can be
     /// checked against a session of its own (a session is flagged once).
     pub(crate) fn attempt(conn: &Connection, id: &str) {

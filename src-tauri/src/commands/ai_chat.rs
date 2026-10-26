@@ -429,6 +429,9 @@ pub(crate) fn models_source(
 ) -> Result<(alexandria_studio::model::StudioConnection, Option<String>), String> {
     ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
+    // Listing models contacts the provider with the stored key: never one
+    // the learner may not connect at all.
+    ai_access::may_connect(conn, &doc.value)?;
     let key = studio_store::secret(conn, connection_id).map_err(|e| e.to_string())?;
     Ok((doc.value, key))
 }
@@ -1390,6 +1393,26 @@ mod tests {
             "nothing changed"
         );
         // chat_start_run begins through the turn, which the turn's tests cover.
+    }
+
+    #[test]
+    fn listing_models_never_reaches_a_provider_the_learner_may_not_connect() {
+        let conn = db();
+        connection(&conn, "c1", "cloud", "https://openrouter.ai/api/v1", None);
+        assert!(models_source(&conn, "c1").is_ok());
+        born_years_ago(&conn, 16);
+        let err = models_source(&conn, "c1").unwrap_err();
+        assert!(err.starts_with("adults_only"), "{err}");
+        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
+        assert!(
+            models_source(&conn, "c1").is_ok(),
+            "approval is for sending"
+        );
+        born_years_ago(&conn, 12);
+        let err = models_source(&conn, "c1").unwrap_err();
+        assert!(err.starts_with("under_13"), "{err}");
+        connection(&conn, "c1", "local", "http://127.0.0.1:11434/v1", None);
+        assert!(models_source(&conn, "c1").is_ok());
     }
 
     // ─── streaming, end to end ──────────────────────────────────────────

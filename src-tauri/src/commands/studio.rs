@@ -289,8 +289,20 @@ pub async fn studio_save_connection(
     api_key: Option<String>,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     with_db(&state, |db| {
-        store::save_connection(db, &document, api_key.as_deref())
-    })
+        Ok(save_connection(db, &document, api_key.as_deref()))
+    })?
+}
+
+/// Saves a model connection the learner may set up: the same age rules as
+/// signing in to a provider (never a remote model under 13, never an
+/// adults-only vendor under 18), with the same refusal codes.
+pub(crate) fn save_connection(
+    db: &rusqlite::Connection,
+    document: &StudioDocument<StudioConnection>,
+    api_key: Option<&str>,
+) -> Result<StudioDocument<StudioConnection>, String> {
+    crate::ai_access::may_connect(db, &document.value)?;
+    store::save_connection(db, document, api_key).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -663,6 +675,33 @@ mod tests {
             Err(alexandria_studio::access::Refused::AttemptInProgress)
         ));
         assert!(flagged(&conn, "attempt"));
+    }
+
+    #[test]
+    fn the_connection_form_follows_the_sign_in_age_rules() {
+        use crate::ai_chat::turn::fixtures::{born_years_ago, db};
+        let conn = db();
+        let doc = |id: &str, endpoint: &str| StudioDocument {
+            id: id.into(),
+            revision: 0,
+            value: StudioConnection {
+                endpoint: endpoint.into(),
+                id: id.into(),
+                name: "Mine".into(),
+                model: "m".into(),
+                ..crate::commands::ai_signin::sign_in_target(endpoint)
+            },
+        };
+        born_years_ago(&conn, 16);
+        let err = save_connection(&conn, &doc("or", "https://openrouter.ai/api/v1"), Some("k"))
+            .unwrap_err();
+        assert!(err.starts_with("adults_only: OpenRouter"), "{err}");
+        assert!(store::connection(&conn, "or").is_err(), "nothing saved");
+        save_connection(&conn, &doc("oa", "https://api.openai.com/v1"), Some("k")).unwrap();
+        born_years_ago(&conn, 12);
+        let err = save_connection(&conn, &doc("oa2", "https://api.openai.com/v1"), Some("k"))
+            .unwrap_err();
+        assert!(err.starts_with("under_13"), "{err}");
     }
 
     #[test]
