@@ -856,7 +856,7 @@ pub async fn plugin_submit_and_grade(
             if issuance_block.is_none() && persisted_record.score >= PLUGIN_PASS_THRESHOLD {
                 let skills = element_skill_ids(db, &persisted_element_id).unwrap_or_default();
                 if !skills.is_empty() {
-                    let now = crate::commands::credentials::now_rfc3339();
+                    let now = crate::clock::now_rfc3339();
                     let evidence = vec![
                         persisted_submission_cid.clone(),
                         persisted_content_cid.clone(),

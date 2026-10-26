@@ -5,6 +5,7 @@
 //! [`crate::aggregation::store`]. These commands read and recompute it, and
 //! read a skill's dated history.
 
+use crate::clock::now_rfc3339;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, Connection};
 
@@ -15,12 +16,6 @@ use crate::aggregation::DerivedSkillState;
 use crate::crypto::did::Did;
 use crate::db::executor::DatabaseWorkload;
 use crate::AppState;
-
-// ---- helpers -------------------------------------------------------------
-
-fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-}
 
 // ---- tauri command handlers ---------------------------------------------
 

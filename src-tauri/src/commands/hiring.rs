@@ -462,7 +462,7 @@ pub async fn hiring_interview_respond(
         decision: signed.response.decision.clone(),
         chosen_slot: signed.response.chosen_slot,
         meeting_url: signed.response.invite.meeting_url.clone(),
-        responded_at: super::credentials::now_rfc3339(),
+        responded_at: crate::clock::now_rfc3339(),
         payload_json: serde_json::to_string(&signed).map_err(|e| e.to_string())?,
     };
     state
@@ -522,7 +522,7 @@ pub async fn hiring_offer_respond(
         decision: signed.response.decision.clone(),
         chosen_slot: None,
         meeting_url: None,
-        responded_at: super::credentials::now_rfc3339(),
+        responded_at: crate::clock::now_rfc3339(),
         payload_json: serde_json::to_string(&signed).map_err(|e| e.to_string())?,
     };
     state
@@ -895,7 +895,7 @@ pub async fn hiring_interview_integrity_send(
         integrity_session_id,
         interview_id,
         organization: signed.report.invite.organization.clone(),
-        sent_at: super::credentials::now_rfc3339(),
+        sent_at: crate::clock::now_rfc3339(),
         report: signed.report.clone(),
     };
     let payload = serde_json::to_string(&signed).map_err(|e| e.to_string())?;

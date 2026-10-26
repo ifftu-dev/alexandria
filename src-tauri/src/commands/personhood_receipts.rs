@@ -147,7 +147,7 @@ mod implementation {
 
     fn current_account(db: &rusqlite::Connection, account: &SigningKey) -> Result<(), String> {
         let did = alexandria_verify::did::did_from_verifying_key(&account.verifying_key());
-        let time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let time = crate::clock::now_rfc3339();
         let current = crate::crypto::key_registry::resolve_key_at(db, &did, &time)
             .map_err(|e| e.to_string())?;
         if let Some(entry) = current {

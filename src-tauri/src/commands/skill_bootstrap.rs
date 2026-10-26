@@ -156,7 +156,7 @@ pub async fn bootstrap_confirm(
         return Ok(0);
     }
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let provenance = doc_type.provenance();
     let evidence_refs: Vec<String> = content_hash.into_iter().collect();
 

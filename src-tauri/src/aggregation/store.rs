@@ -16,14 +16,11 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{aggregate_skill_state, AggregationConfig, AggregationInput, DerivedSkillState};
+use crate::clock::now_rfc3339;
 use crate::crypto::did::Did;
 use crate::db::scoring_inputs::{scoring_input_fingerprint, verified_skill_inputs};
 use crate::domain::vc::{CredentialType, VerifiableCredential};
 use crate::network_profile::embedded_preprod;
-
-fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-}
 
 /// Read a cached `DerivedSkillState` for `(subject, skill)` if one
 /// exists for the current calculation version, else recompute live

@@ -330,7 +330,7 @@ pub async fn assessment_plan_goal(
     state: State<'_, AppState>,
     goal_skill_ids: Vec<String>,
 ) -> Result<crate::assessment::goal_plan::GoalAssessmentPlan, String> {
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -426,8 +426,8 @@ pub async fn assessment_start_attempt(
     role_assessment_id: Option<String>,
 ) -> Result<StartedAttempt, String> {
     let seed: u64 = rand::random();
-    let attempt_id = crate::commands::credentials::now_rfc3339() + "-" + &seed.to_string();
-    let now = crate::commands::credentials::now_rfc3339();
+    let attempt_id = crate::clock::now_rfc3339() + "-" + &seed.to_string();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -887,11 +887,7 @@ pub(crate) fn submit_answers_impl(
     save_draft_impl(conn, attempt_id, &normalized)?;
     conn.execute(
         "UPDATE assessment_attempts SET submitted_answers_json=?2, submitted_at=?3 WHERE id=?1",
-        params![
-            attempt_id,
-            json,
-            crate::commands::credentials::now_rfc3339()
-        ],
+        params![attempt_id, json, crate::clock::now_rfc3339()],
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())
@@ -929,7 +925,7 @@ pub async fn assessment_grade(
     answers: Vec<SubmittedAnswer>,
 ) -> Result<GradeResult, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
     let graded = state

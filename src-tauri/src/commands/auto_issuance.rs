@@ -114,7 +114,7 @@ fn issue_new_observation(
     let list_id = ensure_status_list(conn, learner_did)?;
     let index = allocate_status_index(conn, &list_id)?;
 
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
 
     // Self-asserted course-completion claim. The properties land
     // directly on `credentialSubject` per W3C VC v2 — a `claimType`

@@ -6,6 +6,7 @@ pub mod assessment;
 pub mod av_permissions;
 pub mod cardano;
 pub mod classroom;
+pub mod clock;
 pub mod commands;
 pub mod content_store;
 pub mod course_notes;
@@ -295,7 +296,7 @@ impl AppState {
         // the current decay, and records a dated history snapshot. Best-effort.
         if let Ok(guard) = self.db.lock() {
             if let Some(db) = guard.as_ref() {
-                let now = commands::credentials::now_rfc3339();
+                let now = crate::clock::now_rfc3339();
                 match crate::aggregation::store::recompute_all_impl(db.conn(), &now) {
                     Ok(n) if n > 0 => log::info!("recomputed {n} derived skill states on unlock"),
                     Ok(_) => {}
@@ -499,7 +500,7 @@ impl AppState {
         // even when the app has been shut for the whole window — the deadline
         // is an absolute timestamp, not elapsed uptime.
         {
-            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let now = crate::clock::now_rfc3339();
             match crate::sentinel::evidence::purge_expired(database.conn(), &now) {
                 Ok(n) if n > 0 => log::info!("sentinel evidence: purged {n} expired row(s)"),
                 Ok(_) => {}
@@ -1092,7 +1093,7 @@ pub fn run() {
                                         }
                                     };
                                     if !pending.is_empty() {
-                                        let now = commands::credentials::now_rfc3339();
+                                        let now = crate::clock::now_rfc3339();
                                         let (accepted, errors) = commands::credentials::push_status_lists(
                                             &pending,
                                             &signing_key,
@@ -1128,7 +1129,7 @@ pub fn run() {
                                     let signing_key =
                                         ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
                                     let did = crypto::did::derive_did_key(&signing_key);
-                                    let now = commands::credentials::now_rfc3339();
+                                    let now = crate::clock::now_rfc3339();
                                     let now_unix = chrono::Utc::now().timestamp();
                                     let plan = {
                                         let guard = db_for_queue.lock();

@@ -6,6 +6,7 @@
 //! `&Did`. This split keeps the business logic unit-testable without
 //! constructing a full `State<AppState>`.
 
+use crate::clock::now_rfc3339;
 use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -886,10 +887,6 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
         return Err(format!("status list {list_id} is full"));
     }
     Ok(next)
-}
-
-pub(crate) fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 pub(crate) async fn load_issuer_key(

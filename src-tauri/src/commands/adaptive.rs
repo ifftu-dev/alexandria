@@ -35,11 +35,12 @@ use crate::assessment::adaptive::{select_next_item, should_stop, PoolItem, StopR
 use crate::assessment::irt::{estimate_theta_eap, theta_to_score, AbilityEstimate, ItemParams};
 use crate::assessment::items::{self, GradeEngine, ServedItem};
 use crate::assessment::{shuffle, SplitMix64};
+use crate::clock::now_rfc3339;
 use crate::commands::assessment::{
     end_interrupted_attempts, ensure_attempt_owner, load_attempt_history,
     require_live_integrity_session, resolve_bank_policy, GradeResult,
 };
-use crate::commands::credentials::{load_issuer_key, now_rfc3339};
+use crate::commands::credentials::load_issuer_key;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};

@@ -176,7 +176,7 @@ pub async fn guardian_accept_invite(
     // Issue the guardianship credential (RoleCredential role=guardian,
     // subject = child DID) with our signing key.
     let (signing_key, issuer_did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let invite_for_db = invite.clone();
     let code_hash_for_db = code_hash.clone();
     let issuer_did_for_db = issuer_did.clone();

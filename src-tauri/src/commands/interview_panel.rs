@@ -19,7 +19,7 @@ use serde_json::Value;
 use super::interview::{
     create_interview_impl, CreateInterviewParticipant, CreateInterviewRequest, InterviewBundle,
 };
-use crate::commands::credentials::now_rfc3339;
+use crate::clock::now_rfc3339;
 use crate::commands::exchange::{client, response_json};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;

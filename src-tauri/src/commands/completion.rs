@@ -23,7 +23,8 @@ use crate::cardano::{
     completion_queue::{self, WitnessState, WitnessStatus},
     completion_recovery, completion_tx_builder, script_refs,
 };
-use crate::commands::credentials::{now_rfc3339, IssueCredentialRequest};
+use crate::clock::now_rfc3339;
+use crate::commands::credentials::IssueCredentialRequest;
 use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;

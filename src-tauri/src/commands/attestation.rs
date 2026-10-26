@@ -61,7 +61,7 @@ pub async fn get_credential_trust(
         .map_err(|error| error.to_string())?
         .network_id
         .clone();
-    let verification_time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let verification_time = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(

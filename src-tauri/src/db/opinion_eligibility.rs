@@ -215,7 +215,7 @@ pub(crate) fn opinion_refusal_message(
 
 /// Verification time for privilege checks, in the credential envelope format.
 pub(crate) fn verification_time_now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    crate::clock::now_rfc3339()
 }
 
 fn skill_subject_field(conn: &Connection, skill_id: &str) -> Result<Option<String>, String> {
