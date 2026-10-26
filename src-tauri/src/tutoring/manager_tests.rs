@@ -179,6 +179,7 @@ fn request(name: &str, kind: CallKind, context: Option<&str>) -> RoomRequest {
         kind,
         context_id: context.map(str::to_string),
         devices: DeviceSelection::default(),
+        classroom_call: None,
     }
 }
 
@@ -502,4 +503,148 @@ async fn device_events_and_route_changes_reach_the_running_call() {
     assert!(manager.toggle_audio(false).await.is_ok());
 
     manager.shutdown().await.expect("cleanup");
+}
+
+fn classroom_request(classroom: &str) -> RoomRequest {
+    RoomRequest {
+        classroom_call: Some(super::call_kind::ClassroomCallRow {
+            channel_id: None,
+            started_by: "stake_test1".into(),
+        }),
+        ..request("Teacher", CallKind::Classroom, Some(classroom))
+    }
+}
+
+fn count(records: &MemoryRecords, table: &str) -> i64 {
+    records.with(|db| {
+        db.conn()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_classroom_call_and_its_session_row_are_written_together_or_not_at_all() {
+    let book = MemoryLookup::new();
+    let node = Node::bind(&book).await;
+    let records = MemoryRecords::migrated();
+    let (manager, _) = manager();
+
+    // The classroom does not exist, so its call row cannot be written: no
+    // session row may be left behind as a phantom active call, and the room
+    // is not left running.
+    let refused = manager
+        .create_room(
+            classroom_request("no-such-classroom"),
+            node.network(),
+            &records,
+        )
+        .await
+        .expect_err("the classroom row fails");
+    assert!(refused.contains("FOREIGN KEY"), "{refused}");
+    assert_eq!(count(&records, "tutoring_sessions"), 0);
+    assert_eq!(count(&records, "classroom_calls"), 0);
+    assert!(!manager.is_active().await);
+    assert!(!manager.media().session_running());
+
+    records.with(|db| {
+        db.conn()
+            .execute(
+                "INSERT INTO classrooms (id, name, owner_address) VALUES ('c1', 'Algebra', 'addr')",
+                [],
+            )
+            .unwrap()
+    });
+    let call = classroom_request("c1");
+    let id = call.session_id.clone();
+    let ticket = manager
+        .create_room(call, node.network(), &records)
+        .await
+        .expect("classroom call starts");
+    let (kind, context, status, _) = session_row(&records, &id);
+    assert_eq!(
+        (kind.as_str(), context.as_deref(), status.as_str()),
+        ("classroom", Some("c1"), "active")
+    );
+    let stored: String = records.with(|db| {
+        db.conn()
+            .query_row(
+                "SELECT ticket FROM classroom_calls WHERE id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    });
+    assert_eq!(stored, ticket);
+    manager.shutdown().await.expect("cleanup");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slow_leave_never_ends_the_media_of_the_call_that_follows() {
+    let book = MemoryLookup::new();
+    let node = Node::bind(&book).await;
+    let records = MemoryRecords::migrated();
+    let (manager, _) = manager();
+    let manager = Arc::new(manager);
+    manager
+        .create_room(
+            request("First", CallKind::Tutoring, None),
+            node.network(),
+            &records,
+        )
+        .await
+        .expect("first call");
+
+    // Hold the first call's cleanup open with native work that cannot be
+    // aborted.
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (started, running) = oneshot::channel::<()>();
+    let tasks = manager.tasks().clone();
+    let native = tokio::spawn(async move {
+        let _ = tasks
+            .run_blocking(move || {
+                let _ = started.send(());
+                let _ = released.recv();
+            })
+            .await;
+    });
+    running.await.expect("native work started");
+
+    // Leaving gets as far as waiting on cleanup, and is not polled again
+    // until the next call has started.
+    let mut leave = Box::pin(manager.leave_room(&records));
+    assert!(futures::poll!(&mut leave).is_pending());
+
+    let next = {
+        let manager = manager.clone();
+        let records = records.clone();
+        let network = node.network();
+        tokio::spawn(async move {
+            manager
+                .create_room(
+                    request("Second", CallKind::Tutoring, None),
+                    network,
+                    &records,
+                )
+                .await
+        })
+    };
+    release.send(()).expect("finish native work");
+    native.await.expect("native task");
+    next.await.expect("join task").expect("second call starts");
+    assert!(manager.media().session_running());
+
+    // The first leave now finishes. It must not end the second call's media.
+    leave.await.expect("first leave");
+    assert!(
+        manager.is_active().await,
+        "the second call is still running"
+    );
+    assert!(
+        manager.media().session_running(),
+        "the late leave ended the next call's media"
+    );
+
+    manager.shutdown().await.expect("cleanup");
+    assert!(!manager.media().session_running());
 }

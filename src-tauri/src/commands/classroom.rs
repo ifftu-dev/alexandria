@@ -1349,30 +1349,6 @@ pub async fn classroom_unsubscribe(
 
 // ── Live Calls ─────────────────────────────────────────────────────
 
-/// The profile's database, for the call manager's session rows.
-fn call_records(state: &State<'_, AppState>) -> crate::tutoring::records::ProfileRecords {
-    crate::tutoring::records::ProfileRecords {
-        executor: state.db_executor.clone(),
-        lease: state.profile_lease(),
-    }
-}
-
-/// The iroh node a classroom call rides on.
-#[cfg(desktop)]
-async fn call_network(
-    state: &State<'_, AppState>,
-) -> Result<crate::tutoring::manager::Network, String> {
-    let content_node = &state.content_node;
-    Ok(crate::tutoring::manager::Network {
-        endpoint: content_node
-            .endpoint()
-            .await
-            .ok_or("iroh node not running")?,
-        gossip: content_node.gossip().await.ok_or("gossip not available")?,
-        live: content_node.live().await.ok_or("live not available")?,
-    })
-}
-
 /// Start a voice/video call in a classroom (desktop only).
 ///
 /// Creates a live-crate room and broadcasts the ticket to all members
@@ -1408,7 +1384,7 @@ pub async fn classroom_start_call(
     })
     .await?;
 
-    let network = call_network(&state).await?;
+    let network = super::tutoring::network(&state).await?;
     let call_id = uuid::Uuid::new_v4().to_string();
     let title = format!("{classroom_name} call");
     let request = crate::tutoring::manager::RoomRequest {
@@ -1422,70 +1398,30 @@ pub async fn classroom_start_call(
             mic_device_id: mic_id,
             speaker_device_id: speaker_id,
         },
+        // Its classroom_calls row is written with the call's own row.
+        classroom_call: Some(crate::tutoring::call_kind::ClassroomCallRow {
+            channel_id: channel_id.clone(),
+            started_by: w.stake_address.clone(),
+        }),
     };
     let ticket = state
         .tutoring
-        .create_room(request, network, &call_records(&state))
+        .create_room(request, network, &super::tutoring::records(&state))
         .await
         .map_err(|e| e.to_string())?;
 
     let persisted_call_id = call_id.clone();
-    let persisted_classroom_id = classroom_id.clone();
-    let persisted_channel_id = channel_id.clone();
-    let persisted_title = title.clone();
-    let persisted_ticket = ticket.clone();
-    let persisted_starter = w.stake_address.clone();
-    let call = classroom_db(&state, "classroom.start-call.persist", move |db| {
-        let tx = rusqlite::Transaction::new_unchecked(
-            db.conn(),
-            rusqlite::TransactionBehavior::Immediate,
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "INSERT INTO classroom_calls \
-             (id, classroom_id, channel_id, title, ticket, started_by, status, started_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', datetime('now'))",
-            params![
-                persisted_call_id,
-                persisted_classroom_id,
-                persisted_channel_id,
-                persisted_title,
-                persisted_ticket,
-                persisted_starter
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        crate::tutoring::call_kind::record_session(
-            &tx,
-            &persisted_call_id,
-            &persisted_title,
-            &persisted_ticket,
-            crate::tutoring::call_kind::CallKind::Classroom,
-            Some(&persisted_classroom_id),
-        )?;
-        let call = tx
+    let call = classroom_db(&state, "classroom.start-call.read", move |db| {
+        db.conn()
             .query_row(
                 "SELECT id, classroom_id, channel_id, title, ticket, started_by, status, started_at, ended_at \
                  FROM classroom_calls WHERE id = ?1",
                 params![persisted_call_id],
                 map_call_row,
             )
-            .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(call)
+            .map_err(|e| e.to_string())
     })
-    .await;
-    let call = match call {
-        Ok(call) => call,
-        Err(error) => {
-            if let Err(cleanup_error) = state.tutoring.leave_room(&call_records(&state)).await {
-                log::error!(
-                    "classroom_start_call: failed to clean up unpersisted room: {cleanup_error}"
-                );
-            }
-            return Err(error);
-        }
-    };
+    .await?;
 
     // Broadcast call started event
     {
@@ -1544,11 +1480,10 @@ pub async fn classroom_join_call(
         })
         .await?;
 
-    let network = call_network(&state).await?;
-    let title = format!("{classroom_name} call");
+    let network = super::tutoring::network(&state).await?;
     let request = crate::tutoring::manager::RoomRequest {
-        session_id: call_id.clone(),
-        title: title.clone(),
+        session_id: call_id,
+        title: format!("{classroom_name} call"),
         display_name: display_name.unwrap_or_else(|| w.stake_address.clone()),
         kind: crate::tutoring::call_kind::CallKind::Classroom,
         context_id: Some(classroom_id.clone()),
@@ -1557,23 +1492,14 @@ pub async fn classroom_join_call(
             mic_device_id: mic_id,
             speaker_device_id: speaker_id,
         },
+        classroom_call: None,
     };
+    // The manager records the call's session row as a classroom call.
     state
         .tutoring
-        .join_room(request, &ticket, network, &call_records(&state))
+        .join_room(request, &ticket, network, &super::tutoring::records(&state))
         .await
-        .map_err(|e| e.to_string())?;
-    classroom_db(&state, "classroom.join-call.record", move |db| {
-        crate::tutoring::call_kind::record_session(
-            db.conn(),
-            &call_id,
-            &title,
-            &ticket,
-            crate::tutoring::call_kind::CallKind::Classroom,
-            Some(&classroom_id),
-        )
-    })
-    .await
+        .map(|_| ())
 }
 
 /// End a classroom call (started_by or moderator/owner).
@@ -1621,7 +1547,10 @@ pub async fn classroom_end_call(call_id: String, state: State<'_, AppState>) -> 
     .await?;
 
     // Leave the live-crate room if we're in it
-    let _ = state.tutoring.leave_room(&call_records(&state)).await;
+    let _ = state
+        .tutoring
+        .leave_room(&super::tutoring::records(&state))
+        .await;
 
     // Broadcast call ended
     let node_lock = state.p2p_node.lock().await;

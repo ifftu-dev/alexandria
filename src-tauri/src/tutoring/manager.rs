@@ -21,6 +21,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -251,7 +252,6 @@ pub struct DeviceList {
 }
 
 /// What a learner asks for when creating or joining a call.
-#[derive(Debug, Clone)]
 pub struct RoomRequest {
     pub session_id: String,
     pub title: String,
@@ -260,6 +260,10 @@ pub struct RoomRequest {
     /// The classroom, interview or plugin element the call belongs to.
     pub context_id: Option<String>,
     pub devices: DeviceSelection,
+    /// A classroom call being started: its `classroom_calls` row is written
+    /// in the same transaction as this call's session row, so neither exists
+    /// without the other. A failed write stops the call.
+    pub classroom_call: Option<call_kind::ClassroomCallRow>,
 }
 
 /// The iroh node a call rides on; every handle is a cheap clone.
@@ -278,6 +282,9 @@ type Shared<M> = Arc<Mutex<Option<ActiveSession<M>>>>;
 /// Internal state for an active room.
 pub(super) struct ActiveSession<M: MediaDevices> {
     session_id: String,
+    /// Which start of the platform media this session owns; see
+    /// [`Core::generation`].
+    generation: u64,
     session_title: String,
     handle: RoomHandle,
     broadcast: PublishBroadcast,
@@ -368,6 +375,10 @@ struct Core<M: MediaDevices> {
     events: Arc<dyn CallEvents>,
     tasks: Arc<SessionTasks>,
     inner: Shared<M>,
+    /// Bumped, under `inner`, each time a session starts the platform
+    /// media. Leaving ends the media only if no later session has started
+    /// it again, so a slow leave never ends the next call's media.
+    generation: Arc<AtomicU64>,
 }
 
 impl<M: MediaDevices> Clone for Core<M> {
@@ -378,6 +389,7 @@ impl<M: MediaDevices> Clone for Core<M> {
             events: self.events.clone(),
             tasks: self.tasks.clone(),
             inner: self.inner.clone(),
+            generation: self.generation.clone(),
         }
     }
 }
@@ -401,6 +413,7 @@ impl<M: MediaDevices> CallManager<M> {
                 events: Arc::new(events),
                 tasks: Arc::new(SessionTasks::default()),
                 inner: Arc::new(Mutex::new(None)),
+                generation: Arc::new(AtomicU64::new(0)),
             },
         }
     }
@@ -490,6 +503,7 @@ impl<M: MediaDevices> CallManager<M> {
         }
         core.tasks.shutdown().await;
         core.tasks.open()?;
+        let generation = core.generation.fetch_add(1, Ordering::SeqCst) + 1;
         core.media.session_started();
         let mut startup = core.tasks.startup_guard();
         let RoomRequest {
@@ -499,6 +513,7 @@ impl<M: MediaDevices> CallManager<M> {
             kind,
             context_id,
             devices,
+            classroom_call,
         } = request;
         let result = async {
             let endpoint = &network.endpoint;
@@ -573,6 +588,7 @@ impl<M: MediaDevices> CallManager<M> {
 
             *inner = Some(ActiveSession {
                 session_id: session_id.clone(),
+                generation,
                 session_title: title.clone(),
                 handle,
                 broadcast,
@@ -650,22 +666,38 @@ impl<M: MediaDevices> CallManager<M> {
                     "tutoring.create.persist-session"
                 },
                 move |db| {
-                    call_kind::record_session(
+                    let tx = rusqlite::Transaction::new_unchecked(
                         db.conn(),
+                        rusqlite::TransactionBehavior::Immediate,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    call_kind::record_session(
+                        &tx,
                         &session_id,
                         &title,
                         &ticket_str,
                         kind,
                         context_id.as_deref(),
                     )?;
-                    super::presence::register(db.conn(), &session_id, &ticket_str)
+                    super::presence::register(&tx, &session_id, &ticket_str)?;
+                    if let Some(row) = &classroom_call {
+                        call_kind::record_classroom_call(
+                            &tx,
+                            &session_id,
+                            context_id.as_deref(),
+                            &title,
+                            &ticket_str,
+                            row,
+                        )?;
+                    }
+                    tx.commit().map_err(|e| e.to_string())
                 },
             )
         }
         .await;
         if let Err(error) = record {
             log::error!("tutoring: session {session_id} could not be recorded: {error}");
-            self.stop_room(false).await?;
+            self.stop_room(false, Some(&session_id)).await?;
             return Err(error);
         }
         Ok(ticket_str)
@@ -674,7 +706,7 @@ impl<M: MediaDevices> CallManager<M> {
     /// Leave the current room and note when it was last occupied.
     pub async fn leave_room(&self, records: &impl SessionRecords) -> Result<(), String> {
         let session_id = self.status().await.map(|s| s.session_id);
-        self.stop_room(true).await?;
+        self.stop_room(true, None).await?;
         if let Some(id) = session_id {
             records
                 .run("tutoring.leave.persist-session", move |db| {
@@ -693,7 +725,7 @@ impl<M: MediaDevices> CallManager<M> {
 
     /// Stop whatever is running, on profile lock or app exit.
     pub async fn shutdown(&self) -> Result<(), String> {
-        self.stop_room(false).await
+        self.stop_room(false, None).await
     }
 
     /// Leave the room without letting a stuck media task hold leaving hostage.
@@ -704,16 +736,25 @@ impl<M: MediaDevices> CallManager<M> {
     /// await) finishes in the background. Starting another room is still
     /// refused until it does, because [`SessionTasks::open`] waits for an
     /// empty registry: no second camera opens on top of the first.
-    async fn stop_room(&self, require_active: bool) -> Result<(), String> {
+    ///
+    /// `only` stops the room only if it is still that session, for a start
+    /// that failed after releasing the lock.
+    async fn stop_room(&self, require_active: bool, only: Option<&str>) -> Result<(), String> {
         let core = &self.core;
         crate::diag::log("leave: waiting for the session lock");
         let session = {
             let mut inner = core.inner.lock().await;
+            if let Some(only) = only {
+                if inner.as_ref().map(|s| s.session_id.as_str()) != Some(only) {
+                    return Ok(());
+                }
+            }
             if require_active && inner.is_none() {
                 return Err("not in a tutoring session".into());
             }
             inner.take()
         };
+        let ended = session.as_ref().map(|s| s.generation);
         crate::diag::log("leave: session taken, stopping media");
         if let Some(session) = session.as_ref() {
             if let Some(preview) = &session.self_preview_task {
@@ -743,7 +784,16 @@ impl<M: MediaDevices> CallManager<M> {
         } else {
             crate::diag::log("leave: media stopped");
         }
-        core.media.session_ended();
+        // End the platform media only if it is still this session's: a call
+        // started while cleanup ran owns it now.
+        if let Some(generation) = ended {
+            let _inner = core.inner.lock().await;
+            if core.generation.load(Ordering::SeqCst) == generation {
+                core.media.session_ended();
+            } else {
+                crate::diag::log("leave: a newer call owns the media; leaving it running");
+            }
+        }
         Ok(())
     }
 

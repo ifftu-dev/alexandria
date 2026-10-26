@@ -33,14 +33,16 @@ pub struct TutoringSessionInfo {
     pub context_id: Option<String>,
 }
 
-fn records(state: &State<'_, AppState>) -> ProfileRecords {
+/// The unlocked profile's database, for a call's session rows.
+pub(crate) fn records(state: &State<'_, AppState>) -> ProfileRecords {
     ProfileRecords {
         executor: state.db_executor.clone(),
         lease: state.profile_lease(),
     }
 }
 
-async fn network(state: &State<'_, AppState>) -> Result<Network, String> {
+/// The iroh node a call rides on.
+pub(crate) async fn network(state: &State<'_, AppState>) -> Result<Network, String> {
     let content_node = &state.content_node;
     let endpoint = content_node
         .endpoint()
@@ -88,6 +90,7 @@ pub async fn tutoring_create_room(
             mic_device_id: mic_id,
             speaker_device_id: speaker_id,
         },
+        classroom_call: None,
     };
     let ticket = state
         .tutoring
@@ -145,6 +148,7 @@ pub async fn tutoring_join_room(
             mic_device_id: mic_id,
             speaker_device_id: speaker_id,
         },
+        classroom_call: None,
     };
     let resolved_ticket = state
         .tutoring
