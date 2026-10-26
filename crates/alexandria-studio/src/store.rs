@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::access::Reader;
 use crate::model::*;
 use crate::{Error, Result};
 
@@ -178,7 +179,7 @@ pub fn tutor_policy(conn: &Connection, course_id: &str) -> Result<TutorPolicy> {
         .unwrap_or_default())
 }
 
-fn can_use_tutor(conn: &Connection, course_id: &str) -> Result<()> {
+pub(crate) fn can_use_tutor(conn: &Connection, course_id: &str) -> Result<()> {
     let allowed: bool = conn.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM courses c
@@ -220,19 +221,10 @@ pub fn tutor_context(
             "The instructor has not enabled the tutor".into(),
         ));
     }
-    let lesson: Option<(String, Option<String>, Option<String>, String)> = conn
-        .query_row(
-            "SELECT e.title,e.content_inline,e.content_cid,e.element_type
-             FROM course_elements e JOIN course_chapters ch ON ch.id=e.chapter_id
-             WHERE e.id=?1 AND ch.course_id=?2",
-            params![element_id, course_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .optional()?;
-    let (lesson_title, lesson_inline, lesson_cid, kind) = lesson.ok_or(Error::Permission)?;
-    if kind != "text" {
-        return Err(Error::Permission);
-    }
+    let lesson = crate::access::visible_lesson(conn, Reader::Tutor, course_id, element_id)?;
+    let lesson_inline = lesson.inline().map(str::to_owned);
+    let lesson_cid = lesson.blob().map(str::to_owned);
+    let lesson_title = lesson.title;
     let connection = connection(conn, connection_id)?.value;
     if !connection.enabled || connection.capability != "text" {
         return Err(Error::Unavailable("Choose an enabled text model".into()));

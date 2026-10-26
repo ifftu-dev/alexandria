@@ -20,8 +20,9 @@ use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
 use alexandria_ai::Adapter;
 use alexandria_ai::StreamEvent;
+use alexandria_studio::access::{visible_lesson, Reader};
 use alexandria_studio::model::StudioConnection;
-use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
+use alexandria_studio::{gate, provider as studio_provider, store as studio_store};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -251,10 +252,7 @@ pub(crate) fn attach(
     element_id: &str,
 ) -> Result<ChatBinding, String> {
     refuse_during_assessment(conn)?;
-    let target = learning::lesson_target(conn, course_id, element_id).map_err(|e| e.to_string())?;
-    if learning::content_kind(&target.element_type) != "text" {
-        return Err("invalid_input: only text lessons can be attached".into());
-    }
+    let target = visible_lesson(conn, Reader::Chat, course_id, element_id)?;
     let id = uuid::Uuid::new_v4().to_string();
     store::add_binding(
         conn,
