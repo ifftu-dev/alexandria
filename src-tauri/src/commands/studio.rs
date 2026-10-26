@@ -117,7 +117,7 @@ fn tutor_gate(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
     let gated = alexandria_studio::gate::require_no_assessment(db);
     if matches!(gated, Err(StudioError::AssessmentActive)) {
         if let Err(error) =
-            super::integrity::record_backend_flag(db, "in_app_assistant_during_attempt")
+            crate::sentinel::snapshots::record_backend_flag(db, "in_app_assistant_during_attempt")
         {
             log::warn!("tutor: could not record an integrity flag: {error}");
         }

@@ -672,7 +672,9 @@ pub fn build_integrity_report(
         .into_iter()
         .take(64)
         .map(|(flag, count)| IntegrityFlag {
-            severity: super::integrity::flag_severity(&flag).as_str().into(),
+            severity: crate::sentinel::snapshots::flag_severity(&flag)
+                .as_str()
+                .into(),
             flag,
             count,
         })

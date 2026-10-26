@@ -67,7 +67,7 @@ pub(crate) fn refuse_during_assessment(conn: &Connection) -> Result<(), String> 
     let gated = gate::require_no_assessment(conn);
     if matches!(gated, Err(alexandria_studio::Error::AssessmentActive)) {
         if let Err(error) =
-            super::integrity::record_backend_flag(conn, "in_app_assistant_during_attempt")
+            crate::sentinel::snapshots::record_backend_flag(conn, "in_app_assistant_during_attempt")
         {
             log::warn!("chat: could not record an integrity flag: {error}");
         }

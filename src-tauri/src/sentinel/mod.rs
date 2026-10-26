@@ -25,6 +25,8 @@
 //!   hide-overlay-windows), obscured-touch counter, accessibility / ADB report
 //! - `display_topology` — monitor count, external / mirrored display,
 //!   mobile split-screen (native per-OS probes)
+//! - `snapshots` — the integrity snapshot chain: validation, commitment,
+//!   severity, escalation, and flags the backend records itself
 //! - `evidence` — learner-consented retention of appeal evidence for
 //!   flagged sessions; nothing is persisted without an explicit yes
 //!
@@ -48,4 +50,5 @@ pub mod mouse_cnn;
 pub mod paste_classifier;
 pub mod prior_blob;
 pub mod processes;
+pub mod snapshots;
 pub mod types;
