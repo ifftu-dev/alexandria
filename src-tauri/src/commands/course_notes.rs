@@ -13,6 +13,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
+use crate::ai_access::{self, Surface};
 use crate::ai_chat::{artifact, bank_guard, store as chat_store};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
@@ -54,10 +55,6 @@ where
             move |db| f(db.conn()),
         )
         .await
-}
-
-fn no_assessment(conn: &Connection) -> Result<(), String> {
-    alexandria_studio::gate::require_no_assessment(conn).map_err(|e| e.to_string())
 }
 
 fn preview(body: &str) -> String {
@@ -103,7 +100,7 @@ fn note(conn: &Connection, id: &str) -> Result<CourseNote, String> {
 
 /// A course's notes, newest first.
 pub fn list(conn: &Connection, course_id: &str) -> Result<Vec<CourseNote>, String> {
-    no_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::CourseNotes)?;
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {NOTE_COLUMNS} FROM course_notes n
@@ -140,7 +137,7 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
 /// Copies a saved chat note into the course of the first lesson it cites.
 /// Copying the same note to the same lesson twice keeps one course note.
 pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote, String> {
-    no_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::CourseNotes)?;
     let item = chat_store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
     let artifact::Body::Note { text } = &item.body else {
         return Err("invalid_input: only a note can be saved to a course".into());
@@ -151,6 +148,9 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
     let Some(lesson) = item.sources.iter().find(|s| s.kind == "lesson") else {
         return Err("no_lesson: this note does not cite a lesson".into());
     };
+    if bank_guard::matches_assessment_item(conn, text) {
+        return Err("assessment_item: notes cannot hold assessment questions".into());
+    }
     let title = if item.title.is_empty() {
         preview(text)
     } else {
@@ -161,6 +161,10 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
 
 /// Adds a note from chat to a course, at a lesson. The learner must be
 /// taking the course. The same text at the same lesson is kept once.
+///
+/// Callers have already applied the attempt gate and the item-bank guard to
+/// the text: [`save_from_chat`] here, and the chat action that allows a
+/// course-note proposal (`ai_chat::action::allow`).
 pub fn insert(
     conn: &Connection,
     course_id: &str,
@@ -168,10 +172,6 @@ pub fn insert(
     title: &str,
     text: &str,
 ) -> Result<CourseNote, String> {
-    no_assessment(conn)?;
-    if bank_guard::matches_assessment_item(conn, text) {
-        return Err("assessment_item: notes cannot hold assessment questions".into());
-    }
     let enrollment: Option<String> = conn
         .query_row(
             "SELECT id FROM enrollments WHERE course_id = ?1 AND status != 'dropped'

@@ -36,10 +36,7 @@ use super::store::{
     StoredSnapshot,
 };
 use super::{artifact, bank_guard, memory, now, practice, ChatRuntime};
-// TODO(ticket 03): the gates move to the policy module; until then the turn
-// calls them where the commands file keeps them.
-use crate::ai_access;
-use crate::commands::ai_chat::refuse_during_assessment;
+use crate::ai_access::{self, Surface};
 
 /// How long a prepared request may wait for the learner before it expires.
 const PREPARE_TTL: chrono::Duration = chrono::Duration::minutes(15);
@@ -120,7 +117,7 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
         excluded_memory,
         include_history,
     } = inputs;
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
     let e = |e: store::StoreError| e.to_string();
     let thread = store::thread(conn, thread_id).map_err(e)?;
     let connection_id = thread
@@ -516,7 +513,7 @@ pub fn begin(
     if let Some(existing) = store::run_by_client_request(conn, client_request_id).map_err(e)? {
         return Err(format!("duplicate:{}", existing.id));
     }
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
     let snapshot = store::snapshot(conn, prepare_id).map_err(|_| stale())?;
     if snapshot.consumed_at.is_some()
         || snapshot.expires_at < now()
@@ -888,6 +885,30 @@ pub(crate) mod fixtures {
             Some("sk-secret"),
         )
         .unwrap();
+    }
+
+    /// Opens an attempt `id`, ending any other first, so each refusal can be
+    /// checked against a session of its own (a session is flagged once).
+    pub(crate) fn attempt(conn: &Connection, id: &str) {
+        conn.execute(
+            "UPDATE integrity_sessions SET ended_at = datetime('now'), status = 'completed'
+              WHERE ended_at IS NULL",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO integrity_sessions(id) VALUES (?1)", [id])
+            .unwrap();
+    }
+
+    /// Whether attempt `id` carries the in-app assistant flag.
+    pub(crate) fn flagged(conn: &Connection, id: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM integrity_snapshots
+              WHERE session_id = ?1 AND anomaly_flags LIKE '%in_app_assistant_during_attempt%')",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
     }
 
     pub(crate) fn thread(conn: &Connection) -> String {

@@ -12,6 +12,9 @@
 //!   needs a linked guardian's approval for that connection at that endpoint.
 //! * [`may_connect`]: the part of those rules no guardian approval can lift,
 //!   for setting a connection up (provider sign-in, asking for approval).
+//! * [`no_attempt_in_progress`]: every AI surface refuses while an
+//!   assessment attempt or interview check runs; chat and the tutor record
+//!   the refusal as an integrity flag (see [`Surface`]).
 //! * [`visible_lesson`]: which lesson a model may see (text lessons only).
 //! * Guardian approvals: [`request_approval`], [`approvals`],
 //!   [`pending_approvals`] for the guardian sync, and [`record_decision`]
@@ -108,6 +111,57 @@ fn refuse_for_minors(endpoint: &str, band: AgeBand) -> Result<(), Refused> {
     match alexandria_ai::terms::adults_only(&url) {
         Some(vendor) => Err(Refused::AdultsOnly(vendor)),
         None => Ok(()),
+    }
+}
+
+// ─── the attempt gate ────────────────────────────────────────────────────
+
+/// Which AI surface asks whether an attempt is in progress. They are all
+/// refused; they differ in whether the refusal is an integrity flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    /// A chat command only the open chat panel sends, chat actions
+    /// included. The panel is not mounted during an attempt, so a call that
+    /// gets here did not come from the normal interface: flagged.
+    Chat,
+    /// A chat read the app may send by itself as an attempt starts (reloading
+    /// the open thread when the attempt cancels its run): refused, not
+    /// flagged.
+    ChatRead,
+    /// The lesson tutor, which is not mounted during an attempt: flagged.
+    Tutor,
+    /// A Studio run step: refused, not flagged, since a run may have started
+    /// before the attempt.
+    StudioRun,
+    /// Course notes, which a course page may still list as an attempt
+    /// starts: refused, not flagged.
+    CourseNotes,
+}
+
+impl Surface {
+    fn flag(self) -> Option<&'static str> {
+        match self {
+            Surface::Chat | Surface::Tutor => Some("in_app_assistant_during_attempt"),
+            Surface::ChatRead | Surface::StudioRun | Surface::CourseNotes => None,
+        }
+    }
+}
+
+/// Refuses while an assessment attempt or interview check is in progress
+/// (see `alexandria_studio::gate`), and records the surface's integrity flag
+/// into the attempt's committed snapshot chain when it has one.
+pub fn no_attempt_in_progress(conn: &Connection, surface: Surface) -> Result<(), Refused> {
+    match alexandria_studio::gate::require_no_assessment(conn) {
+        Ok(()) => Ok(()),
+        Err(alexandria_studio::Error::AssessmentActive) => {
+            if let Some(flag) = surface.flag() {
+                if let Err(error) = crate::sentinel::snapshots::record_backend_flag(conn, flag) {
+                    log::warn!("{surface:?}: could not record an integrity flag: {error}");
+                }
+            }
+            Err(Refused::AttemptInProgress)
+        }
+        Err(other) => Err(other.into()),
     }
 }
 
@@ -478,6 +532,33 @@ mod tests {
             may_use(&conn, &current(&conn, "c1")),
             Err(Refused::GuardianDeclined)
         ));
+    }
+
+    #[test]
+    fn an_attempt_refuses_every_surface_and_flags_only_what_the_open_app_never_sends() {
+        let conn = db();
+        let surfaces = [
+            (Surface::Chat, true),
+            (Surface::Tutor, true),
+            (Surface::ChatRead, false),
+            (Surface::StudioRun, false),
+            (Surface::CourseNotes, false),
+        ];
+        for (surface, _) in surfaces {
+            assert!(no_attempt_in_progress(&conn, surface).is_ok());
+        }
+        for (surface, flags) in surfaces {
+            let id = format!("{surface:?}");
+            attempt(&conn, &id);
+            let refused = no_attempt_in_progress(&conn, surface).unwrap_err();
+            assert!(matches!(refused, Refused::AttemptInProgress));
+            assert!(refused.to_string().starts_with("assessment_active"));
+            assert!(matches!(
+                alexandria_studio::Error::from(refused),
+                alexandria_studio::Error::AssessmentActive
+            ));
+            assert_eq!(flagged(&conn, &id), flags, "{id}");
+        }
     }
 
     #[test]

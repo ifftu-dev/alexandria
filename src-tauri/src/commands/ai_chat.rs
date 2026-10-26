@@ -27,7 +27,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tokio::sync::mpsc;
 
-use crate::ai_access::{self, GuardianApproval};
+use crate::ai_access::{self, GuardianApproval, Surface};
 use crate::ai_chat::store::{self, ChatBinding, ChatMessage, ChatThread, Finish};
 use crate::ai_chat::turn::{self, PreparedMessage, StartedRun};
 use crate::ai_chat::{action, bank_guard, error_code, memory, now, ChatRuntime, RunGuard};
@@ -59,21 +59,6 @@ where
             move |db| f(db.conn()),
         )
         .await
-}
-
-/// Refuses while an assessment is in progress, and records the attempt as an
-/// integrity flag: the chat panel is not mounted then, so a call that gets
-/// here did not come from the normal interface.
-pub(crate) fn refuse_during_assessment(conn: &Connection) -> Result<(), String> {
-    let gated = gate::require_no_assessment(conn);
-    if matches!(gated, Err(alexandria_studio::Error::AssessmentActive)) {
-        if let Err(error) =
-            crate::sentinel::snapshots::record_backend_flag(conn, "in_app_assistant_during_attempt")
-        {
-            log::warn!("chat: could not record an integrity flag: {error}");
-        }
-    }
-    gated.map_err(|e| e.to_string())
 }
 
 fn recover(conn: &Connection, runtime: &ChatRuntime) -> Result<(), String> {
@@ -126,7 +111,7 @@ pub async fn chat_create_thread(
     model_id: Option<String>,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.create-thread", move |conn| {
-        refuse_during_assessment(conn)?;
+        ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
         let id = uuid::Uuid::new_v4().to_string();
         store::create_thread(
             conn,
@@ -251,7 +236,7 @@ pub(crate) fn attach(
     course_id: &str,
     element_id: &str,
 ) -> Result<ChatBinding, String> {
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
     let target = visible_lesson(conn, Reader::Chat, course_id, element_id)?;
     let id = uuid::Uuid::new_v4().to_string();
     store::add_binding(
@@ -285,7 +270,7 @@ pub(crate) fn attach_goal(
     thread_id: &str,
     goal_id: &str,
 ) -> Result<ChatBinding, String> {
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
     let label = crate::ai_chat::goal::label(conn, goal_id)?
         .ok_or_else(|| "not_found: that goal no longer exists".to_string())?;
     store::add_goal_binding(
@@ -878,7 +863,7 @@ pub async fn chat_practice_attempt(
     answer: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-attempt", move |conn| {
-        refuse_during_assessment(conn)?;
+        ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
         let id = uuid::Uuid::new_v4().to_string();
         store::practice_attempt(conn, &item_id, &id, &answer, &now()).map_err(|e| e.to_string())
     })
@@ -891,7 +876,7 @@ pub async fn chat_practice_hint(
     item_id: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-hint", move |conn| {
-        refuse_during_assessment(conn)?;
+        ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
         store::practice_hint(conn, &item_id).map_err(|e| e.to_string())
     })
     .await
@@ -903,7 +888,7 @@ pub async fn chat_practice_reveal(
     item_id: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-reveal", move |conn| {
-        refuse_during_assessment(conn)?;
+        ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
         store::practice_reveal(conn, &item_id).map_err(|e| e.to_string())
     })
     .await

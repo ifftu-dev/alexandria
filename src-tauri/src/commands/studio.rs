@@ -7,6 +7,7 @@ use tauri::Manager;
 
 use crate::profile::scope::ProfileState as State;
 
+use crate::ai_access::{may_use, no_attempt_in_progress, Surface};
 use crate::AppState;
 
 pub struct StudioRuntime {
@@ -111,20 +112,6 @@ pub async fn studio_get_tutor_thread(
     })
 }
 
-/// The tutor is not mounted during assessments, so a tutor request that
-/// arrives during one is refused and recorded as an integrity flag.
-fn tutor_gate(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
-    let gated = alexandria_studio::gate::require_no_assessment(db);
-    if matches!(gated, Err(StudioError::AssessmentActive)) {
-        if let Err(error) =
-            crate::sentinel::snapshots::record_backend_flag(db, "in_app_assistant_during_attempt")
-        {
-            log::warn!("tutor: could not record an integrity flag: {error}");
-        }
-    }
-    gated
-}
-
 #[tauri::command]
 pub async fn studio_ask_tutor(
     state: State<'_, AppState>,
@@ -139,9 +126,9 @@ pub async fn studio_ask_tutor(
     }
     let epoch = state.studio.epoch.load(Ordering::SeqCst);
     let context = with_db(&state, |db| {
-        tutor_gate(db)?;
+        no_attempt_in_progress(db, Surface::Tutor)?;
         let context = store::tutor_context(db, &course_id, &element_id, &connection_id)?;
-        crate::ai_access::may_use(db, &context.connection)?;
+        may_use(db, &context.connection)?;
         Ok(context)
     })?;
     let expected_messages = context.thread.messages.len();
@@ -206,7 +193,7 @@ pub async fn studio_ask_tutor(
             return Err(StudioError::Locked);
         }
         // An attempt that started while the answer was generating discards it.
-        tutor_gate(db)?;
+        no_attempt_in_progress(db, Surface::Tutor)?;
         store::save_tutor_exchange(db, context.thread, expected_messages, &question, &answer)
     })?;
     Ok(TutorReply {
@@ -415,7 +402,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
             let Some(index) = run.value.steps.iter().position(|s| s.output.is_none()) else {
                 return Ok(None);
             };
-            alexandria_studio::gate::require_no_assessment(db)?;
+            no_attempt_in_progress(db, Surface::StudioRun)?;
             let step = run.value.steps[index].clone();
             let current = store::connection(db, &step.connection.id)?.value;
             if !current.enabled
@@ -427,7 +414,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                         .into(),
                 ));
             }
-            crate::ai_access::may_use(db, &current)?;
+            may_use(db, &current)?;
             let key = store::secret(db, &step.connection.id)?;
             let previous: Vec<_> = run.value.steps[..index]
                 .iter()
@@ -484,7 +471,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
                         return Err(StudioError::Locked);
                     }
-                    alexandria_studio::gate::require_no_assessment(db)?;
+                    no_attempt_in_progress(db, Surface::StudioRun)?;
                     let current = store::run(db, &id)?;
                     if current.revision != run.revision || current.value.status != "running" {
                         return Err(StudioError::Conflict);
