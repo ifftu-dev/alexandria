@@ -1,6 +1,6 @@
 # Architecture deepening: chat, calls, and AI access
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 
 Umbrella for the seven deepening opportunities found in the 2026-10-26 architecture review. Each child ticket is one refactor that turns a shallow module into a deep one. Vocabulary: **module** (interface + implementation), **interface** (everything a caller must know), **seam** (where an interface lives), **adapter** (a concrete thing filling a seam), **depth** (behaviour per unit of interface), **locality** (change and tests concentrate in one place), **leverage** (one implementation, many callers).
@@ -55,3 +55,4 @@ Recommended order: 01, then 03 and 05, then 02 once the pending live-calls retes
 ## Notes
 
 - 2026-10-26: created from the architecture review. All children labelled ready-for-agent; 02 also needs a human for on-device verification (see its notes).
+- 2026-10-27: closed (done). All seven children are done and merged into `refactor/arch-integration`; each child's Notes record what landed and where it departed from its text. Two things remain outside these tickets: the on-device call retest in 02 (a human, before merge to `main`), and moving the derived skill state store's tests down once credential issuance leaves the commands layer (07). No glossary or ADR was added. The architecture and AI chat docs describe the new modules.
