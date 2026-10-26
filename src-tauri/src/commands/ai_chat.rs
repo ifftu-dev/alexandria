@@ -17,7 +17,6 @@ use std::time::{Duration, Instant};
 
 use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
-use alexandria_ai::Protocol;
 use alexandria_ai::StreamEvent;
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
@@ -367,15 +366,21 @@ pub async fn chat_list_models(
     })
     .await?;
     let target = studio_provider::connection(&connection).map_err(|e| e.to_string())?;
+    // A bad endpoint is refused before a sign-in is renewed.
+    let resolved = target
+        .resolve()
+        .await
+        .map_err(|e| format!("{}: {e}", error_code(&e)))?;
     let key = crate::ai_auth::credential::bearer_for(
         &state.db_executor,
         &state.profile_lease(),
         &connection,
         key,
+        || Ok(()),
     )
     .await?;
-    let adapter = alexandria_ai::connect(&target, key.as_deref(), Limits::default())
-        .await
+    let adapter = resolved
+        .connect(key.as_deref(), Limits::default())
         .map_err(|e| format!("{}: {e}", error_code(&e)))?;
     adapter
         .list_models()
@@ -1159,9 +1164,7 @@ struct Started {
     run: StartedRun,
     mode: String,
     request: alexandria_ai::ChatRequest,
-    endpoint: String,
     location: Location,
-    protocol: Protocol,
     key: Option<String>,
     /// The connection as it was reviewed, to renew a sign-in before sending.
     connection: StudioConnection,
@@ -1282,9 +1285,7 @@ fn begin(
         },
         mode: manifest.mode.clone(),
         request,
-        endpoint: manifest.destination.endpoint,
         location,
-        protocol: doc.value.protocol,
         key,
         connection: doc.value,
     })
@@ -1616,49 +1617,33 @@ impl Stream {
         let run_id = self.started.run.run_id.clone();
         let message_id = self.started.run.assistant_message.id.clone();
 
-        // A ChatGPT sign-in renews its hour-long token here, before sending.
-        let key = match crate::ai_auth::credential::bearer_for(
-            &self.executor,
-            &self.lease,
-            &self.started.connection,
-            self.started.key.take(),
-        )
-        .await
-        {
-            Ok(key) => key,
-            Err(error) => {
-                let code = error.split(':').next().unwrap_or("auth").to_string();
-                finish(
-                    &self.executor,
-                    &self.lease,
-                    &run_id,
-                    &message_id,
-                    "failed",
-                    "",
-                    Some(&code),
-                    None,
-                )
-                .await;
-                self.emit(
-                    &mut seq,
-                    ChatEventBody::RunFailed {
-                        error: code,
-                        partial: false,
-                    },
-                );
-                return;
-            }
-        };
-        let target = alexandria_ai::Connection {
-            endpoint: self.started.endpoint.clone(),
-            location: self.started.location,
-            protocol: self.started.protocol,
-        };
-        let adapter = match alexandria_ai::connect(&target, key.as_deref(), Limits::default()).await
-        {
+        // The endpoint is checked and pinned first, so a bad one never
+        // renews a sign-in; a ChatGPT sign-in renews its hour-long token
+        // next, before the credential is admitted.
+        let connected = async {
+            let target =
+                studio_provider::connection(&self.started.connection).map_err(|e| match e {
+                    alexandria_studio::Error::Unavailable(_) => "no_connection".to_string(),
+                    _ => "invalid".to_string(),
+                })?;
+            let resolved = target.resolve().await.map_err(|e| error_code(&e))?;
+            let key = crate::ai_auth::credential::bearer_for(
+                &self.executor,
+                &self.lease,
+                &self.started.connection,
+                self.started.key.take(),
+                || Ok(()),
+            )
+            .await
+            .map_err(|e| e.split(':').next().unwrap_or("auth").to_string())?;
+            resolved
+                .connect(key.as_deref(), Limits::default())
+                .map_err(|e| error_code(&e))
+        }
+        .await;
+        let adapter = match connected {
             Ok(adapter) => adapter,
-            Err(error) => {
-                let code = error_code(&error);
+            Err(code) => {
                 finish(
                     &self.executor,
                     &self.lease,
@@ -2041,6 +2026,7 @@ pub async fn chat_list_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alexandria_ai::Protocol;
     use alexandria_studio::model::StudioDocument;
     use chrono::Datelike;
     use std::sync::Arc;
@@ -2863,7 +2849,13 @@ mod tests {
                 expires_at: crate::ai_auth::now_secs() + 3000,
                 scopes: vec!["chatgpt.tokens.use.direct".into()],
             };
-            studio_store::save_signed_in_connection(conn, &doc, &credential.encode()).unwrap();
+            studio_store::save_signed_in_connection(
+                conn,
+                &doc,
+                &credential.encode(),
+                &credential.access_token,
+            )
+            .unwrap();
             // The generic editor cannot swap the sign-in for a key.
             let doc = studio_store::connection(conn, "c1").unwrap();
             assert!(studio_store::save_connection(conn, &doc, Some("sk-x")).is_err());

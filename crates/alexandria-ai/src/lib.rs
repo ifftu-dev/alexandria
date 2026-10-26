@@ -23,7 +23,7 @@ pub mod responses;
 mod sse;
 pub mod terms;
 
-pub use connection::{connect, Connection};
+pub use connection::{connect, Connection, Resolved};
 pub use endpoint::{Endpoint, Location};
 pub use model::{ChatRequest, Completion, FinishReason, Message, Role, StreamEvent, Usage};
 

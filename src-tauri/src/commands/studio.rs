@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
+use alexandria_ai::model::Limits;
 use alexandria_studio::{model::*, provider, store, Error as StudioError};
 use tauri::Manager;
 
@@ -139,39 +140,68 @@ fn age_checked(
     })
 }
 
+/// Studio's profile guard, as [`with_db`] applies it, for work that runs
+/// outside it: the profile is still active, Studio is not blocked, and the
+/// epoch the work started under is still current.
+fn profile_guard(
+    app: tauri::AppHandle,
+    epoch: u64,
+) -> impl Fn() -> Result<(), String> + Clone + Send + 'static {
+    move || {
+        let state = app.state::<AppState>();
+        if state.studio.blocked.load(Ordering::SeqCst)
+            || state.studio.epoch.load(Ordering::SeqCst) != epoch
+            || state.active_id().is_none()
+        {
+            return Err(StudioError::Locked.to_string());
+        }
+        Ok(())
+    }
+}
+
 /// One answer from a Studio connection: the tutor's reply or a run step's
-/// output. `key` is the bearer the host already looked up for it.
-async fn complete(
+/// output. The connection passes Studio's gate and its endpoint is resolved
+/// before the bearer is looked up, so a bad endpoint never renews a sign-in;
+/// `allowed` guards that lookup.
+async fn complete<G>(
+    state: &AppState,
+    lease: &ProfileLease,
+    allowed: G,
     connection: &StudioConnection,
-    key: Option<&str>,
+    stored: Option<String>,
     system: &str,
     context: &str,
-) -> Result<String, StudioError> {
-    if !connection.enabled {
-        return Err(StudioError::Unavailable(
-            "Model connection is disabled".into(),
-        ));
-    }
-    provider::validate_connection(connection)?;
-    let target = provider::connection(connection)?;
-    if target.location == alexandria_ai::Location::Remote && key.is_none_or(str::is_empty) {
-        return Err(StudioError::Invalid(
-            "Add an API key for this cloud connection".into(),
-        ));
-    }
-    let adapter = alexandria_ai::connect(&target, key, provider::limits())
-        .await
-        .map_err(provider::map_error)?;
+) -> Result<String, String>
+where
+    G: Fn() -> Result<(), String> + Clone + Send + 'static,
+{
+    let studio = |e: StudioError| e.to_string();
+    let ai = |e: alexandria_ai::Error| provider::map_error(e).to_string();
+    let target = provider::connection(connection).map_err(studio)?;
+    let resolved = target.resolve().await.map_err(ai)?;
+    // A ChatGPT sign-in renews its hour-long token here, before sending.
+    let key = crate::ai_auth::credential::bearer_for(
+        &state.db_executor,
+        lease,
+        connection,
+        stored,
+        allowed,
+    )
+    .await?;
+    let adapter = resolved
+        .connect(key.as_deref(), Limits::default())
+        .map_err(ai)?;
     let completion = adapter
         .complete(&provider::request(connection, system, context))
         .await
-        .map_err(provider::map_error)?;
-    bounded(&completion.text, 128_000, "Model output")?;
+        .map_err(ai)?;
+    bounded(&completion.text, 128_000, "Model output").map_err(studio)?;
     Ok(completion.text)
 }
 
 #[tauri::command]
 pub async fn studio_ask_tutor(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     course_id: String,
     element_id: String,
@@ -227,16 +257,16 @@ pub async fn studio_ask_tutor(
         "learner_question": question,
     }))
     .map_err(|error| error.to_string())?;
-    let secret = crate::ai_auth::credential::bearer_for(
-        &state.db_executor,
+    let answer = complete(
+        &state,
         &state.profile_lease(),
+        profile_guard(app, epoch),
         &context.connection,
         context.secret.clone(),
+        &system,
+        &request,
     )
     .await?;
-    let answer = complete(&context.connection, secret.as_deref(), &system, &request)
-        .await
-        .map_err(|error| error.to_string())?;
     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
         return Err(StudioError::Locked.to_string());
     }
@@ -496,24 +526,12 @@ async fn execute_run(
                 break;
             }
         };
-        // A ChatGPT sign-in renews its hour-long token here, before sending.
-        let key = match crate::ai_auth::credential::bearer_for(
-            &state.db_executor,
+        let output = complete(
+            &state,
             &lease,
+            profile_guard(app.clone(), epoch),
             &step.connection,
             key,
-        )
-        .await
-        {
-            Ok(key) => key,
-            Err(error) => {
-                fail_run(&state, &id, epoch, error);
-                break;
-            }
-        };
-        let output = complete(
-            &step.connection,
-            key.as_deref(),
             &step.effective_prompt,
             &context,
         )
@@ -542,7 +560,7 @@ async fn execute_run(
                 }
             }
             Err(error) => {
-                fail_run(&state, &id, epoch, error.to_string());
+                fail_run(&state, &id, epoch, error);
                 break;
             }
         }

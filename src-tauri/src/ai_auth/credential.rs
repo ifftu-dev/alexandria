@@ -26,7 +26,9 @@ pub const SIGN_IN_AGAIN: &str =
 
 /// The bearer value for `connection`, refreshing a ChatGPT sign-in first
 /// when needed. `load` re-reads the stored secret and `save` replaces it.
-pub async fn bearer<L, LF, S, SF>(
+/// Hosts call [`bearer_for`]; this is separate only so tests can stand in
+/// for the database.
+async fn bearer<L, LF, S, SF>(
     endpoints: &chatgpt::Endpoints,
     connection: &StudioConnection,
     stored: Option<String>,
@@ -71,15 +73,24 @@ where
     }
 }
 
-/// [`bearer`] against the profile database.
-pub(crate) async fn bearer_for(
+/// [`bearer`] against the profile database: the one way the app obtains the
+/// bearer a connection sends. `allowed` runs inside each database job,
+/// before a sign-in is re-read for its refresh and before the renewed one is
+/// saved; an error from it stops there and is returned. Studio passes its
+/// profile guard; a chat run is bounded by its lease and passes `|| Ok(())`.
+pub(crate) async fn bearer_for<G>(
     executor: &DatabaseExecutor,
     lease: &ProfileLease,
     connection: &StudioConnection,
     stored: Option<String>,
-) -> Result<Option<String>, String> {
+    allowed: G,
+) -> Result<Option<String>, String>
+where
+    G: Fn() -> Result<(), String> + Clone + Send + 'static,
+{
     let id = connection.id.clone();
     let save_id = connection.id.clone();
+    let allowed_to_load = allowed.clone();
     bearer(
         &chatgpt::Endpoints::default(),
         connection,
@@ -90,6 +101,7 @@ pub(crate) async fn bearer_for(
                 lease.clone(),
                 "ai-auth.load",
                 move |db| {
+                    allowed_to_load()?;
                     alexandria_studio::store::secret(db.conn(), &id).map_err(|e| e.to_string())
                 },
             )
@@ -100,6 +112,7 @@ pub(crate) async fn bearer_for(
                 lease.clone(),
                 "ai-auth.save",
                 move |db| {
+                    allowed()?;
                     alexandria_studio::store::replace_secret(db.conn(), &save_id, &next)
                         .map_err(|e| e.to_string())
                 },

@@ -201,8 +201,10 @@ async fn sign_in_chatgpt(
         },
     };
     let encoded = credential.encode();
+    let bearer = credential.access_token;
     with_conn(state, "ai-signin.chatgpt-save", move |conn| {
-        studio_store::save_signed_in_connection(conn, &doc, &encoded).map_err(|e| e.to_string())
+        studio_store::save_signed_in_connection(conn, &doc, &encoded, &bearer)
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(step("save ChatGPT connection"))
@@ -253,7 +255,7 @@ async fn save_openrouter(
         },
     };
     with_conn(state, "ai-signin.openrouter-save", move |conn| {
-        studio_store::save_signed_in_connection(conn, &doc, &key).map_err(|e| e.to_string())
+        studio_store::save_signed_in_connection(conn, &doc, &key, &key).map_err(|e| e.to_string())
     })
     .await
     .map_err(step("save OpenRouter connection"))

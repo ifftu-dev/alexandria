@@ -328,7 +328,7 @@ async fn real_http_boundary_sends_effective_prompt_and_handles_provider_failure(
     let adapter = alexandria_ai::connect(
         &provider::connection(&connection).unwrap(),
         None,
-        provider::limits(),
+        alexandria_ai::model::Limits::default(),
     )
     .await
     .unwrap();
@@ -437,7 +437,7 @@ async fn provider_failure_does_not_disclose_response_body() {
     let adapter = alexandria_ai::connect(
         &provider::connection(&connection).unwrap(),
         Some("private-key"),
-        provider::limits(),
+        alexandria_ai::model::Limits::default(),
     )
     .await
     .unwrap();
@@ -447,4 +447,48 @@ async fn provider_failure_does_not_disclose_response_body() {
     assert!(!error.contains("private-key"));
     assert!(!error.contains("sensitive"));
     server.await.unwrap();
+}
+
+#[test]
+fn a_sign_in_is_admitted_on_the_token_it_will_send() {
+    let db = db();
+    let chatgpt = |id: &str| StudioDocument {
+        id: id.into(),
+        revision: 0,
+        value: StudioConnection {
+            id: id.into(),
+            name: "ChatGPT".into(),
+            endpoint: "https://api.openai.com/v1".into(),
+            model: "gpt-x".into(),
+            location: "cloud".into(),
+            capability: "text".into(),
+            enabled: true,
+            has_key: true,
+            context_tokens: None,
+            protocol: alexandria_ai::Protocol::Responses,
+            auth: ConnectionAuth::ChatgptPlan,
+        },
+    };
+    // The stored token set is opaque to the store; its access token is what
+    // requests carry, so that is what is admitted.
+    let consumer = r#"{"access_token":"sk-ant-oat01-abc"}"#;
+    let error = store::save_signed_in_connection(&db, &chatgpt("a"), consumer, "sk-ant-oat01-abc")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("subscription sign-in token"), "{error}");
+    assert!(store::connection(&db, "a").is_err(), "nothing was saved");
+    assert_eq!(store::secret(&db, "a").unwrap(), None);
+
+    let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1In0.c2lnbmF0dXJl";
+    let set = format!(r#"{{"access_token":"{jwt}"}}"#);
+    store::save_signed_in_connection(&db, &chatgpt("b"), &set, jwt).unwrap();
+    assert_eq!(store::secret(&db, "b").unwrap(), Some(set));
+
+    // An issued API key gets the same check as a pasted one.
+    let mut openrouter = chatgpt("c");
+    openrouter.value.endpoint = "https://openrouter.ai/api/v1".into();
+    openrouter.value.protocol = alexandria_ai::Protocol::Compatible;
+    openrouter.value.auth = ConnectionAuth::ApiKey;
+    let token = "sk-ant-oat01-abc";
+    assert!(store::save_signed_in_connection(&db, &openrouter, token, token).is_err());
 }

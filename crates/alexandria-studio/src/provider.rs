@@ -1,18 +1,16 @@
 //! Studio's view of a model connection.
 //!
 //! A Studio connection document names its location in Studio's words
-//! (`local`, `private_network`, `cloud`). This module maps it to what the
-//! shared `alexandria-ai` runtime needs, validates a document before it is
-//! saved, fixes the shape of a Studio run's request, and maps the runtime's
-//! typed errors to Studio's vocabulary once. Reaching a model is
-//! `alexandria_ai::connect`; endpoint policy, credential admission,
-//! transport bounds, and error sanitizing live there, so Studio, the lesson
-//! tutor, and global chat cannot drift apart.
-
-use std::time::Duration;
+//! (`local`, `private_network`, `cloud`). This module validates a document
+//! before it is saved, is the one gate a saved connection passes before any
+//! model call ([`connection`]), fixes the shape of a Studio run's request,
+//! and maps the runtime's typed errors to Studio's vocabulary once.
+//! Reaching a model is `alexandria_ai`'s resolve-then-connect; endpoint
+//! policy, the key rule, credential admission, transport bounds, and error
+//! sanitizing live there, so Studio, the lesson tutor, and global chat
+//! cannot drift apart.
 
 use alexandria_ai::endpoint::{self, Location};
-use alexandria_ai::model::Limits;
 use alexandria_ai::{ChatRequest, Message};
 use url::Url;
 
@@ -32,8 +30,14 @@ pub fn location(connection: &StudioConnection) -> Result<Location> {
     }
 }
 
-/// The connection as `alexandria_ai::connect` takes it.
+/// The gate every model call from a saved connection passes, whoever
+/// makes it: the connection must be enabled and valid. Returns it in the
+/// shape `alexandria_ai` resolves.
 pub fn connection(connection: &StudioConnection) -> Result<alexandria_ai::Connection> {
+    if !connection.enabled {
+        return Err(Error::Unavailable("Model connection is disabled".into()));
+    }
+    validate_connection(connection)?;
     Ok(alexandria_ai::Connection {
         endpoint: connection.endpoint.clone(),
         location: location(connection)?,
@@ -89,15 +93,6 @@ pub fn validate_connection(connection: &StudioConnection) -> Result<Url> {
         ));
     }
     Ok(url)
-}
-
-/// Bounds for one Studio run step or tutor turn: a single answer within two
-/// minutes.
-pub fn limits() -> Limits {
-    Limits {
-        total_timeout: Duration::from_secs(120),
-        ..Limits::default()
-    }
 }
 
 /// The request a Studio run step or tutor turn sends: the effective prompt

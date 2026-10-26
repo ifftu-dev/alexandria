@@ -1,19 +1,30 @@
 //! One preamble to a model: from a saved connection and its credential to a
 //! ready adapter.
 //!
-//! Every path that talks to a model (the chat, the lesson tutor, Studio
-//! runs, provider sign-in) goes through [`connect`]. It resolves the
-//! endpoint under the policy for the connection's declared location, admits
-//! the credential under the vendor terms, applies the caller's limits, and
-//! returns an [`Adapter`] or a typed [`Error`]. It is the only way to build
-//! an adapter, so no call site can skip a check. It reads nothing: the host
-//! looks the credential up and passes it in.
+//! Every adapter is built here. The chat, the lesson tutor, Studio runs, and
+//! provider sign-in all go through [`Connection::resolve`] and
+//! [`Resolved::connect`] (or [`connect`], which does both): the endpoint is
+//! checked against the policy for the connection's declared location and
+//! the vendor terms, resolved, and pinned; then a credential is required for
+//! a remote endpoint, admitted under the vendor terms, and the caller's
+//! limits are applied. Adapter constructors are private to this crate, so
+//! no adapter skips these checks. Nothing here reads storage: the host looks
+//! the credential up and passes it in, and resolving first lets it refuse a
+//! bad endpoint before it renews a sign-in.
+//!
+//! Out of scope on purpose: the Optional AI checks client
+//! (`alexandria-decisions`, built by the app's `pinned_http`). That crate
+//! must stay MIT/Apache because `alexandria-cloud` vendors it, so it cannot
+//! depend on this AGPL crate or its adapters, and it speaks its own non-chat
+//! protocol. It shares only endpoint resolution, through
+//! [`Endpoint::http_client`](crate::Endpoint::http_client) (AI chat spec,
+//! section 26).
 
 use url::Url;
 
-use crate::endpoint::{self, Location};
+use crate::endpoint::{self, Endpoint, Location};
 use crate::model::Limits;
-use crate::{terms, Adapter, Protocol, Result};
+use crate::{terms, Adapter, Error, Protocol, Result};
 
 /// What this crate needs to know about a saved connection: its base URL,
 /// where the user says it runs, and the protocol it speaks.
@@ -24,30 +35,63 @@ pub struct Connection {
     pub protocol: Protocol,
 }
 
+impl Connection {
+    /// Checks the endpoint against its declared location and the vendor
+    /// terms, then resolves and pins it. Needs no credential and sends
+    /// nothing.
+    pub async fn resolve(&self) -> Result<Resolved> {
+        let base = endpoint::parse(&self.endpoint, self.location)?;
+        Ok(Resolved {
+            endpoint: endpoint::resolve_parsed(base, self.location).await?,
+            protocol: self.protocol,
+        })
+    }
+}
+
+/// A connection whose endpoint passed the policy and is pinned to the
+/// addresses it resolved to. Nothing has been sent.
+#[derive(Debug)]
+pub struct Resolved {
+    endpoint: Endpoint,
+    protocol: Protocol,
+}
+
+impl Resolved {
+    /// Admits the credential and returns an adapter bound to `limits`. A
+    /// blank credential counts as none, and a remote endpoint needs one.
+    pub fn connect(self, credential: Option<&str>, limits: Limits) -> Result<Adapter> {
+        let credential = credential.filter(|c| !c.trim().is_empty());
+        match credential {
+            Some(credential) => admit(self.endpoint.base(), self.protocol, credential)?,
+            None if self.endpoint.location() == Location::Remote => {
+                return Err(Error::Invalid(
+                    "Add an API key for this cloud connection".into(),
+                ))
+            }
+            None => {}
+        }
+        let adapter = Adapter::new(self.protocol, self.endpoint, credential.map(str::to_owned));
+        Ok(adapter.with_limits(limits))
+    }
+}
+
 /// Admits a credential for a connection, before it is stored or sent. The
-/// host's connection store applies this when saving; [`connect`] applies it
-/// before resolving. A token from OpenAI's own "Sign in with ChatGPT" flow is
-/// the one sanctioned sign-in, and it is only ever spoken over `responses`.
+/// host's connection store applies this when saving; [`Resolved::connect`]
+/// applies it before every adapter. A token from OpenAI's own "Sign in with
+/// ChatGPT" flow is the one sanctioned sign-in, and it is only ever spoken
+/// over `responses`.
 pub fn admit(base: &Url, protocol: Protocol, credential: &str) -> Result<()> {
     terms::check_credential(base, credential, protocol == Protocol::Responses)
 }
 
-/// Resolves and pins the connection's endpoint for its declared location,
-/// admits the credential, and returns an adapter bound to `limits`. Nothing
-/// is sent; the first request is the adapter's.
+/// [`Connection::resolve`] then [`Resolved::connect`], for a caller that
+/// already holds its credential.
 pub async fn connect(
     connection: &Connection,
     credential: Option<&str>,
     limits: Limits,
 ) -> Result<Adapter> {
-    let base = endpoint::parse(&connection.endpoint, connection.location)?;
-    let credential = credential.filter(|c| !c.trim().is_empty());
-    if let Some(credential) = credential {
-        admit(&base, connection.protocol, credential)?;
-    }
-    let endpoint = endpoint::resolve_parsed(base, connection.location).await?;
-    let adapter = Adapter::new(connection.protocol, endpoint, credential.map(str::to_owned));
-    Ok(adapter.with_limits(limits))
+    connection.resolve().await?.connect(credential, limits)
 }
 
 #[cfg(test)]
@@ -287,5 +331,57 @@ mod tests {
             !shown.contains("sensitive") && !shown.contains("sk-secret"),
             "{shown}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_remote_connection_needs_a_key_and_blank_is_none() {
+        // A public literal resolves without the network.
+        let resolved = || async {
+            remote("https://8.8.8.8/v1", Protocol::Compatible)
+                .resolve()
+                .await
+                .unwrap()
+        };
+        for missing in [None, Some(""), Some("   ")] {
+            let message = invalid(
+                resolved()
+                    .await
+                    .connect(missing, Limits::default())
+                    .unwrap_err(),
+            );
+            assert_eq!(message, "Add an API key for this cloud connection");
+        }
+        assert!(resolved()
+            .await
+            .connect(Some("sk-x"), Limits::default())
+            .is_ok());
+        // A model on the device or the user's own network may need none.
+        let (port, _seen) = server("").await;
+        assert!(device(port, "127.0.0.1")
+            .resolve()
+            .await
+            .unwrap()
+            .connect(Some("  "), Limits::default())
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_is_checked_before_any_credential_is_needed() {
+        // So a host can refuse a bad endpoint before it renews a sign-in.
+        for (endpoint, location) in [
+            ("https://10.0.0.5/v1", Location::Remote),
+            ("https://chatgpt.com/backend-api", Location::Remote),
+            ("http://192.168.1.4/v1", Location::Device),
+        ] {
+            let connection = Connection {
+                endpoint: endpoint.into(),
+                location,
+                protocol: Protocol::Compatible,
+            };
+            assert!(
+                matches!(connection.resolve().await, Err(crate::Error::Invalid(_))),
+                "{endpoint}"
+            );
+        }
     }
 }
