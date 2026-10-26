@@ -126,6 +126,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
 
 /// Records that the learner declined a proposal.
 pub fn decline(db: &Database, artifact_id: &str, now: &str) -> Result<Artifact, String> {
+    ai_access::no_attempt_in_progress(db.conn(), Surface::Chat)?;
     store::decline_artifact(db.conn(), artifact_id, now).map_err(|e| e.to_string())
 }
 
