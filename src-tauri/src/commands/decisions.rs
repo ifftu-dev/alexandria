@@ -462,6 +462,16 @@ pub async fn decision_search(
         .collect()
 }
 
+/// Checking a tutor answer sends the lesson and the last exchange to the
+/// decision service. Only the tutor's "check" button sends it, so during an
+/// attempt it is refused and flagged like asking the tutor; under 13 it is
+/// refused like any remote model.
+fn tutor_review_allowed(db: &rusqlite::Connection) -> Result<(), Error> {
+    crate::ai_access::no_attempt_in_progress(db, crate::ai_access::Surface::Tutor)?;
+    crate::ai_access::may_use_remote_service(db)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn decision_tutor_review(
     state: State<'_, AppState>,
@@ -469,6 +479,7 @@ pub async fn decision_tutor_review(
     element_id: String,
     connection_id: String,
 ) -> Result<BTreeMap<String, Judgment>, String> {
+    with_db(&state, tutor_review_allowed)?;
     let (client, revision) = prepare(&state, Task::Tutor).await?;
     let context = with_db(&state, |db| {
         store::tutor_context(db, &course_id, &element_id, &connection_id)
@@ -521,6 +532,30 @@ pub async fn decision_tutor_review(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tutor_answer_check_follows_the_attempt_and_under_13_rules() {
+        use crate::ai_chat::turn::fixtures::{attempt, born_years_ago, db, flagged};
+        let conn = db();
+        assert!(tutor_review_allowed(&conn).is_ok());
+        born_years_ago(&conn, 15);
+        assert!(
+            tutor_review_allowed(&conn).is_ok(),
+            "not a model connection"
+        );
+        born_years_ago(&conn, 12);
+        match tutor_review_allowed(&conn) {
+            Err(Error::Unavailable(message)) => assert!(message.contains("under 13"), "{message}"),
+            other => panic!("{other:?}"),
+        }
+        born_years_ago(&conn, 30);
+        attempt(&conn, "attempt");
+        assert!(matches!(
+            tutor_review_allowed(&conn),
+            Err(Error::AssessmentActive)
+        ));
+        assert!(flagged(&conn, "attempt"));
+    }
 
     fn db() -> crate::db::Database {
         let db = crate::db::Database::open_in_memory().unwrap();

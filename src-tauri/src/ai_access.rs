@@ -11,7 +11,10 @@
 //!   terms require users to be 18 or older, and every other remote endpoint
 //!   needs a linked guardian's approval for that connection at that endpoint.
 //! * [`may_connect`]: the part of those rules no guardian approval can lift,
-//!   for setting a connection up (provider sign-in, asking for approval).
+//!   for setting a connection up (provider sign-in, the connection form,
+//!   listing models, asking for approval).
+//! * [`may_use_remote_service`]: the under-13 rule for the one fixed remote
+//!   service that is not a model connection (Optional AI checks).
 //! * [`no_attempt_in_progress`]: every AI surface refuses while an
 //!   assessment attempt or interview check runs; chat and the tutor record
 //!   the refusal as an integrity flag (see [`Surface`]).
@@ -99,6 +102,18 @@ pub fn may_connect(conn: &Connection, connection: &StudioConnection) -> Result<(
     match age_band(conn)? {
         AgeBand::Adult => Ok(()),
         band => refuse_for_minors(&connection.endpoint, band),
+    }
+}
+
+/// May the profile's holder send learning data to a fixed remote service
+/// that is not a model connection: the Optional AI checks service, which
+/// runs under its own terms. Under 13, no: the same reason as remote models.
+/// Vendor age floors and guardian approvals belong to model connections and
+/// endpoints, so they do not apply here.
+pub fn may_use_remote_service(conn: &Connection) -> Result<(), Refused> {
+    match age_band(conn)? {
+        AgeBand::Child => Err(Refused::TooYoungForRemote),
+        AgeBand::Teen | AgeBand::Adult => Ok(()),
     }
 }
 
