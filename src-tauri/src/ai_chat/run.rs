@@ -571,9 +571,9 @@ async fn record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai_chat::ops::attach;
     use crate::ai_chat::turn::fixtures::*;
     use crate::ai_chat::{store, ChatRuntime};
-    use crate::commands::ai_chat::attach;
     use crate::db::Database;
     use crate::profile::scope::Admission;
     use alexandria_ai::FinishReason;
