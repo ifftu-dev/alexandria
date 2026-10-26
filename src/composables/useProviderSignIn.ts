@@ -19,13 +19,6 @@ export type ProviderPage = 'chatgpt_usage' | 'openrouter_keys'
 
 const signingIn = ref<SignInProvider | null>(null)
 
-/** The stable code at the start of a backend sign-in error. */
-export function signInErrorCode(error: unknown): string {
-  const text = String(error instanceof Error ? error.message : error)
-  const code = text.split(':')[0]?.trim() ?? ''
-  return /^[a-z_0-9]+$/.test(code) ? code : 'signin_failed'
-}
-
 export function useProviderSignIn() {
   const { invoke } = useLocalApi()
   const { t } = useI18n()

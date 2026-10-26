@@ -100,7 +100,7 @@ struct Raw {
 /// Splits a reply into the prose to show and the practice block, if any.
 /// The block is removed from the prose whether or not it is valid.
 pub fn split(reply: &str) -> (String, Option<&str>) {
-    super::memory::split_block(reply, "practice")
+    super::memory::split_block(reply, super::vocab::ReplyFence::Practice)
 }
 
 fn clip(text: &str, max: usize) -> Option<String> {

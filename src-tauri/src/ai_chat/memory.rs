@@ -15,6 +15,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::vocab::ReplyFence;
+
 pub const MAX_CONTENT_CHARS: usize = 300;
 /// Most approved items kept at once.
 pub const MAX_ITEMS: usize = 50;
@@ -70,10 +72,10 @@ pub fn parse(block: &str) -> Option<Proposal> {
     })
 }
 
-/// Splits a fenced block tagged `tag` (```tag ... ```) out of a reply.
-/// Returns the reply without the block, and the block body. An unterminated
-/// block is dropped from the shown text.
-pub fn split_block<'a>(reply: &'a str, tag: &str) -> (String, Option<&'a str>) {
+/// Splits a fenced block (```tag ... ```) out of a reply. Returns the reply
+/// without the block, and the block body. An unterminated block is dropped
+/// from the shown text.
+pub fn split_block(reply: &str, tag: ReplyFence) -> (String, Option<&str>) {
     let fence = format!("```{tag}");
     let Some(start) = reply.find(&fence) else {
         return (reply.to_string(), None);
@@ -118,9 +120,9 @@ mod tests {
     #[test]
     fn blocks_split_by_tag() {
         let reply = "Answer.\n```memory\n{\"kind\":\"preference\",\"content\":\"x\"}\n```";
-        let (text, block) = split_block(reply, "memory");
+        let (text, block) = split_block(reply, ReplyFence::Memory);
         assert_eq!(text, "Answer.");
         assert!(block.unwrap().contains("preference"));
-        assert_eq!(split_block(reply, "practice").1, None);
+        assert_eq!(split_block(reply, ReplyFence::Practice).1, None);
     }
 }

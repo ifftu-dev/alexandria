@@ -102,3 +102,36 @@ test("retired authority commands cannot be registered again", () => {
   assert.match(result.output, /Retired authority commands restored/);
   assert.match(result.output, /plugin_ingest_attestation/);
 });
+
+test("stale generated chat vocabulary fails the guard", () => {
+  const result = runGuard({
+    "src/generated/chat-vocab.ts": source => source.replace('  "rate_limited",\n', ""),
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /Generated chat vocabulary is stale/);
+});
+
+test("a snapshot missing a vocabulary fails the guard", () => {
+  const result = runGuard({
+    "scripts/chat-vocab.json": source => {
+      const snapshot = JSON.parse(source);
+      delete snapshot.reply_fence_tags;
+      return JSON.stringify(snapshot);
+    },
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /chat-vocab\.json.*reply_fence_tags/);
+});
+
+test("an empty host list is allowed but an empty union-backed list is not", () => {
+  const emptied = (key) => (source) => {
+    const snapshot = JSON.parse(source);
+    snapshot[key] = [];
+    return JSON.stringify(snapshot);
+  };
+  const hosts = runGuard({ "scripts/chat-vocab.json": emptied("restricts_apps_for_minors_hosts") });
+  assert.doesNotMatch(hosts.output, /Cannot render the chat vocabulary/);
+  const fences = runGuard({ "scripts/chat-vocab.json": emptied("reply_fence_tags") });
+  assert.equal(fences.exitCode, 1);
+  assert.match(fences.output, /chat-vocab\.json.*reply_fence_tags/);
+});

@@ -35,6 +35,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::store::{self as chat_store, Finish};
 use super::turn::{self, Begun, Started, StartedRun};
+use super::vocab::ChatErrorCode;
 use super::{error_code, now, RunGuard};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
@@ -392,7 +393,7 @@ where
                             unsaved = 0;
                             last_save = Instant::now();
                             if !checkpoint(&store, message_id.clone(), text.clone()).await {
-                                break RunEnd::Stopped(Some("assessment_active"));
+                                break RunEnd::Stopped(Some(ChatErrorCode::AssessmentActive.as_str()));
                             }
                         }
                     }
@@ -448,7 +449,7 @@ where
                     }
                     Err(error) => {
                         log::warn!("chat: could not save an answer: {error}");
-                        let code = "storage_error".to_string();
+                        let code = ChatErrorCode::StorageError.to_string();
                         let partial = !text.trim().is_empty();
                         record(&store, ids, "failed", text, Some(code.clone()), usage).await;
                         events.emit(ChatEventBody::RunFailed {

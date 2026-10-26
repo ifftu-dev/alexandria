@@ -34,6 +34,7 @@ use super::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
+use super::vocab::ReplyFence;
 use super::{artifact, bank_guard, memory, now, practice, timestamp, ChatRuntime};
 // TODO(ticket 03): the gates move to the policy module; until then the turn
 // calls them where the commands file keeps them.
@@ -43,14 +44,6 @@ use crate::commands::ai_chat::{age_gate, refuse_during_assessment};
 const PREPARE_TTL: chrono::Duration = chrono::Duration::minutes(15);
 /// Longest attached excerpt, in characters.
 const MAX_EXCERPT_CHARS: usize = 120_000;
-
-fn location_name(location: Location) -> &'static str {
-    match location {
-        Location::Device => "device",
-        Location::PrivateNetwork => "private_network",
-        Location::Remote => "remote",
-    }
-}
 
 // ─── gather ──────────────────────────────────────────────────────────────
 
@@ -283,7 +276,7 @@ fn destination(gathered: &Gathered) -> Result<(Destination, u32), String> {
             connection_revision: gathered.connection_revision,
             endpoint: gathered.connection.endpoint.clone(),
             host: url.host_str().unwrap_or_default().to_string(),
-            location: location_name(gathered.location).to_string(),
+            location: gathered.location.as_str().to_string(),
             model_id: gathered.model_id.clone(),
         },
         input_budget(gathered.connection.context_tokens),
@@ -577,7 +570,7 @@ pub fn begin(
         return Err(stale());
     }
     let location = studio_provider::location(&doc.value).map_err(|e| e.to_string())?;
-    if location_name(location) != manifest.destination.location {
+    if location.as_str() != manifest.destination.location {
         return Err(stale());
     }
     if !runtime.has_capacity() {
@@ -694,7 +687,7 @@ pub fn complete(
     let thread_id = begun.run.thread_id.as_str();
     let mut refused = Vec::new();
 
-    let (without_artifact, artifact_block) = memory::split_block(reply, "artifact");
+    let (without_artifact, artifact_block) = memory::split_block(reply, ReplyFence::Artifact);
     let draft = match artifact_block.map(artifact::parse) {
         Some(None) => {
             refused.push(Refused::MalformedProposal);
@@ -703,7 +696,7 @@ pub fn complete(
         Some(draft) => draft,
         None => None,
     };
-    let (without_memory, memory_block) = memory::split_block(&without_artifact, "memory");
+    let (without_memory, memory_block) = memory::split_block(&without_artifact, ReplyFence::Memory);
     let proposal = match memory_block.map(memory::parse) {
         Some(None) => {
             refused.push(Refused::MalformedMemory);

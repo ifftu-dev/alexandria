@@ -16,6 +16,7 @@
 //! [`apply_change`] write the goal through the settings store, checking
 //! every skill again.
 
+use super::vocab::{refuse, ChatErrorCode};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -54,7 +55,7 @@ fn stored(conn: &Connection) -> Result<Vec<Value>, String> {
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| "storage_error: goals could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "goals could not be read"))?;
     Ok(raw
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default())
@@ -62,7 +63,7 @@ fn stored(conn: &Connection) -> Result<Vec<Value>, String> {
 
 fn save(conn: &Connection, goals: Vec<Value>) -> Result<(), String> {
     SettingsStore::set(conn, LEARNER_TARGETS, JsonSetting(Value::Array(goals)))
-        .map_err(|_| "storage_error: goals could not be saved".to_string())
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "goals could not be saved"))
 }
 
 fn find(conn: &Connection, goal_id: &str) -> Result<Option<StoredGoal>, String> {
@@ -80,13 +81,17 @@ fn known_skills(conn: &Connection, ids: &[String]) -> Result<Vec<String>, String
             continue;
         }
         if skill_name(conn, id)?.is_none() {
-            return Err("invalid_input: a skill on this goal no longer exists".into());
+            return Err(refuse(
+                ChatErrorCode::InvalidInput,
+                "a skill on this goal no longer exists",
+            ));
         }
         out.push(id.clone());
     }
     if out.is_empty() || out.len() > MAX_GOAL_SKILLS {
-        return Err(format!(
-            "invalid_input: a goal needs between 1 and {MAX_GOAL_SKILLS} skills"
+        return Err(refuse(
+            ChatErrorCode::InvalidInput,
+            format!("a goal needs between 1 and {MAX_GOAL_SKILLS} skills"),
         ));
     }
     Ok(out)
@@ -101,7 +106,7 @@ pub fn add(
     now: &str,
 ) -> Result<String, String> {
     let label = super::artifact::clean_title(label)
-        .ok_or_else(|| "invalid_input: a goal needs a short name".to_string())?;
+        .ok_or_else(|| refuse(ChatErrorCode::InvalidInput, "a goal needs a short name"))?;
     let ids = known_skills(conn, skill_ids)?;
     let mut goals = stored(conn)?;
     let mut wanted = ids.clone();
@@ -142,14 +147,17 @@ pub fn apply_change(conn: &Connection, change: &Body) -> Result<(), String> {
         ..
     } = change
     else {
-        return Err("invalid_input: not a goal change".into());
+        return Err(refuse(ChatErrorCode::InvalidInput, "not a goal change"));
     };
     let mut goals = stored(conn)?;
     let Some(goal) = goals
         .iter_mut()
         .find(|g| g.get("id").and_then(Value::as_str) == Some(goal_id.as_str()))
     else {
-        return Err("not_found: that goal is not in your goals".into());
+        return Err(refuse(
+            ChatErrorCode::NotFound,
+            "that goal is not in your goals",
+        ));
     };
     let current: Vec<String> = goal
         .get("goal_skill_ids")
@@ -174,8 +182,13 @@ pub fn render(conn: &Connection, goal_id: &str) -> Result<Option<(String, String
     let Some(goal) = find(conn, goal_id)? else {
         return Ok(None);
     };
-    let path = alexandria_studio::skills::my_learning_path(conn, &goal.goal_skill_ids)
-        .map_err(|_| "storage_error: the goal's path could not be computed".to_string())?;
+    let path =
+        alexandria_studio::skills::my_learning_path(conn, &goal.goal_skill_ids).map_err(|_| {
+            refuse(
+                ChatErrorCode::StorageError,
+                "the goal's path could not be computed",
+            )
+        })?;
     let name = |id: &str| {
         path.steps
             .iter()
@@ -253,7 +266,7 @@ pub fn render(conn: &Connection, goal_id: &str) -> Result<Option<(String, String
 fn skill_name(conn: &Connection, id: &str) -> Result<Option<String>, String> {
     conn.query_row("SELECT name FROM skills WHERE id = ?1", [id], |r| r.get(0))
         .optional()
-        .map_err(|_| "storage_error: skills could not be read".to_string())
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "skills could not be read"))
 }
 
 fn skill_named(conn: &Connection, name: &str) -> Result<Option<SkillRef>, String> {
@@ -268,7 +281,7 @@ fn skill_named(conn: &Connection, name: &str) -> Result<Option<SkillRef>, String
         },
     )
     .optional()
-    .map_err(|_| "storage_error: skills could not be read".to_string())
+    .map_err(|_| refuse(ChatErrorCode::StorageError, "skills could not be read"))
 }
 
 /// Resolves a model's goal change against the goals attached to the chat.
@@ -360,7 +373,12 @@ pub fn resolve_enroll(
             continue;
         };
         let path = alexandria_studio::skills::my_learning_path(conn, &goal.goal_skill_ids)
-            .map_err(|_| "storage_error: the goal's path could not be computed".to_string())?;
+            .map_err(|_| {
+                refuse(
+                    ChatErrorCode::StorageError,
+                    "the goal's path could not be computed",
+                )
+            })?;
         let found = path
             .steps
             .iter()
@@ -376,7 +394,7 @@ pub fn resolve_enroll(
                 [&found.course_id],
                 |r| r.get(0),
             )
-            .map_err(|_| "storage_error: enrollments could not be read".to_string())?;
+            .map_err(|_| refuse(ChatErrorCode::StorageError, "enrollments could not be read"))?;
         if taking {
             return Ok(None);
         }

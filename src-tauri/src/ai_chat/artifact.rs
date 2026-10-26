@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::vocab::ProposalKind;
+
 pub const MAX_TITLE_CHARS: usize = 120;
 pub const MAX_NOTE_CHARS: usize = 8_000;
 pub const MAX_CARDS: usize = 20;
@@ -110,14 +112,15 @@ pub enum Draft {
 }
 
 impl Body {
-    pub fn kind(&self) -> &'static str {
+    /// The proposal's kind, equal to its `kind` tag.
+    pub fn kind(&self) -> ProposalKind {
         match self {
-            Body::Note { .. } => "note",
-            Body::Flashcards { .. } => "flashcards",
-            Body::Goal { .. } => "goal",
-            Body::GoalChange { .. } => "goal_change",
-            Body::CourseNote { .. } => "course_note",
-            Body::Enroll { .. } => "enroll",
+            Body::Note { .. } => ProposalKind::Note,
+            Body::Flashcards { .. } => ProposalKind::Flashcards,
+            Body::Goal { .. } => ProposalKind::Goal,
+            Body::GoalChange { .. } => ProposalKind::GoalChange,
+            Body::CourseNote { .. } => ProposalKind::CourseNote,
+            Body::Enroll { .. } => ProposalKind::Enroll,
         }
     }
 
@@ -291,7 +294,7 @@ mod tests {
         let cards = ready(
             r#"{"type":"flashcards","title":"Terms","cards":[{"front":"Prior","back":"Belief before evidence"}]}"#,
         );
-        assert_eq!(cards.body.kind(), "flashcards");
+        assert_eq!(cards.body.kind(), ProposalKind::Flashcards);
         assert!(cards.body.text().contains("Belief before evidence"));
 
         let many = format!(
