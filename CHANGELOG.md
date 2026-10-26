@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Live-call chat, captions and names cross devices again.** Since the
+  in-tree media crate, each device derived its own gossip topic from the
+  room ticket, so chat, captions and peer display names never reached the
+  other side. They now share the room's topic. Builds from before and after
+  this change do not exchange chat with each other. On iPhone, a camera
+  turned off before locking stays off after unlocking, and sound comes back
+  at once on unlock instead of waiting for the camera.
+- **AI access rules apply everywhere they should.** A cloud connection with
+  no API key now says "Add an API key for this cloud connection" instead of
+  sending the request and showing the provider's 401. During an assessment,
+  only requests that reach a model (sending a message, practice questions,
+  hints and answers, allowing a chat proposal, asking the tutor, checking a
+  tutor answer) are flagged. Housekeeping clicks still in flight when an
+  attempt starts are refused without flagging the learner. Age rules apply
+  again when a message is sent, before listing a connection's models, and
+  when the connection form saves. Optional AI checks that send the
+  learner's own text (goal, job description, document, search relevance
+  and tutor answer checks) are refused under 13. Tutor and Studio requests
+  share chat's 600-second limit, so slow local models are no longer cut off
+  at 120 seconds.
+- Internal: the chat turn, streaming run, AI access policy, model connect
+  path and call manager are each one module behind a narrow interface, and
+  no module outside `commands/` imports the commands layer (see
+  `docs/architecture-deepening-spec.md`).
+
 - **Candidate integrity check for interviews held in Alexandria.** An
   organisation can ask, in the signed invitation, for the candidate to run
   Sentinel on their own device during the call. The candidate chooses before
