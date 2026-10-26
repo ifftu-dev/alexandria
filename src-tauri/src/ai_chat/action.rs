@@ -21,6 +21,7 @@
 
 use super::artifact::Body;
 use super::store::{self, Artifact};
+use super::vocab::{refuse, ChatErrorCode};
 use super::{bank_guard, goal};
 use crate::db::Database;
 
@@ -44,7 +45,7 @@ pub fn allow(
     let item = store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
     match item.status.as_str() {
         "proposed" => {}
-        "declined" => return Err("invalid_input: this was not allowed".into()),
+        "declined" => return Err(refuse(ChatErrorCode::InvalidInput, "this was not allowed")),
         _ => {
             return Ok(Allowed {
                 artifact: item,
@@ -53,12 +54,15 @@ pub fn allow(
         }
     }
     if bank_guard::matches_assessment_item(conn, &format!("{} {}", item.title, item.body.text())) {
-        return Err("assessment_item: this cannot hold assessment questions".into());
+        return Err(refuse(
+            ChatErrorCode::AssessmentItem,
+            "this cannot hold assessment questions",
+        ));
     }
 
     let tx = conn
         .unchecked_transaction()
-        .map_err(|_| "storage_error: could not start".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "could not start"))?;
     let mut goals_changed = false;
     let artifact = match &item.body {
         Body::Note { .. } | Body::Flashcards { .. } => {
@@ -90,7 +94,7 @@ pub fn allow(
         }
     };
     tx.commit()
-        .map_err(|_| "storage_error: could not be saved".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "could not be saved"))?;
     log::info!("chat: the learner allowed a {} proposal", item.body.kind());
     Ok(Allowed {
         artifact,
@@ -109,18 +113,21 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
             [course_id],
             |r| r.get(0),
         )
-        .map_err(|_| "storage_error: enrollments could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "enrollments could not be read"))?;
     if taking {
         return Ok(());
     }
     for cid in crate::commands::plugins::course_plugin_cids(db, course_id)? {
         if crate::plugins::registry::get_installed(db, &cid)?.is_none() {
-            return Err("needs_plugins: open the course to install what it needs".into());
+            return Err(refuse(
+                ChatErrorCode::NeedsPlugins,
+                "open the course to install what it needs",
+            ));
         }
     }
     crate::commands::enrollment::enroll_db(db, course_id.to_string())
         .map(|_| ())
-        .map_err(|e| format!("open_course: {e}"))
+        .map_err(|e| refuse(ChatErrorCode::OpenCourse, e))
 }
 
 /// Records that the learner declined a proposal.

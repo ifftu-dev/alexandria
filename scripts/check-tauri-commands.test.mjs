@@ -122,3 +122,16 @@ test("a snapshot missing a vocabulary fails the guard", () => {
   assert.equal(result.exitCode, 1);
   assert.match(result.output, /chat-vocab\.json.*reply_fence_tags/);
 });
+
+test("an empty host list is allowed but an empty union-backed list is not", () => {
+  const emptied = (key) => (source) => {
+    const snapshot = JSON.parse(source);
+    snapshot[key] = [];
+    return JSON.stringify(snapshot);
+  };
+  const hosts = runGuard({ "scripts/chat-vocab.json": emptied("restricts_apps_for_minors_hosts") });
+  assert.doesNotMatch(hosts.output, /Cannot render the chat vocabulary/);
+  const fences = runGuard({ "scripts/chat-vocab.json": emptied("reply_fence_tags") });
+  assert.equal(fences.exitCode, 1);
+  assert.match(fences.output, /chat-vocab\.json.*reply_fence_tags/);
+});

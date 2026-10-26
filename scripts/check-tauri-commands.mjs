@@ -175,10 +175,11 @@ const chatVocabularies = [
 function readChatVocabSnapshot() {
   const snapshot = JSON.parse(readText(chatVocabSnapshotPath));
   const problems = [];
-  const isNames = (value) =>
-    Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string");
-  for (const [, key] of chatVocabularies) {
-    if (!isNames(snapshot[key])) problems.push(key);
+  const isNames = (value) => Array.isArray(value) && value.every((v) => typeof v === "string");
+  for (const [, key, union] of chatVocabularies) {
+    // A list that backs a union type must have at least one member; a plain
+    // host list may be empty.
+    if (!isNames(snapshot[key]) || (union && snapshot[key].length === 0)) problems.push(key);
   }
   const locations = snapshot.connection_locations;
   if (
@@ -286,8 +287,7 @@ if (generatedChatVocab !== undefined) {
   if (checkedInChatVocab !== undefined && checkedInChatVocab !== generatedChatVocab) {
     failures.push(
       `Generated chat vocabulary is stale: ${generatedChatVocabPath}. ` +
-        "Run `cargo test -p alexandria-node chat_vocab` (which refreshes scripts/chat-vocab.json) " +
-        "and then `npm run generate:tauri-commands`, and commit the result.",
+        "Run `npm run generate:chat-vocab` and commit the result.",
     );
   }
 }

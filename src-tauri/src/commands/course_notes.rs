@@ -13,6 +13,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
+use crate::ai_chat::vocab::{refuse, ChatErrorCode};
 use crate::ai_chat::{artifact, bank_guard, store as chat_store};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
@@ -97,8 +98,8 @@ fn note(conn: &Connection, id: &str) -> Result<CourseNote, String> {
         note_row,
     )
     .optional()
-    .map_err(|_| "storage_error: the note could not be read".to_string())?
-    .ok_or_else(|| "not_found: no such note".to_string())
+    .map_err(|_| refuse(ChatErrorCode::StorageError, "the note could not be read"))?
+    .ok_or_else(|| refuse(ChatErrorCode::NotFound, "no such note"))
 }
 
 /// A course's notes, newest first.
@@ -112,11 +113,11 @@ pub fn list(conn: &Connection, course_id: &str) -> Result<Vec<CourseNote>, Strin
               WHERE e.course_id = ?1 AND n.deleted_at IS NULL AND n.body IS NOT NULL
               ORDER BY n.updated_at DESC, n.id LIMIT {MAX_LISTED}"
         ))
-        .map_err(|_| "storage_error: notes could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "notes could not be read"))?;
     let rows = stmt
         .query_map([course_id], note_row)
         .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(|_| "storage_error: notes could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "notes could not be read"))?;
     Ok(rows)
 }
 
@@ -130,9 +131,9 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
               WHERE id = ?1 AND deleted_at IS NULL",
             [id],
         )
-        .map_err(|_| "storage_error: the note could not be deleted".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "the note could not be deleted"))?;
     if changed == 0 {
-        return Err("not_found: no such note".into());
+        return Err(refuse(ChatErrorCode::NotFound, "no such note"));
     }
     Ok(())
 }
@@ -143,13 +144,19 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
     no_assessment(conn)?;
     let item = chat_store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
     let artifact::Body::Note { text } = &item.body else {
-        return Err("invalid_input: only a note can be saved to a course".into());
+        return Err(refuse(
+            ChatErrorCode::InvalidInput,
+            "only a note can be saved to a course",
+        ));
     };
     if item.status != "saved" {
-        return Err("invalid_input: save the note first".into());
+        return Err(refuse(ChatErrorCode::InvalidInput, "save the note first"));
     }
     let Some(lesson) = item.sources.iter().find(|s| s.kind == "lesson") else {
-        return Err("no_lesson: this note does not cite a lesson".into());
+        return Err(refuse(
+            ChatErrorCode::NoLesson,
+            "this note does not cite a lesson",
+        ));
     };
     let title = if item.title.is_empty() {
         preview(text)
@@ -170,7 +177,10 @@ pub fn insert(
 ) -> Result<CourseNote, String> {
     no_assessment(conn)?;
     if bank_guard::matches_assessment_item(conn, text) {
-        return Err("assessment_item: notes cannot hold assessment questions".into());
+        return Err(refuse(
+            ChatErrorCode::AssessmentItem,
+            "notes cannot hold assessment questions",
+        ));
     }
     let enrollment: Option<String> = conn
         .query_row(
@@ -180,9 +190,12 @@ pub fn insert(
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| "storage_error: enrollments could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "enrollments could not be read"))?;
     let Some(enrollment) = enrollment else {
-        return Err("not_enrolled: enroll in the course to keep notes there".into());
+        return Err(refuse(
+            ChatErrorCode::NotEnrolled,
+            "enroll in the course to keep notes there",
+        ));
     };
     // The lesson may have been removed from the course since; the note then
     // belongs to the course without a lesson.
@@ -195,7 +208,7 @@ pub fn insert(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
-        .map_err(|_| "storage_error: the lesson could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "the lesson could not be read"))?;
     let (element_id, chapter_id) = element.unzip();
 
     let existing: Option<String> = conn
@@ -206,7 +219,7 @@ pub fn insert(
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| "storage_error: notes could not be read".to_string())?;
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "notes could not be read"))?;
     if let Some(id) = existing {
         return note(conn, &id);
     }
@@ -216,7 +229,7 @@ pub fn insert(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'chat')",
         params![id, enrollment, chapter_id, element_id, title, text],
     )
-    .map_err(|_| "storage_error: the note could not be saved".to_string())?;
+    .map_err(|_| refuse(ChatErrorCode::StorageError, "the note could not be saved"))?;
     note(conn, &id)
 }
 

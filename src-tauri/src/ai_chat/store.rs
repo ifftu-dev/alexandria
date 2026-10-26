@@ -8,6 +8,7 @@
 //! referenced from every snapshot that used them. Completed message content is
 //! never rewritten.
 
+use super::vocab::{refuse, ChatErrorCode};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -37,11 +38,20 @@ impl From<rusqlite::Error> for StoreError {
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StoreError::NotFound => f.write_str("not_found: this chat no longer exists"),
-            StoreError::Conflict => f.write_str("conflict: this chat changed; reload it"),
-            StoreError::Invalid(m) => write!(f, "invalid_input: {m}"),
+            StoreError::NotFound => f.write_str(&refuse(
+                ChatErrorCode::NotFound,
+                "this chat no longer exists",
+            )),
+            StoreError::Conflict => f.write_str(&refuse(
+                ChatErrorCode::Conflict,
+                "this chat changed; reload it",
+            )),
+            StoreError::Invalid(m) => f.write_str(&refuse(ChatErrorCode::InvalidInput, m)),
             // Never surface SQL text; it can echo stored content.
-            StoreError::Sql(_) => f.write_str("storage_error: chat data could not be accessed"),
+            StoreError::Sql(_) => f.write_str(&refuse(
+                ChatErrorCode::StorageError,
+                "chat data could not be accessed",
+            )),
         }
     }
 }

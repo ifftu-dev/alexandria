@@ -2,8 +2,9 @@
 //! stable string form that crosses the Tauri bridge.
 //!
 //! The webview never retypes these. `scripts/chat-vocab.json` is a snapshot
-//! of this module, kept current by the `chat_vocab_snapshot` test below, and
-//! `scripts/check-tauri-commands.mjs --write` renders it into
+//! of this module, checked by the `chat_vocab_snapshot_is_current` test
+//! below and rewritten by `npm run generate:chat-vocab`, which then has
+//! `scripts/check-tauri-commands.mjs --write` render it into
 //! `src/generated/chat-vocab.ts`. Both guards run in CI, so adding a variant
 //! here without regenerating fails the build rather than drifting.
 
@@ -158,6 +159,13 @@ impl ChatErrorCode {
     }
 }
 
+/// A refusal as commands return it: the code, a colon, and a reason written
+/// for people. The webview reads the code and translates it; the reason is
+/// shown only where the message says it is.
+pub fn refuse(code: ChatErrorCode, reason: impl std::fmt::Display) -> String {
+    format!("{code}: {reason}")
+}
+
 vocabulary! {
     /// What a chat may propose to save or change; the `kind` tag of
     /// `artifact::Body`.
@@ -195,14 +203,10 @@ vocabulary! {
 }
 
 impl ConnectionLocation {
-    /// The place chat names for this connection, if chat can use it.
+    /// The place chat names for this connection, if chat can use it. The
+    /// mapping lives with [`Location::from_legacy`]; this only names it.
     pub fn chat_location(self) -> Option<Location> {
-        match self {
-            Self::Local => Some(Location::Device),
-            Self::PrivateNetwork => Some(Location::PrivateNetwork),
-            Self::Cloud => Some(Location::Remote),
-            Self::External => None,
-        }
+        Location::from_legacy(self.as_str())
     }
 }
 
@@ -239,7 +243,7 @@ struct Snapshot {
 /// The snapshot `scripts/check-tauri-commands.mjs` renders into TypeScript.
 pub fn snapshot_json() -> String {
     let snapshot = Snapshot {
-        _comment: "Written by `cargo test -p alexandria-node chat_vocab` from src-tauri/src/ai_chat/vocab.rs and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
+        _comment: "Written by `npm run generate:chat-vocab` from src-tauri/src/ai_chat/vocab.rs and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
         chat_error_codes: ChatErrorCode::ALL.iter().map(|c| c.as_str()).collect(),
         proposal_kinds: ProposalKind::ALL.iter().map(|k| k.as_str()).collect(),
         reply_fence_tags: ReplyFence::ALL.iter().map(|f| f.as_str()).collect(),
@@ -504,71 +508,140 @@ mod tests {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
     }
 
-    /// Commands write their refusals as `"code: reason"` literals. Every such
-    /// prefix in chat-owned code must be a code the webview can translate.
+    /// Every `.rs` file under `relative`, as paths relative to the crate.
+    fn rust_files(relative: &str) -> Vec<String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+        let mut files: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "rs"))
+            .map(|entry| format!("{relative}/{}", entry.file_name().to_string_lossy()))
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// Files that take part in chat: the chat and sign-in modules, and every
+    /// command file that uses them. Commands chat shares with other screens
+    /// (skills, guardian sync) are not chat-owned; their codes fall to the
+    /// generic message, which is the designed fallback.
+    fn chat_source_files() -> Vec<String> {
+        let mut files = rust_files("src/ai_chat");
+        files.extend(rust_files("src/ai_auth"));
+        files.extend(
+            rust_files("src/commands")
+                .into_iter()
+                .filter(|file| app_source(file).contains("ai_chat")),
+        );
+        files
+    }
+
+    /// Commands that still write refusals as `"code: reason"` literals, rather
+    /// than through [`refuse`], must still use a code the webview can
+    /// translate. Only refusal contexts count; log labels and fixtures do not.
     #[test]
     fn every_literal_error_prefix_in_chat_code_is_a_known_code() {
-        // Prefixes that are not error codes: log lines and SSE fixtures.
-        const NOT_CODES: &[&str] = &["chat", "event", "data", "needs", "authorization"];
-        let files = [
-            "src/commands/ai_chat.rs",
-            "src/commands/ai_signin.rs",
-            "src/commands/course_notes.rs",
-            "src/ai_chat/action.rs",
-            "src/ai_chat/goal.rs",
-            "src/ai_chat/mod.rs",
-            "src/ai_chat/store.rs",
-            "src/ai_auth/mod.rs",
-            "src/ai_auth/credential.rs",
-        ];
+        let is_log = |line: &str| {
+            ["log::", "warn!(", "info!(", "debug!(", "error!(", "trace!("]
+                .iter()
+                .any(|m| line.contains(m))
+        };
+        let is_refusal = |window: &str| {
+            [
+                "Err(",
+                "ok_or",
+                "map_err",
+                "write_str(",
+                "write!(",
+                "#[error(",
+            ]
+            .iter()
+            .any(|m| window.contains(m))
+        };
         let mut unknown = Vec::new();
-        for file in files {
-            let source = app_source(file);
-            for (index, _) in source.match_indices('"') {
-                let rest = &source[index + 1..];
-                let Some(colon) = rest.find(": ") else {
-                    continue;
-                };
-                let prefix = &rest[..colon];
-                if prefix.is_empty()
-                    || !prefix
-                        .bytes()
-                        .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
-                {
+        for file in chat_source_files() {
+            let source = app_source(&file);
+            let lines: Vec<&str> = source.lines().collect();
+            for (index, line) in lines.iter().enumerate() {
+                if is_log(line) {
                     continue;
                 }
-                if NOT_CODES.contains(&prefix) || ChatErrorCode::parse(prefix).is_some() {
+                let window = lines[index.saturating_sub(1)..=index].join(" ");
+                if !is_refusal(&window) {
                     continue;
                 }
-                unknown.push(format!("{file}: {prefix}"));
+                for (start, _) in line.match_indices('"') {
+                    let rest = &line[start + 1..];
+                    let Some(colon) = rest.find(": ") else {
+                        continue;
+                    };
+                    let prefix = &rest[..colon];
+                    let is_name = !prefix.is_empty()
+                        && prefix
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit());
+                    if is_name && ChatErrorCode::parse(prefix).is_none() {
+                        unknown.push(format!("{file}:{}: {prefix}", index + 1));
+                    }
+                }
             }
         }
-        unknown.sort();
-        unknown.dedup();
         assert!(
             unknown.is_empty(),
             "error prefixes missing from ChatErrorCode: {unknown:?}"
         );
     }
 
+    #[test]
+    fn the_scanner_covers_the_chat_commands_and_modules() {
+        let files = chat_source_files();
+        for expected in [
+            "src/ai_chat/vocab.rs",
+            "src/ai_auth/mod.rs",
+            "src/commands/ai_chat.rs",
+            "src/commands/ai_signin.rs",
+            "src/commands/course_notes.rs",
+        ] {
+            assert!(
+                files.iter().any(|f| f == expected),
+                "{expected} not scanned"
+            );
+        }
+    }
+
     fn snapshot_path() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/chat-vocab.json")
     }
 
-    /// The checked-in snapshot equals this module. When it does not, the
-    /// snapshot is rewritten and the test fails, so one run repairs it and
-    /// CI still catches a stale commit.
+    /// The checked-in snapshot equals this module. With `UPDATE_CHAT_VOCAB=1`
+    /// (set by `npm run generate:chat-vocab`) the snapshot is rewritten
+    /// instead; otherwise a stale snapshot fails with the lines that differ.
     #[test]
     fn chat_vocab_snapshot_is_current() {
         let expected = snapshot_json();
         let path = snapshot_path();
-        let actual = std::fs::read_to_string(&path).unwrap_or_default();
-        if actual != expected {
-            std::fs::write(&path, &expected).unwrap();
-            panic!(
-                "{} was stale and has been rewritten; run `npm run generate:tauri-commands` and commit both files",
-                path.display()
-            );
+        if std::env::var_os("UPDATE_CHAT_VOCAB").is_some_and(|v| v == "1") {
+            std::fs::write(&path, &expected)
+                .unwrap_or_else(|e| panic!("could not write {}: {e}", path.display()));
+            return;
         }
+        let actual = std::fs::read_to_string(&path).unwrap_or_default();
+        if actual == expected {
+            return;
+        }
+        let expected_lines: HashSet<&str> = expected.lines().collect();
+        let actual_lines: HashSet<&str> = actual.lines().collect();
+        let missing: Vec<&str> = expected
+            .lines()
+            .filter(|l| !actual_lines.contains(l))
+            .collect();
+        let extra: Vec<&str> = actual
+            .lines()
+            .filter(|l| !expected_lines.contains(l))
+            .collect();
+        panic!(
+            "{} is stale; run `npm run generate:chat-vocab` and commit the result.\n  missing from the snapshot: {missing:?}\n  no longer in the vocabulary: {extra:?}",
+            path.display()
+        );
     }
 }

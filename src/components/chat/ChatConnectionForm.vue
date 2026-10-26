@@ -6,7 +6,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import type { StudioConnection, StudioDocument } from '@/types'
 import { restrictsAppsForMinors } from '@/utils/providerTerms'
-import { parseChatError, signInErrorMessageKey } from '@/utils/chatErrors'
+import { parseChatError, signInErrorMessageKey, signInFailureCode } from '@/utils/chatErrors'
 import type { ConnectionLocation, Protocol as WireProtocol } from '@/generated/chat-vocab'
 import { useProviderSignIn, type SignInProvider } from '@/composables/useProviderSignIn'
 
@@ -58,10 +58,10 @@ const pastedCode = ref('')
 const connecting = ref(false)
 
 function showSignInError(e: unknown) {
-  const code = parseChatError(e).code ?? 'signin_failed'
+  const { code } = parseChatError(e)
   if (code === 'signin_cancelled') return
-  const known = signInErrorMessageKey(code)
-  signInError.value = known ? t(known) : t('chat.signin.errors.failedCode', { code })
+  const known = code && signInErrorMessageKey(code)
+  signInError.value = known ? t(known) : t('chat.signin.errors.failedCode', { code: signInFailureCode(e) })
 }
 
 function go(next: Step) {

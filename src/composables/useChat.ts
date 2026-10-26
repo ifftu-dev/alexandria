@@ -123,7 +123,7 @@ export function useChat() {
 
   const usableConnections = computed(() =>
     connections.value.filter(
-      (c) => c.value.enabled && c.value.capability === 'text' && CHAT_LOCATION_OF_CONNECTION[c.value.location] !== null,
+      (c) => c.value.enabled && c.value.capability === 'text' && CHAT_LOCATION_OF_CONNECTION[c.value.location] != null,
     ),
   )
   const thread = computed(() => detail.value?.thread ?? null)

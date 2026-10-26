@@ -12,13 +12,23 @@ export function isChatErrorCode(value: string): value is ChatErrorCode {
   return CODES.has(value)
 }
 
-/** The code at the start of a backend error, and whatever follows its first colon. */
-export function parseChatError(value: unknown): { code: ChatErrorCode | null; detail: string } {
+/**
+ * The code at the start of a backend error, the text before its first colon
+ * as written (`head`, for showing a code the webview does not know), and
+ * whatever follows the colon.
+ */
+export function parseChatError(value: unknown): { code: ChatErrorCode | null; head: string; detail: string } {
   const text = String(value instanceof Error ? value.message : value)
   const colon = text.indexOf(':')
   const head = (colon < 0 ? text : text.slice(0, colon)).trim()
   const detail = colon < 0 ? '' : text.slice(colon + 1).trim()
-  return { code: isChatErrorCode(head) ? head : null, detail }
+  return { code: isChatErrorCode(head) ? head : null, head, detail }
+}
+
+/** The code shown in a sign-in's generic failure message, as the backend wrote it. */
+export function signInFailureCode(value: unknown): string {
+  const { code, head } = parseChatError(value)
+  return code ?? (/^[a-z_0-9]+$/.test(head) ? head : 'signin_failed')
 }
 
 /** The code of a backend error, or `generic` when it carries none the webview knows. */

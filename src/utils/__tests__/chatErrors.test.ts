@@ -6,6 +6,7 @@ import {
   chatErrorMessageKey,
   parseChatError,
   signInErrorMessageKey,
+  signInFailureCode,
 } from '../chatErrors'
 
 /** Whether a dotted key resolves to a message in the English catalog. */
@@ -22,11 +23,12 @@ describe('chat error codes', () => {
   it('parses the code before the first colon and keeps the rest as detail', () => {
     expect(parseChatError('invalid_input: write a message first')).toEqual({
       code: 'invalid_input',
+      head: 'invalid_input',
       detail: 'write a message first',
     })
-    expect(parseChatError(new Error('rate_limited:7'))).toEqual({ code: 'rate_limited', detail: '7' })
-    expect(parseChatError('http:503')).toEqual({ code: 'http', detail: '503' })
-    expect(parseChatError('guardian_pending')).toEqual({ code: 'guardian_pending', detail: '' })
+    expect(parseChatError(new Error('rate_limited:7'))).toMatchObject({ code: 'rate_limited', detail: '7' })
+    expect(parseChatError('http:503')).toMatchObject({ code: 'http', detail: '503' })
+    expect(parseChatError('guardian_pending')).toMatchObject({ code: 'guardian_pending', detail: '' })
   })
 
   it('treats anything the backend does not list as no code', () => {
@@ -34,6 +36,12 @@ describe('chat error codes', () => {
     expect(parseChatError('profile_locked: unlock first').code).toBeNull()
     expect(parseChatError('').code).toBeNull()
     expect(chatErrorCode('weird')).toBe('generic')
+  })
+
+  it('keeps a code it does not know for the sign-in failure message', () => {
+    expect(signInFailureCode('profile_locked: unlock first')).toBe('profile_locked')
+    expect(signInFailureCode('signin_timeout: slow')).toBe('signin_timeout')
+    expect(signInFailureCode('Something odd')).toBe('signin_failed')
   })
 
   it('round-trips every generated code through the parser', () => {

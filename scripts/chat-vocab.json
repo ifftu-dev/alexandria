@@ -1,5 +1,5 @@
 {
-  "_comment": "Written by `cargo test -p alexandria-node chat_vocab` from src-tauri/src/ai_chat/vocab.rs and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
+  "_comment": "Written by `npm run generate:chat-vocab` from src-tauri/src/ai_chat/vocab.rs and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
   "chat_error_codes": [
     "invalid",
     "unreachable",

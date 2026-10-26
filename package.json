@@ -14,6 +14,7 @@
     "check:fast": "bash scripts/check.sh --fast",
     "check:tauri-commands": "node scripts/check-tauri-commands.mjs",
     "generate:tauri-commands": "node scripts/check-tauri-commands.mjs --write",
+    "generate:chat-vocab": "UPDATE_CHAT_VOCAB=1 cargo test -p alexandria-node chat_vocab_snapshot && node scripts/check-tauri-commands.mjs --write",
     "tauri": "tauri",
     "i18n:keys": "node scripts/i18n/gen-keys.mjs",
     "i18n:parity": "node scripts/i18n/check-parity.mjs",

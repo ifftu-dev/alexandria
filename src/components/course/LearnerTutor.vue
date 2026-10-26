@@ -36,7 +36,7 @@ const apiKey = ref('')
 const connection = ref<StudioDocument<StudioConnection> | null>(null)
 
 const availableConnections = computed(() => connections.value.filter(item =>
-  item.value.enabled && item.value.capability === 'text' && CHAT_LOCATION_OF_CONNECTION[item.value.location] !== null,
+  item.value.enabled && item.value.capability === 'text' && CHAT_LOCATION_OF_CONNECTION[item.value.location] != null,
 ))
 const selected = computed(() => availableConnections.value.find(item => item.id === selectedConnection.value))
 const providerLocation = computed(() => selected.value?.value.location ?? 'local')

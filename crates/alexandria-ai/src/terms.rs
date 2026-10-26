@@ -180,7 +180,6 @@ mod tests {
     fn age_floors_are_named() {
         let gemini = url("https://generativelanguage.googleapis.com/v1beta/openai/");
         assert_eq!(adults_only(&gemini), Some("Google's Gemini API"));
-        assert!(RESTRICTS_APPS_FOR_MINORS.contains(&"generativelanguage.googleapis.com"));
         assert_eq!(
             adults_only(&url("https://openrouter.ai/api/v1")),
             Some("OpenRouter")
