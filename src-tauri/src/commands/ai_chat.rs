@@ -29,6 +29,7 @@ use tauri::ipc::Channel;
 use crate::ai_chat::run::{self, ChatEvent};
 use crate::ai_chat::store::{self, ChatBinding, ChatMessage, ChatThread};
 use crate::ai_chat::turn::{self, PreparedMessage, StartedRun};
+use crate::ai_chat::vocab::{refuse, ChatErrorCode};
 use crate::ai_chat::{action, bank_guard, error_code, memory, now, ChatRuntime};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
@@ -195,7 +196,10 @@ pub async fn chat_set_thread_model(
         }
         let model_id = model_id.filter(|m| !m.trim().is_empty());
         if model_id.as_ref().is_some_and(|m| m.len() > 200) {
-            return Err("invalid_input: model identifier is too long".into());
+            return Err(refuse(
+                ChatErrorCode::InvalidInput,
+                "model identifier is too long",
+            ));
         }
         store::set_thread_model(
             conn,
@@ -249,7 +253,10 @@ pub(crate) fn attach(
     refuse_during_assessment(conn)?;
     let target = learning::lesson_target(conn, course_id, element_id).map_err(|e| e.to_string())?;
     if learning::content_kind(&target.element_type) != "text" {
-        return Err("invalid_input: only text lessons can be attached".into());
+        return Err(refuse(
+            ChatErrorCode::InvalidInput,
+            "only text lessons can be attached",
+        ));
     }
     let id = uuid::Uuid::new_v4().to_string();
     store::add_binding(
@@ -285,7 +292,7 @@ pub(crate) fn attach_goal(
 ) -> Result<ChatBinding, String> {
     refuse_during_assessment(conn)?;
     let label = crate::ai_chat::goal::label(conn, goal_id)?
-        .ok_or_else(|| "not_found: that goal no longer exists".to_string())?;
+        .ok_or_else(|| refuse(ChatErrorCode::NotFound, "that goal no longer exists"))?;
     store::add_goal_binding(
         conn,
         &uuid::Uuid::new_v4().to_string(),
@@ -379,7 +386,7 @@ fn age_band(conn: &Connection) -> Result<AgeBand, String> {
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| "storage_error: profile could not be read".to_string())?
+        .map_err(|_| refuse(ChatErrorCode::StorageError, "profile could not be read"))?
         .flatten();
     let today = chrono::Utc::now().date_naive();
     Ok(match birthdate.as_deref() {
@@ -406,10 +413,10 @@ pub(crate) fn age_gate(conn: &Connection, connection: &StudioConnection) -> Resu
     match latest_approval(conn, &connection.id, &connection.endpoint)?.as_deref() {
         Some("approved") => Ok(()),
         Some("pending") => {
-            Err("guardian_pending: waiting for a guardian to approve this model".into())
+            Err(refuse(ChatErrorCode::GuardianPending, "waiting for a guardian to approve this model"))
         }
-        Some(_) => Err("guardian_declined: a guardian did not approve this model".into()),
-        None => Err("guardian_required: remote models need a guardian's approval; use a model on this device or your own network".into()),
+        Some(_) => Err(refuse(ChatErrorCode::GuardianDeclined, "a guardian did not approve this model")),
+        None => Err(refuse(ChatErrorCode::GuardianRequired, "remote models need a guardian's approval; use a model on this device or your own network")),
     }
 }
 
@@ -420,16 +427,17 @@ fn refuse_for_minors(connection: &StudioConnection, band: AgeBand) -> Result<(),
 
 fn refuse_endpoint_for_minors(endpoint: &str, band: AgeBand) -> Result<(), String> {
     if band == AgeBand::Child {
-        return Err(
-            "under_13: learners under 13 can use models on this device or their own network only"
-                .into(),
-        );
+        return Err(refuse(
+            ChatErrorCode::Under13,
+            "learners under 13 can use models on this device or their own network only",
+        ));
     }
     let url =
         alexandria_ai::endpoint::parse(endpoint, Location::Remote).map_err(|e| e.to_string())?;
     if let Some(vendor) = alexandria_ai::terms::adults_only(&url) {
-        return Err(format!(
-            "adults_only: {vendor} requires users to be 18 or older"
+        return Err(refuse(
+            ChatErrorCode::AdultsOnly,
+            format!("{vendor} requires users to be 18 or older"),
         ));
     }
     Ok(())
@@ -458,7 +466,7 @@ fn latest_approval(
         |r| r.get(0),
     )
     .optional()
-    .map_err(|_| "storage_error: approvals could not be read".to_string())
+    .map_err(|_| refuse(ChatErrorCode::StorageError, "approvals could not be read"))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -507,7 +515,10 @@ pub(crate) fn request_approval(
 ) -> Result<GuardianApproval, String> {
     let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
     if studio_provider::location(&doc.value).map_err(|e| e.to_string())? != Location::Remote {
-        return Err("invalid_input: only remote models need a guardian's approval".into());
+        return Err(refuse(
+            ChatErrorCode::InvalidInput,
+            "only remote models need a guardian's approval",
+        ));
     }
     let has_guardian: bool = conn
         .query_row(
@@ -517,7 +528,10 @@ pub(crate) fn request_approval(
         )
         .map_err(|e| e.to_string())?;
     if !has_guardian {
-        return Err("no_guardian: link a guardian in Settings first".into());
+        return Err(refuse(
+            ChatErrorCode::NoGuardian,
+            "link a guardian in Settings first",
+        ));
     }
     let band = age_band(conn)?;
     if band != AgeBand::Adult {
@@ -530,7 +544,7 @@ pub(crate) fn request_approval(
         return approvals(conn)?
             .into_iter()
             .find(|a| a.connection_id == doc.id && a.endpoint == doc.value.endpoint)
-            .ok_or_else(|| "storage_error: approval missing".to_string());
+            .ok_or_else(|| refuse(ChatErrorCode::StorageError, "approval missing"));
     }
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
@@ -542,7 +556,7 @@ pub(crate) fn request_approval(
     approvals(conn)?
         .into_iter()
         .find(|a| a.id == id)
-        .ok_or_else(|| "storage_error: approval missing".to_string())
+        .ok_or_else(|| refuse(ChatErrorCode::StorageError, "approval missing"))
 }
 
 #[tauri::command]
@@ -644,7 +658,7 @@ pub async fn chat_start_run(
             return with_conn(&state, "chat.start.existing", move |conn| {
                 let run = store::run_by_client_request(conn, &client_request_id)
                     .map_err(|e| e.to_string())?
-                    .ok_or("not_found: run")?;
+                    .ok_or_else(|| refuse(ChatErrorCode::NotFound, "run"))?;
                 Ok(StartedRun {
                     run_id,
                     thread_id: run.thread_id,
@@ -761,9 +775,13 @@ pub async fn chat_add_memory(
     content: String,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.add-memory", move |conn| {
-        let kind = memory::Kind::parse(&kind).ok_or("invalid_input: unknown memory kind")?;
+        let kind = memory::Kind::parse(&kind)
+            .ok_or_else(|| refuse(ChatErrorCode::InvalidInput, "unknown memory kind"))?;
         if bank_guard::matches_assessment_item(conn, &content) {
-            return Err("assessment_item: memory cannot hold assessment questions".into());
+            return Err(refuse(
+                ChatErrorCode::AssessmentItem,
+                "memory cannot hold assessment questions",
+            ));
         }
         let id = uuid::Uuid::new_v4().to_string();
         store::add_memory(conn, &id, kind, &content, &now()).map_err(|e| e.to_string())
@@ -782,7 +800,10 @@ pub async fn chat_approve_memory(
             .as_deref()
             .is_some_and(|c| bank_guard::matches_assessment_item(conn, c))
         {
-            return Err("assessment_item: memory cannot hold assessment questions".into());
+            return Err(refuse(
+                ChatErrorCode::AssessmentItem,
+                "memory cannot hold assessment questions",
+            ));
         }
         store::approve_memory(conn, &memory_id, content.as_deref(), &now())
             .map_err(|e| e.to_string())
@@ -802,7 +823,10 @@ pub async fn chat_update_memory(
             .as_deref()
             .is_some_and(|c| bank_guard::matches_assessment_item(conn, c))
         {
-            return Err("assessment_item: memory cannot hold assessment questions".into());
+            return Err(refuse(
+                ChatErrorCode::AssessmentItem,
+                "memory cannot hold assessment questions",
+            ));
         }
         store::update_memory(conn, &memory_id, content.as_deref(), active, &now())
             .map_err(|e| e.to_string())
@@ -842,7 +866,10 @@ pub(crate) fn save_note(
 ) -> Result<store::Artifact, String> {
     let origin = store::message(conn, message_id).map_err(|e| e.to_string())?;
     if bank_guard::matches_assessment_item(conn, &origin.content) {
-        return Err("assessment_item: notes cannot hold assessment questions".into());
+        return Err(refuse(
+            ChatErrorCode::AssessmentItem,
+            "notes cannot hold assessment questions",
+        ));
     }
     store::save_message_as_note(
         conn,

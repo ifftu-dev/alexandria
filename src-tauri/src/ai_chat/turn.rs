@@ -34,7 +34,7 @@ use super::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use super::vocab::ReplyFence;
+use super::vocab::{refuse, ChatErrorCode, ReplyFence};
 use super::{artifact, bank_guard, memory, now, practice, timestamp, ChatRuntime};
 // TODO(ticket 03): the gates move to the policy module; until then the turn
 // calls them where the commands file keeps them.
@@ -117,11 +117,18 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
     let connection_id = thread
         .connection_id
         .clone()
-        .ok_or("no_connection: choose a model before sending")?;
-    let doc = studio_store::connection(conn, &connection_id)
-        .map_err(|_| "no_connection: the chosen model connection no longer exists".to_string())?;
+        .ok_or_else(|| refuse(ChatErrorCode::NoConnection, "choose a model before sending"))?;
+    let doc = studio_store::connection(conn, &connection_id).map_err(|_| {
+        refuse(
+            ChatErrorCode::NoConnection,
+            "the chosen model connection no longer exists",
+        )
+    })?;
     if !doc.value.enabled {
-        return Err("no_connection: the chosen model connection is disabled".into());
+        return Err(refuse(
+            ChatErrorCode::NoConnection,
+            "the chosen model connection is disabled",
+        ));
     }
     let location = studio_provider::location(&doc.value).map_err(|e| e.to_string())?;
     age_gate(conn, &doc.value)?;
@@ -134,7 +141,10 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
         Some(user_id) => {
             let user = store::message(conn, &user_id).map_err(e)?;
             if user.thread_id != thread_id || user.role != "user" {
-                return Err("invalid_input: not a message in this chat".into());
+                return Err(refuse(
+                    ChatErrorCode::InvalidInput,
+                    "not a message in this chat",
+                ));
             }
             (user.content, Some(user.id), user.position)
         }
@@ -142,13 +152,19 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
             let text = text.unwrap_or_default();
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                return Err("invalid_input: write a message first".into());
+                return Err(refuse(ChatErrorCode::InvalidInput, "write a message first"));
             }
             if trimmed.chars().count() > context::MAX_MESSAGE_CHARS {
-                return Err("invalid_input: this message is too long".into());
+                return Err(refuse(
+                    ChatErrorCode::InvalidInput,
+                    "this message is too long",
+                ));
             }
             if bank_guard::matches_assessment_item(conn, trimmed) {
-                return Err("assessment_item: this looks like an assessment question, which chat cannot help with".into());
+                return Err(refuse(
+                    ChatErrorCode::AssessmentItem,
+                    "this looks like an assessment question, which chat cannot help with",
+                ));
             }
             (trimmed.to_string(), None, i64::MAX)
         }
@@ -166,9 +182,9 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
     for binding in store::bindings(conn, thread_id).map_err(e)? {
         let included = !excluded.contains(&binding.id);
         let gone = || {
-            format!(
-                "source_unavailable: {} is no longer available",
-                binding.label
+            refuse(
+                ChatErrorCode::SourceUnavailable,
+                format!("{} is no longer available", binding.label),
             )
         };
         let attached = if binding.kind == "goal" {
@@ -245,7 +261,12 @@ fn render_excerpt(
         Some(Ok(bytes)) => learning::Body::Fetched(Ok(bytes.as_slice())),
         Some(Err(reason)) => learning::Body::Fetched(Err(reason.as_str())),
     };
-    let unavailable = |title: &str| format!("source_unavailable: {title} could not be loaded");
+    let unavailable = |title: &str| {
+        refuse(
+            ChatErrorCode::SourceUnavailable,
+            format!("{title} could not be loaded"),
+        )
+    };
     let mut start = 0;
     let mut text = String::new();
     loop {
@@ -306,9 +327,9 @@ pub fn prepare(
             Attached::Goal => {
                 let (_, text) =
                     super::goal::render(conn, &binding.element_id)?.ok_or_else(|| {
-                        format!(
-                            "source_unavailable: {} is no longer available",
-                            binding.label
+                        refuse(
+                            ChatErrorCode::SourceUnavailable,
+                            format!("{} is no longer available", binding.label),
                         )
                     })?;
                 (text, false)
@@ -400,7 +421,12 @@ pub fn prepare(
                 .map(|(m, _)| (m.revision, m.content.clone()))
         },
     )
-    .ok_or("storage_error: the request could not be assembled")?;
+    .ok_or_else(|| {
+        refuse(
+            ChatErrorCode::StorageError,
+            "the request could not be assembled",
+        )
+    })?;
     let request_digest = digest(&request);
     let bytes = serde_json::to_vec(&request)
         .map(|b| b.len())
@@ -416,8 +442,12 @@ pub fn prepare(
                 id: id.clone(),
                 thread_id: manifest.thread_id.clone(),
                 digest: request_digest.clone(),
-                manifest_json: serde_json::to_string(&manifest)
-                    .map_err(|_| "storage_error: the request could not be saved")?,
+                manifest_json: serde_json::to_string(&manifest).map_err(|_| {
+                    refuse(
+                        ChatErrorCode::StorageError,
+                        "the request could not be saved",
+                    )
+                })?,
                 expires_at: expires_at.clone(),
                 consumed_at: None,
             },
@@ -511,7 +541,10 @@ impl std::fmt::Debug for Started {
 }
 
 fn stale() -> String {
-    "context_stale: something this message depends on changed; review it again".into()
+    refuse(
+        ChatErrorCode::ContextStale,
+        "something this message depends on changed; review it again",
+    )
 }
 
 /// Begins a prepared turn. Refuses a repeated client request
@@ -527,7 +560,10 @@ pub fn begin(
 ) -> Result<Started, String> {
     let e = |e: store::StoreError| e.to_string();
     if client_request_id.is_empty() || client_request_id.len() > 128 {
-        return Err("invalid_input: a request identifier is required".into());
+        return Err(refuse(
+            ChatErrorCode::InvalidInput,
+            "a request identifier is required",
+        ));
     }
     if let Some(existing) = store::run_by_client_request(conn, client_request_id).map_err(e)? {
         return Err(format!("duplicate:{}", existing.id));
@@ -574,7 +610,10 @@ pub fn begin(
         return Err(stale());
     }
     if !runtime.has_capacity() {
-        return Err("too_many_runs: wait for another answer to finish".into());
+        return Err(refuse(
+            ChatErrorCode::TooManyRuns,
+            "wait for another answer to finish",
+        ));
     }
     let key = studio_store::secret(conn, &doc.id).map_err(|e| e.to_string())?;
     let run_id = uuid::Uuid::new_v4().to_string();
