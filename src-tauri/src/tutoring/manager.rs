@@ -320,6 +320,15 @@ pub(super) struct ActiveSession<M: MediaDevices> {
     self_preview_task: Option<TaskHandle>,
     /// User's selected devices — kept for toggles and route changes.
     devices: DeviceSelection,
+    /// The camera was on and the app took it away for the background; only
+    /// such a camera comes back in the foreground, never one the learner
+    /// turned off.
+    #[cfg(tutoring_video)]
+    camera_released_for_background: bool,
+    /// Bumped on every trip to the background, so a foreground restore that
+    /// finishes after the app left again does not reopen the camera.
+    #[cfg(tutoring_video)]
+    background_epoch: u64,
     /// Background tasks to abort on leave.
     _tasks: Vec<TaskHandle>,
     /// Ring buffer of recent log entries for diagnostics.
@@ -608,6 +617,10 @@ impl<M: MediaDevices> CallManager<M> {
                 last_chat_sent: Instant::now() - Duration::from_secs(10),
                 self_preview_task,
                 devices,
+                #[cfg(tutoring_video)]
+                camera_released_for_background: false,
+                #[cfg(tutoring_video)]
+                background_epoch: 0,
                 _tasks: session_tasks,
                 recent_logs: init_logs,
                 home_relay,
@@ -808,6 +821,9 @@ impl<M: MediaDevices> CallManager<M> {
         let (session_id, camera) = {
             let mut inner = core.inner.lock().await;
             let session = core.active(&mut inner)?;
+            // The learner's choice replaces whatever the app did for the
+            // background.
+            session.camera_released_for_background = false;
             if enable == session.video_enabled && !session.screen_sharing {
                 return Ok(session.video_enabled);
             }
@@ -935,6 +951,7 @@ impl<M: MediaDevices> CallManager<M> {
         let (session_id, camera) = {
             let mut inner = core.inner.lock().await;
             let session = core.active(&mut inner)?;
+            session.camera_released_for_background = false;
             if enable == session.screen_sharing {
                 return Ok(session.screen_sharing);
             }
@@ -1570,6 +1587,14 @@ impl<M: MediaDevices> Core<M> {
         self.tasks.clone().spawn(async move {
             loop {
                 match events.recv().await {
+                    // Restoring the camera waits a second and then on the
+                    // camera itself; audio events must not queue behind it.
+                    Ok(MediaEvent::AppForegrounded) => {
+                        log::info!("tutoring: device event AppForegrounded");
+                        let restore = core.clone();
+                        core.tasks
+                            .spawn(async move { restore.restore_camera_after_foreground().await });
+                    }
                     Ok(event) => core.handle_media_event(event).await,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -1582,7 +1607,6 @@ impl<M: MediaDevices> Core<M> {
         log::info!("tutoring: device event {event:?}");
         crate::diag::log(&format!("device event {event:?}"));
         match event {
-            MediaEvent::AudioInterrupted => {}
             MediaEvent::AudioResumed | MediaEvent::AudioRouteChanged => {
                 self.resume_outputs().await;
             }
@@ -1591,16 +1615,24 @@ impl<M: MediaDevices> Core<M> {
         }
     }
 
-    /// Leaving the foreground: stop the camera to release the hardware.
+    /// Leaving the foreground: stop the camera to release the hardware, and
+    /// remember that the app did it.
     #[cfg(tutoring_video)]
     async fn release_camera_for_background(&self) {
         let mut guard = self.inner.lock().await;
-        if let Some(session) = guard.as_mut().filter(|s| s.video_enabled) {
-            if let Err(e) = self.remove_video(session) {
-                log::warn!("tutoring: failed to stop the camera for the background: {e}");
-            } else {
+        let Some(session) = guard.as_mut() else {
+            return;
+        };
+        session.background_epoch += 1;
+        if !session.video_enabled {
+            return;
+        }
+        match self.remove_video(session) {
+            Ok(()) => {
+                session.camera_released_for_background = true;
                 log::info!("tutoring: camera stopped (background)");
             }
+            Err(e) => log::warn!("tutoring: failed to stop the camera for the background: {e}"),
         }
     }
 
@@ -1608,18 +1640,26 @@ impl<M: MediaDevices> Core<M> {
     async fn release_camera_for_background(&self) {}
 
     /// Back in the foreground: give connections a moment, reopen the camera
-    /// if it is off, and let remote video be watched afresh.
+    /// the app took away for the background (never one the learner turned
+    /// off), and let remote video be watched afresh.
     #[cfg(tutoring_video)]
     async fn restore_camera_after_foreground(&self) {
+        let epoch = match self.inner.lock().await.as_ref() {
+            Some(session) => session.background_epoch,
+            None => return,
+        };
         tokio::time::sleep(Duration::from_secs(1)).await;
         let (session_id, camera) = {
             let guard = self.inner.lock().await;
             let Some(session) = guard.as_ref() else {
                 return;
             };
+            let wanted = session.camera_released_for_background
+                && !session.video_enabled
+                && session.background_epoch == epoch;
             (
                 session.session_id.clone(),
-                (!session.video_enabled).then(|| session.devices.camera_index.clone()),
+                wanted.then(|| session.devices.camera_index.clone()),
             )
         };
         let reopened = match camera {
@@ -1630,8 +1670,14 @@ impl<M: MediaDevices> Core<M> {
         let Ok(session) = self.same_session(&mut guard, &session_id) else {
             return;
         };
+        // Still wanted: the learner did not choose meanwhile, and the app
+        // did not go back to the background.
+        let still_wanted = session.camera_released_for_background
+            && !session.video_enabled
+            && session.background_epoch == epoch;
         match reopened {
-            Some(Ok(opened)) if !session.video_enabled => {
+            Some(Ok(opened)) if still_wanted => {
+                session.camera_released_for_background = false;
                 match self.install_video(session, opened, false) {
                     Ok(()) => log::info!("tutoring: camera restarted (foreground)"),
                     Err(e) => log::warn!("tutoring: failed to restart camera: {e}"),

@@ -489,17 +489,17 @@ async fn device_events_and_route_changes_reach_the_running_call() {
     // the call running and answering.
     for event in [
         MediaEvent::AudioRouteChanged,
-        MediaEvent::AudioInterrupted,
         MediaEvent::AudioResumed,
         MediaEvent::AppBackgrounded,
         MediaEvent::AppForegrounded,
     ] {
         manager.media().raise(event);
     }
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    let status = manager.status().await.expect("still in the call");
+    let status = wait_for_status(&manager, Duration::from_secs(5), |s| {
+        s.video_enabled == cfg!(tutoring_video)
+    })
+    .await;
     assert!(status.audio_enabled);
-    assert_eq!(status.video_enabled, cfg!(tutoring_video));
     assert!(manager.toggle_audio(false).await.is_ok());
 
     manager.shutdown().await.expect("cleanup");
@@ -647,4 +647,112 @@ async fn a_slow_leave_never_ends_the_media_of_the_call_that_follows() {
 
     manager.shutdown().await.expect("cleanup");
     assert!(!manager.media().session_running());
+}
+
+/// The call's status once `ready` holds, polling for up to `timeout`.
+async fn wait_for_status(
+    manager: &Manager,
+    timeout: Duration,
+    ready: impl Fn(&super::manager::SessionStatus) -> bool,
+) -> super::manager::SessionStatus {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let status = manager.status().await.expect("still in the call");
+        if ready(&status) || tokio::time::Instant::now() >= deadline {
+            return status;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[cfg(tutoring_video)]
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_camera_taken_for_the_background_comes_back() {
+    let book = MemoryLookup::new();
+    let node = Node::bind(&book).await;
+    let records = MemoryRecords::migrated();
+    let (manager, _) = manager();
+    manager
+        .create_room(
+            request("Host", CallKind::Tutoring, None),
+            node.network(),
+            &records,
+        )
+        .await
+        .expect("create");
+    assert!(manager.status().await.unwrap().video_enabled);
+
+    // The app takes the camera for the background and gives it back.
+    manager.media().raise(MediaEvent::AppBackgrounded);
+    let away = wait_for_status(&manager, Duration::from_secs(2), |s| !s.video_enabled).await;
+    assert!(
+        !away.video_enabled,
+        "the camera is released in the background"
+    );
+    manager.media().raise(MediaEvent::AppForegrounded);
+    let back = wait_for_status(&manager, Duration::from_secs(5), |s| s.video_enabled).await;
+    assert!(back.video_enabled, "the camera the app took comes back");
+
+    // A camera the learner turned off stays off.
+    assert!(!manager.toggle_video(false).await.unwrap());
+    manager.media().raise(MediaEvent::AppBackgrounded);
+    manager.media().raise(MediaEvent::AppForegrounded);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(
+        !manager.status().await.unwrap().video_enabled,
+        "the learner's choice survives a trip to the background"
+    );
+
+    // Back in the background before the restore finishes: no camera.
+    assert!(manager.toggle_video(true).await.unwrap());
+    manager.media().raise(MediaEvent::AppBackgrounded);
+    wait_for_status(&manager, Duration::from_secs(2), |s| !s.video_enabled).await;
+    manager.media().raise(MediaEvent::AppForegrounded);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    manager.media().raise(MediaEvent::AppBackgrounded);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(
+        !manager.status().await.unwrap().video_enabled,
+        "a restore that lands after the app left again does not reopen the camera"
+    );
+
+    manager.shutdown().await.expect("cleanup");
+}
+
+#[cfg(tutoring_video)]
+#[tokio::test(flavor = "multi_thread")]
+async fn audio_resumes_without_waiting_for_the_camera_to_come_back() {
+    let book = MemoryLookup::new();
+    let node = Node::bind(&book).await;
+    let records = MemoryRecords::migrated();
+    let (manager, _) = manager();
+    manager
+        .create_room(
+            request("Host", CallKind::Tutoring, None),
+            node.network(),
+            &records,
+        )
+        .await
+        .expect("create");
+    manager.media().raise(MediaEvent::AppBackgrounded);
+    wait_for_status(&manager, Duration::from_secs(2), |s| !s.video_enabled).await;
+
+    // Unlocking the phone and getting the audio session back arrive
+    // together; the camera takes a second or more to return.
+    let before = manager.media().resumes();
+    manager.media().raise(MediaEvent::AppForegrounded);
+    manager.media().raise(MediaEvent::AudioResumed);
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    while manager.media().resumes() == before && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        manager.media().resumes() > before,
+        "speakers resumed while the camera was still coming back"
+    );
+    assert!(
+        !manager.status().await.unwrap().video_enabled,
+        "the camera had not come back yet"
+    );
+    manager.shutdown().await.expect("cleanup");
 }

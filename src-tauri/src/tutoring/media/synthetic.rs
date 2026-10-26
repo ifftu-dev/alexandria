@@ -7,7 +7,7 @@
 //! runs end to end in a test; without one the build has no video types and
 //! the camera simply reports as absent.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,6 +27,8 @@ pub struct SyntheticMedia {
     /// in for a device that is missing or refused.
     camera_available: AtomicBool,
     sessions_started: AtomicBool,
+    /// How many times any speaker stream has been resumed.
+    resumes: Arc<AtomicUsize>,
 }
 
 impl Default for SyntheticMedia {
@@ -43,7 +45,14 @@ impl SyntheticMedia {
             route: Mutex::new(DeviceSelection::default()),
             camera_available: AtomicBool::new(true),
             sessions_started: AtomicBool::new(false),
+            resumes: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    /// How many times the call has resumed a speaker stream, as it does
+    /// when a stream opens and after a route change or interruption.
+    pub fn resumes(&self) -> usize {
+        self.resumes.load(Ordering::SeqCst)
     }
 
     /// Raise a device event, as the platform would.
@@ -126,7 +135,9 @@ impl MediaDevices for SyntheticMedia {
 
     fn open_audio(&self, selection: &DeviceSelection) -> Result<SilentAudio, String> {
         *self.route.lock().expect("route poisoned") = selection.clone();
-        Ok(SilentAudio)
+        Ok(SilentAudio {
+            resumes: self.resumes.clone(),
+        })
     }
 
     #[cfg(tutoring_video)]
@@ -172,7 +183,9 @@ impl MediaDevices for SyntheticMedia {
 /// An audio engine whose microphone hears nothing and whose speaker plays
 /// into the void.
 #[derive(Debug, Clone)]
-pub struct SilentAudio;
+pub struct SilentAudio {
+    resumes: Arc<AtomicUsize>,
+}
 
 impl AudioSession for SilentAudio {
     type Input = SilentInput;
@@ -183,7 +196,10 @@ impl AudioSession for SilentAudio {
     }
 
     async fn output(&self) -> Result<SilentOutput, String> {
-        Ok(SilentOutput::default())
+        Ok(SilentOutput {
+            paused: Arc::default(),
+            resumes: self.resumes.clone(),
+        })
     }
 }
 
@@ -213,9 +229,10 @@ impl CallAudioInput for SilentInput {
 }
 
 /// A speaker that discards what it is given.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SilentOutput {
     paused: Arc<AtomicBool>,
+    resumes: Arc<AtomicUsize>,
 }
 
 impl AudioSinkHandle for SilentOutput {
@@ -225,6 +242,7 @@ impl AudioSinkHandle for SilentOutput {
 
     fn resume(&self) {
         self.paused.store(false, Ordering::SeqCst);
+        self.resumes.fetch_add(1, Ordering::SeqCst);
     }
 
     fn is_paused(&self) -> bool {

@@ -177,9 +177,8 @@ pub struct MediaProfile {
 /// Something the device did on its own that a call must react to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaEvent {
-    /// Another app or a phone call took the audio session.
-    AudioInterrupted,
-    /// The audio session is ours again; outputs should resume.
+    /// The audio session is ours again after another app or a phone call
+    /// took it; outputs should resume.
     AudioResumed,
     /// Headphones, a Bluetooth device or a car came or went; outputs should
     /// resume on the new route.
