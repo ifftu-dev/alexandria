@@ -117,7 +117,7 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
         excluded_memory,
         include_history,
     } = inputs;
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel)?;
     let e = |e: store::StoreError| e.to_string();
     let thread = store::thread(conn, thread_id).map_err(e)?;
     let connection_id = thread
@@ -514,7 +514,7 @@ pub fn begin(
     if let Some(existing) = store::run_by_client_request(conn, client_request_id).map_err(e)? {
         return Err(format!("duplicate:{}", existing.id));
     }
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel)?;
     let snapshot = store::snapshot(conn, prepare_id).map_err(|_| stale())?;
     if snapshot.consumed_at.is_some()
         || snapshot.expires_at < now()

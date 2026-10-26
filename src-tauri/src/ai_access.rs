@@ -118,18 +118,26 @@ fn refuse_for_minors(endpoint: &str, band: AgeBand) -> Result<(), Refused> {
 
 /// Which AI surface asks whether an attempt is in progress. They are all
 /// refused; they differ in whether the refusal is an integrity flag.
+///
+/// The webview learns that an attempt began only when it next refreshes the
+/// chat status, so a click already in flight can arrive after the attempt
+/// started. Only requests that reach a model, or show model or practice
+/// content on request, are flagged; everything else that touches AI state
+/// is refused quietly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
-    /// A chat command only the open chat panel sends, chat actions
-    /// included. The panel is not mounted during an attempt, so a call that
-    /// gets here did not come from the normal interface: flagged.
-    Chat,
-    /// A chat read the app may send by itself as an attempt starts (reloading
-    /// the open thread when the attempt cancels its run): refused, not
-    /// flagged.
-    ChatRead,
-    /// The lesson tutor, which is not mounted during an attempt: flagged.
+    /// Chat that reaches a model or shows its content on request: preparing
+    /// and starting a turn, practice attempts, hints and reveals, and
+    /// allowing a proposal. Flagged.
+    ChatModel,
+    /// Every other chat command that reads or changes chat state: threads,
+    /// attachments, models, memory, notes, approvals. Refused, not flagged.
+    ChatState,
+    /// Asking the lesson tutor, or having its answer checked. Flagged.
     Tutor,
+    /// Saving a tutor answer that was already generating when the attempt
+    /// started: discarded, not flagged.
+    TutorSave,
     /// A Studio run step: refused, not flagged, since a run may have started
     /// before the attempt.
     StudioRun,
@@ -141,8 +149,10 @@ pub enum Surface {
 impl Surface {
     fn flag(self) -> Option<&'static str> {
         match self {
-            Surface::Chat | Surface::Tutor => Some("in_app_assistant_during_attempt"),
-            Surface::ChatRead | Surface::StudioRun | Surface::CourseNotes => None,
+            Surface::ChatModel | Surface::Tutor => Some("in_app_assistant_during_attempt"),
+            Surface::ChatState | Surface::TutorSave | Surface::StudioRun | Surface::CourseNotes => {
+                None
+            }
         }
     }
 }
@@ -538,9 +548,10 @@ mod tests {
     fn an_attempt_refuses_every_surface_and_flags_only_what_the_open_app_never_sends() {
         let conn = db();
         let surfaces = [
-            (Surface::Chat, true),
+            (Surface::ChatModel, true),
             (Surface::Tutor, true),
-            (Surface::ChatRead, false),
+            (Surface::ChatState, false),
+            (Surface::TutorSave, false),
             (Surface::StudioRun, false),
             (Surface::CourseNotes, false),
         ];

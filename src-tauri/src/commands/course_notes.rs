@@ -137,7 +137,7 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
 /// Copies a saved chat note into the course of the first lesson it cites.
 /// Copying the same note to the same lesson twice keeps one course note.
 pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::CourseNotes)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let item = chat_store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
     let artifact::Body::Note { text } = &item.body else {
         return Err("invalid_input: only a note can be saved to a course".into());

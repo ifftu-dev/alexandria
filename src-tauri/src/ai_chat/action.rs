@@ -41,7 +41,7 @@ pub fn allow(
     now: &str,
 ) -> Result<Allowed, String> {
     let conn = db.conn();
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel)?;
     let item = store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
     match item.status.as_str() {
         "proposed" => {}
@@ -126,7 +126,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
 
 /// Records that the learner declined a proposal.
 pub fn decline(db: &Database, artifact_id: &str, now: &str) -> Result<Artifact, String> {
-    ai_access::no_attempt_in_progress(db.conn(), Surface::Chat)?;
+    ai_access::no_attempt_in_progress(db.conn(), Surface::ChatState)?;
     store::decline_artifact(db.conn(), artifact_id, now).map_err(|e| e.to_string())
 }
 

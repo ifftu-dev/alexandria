@@ -109,7 +109,7 @@ pub(crate) fn search_threads(
     conn: &Connection,
     query: &str,
 ) -> Result<Vec<store::SearchHit>, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::ChatRead)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::search_threads(conn, query, 50).map_err(|e| e.to_string())
 }
 
@@ -130,7 +130,7 @@ pub(crate) fn create_thread(
     connection_id: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<ChatThread, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let id = uuid::Uuid::new_v4().to_string();
     store::create_thread(conn, &id, connection_id, model_id, &now()).map_err(|e| e.to_string())
 }
@@ -168,7 +168,7 @@ pub(crate) fn thread_detail(
     runtime: &ChatRuntime,
     thread_id: &str,
 ) -> Result<ThreadDetail, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::ChatRead)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     recover(conn, runtime)?;
     let e = |e: store::StoreError| e.to_string();
     Ok(ThreadDetail {
@@ -199,7 +199,7 @@ pub(crate) fn rename_thread(
     thread_id: &str,
     title: &str,
 ) -> Result<ChatThread, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::rename_thread(conn, thread_id, title, &now()).map_err(|e| e.to_string())
 }
 
@@ -222,7 +222,7 @@ pub(crate) fn set_thread_model(
     connection_id: Option<&str>,
     model_id: Option<String>,
 ) -> Result<ChatThread, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     if let Some(id) = connection_id {
         studio_store::connection(conn, id).map_err(|e| e.to_string())?;
     }
@@ -251,7 +251,7 @@ pub(crate) fn delete_thread(
     runtime: &ChatRuntime,
     thread_id: &str,
 ) -> Result<(), String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     if let Some(run) = store::active_run(conn, thread_id).map_err(|e| e.to_string())? {
         runtime.cancel(&run);
     }
@@ -280,7 +280,7 @@ pub(crate) fn attach(
     course_id: &str,
     element_id: &str,
 ) -> Result<ChatBinding, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let target = visible_lesson(conn, Reader::Chat, course_id, element_id)?;
     let id = uuid::Uuid::new_v4().to_string();
     store::add_binding(
@@ -314,7 +314,7 @@ pub(crate) fn attach_goal(
     thread_id: &str,
     goal_id: &str,
 ) -> Result<ChatBinding, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let label = crate::ai_chat::goal::label(conn, goal_id)?
         .ok_or_else(|| "not_found: that goal no longer exists".to_string())?;
     store::add_goal_binding(
@@ -341,7 +341,7 @@ pub async fn chat_detach(
 }
 
 pub(crate) fn detach(conn: &Connection, thread_id: &str, binding_id: &str) -> Result<(), String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::remove_binding(conn, thread_id, binding_id, &now()).map_err(|e| e.to_string())
 }
 
@@ -407,7 +407,7 @@ pub(crate) fn request_approval(
     conn: &Connection,
     connection_id: &str,
 ) -> Result<GuardianApproval, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     Ok(ai_access::request_approval(conn, connection_id)?)
 }
 
@@ -427,7 +427,7 @@ pub(crate) fn models_source(
     conn: &Connection,
     connection_id: &str,
 ) -> Result<(alexandria_studio::model::StudioConnection, Option<String>), String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
     let key = studio_store::secret(conn, connection_id).map_err(|e| e.to_string())?;
     Ok((doc.value, key))
@@ -927,7 +927,7 @@ pub(crate) fn set_thread_mode(
     thread_id: &str,
     mode: &str,
 ) -> Result<ChatThread, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::set_thread_mode(conn, thread_id, mode, &now()).map_err(|e| e.to_string())
 }
 
@@ -949,7 +949,7 @@ pub(crate) fn practice_attempt(
     item_id: &str,
     answer: &str,
 ) -> Result<store::PracticeView, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel)?;
     let id = uuid::Uuid::new_v4().to_string();
     store::practice_attempt(conn, item_id, &id, answer, &now()).map_err(|e| e.to_string())
 }
@@ -969,7 +969,7 @@ pub(crate) fn practice_hint(
     conn: &Connection,
     item_id: &str,
 ) -> Result<store::PracticeView, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel)?;
     store::practice_hint(conn, item_id).map_err(|e| e.to_string())
 }
 
@@ -988,7 +988,7 @@ pub(crate) fn practice_reveal(
     conn: &Connection,
     item_id: &str,
 ) -> Result<store::PracticeView, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel)?;
     store::practice_reveal(conn, item_id).map_err(|e| e.to_string())
 }
 
@@ -1020,7 +1020,7 @@ pub(crate) fn add_memory(
     kind: &str,
     content: &str,
 ) -> Result<store::MemoryItem, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let kind = memory::Kind::parse(kind).ok_or("invalid_input: unknown memory kind")?;
     if bank_guard::matches_assessment_item(conn, content) {
         return Err("assessment_item: memory cannot hold assessment questions".into());
@@ -1046,7 +1046,7 @@ pub(crate) fn approve_memory(
     memory_id: &str,
     content: Option<&str>,
 ) -> Result<store::MemoryItem, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     if content.is_some_and(|c| bank_guard::matches_assessment_item(conn, c)) {
         return Err("assessment_item: memory cannot hold assessment questions".into());
     }
@@ -1072,7 +1072,7 @@ pub(crate) fn update_memory(
     content: Option<&str>,
     active: Option<bool>,
 ) -> Result<store::MemoryItem, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     if content.is_some_and(|c| bank_guard::matches_assessment_item(conn, c)) {
         return Err("assessment_item: memory cannot hold assessment questions".into());
     }
@@ -1092,7 +1092,7 @@ pub async fn chat_forget_memory(
 }
 
 pub(crate) fn forget_memory(conn: &Connection, memory_id: &str) -> Result<(), String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::forget_memory(conn, memory_id).map_err(|e| e.to_string())
 }
 
@@ -1114,7 +1114,7 @@ pub(crate) fn save_note(
     message_id: &str,
     title: &str,
 ) -> Result<store::Artifact, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     let origin = store::message(conn, message_id).map_err(|e| e.to_string())?;
     if bank_guard::matches_assessment_item(conn, &origin.content) {
         return Err("assessment_item: notes cannot hold assessment questions".into());
@@ -1187,7 +1187,7 @@ pub async fn chat_delete_artifact(
 }
 
 pub(crate) fn delete_artifact(conn: &Connection, artifact_id: &str) -> Result<(), String> {
-    ai_access::no_attempt_in_progress(conn, Surface::Chat)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::delete_artifact(conn, artifact_id).map_err(|e| e.to_string())
 }
 
@@ -1202,7 +1202,7 @@ pub async fn chat_list_artifacts(
 /// Saved notes and flashcards hold model-written text, so, like a thread's
 /// contents, they are refused during an attempt without a flag.
 pub(crate) fn saved_artifacts(conn: &Connection) -> Result<Vec<store::Artifact>, String> {
-    ai_access::no_attempt_in_progress(conn, Surface::ChatRead)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState)?;
     store::saved_artifacts(conn).map_err(|e| e.to_string())
 }
 
@@ -1244,7 +1244,7 @@ mod tests {
         let commands: Vec<(&str, bool, Call)> = vec![
             (
                 "chat_create_thread",
-                true,
+                false,
                 Box::new(|| create_thread(conn, Some("c1"), None).map(drop)),
             ),
             (
@@ -1259,47 +1259,47 @@ mod tests {
             ),
             (
                 "chat_rename_thread",
-                true,
+                false,
                 Box::new(|| rename_thread(conn, "t", "Renamed").map(drop)),
             ),
             (
                 "chat_set_thread_model",
-                true,
+                false,
                 Box::new(|| set_thread_model(conn, "t", Some("c1"), None).map(drop)),
             ),
             (
                 "chat_set_thread_mode",
-                true,
+                false,
                 Box::new(|| set_thread_mode(conn, "t", "practice").map(drop)),
             ),
             (
                 "chat_delete_thread",
-                true,
+                false,
                 Box::new(|| delete_thread(conn, &runtime, "t")),
             ),
             (
                 "chat_attach_lesson",
-                true,
+                false,
                 Box::new(|| attach(conn, "t", "course", "lesson").map(drop)),
             ),
             (
                 "chat_attach_goal",
-                true,
+                false,
                 Box::new(|| attach_goal(conn, "t", "g1").map(drop)),
             ),
             (
                 "chat_detach",
-                true,
+                false,
                 Box::new(|| detach(conn, "t", "binding")),
             ),
             (
                 "chat_list_models",
-                true,
+                false,
                 Box::new(|| models_source(conn, "c1").map(drop)),
             ),
             (
                 "chat_request_guardian_approval",
-                true,
+                false,
                 Box::new(|| request_approval(conn, "c1").map(drop)),
             ),
             (
@@ -1324,28 +1324,35 @@ mod tests {
             ),
             (
                 "chat_add_memory",
-                true,
+                false,
                 Box::new(|| add_memory(conn, "preference", "Short answers").map(drop)),
             ),
             (
                 "chat_approve_memory",
-                true,
+                false,
                 Box::new(|| approve_memory(conn, "memory", None).map(drop)),
             ),
             (
                 "chat_update_memory",
-                true,
+                false,
                 Box::new(|| update_memory(conn, "memory", None, Some(false)).map(drop)),
             ),
             (
                 "chat_forget_memory",
-                true,
+                false,
                 Box::new(|| forget_memory(conn, "memory")),
             ),
             (
                 "chat_save_note",
-                true,
+                false,
                 Box::new(|| save_note(conn, "message", "Note").map(drop)),
+            ),
+            (
+                "chat_save_course_note",
+                false,
+                Box::new(|| {
+                    crate::commands::course_notes::save_from_chat(conn, "artifact").map(drop)
+                }),
             ),
             (
                 "chat_allow_action",
@@ -1354,12 +1361,12 @@ mod tests {
             ),
             (
                 "chat_decline_action",
-                true,
+                false,
                 Box::new(|| action::decline(&db, "artifact", &now()).map(drop)),
             ),
             (
                 "chat_delete_artifact",
-                true,
+                false,
                 Box::new(|| delete_artifact(conn, "artifact")),
             ),
             (
