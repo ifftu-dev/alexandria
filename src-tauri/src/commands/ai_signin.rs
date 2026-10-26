@@ -15,10 +15,10 @@ use alexandria_studio::store as studio_store;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+use super::with_conn;
 use crate::ai_access;
 use crate::ai_auth::{self, chatgpt, openrouter, DonePage, SignInError};
 use crate::ai_chat::vocab::refused;
-use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -27,26 +27,6 @@ static ACTIVE: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
 /// Context window assumed for ChatGPT plan models, which are large.
 const CHATGPT_CONTEXT_TOKENS: u32 = 128_000;
-
-async fn with_conn<T, F>(
-    state: &State<'_, AppState>,
-    label: &'static str,
-    f: F,
-) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce(&rusqlite::Connection) -> Result<T, String> + Send + 'static,
-{
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            label,
-            move |db| f(db.conn()),
-        )
-        .await
-}
 
 /// Claims the single sign-in slot. Dropping the guard frees it.
 struct Slot;

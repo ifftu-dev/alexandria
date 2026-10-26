@@ -20,10 +20,10 @@ use std::time::Duration;
 
 use alexandria_ai::model::Limits;
 use alexandria_studio::{gate, provider as studio_provider};
-use rusqlite::Connection;
 use serde::Serialize;
 use tauri::ipc::Channel;
 
+use super::with_conn;
 use crate::ai_access::{self, GuardianApproval};
 use crate::ai_chat::run::{self, ChatEvent};
 use crate::ai_chat::store::{self, ChatBinding, ChatThread};
@@ -35,26 +35,6 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 const CONTENT_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-
-async fn with_conn<T, F>(
-    state: &State<'_, AppState>,
-    label: &'static str,
-    f: F,
-) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
-{
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            label,
-            move |db| f(db.conn()),
-        )
-        .await
-}
 
 #[derive(Debug, Serialize)]
 pub struct ChatStatus {

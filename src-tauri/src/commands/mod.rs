@@ -1,3 +1,15 @@
+//! Tauri commands: the adapter between the webview and the app's modules.
+//!
+//! Commands depend on the modules below them and never the other way round:
+//! a module outside `commands` must not import from here. Behaviour another
+//! module needs belongs in the module named for it, with the command as a
+//! thin wrapper over it. `lib.rs` is the one exception, because it registers
+//! the commands and runs the background tasks.
+
+use crate::db::executor::DatabaseWorkload;
+use crate::profile::scope::ProfileState as State;
+use crate::AppState;
+
 pub mod adaptive;
 pub mod aggregation;
 pub mod assessment;
@@ -92,3 +104,28 @@ pub mod interview_panel;
 pub mod organisations;
 
 pub mod discussions;
+
+/// Runs `f` on the active profile's database as learner work, under the
+/// command's profile lease, so it is refused once the profile it started
+/// for has been locked or switched. `label` names the work in the
+/// executor's timing logs. Errors are the command's own `code: reason`
+/// strings, returned unchanged.
+pub(crate) async fn with_conn<T, F>(
+    state: &State<'_, AppState>,
+    label: &'static str,
+    f: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&rusqlite::Connection) -> Result<T, String> + Send + 'static,
+{
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            label,
+            move |db| f(db.conn()),
+        )
+        .await
+}
