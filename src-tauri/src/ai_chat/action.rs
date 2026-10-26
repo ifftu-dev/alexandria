@@ -118,7 +118,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
     if taking {
         return Ok(());
     }
-    for cid in crate::commands::plugins::course_plugin_cids(db, course_id)? {
+    for cid in crate::plugins::registry::course_plugin_cids(db, course_id)? {
         if crate::plugins::registry::get_installed(db, &cid)?.is_none() {
             return Err(refuse(
                 ChatErrorCode::NeedsPlugins,
