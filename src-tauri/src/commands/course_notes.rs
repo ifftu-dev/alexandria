@@ -148,9 +148,6 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
     let Some(lesson) = item.sources.iter().find(|s| s.kind == "lesson") else {
         return Err("no_lesson: this note does not cite a lesson".into());
     };
-    if bank_guard::matches_assessment_item(conn, text) {
-        return Err("assessment_item: notes cannot hold assessment questions".into());
-    }
     let title = if item.title.is_empty() {
         preview(text)
     } else {
@@ -162,9 +159,10 @@ pub fn save_from_chat(conn: &Connection, artifact_id: &str) -> Result<CourseNote
 /// Adds a note from chat to a course, at a lesson. The learner must be
 /// taking the course. The same text at the same lesson is kept once.
 ///
-/// Callers have already applied the attempt gate and the item-bank guard to
-/// the text: [`save_from_chat`] here, and the chat action that allows a
-/// course-note proposal (`ai_chat::action::allow`).
+/// Refused during an attempt (not flagged here: callers apply their own
+/// check first, which flags where it should) and for text that holds an
+/// assessment item. Both checks run in the same transaction as the write:
+/// the caller's, or one of its own when the caller has none.
 pub fn insert(
     conn: &Connection,
     course_id: &str,
@@ -172,6 +170,29 @@ pub fn insert(
     title: &str,
     text: &str,
 ) -> Result<CourseNote, String> {
+    if !conn.is_autocommit() {
+        return insert_checked(conn, course_id, element_id, title, text);
+    }
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|_| "storage_error: the note could not be saved".to_string())?;
+    let note = insert_checked(&tx, course_id, element_id, title, text)?;
+    tx.commit()
+        .map_err(|_| "storage_error: the note could not be saved".to_string())?;
+    Ok(note)
+}
+
+fn insert_checked(
+    conn: &Connection,
+    course_id: &str,
+    element_id: &str,
+    title: &str,
+    text: &str,
+) -> Result<CourseNote, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::CourseNotes)?;
+    if bank_guard::matches_assessment_item(conn, text) {
+        return Err("assessment_item: notes cannot hold assessment questions".into());
+    }
     let enrollment: Option<String> = conn
         .query_row(
             "SELECT id FROM enrollments WHERE course_id = ?1 AND status != 'dropped'
@@ -354,6 +375,28 @@ mod tests {
         .unwrap();
         assert!(save_from_chat(&conn, "draft").is_err());
         assert!(save_from_chat(&conn, "missing").is_err());
+    }
+
+    #[test]
+    fn a_note_is_never_written_during_an_attempt_or_with_an_assessment_item() {
+        use crate::ai_chat::turn::fixtures::{add_bank_item, attempt, db, BANK_ITEM};
+        let conn = db();
+        conn.execute_batch("INSERT INTO enrollments(id, course_id) VALUES ('en', 'course');")
+            .unwrap();
+        add_bank_item(&conn);
+        let err = insert(&conn, "course", "lesson", "Q", BANK_ITEM).unwrap_err();
+        assert!(err.starts_with("assessment_item"), "{err}");
+        attempt(&conn, "attempt");
+        let err = insert(&conn, "course", "lesson", "Bayes", "Update a prior.").unwrap_err();
+        assert!(err.starts_with("assessment_active"), "{err}");
+        // Inside a caller's transaction too.
+        let tx = conn.unchecked_transaction().unwrap();
+        assert!(insert(&tx, "course", "lesson", "Bayes", "Update a prior.").is_err());
+        drop(tx);
+        let notes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM course_notes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(notes, 0);
     }
 
     #[test]
