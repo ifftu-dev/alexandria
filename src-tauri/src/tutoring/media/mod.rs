@@ -16,8 +16,11 @@
 //!   and interruptions, GCD main-thread dispatch.
 //! - [`android`]: the NDK Camera2 camera over the same ffmpeg pipeline as
 //!   the desktop; no screen share.
-//! - [`synthetic`]: generated frames and silent audio. Tests run against it,
-//!   and so does any build without a video feature.
+//! - [`synthetic`]: generated frames and silent audio, for tests (and any
+//!   target with no adapter of its own).
+//!
+//! Every platform adapter also works without its video feature, making
+//! audio-only calls on the real microphone and speaker.
 //!
 //! [`PlatformMedia`] names the adapter the current build uses.
 
@@ -31,55 +34,33 @@ use live::media::av::{VideoDecoder, VideoEncoder, VideoPreset, VideoSource};
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-#[cfg(all(
-    target_os = "android",
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+#[cfg(target_os = "android")]
 pub mod android;
-#[cfg(all(
-    desktop,
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+#[cfg(desktop)]
 pub mod desktop;
-#[cfg(all(
-    any(desktop, target_os = "android"),
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+#[cfg(all(any(desktop, target_os = "android"), tutoring_video))]
 mod ffmpeg;
-#[cfg(all(target_os = "ios", feature = "tutoring-video-ios"))]
+#[cfg(target_os = "ios")]
 pub mod ios;
 #[cfg(target_os = "ios")]
 pub(crate) mod main_thread;
+#[cfg(any(test, not(any(desktop, target_os = "android", target_os = "ios"))))]
 pub mod synthetic;
 
-/// The adapter this build fills the seam with.
-#[cfg(all(
-    desktop,
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+/// The adapter this build fills the seam with. Without a video feature it
+/// still makes real audio-only calls.
+#[cfg(desktop)]
 pub type PlatformMedia = desktop::DesktopMedia;
-/// The adapter this build fills the seam with.
-#[cfg(all(
-    target_os = "android",
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+/// The adapter this build fills the seam with. Without a video feature it
+/// still makes real audio-only calls.
+#[cfg(target_os = "android")]
 pub type PlatformMedia = android::AndroidMedia;
-/// The adapter this build fills the seam with.
-#[cfg(all(target_os = "ios", feature = "tutoring-video-ios"))]
+/// The adapter this build fills the seam with. Without a video feature it
+/// still makes real audio-only calls.
+#[cfg(target_os = "ios")]
 pub type PlatformMedia = ios::IosMedia;
-/// The adapter this build fills the seam with: no video feature is on, so
-/// calls run audio-free and camera-free over generated media.
-#[cfg(not(any(
-    all(
-        desktop,
-        any(feature = "tutoring-video", feature = "tutoring-video-static")
-    ),
-    all(
-        target_os = "android",
-        any(feature = "tutoring-video", feature = "tutoring-video-static")
-    ),
-    all(target_os = "ios", feature = "tutoring-video-ios")
-)))]
+/// A target with no platform adapter runs over generated media.
+#[cfg(not(any(desktop, target_os = "android", target_os = "ios")))]
 pub type PlatformMedia = synthetic::SyntheticMedia;
 
 /// Error for a video operation in a build without video.
@@ -117,6 +98,19 @@ pub struct AudioDeviceInfo {
     pub name: Option<String>,
     /// Whether this is the current default.
     pub is_default: bool,
+}
+
+/// Result of a pre-join device availability check.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceCheckResult {
+    /// Whether at least one camera was found.
+    pub has_camera: bool,
+    /// Name of the first camera (e.g. "FaceTime HD Camera").
+    pub camera_name: Option<String>,
+    /// Whether an audio input device was found.
+    pub has_audio: bool,
+    /// Error message if something failed (informational).
+    pub error: Option<String>,
 }
 
 /// The audio devices a platform offers and which it currently uses.
@@ -172,6 +166,48 @@ pub struct MediaProfile {
     /// learner has not clicked yet, and a timeout there would start a call
     /// with no camera or microphone and drop the device once it opens.
     pub start_device_timeout: Option<Duration>,
+}
+
+/// The rendition a phone watches: 720p at most. Its tiles are never larger
+/// than the 960px remote viewport, and decoding plus copying out 1080p frames
+/// fell behind the sender (15 Oct).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) const PHONE_VIDEO_QUALITY: Quality = Quality::High;
+
+/// What a phone watches and how its tiles are fed; each phone adapter fills
+/// in what it can do.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn phone_profile() -> MediaProfile {
+    MediaProfile {
+        name: "phone",
+        video: false,
+        screen_share: false,
+        camera_switch: false,
+        audio_route_switch: false,
+        remote_quality: PHONE_VIDEO_QUALITY,
+        // The decoder scales each frame to fit this box before the JPEG
+        // step, which is the costly part: a 720x1280 self view encoded
+        // several times a second held a core at 100% (iOS killed the app
+        // for it). The self view only fills a phone-sized tile, so 360x640
+        // is plenty; a remote camera fits 960x960 whichever way up it is
+        // held. The encoder scales again only if a frame still arrives
+        // larger.
+        self_view: FrameTuning {
+            viewport: (360, 640),
+            jpeg_max: (360, 640),
+            jpeg_quality: 75,
+            interval: Duration::from_millis(42),
+        },
+        remote_view: FrameTuning {
+            viewport: (960, 960),
+            jpeg_max: (960, 960),
+            jpeg_quality: 70,
+            interval: Duration::from_millis(50),
+        },
+        audio_level_interval: Duration::from_millis(200),
+        room_open_timeout: None,
+        start_device_timeout: None,
+    }
 }
 
 /// Something the device did on its own that a call must react to.
@@ -239,19 +275,19 @@ impl AudioSession for AudioBackend {
 }
 
 /// Parse a device id string from [`AudioDeviceInfo::id`].
-#[cfg(all(
-    any(desktop, target_os = "android"),
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+#[cfg(any(desktop, target_os = "android"))]
 pub(crate) fn parse_device_id(id: Option<&str>) -> Option<live::media::audio::DeviceId> {
     id.and_then(|id| id.parse().ok())
 }
 
+/// Whether cpal sees a microphone. Enumeration only.
+#[cfg(any(desktop, target_os = "android", target_os = "ios"))]
+pub(crate) fn has_cpal_input() -> bool {
+    !AudioBackend::list_input_devices().is_empty()
+}
+
 /// The cpal device list as [`AudioDeviceInfo`], default first.
-#[cfg(all(
-    any(desktop, target_os = "android"),
-    any(feature = "tutoring-video", feature = "tutoring-video-static")
-))]
+#[cfg(any(desktop, target_os = "android"))]
 pub(crate) fn cpal_inventory() -> AudioDeviceInventory {
     let map = |devices: Vec<live::media::audio::DeviceInfo>| -> Vec<AudioDeviceInfo> {
         devices
@@ -320,8 +356,14 @@ pub trait MediaDevices: Send + Sync + 'static {
     /// The cameras available right now.
     fn cameras(&self) -> impl Future<Output = Vec<CameraDeviceInfo>> + Send;
 
-    /// The audio devices available right now and which are in use.
+    /// The audio devices available right now and which are in use. May
+    /// configure the platform's audio session to see them all.
     fn audio_devices(&self) -> AudioDeviceInventory;
+
+    /// Whether a camera and a microphone are there, before a call. Only
+    /// enumerates: it must not start a stream or configure an audio session,
+    /// which would stop the learner's music on the pre-join screen.
+    fn check_devices(&self) -> impl Future<Output = DeviceCheckResult> + Send;
 
     /// Start the audio engine on the selected devices or route. Blocking.
     fn open_audio(&self, selection: &DeviceSelection) -> Result<Self::Audio, String>;

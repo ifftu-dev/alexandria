@@ -46,9 +46,12 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 
 use super::call_kind::{self, CallKind};
 use super::events::{emit, CallEvents};
+pub use super::media::DeviceCheckResult;
+#[cfg(not(tutoring_video))]
+use super::media::VIDEO_DISABLED_ERROR;
 use super::media::{
     AudioDeviceInfo, AudioSession, CallAudioInput, CallAudioOutput, CameraDeviceInfo,
-    DeviceSelection, MediaDevices, MediaEvent, MediaProfile, VIDEO_DISABLED_ERROR,
+    DeviceSelection, MediaDevices, MediaEvent, MediaProfile,
 };
 #[cfg(tutoring_video)]
 use super::media::{FrameTuning, OpenedVideo};
@@ -224,19 +227,6 @@ pub struct PeerDiagnostics {
     pub display_name: Option<String>,
     pub broadcasts: Vec<String>,
     pub connected: bool,
-}
-
-/// Result of a pre-join device availability check.
-#[derive(Debug, Clone, Serialize)]
-pub struct DeviceCheckResult {
-    /// Whether at least one camera was found.
-    pub has_camera: bool,
-    /// Name of the first camera (e.g. "FaceTime HD Camera").
-    pub camera_name: Option<String>,
-    /// Whether an audio input device was found.
-    pub has_audio: bool,
-    /// Error message if something failed (informational).
-    pub error: Option<String>,
 }
 
 /// Available devices for audio and video.
@@ -1182,23 +1172,9 @@ impl<M: MediaDevices> CallManager<M> {
     }
 
     /// Check device availability (camera + audio) before joining a session.
-    /// Enumeration only: no stream or capture is started.
+    /// Enumeration only: no stream, capture or audio session is started.
     pub async fn check_devices(&self) -> DeviceCheckResult {
-        let has_audio = !self.core.media.audio_devices().inputs.is_empty();
-        let cameras = self.core.media.cameras().await;
-        let camera_name = cameras.first().map(|c| c.name.clone());
-        DeviceCheckResult {
-            has_camera: !cameras.is_empty(),
-            camera_name,
-            has_audio,
-            error: if !self.core.profile.video {
-                Some(VIDEO_DISABLED_ERROR.into())
-            } else if !has_audio {
-                Some("No microphone detected".into())
-            } else {
-                None
-            },
-        }
+        self.core.media.check_devices().await
     }
 
     /// List all available audio and camera devices.

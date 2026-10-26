@@ -33,20 +33,21 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(grader)");
     println!("cargo:rustc-cfg=grader");
 
-    // `tutoring_video`: any of the three video features is on, so the media
-    // crate's video types (sources, encoders, decoders, frames) exist. The
-    // call manager and the media adapters gate their video paths on this one
-    // cfg instead of repeating the three-feature union; which adapter fills
-    // the seam is decided per target in `tutoring/media/mod.rs`.
+    // `tutoring_video`: this target's video feature is on, so the media
+    // crate's video types exist and the platform adapter publishes and
+    // watches video. iOS has its own (VideoToolbox); desktop and Android
+    // share the ffmpeg ones, exactly as the two former managers gated it.
+    // Without it every platform still makes real audio-only calls. Which
+    // adapter fills the seam is decided per target in
+    // `tutoring/media/mod.rs`.
     println!("cargo::rustc-check-cfg=cfg(tutoring_video)");
-    if [
-        "TUTORING_VIDEO",
-        "TUTORING_VIDEO_STATIC",
-        "TUTORING_VIDEO_IOS",
-    ]
-    .iter()
-    .any(|feature| std::env::var(format!("CARGO_FEATURE_{feature}")).is_ok())
-    {
+    let has_feature = |f: &str| std::env::var(format!("CARGO_FEATURE_{f}")).is_ok();
+    let video = if target_os == "ios" {
+        has_feature("TUTORING_VIDEO_IOS")
+    } else {
+        has_feature("TUTORING_VIDEO") || has_feature("TUTORING_VIDEO_STATIC")
+    };
+    if video {
         println!("cargo:rustc-cfg=tutoring_video");
     }
 

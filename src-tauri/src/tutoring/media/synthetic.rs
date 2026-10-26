@@ -16,7 +16,8 @@ use tokio::sync::broadcast;
 
 use super::{
     AudioDeviceInfo, AudioDeviceInventory, AudioSession, CallAudioInput, CallAudioOutput,
-    CameraDeviceInfo, DeviceSelection, FrameTuning, MediaDevices, MediaEvent, MediaProfile,
+    CameraDeviceInfo, DeviceCheckResult, DeviceSelection, FrameTuning, MediaDevices, MediaEvent,
+    MediaProfile,
 };
 
 /// Generated frames and silent audio; no device is ever opened.
@@ -130,6 +131,16 @@ impl MediaDevices for SyntheticMedia {
             outputs: vec![device("void", "Void", &route.speaker_device_id)],
             selected_input: Some(route.mic_device_id.unwrap_or_else(|| "silence".into())),
             selected_output: Some(route.speaker_device_id.unwrap_or_else(|| "void".into())),
+        }
+    }
+
+    async fn check_devices(&self) -> DeviceCheckResult {
+        let cameras = self.cameras().await;
+        DeviceCheckResult {
+            has_camera: !cameras.is_empty(),
+            camera_name: cameras.first().map(|c| c.name.clone()),
+            has_audio: true,
+            error: (!cfg!(tutoring_video)).then(|| super::VIDEO_DISABLED_ERROR.into()),
         }
     }
 

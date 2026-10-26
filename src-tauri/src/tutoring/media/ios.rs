@@ -26,24 +26,24 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use live::media::audio::AudioBackend;
-use live::media::av::{Quality, VideoPreset};
+#[cfg(tutoring_video)]
+use live::media::av::VideoPreset;
+#[cfg(tutoring_video)]
 use live::media::videotoolbox::{IosCameraSource, VtDecoder, VtEncoder};
 use tokio::sync::broadcast;
 
 use super::main_thread::run_on_main_thread;
 
+#[cfg(tutoring_video)]
+use super::OpenedVideo;
 use super::{
-    AudioDeviceInfo, AudioDeviceInventory, AudioSession, CameraDeviceInfo, DeviceSelection,
-    FrameTuning, MediaDevices, MediaEvent, MediaProfile, OpenedVideo,
+    AudioDeviceInfo, AudioDeviceInventory, AudioSession, CameraDeviceInfo, DeviceCheckResult,
+    DeviceSelection, MediaDevices, MediaEvent, MediaProfile,
 };
 
 /// Mobile video presets — lower resolutions to save battery and bandwidth.
+#[cfg(tutoring_video)]
 const MOBILE_VIDEO_PRESETS: [VideoPreset; 2] = [VideoPreset::P360, VideoPreset::P720];
-
-/// The rendition a phone watches: 720p at most. Its tiles are never larger
-/// than the 960px remote viewport, and decoding plus copying out 1080p frames
-/// fell behind the sender (15 Oct).
-const PHONE_VIDEO_QUALITY: Quality = Quality::High;
 
 // ── Shared ObjC FFI types ──────────────────────────────────────────
 
@@ -1027,48 +1027,34 @@ impl IosMedia {
 
 impl MediaDevices for IosMedia {
     type Audio = IosAudio;
+    #[cfg(tutoring_video)]
     type VideoSource = IosCameraSource;
+    #[cfg(tutoring_video)]
     type VideoEncoder = VtEncoder;
+    #[cfg(tutoring_video)]
     type VideoDecoder = VtDecoder;
 
     fn profile(&self) -> MediaProfile {
         MediaProfile {
             name: "ios",
-            video: true,
+            video: cfg!(tutoring_video),
             screen_share: false,
             camera_switch: false,
             audio_route_switch: true,
-            remote_quality: PHONE_VIDEO_QUALITY,
-            // The decoder scales each frame to fit this box before the JPEG
-            // step, which is the costly part: a 720x1280 self view encoded
-            // several times a second held a core at 100% (iOS killed the app
-            // for it). The self view only fills a phone-sized tile, so
-            // 360x640 is plenty; a remote camera fits 960x960 whichever way
-            // up it is held. The encoder scales again only if a frame still
-            // arrives larger.
-            self_view: FrameTuning {
-                viewport: (360, 640),
-                jpeg_max: (360, 640),
-                jpeg_quality: 75,
-                interval: Duration::from_millis(42),
-            },
-            remote_view: FrameTuning {
-                viewport: (960, 960),
-                jpeg_max: (960, 960),
-                jpeg_quality: 70,
-                interval: Duration::from_millis(50),
-            },
-            audio_level_interval: Duration::from_millis(200),
             // A phone gives up rather than leave the call starting: the room
             // after 15s, the audio engine and the camera after 10s each.
             room_open_timeout: Some(Duration::from_secs(15)),
             start_device_timeout: Some(Duration::from_secs(10)),
+            ..super::phone_profile()
         }
     }
 
     async fn cameras(&self) -> Vec<CameraDeviceInfo> {
         // The front camera is the only one a call uses; it is always present
         // on a device (the simulator may not produce frames).
+        if !cfg!(tutoring_video) {
+            return Vec::new();
+        }
         vec![CameraDeviceInfo {
             index: "front".into(),
             name: "Front Camera".into(),
@@ -1077,6 +1063,27 @@ impl MediaDevices for IosMedia {
 
     fn audio_devices(&self) -> AudioDeviceInventory {
         build_audio_device_inventory(remembered_selection().as_ref())
+    }
+
+    async fn check_devices(&self) -> DeviceCheckResult {
+        // Enumeration only; the AVAudioSession is left as it is.
+        let has_audio = super::has_cpal_input();
+        // Every device has a camera (the simulator may not produce frames,
+        // but a capture session still starts).
+        if !cfg!(tutoring_video) {
+            return DeviceCheckResult {
+                has_camera: false,
+                camera_name: None,
+                has_audio,
+                error: Some(super::VIDEO_DISABLED_ERROR.into()),
+            };
+        }
+        DeviceCheckResult {
+            has_camera: true,
+            camera_name: Some("iOS Camera".into()),
+            has_audio,
+            error: (!has_audio).then(|| "No microphone detected".into()),
+        }
     }
 
     fn open_audio(&self, selection: &DeviceSelection) -> Result<IosAudio, String> {
@@ -1090,6 +1097,7 @@ impl MediaDevices for IosMedia {
         Ok(IosAudio { backend })
     }
 
+    #[cfg(tutoring_video)]
     fn open_camera(&self, _camera: Option<&str>) -> Result<OpenedVideo<IosCameraSource>, String> {
         // AVCaptureSession has to be set up on the main thread.
         let camera = self
@@ -1102,6 +1110,7 @@ impl MediaDevices for IosMedia {
         })
     }
 
+    #[cfg(tutoring_video)]
     fn open_screen(&self) -> Result<OpenedVideo<IosCameraSource>, String> {
         Err("Screen sharing is not available on mobile".into())
     }
