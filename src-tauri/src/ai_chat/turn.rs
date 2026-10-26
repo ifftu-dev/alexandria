@@ -22,7 +22,6 @@ use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::Protocol;
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{learning, provider as studio_provider, store as studio_store};
-use chrono::SecondsFormat;
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -35,7 +34,7 @@ use super::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use super::{artifact, bank_guard, memory, now, practice, ChatRuntime};
+use super::{artifact, bank_guard, memory, now, practice, timestamp, ChatRuntime};
 // TODO(ticket 03): the gates move to the policy module; until then the turn
 // calls them where the commands file keeps them.
 use crate::commands::ai_chat::{age_gate, refuse_during_assessment};
@@ -414,8 +413,7 @@ pub fn prepare(
         .map(|b| b.len())
         .unwrap_or(usize::MAX);
     let fits = fitted.fits && bytes <= context::MAX_REQUEST_BYTES;
-    let expires_at =
-        (chrono::Utc::now() + PREPARE_TTL).to_rfc3339_opts(SecondsFormat::Millis, true);
+    let expires_at = timestamp(chrono::Utc::now() + PREPARE_TTL);
     let prepare_id = if fits {
         let id = uuid::Uuid::new_v4().to_string();
         let hashes: Vec<String> = manifest.sources.iter().map(|s| s.hash.clone()).collect();
@@ -654,6 +652,9 @@ pub enum Refused {
     /// The proposal needs an attachment the chat does not have, or names
     /// nothing that exists.
     UnresolvedProposal,
+    /// What the proposal depends on (attachments, goals, the skill catalog)
+    /// could not be read. The answer is kept; the proposal is dropped.
+    ProposalLookupFailed,
     /// The proposal resembles a stored assessment item.
     ProposalResemblesItem,
 }
@@ -665,6 +666,7 @@ pub struct Outcome {
     pub content: String,
     /// `practice_rejected` when a Practice reply's question could not be used.
     pub note: Option<&'static str>,
+    /// The cards written beside the answer. Present only when `saved`.
     pub practice: Option<practice::Question>,
     pub memory: Option<memory::Proposal>,
     pub proposal: Option<artifact::Proposal>,
@@ -743,14 +745,21 @@ pub fn complete(
         }
         fine
     });
+    // A proposal that cannot be resolved never costs the answer: the run
+    // still finishes, and the proposal is dropped with its reason.
     let made = match draft {
-        Some(draft) => {
-            let made = resolve_draft(conn, thread_id, draft)?;
-            if made.is_none() {
+        Some(draft) => match resolve_draft(conn, thread_id, draft) {
+            Ok(Some(made)) => Some(made),
+            Ok(None) => {
                 refused.push(Refused::UnresolvedProposal);
+                None
             }
-            made
-        }
+            Err(error) => {
+                log::warn!("chat: a proposal could not be resolved: {error}");
+                refused.push(Refused::ProposalLookupFailed);
+                None
+            }
+        },
         None => None,
     };
     let made = made.filter(|a| {
@@ -794,12 +803,19 @@ pub fn complete(
         }
     }
     tx.commit().map_err(|e| e.to_string())?;
+    // Cards exist only once they are written; a run that had already ended
+    // wrote nothing.
+    let (practice, memory, proposal) = if finished {
+        (accepted, proposal, made)
+    } else {
+        (None, None, None)
+    };
     Ok(Outcome {
         content,
         note,
-        practice: accepted,
-        memory: proposal,
-        proposal: made,
+        practice,
+        memory,
+        proposal,
         refused,
         saved: finished,
     })
@@ -1445,9 +1461,21 @@ mod tests {
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].status, "proposed");
 
-        // A run that already ended is not completed again.
-        let again = complete(&conn, &started, "Something else");
+        // A run that already ended is not completed again, and reports no
+        // cards: none were written.
+        let again = complete(
+            &conn,
+            &started,
+            "Something else\n```memory\n{\"kind\":\"preference\",\"content\":\"Prefers proofs\"}\n```",
+        );
         assert!(!again.saved);
+        assert!(again.memory.is_none() && again.practice.is_none() && again.proposal.is_none());
+        assert_eq!(
+            store::memory_proposals_for_thread(&conn, "t")
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(store::artifacts_for_thread(&conn, "t").unwrap().len(), 1);
     }
 
@@ -1698,5 +1726,28 @@ mod tests {
             sendable.is_empty(),
             "nothing is sent until the learner saves it"
         );
+    }
+
+    #[test]
+    fn a_proposal_that_cannot_be_looked_up_still_finishes_the_answer() {
+        let conn = db();
+        goal(&conn);
+        thread(&conn);
+        attach_goal(&conn, "t", "g1").unwrap();
+        let started = start(&conn, &prepare(&conn, "Add counting").unwrap(), "q1").unwrap();
+        // The skill catalog the change resolves against goes away mid-answer.
+        conn.execute_batch("ALTER TABLE skills RENAME TO skills_gone")
+            .unwrap();
+        let reply = "Try this.\n```artifact\n{\"type\":\"goal_change\",\"title\":\"Data analyst\",\"add\":[\"Counting outcomes\"],\"remove\":[],\"text\":\"Start from counting.\"}\n```";
+        let outcome = complete(&conn, &started, reply);
+
+        assert!(outcome.saved);
+        assert_eq!(outcome.content, "Try this.");
+        assert!(outcome.proposal.is_none());
+        assert_eq!(outcome.refused, vec![Refused::ProposalLookupFailed]);
+        let message = store::message(&conn, &started.run.assistant_message.id).unwrap();
+        assert_eq!((message.status.as_str(), message.error), ("complete", None));
+        assert!(store::artifacts_for_thread(&conn, "t").unwrap().is_empty());
+        assert!(store::active_run(&conn, "t").unwrap().is_none());
     }
 }

@@ -21,9 +21,14 @@ use std::sync::{Arc, Mutex};
 use chrono::SecondsFormat;
 use tokio::sync::oneshot;
 
-/// The moment, as stored: RFC 3339 in UTC with millisecond precision.
+/// A moment as stored: RFC 3339 in UTC with millisecond precision, so
+/// timestamps compare as text in the order they happened.
+pub(crate) fn timestamp(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 pub(crate) fn now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+    timestamp(chrono::Utc::now())
 }
 
 /// Most answers generating at once across all threads of a profile.
