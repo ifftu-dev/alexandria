@@ -133,7 +133,7 @@ fn get_skill_state_history_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aggregation::store::parse_credential_type;
+    use crate::aggregation::store::test_support::parse_credential_type;
     use crate::aggregation::AggregationConfig;
     use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
     use crate::crypto::did::derive_did_key;

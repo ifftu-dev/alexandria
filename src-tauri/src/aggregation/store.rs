@@ -251,7 +251,7 @@ fn load_evidence_for(
 
 /// `vc.type_` is `["VerifiableCredential", "<class>"]` per §7. Pull
 /// the class string and map it back to `CredentialType` via serde.
-pub(crate) fn parse_credential_type(vc: &VerifiableCredential) -> CredentialType {
+fn parse_credential_type(vc: &VerifiableCredential) -> CredentialType {
     for t in &vc.type_ {
         if t == "VerifiableCredential" {
             continue;
@@ -368,4 +368,16 @@ fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), 
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// What the store's tests in `commands::aggregation` reach that production
+/// code does not. They stay there until credential issuance moves out of
+/// the commands layer.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::domain::vc::{CredentialType, VerifiableCredential};
+
+    pub(crate) fn parse_credential_type(vc: &VerifiableCredential) -> CredentialType {
+        super::parse_credential_type(vc)
+    }
 }
