@@ -93,6 +93,8 @@ impl MediaDevices for SyntheticMedia {
             self_view: tuning,
             remote_view: tuning,
             audio_level_interval: Duration::from_millis(200),
+            room_open_timeout: None,
+            start_device_timeout: None,
         }
     }
 

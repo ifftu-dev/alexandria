@@ -163,6 +163,15 @@ pub struct MediaProfile {
     pub remote_view: FrameTuning,
     /// How often mic and speaker levels are reported to the webview.
     pub audio_level_interval: Duration,
+    /// How long joining the room may take before the start fails. `None`
+    /// waits as long as it takes.
+    pub room_open_timeout: Option<Duration>,
+    /// How long the audio engine and the first camera may take to open when
+    /// a call starts before the call goes on without them. `None` waits:
+    /// on a desktop the first open can sit behind a permission prompt the
+    /// learner has not clicked yet, and a timeout there would start a call
+    /// with no camera or microphone and drop the device once it opens.
+    pub start_device_timeout: Option<Duration>,
 }
 
 /// Something the device did on its own that a call must react to.

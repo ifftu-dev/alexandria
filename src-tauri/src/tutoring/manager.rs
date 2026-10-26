@@ -68,11 +68,9 @@ const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
 const BROADCAST_NAME: &str = "cam";
 /// Maximum number of log entries retained in the ring buffer.
 const MAX_LOG_ENTRIES: usize = 50;
-/// How long joining the room's gossip and MoQ layer may take.
-const ROOM_OPEN_TIMEOUT: Duration = Duration::from_secs(15);
-/// How long the audio engine may take to start.
-const AUDIO_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a camera or screen source may take to open.
+/// How long a camera or screen may take to open mid-call, on every
+/// platform. The start of a call follows the platform's
+/// [`MediaProfile::start_device_timeout`] instead.
 #[cfg(tutoring_video)]
 const SOURCE_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long leaving waits for media cleanup before letting it finish in the
@@ -526,12 +524,12 @@ impl<M: MediaDevices> CallManager<M> {
                     .map_err(|e| format!("invalid room ticket: {e}"))?,
                 None => RoomTicket::generate(),
             };
-            let room = tokio::time::timeout(
-                ROOM_OPEN_TIMEOUT,
+            let room = within(
+                core.profile.room_open_timeout,
                 Room::new(endpoint, network.gossip.clone(), network.live, ticket),
             )
             .await
-            .map_err(|_| format!("Room::new timed out after {}s", ROOM_OPEN_TIMEOUT.as_secs()))?
+            .map_err(|limit| format!("Room::new timed out after {}s", limit.as_secs()))?
             .map_err(|e| format!("failed to {} room: {e}", verb.trim_end_matches("_room")))?;
             let ticket_str = room.ticket().to_string();
             crate::diag::log(&format!("{verb}: room open"));
@@ -1241,14 +1239,15 @@ impl<M: MediaDevices> Core<M> {
 
     // ── Devices ────────────────────────────────────────────────────
 
-    /// Start the audio engine on a blocking thread the session owns, with a
-    /// timeout so startup continues without audio. Cleanup still joins an
-    /// initializer that has not returned; a timeout cannot stop it.
+    /// Start the audio engine on a blocking thread the session owns. Where
+    /// the platform sets a start timeout, startup continues without audio
+    /// once it passes; cleanup still joins an initializer that has not
+    /// returned, since a timeout cannot stop it.
     async fn open_audio(&self, devices: &DeviceSelection) -> Option<M::Audio> {
         let media = self.media.clone();
         let devices = devices.clone();
-        let result = tokio::time::timeout(
-            AUDIO_OPEN_TIMEOUT,
+        let result = within(
+            self.profile.start_device_timeout,
             self.tasks.run_blocking(move || {
                 catch_unwind(AssertUnwindSafe(|| media.open_audio(&devices)))
             }),
@@ -1271,10 +1270,10 @@ impl<M: MediaDevices> Core<M> {
                 log::warn!("tutoring: audio initialization cancelled: {error}");
                 None
             }
-            Err(_) => {
+            Err(limit) => {
                 log::error!(
                     "tutoring: audio engine init timed out after {}s",
-                    AUDIO_OPEN_TIMEOUT.as_secs()
+                    limit.as_secs()
                 );
                 None
             }
@@ -1322,8 +1321,8 @@ impl<M: MediaDevices> Core<M> {
         camera: Option<String>,
     ) -> Result<Option<OpenedVideo<M::VideoSource>>, String> {
         let media = self.media.clone();
-        let result = tokio::time::timeout(
-            SOURCE_OPEN_TIMEOUT,
+        let result = within(
+            self.profile.start_device_timeout,
             self.tasks.run_blocking(move || {
                 catch_unwind(AssertUnwindSafe(|| media.open_camera(camera.as_deref())))
             }),
@@ -1340,11 +1339,8 @@ impl<M: MediaDevices> Core<M> {
                 Ok(None)
             }
             Ok(Err(error)) => Err(format!("camera initialization failed: {error}")),
-            Err(_) => {
-                log::error!(
-                    "tutoring: camera init timed out after {}s",
-                    SOURCE_OPEN_TIMEOUT.as_secs()
-                );
+            Err(limit) => {
+                log::error!("tutoring: camera init timed out after {}s", limit.as_secs());
                 Ok(None)
             }
         }
@@ -2286,6 +2282,18 @@ impl BridgeStats {
         );
         *self = Self::default();
         Some(summary)
+    }
+}
+
+/// Run `work`, giving up after `limit` if there is one. `Err` carries the
+/// limit that passed.
+async fn within<F: std::future::Future>(
+    limit: Option<Duration>,
+    work: F,
+) -> Result<F::Output, Duration> {
+    match limit {
+        Some(limit) => tokio::time::timeout(limit, work).await.map_err(|_| limit),
+        None => Ok(work.await),
     }
 }
 

@@ -58,6 +58,8 @@ impl MediaDevices for AndroidMedia {
                 interval: Duration::from_millis(1000 / 30),
             },
             audio_level_interval: Duration::from_millis(50),
+            room_open_timeout: None,
+            start_device_timeout: None,
         }
     }
 

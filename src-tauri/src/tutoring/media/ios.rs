@@ -1059,6 +1059,10 @@ impl MediaDevices for IosMedia {
                 interval: Duration::from_millis(50),
             },
             audio_level_interval: Duration::from_millis(200),
+            // A phone gives up rather than leave the call starting: the room
+            // after 15s, the audio engine and the camera after 10s each.
+            room_open_timeout: Some(Duration::from_secs(15)),
+            start_device_timeout: Some(Duration::from_secs(10)),
         }
     }
 
