@@ -17,16 +17,16 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         profile_operations: super::operations::ProfileOperations::default(),
         tutoring: Arc::new(TutoringManager::new()),
         classroom: Arc::new(ClassroomManager::new()),
-        // The commands layer's runtimes start empty; the test builds them
-        // by type so the profile module never names the commands layer.
-        studio: Default::default(),
+        studio: Arc::new(crate::studio::StudioRuntime::default()),
         ai_chat: Arc::new(crate::ai_chat::ChatRuntime::default()),
         #[cfg(grader)]
         grader_runtime: Arc::new(
             crate::plugins::wasm_runtime::GraderRuntime::new().expect("grader"),
         ),
         last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
-        ipc_limiter: Default::default(),
+        ipc_limiter: Arc::new(std::sync::Mutex::new(
+            crate::ratelimit::IpcRateLimiter::new(),
+        )),
         evidence_staging: Arc::new(crate::sentinel::evidence::EvidenceStaging::new()),
         db_executor: crate::db::executor::DatabaseExecutor::new(db.clone()),
         db,

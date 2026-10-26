@@ -23,8 +23,10 @@ pub mod org_trust;
 pub mod p2p;
 pub mod plugins;
 pub mod profile;
+pub mod ratelimit;
 pub mod sentinel;
 pub mod settings;
+pub mod studio;
 pub mod tutoring;
 
 #[cfg(target_os = "macos")]
@@ -77,7 +79,7 @@ pub struct ActiveProfile {
 /// does not by itself permit concurrent access. Blocking SQL on runtime
 /// workers is a separate responsiveness concern to measure and address.
 pub struct AppState {
-    pub studio: Arc<commands::studio::StudioRuntime>,
+    pub studio: Arc<studio::StudioRuntime>,
     /// Live chat generations, so they can be stopped and recovered.
     pub ai_chat: Arc<ai_chat::ChatRuntime>,
     // ─── per-device singletons ──────────────────────────────────────
@@ -98,7 +100,7 @@ pub struct AppState {
     /// Last IPC activity timestamp for session timeout (auto-lock).
     pub last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
     /// IPC rate limiter for sensitive commands.
-    pub ipc_limiter: Arc<std::sync::Mutex<crate::commands::ratelimit::IpcRateLimiter>>,
+    pub ipc_limiter: Arc<std::sync::Mutex<crate::ratelimit::IpcRateLimiter>>,
     /// Sentinel appeal evidence awaiting a learner's consent decision. Held in
     /// memory only and cleared on lock — nothing here has been persisted, and
     /// nothing will be unless the learner says yes. See `sentinel::evidence`.
@@ -1257,7 +1259,7 @@ pub fn run() {
             );
 
             let app_state = AppState {
-                studio: Arc::new(commands::studio::StudioRuntime::default()),
+                studio: Arc::new(studio::StudioRuntime::default()),
                 ai_chat: Arc::new(ai_chat::ChatRuntime::default()),
                 app_data_dir: app_dir.clone(),
                 profile_manager,
@@ -1269,7 +1271,7 @@ pub fn run() {
                 grader_runtime,
                 last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
                 ipc_limiter: Arc::new(std::sync::Mutex::new(
-                    commands::ratelimit::IpcRateLimiter::new(),
+                    ratelimit::IpcRateLimiter::new(),
                 )),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 db,
