@@ -540,7 +540,10 @@ impl<M: MediaDevices> CallManager<M> {
             let (events, handle) = room.split();
             let self_preview_task = core.start_self_preview(&mut broadcast);
 
-            let topic_seed = room_topic_bytes(&ticket_str);
+            // Every participant derives the chat and names topics from the
+            // room's gossip topic. The ticket string is not shared: each
+            // device's copy names itself as the bootstrap peer.
+            let topic_seed = handle.ticket().topic_id.as_bytes().to_vec();
             let chat_sender = core
                 .setup_chat(&network.gossip, &topic_seed, &our_node_id)
                 .await;
@@ -2237,11 +2240,6 @@ impl BridgeStats {
         *self = Self::default();
         Some(summary)
     }
-}
-
-/// Derive stable bytes from a ticket string for topic derivation.
-fn room_topic_bytes(ticket_str: &str) -> Vec<u8> {
-    ticket_str.as_bytes().to_vec()
 }
 
 /// A gossip topic derived from the room's by a suffix.
