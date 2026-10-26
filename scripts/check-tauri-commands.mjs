@@ -331,10 +331,10 @@ for (const command of unscoped) {
 // module outside src-tauri/src/commands may name the commands layer.
 // Behaviour another module needs moves into the module named for it.
 // lib.rs is exempt: it registers the commands and runs the background tasks
-// that call them. Comments are blanked first (keeping line numbers), so docs
-// may point at a command. This is a text check, not name resolution.
+// that call them. A small lexer blanks comments (nested too), strings, raw
+// strings and char literals first, keeping line numbers, so docs and log
+// text may mention a command. This is a token check, not name resolution.
 const backendRoot = "src-tauri/src";
-const commandsLayer = /\bcommands\s*::|\bcrate\s*::\s*commands\b|\bcrate\s*::\s*\{[^}]*\bcommands\b/g;
 
 function walkRust(dir, out) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -344,10 +344,93 @@ function walkRust(dir, out) {
   }
 }
 
-function blankComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "))
-    .replace(/\/\/[^\n]*/g, "");
+// Rust source with every comment and literal replaced by spaces (newlines
+// kept), so only code remains at the same offsets.
+function blankRust(source) {
+  const out = source.split("");
+  const n = source.length;
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < n; k++) if (out[k] !== "\n") out[k] = " ";
+  };
+  const isIdent = (c) => c !== undefined && /[A-Za-z0-9_]/.test(c);
+  let i = 0;
+  while (i < n) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (c === "/" && next === "/") {
+      let end = source.indexOf("\n", i);
+      if (end === -1) end = n;
+      blank(i, end);
+      i = end;
+    } else if (c === "/" && next === "*") {
+      let depth = 1;
+      let k = i + 2;
+      while (k < n && depth > 0) {
+        if (source[k] === "/" && source[k + 1] === "*") { depth++; k += 2; }
+        else if (source[k] === "*" && source[k + 1] === "/") { depth--; k += 2; }
+        else k++;
+      }
+      blank(i, k);
+      i = k;
+    } else if ((c === "r" || (c === "b" && next === "r")) && !isIdent(source[i - 1])) {
+      // A raw string: r"…", r#"…"#, br"…". Anything else is an identifier.
+      let k = c === "b" ? i + 2 : i + 1;
+      let hashes = 0;
+      while (source[k] === "#") { hashes++; k++; }
+      if (source[k] !== '"') { i++; continue; }
+      const close = '"' + "#".repeat(hashes);
+      let end = source.indexOf(close, k + 1);
+      end = end === -1 ? n : end + close.length;
+      blank(i, end);
+      i = end;
+    } else if (c === '"') {
+      let k = i + 1;
+      while (k < n && source[k] !== '"') k += source[k] === "\\" ? 2 : 1;
+      blank(i, k + 1);
+      i = k + 1;
+    } else if (c === "'") {
+      // A char literal ('x', '\n', '\u{..}', or one astral char); otherwise
+      // a lifetime or label, which is code.
+      let end = -1;
+      if (next === "\\") end = source.indexOf("'", i + 2);
+      else if (source[i + 2] === "'") end = i + 2;
+      else if (/[\uD800-\uDBFF]/.test(next ?? "") && source[i + 3] === "'") end = i + 3;
+      if (end === -1) { i++; continue; }
+      blank(i, end + 1);
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+// Offsets in blanked code where the commands layer is named: a
+// `commands::` path; `crate::commands`, `super::commands` (any number of
+// supers) or `self::commands`, renamed or not; or `commands` as a direct
+// item of a grouped `crate::{…}` (or `super::{…}`/`self::{…}`) import,
+// however deeply its other items nest.
+function commandsLayerOffsets(code) {
+  const offsets = [];
+  const direct = /\bcommands\s*::|\b(?:crate|self|super)\s*::\s*(?:super\s*::\s*)*commands\b/g;
+  for (const match of code.matchAll(direct)) offsets.push(match.index);
+  const group = /\b(?:crate|self|super)\s*::\s*(?:super\s*::\s*)*\{/g;
+  for (const match of code.matchAll(group)) {
+    let depth = 0;
+    let atItemStart = false;
+    for (let k = match.index + match[0].length - 1; k < code.length; k++) {
+      const c = code[k];
+      if (c === "{") { depth++; atItemStart = depth === 1; continue; }
+      if (c === "}") { depth--; if (depth === 0) break; atItemStart = false; continue; }
+      if (depth === 1 && c === ",") { atItemStart = true; continue; }
+      if (/\s/.test(c)) continue;
+      if (depth === 1 && atItemStart && code.startsWith("commands", k) && !/[A-Za-z0-9_]/.test(code[k + 8] ?? "")) {
+        offsets.push(k);
+      }
+      atItemStart = false;
+    }
+  }
+  return offsets;
 }
 
 const rustFiles = [];
@@ -355,9 +438,9 @@ walkRust(path.join(root, backendRoot), rustFiles);
 for (const file of rustFiles) {
   const rel = path.relative(root, file).split(path.sep).join("/");
   if (rel === `${backendRoot}/lib.rs` || rel.startsWith(`${backendRoot}/commands/`)) continue;
-  const code = blankComments(readText(rel));
-  for (const match of code.matchAll(commandsLayer)) {
-    const line = code.slice(0, match.index).split("\n").length;
+  const code = blankRust(readText(rel));
+  const lines = new Set(commandsLayerOffsets(code).map((at) => code.slice(0, at).split("\n").length));
+  for (const line of [...lines].sort((a, b) => a - b)) {
     failures.push(
       `A module outside the commands layer imports the commands layer: ${rel}:${line}. ` +
         "Move what it needs into the module that owns it and have the command call that.",
