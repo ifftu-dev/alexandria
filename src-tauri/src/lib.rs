@@ -294,7 +294,7 @@ impl AppState {
         if let Ok(guard) = self.db.lock() {
             if let Some(db) = guard.as_ref() {
                 let now = commands::credentials::now_rfc3339();
-                match commands::aggregation::recompute_all_impl(db.conn(), &now) {
+                match crate::aggregation::store::recompute_all_impl(db.conn(), &now) {
                     Ok(n) if n > 0 => log::info!("recomputed {n} derived skill states on unlock"),
                     Ok(_) => {}
                     Err(e) => log::warn!("skill-state recompute on unlock failed: {e}"),

@@ -202,7 +202,7 @@ pub async fn bootstrap_confirm(
                 }
 
                 // Refresh derived confidence so the new (low-tier) skills appear.
-                let _ = crate::commands::aggregation::recompute_all_impl(conn, &now);
+                let _ = crate::aggregation::store::recompute_all_impl(conn, &now);
                 Ok(claimed)
             },
         )

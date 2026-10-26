@@ -81,7 +81,7 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
     // Revalidation drops other calculation versions, recomputes changed
     // states and removes states whose last verified input disappeared, so a
     // learner is never offered a stale or unbacked strength.
-    super::aggregation::revalidate_cached_states(conn, Some(subject_did), &now)?;
+    crate::aggregation::store::revalidate_cached_states(conn, Some(subject_did), &now)?;
     let version = crate::aggregation::AggregationConfig::default().version;
     let mut stmt = conn
         .prepare(
@@ -386,7 +386,7 @@ pub fn grant_snapshot_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::aggregation::recompute_all_impl;
+    use crate::aggregation::store::recompute_all_impl;
     use crate::crypto::did::{derive_did_key, Did};
     use crate::db::opinion_eligibility::test_support::store_skill_credential;
     use crate::db::Database;

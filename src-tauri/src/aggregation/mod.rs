@@ -9,6 +9,7 @@ pub mod antigaming;
 pub mod config;
 pub mod independence;
 pub mod level;
+pub mod store;
 pub mod weights;
 
 use serde::{Deserialize, Serialize};

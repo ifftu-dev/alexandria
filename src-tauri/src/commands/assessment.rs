@@ -1217,7 +1217,7 @@ pub fn grade_attempt_impl(
     .map_err(|e| e.to_string())?;
 
     if passed {
-        crate::commands::aggregation::recompute_all_impl(conn, now)?;
+        crate::aggregation::store::recompute_all_impl(conn, now)?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
