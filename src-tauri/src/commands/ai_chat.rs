@@ -14,7 +14,20 @@
 //!   request-scoped channel while saving checkpoints; the turn completes
 //!   the answer.
 //!
-//! Every entry point refuses while an assessment is in progress.
+//! While an assessment is in progress (see
+//! [`crate::ai_access::no_attempt_in_progress`]):
+//!
+//! * Refused and flagged as an integrity event: the requests that reach a
+//!   model or show model or practice content (prepare, start, practice
+//!   attempt, hint and reveal, allowing a proposal).
+//! * Refused without a flag: every other command that reads or changes
+//!   chat state (threads, search, attachments, mode and model, listing
+//!   models, guardian approval requests, memory writes, notes, declining a
+//!   proposal, saved artifacts). The webview learns of an attempt only at
+//!   its next status refresh, so a click in flight must not flag a learner.
+//! * Open: status, listing threads, listing guardian approvals, listing
+//!   memory, drafts, and cancelling a run, so the panel can still show its
+//!   state, keep unsent text, and stop.
 
 use std::time::Duration;
 
