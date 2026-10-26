@@ -614,8 +614,8 @@ mod tests {
 
     #[test]
     fn provider_sign_in_follows_the_same_age_rules() {
+        use crate::ai_auth::sign_in_target;
         use crate::ai_auth::{chatgpt, openrouter};
-        use crate::commands::ai_signin::sign_in_target;
         let conn = db();
         let chatgpt = sign_in_target(chatgpt::API_BASE);
         let openrouter = sign_in_target(openrouter::API_BASE);

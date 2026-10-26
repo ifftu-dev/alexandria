@@ -15,10 +15,10 @@ use alexandria_studio::store as studio_store;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+use super::with_conn;
 use crate::ai_access;
 use crate::ai_auth::{self, chatgpt, openrouter, DonePage, SignInError};
 use crate::ai_chat::vocab::refused;
-use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -27,45 +27,6 @@ static ACTIVE: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
 /// Context window assumed for ChatGPT plan models, which are large.
 const CHATGPT_CONTEXT_TOKENS: u32 = 128_000;
-
-/// The connection a sign-in to `api_base` creates, before it has a model or
-/// a key: a remote text connection. The age rules are checked against it
-/// before the browser opens, and the saved connection is built from it.
-pub(crate) fn sign_in_target(api_base: &str) -> StudioConnection {
-    StudioConnection {
-        id: String::new(),
-        name: String::new(),
-        endpoint: api_base.into(),
-        model: String::new(),
-        location: "cloud".into(),
-        capability: "text".into(),
-        enabled: true,
-        has_key: true,
-        context_tokens: None,
-        protocol: Protocol::default(),
-        auth: ConnectionAuth::default(),
-    }
-}
-
-async fn with_conn<T, F>(
-    state: &State<'_, AppState>,
-    label: &'static str,
-    f: F,
-) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce(&rusqlite::Connection) -> Result<T, String> + Send + 'static,
-{
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            label,
-            move |db| f(db.conn()),
-        )
-        .await
-}
 
 /// Claims the single sign-in slot. Dropping the guard frees it.
 struct Slot;
@@ -152,7 +113,8 @@ async fn sign_in_chatgpt(
     page: &DonePage,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     let existing = with_conn(state, "ai-signin.chatgpt-check", |conn| {
-        ai_access::may_connect(conn, &sign_in_target(chatgpt::API_BASE)).map_err(refused)?;
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(chatgpt::API_BASE))
+            .map_err(refused)?;
         signed_in_chatgpt(conn)
     })
     .await?;
@@ -214,7 +176,7 @@ async fn sign_in_chatgpt(
             context_tokens: Some(CHATGPT_CONTEXT_TOKENS),
             protocol: Protocol::Responses,
             auth: ConnectionAuth::ChatgptPlan,
-            ..sign_in_target(chatgpt::API_BASE)
+            ..ai_auth::sign_in_target(chatgpt::API_BASE)
         },
     };
     let encoded = credential.encode();
@@ -232,7 +194,8 @@ async fn sign_in_openrouter(
     page: &DonePage,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     with_conn(state, "ai-signin.openrouter-check", |conn| {
-        ai_access::may_connect(conn, &sign_in_target(openrouter::API_BASE)).map_err(refused)
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(openrouter::API_BASE))
+            .map_err(refused)
     })
     .await?;
     let (_slot, mut cancel) = Slot::claim()?;
@@ -263,7 +226,7 @@ async fn save_openrouter(
             model: openrouter::DEFAULT_MODEL.into(),
             protocol: Protocol::Compatible,
             auth: ConnectionAuth::ApiKey,
-            ..sign_in_target(openrouter::API_BASE)
+            ..ai_auth::sign_in_target(openrouter::API_BASE)
         },
     };
     with_conn(state, "ai-signin.openrouter-save", move |conn| {
@@ -293,7 +256,8 @@ pub async fn ai_signin_code_start(
         return Err("invalid_input: unknown provider".into());
     }
     with_conn(&state, "ai-signin.code-check", |conn| {
-        ai_access::may_connect(conn, &sign_in_target(openrouter::API_BASE)).map_err(refused)
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(openrouter::API_BASE))
+            .map_err(refused)
     })
     .await?;
     let (verifier, challenge) = ai_auth::pkce();
@@ -319,7 +283,8 @@ pub async fn ai_signin_code_finish(
         .ok_or_else(|| SignInError::CodeRejected.to_string())?
         .to_owned();
     with_conn(&state, "ai-signin.code-check", |conn| {
-        ai_access::may_connect(conn, &sign_in_target(openrouter::API_BASE)).map_err(refused)
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(openrouter::API_BASE))
+            .map_err(refused)
     })
     .await?;
     let verifier = take_pending(std::time::Instant::now()).map_err(|e| e.to_string())?;

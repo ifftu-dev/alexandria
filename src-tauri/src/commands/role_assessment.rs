@@ -16,8 +16,9 @@ use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::clock::now_rfc3339;
 use crate::commands::credentials::{
-    issue_credential_impl, load_issuer_key, now_rfc3339, IssuancePolicy, IssueCredentialRequest,
+    issue_credential_impl, load_issuer_key, IssuancePolicy, IssueCredentialRequest,
 };
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
@@ -981,7 +982,7 @@ mod tests {
         // corroboration, so they add no independent issuer cluster. An
         // org-issued skill credential is an independent cluster, so it raises
         // the count aggregation weighs.
-        use crate::commands::aggregation::recompute_all_impl;
+        use crate::aggregation::store::recompute_all_impl;
         use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
         use crate::domain::vc::SkillClaim;
 

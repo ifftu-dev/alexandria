@@ -110,7 +110,7 @@ pub async fn diagnostics_enter(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DiagnosticsStatus, String> {
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let status = state
         .db_executor
         .execute(

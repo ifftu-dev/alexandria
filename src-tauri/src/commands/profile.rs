@@ -101,7 +101,7 @@ fn issue_birthdate_vc(
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     crate::commands::credentials::issue_credential_impl(conn, signing_key, &did, &req, &now)?;
     Ok(())
 }

@@ -24,7 +24,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::commands::credentials::{load_issuer_key, now_rfc3339};
+use crate::clock::now_rfc3339;
+use crate::commands::credentials::load_issuer_key;
 use crate::commands::exchange::{client, directory, response_json};
 use crate::commands::holder_pull::{Problem, PullResult};
 use crate::db::executor::DatabaseWorkload;

@@ -333,7 +333,7 @@ pub async fn set_visibility(
     }
 
     let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
 
     // A record with no skills in it. The endpoint checks the signature and the
     // subject, and nothing else; sending the published listing would attach a
@@ -382,7 +382,7 @@ pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
         .next()
         .ok_or("requests from organisations are switched off, or no Alexandria Cloud is set")?;
     let (key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let now_unix = chrono::Utc::now().timestamp();
     let (sign_key, subject, at) = (key.clone(), did.as_str().to_string(), now.clone());
     let (digest, signed) = state

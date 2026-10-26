@@ -577,13 +577,14 @@ mod tests {
         files
     }
 
-    /// Files that take part in chat: the chat and sign-in modules, and every
-    /// command file that uses them. Commands chat shares with other screens
-    /// (skills, guardian sync) are not chat-owned; their codes fall to the
-    /// generic message, which is the designed fallback.
+    /// Files that take part in chat: the chat, sign-in and course notes
+    /// modules, and every command file that uses them. Commands chat shares
+    /// with other screens (skills, guardian sync) are not chat-owned; their
+    /// codes fall to the generic message, which is the designed fallback.
     fn chat_source_files() -> Vec<String> {
         let mut files = rust_files("src/ai_chat");
         files.extend(rust_files("src/ai_auth"));
+        files.push("src/course_notes.rs".into());
         files.extend(
             rust_files("src/commands")
                 .into_iter()
@@ -656,7 +657,7 @@ mod tests {
             "src/ai_auth/mod.rs",
             "src/commands/ai_chat.rs",
             "src/commands/ai_signin.rs",
-            "src/commands/course_notes.rs",
+            "src/course_notes.rs",
         ] {
             assert!(
                 files.iter().any(|f| f == expected),

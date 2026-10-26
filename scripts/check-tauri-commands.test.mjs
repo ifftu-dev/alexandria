@@ -137,3 +137,84 @@ test("an empty host list is allowed but an empty union-backed list is not", () =
   assert.equal(fences.exitCode, 1);
   assert.match(fences.output, /chat-vocab\.json.*reply_fence_tags/);
 });
+
+test("a module outside the commands layer that imports it fails the guard", () => {
+  const result = runGuard({
+    "src-tauri/src/ai_access.rs": source => "use crate::commands::health;\n" + source,
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /imports the commands layer: src-tauri\/src\/ai_access\.rs:1/);
+});
+
+test("a grouped or nested commands import fails the guard too", () => {
+  const grouped = runGuard({
+    "src-tauri/src/ai_chat/action.rs": source => "use crate::{\n    commands,\n    db,\n};\n" + source,
+  });
+  assert.equal(grouped.exitCode, 1);
+  assert.match(grouped.output, /imports the commands layer: src-tauri\/src\/ai_chat\/action\.rs:2/);
+  const nested = runGuard({
+    "src-tauri/src/db/scoring_inputs.rs": source =>
+      source + "\nfn sideways() { let _ = crate::commands::credentials::now_rfc3339(); }\n",
+  });
+  assert.equal(nested.exitCode, 1);
+  assert.match(nested.output, /imports the commands layer: src-tauri\/src\/db\/scoring_inputs\.rs:\d+/);
+});
+
+test("comments may name the commands layer, and lib.rs may use it", () => {
+  const result = runGuard({
+    "src-tauri/src/ai_access.rs": source =>
+      "//! Called from `commands::ai_chat`.\n/* see crate::commands::studio */\n" + source,
+  });
+  assert.equal(result.exitCode, 0, result.output);
+});
+
+test("commands after a nested group in a crate import fails the guard", () => {
+  const result = runGuard({
+    "src-tauri/src/ai_access.rs": source =>
+      "use crate::{db::{executor::{DatabaseWorkload}, Database}, commands};\n" + source,
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /imports the commands layer: src-tauri\/src\/ai_access\.rs:1/);
+});
+
+test("a renamed super or self commands import fails the guard", () => {
+  for (const line of [
+    "use super::commands as cmd;",
+    "use super::super::commands;",
+    "use self::commands as c;",
+  ]) {
+    const result = runGuard({
+      "src-tauri/src/ai_chat/action.rs": source => line + "\n" + source,
+    });
+    assert.equal(result.exitCode, 1, line);
+    assert.match(result.output, /imports the commands layer: src-tauri\/src\/ai_chat\/action\.rs:1/, line);
+  }
+});
+
+test("a URL string before a real import on the same line still fails the guard", () => {
+  const result = runGuard({
+    "src-tauri/src/ai_access.rs": source =>
+      source + '\nconst SITE: &str = "https://example.org"; use crate::commands::health;\n',
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /imports the commands layer: src-tauri\/src\/ai_access\.rs:\d+/);
+});
+
+test("a comment opener inside a string does not hide a later import", () => {
+  const result = runGuard({
+    "src-tauri/src/ai_access.rs": source =>
+      source + '\nconst GLOB: &str = "/*";\nuse crate::commands::health;\nconst END: &str = "*/";\n',
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /imports the commands layer: src-tauri\/src\/ai_access\.rs:\d+/);
+});
+
+test("strings, raw strings, chars and nested comments may name the commands layer", () => {
+  const result = runGuard({
+    "src-tauri/src/ai_access.rs": source =>
+      source +
+      '\nfn log_it() { log::info!("see commands::x"); let _ = r#"crate::commands::y "quoted""#; let _ = \'"\'; }\n' +
+      "/* outer /* inner commands::health */ still a comment: crate::commands */\n",
+  });
+  assert.equal(result.exitCode, 0, result.output);
+});

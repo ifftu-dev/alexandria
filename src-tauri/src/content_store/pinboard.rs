@@ -31,7 +31,7 @@ pub fn declare_commitment(
     scope: &[String],
     signing_key: &ed25519_dalek::SigningKey,
 ) -> Result<PinboardCommitment, String> {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
     let mut commit = PinboardCommitment {
         id: format!("urn:uuid:{}", Uuid::new_v4()),
         pinner_did: pinner_did.as_str().to_string(),
@@ -48,7 +48,7 @@ pub fn declare_commitment(
 }
 
 pub fn revoke_commitment(db: &rusqlite::Connection, commitment_id: &str) -> Result<(), String> {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
     let updated = db
         .execute(
             "UPDATE pinboard_observations SET revoked_at = ?2 \

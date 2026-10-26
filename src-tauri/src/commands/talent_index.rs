@@ -76,12 +76,12 @@ fn load_consent(conn: &Connection) -> TalentIndexConsent {
 /// straight from credentials would let one issuer's repeated attestations look
 /// like corroboration.
 fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<CandidateSkill>, String> {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
     // A cached state is listed only while its verified inputs are unchanged.
     // Revalidation drops other calculation versions, recomputes changed
     // states and removes states whose last verified input disappeared, so a
     // learner is never offered a stale or unbacked strength.
-    super::aggregation::revalidate_cached_states(conn, Some(subject_did), &now)?;
+    crate::aggregation::store::revalidate_cached_states(conn, Some(subject_did), &now)?;
     let version = crate::aggregation::AggregationConfig::default().version;
     let mut stmt = conn
         .prepare(
@@ -243,7 +243,7 @@ pub fn set_talent_index_consent_impl(
 pub async fn get_talent_index_preview(
     state: State<'_, AppState>,
 ) -> Result<TalentIndexPreview, String> {
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -264,7 +264,7 @@ pub async fn set_talent_index_consent(
     state: State<'_, AppState>,
     consent: TalentIndexConsent,
 ) -> Result<TalentIndexPreview, String> {
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -321,7 +321,7 @@ pub async fn sign_consented_record(
     only: Option<&[String]>,
 ) -> Result<Option<SignedTalentIndexRecord>, String> {
     let (signing_key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let only = only.map(<[String]>::to_vec);
     state
         .db_executor
@@ -386,7 +386,7 @@ pub fn grant_snapshot_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::aggregation::recompute_all_impl;
+    use crate::aggregation::store::recompute_all_impl;
     use crate::crypto::did::{derive_did_key, Did};
     use crate::db::opinion_eligibility::test_support::store_skill_credential;
     use crate::db::Database;

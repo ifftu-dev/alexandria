@@ -90,6 +90,17 @@ pub fn verify_credential_db(
     )
 }
 
+/// The hash stored with a credential: BLAKE3 over its JCS-canonical JSON
+/// with the proof value cleared, so it names the signed content and not
+/// one signature over it.
+pub fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
+    let mut clone = vc.clone();
+    clone.proof.proof_value.clear();
+    let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;
+    let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|e| e.to_string())?;
+    Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

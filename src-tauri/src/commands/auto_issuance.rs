@@ -26,7 +26,7 @@ use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::domain::vc::context::W3C_VC_V2;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    Claim, CredentialStatus, CustomClaim, Proof, VerifiableCredential, Witness,
+    integrity_hash_of, Claim, CredentialStatus, CustomClaim, Proof, VerifiableCredential, Witness,
 };
 
 const STATUS_LIST_BITS: usize = alexandria_verify::vc::status::MIN_BITS;
@@ -114,7 +114,7 @@ fn issue_new_observation(
     let list_id = ensure_status_list(conn, learner_did)?;
     let index = allocate_status_index(conn, &list_id)?;
 
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
 
     // Self-asserted course-completion claim. The properties land
     // directly on `credentialSubject` per W3C VC v2 — a `claimType`
@@ -239,14 +239,6 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
         return Err(format!("status list {list_id} is full"));
     }
     Ok(next)
-}
-
-fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
-    let mut clone = vc.clone();
-    clone.proof.proof_value.clear();
-    let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;
-    let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|e| e.to_string())?;
-    Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
 }
 
 /// Find the credential id that was issued for a given observation

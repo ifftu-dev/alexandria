@@ -80,7 +80,7 @@ pub fn handle_did_message(
     // the DID's own key (checked above), so the subject really is asking for
     // this.
     if let Some(rotated_to) = parsed.rotated_to {
-        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let now = crate::clock::now_rfc3339();
         let conn = db.conn();
         // Close any open entry for this DID.
         conn.execute(

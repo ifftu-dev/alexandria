@@ -6,7 +6,8 @@ use reqwest::Url;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::credentials::{load_issuer_key, now_rfc3339};
+use crate::clock::now_rfc3339;
+use crate::commands::credentials::load_issuer_key;
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
 use crate::db::executor::DatabaseWorkload;
 use crate::org_trust::{self, OrgCheck};

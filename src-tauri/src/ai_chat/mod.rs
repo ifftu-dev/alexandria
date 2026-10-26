@@ -10,6 +10,7 @@ pub mod bank_guard;
 pub mod context;
 pub mod goal;
 pub mod memory;
+pub mod ops;
 pub mod practice;
 pub mod run;
 pub mod store;

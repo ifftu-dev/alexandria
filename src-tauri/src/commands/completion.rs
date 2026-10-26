@@ -23,7 +23,8 @@ use crate::cardano::{
     completion_queue::{self, WitnessState, WitnessStatus},
     completion_recovery, completion_tx_builder, script_refs,
 };
-use crate::commands::credentials::{now_rfc3339, IssueCredentialRequest};
+use crate::clock::now_rfc3339;
+use crate::commands::credentials::IssueCredentialRequest;
 use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
@@ -906,7 +907,7 @@ fn self_issue_completion(
 
     // (4) Refresh derived proficiency so the skill graph reflects the
     // new evidence right away.
-    super::aggregation::recompute_all_impl(conn, &now)?;
+    crate::aggregation::store::recompute_all_impl(conn, &now)?;
 
     Ok(issued_ids)
 }
@@ -1338,7 +1339,7 @@ mod tests {
         assert!(completion_obs::pending_observations(db.conn())
             .unwrap()
             .is_empty());
-        let state = super::super::aggregation::list_derived_states_impl(db.conn(), None).unwrap();
+        let state = crate::aggregation::store::list_derived_states_impl(db.conn(), None).unwrap();
         assert_eq!(state.len(), 1);
         // The learner's own completion claim is scored but is not independent
         // corroboration, so it contributes no issuer cluster.

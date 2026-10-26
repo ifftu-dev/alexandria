@@ -1097,7 +1097,7 @@ mod tests {
     use super::fixtures::*;
     use super::{artifact, now, store, Inputs, Refused, Started};
     use crate::ai_chat::action;
-    use crate::commands::ai_chat::{attach, attach_goal, save_note};
+    use crate::ai_chat::ops::{attach, attach_goal, save_note};
     use crate::db::Database;
 
     #[test]

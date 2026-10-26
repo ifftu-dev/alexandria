@@ -86,7 +86,7 @@ pub fn allow(
             text,
             ..
         } => {
-            crate::commands::course_notes::insert(&tx, course_id, element_id, &item.title, text)?;
+            crate::course_notes::insert(&tx, course_id, element_id, &item.title, text)?;
             store::mark_added(&tx, artifact_id, now).map_err(|e| e.to_string())?
         }
         Body::Enroll { course_id, .. } => {
@@ -118,7 +118,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
     if taking {
         return Ok(());
     }
-    for cid in crate::commands::plugins::course_plugin_cids(db, course_id)? {
+    for cid in crate::plugins::registry::course_plugin_cids(db, course_id)? {
         if crate::plugins::registry::get_installed(db, &cid)?.is_none() {
             return Err(refuse(
                 ChatErrorCode::NeedsPlugins,
@@ -126,7 +126,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
             ));
         }
     }
-    crate::commands::enrollment::enroll_db(db, course_id.to_string())
+    crate::enrollment::enroll(db, course_id)
         .map(|_| ())
         .map_err(|e| refuse(ChatErrorCode::OpenCourse, e))
 }
@@ -311,7 +311,7 @@ mod tests {
         assert_eq!(allow(&db, "n", None, NOW).unwrap().artifact.status, "added");
         propose(&db, "n2", "Bayes rule", &body);
         allow(&db, "n2", None, NOW).unwrap();
-        let notes = crate::commands::course_notes::list(db.conn(), "course").unwrap();
+        let notes = crate::course_notes::list(db.conn(), "course").unwrap();
         assert_eq!(notes.len(), 1, "the same note is kept once");
         assert_eq!(notes[0].element_id.as_deref(), Some("lesson"));
         assert_eq!(notes[0].origin.as_deref(), Some("chat"));

@@ -26,8 +26,9 @@ use alexandria_verify::vc::VerifiableCredential;
 use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 
+use crate::clock::now_rfc3339;
 use crate::commands::credentials::{
-    export_bundle_signed_impl, mark_status_lists_published, now_rfc3339, pending_status_lists,
+    export_bundle_signed_impl, mark_status_lists_published, pending_status_lists,
     push_status_lists, revoke_credential_impl, verify_bundle_offline_impl,
 };
 use crate::commands::hiring::{

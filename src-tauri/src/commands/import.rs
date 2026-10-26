@@ -178,7 +178,7 @@ pub fn import_credential_impl(
     };
     // Same derivation `issue_credential` uses, reused rather than reimplemented
     // so an imported credential and a locally issued one hash identically.
-    let integrity_hash = super::credentials::integrity_hash_of(vc)?;
+    let integrity_hash = crate::domain::vc::integrity_hash_of(vc)?;
     let signed_json = serde_json::to_string(vc).map_err(|e| e.to_string())?;
 
     conn.execute(
@@ -216,7 +216,7 @@ pub async fn import_credential(
     state: State<'_, AppState>,
     credential: VerifiableCredential,
 ) -> Result<ImportOutcome, String> {
-    let now = super::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -298,7 +298,7 @@ pub async fn import_credential_from_peer(
         .map_err(|e| format!("read fetched credential {}: {e}", ticket.hash))?;
     let vc = credential_from_bytes(&bytes)?;
 
-    let now = super::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -425,7 +425,7 @@ pub async fn import_credentials(
     state: State<'_, AppState>,
     payload: String,
 ) -> Result<ImportSummary, String> {
-    let now = super::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(

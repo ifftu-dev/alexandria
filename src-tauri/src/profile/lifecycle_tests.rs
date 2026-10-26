@@ -20,7 +20,7 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
             crate::tutoring::events::RecordedEvents::default(),
         )),
         classroom: Arc::new(ClassroomManager::new()),
-        studio: Arc::new(crate::commands::studio::StudioRuntime::default()),
+        studio: Arc::new(crate::studio::StudioRuntime::default()),
         ai_chat: Arc::new(crate::ai_chat::ChatRuntime::default()),
         #[cfg(grader)]
         grader_runtime: Arc::new(
@@ -28,7 +28,7 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         ),
         last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
         ipc_limiter: Arc::new(std::sync::Mutex::new(
-            crate::commands::ratelimit::IpcRateLimiter::new(),
+            crate::ratelimit::IpcRateLimiter::new(),
         )),
         evidence_staging: Arc::new(crate::sentinel::evidence::EvidenceStaging::new()),
         db_executor: crate::db::executor::DatabaseExecutor::new(db.clone()),

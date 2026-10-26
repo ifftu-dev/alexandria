@@ -176,7 +176,7 @@ pub async fn integrity_attest_session(
         nonce_hex: hex::encode(nonce),
         app_id: captured.app_id,
         payload: captured.payload,
-        captured_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        captured_at: crate::clock::now_rfc3339(),
     };
     // Verify what we just captured (the end-of-session assertion is not
     // required yet: no commitment root exists).

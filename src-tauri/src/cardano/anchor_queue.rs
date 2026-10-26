@@ -80,7 +80,7 @@ pub(crate) async fn tick(
         return Ok(0);
     }
 
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
     let mut processed = 0u32;
 
     for row in batch {
@@ -243,7 +243,7 @@ async fn build_and_submit(
 /// Pending rows ready to be processed *now* — `next_attempt_at` is
 /// either NULL (never tried, or first attempt) or in the past.
 fn load_pending(conn: &rusqlite::Connection) -> Result<Vec<CredentialAnchor>, String> {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
     let mut stmt = conn
         .prepare(
             "SELECT credential_id, anchor_tx_hash, anchor_status, attempts, \

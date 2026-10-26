@@ -6,6 +6,7 @@
 //! `&Did`. This split keeps the business logic unit-testable without
 //! constructing a full `State<AppState>`.
 
+use crate::clock::now_rfc3339;
 use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -15,8 +16,8 @@ use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof, VerifiableCredential,
-    VerificationPendingReason, VerificationResult,
+    integrity_hash_of, Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof,
+    VerifiableCredential, VerificationPendingReason, VerificationResult,
 };
 use crate::AppState;
 
@@ -886,18 +887,6 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
         return Err(format!("status list {list_id} is full"));
     }
     Ok(next)
-}
-
-pub(crate) fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
-    let mut clone = vc.clone();
-    clone.proof.proof_value.clear();
-    let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;
-    let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|e| e.to_string())?;
-    Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
-}
-
-pub(crate) fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 pub(crate) async fn load_issuer_key(

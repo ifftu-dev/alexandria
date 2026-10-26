@@ -212,7 +212,7 @@ pub fn handle_status_message(
         return Ok(StatusIngest::IgnoredBadSignature);
     }
     let bit_length = (bits.len() as i64) * 8;
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
 
     db.conn()
         .execute(

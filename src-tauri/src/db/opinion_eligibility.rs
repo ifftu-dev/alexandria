@@ -18,10 +18,10 @@ use alexandria_verify::qualification::{
 use alexandria_verify::vc::VerificationPendingReason;
 use alexandria_verify::Did;
 
-use crate::commands::attestation::{stored_completion_evidence, StoredCompletionEvidence};
 use crate::domain::vc::{
     verify_credential_db, SkillClaim, VerifiableCredential, VerificationPolicy,
 };
+use crate::evidence::completion::{stored_completion_evidence, StoredCompletionEvidence};
 
 /// Upper bound on credential references in one opinion. Each reference costs
 /// a signature verification, so the bound applies before any lookup.
@@ -215,7 +215,7 @@ pub(crate) fn opinion_refusal_message(
 
 /// Verification time for privilege checks, in the credential envelope format.
 pub(crate) fn verification_time_now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    crate::clock::now_rfc3339()
 }
 
 fn skill_subject_field(conn: &Connection, skill_id: &str) -> Result<Option<String>, String> {
@@ -377,7 +377,7 @@ pub(crate) mod test_support {
                     class,
                     skill_id,
                     serde_json::to_string(&credential).unwrap(),
-                    crate::commands::credentials::integrity_hash_of(&credential).unwrap()
+                    crate::domain::vc::integrity_hash_of(&credential).unwrap()
                 ],
             )
             .unwrap();

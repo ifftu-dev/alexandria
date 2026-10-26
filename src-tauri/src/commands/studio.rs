@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 
 use alexandria_ai::model::Limits;
 use alexandria_studio::{model::*, provider, store, Error as StudioError};
@@ -11,55 +9,8 @@ use crate::profile::scope::ProfileState as State;
 
 use crate::ai_access::{may_use, no_attempt_in_progress, Surface};
 use crate::ai_chat::vocab::refused;
+use crate::studio::StudioRuntime;
 use crate::AppState;
-
-pub struct StudioRuntime {
-    /// The Optional AI checks client: profile epoch, settings revision, when
-    /// its addresses were pinned, and the client.
-    pub decisions: Mutex<Option<(u64, i64, std::time::Instant, alexandria_decisions::Client)>>,
-    pub grants: Mutex<alexandria_studio::grants::Grants>,
-    pub broker_available: AtomicBool,
-    pub broker_gate: tokio::sync::RwLock<()>,
-    pub epoch: AtomicU64,
-    pub blocked: AtomicBool,
-    pub jobs: Mutex<HashMap<String, (i64, tauri::async_runtime::JoinHandle<()>)>>,
-}
-
-impl Default for StudioRuntime {
-    fn default() -> Self {
-        Self {
-            decisions: Mutex::new(None),
-            grants: Mutex::new(alexandria_studio::grants::Grants::default()),
-            broker_available: AtomicBool::new(false),
-            broker_gate: tokio::sync::RwLock::new(()),
-            epoch: AtomicU64::new(0),
-            blocked: AtomicBool::new(true),
-            jobs: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl StudioRuntime {
-    pub fn activate(&self) {
-        self.epoch.fetch_add(1, Ordering::SeqCst);
-        self.blocked.store(false, Ordering::SeqCst);
-    }
-    pub fn invalidate(&self) {
-        if let Ok(mut client) = self.decisions.lock() {
-            *client = None;
-        }
-        if let Ok(mut grants) = self.grants.lock() {
-            grants.clear();
-        }
-        self.blocked.store(true, Ordering::SeqCst);
-        self.epoch.fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut jobs) = self.jobs.lock() {
-            for (_, (_, job)) in jobs.drain() {
-                job.abort();
-            }
-        }
-    }
-}
 
 pub(crate) fn with_db<T>(
     state: &AppState,
@@ -735,7 +686,7 @@ mod tests {
                 id: id.into(),
                 name: "Mine".into(),
                 model: "m".into(),
-                ..crate::commands::ai_signin::sign_in_target(endpoint)
+                ..crate::ai_auth::sign_in_target(endpoint)
             },
         };
         born_years_ago(&conn, 16);
