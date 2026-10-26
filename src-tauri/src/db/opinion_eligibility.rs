@@ -18,10 +18,10 @@ use alexandria_verify::qualification::{
 use alexandria_verify::vc::VerificationPendingReason;
 use alexandria_verify::Did;
 
-use crate::commands::attestation::{stored_completion_evidence, StoredCompletionEvidence};
 use crate::domain::vc::{
     verify_credential_db, SkillClaim, VerifiableCredential, VerificationPolicy,
 };
+use crate::evidence::completion::{stored_completion_evidence, StoredCompletionEvidence};
 
 /// Upper bound on credential references in one opinion. Each reference costs
 /// a signature verification, so the bound applies before any lookup.
