@@ -15,6 +15,7 @@ use alexandria_studio::store as studio_store;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+use crate::ai_access;
 use crate::ai_auth::{self, chatgpt, openrouter, DonePage, SignInError};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
@@ -25,6 +26,25 @@ static ACTIVE: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
 /// Context window assumed for ChatGPT plan models, which are large.
 const CHATGPT_CONTEXT_TOKENS: u32 = 128_000;
+
+/// The connection a sign-in to `api_base` creates, before it has a model or
+/// a key: a remote text connection. The age rules are checked against it
+/// before the browser opens, and the saved connection is built from it.
+pub(crate) fn sign_in_target(api_base: &str) -> StudioConnection {
+    StudioConnection {
+        id: String::new(),
+        name: String::new(),
+        endpoint: api_base.into(),
+        model: String::new(),
+        location: "cloud".into(),
+        capability: "text".into(),
+        enabled: true,
+        has_key: true,
+        context_tokens: None,
+        protocol: Protocol::default(),
+        auth: ConnectionAuth::default(),
+    }
+}
 
 async fn with_conn<T, F>(
     state: &State<'_, AppState>,
@@ -131,7 +151,7 @@ async fn sign_in_chatgpt(
     page: &DonePage,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     let existing = with_conn(state, "ai-signin.chatgpt-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, chatgpt::API_BASE)?;
+        ai_access::may_connect(conn, &sign_in_target(chatgpt::API_BASE))?;
         signed_in_chatgpt(conn)
     })
     .await?;
@@ -184,15 +204,11 @@ async fn sign_in_chatgpt(
         value: StudioConnection {
             id,
             name,
-            endpoint: chatgpt::API_BASE.into(),
             model,
-            location: "cloud".into(),
-            capability: "text".into(),
-            enabled: true,
-            has_key: true,
             context_tokens: Some(CHATGPT_CONTEXT_TOKENS),
             protocol: Protocol::Responses,
             auth: ConnectionAuth::ChatgptPlan,
+            ..sign_in_target(chatgpt::API_BASE)
         },
     };
     let encoded = credential.encode();
@@ -208,7 +224,10 @@ async fn sign_in_openrouter(
     page: &DonePage,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     with_conn(state, "ai-signin.openrouter-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+        Ok(ai_access::may_connect(
+            conn,
+            &sign_in_target(openrouter::API_BASE),
+        )?)
     })
     .await?;
     let (_slot, mut cancel) = Slot::claim()?;
@@ -236,15 +255,10 @@ async fn save_openrouter(
         value: StudioConnection {
             id,
             name: "OpenRouter".into(),
-            endpoint: openrouter::API_BASE.into(),
             model: openrouter::DEFAULT_MODEL.into(),
-            location: "cloud".into(),
-            capability: "text".into(),
-            enabled: true,
-            has_key: true,
-            context_tokens: None,
             protocol: Protocol::Compatible,
             auth: ConnectionAuth::ApiKey,
+            ..sign_in_target(openrouter::API_BASE)
         },
     };
     with_conn(state, "ai-signin.openrouter-save", move |conn| {
@@ -277,7 +291,10 @@ pub async fn ai_signin_code_start(
         return Err("invalid_input: unknown provider".into());
     }
     with_conn(&state, "ai-signin.code-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+        Ok(ai_access::may_connect(
+            conn,
+            &sign_in_target(openrouter::API_BASE),
+        )?)
     })
     .await?;
     let (verifier, challenge) = ai_auth::pkce();
@@ -303,7 +320,10 @@ pub async fn ai_signin_code_finish(
         .ok_or_else(|| SignInError::CodeRejected.to_string())?
         .to_owned();
     with_conn(&state, "ai-signin.code-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+        Ok(ai_access::may_connect(
+            conn,
+            &sign_in_target(openrouter::API_BASE),
+        )?)
     })
     .await?;
     let verifier = take_pending(std::time::Instant::now()).map_err(|e| e.to_string())?;

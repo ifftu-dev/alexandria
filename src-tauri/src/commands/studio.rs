@@ -125,19 +125,6 @@ fn tutor_gate(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
     gated
 }
 
-/// The age rules chat applies, for the tutor and Studio runs: no remote
-/// models under 13, no 18+ vendors for minors, and a guardian's approval
-/// for other remote models.
-fn age_checked(
-    db: &rusqlite::Connection,
-    connection: &alexandria_studio::model::StudioConnection,
-) -> alexandria_studio::Result<()> {
-    super::ai_chat::age_gate(db, connection).map_err(|error| {
-        let message = error.split_once(": ").map_or(error.as_str(), |(_, m)| m);
-        StudioError::Unavailable(message.to_string())
-    })
-}
-
 #[tauri::command]
 pub async fn studio_ask_tutor(
     state: State<'_, AppState>,
@@ -154,7 +141,7 @@ pub async fn studio_ask_tutor(
     let context = with_db(&state, |db| {
         tutor_gate(db)?;
         let context = store::tutor_context(db, &course_id, &element_id, &connection_id)?;
-        age_checked(db, &context.connection)?;
+        crate::ai_access::may_use(db, &context.connection)?;
         Ok(context)
     })?;
     let expected_messages = context.thread.messages.len();
@@ -431,7 +418,6 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
             alexandria_studio::gate::require_no_assessment(db)?;
             let step = run.value.steps[index].clone();
             let current = store::connection(db, &step.connection.id)?.value;
-            age_checked(db, &current)?;
             if !current.enabled
                 || current.endpoint != step.connection.endpoint
                 || current.model != step.connection.model
@@ -441,6 +427,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                         .into(),
                 ));
             }
+            crate::ai_access::may_use(db, &current)?;
             let key = store::secret(db, &step.connection.id)?;
             let previous: Vec<_> = run.value.steps[..index]
                 .iter()

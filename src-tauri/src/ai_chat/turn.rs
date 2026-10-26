@@ -38,7 +38,8 @@ use super::store::{
 use super::{artifact, bank_guard, memory, now, practice, ChatRuntime};
 // TODO(ticket 03): the gates move to the policy module; until then the turn
 // calls them where the commands file keeps them.
-use crate::commands::ai_chat::{age_gate, refuse_during_assessment};
+use crate::ai_access;
+use crate::commands::ai_chat::refuse_during_assessment;
 
 /// How long a prepared request may wait for the learner before it expires.
 const PREPARE_TTL: chrono::Duration = chrono::Duration::minutes(15);
@@ -128,11 +129,8 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
         .ok_or("no_connection: choose a model before sending")?;
     let doc = studio_store::connection(conn, &connection_id)
         .map_err(|_| "no_connection: the chosen model connection no longer exists".to_string())?;
-    if !doc.value.enabled {
-        return Err("no_connection: the chosen model connection is disabled".into());
-    }
+    ai_access::may_use(conn, &doc.value)?;
     let location = studio_provider::location(&doc.value).map_err(|e| e.to_string())?;
-    age_gate(conn, &doc.value)?;
     let model_id = thread
         .model_id
         .clone()

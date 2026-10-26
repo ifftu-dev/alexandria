@@ -525,19 +525,15 @@ fn handle_approval_decision(conn: &Connection, link_id: &str, sealed: &[u8]) -> 
         Ok(d) => d,
         Err(e) => return GuardianResponse::Error(format!("open approval decision: {e}")),
     };
-    let status = if decision.approved {
-        "approved"
-    } else {
-        "declined"
-    };
-    match conn.execute(
-        "UPDATE ai_connection_approvals
-            SET status = ?3, decided_by_link = ?4, decided_at = datetime('now')
-          WHERE id = ?1 AND endpoint = ?2",
-        rusqlite::params![decision.request_id, decision.endpoint, status, link_id],
+    match crate::ai_access::record_decision(
+        conn,
+        link_id,
+        &decision.request_id,
+        &decision.endpoint,
+        decision.approved,
     ) {
-        Ok(1) => GuardianResponse::Acknowledged,
-        Ok(_) => GuardianResponse::Error("no matching approval request".into()),
+        Ok(true) => GuardianResponse::Acknowledged,
+        Ok(false) => GuardianResponse::Error("no matching approval request".into()),
         Err(e) => GuardianResponse::Error(e.to_string()),
     }
 }

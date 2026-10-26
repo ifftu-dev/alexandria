@@ -529,26 +529,16 @@ async fn send_approval_requests(
             lease.clone(),
             "guardian.approvals.pending",
             |db| {
-                let mut stmt = db
-                    .conn()
-                    .prepare(
-                        "SELECT id, connection_name, endpoint, model FROM ai_connection_approvals
-                      WHERE status = 'pending' ORDER BY requested_at LIMIT 20",
-                    )
-                    .map_err(|e| e.to_string())?;
-                let rows = stmt
-                    .query_map([], |r| {
-                        Ok(proto::ApprovalRequestPayload {
-                            request_id: r.get(0)?,
-                            connection_name: r.get(1)?,
-                            endpoint: r.get(2)?,
-                            model: r.get(3)?,
-                        })
+                let pending = crate::ai_access::pending_approvals(db.conn(), 20)?;
+                Ok(pending
+                    .into_iter()
+                    .map(|p| proto::ApprovalRequestPayload {
+                        request_id: p.id,
+                        connection_name: p.connection_name,
+                        endpoint: p.endpoint,
+                        model: p.model,
                     })
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?;
-                Ok(rows)
+                    .collect())
             },
         )
         .await?;

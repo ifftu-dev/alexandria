@@ -16,18 +16,18 @@
 
 use std::time::{Duration, Instant};
 
-use alexandria_ai::endpoint::{self, Location};
+use alexandria_ai::endpoint;
 use alexandria_ai::model::Limits;
 use alexandria_ai::Adapter;
 use alexandria_ai::StreamEvent;
 use alexandria_studio::access::{visible_lesson, Reader};
-use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{gate, provider as studio_provider, store as studio_store};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tokio::sync::mpsc;
 
+use crate::ai_access::{self, GuardianApproval};
 use crate::ai_chat::store::{self, ChatBinding, ChatMessage, ChatThread, Finish};
 use crate::ai_chat::turn::{self, PreparedMessage, StartedRun};
 use crate::ai_chat::{action, bank_guard, error_code, memory, now, ChatRuntime, RunGuard};
@@ -360,200 +360,13 @@ pub async fn chat_list_models(
         .map_err(|e| format!("{}: {e}", error_code(&e)))
 }
 
-/// How vendor terms and guardian rules see the profile's holder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgeBand {
-    Adult,
-    /// 13 to 17: remote models with a guardian's approval, except vendors
-    /// whose terms require users to be 18 or older.
-    Teen,
-    /// Under 13: models on the device or the user's own network only.
-    /// Vendors expect zero data retention or COPPA-grade handling for
-    /// children's data, which Alexandria cannot verify on a user's key.
-    Child,
-}
-
-fn age_band(conn: &Connection) -> Result<AgeBand, String> {
-    let birthdate: Option<String> = conn
-        .query_row(
-            "SELECT birthdate FROM local_identity WHERE id = 1",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|_| "storage_error: profile could not be read".to_string())?
-        .flatten();
-    let today = chrono::Utc::now().date_naive();
-    Ok(match birthdate.as_deref() {
-        Some(b) if crate::domain::identity::is_younger_than(b, 13, today) => AgeBand::Child,
-        Some(b) if crate::domain::identity::is_minor(b, today) => AgeBand::Teen,
-        _ => AgeBand::Adult,
-    })
-}
-
-/// The age rules for sending to a connection, shared by chat, the lesson
-/// tutor, and Studio runs. Remote models are refused under 13, vendors with
-/// an 18+ floor are refused for every minor, and other remote models need a
-/// guardian's approval at the connection's current endpoint.
-pub(crate) fn age_gate(conn: &Connection, connection: &StudioConnection) -> Result<(), String> {
-    let location = studio_provider::location(connection).map_err(|e| e.to_string())?;
-    if location != Location::Remote {
-        return Ok(());
-    }
-    let band = age_band(conn)?;
-    if band == AgeBand::Adult {
-        return Ok(());
-    }
-    refuse_for_minors(connection, band)?;
-    match latest_approval(conn, &connection.id, &connection.endpoint)?.as_deref() {
-        Some("approved") => Ok(()),
-        Some("pending") => {
-            Err("guardian_pending: waiting for a guardian to approve this model".into())
-        }
-        Some(_) => Err("guardian_declined: a guardian did not approve this model".into()),
-        None => Err("guardian_required: remote models need a guardian's approval; use a model on this device or your own network".into()),
-    }
-}
-
-/// Refusals no guardian approval can lift.
-fn refuse_for_minors(connection: &StudioConnection, band: AgeBand) -> Result<(), String> {
-    refuse_endpoint_for_minors(&connection.endpoint, band)
-}
-
-fn refuse_endpoint_for_minors(endpoint: &str, band: AgeBand) -> Result<(), String> {
-    if band == AgeBand::Child {
-        return Err(
-            "under_13: learners under 13 can use models on this device or their own network only"
-                .into(),
-        );
-    }
-    let url =
-        alexandria_ai::endpoint::parse(endpoint, Location::Remote).map_err(|e| e.to_string())?;
-    if let Some(vendor) = alexandria_ai::terms::adults_only(&url) {
-        return Err(format!(
-            "adults_only: {vendor} requires users to be 18 or older"
-        ));
-    }
-    Ok(())
-}
-
-/// Whether this profile may connect a remote provider at `endpoint` at all,
-/// before any guardian approval: used before a provider sign-in starts.
-pub(crate) fn remote_allowed_for_age(conn: &Connection, endpoint: &str) -> Result<(), String> {
-    match age_band(conn)? {
-        AgeBand::Adult => Ok(()),
-        band => refuse_endpoint_for_minors(endpoint, band),
-    }
-}
-
-/// The latest guardian decision for a connection at its current endpoint.
-fn latest_approval(
-    conn: &Connection,
-    connection_id: &str,
-    endpoint: &str,
-) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT status FROM ai_connection_approvals
-          WHERE connection_id = ?1 AND endpoint = ?2
-          ORDER BY requested_at DESC, rowid DESC LIMIT 1",
-        [connection_id, endpoint],
-        |r| r.get(0),
-    )
-    .optional()
-    .map_err(|_| "storage_error: approvals could not be read".to_string())
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct GuardianApproval {
-    pub id: String,
-    pub connection_id: String,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-    pub status: String,
-    pub requested_at: String,
-    pub decided_at: Option<String>,
-}
-
-fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, connection_id, connection_name, endpoint, model, status, requested_at, decided_at
-               FROM ai_connection_approvals ORDER BY requested_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok(GuardianApproval {
-                id: r.get(0)?,
-                connection_id: r.get(1)?,
-                connection_name: r.get(2)?,
-                endpoint: r.get(3)?,
-                model: r.get(4)?,
-                status: r.get(5)?,
-                requested_at: r.get(6)?,
-                decided_at: r.get(7)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
-/// Asks the learner's guardians to approve a remote connection at its current
-/// endpoint. The request travels with the next guardian sync.
-pub(crate) fn request_approval(
-    conn: &Connection,
-    connection_id: &str,
-) -> Result<GuardianApproval, String> {
-    let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
-    if studio_provider::location(&doc.value).map_err(|e| e.to_string())? != Location::Remote {
-        return Err("invalid_input: only remote models need a guardian's approval".into());
-    }
-    let has_guardian: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM guardian_links WHERE side = 'ward' AND status = 'active')",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if !has_guardian {
-        return Err("no_guardian: link a guardian in Settings first".into());
-    }
-    let band = age_band(conn)?;
-    if band != AgeBand::Adult {
-        refuse_for_minors(&doc.value, band)?;
-    }
-    if matches!(
-        latest_approval(conn, &doc.id, &doc.value.endpoint)?.as_deref(),
-        Some("pending" | "approved")
-    ) {
-        return approvals(conn)?
-            .into_iter()
-            .find(|a| a.connection_id == doc.id && a.endpoint == doc.value.endpoint)
-            .ok_or_else(|| "storage_error: approval missing".to_string());
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
-        rusqlite::params![id, doc.id, doc.value.name, doc.value.endpoint, doc.value.model, now()],
-    )
-    .map_err(|e| e.to_string())?;
-    approvals(conn)?
-        .into_iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| "storage_error: approval missing".to_string())
-}
-
 #[tauri::command]
 pub async fn chat_request_guardian_approval(
     state: State<'_, AppState>,
     connection_id: String,
 ) -> Result<GuardianApproval, String> {
     with_conn(&state, "chat.request-approval", move |conn| {
-        request_approval(conn, &connection_id)
+        Ok(ai_access::request_approval(conn, &connection_id)?)
     })
     .await
 }
@@ -562,7 +375,10 @@ pub async fn chat_request_guardian_approval(
 pub async fn chat_list_guardian_approvals(
     state: State<'_, AppState>,
 ) -> Result<Vec<GuardianApproval>, String> {
-    with_conn(&state, "chat.list-approvals", approvals).await
+    with_conn(&state, "chat.list-approvals", |conn| {
+        Ok(ai_access::approvals(conn)?)
+    })
+    .await
 }
 
 // ─── prepare ─────────────────────────────────────────────────────────────
@@ -1278,8 +1094,6 @@ mod tests {
     use crate::ai_chat::artifact;
     use crate::ai_chat::turn::fixtures::*;
     use alexandria_ai::Protocol;
-    use alexandria_studio::model::StudioDocument;
-    use chrono::Datelike;
     use std::sync::Arc;
 
     #[test]
@@ -1293,199 +1107,6 @@ mod tests {
             .unwrap_err()
             .starts_with("invalid_input"));
         assert!(store::bindings(&conn, "t").unwrap().is_empty());
-    }
-
-    /// Sets the profile's birthdate `years` years and a day before today.
-    fn born_years_ago(conn: &Connection, years: i32) {
-        let today = chrono::Utc::now().date_naive();
-        let born = chrono::NaiveDate::from_ymd_opt(today.year() - years, today.month(), 1).unwrap()
-            - chrono::Duration::days(1);
-        conn.execute(
-            "UPDATE local_identity SET birthdate = ?1",
-            [born.format("%Y-%m-%d").to_string()],
-        )
-        .unwrap();
-    }
-
-    fn link_guardian(conn: &Connection) {
-        conn.execute(
-            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
-             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
-            [],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn under_13_learners_use_local_models_only_whatever_a_guardian_approves() {
-        let conn = db();
-        thread(&conn);
-        born_years_ago(&conn, 11);
-        link_guardian(&conn);
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "device"
-        );
-        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
-        assert!(request_approval(&conn, "c1")
-            .unwrap_err()
-            .starts_with("under_13"));
-        conn.execute(
-            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
-             VALUES ('a', 'c1', 'Ollama', 'https://api.openai.com/v1', 'm', 'approved', '2026-10-24T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        assert!(prepare(&conn, "Hello").unwrap_err().starts_with("under_13"));
-        connection(
-            &conn,
-            "c1",
-            "private_network",
-            "http://192.168.1.40:1234/v1",
-            None,
-        );
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "private_network"
-        );
-    }
-
-    #[test]
-    fn vendors_with_an_18_plus_floor_are_refused_for_minors_and_allowed_for_adults() {
-        let conn = db();
-        thread(&conn);
-        let gemini = "https://generativelanguage.googleapis.com/v1beta/openai";
-        connection(&conn, "c1", "cloud", gemini, None);
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "remote"
-        );
-        born_years_ago(&conn, 16);
-        link_guardian(&conn);
-        assert!(request_approval(&conn, "c1")
-            .unwrap_err()
-            .starts_with("adults_only"));
-        conn.execute(
-            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
-             VALUES ('a', 'c1', 'Ollama', ?1, 'm', 'approved', '2026-10-24T00:00:00Z')",
-            [gemini],
-        )
-        .unwrap();
-        let err = prepare(&conn, "Hello").unwrap_err();
-        assert!(
-            err.starts_with("adults_only") && err.contains("Gemini"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn consumer_sign_ins_are_never_stored_or_used() {
-        let conn = db();
-        let doc = |endpoint: &str| StudioDocument {
-            id: "c2".into(),
-            revision: 0,
-            value: StudioConnection {
-                id: "c2".into(),
-                name: "Mine".into(),
-                endpoint: endpoint.into(),
-                model: "m".into(),
-                location: "cloud".into(),
-                capability: "text".into(),
-                enabled: true,
-                has_key: false,
-                context_tokens: None,
-                protocol: Default::default(),
-                auth: Default::default(),
-            },
-        };
-        let err = studio_store::save_connection(
-            &conn,
-            &doc("https://api.anthropic.com/v1"),
-            Some("sk-ant-oat01-x"),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("subscription sign-in token"), "{err}");
-        assert!(
-            studio_store::connection(&conn, "c2").is_err(),
-            "nothing saved"
-        );
-        let err = studio_store::save_connection(
-            &conn,
-            &doc("https://chatgpt.com/backend-api/codex"),
-            Some("k"),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("consumer app"), "{err}");
-        studio_store::save_connection(
-            &conn,
-            &doc("https://api.anthropic.com/v1"),
-            Some("sk-ant-api03-x"),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn minors_need_a_guardians_approval_for_remote_models_at_that_endpoint() {
-        let conn = db();
-        thread(&conn);
-        born_years_ago(&conn, 15);
-        prepare(&conn, "Hello").unwrap();
-        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_required"));
-        // Asking needs a linked guardian.
-        assert!(request_approval(&conn, "c1")
-            .unwrap_err()
-            .starts_with("no_guardian"));
-        conn.execute(
-            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
-             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
-            [],
-        )
-        .unwrap();
-        let asked = request_approval(&conn, "c1").unwrap();
-        assert_eq!(asked.status, "pending");
-        assert_eq!(
-            request_approval(&conn, "c1").unwrap().id,
-            asked.id,
-            "no duplicate request"
-        );
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_pending"));
-        conn.execute("UPDATE ai_connection_approvals SET status = 'approved'", [])
-            .unwrap();
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "remote"
-        );
-        // A different endpoint is a different approval.
-        connection(&conn, "c1", "cloud", "https://api.anthropic.com/v1", None);
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_required"));
-        // Models on the learner's own network never need approval.
-        connection(
-            &conn,
-            "c1",
-            "private_network",
-            "http://192.168.1.40:1234/v1",
-            None,
-        );
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "private_network"
-        );
-        // A declined request says so.
-        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
-        conn.execute("UPDATE ai_connection_approvals SET status = 'declined'", [])
-            .unwrap();
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_declined"));
     }
 
     // ─── streaming, end to end ──────────────────────────────────────────
