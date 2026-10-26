@@ -13,6 +13,7 @@ pub mod crypto;
 pub mod db;
 pub mod diag;
 pub mod domain;
+pub mod enrollment;
 pub mod evidence;
 pub mod goals;
 #[cfg(test)]

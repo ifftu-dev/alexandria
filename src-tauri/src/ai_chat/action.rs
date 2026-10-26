@@ -126,7 +126,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
             ));
         }
     }
-    crate::commands::enrollment::enroll_db(db, course_id.to_string())
+    crate::enrollment::enroll(db, course_id)
         .map(|_| ())
         .map_err(|e| refuse(ChatErrorCode::OpenCourse, e))
 }
