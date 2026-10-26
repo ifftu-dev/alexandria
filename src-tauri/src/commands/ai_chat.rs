@@ -636,7 +636,7 @@ pub async fn chat_start_run(
         })
         .await
     };
-    let mut started = match started {
+    let started = match started {
         Ok(started) => started,
         Err(error) if error.starts_with("duplicate:") => {
             // The same send arrived twice. Report the existing run; send nothing.
@@ -670,14 +670,14 @@ pub async fn chat_start_run(
             return Err(reason.into());
         }
     };
-    let source = run::ProviderStream::new(db.clone(), &mut started);
+    let response = started.run.clone();
+    let (source, begun) = run::ProviderStream::new(db.clone(), started);
     let sink = move |event: ChatEvent| {
         // The panel may be closed; the answer still completes and is saved.
         let _ = on_event.send(event);
     };
     let lease = db.lease.clone();
-    let response = started.run.clone();
-    let task = run::Run::new(started.begun(), db, source, sink, slot);
+    let task = run::Run::new(begun, db, source, sink, slot);
     state
         .profile_operations
         .spawn_job(async move {

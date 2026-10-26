@@ -10,7 +10,9 @@
 //! * [`EventSink`]: where events go. The IPC channel in production, a vector
 //!   in tests. The run numbers events; the sink only delivers them.
 //! * [`StreamSource`]: where text comes from. The AI crate's adapter
-//!   ([`ProviderStream`]) in production, a scripted answer in tests.
+//!   ([`ProviderStream`]) in production, a scripted answer in tests. A
+//!   source connects first, and that step is never cut short by Stop; only
+//!   the stream itself is.
 //! * [`RunStore`]: how the profile database is reached. The executor under
 //!   the profile lease ([`ExecutorStore`]) in production, the connection held
 //!   directly in tests.
@@ -123,6 +125,14 @@ pub type SeamFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// arrive and then returns the whole answer, or why there is none. The
 /// channel's capacity bounds how far decoding runs ahead of the run.
 pub trait StreamSource: Send + 'static {
+    /// Gets ready to send. The run awaits this to the end before it listens
+    /// for Stop, so work that must not be abandoned halfway (renewing a
+    /// sign-in, whose rotated token has to be saved) belongs here.
+    fn connect(&mut self) -> SeamFuture<'_, Result<(), Failure>> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
+    /// Sends the request. Dropping the future ends it.
     fn stream(
         self,
         events: mpsc::Sender<StreamEvent>,
@@ -161,54 +171,84 @@ impl RunStore for ExecutorStore {
     }
 }
 
-/// The AI crate's adapter for the begun turn's connection: resolves the
-/// endpoint, renews a sign-in, and streams the request. Takes the provider
-/// secret out of the turn when built, so it is read once.
+/// The AI crate's adapter for the begun turn's connection. Connecting
+/// resolves the endpoint and renews a sign-in; streaming sends the request.
 pub struct ProviderStream {
     db: ExecutorStore,
     request: ChatRequest,
     endpoint: String,
     location: Location,
     protocol: Protocol,
+    /// The stored secret until connecting renews it into the bearer to send.
     key: Option<String>,
     connection: StudioConnection,
+    /// Set by a successful connect.
+    resolved: Option<alexandria_ai::Endpoint>,
 }
 
 impl ProviderStream {
-    pub fn new(db: ExecutorStore, started: &mut Started) -> Self {
-        Self {
+    /// Consumes the begun turn: the request and the provider secret move
+    /// into the source, and what completing needs comes back as [`Begun`].
+    pub fn new(db: ExecutorStore, mut started: Started) -> (Self, Begun) {
+        let key = started.take_key();
+        let Started {
+            run,
+            mode,
+            request,
+            endpoint,
+            location,
+            protocol,
+            connection,
+            ..
+        } = started;
+        let source = Self {
             db,
-            request: started.request.clone(),
-            endpoint: started.endpoint.clone(),
-            location: started.location,
-            protocol: started.protocol,
-            key: started.take_key(),
-            connection: started.connection.clone(),
-        }
+            request,
+            endpoint,
+            location,
+            protocol,
+            key,
+            connection,
+            resolved: None,
+        };
+        (source, Begun { run, mode })
     }
 }
 
 impl StreamSource for ProviderStream {
-    fn stream(
-        self,
-        events: mpsc::Sender<StreamEvent>,
-    ) -> SeamFuture<'static, Result<Completion, Failure>> {
+    fn connect(&mut self) -> SeamFuture<'_, Result<(), Failure>> {
         Box::pin(async move {
             let endpoint = endpoint::resolve(&self.endpoint, self.location)
                 .await
                 .map_err(Failure::Provider)?;
-            // A ChatGPT sign-in renews its hour-long token here, before sending.
-            let key = crate::ai_auth::credential::bearer_for(
+            // A ChatGPT sign-in renews its hour-long token here, before
+            // sending. The refresh token rotates, so the renewal and its save
+            // must finish even if the learner stops the answer meanwhile.
+            self.key = crate::ai_auth::credential::bearer_for(
                 &self.db.executor,
                 &self.db.lease,
                 &self.connection,
-                self.key,
+                self.key.take(),
             )
             .await
             .map_err(|error| {
                 Failure::NotSent(error.split(':').next().unwrap_or("auth").to_string())
             })?;
-            let adapter = Adapter::new(self.protocol, endpoint, key).with_limits(Limits::default());
+            self.resolved = Some(endpoint);
+            Ok(())
+        })
+    }
+
+    fn stream(
+        self,
+        events: mpsc::Sender<StreamEvent>,
+    ) -> SeamFuture<'static, Result<Completion, Failure>> {
+        Box::pin(async move {
+            let endpoint = self
+                .resolved
+                .ok_or_else(|| Failure::NotSent("invalid".into()))?;
+            let adapter =
+                Adapter::new(self.protocol, endpoint, self.key).with_limits(Limits::default());
             adapter
                 .stream(&self.request, events)
                 .await
@@ -296,7 +336,7 @@ where
         let Run {
             begun,
             store,
-            source,
+            mut source,
             sink,
             mut cancel,
             _guard,
@@ -309,10 +349,30 @@ where
         };
         let message_id = begun.run.assistant_message.id.clone();
         events.emit(ChatEventBody::RunStarted);
+        let ids = (events.run_id.clone(), message_id.clone());
+
+        // Not raced with Stop: a stop that arrives meanwhile is seen as soon
+        // as the stream starts.
+        if let Err(failure) = source.connect().await {
+            let code = failure.code();
+            record(
+                &store,
+                ids,
+                "failed",
+                String::new(),
+                Some(code.clone()),
+                None,
+            )
+            .await;
+            events.emit(ChatEventBody::RunFailed {
+                error: code,
+                partial: false,
+            });
+            return;
+        }
 
         let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
-        let stream = source.stream(tx);
-        tokio::pin!(stream);
+        let mut stream = source.stream(tx);
 
         let mut text = String::new();
         let mut usage: Option<Usage> = None;
@@ -343,7 +403,7 @@ where
                     Some(StreamEvent::Finished { .. }) => {}
                     None => events_open = false,
                 },
-                result = &mut stream => {
+                result = stream.as_mut() => {
                     // Deliver anything decoded before the stream returned.
                     while let Ok(event) = rx.try_recv() {
                         match event {
@@ -362,6 +422,11 @@ where
                 }
             }
         };
+        // Ends the provider request now, not when the run returns: a stopped
+        // answer's request must not stay open while the stop is recorded. The
+        // provider may still have computed (and billed) the answer.
+        drop(stream);
+        drop(rx);
 
         match end {
             RunEnd::Done(Ok(completion)) => {
@@ -370,8 +435,28 @@ where
                     .ok()
                     .and_then(|v| v.as_str().map(str::to_owned))
                     .unwrap_or_else(|| "unknown".into());
-                complete(&store, begun, completion.text, usage).await;
-                events.emit(ChatEventBody::RunCompleted { finish });
+                match complete(&store, begun, completion.text, usage).await {
+                    Ok(Completed::Saved) => {
+                        events.emit(ChatEventBody::RunCompleted { finish });
+                    }
+                    Ok(Completed::AssessmentActive) => {
+                        let error = "assessment_active";
+                        record(&store, ids, "cancelled", text, Some(error.into()), usage).await;
+                        events.emit(ChatEventBody::RunCancelled {
+                            error: Some(error.into()),
+                        });
+                    }
+                    Err(error) => {
+                        log::warn!("chat: could not save an answer: {error}");
+                        let code = "storage_error".to_string();
+                        let partial = !text.trim().is_empty();
+                        record(&store, ids, "failed", text, Some(code.clone()), usage).await;
+                        events.emit(ChatEventBody::RunFailed {
+                            error: code,
+                            partial,
+                        });
+                    }
+                }
             }
             RunEnd::Done(Err(failure)) => {
                 let code = failure.code();
@@ -381,7 +466,6 @@ where
                 } else {
                     "failed"
                 };
-                let ids = (events.run_id.clone(), message_id);
                 record(&store, ids, state, text, Some(code.clone()), usage).await;
                 events.emit(ChatEventBody::RunFailed {
                     error: code,
@@ -389,10 +473,7 @@ where
                 });
             }
             RunEnd::Stopped(reason) => {
-                // Dropping the stream ends the local request. The provider may
-                // still have computed (and billed) the answer.
                 let error = reason.unwrap_or("cancelled").to_string();
-                let ids = (events.run_id.clone(), message_id);
                 record(&store, ids, "cancelled", text, Some(error), usage).await;
                 events.emit(ChatEventBody::RunCancelled {
                     error: reason.map(str::to_owned),
@@ -423,21 +504,35 @@ async fn checkpoint(db: &impl RunStore, id: String, text: String) -> bool {
     .unwrap_or(false)
 }
 
+/// What completing a finished answer did.
+enum Completed {
+    Saved,
+    /// An assessment started after the last checkpoint; nothing was saved.
+    AssessmentActive,
+}
+
 /// Completes the answer through the turn, which stores it with its cards in
-/// one transaction.
-async fn complete(db: &impl RunStore, begun: Begun, reply: String, usage: Option<Usage>) {
-    let saved = db
-        .execute("chat.finish", move |conn| {
-            turn::complete(conn, &begun, &reply, usage)
-        })
-        .await;
-    if let Err(error) = saved {
-        log::warn!("chat: could not save an answer: {error}");
-    }
+/// one transaction, unless an assessment has started since the last
+/// checkpoint. A short answer may never reach a checkpoint, so the gate is
+/// checked here too, in the same database hop as the write.
+async fn complete(
+    db: &impl RunStore,
+    begun: Begun,
+    reply: String,
+    usage: Option<Usage>,
+) -> Result<Completed, String> {
+    db.execute("chat.finish", move |conn| {
+        if gate::assessment_in_progress(conn).unwrap_or(true) {
+            return Ok(Completed::AssessmentActive);
+        }
+        turn::complete(conn, &begun, &reply, usage).map(|_| Completed::Saved)
+    })
+    .await
 }
 
 /// Records a run that ended without a completed answer.
-/// `ids` are the run and its answer's message.
+/// `ids` are the run and its answer's message. A run that already ended (a
+/// recovery marked it interrupted) is left as it is.
 async fn record(
     db: &impl RunStore,
     ids: (String, String),
@@ -445,26 +540,32 @@ async fn record(
     content: String,
     error: Option<String>,
     usage: Option<Usage>,
-) -> bool {
+) {
     let (run_id, message_id) = ids;
-    db.execute("chat.finish", move |conn| {
-        chat_store::finish_run(
-            conn,
-            &Finish {
-                run_id: &run_id,
-                assistant_message_id: &message_id,
-                state,
-                content: &content,
-                error: error.as_deref(),
-                input_tokens: usage.and_then(|u| u.input_tokens),
-                output_tokens: usage.and_then(|u| u.output_tokens),
-                now: &now(),
-            },
-        )
-        .map_err(|e| e.to_string())
-    })
-    .await
-    .unwrap_or(false)
+    let ended = run_id.clone();
+    let recorded = db
+        .execute("chat.finish", move |conn| {
+            chat_store::finish_run(
+                conn,
+                &Finish {
+                    run_id: &run_id,
+                    assistant_message_id: &message_id,
+                    state,
+                    content: &content,
+                    error: error.as_deref(),
+                    input_tokens: usage.and_then(|u| u.input_tokens),
+                    output_tokens: usage.and_then(|u| u.output_tokens),
+                    now: &now(),
+                },
+            )
+            .map_err(|e| e.to_string())
+        })
+        .await;
+    match recorded {
+        Ok(true) => {}
+        Ok(false) => log::info!("chat: run {ended} had already ended; kept as it was"),
+        Err(error) => log::warn!("chat: could not record how a run ended: {error}"),
+    }
 }
 
 #[cfg(test)]
@@ -480,11 +581,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    type Events = Arc<Mutex<Vec<serde_json::Value>>>;
+    type Recorded = Arc<Mutex<Vec<serde_json::Value>>>;
 
     /// The test sink: every event, as the panel would decode it.
-    fn vector_sink() -> (impl FnMut(ChatEvent) + Send, Events) {
-        let events: Events = Arc::default();
+    fn vector_sink() -> (impl FnMut(ChatEvent) + Send, Recorded) {
+        let events: Recorded = Arc::default();
         let sink = events.clone();
         (
             move |event: ChatEvent| {
@@ -523,6 +624,8 @@ mod tests {
         words: &'static [&'static str],
         pause: Duration,
         ending: Result<Completion, Failure>,
+        /// A slow connect, like a sign-in renewal, and whether it finished.
+        connecting: Option<(Duration, Arc<std::sync::atomic::AtomicBool>)>,
     }
 
     impl Scripted {
@@ -538,6 +641,7 @@ mod tests {
                     }),
                     finish: FinishReason::Stop,
                 }),
+                connecting: None,
             }
         }
 
@@ -546,11 +650,22 @@ mod tests {
                 words: &[],
                 pause: Duration::ZERO,
                 ending: Err(Failure::Provider(error)),
+                connecting: None,
             }
         }
     }
 
     impl StreamSource for Scripted {
+        fn connect(&mut self) -> SeamFuture<'_, Result<(), Failure>> {
+            Box::pin(async move {
+                if let Some((delay, done)) = &self.connecting {
+                    tokio::time::sleep(*delay).await;
+                    done.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                Ok(())
+            })
+        }
+
         fn stream(
             self,
             events: mpsc::Sender<StreamEvent>,
@@ -659,10 +774,9 @@ mod tests {
 
         /// Drives a begun turn over the production adapters: the AI crate's
         /// adapter and the executor-backed store.
-        async fn drive_provider(&self, mut started: Started) -> Vec<serde_json::Value> {
-            let source = ProviderStream::new(self.executor_store(), &mut started);
-            self.drive_with(started.begun(), self.executor_store(), source)
-                .await
+        async fn drive_provider(&self, started: Started) -> Vec<serde_json::Value> {
+            let (source, begun) = ProviderStream::new(self.executor_store(), started);
+            self.drive_with(begun, self.executor_store(), source).await
         }
 
         async fn drive_with(
@@ -797,6 +911,95 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stopping_while_connecting_lets_a_sign_in_renewal_finish() {
+        let harness = Harness::new("http://127.0.0.1:11434/v1");
+        let started = harness.begin("Hello");
+        let run_id = started.run.run_id.clone();
+        let message_id = started.run.assistant_message.id.clone();
+        let renewed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut source = Scripted::answer(&["Never ", "sent."], 5);
+        source.connecting = Some((Duration::from_millis(300), renewed.clone()));
+        let runtime = harness.runtime.clone();
+        let stopper = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(runtime.cancel(&run_id));
+        });
+        let events = harness.drive(&started, source).await;
+        stopper.await.unwrap();
+
+        // The renewal (and the save of its rotated token) ran to the end;
+        // the stop then ended the run before anything was sent.
+        assert!(renewed.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(kinds(&events), ["run_started", "run_cancelled"]);
+        let saved = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(
+            (saved.status.as_str(), saved.content.as_str()),
+            ("cancelled", "")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_assessment_starting_before_a_short_answer_is_saved_stops_it() {
+        // Too short and too quick to reach a checkpoint.
+        static WORDS: [&str; 2] = ["Short ", "answer."];
+        let harness = Harness::new("http://127.0.0.1:11434/v1");
+        let started = harness.begin("Explain");
+        let message_id = started.run.assistant_message.id.clone();
+        let shared = harness.shared.clone();
+        let attempt = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            let guard = shared.lock().unwrap();
+            guard
+                .as_ref()
+                .unwrap()
+                .conn()
+                .execute("INSERT INTO integrity_sessions(id) VALUES ('attempt')", [])
+                .unwrap();
+        });
+        let events = harness.drive(&started, Scripted::answer(&WORDS, 100)).await;
+        attempt.await.unwrap();
+
+        let saved = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(saved.status, "cancelled");
+        assert_eq!(saved.error.as_deref(), Some("assessment_active"));
+        let last = events.last().unwrap();
+        assert_eq!(last["kind"], "run_cancelled");
+        assert_eq!(last["error"], "assessment_active");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_answer_that_cannot_be_saved_fails_instead_of_completing() {
+        static WORDS: [&str; 2] = [
+            "Here is one.\n",
+            "```practice\n{\"kind\":\"numeric\",\"prompt\":\"What is 1/2 + 1/4?\",\"answer\":\"3/4\"}\n```",
+        ];
+        let harness = Harness::new("http://127.0.0.1:11434/v1");
+        let started = harness.begin_in("practice", "Quiz me");
+        let message_id = started.run.assistant_message.id.clone();
+        // The question cannot be stored, so the turn's transaction fails.
+        harness.conn(|c| {
+            c.execute_batch("ALTER TABLE chat_practice_items RENAME TO practice_gone")
+                .unwrap()
+        });
+        let events = harness.drive(&started, Scripted::answer(&WORDS, 5)).await;
+
+        let last = events.last().unwrap();
+        assert_eq!(
+            (last["kind"].as_str(), last["error"].as_str()),
+            (Some("run_failed"), Some("storage_error"))
+        );
+        assert_eq!(last["partial"], true);
+        let saved = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(
+            (saved.status.as_str(), saved.error.as_deref()),
+            ("failed", Some("storage_error"))
+        );
+        assert!(harness
+            .conn(|c| store::active_run(c, "t").unwrap())
+            .is_none());
+    }
+
     // ─── over the provider adapter, against a loopback model ────────────
 
     /// Serves one streamed answer, word by word, pausing between words.
@@ -902,6 +1105,28 @@ mod tests {
             let _ = socket.write_all(body.as_bytes()).await;
         });
         (endpoint, rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_provider_adapter_reports_an_unreachable_model_without_text() {
+        let port = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let harness = Harness::new(&format!("http://127.0.0.1:{port}/v1"));
+        let started = harness.begin("Hello");
+        let message_id = started.run.assistant_message.id.clone();
+        let events = harness.drive_provider(started).await;
+        let saved = harness.conn(|c| store::message(c, &message_id).unwrap());
+        assert_eq!(
+            (saved.status.as_str(), saved.error.as_deref()),
+            ("failed", Some("unreachable"))
+        );
+        let last = events.last().unwrap();
+        assert_eq!(
+            (last["kind"].as_str(), last["partial"].as_bool()),
+            (Some("run_failed"), Some(false))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
