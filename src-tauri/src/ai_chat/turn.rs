@@ -178,10 +178,18 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
             super::goal::label(conn, &binding.element_id)?.ok_or_else(gone)?;
             Attached::Goal
         } else {
-            Attached::Lesson(
-                learning::lesson_target(conn, &binding.course_id, &binding.element_id)
-                    .map_err(|_| gone())?,
-            )
+            // The shared lesson rule: a lesson republished as a graded or
+            // video element is withheld, not sent.
+            match ai_access::visible_lesson(
+                conn,
+                ai_access::Reader::Chat,
+                &binding.course_id,
+                &binding.element_id,
+            ) {
+                Ok(target) => Attached::Lesson(target),
+                Err(withheld @ ai_access::Refused::LessonWithheld) => return Err(withheld.into()),
+                Err(_) => return Err(gone()),
+            }
         };
         lessons.push((binding, attached, included));
     }
@@ -1175,6 +1183,26 @@ mod tests {
             )
             .unwrap();
         assert_eq!((critical, flagged), (1, 1));
+    }
+
+    #[test]
+    fn an_attached_lesson_republished_as_a_graded_or_video_element_is_withheld() {
+        let conn = db();
+        thread(&conn);
+        attach(&conn, "t", "course", "lesson").unwrap();
+        prepare(&conn, "Explain this").unwrap();
+        for kind in ["quiz", "video"] {
+            conn.execute(
+                "UPDATE course_elements SET element_type = ?1 WHERE id = 'lesson'",
+                [kind],
+            )
+            .unwrap();
+            let err = prepare(&conn, "Explain this").unwrap_err();
+            assert_eq!(
+                err, "invalid_input: only text lessons can be attached",
+                "{kind}"
+            );
+        }
     }
 
     #[test]
