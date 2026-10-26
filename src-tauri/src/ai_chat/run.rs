@@ -24,11 +24,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
-use alexandria_ai::{Adapter, ChatRequest, Completion, Protocol, StreamEvent, Usage};
+use alexandria_ai::{Adapter, ChatRequest, Completion, StreamEvent, Usage};
 use alexandria_studio::gate;
 use alexandria_studio::model::StudioConnection;
+use alexandria_studio::provider as studio_provider;
 use rusqlite::Connection;
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
@@ -173,18 +173,16 @@ impl RunStore for ExecutorStore {
 }
 
 /// The AI crate's adapter for the begun turn's connection. Connecting
-/// resolves the endpoint and renews a sign-in; streaming sends the request.
+/// passes the connection through Studio's gate, resolves its endpoint,
+/// renews a sign-in, and admits the bearer; streaming sends the request.
 pub struct ProviderStream {
     db: ExecutorStore,
     request: ChatRequest,
-    endpoint: String,
-    location: Location,
-    protocol: Protocol,
     /// The stored secret until connecting renews it into the bearer to send.
     key: Option<String>,
     connection: StudioConnection,
     /// Set by a successful connect.
-    resolved: Option<alexandria_ai::Endpoint>,
+    adapter: Option<Adapter>,
 }
 
 impl ProviderStream {
@@ -196,21 +194,15 @@ impl ProviderStream {
             run,
             mode,
             request,
-            endpoint,
-            location,
-            protocol,
             connection,
             ..
         } = started;
         let source = Self {
             db,
             request,
-            endpoint,
-            location,
-            protocol,
             key,
             connection,
-            resolved: None,
+            adapter: None,
         };
         (source, Begun { run, mode })
     }
@@ -219,23 +211,32 @@ impl ProviderStream {
 impl StreamSource for ProviderStream {
     fn connect(&mut self) -> SeamFuture<'_, Result<(), Failure>> {
         Box::pin(async move {
-            let endpoint = endpoint::resolve(&self.endpoint, self.location)
-                .await
-                .map_err(Failure::Provider)?;
+            let target = studio_provider::connection(&self.connection).map_err(|error| {
+                Failure::NotSent(ChatErrorCode::of_connection(&error).to_string())
+            })?;
+            // The endpoint is checked and pinned first, so a bad one never
+            // renews a sign-in.
+            let resolved = target.resolve().await.map_err(Failure::Provider)?;
             // A ChatGPT sign-in renews its hour-long token here, before
             // sending. The refresh token rotates, so the renewal and its save
-            // must finish even if the learner stops the answer meanwhile.
-            self.key = crate::ai_auth::credential::bearer_for(
+            // must finish even if the learner stops the answer meanwhile. A
+            // run is bounded by its profile lease, so it needs no other guard.
+            let key = crate::ai_auth::credential::bearer_for(
                 &self.db.executor,
                 &self.db.lease,
                 &self.connection,
                 self.key.take(),
+                || Ok(()),
             )
             .await
             .map_err(|error| {
                 Failure::NotSent(error.split(':').next().unwrap_or("auth").to_string())
             })?;
-            self.resolved = Some(endpoint);
+            // A remote connection without a key is refused here, as `invalid`.
+            let adapter = resolved
+                .connect(key.as_deref(), Limits::default())
+                .map_err(Failure::Provider)?;
+            self.adapter = Some(adapter);
             Ok(())
         })
     }
@@ -245,11 +246,9 @@ impl StreamSource for ProviderStream {
         events: mpsc::Sender<StreamEvent>,
     ) -> SeamFuture<'static, Result<Completion, Failure>> {
         Box::pin(async move {
-            let endpoint = self
-                .resolved
-                .ok_or_else(|| Failure::NotSent("invalid".into()))?;
-            let adapter =
-                Adapter::new(self.protocol, endpoint, self.key).with_limits(Limits::default());
+            let adapter = self
+                .adapter
+                .ok_or_else(|| Failure::NotSent(ChatErrorCode::Invalid.to_string()))?;
             adapter
                 .stream(&self.request, events)
                 .await
@@ -578,6 +577,7 @@ mod tests {
     use crate::db::Database;
     use crate::profile::scope::Admission;
     use alexandria_ai::FinishReason;
+    use alexandria_ai::Protocol;
     use alexandria_studio::store as studio_store;
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1174,7 +1174,13 @@ mod tests {
                 expires_at: crate::ai_auth::now_secs() + 3000,
                 scopes: vec!["chatgpt.tokens.use.direct".into()],
             };
-            studio_store::save_signed_in_connection(conn, &doc, &credential.encode()).unwrap();
+            studio_store::save_signed_in_connection(
+                conn,
+                &doc,
+                &credential.encode(),
+                &credential.access_token,
+            )
+            .unwrap();
             // The generic editor cannot swap the sign-in for a key.
             let doc = studio_store::connection(conn, "c1").unwrap();
             assert!(studio_store::save_connection(conn, &doc, Some("sk-x")).is_err());

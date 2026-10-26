@@ -18,8 +18,8 @@
 
 use std::time::Duration;
 
-use alexandria_ai::endpoint::{self, Location};
-use alexandria_ai::Adapter;
+use alexandria_ai::endpoint::Location;
+use alexandria_ai::model::Limits;
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
 use rusqlite::{Connection, OptionalExtension};
@@ -348,8 +348,18 @@ pub async fn chat_list_models(
         Ok((doc.value, key))
     })
     .await?;
-    let location = studio_provider::location(&connection).map_err(|e| e.to_string())?;
-    let endpoint = endpoint::resolve(&connection.endpoint, location)
+    let target = studio_provider::connection(&connection).map_err(|e| {
+        let reason = match &e {
+            alexandria_studio::Error::Invalid(m) | alexandria_studio::Error::Unavailable(m) => {
+                m.clone()
+            }
+            other => other.to_string(),
+        };
+        refuse(ChatErrorCode::of_connection(&e), reason)
+    })?;
+    // A bad endpoint is refused before a sign-in is renewed.
+    let resolved = target
+        .resolve()
         .await
         .map_err(|e| format!("{}: {e}", error_code(&e)))?;
     let key = crate::ai_auth::credential::bearer_for(
@@ -357,9 +367,13 @@ pub async fn chat_list_models(
         &state.profile_lease(),
         &connection,
         key,
+        || Ok(()),
     )
     .await?;
-    Adapter::new(connection.protocol, endpoint, key)
+    let adapter = resolved
+        .connect(key.as_deref(), Limits::default())
+        .map_err(|e| format!("{}: {e}", error_code(&e)))?;
+    adapter
         .list_models()
         .await
         .map_err(|e| format!("{}: {e}", error_code(&e)))

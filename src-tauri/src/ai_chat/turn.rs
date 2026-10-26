@@ -19,7 +19,6 @@
 //! streaming happens between `begin` and `complete`.
 
 use alexandria_ai::endpoint::{self, Location};
-use alexandria_ai::Protocol;
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::{learning, provider as studio_provider, store as studio_store};
 use rusqlite::Connection;
@@ -506,9 +505,7 @@ pub struct Started {
     pub run: StartedRun,
     pub mode: String,
     pub request: alexandria_ai::ChatRequest,
-    pub endpoint: String,
     pub location: Location,
-    pub protocol: Protocol,
     /// The provider secret. Read once, by whoever sends the request.
     key: Option<String>,
     /// The connection as it was reviewed, to renew a sign-in before sending.
@@ -658,9 +655,7 @@ pub fn begin(
         },
         mode: manifest.mode.clone(),
         request,
-        endpoint: manifest.destination.endpoint,
         location,
-        protocol: doc.value.protocol,
         key,
         connection: doc.value,
     })

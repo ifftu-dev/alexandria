@@ -142,6 +142,15 @@ impl ChatErrorCode {
         }
     }
 
+    /// The code for a saved connection that Studio's gate refuses before
+    /// anything is sent: a disabled one, or one whose settings are not valid.
+    pub fn of_connection(error: &alexandria_studio::Error) -> Self {
+        match error {
+            alexandria_studio::Error::Unavailable(_) => Self::NoConnection,
+            _ => Self::Invalid,
+        }
+    }
+
     /// The code a sign-in failure's display string starts with.
     pub fn of_sign_in(error: &crate::ai_auth::SignInError) -> Self {
         use crate::ai_auth::SignInError as S;

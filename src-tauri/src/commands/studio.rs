@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use alexandria_studio::{model::*, store, Error as StudioError};
+use alexandria_ai::model::Limits;
+use alexandria_studio::{model::*, provider, store, Error as StudioError};
 use tauri::Manager;
 
+use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
 
 use crate::AppState;
@@ -138,8 +140,68 @@ fn age_checked(
     })
 }
 
+/// Studio's profile guard, as [`with_db`] applies it, for work that runs
+/// outside it: the profile is still active, Studio is not blocked, and the
+/// epoch the work started under is still current.
+fn profile_guard(
+    app: tauri::AppHandle,
+    epoch: u64,
+) -> impl Fn() -> Result<(), String> + Clone + Send + 'static {
+    move || {
+        let state = app.state::<AppState>();
+        if state.studio.blocked.load(Ordering::SeqCst)
+            || state.studio.epoch.load(Ordering::SeqCst) != epoch
+            || state.active_id().is_none()
+        {
+            return Err(StudioError::Locked.to_string());
+        }
+        Ok(())
+    }
+}
+
+/// One answer from a Studio connection: the tutor's reply or a run step's
+/// output. The connection passes Studio's gate and its endpoint is resolved
+/// before the bearer is looked up, so a bad endpoint never renews a sign-in;
+/// `allowed` guards that lookup.
+async fn complete<G>(
+    state: &AppState,
+    lease: &ProfileLease,
+    allowed: G,
+    connection: &StudioConnection,
+    stored: Option<String>,
+    system: &str,
+    context: &str,
+) -> Result<String, String>
+where
+    G: Fn() -> Result<(), String> + Clone + Send + 'static,
+{
+    let studio = |e: StudioError| e.to_string();
+    let ai = |e: alexandria_ai::Error| provider::map_error(e).to_string();
+    let target = provider::connection(connection).map_err(studio)?;
+    let resolved = target.resolve().await.map_err(ai)?;
+    // A ChatGPT sign-in renews its hour-long token here, before sending.
+    let key = crate::ai_auth::credential::bearer_for(
+        &state.db_executor,
+        lease,
+        connection,
+        stored,
+        allowed,
+    )
+    .await?;
+    let adapter = resolved
+        .connect(key.as_deref(), Limits::default())
+        .map_err(ai)?;
+    let completion = adapter
+        .complete(&provider::request(connection, system, context))
+        .await
+        .map_err(ai)?;
+    bounded(&completion.text, 128_000, "Model output").map_err(studio)?;
+    Ok(completion.text)
+}
+
 #[tauri::command]
 pub async fn studio_ask_tutor(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     course_id: String,
     element_id: String,
@@ -195,21 +257,16 @@ pub async fn studio_ask_tutor(
         "learner_question": question,
     }))
     .map_err(|error| error.to_string())?;
-    let secret = crate::ai_auth::credential::bearer_for(
-        &state.db_executor,
+    let answer = complete(
+        &state,
         &state.profile_lease(),
+        profile_guard(app, epoch),
         &context.connection,
         context.secret.clone(),
-    )
-    .await?;
-    let answer = alexandria_studio::provider::complete(
-        &context.connection,
-        secret.as_deref(),
         &system,
         &request,
     )
-    .await
-    .map_err(|error| error.to_string())?;
+    .await?;
     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
         return Err(StudioError::Locked.to_string());
     }
@@ -388,6 +445,9 @@ pub async fn studio_start_run(
     run_id: String,
     revision: i64,
 ) -> Result<StudioDocument<StudioRun>, String> {
+    // The run keeps the lease of the session that started it, as a chat
+    // answer does, so a locked profile ends it.
+    let lease = state.profile_lease();
     with_db(&state, |db| {
         let epoch = state.studio.epoch.load(Ordering::SeqCst);
         let mut jobs = state
@@ -407,14 +467,20 @@ pub async fn studio_start_run(
         let id = run_id.clone();
         let worker_revision = result.revision;
         let handle = tauri::async_runtime::spawn(async move {
-            execute_run(app, id, epoch, worker_revision).await;
+            execute_run(app, lease, id, epoch, worker_revision).await;
         });
         jobs.insert(run_id, (worker_revision, handle));
         Ok(result)
     })
 }
 
-async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revision: i64) {
+async fn execute_run(
+    app: tauri::AppHandle,
+    lease: ProfileLease,
+    id: String,
+    epoch: u64,
+    worker_revision: i64,
+) {
     loop {
         let state = app.state::<AppState>();
         let next = with_db(&state, |db| {
@@ -460,33 +526,12 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                 break;
             }
         };
-        let connection_id = step.connection.id.clone();
-        let key = match crate::ai_auth::credential::bearer(
-            &crate::ai_auth::chatgpt::Endpoints::default(),
+        let output = complete(
+            &state,
+            &lease,
+            profile_guard(app.clone(), epoch),
             &step.connection,
             key,
-            || {
-                let loaded = with_db(&state, |db| store::secret(db, &connection_id));
-                async move { loaded }
-            },
-            |next| {
-                let saved = with_db(&state, |db| {
-                    store::replace_secret(db, &connection_id, &next)
-                });
-                async move { saved }
-            },
-        )
-        .await
-        {
-            Ok(key) => key,
-            Err(error) => {
-                fail_run(&state, &id, epoch, error);
-                break;
-            }
-        };
-        let output = alexandria_studio::provider::complete(
-            &step.connection,
-            key.as_deref(),
             &step.effective_prompt,
             &context,
         )
@@ -515,7 +560,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                 }
             }
             Err(error) => {
-                fail_run(&state, &id, epoch, error.to_string());
+                fail_run(&state, &id, epoch, error);
                 break;
             }
         }

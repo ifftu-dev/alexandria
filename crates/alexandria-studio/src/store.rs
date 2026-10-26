@@ -478,7 +478,7 @@ pub fn save_connection(
     if let Some(key) = key {
         bounded(key, 4096, "API key")?;
         // Consumer sign-in tokens are never stored, not just never sent.
-        alexandria_ai::terms::check_credential(&url, key, false)
+        alexandria_ai::connection::admit(&url, doc.value.protocol, key)
             .map_err(|e| Error::Invalid(e.to_string()))?;
     }
     let tx = conn.unchecked_transaction()?;
@@ -494,16 +494,24 @@ pub fn save_connection(
 
 /// Saves a connection created by a provider sign-in, with the credential the
 /// provider issued. The host runs the sign-in; nothing else calls this.
+/// `credential` is stored as given (an API key, or a sign-in's encoded token
+/// set); `bearer` is what requests will carry (that key, or the token set's
+/// access token) and is admitted like a pasted key.
 pub fn save_signed_in_connection(
     conn: &Connection,
     doc: &StudioDocument<StudioConnection>,
     credential: &str,
+    bearer: &str,
 ) -> Result<StudioDocument<StudioConnection>> {
-    crate::provider::validate_connection(&doc.value)?;
+    let url = crate::provider::validate_connection(&doc.value)?;
     if doc.id != doc.value.id || credential.is_empty() {
         return Err(Error::Invalid("Connection identifier mismatch".into()));
     }
     bounded(credential, 32_768, "Sign-in credential")?;
+    // The same admission a pasted key gets: a sign-in that issued a consumer
+    // token is refused here, not left for the first request.
+    alexandria_ai::connection::admit(&url, doc.value.protocol, bearer)
+        .map_err(|e| Error::Invalid(e.to_string()))?;
     let tx = conn.unchecked_transaction()?;
     tx.execute("INSERT INTO studio_secrets(connection_id,secret) VALUES (?1,?2) ON CONFLICT(connection_id) DO UPDATE SET secret=excluded.secret",params![doc.id,credential])?;
     let mut value = doc.value.clone();
