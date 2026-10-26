@@ -178,7 +178,7 @@ pub fn import_credential_impl(
     };
     // Same derivation `issue_credential` uses, reused rather than reimplemented
     // so an imported credential and a locally issued one hash identically.
-    let integrity_hash = super::credentials::integrity_hash_of(vc)?;
+    let integrity_hash = crate::domain::vc::integrity_hash_of(vc)?;
     let signed_json = serde_json::to_string(vc).map_err(|e| e.to_string())?;
 
     conn.execute(

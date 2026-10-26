@@ -522,7 +522,7 @@ mod tests {
         assert_eq!(signed.credential_subject.id, did);
         assert!(signed.type_.iter().any(|kind| kind == "DerivedCredential"));
         assert_eq!(
-            crate::commands::credentials::integrity_hash_of(&signed).unwrap(),
+            crate::domain::vc::integrity_hash_of(&signed).unwrap(),
             integrity_hash
         );
         let signed_value: serde_json::Value = serde_json::from_str(&signed_json).unwrap();

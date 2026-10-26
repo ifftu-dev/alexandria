@@ -377,7 +377,7 @@ pub(crate) mod test_support {
                     class,
                     skill_id,
                     serde_json::to_string(&credential).unwrap(),
-                    crate::commands::credentials::integrity_hash_of(&credential).unwrap()
+                    crate::domain::vc::integrity_hash_of(&credential).unwrap()
                 ],
             )
             .unwrap();
