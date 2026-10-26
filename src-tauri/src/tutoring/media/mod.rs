@@ -48,6 +48,8 @@ pub mod desktop;
 mod ffmpeg;
 #[cfg(all(target_os = "ios", feature = "tutoring-video-ios"))]
 pub mod ios;
+#[cfg(target_os = "ios")]
+pub(crate) mod main_thread;
 pub mod synthetic;
 
 /// The adapter this build fills the seam with.

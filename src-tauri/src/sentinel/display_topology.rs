@@ -169,7 +169,7 @@ mod imp {
 
     pub fn current(_app: &tauri::AppHandle) -> Option<DisplayTopology> {
         // UIKit is main-thread-affine; the command runs on a tokio worker.
-        crate::tutoring::manager_mobile::run_on_main_thread(|| read_uikit())
+        crate::tutoring::media::main_thread::run_on_main_thread(read_uikit)
     }
 
     fn read_uikit() -> Option<DisplayTopology> {
