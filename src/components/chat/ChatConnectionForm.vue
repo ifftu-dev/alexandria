@@ -183,7 +183,9 @@ async function save() {
   } catch (e) {
     // Validation messages from the backend are written for people.
     const { code, detail } = parseChatError(e)
-    message.value = code === 'invalid_input' ? detail : t('chat.errors.generic')
+    message.value = code === 'invalid_input'
+      ? detail
+      : code === 'under_13' || code === 'adults_only' ? t(`chat.errors.${code}`) : t('chat.errors.generic')
   } finally {
     saving.value = false
   }

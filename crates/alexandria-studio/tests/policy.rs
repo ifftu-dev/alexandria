@@ -492,3 +492,59 @@ fn a_sign_in_is_admitted_on_the_token_it_will_send() {
     let token = "sk-ant-oat01-abc";
     assert!(store::save_signed_in_connection(&db, &openrouter, token, token).is_err());
 }
+
+#[test]
+fn the_tutor_and_chat_refuse_a_non_text_lesson_through_the_shared_rule() {
+    use alexandria_studio::access::{visible_lesson, Reader, Refused};
+    let db = db();
+    setup(&db);
+    let mut course = store::course(&db, "mine").unwrap();
+    course.value.tutor.enabled = true;
+    store::save_course(&db, &course).unwrap();
+    db.execute_batch(
+        "UPDATE local_identity SET stake_address='learner';
+         INSERT INTO enrollments(id,course_id,status) VALUES ('enrollment','mine','active');
+         INSERT INTO course_elements(id,chapter_id,title,element_type,content_inline,position)
+              VALUES ('video','chapter','Walkthrough','video','chapters',2),
+                     ('quiz','chapter','Check','quiz','QUIZ ANSWERS',3);",
+    )
+    .unwrap();
+    // The tutor sees text lessons of a course the learner takes, and nothing else.
+    let target = visible_lesson(&db, Reader::Tutor, "mine", "lesson").unwrap();
+    assert_eq!(target.title, "Lesson");
+    for withheld in ["video", "quiz", "assessment"] {
+        assert!(
+            matches!(
+                visible_lesson(&db, Reader::Tutor, "mine", withheld),
+                Err(Refused::LessonWithheld)
+            ),
+            "{withheld}"
+        );
+        assert!(matches!(
+            store::tutor_context(&db, "mine", withheld, "local"),
+            Err(Error::Permission)
+        ));
+    }
+    assert!(matches!(
+        visible_lesson(&db, Reader::Tutor, "mine", "missing"),
+        Err(Refused::LessonNotFound)
+    ));
+    // Chat sees published courses only, with the same text rule.
+    assert!(matches!(
+        visible_lesson(&db, Reader::Chat, "mine", "lesson"),
+        Err(Refused::LessonNotFound)
+    ));
+    db.execute("UPDATE courses SET status='published' WHERE id='mine'", [])
+        .unwrap();
+    assert_eq!(
+        visible_lesson(&db, Reader::Chat, "mine", "lesson")
+            .unwrap()
+            .title,
+        "Lesson"
+    );
+    let Err(refused) = visible_lesson(&db, Reader::Chat, "mine", "quiz") else {
+        panic!("a quiz is never shown to a model");
+    };
+    assert!(matches!(refused, Refused::LessonWithheld));
+    assert!(matches!(Error::from(refused), Error::Permission));
+}

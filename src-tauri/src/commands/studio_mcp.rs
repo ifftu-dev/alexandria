@@ -152,7 +152,7 @@ impl alexandria_studio::broker::BrokerHost for AppBroker {
     }
 
     fn report_attempt_flag(&self, db: &rusqlite::Connection, flag: &str) {
-        if let Err(error) = super::integrity::record_backend_flag(db, flag) {
+        if let Err(error) = crate::sentinel::snapshots::record_backend_flag(db, flag) {
             log::warn!("assistant broker: could not record {flag}: {error}");
         }
     }

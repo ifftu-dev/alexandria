@@ -33,11 +33,9 @@ use super::store::{
     self, Attribution, ChatBinding, ChatMessage, ChatThread, Finish, NewRun, SourceRef,
     StoredSnapshot,
 };
-use super::vocab::{refuse, ChatErrorCode, ReplyFence};
+use super::vocab::{refuse, refused, ChatErrorCode, ReplyFence};
 use super::{artifact, bank_guard, memory, now, practice, timestamp, ChatRuntime};
-// TODO(ticket 03): the gates move to the policy module; until then the turn
-// calls them where the commands file keeps them.
-use crate::commands::ai_chat::{age_gate, refuse_during_assessment};
+use crate::ai_access::{self, Surface};
 
 /// How long a prepared request may wait for the learner before it expires.
 const PREPARE_TTL: chrono::Duration = chrono::Duration::minutes(15);
@@ -110,7 +108,7 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
         excluded_memory,
         include_history,
     } = inputs;
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel).map_err(refused)?;
     let e = |e: store::StoreError| e.to_string();
     let thread = store::thread(conn, thread_id).map_err(e)?;
     let connection_id = thread
@@ -123,14 +121,8 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
             "the chosen model connection no longer exists",
         )
     })?;
-    if !doc.value.enabled {
-        return Err(refuse(
-            ChatErrorCode::NoConnection,
-            "the chosen model connection is disabled",
-        ));
-    }
+    ai_access::may_use(conn, &doc.value).map_err(refused)?;
     let location = studio_provider::location(&doc.value).map_err(|e| e.to_string())?;
-    age_gate(conn, &doc.value)?;
     let model_id = thread
         .model_id
         .clone()
@@ -190,10 +182,20 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
             super::goal::label(conn, &binding.element_id)?.ok_or_else(gone)?;
             Attached::Goal
         } else {
-            Attached::Lesson(
-                learning::lesson_target(conn, &binding.course_id, &binding.element_id)
-                    .map_err(|_| gone())?,
-            )
+            // The shared lesson rule: a lesson republished as a graded or
+            // video element is withheld, not sent.
+            match ai_access::visible_lesson(
+                conn,
+                ai_access::Reader::Chat,
+                &binding.course_id,
+                &binding.element_id,
+            ) {
+                Ok(target) => Attached::Lesson(target),
+                Err(withheld @ ai_access::Refused::LessonWithheld) => {
+                    return Err(refused(withheld))
+                }
+                Err(_) => return Err(gone()),
+            }
         };
         lessons.push((binding, attached, included));
     }
@@ -545,9 +547,10 @@ fn stale() -> String {
 }
 
 /// Begins a prepared turn. Refuses a repeated client request
-/// (`duplicate:<run id>`), a send during an assessment, and a snapshot that
-/// is missing, consumed, expired, or no longer rebuilds to the reviewed
-/// digest (`context_stale`).
+/// (`duplicate:<run id>`), a send during an assessment, a snapshot that is
+/// missing, consumed, expired, or no longer rebuilds to the reviewed digest
+/// (`context_stale`), and a connection the learner may no longer use
+/// ([`ai_access::may_use`]).
 pub fn begin(
     conn: &Connection,
     runtime: &ChatRuntime,
@@ -565,7 +568,7 @@ pub fn begin(
     if let Some(existing) = store::run_by_client_request(conn, client_request_id).map_err(e)? {
         return Err(format!("duplicate:{}", existing.id));
     }
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel).map_err(refused)?;
     let snapshot = store::snapshot(conn, prepare_id).map_err(|_| stale())?;
     if snapshot.consumed_at.is_some()
         || snapshot.expires_at < now()
@@ -606,6 +609,9 @@ pub fn begin(
     if location.as_str() != manifest.destination.location {
         return Err(stale());
     }
+    // The age and guardian rules may have changed since the learner reviewed
+    // (a withdrawn approval, a corrected birthdate): they apply at send time.
+    ai_access::may_use(conn, &doc.value).map_err(refused)?;
     if !runtime.has_capacity() {
         return Err(refuse(
             ChatErrorCode::TooManyRuns,
@@ -958,6 +964,52 @@ pub(crate) mod fixtures {
         .unwrap();
     }
 
+    /// Sets the profile's birthdate `years` years and a day before today.
+    pub(crate) fn born_years_ago(conn: &Connection, years: i32) {
+        use chrono::Datelike;
+        let today = chrono::Utc::now().date_naive();
+        let born = chrono::NaiveDate::from_ymd_opt(today.year() - years, today.month(), 1).unwrap()
+            - chrono::Duration::days(1);
+        conn.execute(
+            "UPDATE local_identity SET birthdate = ?1",
+            [born.format("%Y-%m-%d").to_string()],
+        )
+        .unwrap();
+    }
+
+    pub(crate) fn link_guardian(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
+             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
+            [],
+        )
+        .unwrap();
+    }
+
+    /// Opens an attempt `id`, ending any other first, so each refusal can be
+    /// checked against a session of its own (a session is flagged once).
+    pub(crate) fn attempt(conn: &Connection, id: &str) {
+        conn.execute(
+            "UPDATE integrity_sessions SET ended_at = datetime('now'), status = 'completed'
+              WHERE ended_at IS NULL",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO integrity_sessions(id) VALUES (?1)", [id])
+            .unwrap();
+    }
+
+    /// Whether attempt `id` carries the in-app assistant flag.
+    pub(crate) fn flagged(conn: &Connection, id: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM integrity_snapshots
+              WHERE session_id = ?1 AND anomaly_flags LIKE '%in_app_assistant_during_attempt%')",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
     pub(crate) fn thread(conn: &Connection) -> String {
         store::create_thread(conn, "t", Some("c1"), None, &now()).unwrap();
         "t".into()
@@ -1198,6 +1250,26 @@ mod tests {
             )
             .unwrap();
         assert_eq!((critical, flagged), (1, 1));
+    }
+
+    #[test]
+    fn an_attached_lesson_republished_as_a_graded_or_video_element_is_withheld() {
+        let conn = db();
+        thread(&conn);
+        attach(&conn, "t", "course", "lesson").unwrap();
+        prepare(&conn, "Explain this").unwrap();
+        for kind in ["quiz", "video"] {
+            conn.execute(
+                "UPDATE course_elements SET element_type = ?1 WHERE id = 'lesson'",
+                [kind],
+            )
+            .unwrap();
+            let err = prepare(&conn, "Explain this").unwrap_err();
+            assert_eq!(
+                err, "invalid_input: only text lessons can be attached",
+                "{kind}"
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
 pub mod aggregation;
+pub mod ai_access;
 pub mod ai_auth;
 pub mod ai_chat;
 pub mod assessment;

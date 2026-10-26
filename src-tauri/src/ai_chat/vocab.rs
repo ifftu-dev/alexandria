@@ -175,6 +175,28 @@ pub fn refuse(code: ChatErrorCode, reason: impl std::fmt::Display) -> String {
     format!("{code}: {reason}")
 }
 
+/// A refusal from the AI access policy (`crate::ai_access`) as chat returns
+/// it: the typed reason's code from this vocabulary, then its reason. A
+/// Studio error the policy passed on reads as it always has.
+pub fn refused(refusal: alexandria_studio::access::Refused) -> String {
+    use alexandria_studio::access::Refused as R;
+    let code = match &refusal {
+        R::TooYoungForRemote => ChatErrorCode::Under13,
+        R::AdultsOnly(_) => ChatErrorCode::AdultsOnly,
+        R::GuardianRequired => ChatErrorCode::GuardianRequired,
+        R::GuardianPending => ChatErrorCode::GuardianPending,
+        R::GuardianDeclined => ChatErrorCode::GuardianDeclined,
+        R::NoGuardian => ChatErrorCode::NoGuardian,
+        R::NotRemote | R::LessonWithheld | R::Invalid(_) => ChatErrorCode::InvalidInput,
+        R::ConnectionDisabled | R::WrongCapability => ChatErrorCode::NoConnection,
+        R::AttemptInProgress => ChatErrorCode::AssessmentActive,
+        R::LessonNotFound => ChatErrorCode::NotFound,
+        R::Storage(_) => ChatErrorCode::StorageError,
+        R::Studio(error) => return error.to_string(),
+    };
+    refuse(code, refusal.reason())
+}
+
 vocabulary! {
     /// What a chat may propose to save or change; the `kind` tag of
     /// `artifact::Body`.
@@ -276,6 +298,31 @@ pub fn snapshot_json() -> String {
 mod tests {
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn every_policy_refusal_reads_as_the_code_the_webview_translates() {
+        use super::refused;
+        use alexandria_studio::access::Refused;
+        use alexandria_studio::Error;
+        let cases: [(Refused, &str); 13] = [
+            (Refused::TooYoungForRemote, "under_13: learners under 13 can use models on this device or their own network only"),
+            (Refused::AdultsOnly("OpenRouter"), "adults_only: OpenRouter requires users to be 18 or older"),
+            (Refused::GuardianRequired, "guardian_required: remote models need a guardian's approval; use a model on this device or your own network"),
+            (Refused::GuardianPending, "guardian_pending: waiting for a guardian to approve this model"),
+            (Refused::GuardianDeclined, "guardian_declined: a guardian did not approve this model"),
+            (Refused::NoGuardian, "no_guardian: link a guardian in Settings first"),
+            (Refused::NotRemote, "invalid_input: only remote models need a guardian's approval"),
+            (Refused::ConnectionDisabled, "no_connection: the chosen model connection is disabled"),
+            (Refused::AttemptInProgress, &Error::AssessmentActive.to_string()),
+            (Refused::LessonNotFound, &Error::NotFound.to_string()),
+            (Refused::LessonWithheld, "invalid_input: only text lessons can be attached"),
+            (Refused::Storage("profile"), "storage_error: profile could not be read"),
+            (Refused::Studio(Error::Conflict), &Error::Conflict.to_string()),
+        ];
+        for (refusal, expected) in cases {
+            assert_eq!(refused(refusal), expected);
+        }
+    }
 
     use super::*;
 

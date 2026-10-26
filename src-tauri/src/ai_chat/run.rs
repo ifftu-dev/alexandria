@@ -26,7 +26,6 @@ use std::time::{Duration, Instant};
 
 use alexandria_ai::model::Limits;
 use alexandria_ai::{Adapter, ChatRequest, Completion, StreamEvent, Usage};
-use alexandria_studio::gate;
 use alexandria_studio::model::StudioConnection;
 use alexandria_studio::provider as studio_provider;
 use rusqlite::Connection;
@@ -37,6 +36,7 @@ use super::store::{self as chat_store, Finish};
 use super::turn::{self, Begun, Started, StartedRun};
 use super::vocab::ChatErrorCode;
 use super::{error_code, now, RunGuard};
+use crate::ai_access::{self, Surface};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::profile::scope::ProfileLease;
 
@@ -494,7 +494,7 @@ pub async fn abandon(db: &impl RunStore, run: &StartedRun, code: &'static str) {
 /// answer must stop.
 async fn checkpoint(db: &impl RunStore, id: String, text: String) -> bool {
     db.execute("chat.checkpoint", move |conn| {
-        if gate::assessment_in_progress(conn).unwrap_or(true) {
+        if ai_access::no_attempt_in_progress(conn, Surface::LateAnswer).is_err() {
             return Ok(false);
         }
         chat_store::checkpoint(conn, &id, &text).map_err(|e| e.to_string())?;
@@ -522,7 +522,7 @@ async fn complete(
     usage: Option<Usage>,
 ) -> Result<Completed, String> {
     db.execute("chat.finish", move |conn| {
-        if gate::assessment_in_progress(conn).unwrap_or(true) {
+        if ai_access::no_attempt_in_progress(conn, Surface::LateAnswer).is_err() {
             return Ok(Completed::AssessmentActive);
         }
         turn::complete(conn, &begun, &reply, usage).map(|_| Completed::Saved)

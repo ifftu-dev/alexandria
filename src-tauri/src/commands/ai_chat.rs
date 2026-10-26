@@ -18,18 +18,18 @@
 
 use std::time::Duration;
 
-use alexandria_ai::endpoint::Location;
 use alexandria_ai::model::Limits;
-use alexandria_studio::model::StudioConnection;
-use alexandria_studio::{gate, learning, provider as studio_provider, store as studio_store};
-use rusqlite::{Connection, OptionalExtension};
+use alexandria_studio::access::{visible_lesson, Reader};
+use alexandria_studio::{gate, provider as studio_provider, store as studio_store};
+use rusqlite::Connection;
 use serde::Serialize;
 use tauri::ipc::Channel;
 
+use crate::ai_access::{self, GuardianApproval, Surface};
 use crate::ai_chat::run::{self, ChatEvent};
 use crate::ai_chat::store::{self, ChatBinding, ChatMessage, ChatThread};
 use crate::ai_chat::turn::{self, PreparedMessage, StartedRun};
-use crate::ai_chat::vocab::{refuse, ChatErrorCode};
+use crate::ai_chat::vocab::{refuse, refused, ChatErrorCode};
 use crate::ai_chat::{action, bank_guard, error_code, memory, now, ChatRuntime};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
@@ -55,21 +55,6 @@ where
             move |db| f(db.conn()),
         )
         .await
-}
-
-/// Refuses while an assessment is in progress, and records the attempt as an
-/// integrity flag: the chat panel is not mounted then, so a call that gets
-/// here did not come from the normal interface.
-pub(crate) fn refuse_during_assessment(conn: &Connection) -> Result<(), String> {
-    let gated = gate::require_no_assessment(conn);
-    if matches!(gated, Err(alexandria_studio::Error::AssessmentActive)) {
-        if let Err(error) =
-            super::integrity::record_backend_flag(conn, "in_app_assistant_during_attempt")
-        {
-            log::warn!("chat: could not record an integrity flag: {error}");
-        }
-    }
-    gated.map_err(|e| e.to_string())
 }
 
 fn recover(conn: &Connection, runtime: &ChatRuntime) -> Result<(), String> {
@@ -110,9 +95,18 @@ pub async fn chat_search_threads(
     query: String,
 ) -> Result<Vec<store::SearchHit>, String> {
     with_conn(&state, "chat.search", move |conn| {
-        store::search_threads(conn, &query, 50).map_err(|e| e.to_string())
+        search_threads(conn, &query)
     })
     .await
+}
+
+/// Search returns message text, so it is refused during an attempt.
+pub(crate) fn search_threads(
+    conn: &Connection,
+    query: &str,
+) -> Result<Vec<store::SearchHit>, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::search_threads(conn, query, 50).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -122,18 +116,19 @@ pub async fn chat_create_thread(
     model_id: Option<String>,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.create-thread", move |conn| {
-        refuse_during_assessment(conn)?;
-        let id = uuid::Uuid::new_v4().to_string();
-        store::create_thread(
-            conn,
-            &id,
-            connection_id.as_deref(),
-            model_id.as_deref(),
-            &now(),
-        )
-        .map_err(|e| e.to_string())
+        create_thread(conn, connection_id.as_deref(), model_id.as_deref())
     })
     .await
+}
+
+pub(crate) fn create_thread(
+    conn: &Connection,
+    connection_id: Option<&str>,
+    model_id: Option<&str>,
+) -> Result<ChatThread, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    store::create_thread(conn, &id, connection_id, model_id, &now()).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -156,19 +151,31 @@ pub async fn chat_get_thread(
 ) -> Result<ThreadDetail, String> {
     let runtime = state.ai_chat.clone();
     with_conn(&state, "chat.get-thread", move |conn| {
-        recover(conn, &runtime)?;
-        let e = |e: store::StoreError| e.to_string();
-        Ok(ThreadDetail {
-            thread: store::thread(conn, &thread_id).map_err(e)?,
-            messages: store::messages(conn, &thread_id).map_err(e)?,
-            bindings: store::bindings(conn, &thread_id).map_err(e)?,
-            practice: store::practice_for_thread(conn, &thread_id).map_err(e)?,
-            memory_proposals: store::memory_proposals_for_thread(conn, &thread_id).map_err(e)?,
-            artifacts: store::artifacts_for_thread(conn, &thread_id).map_err(e)?,
-            active_run_id: store::active_run(conn, &thread_id).map_err(e)?,
-        })
+        thread_detail(conn, &runtime, &thread_id)
     })
     .await
+}
+
+/// A thread's contents. Refused during an attempt but not flagged: the app
+/// reloads the open thread by itself when starting an attempt cancels its
+/// run.
+pub(crate) fn thread_detail(
+    conn: &Connection,
+    runtime: &ChatRuntime,
+    thread_id: &str,
+) -> Result<ThreadDetail, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    recover(conn, runtime)?;
+    let e = |e: store::StoreError| e.to_string();
+    Ok(ThreadDetail {
+        thread: store::thread(conn, thread_id).map_err(e)?,
+        messages: store::messages(conn, thread_id).map_err(e)?,
+        bindings: store::bindings(conn, thread_id).map_err(e)?,
+        practice: store::practice_for_thread(conn, thread_id).map_err(e)?,
+        memory_proposals: store::memory_proposals_for_thread(conn, thread_id).map_err(e)?,
+        artifacts: store::artifacts_for_thread(conn, thread_id).map_err(e)?,
+        active_run_id: store::active_run(conn, thread_id).map_err(e)?,
+    })
 }
 
 #[tauri::command]
@@ -178,9 +185,18 @@ pub async fn chat_rename_thread(
     title: String,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.rename-thread", move |conn| {
-        store::rename_thread(conn, &thread_id, &title, &now()).map_err(|e| e.to_string())
+        rename_thread(conn, &thread_id, &title)
     })
     .await
+}
+
+pub(crate) fn rename_thread(
+    conn: &Connection,
+    thread_id: &str,
+    title: &str,
+) -> Result<ChatThread, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::rename_thread(conn, thread_id, title, &now()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -191,26 +207,30 @@ pub async fn chat_set_thread_model(
     model_id: Option<String>,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.set-thread-model", move |conn| {
-        if let Some(id) = &connection_id {
-            studio_store::connection(conn, id).map_err(|e| e.to_string())?;
-        }
-        let model_id = model_id.filter(|m| !m.trim().is_empty());
-        if model_id.as_ref().is_some_and(|m| m.len() > 200) {
-            return Err(refuse(
-                ChatErrorCode::InvalidInput,
-                "model identifier is too long",
-            ));
-        }
-        store::set_thread_model(
-            conn,
-            &thread_id,
-            connection_id.as_deref(),
-            model_id.as_deref(),
-            &now(),
-        )
-        .map_err(|e| e.to_string())
+        set_thread_model(conn, &thread_id, connection_id.as_deref(), model_id)
     })
     .await
+}
+
+pub(crate) fn set_thread_model(
+    conn: &Connection,
+    thread_id: &str,
+    connection_id: Option<&str>,
+    model_id: Option<String>,
+) -> Result<ChatThread, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    if let Some(id) = connection_id {
+        studio_store::connection(conn, id).map_err(|e| e.to_string())?;
+    }
+    let model_id = model_id.filter(|m| !m.trim().is_empty());
+    if model_id.as_ref().is_some_and(|m| m.len() > 200) {
+        return Err(refuse(
+            ChatErrorCode::InvalidInput,
+            "model identifier is too long",
+        ));
+    }
+    store::set_thread_model(conn, thread_id, connection_id, model_id.as_deref(), &now())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -220,12 +240,21 @@ pub async fn chat_delete_thread(
 ) -> Result<(), String> {
     let runtime = state.ai_chat.clone();
     with_conn(&state, "chat.delete-thread", move |conn| {
-        if let Some(run) = store::active_run(conn, &thread_id).map_err(|e| e.to_string())? {
-            runtime.cancel(&run);
-        }
-        store::delete_thread(conn, &thread_id).map_err(|e| e.to_string())
+        delete_thread(conn, &runtime, &thread_id)
     })
     .await
+}
+
+pub(crate) fn delete_thread(
+    conn: &Connection,
+    runtime: &ChatRuntime,
+    thread_id: &str,
+) -> Result<(), String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    if let Some(run) = store::active_run(conn, thread_id).map_err(|e| e.to_string())? {
+        runtime.cancel(&run);
+    }
+    store::delete_thread(conn, thread_id).map_err(|e| e.to_string())
 }
 
 /// Attaches a published text lesson. Quizzes are monitored like assessments
@@ -250,14 +279,8 @@ pub(crate) fn attach(
     course_id: &str,
     element_id: &str,
 ) -> Result<ChatBinding, String> {
-    refuse_during_assessment(conn)?;
-    let target = learning::lesson_target(conn, course_id, element_id).map_err(|e| e.to_string())?;
-    if learning::content_kind(&target.element_type) != "text" {
-        return Err(refuse(
-            ChatErrorCode::InvalidInput,
-            "only text lessons can be attached",
-        ));
-    }
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    let target = visible_lesson(conn, Reader::Chat, course_id, element_id).map_err(refused)?;
     let id = uuid::Uuid::new_v4().to_string();
     store::add_binding(
         conn,
@@ -290,7 +313,7 @@ pub(crate) fn attach_goal(
     thread_id: &str,
     goal_id: &str,
 ) -> Result<ChatBinding, String> {
-    refuse_during_assessment(conn)?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
     let label = crate::ai_chat::goal::label(conn, goal_id)?
         .ok_or_else(|| refuse(ChatErrorCode::NotFound, "that goal no longer exists"))?;
     store::add_goal_binding(
@@ -311,9 +334,14 @@ pub async fn chat_detach(
     binding_id: String,
 ) -> Result<(), String> {
     with_conn(&state, "chat.detach", move |conn| {
-        store::remove_binding(conn, &thread_id, &binding_id, &now()).map_err(|e| e.to_string())
+        detach(conn, &thread_id, &binding_id)
     })
     .await
+}
+
+pub(crate) fn detach(conn: &Connection, thread_id: &str, binding_id: &str) -> Result<(), String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::remove_binding(conn, thread_id, binding_id, &now()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -343,9 +371,7 @@ pub async fn chat_list_models(
     connection_id: String,
 ) -> Result<Vec<String>, String> {
     let (connection, key) = with_conn(&state, "chat.list-models", move |conn| {
-        let doc = studio_store::connection(conn, &connection_id).map_err(|e| e.to_string())?;
-        let key = studio_store::secret(conn, &connection_id).map_err(|e| e.to_string())?;
-        Ok((doc.value, key))
+        models_source(conn, &connection_id)
     })
     .await?;
     let target = studio_provider::connection(&connection).map_err(|e| {
@@ -379,200 +405,6 @@ pub async fn chat_list_models(
         .map_err(|e| format!("{}: {e}", error_code(&e)))
 }
 
-/// How vendor terms and guardian rules see the profile's holder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgeBand {
-    Adult,
-    /// 13 to 17: remote models with a guardian's approval, except vendors
-    /// whose terms require users to be 18 or older.
-    Teen,
-    /// Under 13: models on the device or the user's own network only.
-    /// Vendors expect zero data retention or COPPA-grade handling for
-    /// children's data, which Alexandria cannot verify on a user's key.
-    Child,
-}
-
-fn age_band(conn: &Connection) -> Result<AgeBand, String> {
-    let birthdate: Option<String> = conn
-        .query_row(
-            "SELECT birthdate FROM local_identity WHERE id = 1",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|_| refuse(ChatErrorCode::StorageError, "profile could not be read"))?
-        .flatten();
-    let today = chrono::Utc::now().date_naive();
-    Ok(match birthdate.as_deref() {
-        Some(b) if crate::domain::identity::is_younger_than(b, 13, today) => AgeBand::Child,
-        Some(b) if crate::domain::identity::is_minor(b, today) => AgeBand::Teen,
-        _ => AgeBand::Adult,
-    })
-}
-
-/// The age rules for sending to a connection, shared by chat, the lesson
-/// tutor, and Studio runs. Remote models are refused under 13, vendors with
-/// an 18+ floor are refused for every minor, and other remote models need a
-/// guardian's approval at the connection's current endpoint.
-pub(crate) fn age_gate(conn: &Connection, connection: &StudioConnection) -> Result<(), String> {
-    let location = studio_provider::location(connection).map_err(|e| e.to_string())?;
-    if location != Location::Remote {
-        return Ok(());
-    }
-    let band = age_band(conn)?;
-    if band == AgeBand::Adult {
-        return Ok(());
-    }
-    refuse_for_minors(connection, band)?;
-    match latest_approval(conn, &connection.id, &connection.endpoint)?.as_deref() {
-        Some("approved") => Ok(()),
-        Some("pending") => {
-            Err(refuse(ChatErrorCode::GuardianPending, "waiting for a guardian to approve this model"))
-        }
-        Some(_) => Err(refuse(ChatErrorCode::GuardianDeclined, "a guardian did not approve this model")),
-        None => Err(refuse(ChatErrorCode::GuardianRequired, "remote models need a guardian's approval; use a model on this device or your own network")),
-    }
-}
-
-/// Refusals no guardian approval can lift.
-fn refuse_for_minors(connection: &StudioConnection, band: AgeBand) -> Result<(), String> {
-    refuse_endpoint_for_minors(&connection.endpoint, band)
-}
-
-fn refuse_endpoint_for_minors(endpoint: &str, band: AgeBand) -> Result<(), String> {
-    if band == AgeBand::Child {
-        return Err(refuse(
-            ChatErrorCode::Under13,
-            "learners under 13 can use models on this device or their own network only",
-        ));
-    }
-    let url =
-        alexandria_ai::endpoint::parse(endpoint, Location::Remote).map_err(|e| e.to_string())?;
-    if let Some(vendor) = alexandria_ai::terms::adults_only(&url) {
-        return Err(refuse(
-            ChatErrorCode::AdultsOnly,
-            format!("{vendor} requires users to be 18 or older"),
-        ));
-    }
-    Ok(())
-}
-
-/// Whether this profile may connect a remote provider at `endpoint` at all,
-/// before any guardian approval: used before a provider sign-in starts.
-pub(crate) fn remote_allowed_for_age(conn: &Connection, endpoint: &str) -> Result<(), String> {
-    match age_band(conn)? {
-        AgeBand::Adult => Ok(()),
-        band => refuse_endpoint_for_minors(endpoint, band),
-    }
-}
-
-/// The latest guardian decision for a connection at its current endpoint.
-fn latest_approval(
-    conn: &Connection,
-    connection_id: &str,
-    endpoint: &str,
-) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT status FROM ai_connection_approvals
-          WHERE connection_id = ?1 AND endpoint = ?2
-          ORDER BY requested_at DESC, rowid DESC LIMIT 1",
-        [connection_id, endpoint],
-        |r| r.get(0),
-    )
-    .optional()
-    .map_err(|_| refuse(ChatErrorCode::StorageError, "approvals could not be read"))
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct GuardianApproval {
-    pub id: String,
-    pub connection_id: String,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-    pub status: String,
-    pub requested_at: String,
-    pub decided_at: Option<String>,
-}
-
-fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, connection_id, connection_name, endpoint, model, status, requested_at, decided_at
-               FROM ai_connection_approvals ORDER BY requested_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok(GuardianApproval {
-                id: r.get(0)?,
-                connection_id: r.get(1)?,
-                connection_name: r.get(2)?,
-                endpoint: r.get(3)?,
-                model: r.get(4)?,
-                status: r.get(5)?,
-                requested_at: r.get(6)?,
-                decided_at: r.get(7)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
-/// Asks the learner's guardians to approve a remote connection at its current
-/// endpoint. The request travels with the next guardian sync.
-pub(crate) fn request_approval(
-    conn: &Connection,
-    connection_id: &str,
-) -> Result<GuardianApproval, String> {
-    let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
-    if studio_provider::location(&doc.value).map_err(|e| e.to_string())? != Location::Remote {
-        return Err(refuse(
-            ChatErrorCode::InvalidInput,
-            "only remote models need a guardian's approval",
-        ));
-    }
-    let has_guardian: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM guardian_links WHERE side = 'ward' AND status = 'active')",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if !has_guardian {
-        return Err(refuse(
-            ChatErrorCode::NoGuardian,
-            "link a guardian in Settings first",
-        ));
-    }
-    let band = age_band(conn)?;
-    if band != AgeBand::Adult {
-        refuse_for_minors(&doc.value, band)?;
-    }
-    if matches!(
-        latest_approval(conn, &doc.id, &doc.value.endpoint)?.as_deref(),
-        Some("pending" | "approved")
-    ) {
-        return approvals(conn)?
-            .into_iter()
-            .find(|a| a.connection_id == doc.id && a.endpoint == doc.value.endpoint)
-            .ok_or_else(|| refuse(ChatErrorCode::StorageError, "approval missing"));
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
-        rusqlite::params![id, doc.id, doc.value.name, doc.value.endpoint, doc.value.model, now()],
-    )
-    .map_err(|e| e.to_string())?;
-    approvals(conn)?
-        .into_iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| refuse(ChatErrorCode::StorageError, "approval missing"))
-}
-
 #[tauri::command]
 pub async fn chat_request_guardian_approval(
     state: State<'_, AppState>,
@@ -584,11 +416,37 @@ pub async fn chat_request_guardian_approval(
     .await
 }
 
+pub(crate) fn request_approval(
+    conn: &Connection,
+    connection_id: &str,
+) -> Result<GuardianApproval, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    ai_access::request_approval(conn, connection_id).map_err(refused)
+}
+
 #[tauri::command]
 pub async fn chat_list_guardian_approvals(
     state: State<'_, AppState>,
 ) -> Result<Vec<GuardianApproval>, String> {
-    with_conn(&state, "chat.list-approvals", approvals).await
+    with_conn(&state, "chat.list-approvals", |conn| {
+        ai_access::approvals(conn).map_err(refused)
+    })
+    .await
+}
+
+/// The connection and key to ask for models. Asking contacts the provider,
+/// so it is refused during an attempt.
+pub(crate) fn models_source(
+    conn: &Connection,
+    connection_id: &str,
+) -> Result<(alexandria_studio::model::StudioConnection, Option<String>), String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
+    // Listing models contacts the provider with the stored key: never one
+    // the learner may not connect at all.
+    ai_access::may_connect(conn, &doc.value).map_err(refused)?;
+    let key = studio_store::secret(conn, connection_id).map_err(|e| e.to_string())?;
+    Ok((doc.value, key))
 }
 
 // ─── prepare ─────────────────────────────────────────────────────────────
@@ -727,9 +585,18 @@ pub async fn chat_set_thread_mode(
     mode: String,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.set-mode", move |conn| {
-        store::set_thread_mode(conn, &thread_id, &mode, &now()).map_err(|e| e.to_string())
+        set_thread_mode(conn, &thread_id, &mode)
     })
     .await
+}
+
+pub(crate) fn set_thread_mode(
+    conn: &Connection,
+    thread_id: &str,
+    mode: &str,
+) -> Result<ChatThread, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::set_thread_mode(conn, thread_id, mode, &now()).map_err(|e| e.to_string())
 }
 
 /// Checks a practice answer here, without asking a model.
@@ -740,11 +607,19 @@ pub async fn chat_practice_attempt(
     answer: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-attempt", move |conn| {
-        refuse_during_assessment(conn)?;
-        let id = uuid::Uuid::new_v4().to_string();
-        store::practice_attempt(conn, &item_id, &id, &answer, &now()).map_err(|e| e.to_string())
+        practice_attempt(conn, &item_id, &answer)
     })
     .await
+}
+
+pub(crate) fn practice_attempt(
+    conn: &Connection,
+    item_id: &str,
+    answer: &str,
+) -> Result<store::PracticeView, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel).map_err(refused)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    store::practice_attempt(conn, item_id, &id, answer, &now()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -753,10 +628,17 @@ pub async fn chat_practice_hint(
     item_id: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-hint", move |conn| {
-        refuse_during_assessment(conn)?;
-        store::practice_hint(conn, &item_id).map_err(|e| e.to_string())
+        practice_hint(conn, &item_id)
     })
     .await
+}
+
+pub(crate) fn practice_hint(
+    conn: &Connection,
+    item_id: &str,
+) -> Result<store::PracticeView, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel).map_err(refused)?;
+    store::practice_hint(conn, item_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -765,10 +647,17 @@ pub async fn chat_practice_reveal(
     item_id: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-reveal", move |conn| {
-        refuse_during_assessment(conn)?;
-        store::practice_reveal(conn, &item_id).map_err(|e| e.to_string())
+        practice_reveal(conn, &item_id)
     })
     .await
+}
+
+pub(crate) fn practice_reveal(
+    conn: &Connection,
+    item_id: &str,
+) -> Result<store::PracticeView, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel).map_err(refused)?;
+    store::practice_reveal(conn, item_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -789,18 +678,27 @@ pub async fn chat_add_memory(
     content: String,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.add-memory", move |conn| {
-        let kind = memory::Kind::parse(&kind)
-            .ok_or_else(|| refuse(ChatErrorCode::InvalidInput, "unknown memory kind"))?;
-        if bank_guard::matches_assessment_item(conn, &content) {
-            return Err(refuse(
-                ChatErrorCode::AssessmentItem,
-                "memory cannot hold assessment questions",
-            ));
-        }
-        let id = uuid::Uuid::new_v4().to_string();
-        store::add_memory(conn, &id, kind, &content, &now()).map_err(|e| e.to_string())
+        add_memory(conn, &kind, &content)
     })
     .await
+}
+
+pub(crate) fn add_memory(
+    conn: &Connection,
+    kind: &str,
+    content: &str,
+) -> Result<store::MemoryItem, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    let kind = memory::Kind::parse(kind)
+        .ok_or_else(|| refuse(ChatErrorCode::InvalidInput, "unknown memory kind"))?;
+    if bank_guard::matches_assessment_item(conn, content) {
+        return Err(refuse(
+            ChatErrorCode::AssessmentItem,
+            "memory cannot hold assessment questions",
+        ));
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    store::add_memory(conn, &id, kind, content, &now()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -810,19 +708,24 @@ pub async fn chat_approve_memory(
     content: Option<String>,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.approve-memory", move |conn| {
-        if content
-            .as_deref()
-            .is_some_and(|c| bank_guard::matches_assessment_item(conn, c))
-        {
-            return Err(refuse(
-                ChatErrorCode::AssessmentItem,
-                "memory cannot hold assessment questions",
-            ));
-        }
-        store::approve_memory(conn, &memory_id, content.as_deref(), &now())
-            .map_err(|e| e.to_string())
+        approve_memory(conn, &memory_id, content.as_deref())
     })
     .await
+}
+
+pub(crate) fn approve_memory(
+    conn: &Connection,
+    memory_id: &str,
+    content: Option<&str>,
+) -> Result<store::MemoryItem, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    if content.is_some_and(|c| bank_guard::matches_assessment_item(conn, c)) {
+        return Err(refuse(
+            ChatErrorCode::AssessmentItem,
+            "memory cannot hold assessment questions",
+        ));
+    }
+    store::approve_memory(conn, memory_id, content, &now()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -833,19 +736,25 @@ pub async fn chat_update_memory(
     active: Option<bool>,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.update-memory", move |conn| {
-        if content
-            .as_deref()
-            .is_some_and(|c| bank_guard::matches_assessment_item(conn, c))
-        {
-            return Err(refuse(
-                ChatErrorCode::AssessmentItem,
-                "memory cannot hold assessment questions",
-            ));
-        }
-        store::update_memory(conn, &memory_id, content.as_deref(), active, &now())
-            .map_err(|e| e.to_string())
+        update_memory(conn, &memory_id, content.as_deref(), active)
     })
     .await
+}
+
+pub(crate) fn update_memory(
+    conn: &Connection,
+    memory_id: &str,
+    content: Option<&str>,
+    active: Option<bool>,
+) -> Result<store::MemoryItem, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    if content.is_some_and(|c| bank_guard::matches_assessment_item(conn, c)) {
+        return Err(refuse(
+            ChatErrorCode::AssessmentItem,
+            "memory cannot hold assessment questions",
+        ));
+    }
+    store::update_memory(conn, memory_id, content, active, &now()).map_err(|e| e.to_string())
 }
 
 /// Forgets an item or dismisses a suggestion.
@@ -855,9 +764,14 @@ pub async fn chat_forget_memory(
     memory_id: String,
 ) -> Result<(), String> {
     with_conn(&state, "chat.forget-memory", move |conn| {
-        store::forget_memory(conn, &memory_id).map_err(|e| e.to_string())
+        forget_memory(conn, &memory_id)
     })
     .await
+}
+
+pub(crate) fn forget_memory(conn: &Connection, memory_id: &str) -> Result<(), String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::forget_memory(conn, memory_id).map_err(|e| e.to_string())
 }
 
 /// Saves a finished answer as a note.
@@ -878,6 +792,7 @@ pub(crate) fn save_note(
     message_id: &str,
     title: &str,
 ) -> Result<store::Artifact, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
     let origin = store::message(conn, message_id).map_err(|e| e.to_string())?;
     if bank_guard::matches_assessment_item(conn, &origin.content) {
         return Err(refuse(
@@ -947,9 +862,14 @@ pub async fn chat_delete_artifact(
     artifact_id: String,
 ) -> Result<(), String> {
     with_conn(&state, "chat.delete-artifact", move |conn| {
-        store::delete_artifact(conn, &artifact_id).map_err(|e| e.to_string())
+        delete_artifact(conn, &artifact_id)
     })
     .await
+}
+
+pub(crate) fn delete_artifact(conn: &Connection, artifact_id: &str) -> Result<(), String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::delete_artifact(conn, artifact_id).map_err(|e| e.to_string())
 }
 
 /// Every saved note and flashcard set, newest first.
@@ -957,18 +877,21 @@ pub async fn chat_delete_artifact(
 pub async fn chat_list_artifacts(
     state: State<'_, AppState>,
 ) -> Result<Vec<store::Artifact>, String> {
-    with_conn(&state, "chat.list-artifacts", move |conn| {
-        store::saved_artifacts(conn).map_err(|e| e.to_string())
-    })
-    .await
+    with_conn(&state, "chat.list-artifacts", saved_artifacts).await
+}
+
+/// Saved notes and flashcards hold model-written text, so, like a thread's
+/// contents, they are refused during an attempt without a flag.
+pub(crate) fn saved_artifacts(conn: &Connection) -> Result<Vec<store::Artifact>, String> {
+    ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
+    store::saved_artifacts(conn).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ai_chat::turn::fixtures::*;
-    use alexandria_studio::model::StudioDocument;
-    use chrono::Datelike;
+    use crate::db::Database;
 
     #[test]
     fn assessments_can_never_be_attached() {
@@ -983,196 +906,188 @@ mod tests {
         assert!(store::bindings(&conn, "t").unwrap().is_empty());
     }
 
-    /// Sets the profile's birthdate `years` years and a day before today.
-    fn born_years_ago(conn: &Connection, years: i32) {
-        let today = chrono::Utc::now().date_naive();
-        let born = chrono::NaiveDate::from_ymd_opt(today.year() - years, today.month(), 1).unwrap()
-            - chrono::Duration::days(1);
-        conn.execute(
-            "UPDATE local_identity SET birthdate = ?1",
-            [born.format("%Y-%m-%d").to_string()],
-        )
-        .unwrap();
-    }
-
-    fn link_guardian(conn: &Connection) {
-        conn.execute(
-            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
-             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
-            [],
-        )
-        .unwrap();
+    /// Every chat command that reads a thread's contents or changes chat
+    /// state is refused during an attempt. Those only the open panel sends
+    /// are also flagged; reads the app may send by itself as the attempt
+    /// starts are not. Status, thread and approval lists, drafts, memory
+    /// listing and cancelling a run stay open.
+    #[test]
+    fn every_chat_command_that_touches_a_thread_is_refused_during_an_attempt() {
+        let db = Database::open_in_memory().unwrap();
+        seed(db.conn());
+        let conn = db.conn();
+        thread(conn);
+        let before = store::thread(conn, "t").unwrap();
+        let runtime = ChatRuntime::default();
+        type Call<'a> = Box<dyn Fn() -> Result<(), String> + 'a>;
+        let commands: Vec<(&str, bool, Call)> = vec![
+            (
+                "chat_create_thread",
+                false,
+                Box::new(|| create_thread(conn, Some("c1"), None).map(drop)),
+            ),
+            (
+                "chat_get_thread",
+                false,
+                Box::new(|| thread_detail(conn, &runtime, "t").map(drop)),
+            ),
+            (
+                "chat_search_threads",
+                false,
+                Box::new(|| search_threads(conn, "probability").map(drop)),
+            ),
+            (
+                "chat_rename_thread",
+                false,
+                Box::new(|| rename_thread(conn, "t", "Renamed").map(drop)),
+            ),
+            (
+                "chat_set_thread_model",
+                false,
+                Box::new(|| set_thread_model(conn, "t", Some("c1"), None).map(drop)),
+            ),
+            (
+                "chat_set_thread_mode",
+                false,
+                Box::new(|| set_thread_mode(conn, "t", "practice").map(drop)),
+            ),
+            (
+                "chat_delete_thread",
+                false,
+                Box::new(|| delete_thread(conn, &runtime, "t")),
+            ),
+            (
+                "chat_attach_lesson",
+                false,
+                Box::new(|| attach(conn, "t", "course", "lesson").map(drop)),
+            ),
+            (
+                "chat_attach_goal",
+                false,
+                Box::new(|| attach_goal(conn, "t", "g1").map(drop)),
+            ),
+            (
+                "chat_detach",
+                false,
+                Box::new(|| detach(conn, "t", "binding")),
+            ),
+            (
+                "chat_list_models",
+                false,
+                Box::new(|| models_source(conn, "c1").map(drop)),
+            ),
+            (
+                "chat_request_guardian_approval",
+                false,
+                Box::new(|| request_approval(conn, "c1").map(drop)),
+            ),
+            (
+                "chat_prepare_message",
+                true,
+                Box::new(|| prepare(conn, "Hello").map(drop)),
+            ),
+            (
+                "chat_practice_attempt",
+                true,
+                Box::new(|| practice_attempt(conn, "item", "42").map(drop)),
+            ),
+            (
+                "chat_practice_hint",
+                true,
+                Box::new(|| practice_hint(conn, "item").map(drop)),
+            ),
+            (
+                "chat_practice_reveal",
+                true,
+                Box::new(|| practice_reveal(conn, "item").map(drop)),
+            ),
+            (
+                "chat_add_memory",
+                false,
+                Box::new(|| add_memory(conn, "preference", "Short answers").map(drop)),
+            ),
+            (
+                "chat_approve_memory",
+                false,
+                Box::new(|| approve_memory(conn, "memory", None).map(drop)),
+            ),
+            (
+                "chat_update_memory",
+                false,
+                Box::new(|| update_memory(conn, "memory", None, Some(false)).map(drop)),
+            ),
+            (
+                "chat_forget_memory",
+                false,
+                Box::new(|| forget_memory(conn, "memory")),
+            ),
+            (
+                "chat_save_note",
+                false,
+                Box::new(|| save_note(conn, "message", "Note").map(drop)),
+            ),
+            (
+                "chat_save_course_note",
+                false,
+                Box::new(|| {
+                    crate::commands::course_notes::save_from_chat(conn, "artifact").map(drop)
+                }),
+            ),
+            (
+                "chat_allow_action",
+                true,
+                Box::new(|| action::allow(&db, "artifact", None, &now()).map(drop)),
+            ),
+            (
+                "chat_decline_action",
+                false,
+                Box::new(|| action::decline(&db, "artifact", &now()).map(drop)),
+            ),
+            (
+                "chat_delete_artifact",
+                false,
+                Box::new(|| delete_artifact(conn, "artifact")),
+            ),
+            (
+                "chat_list_artifacts",
+                false,
+                Box::new(|| saved_artifacts(conn).map(drop)),
+            ),
+        ];
+        for (name, flags, call) in &commands {
+            attempt(conn, name);
+            let Err(err) = call() else {
+                panic!("{name} is not refused during an attempt");
+            };
+            assert!(err.starts_with("assessment_active"), "{name}: {err}");
+            assert_eq!(flagged(conn, name), *flags, "{name}");
+        }
+        let after = store::thread(conn, "t").unwrap();
+        assert_eq!(
+            (after.title, after.mode, after.connection_id),
+            (before.title, before.mode, before.connection_id),
+            "nothing changed"
+        );
+        // chat_start_run begins through the turn, which the turn's tests cover.
     }
 
     #[test]
-    fn under_13_learners_use_local_models_only_whatever_a_guardian_approves() {
+    fn listing_models_never_reaches_a_provider_the_learner_may_not_connect() {
         let conn = db();
-        thread(&conn);
-        born_years_ago(&conn, 11);
-        link_guardian(&conn);
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "device"
-        );
-        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
-        assert!(request_approval(&conn, "c1")
-            .unwrap_err()
-            .starts_with("under_13"));
-        conn.execute(
-            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
-             VALUES ('a', 'c1', 'Ollama', 'https://api.openai.com/v1', 'm', 'approved', '2026-10-24T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        assert!(prepare(&conn, "Hello").unwrap_err().starts_with("under_13"));
-        connection(
-            &conn,
-            "c1",
-            "private_network",
-            "http://192.168.1.40:1234/v1",
-            None,
-        );
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "private_network"
-        );
-    }
-
-    #[test]
-    fn vendors_with_an_18_plus_floor_are_refused_for_minors_and_allowed_for_adults() {
-        let conn = db();
-        thread(&conn);
-        let gemini = "https://generativelanguage.googleapis.com/v1beta/openai";
-        connection(&conn, "c1", "cloud", gemini, None);
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "remote"
-        );
+        connection(&conn, "c1", "cloud", "https://openrouter.ai/api/v1", None);
+        assert!(models_source(&conn, "c1").is_ok());
         born_years_ago(&conn, 16);
-        link_guardian(&conn);
-        assert!(request_approval(&conn, "c1")
-            .unwrap_err()
-            .starts_with("adults_only"));
-        conn.execute(
-            "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
-             VALUES ('a', 'c1', 'Ollama', ?1, 'm', 'approved', '2026-10-24T00:00:00Z')",
-            [gemini],
-        )
-        .unwrap();
-        let err = prepare(&conn, "Hello").unwrap_err();
-        assert!(
-            err.starts_with("adults_only") && err.contains("Gemini"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn consumer_sign_ins_are_never_stored_or_used() {
-        let conn = db();
-        let doc = |endpoint: &str| StudioDocument {
-            id: "c2".into(),
-            revision: 0,
-            value: StudioConnection {
-                id: "c2".into(),
-                name: "Mine".into(),
-                endpoint: endpoint.into(),
-                model: "m".into(),
-                location: "cloud".into(),
-                capability: "text".into(),
-                enabled: true,
-                has_key: false,
-                context_tokens: None,
-                protocol: Default::default(),
-                auth: Default::default(),
-            },
-        };
-        let err = studio_store::save_connection(
-            &conn,
-            &doc("https://api.anthropic.com/v1"),
-            Some("sk-ant-oat01-x"),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("subscription sign-in token"), "{err}");
-        assert!(
-            studio_store::connection(&conn, "c2").is_err(),
-            "nothing saved"
-        );
-        let err = studio_store::save_connection(
-            &conn,
-            &doc("https://chatgpt.com/backend-api/codex"),
-            Some("k"),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("consumer app"), "{err}");
-        studio_store::save_connection(
-            &conn,
-            &doc("https://api.anthropic.com/v1"),
-            Some("sk-ant-api03-x"),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn minors_need_a_guardians_approval_for_remote_models_at_that_endpoint() {
-        let conn = db();
-        thread(&conn);
-        born_years_ago(&conn, 15);
-        prepare(&conn, "Hello").unwrap();
+        let err = models_source(&conn, "c1").unwrap_err();
+        assert!(err.starts_with("adults_only"), "{err}");
         connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_required"));
-        // Asking needs a linked guardian.
-        assert!(request_approval(&conn, "c1")
-            .unwrap_err()
-            .starts_with("no_guardian"));
-        conn.execute(
-            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status)
-             VALUES ('link', 'ward', 'did:key:zParent', zeroblob(32), 'active')",
-            [],
-        )
-        .unwrap();
-        let asked = request_approval(&conn, "c1").unwrap();
-        assert_eq!(asked.status, "pending");
-        assert_eq!(
-            request_approval(&conn, "c1").unwrap().id,
-            asked.id,
-            "no duplicate request"
+        assert!(
+            models_source(&conn, "c1").is_ok(),
+            "approval is for sending"
         );
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_pending"));
-        conn.execute("UPDATE ai_connection_approvals SET status = 'approved'", [])
-            .unwrap();
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "remote"
-        );
-        // A different endpoint is a different approval.
-        connection(&conn, "c1", "cloud", "https://api.anthropic.com/v1", None);
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_required"));
-        // Models on the learner's own network never need approval.
-        connection(
-            &conn,
-            "c1",
-            "private_network",
-            "http://192.168.1.40:1234/v1",
-            None,
-        );
-        assert_eq!(
-            prepare(&conn, "Hello").unwrap().destination.location,
-            "private_network"
-        );
-        // A declined request says so.
-        connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
-        conn.execute("UPDATE ai_connection_approvals SET status = 'declined'", [])
-            .unwrap();
-        assert!(prepare(&conn, "Hello")
-            .unwrap_err()
-            .starts_with("guardian_declined"));
+        born_years_ago(&conn, 12);
+        let err = models_source(&conn, "c1").unwrap_err();
+        assert!(err.starts_with("under_13"), "{err}");
+        connection(&conn, "c1", "local", "http://127.0.0.1:11434/v1", None);
+        assert!(models_source(&conn, "c1").is_ok());
     }
 }

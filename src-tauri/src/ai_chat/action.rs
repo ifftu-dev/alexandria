@@ -21,8 +21,9 @@
 
 use super::artifact::Body;
 use super::store::{self, Artifact};
-use super::vocab::{refuse, ChatErrorCode};
+use super::vocab::{refuse, refused, ChatErrorCode};
 use super::{bank_guard, goal};
+use crate::ai_access::{self, Surface};
 use crate::db::Database;
 
 /// What allowing a proposal did.
@@ -41,7 +42,7 @@ pub fn allow(
     now: &str,
 ) -> Result<Allowed, String> {
     let conn = db.conn();
-    alexandria_studio::gate::require_no_assessment(conn).map_err(|e| e.to_string())?;
+    ai_access::no_attempt_in_progress(conn, Surface::ChatModel).map_err(refused)?;
     let item = store::artifact(conn, artifact_id).map_err(|e| e.to_string())?;
     match item.status.as_str() {
         "proposed" => {}
@@ -132,6 +133,7 @@ fn enroll(db: &Database, course_id: &str) -> Result<(), String> {
 
 /// Records that the learner declined a proposal.
 pub fn decline(db: &Database, artifact_id: &str, now: &str) -> Result<Artifact, String> {
+    ai_access::no_attempt_in_progress(db.conn(), Surface::ChatState).map_err(refused)?;
     store::decline_artifact(db.conn(), artifact_id, now).map_err(|e| e.to_string())
 }
 

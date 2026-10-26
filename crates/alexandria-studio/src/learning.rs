@@ -235,6 +235,11 @@ pub struct LessonTarget {
 }
 
 impl LessonTarget {
+    /// The body stored inline in the profile database, if any.
+    pub fn inline(&self) -> Option<&str> {
+        self.inline.as_deref()
+    }
+
     /// The content blob to fetch before rendering, when the body is not inline.
     pub fn blob(&self) -> Option<&str> {
         match content_kind(&self.element_type) {
@@ -245,6 +250,26 @@ impl LessonTarget {
 }
 
 pub fn lesson_target(conn: &Connection, course_id: &str, element_id: &str) -> Result<LessonTarget> {
+    target(conn, course_id, element_id, VISIBLE)
+}
+
+/// An element of `course_id` whatever the course's status or author, for a
+/// caller that has already decided the learner may read the course (the
+/// lesson tutor: a course the learner takes or wrote).
+pub(crate) fn course_lesson(
+    conn: &Connection,
+    course_id: &str,
+    element_id: &str,
+) -> Result<LessonTarget> {
+    target(conn, course_id, element_id, "1 = 1")
+}
+
+fn target(
+    conn: &Connection,
+    course_id: &str,
+    element_id: &str,
+    visible: &str,
+) -> Result<LessonTarget> {
     bounded_id(course_id)?;
     bounded_id(element_id)?;
     conn.query_row(
@@ -253,7 +278,7 @@ pub fn lesson_target(conn: &Connection, course_id: &str, element_id: &str) -> Re
              FROM course_elements e
              JOIN course_chapters ch ON ch.id = e.chapter_id
              JOIN courses c ON c.id = ch.course_id
-             WHERE e.id = ?1 AND ch.course_id = ?2 AND {VISIBLE}"
+             WHERE e.id = ?1 AND ch.course_id = ?2 AND {visible}"
         ),
         params![element_id, course_id],
         |r| {
