@@ -735,7 +735,7 @@ mod tests {
                 id: id.into(),
                 name: "Mine".into(),
                 model: "m".into(),
-                ..crate::commands::ai_signin::sign_in_target(endpoint)
+                ..crate::ai_auth::sign_in_target(endpoint)
             },
         };
         born_years_ago(&conn, 16);

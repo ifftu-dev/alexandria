@@ -22,11 +22,32 @@ pub mod openrouter;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use alexandria_ai::Protocol;
+use alexandria_studio::model::{ConnectionAuth, StudioConnection};
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
+
+/// The connection a sign-in to `api_base` creates, before it has a model or
+/// a key: a remote text connection. The age rules are checked against it
+/// before the browser opens, and the saved connection is built from it.
+pub fn sign_in_target(api_base: &str) -> StudioConnection {
+    StudioConnection {
+        id: String::new(),
+        name: String::new(),
+        endpoint: api_base.into(),
+        model: String::new(),
+        location: "cloud".into(),
+        capability: "text".into(),
+        enabled: true,
+        has_key: true,
+        context_tokens: None,
+        protocol: Protocol::default(),
+        auth: ConnectionAuth::default(),
+    }
+}
 
 /// How long a sign-in waits for the browser before giving up.
 pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
