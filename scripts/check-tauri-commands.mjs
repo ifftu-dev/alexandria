@@ -15,6 +15,8 @@
 //   - the generated frontend command-name union is stale                   -> drift
 //   - the generated chat vocabulary (src/generated/chat-vocab.ts) is stale   -> drift
 //   - a security-sensitive retired command is restored anywhere            -> regression
+//   - a Rust module outside src-tauri/src/commands (other than lib.rs)
+//     imports the commands layer                                          -> direction
 //
 // Run from the alexandria/ directory (see package.json "check:tauri-commands").
 
@@ -324,6 +326,45 @@ for (const command of unscoped) {
     failures.push(`Invalid or unexplained profile-scope exemption: ${command}.`);
   }
 }
+// --- dependency direction -------------------------------------------------
+// Commands depend on the modules below them, never the reverse: no Rust
+// module outside src-tauri/src/commands may name the commands layer.
+// Behaviour another module needs moves into the module named for it.
+// lib.rs is exempt: it registers the commands and runs the background tasks
+// that call them. Comments are blanked first (keeping line numbers), so docs
+// may point at a command. This is a text check, not name resolution.
+const backendRoot = "src-tauri/src";
+const commandsLayer = /\bcommands\s*::|\bcrate\s*::\s*commands\b|\bcrate\s*::\s*\{[^}]*\bcommands\b/g;
+
+function walkRust(dir, out) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkRust(full, out);
+    else if (entry.name.endsWith(".rs")) out.push(full);
+  }
+}
+
+function blankComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "))
+    .replace(/\/\/[^\n]*/g, "");
+}
+
+const rustFiles = [];
+walkRust(path.join(root, backendRoot), rustFiles);
+for (const file of rustFiles) {
+  const rel = path.relative(root, file).split(path.sep).join("/");
+  if (rel === `${backendRoot}/lib.rs` || rel.startsWith(`${backendRoot}/commands/`)) continue;
+  const code = blankComments(readText(rel));
+  for (const match of code.matchAll(commandsLayer)) {
+    const line = code.slice(0, match.index).split("\n").length;
+    failures.push(
+      `A module outside the commands layer imports the commands layer: ${rel}:${line}. ` +
+        "Move what it needs into the module that owns it and have the command call that.",
+    );
+  }
+}
+
 const frontendFiles = [];
 walk(path.join(root, "src"), frontendFiles);
 for (const file of frontendFiles) {

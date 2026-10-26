@@ -1,7 +1,8 @@
 //! Tauri commands: the adapter between the webview and the app's modules.
 //!
 //! Commands depend on the modules below them and never the other way round:
-//! a module outside `commands` must not import from here. Behaviour another
+//! a module outside `commands` must not import from here (the command guard,
+//! `scripts/check-tauri-commands.mjs`, fails if one does). Behaviour another
 //! module needs belongs in the module named for it, with the command as a
 //! thin wrapper over it. `lib.rs` is the one exception, because it registers
 //! the commands and runs the background tasks.
