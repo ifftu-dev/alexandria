@@ -15,7 +15,10 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         profile_manager: Arc::new(ProfileManager::open(directory).expect("profile manager")),
         active: Arc::new(std::sync::RwLock::new(None)),
         profile_operations: super::operations::ProfileOperations::default(),
-        tutoring: Arc::new(TutoringManager::new()),
+        tutoring: Arc::new(TutoringManager::new(
+            crate::tutoring::PlatformMedia::new(),
+            crate::tutoring::events::RecordedEvents::default(),
+        )),
         classroom: Arc::new(ClassroomManager::new()),
         studio: Arc::new(crate::commands::studio::StudioRuntime::default()),
         ai_chat: Arc::new(crate::ai_chat::ChatRuntime::default()),

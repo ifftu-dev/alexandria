@@ -58,9 +58,11 @@ test("removing a backend command lease fails the guard", () => {
 });
 
 test("mobile-only scope regressions are checked on desktop", () => {
-  const result = runGuard({ "src-tauri/src/commands/tutoring_mobile.rs": removeLease });
+  // classroom.rs carries `#[cfg(not(desktop))]` call stubs that a desktop
+  // build never compiles; the guard reads the source, so they are checked too.
+  const result = runGuard({ "src-tauri/src/commands/classroom.rs": removeLease });
   assert.equal(result.exitCode, 1);
-  assert.match(result.output, /Profile scope mismatch: tutoring_mobile.rs::/);
+  assert.match(result.output, /Profile scope mismatch: classroom.rs::/);
 });
 
 test("new unexplained exemptions fail the guard", () => {

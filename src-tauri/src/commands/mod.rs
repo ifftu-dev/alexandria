@@ -67,16 +67,7 @@ pub mod ratelimit;
 pub mod storage;
 pub mod sync;
 
-#[cfg(any(desktop, target_os = "android"))]
 pub mod tutoring;
-
-#[cfg(target_os = "ios")]
-pub mod tutoring_mobile;
-#[cfg(target_os = "ios")]
-pub use tutoring_mobile as tutoring;
-
-#[cfg(not(any(desktop, target_os = "ios", target_os = "android")))]
-pub mod tutoring_stubs;
 
 pub mod ai_chat;
 pub mod ai_signin;

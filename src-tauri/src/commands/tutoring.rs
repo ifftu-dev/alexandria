@@ -1,94 +1,22 @@
-//! Tauri commands for live tutoring sessions.
+//! Tauri commands for live calls, on every platform.
 //!
-//! All commands operate through the `TutoringManager` in `AppState`.
-//! Room creation/joining requires the iroh content node to be running
-//! (it provides the shared QUIC endpoint, gossip, and live instances).
+//! All commands operate through the `TutoringManager` in `AppState`. Room
+//! creation/joining requires the iroh content node to be running (it
+//! provides the shared QUIC endpoint, gossip, and live instances). What a
+//! platform cannot do (share a screen, switch cameras, change the audio
+//! route mid-call) the manager refuses with a message for the learner.
 
 use crate::profile::scope::ProfileState as State;
 use crate::tutoring::call_kind::CallKind;
-use live::media::audio::AudioBackend;
+pub use crate::tutoring::manager::{DeviceCheckResult, DeviceList};
+use crate::tutoring::manager::{Network, RoomRequest};
+use crate::tutoring::media::DeviceSelection;
+use crate::tutoring::records::ProfileRecords;
 use rusqlite::params;
 use serde::Serialize;
-use tauri::AppHandle;
 
 use crate::db::executor::DatabaseWorkload;
-use crate::tutoring::manager::DeviceSelection;
 use crate::AppState;
-
-const VIDEO_DISABLED_ERROR: &str = "video support is disabled in this build";
-
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-async fn detect_camera() -> (bool, Option<String>) {
-    use live::media::capture::CameraCapturer;
-
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(CameraCapturer::list_cameras),
-    )
-    .await
-    {
-        Ok(Ok(Ok(cameras))) => {
-            let name = cameras.first().map(|(_, n)| n.clone());
-            (!cameras.is_empty(), name)
-        }
-        _ => (false, None),
-    }
-}
-
-#[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
-async fn detect_camera() -> (bool, Option<String>) {
-    (false, None)
-}
-
-#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-async fn list_cameras() -> Vec<CameraDeviceInfo> {
-    use live::media::capture::CameraCapturer;
-
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(CameraCapturer::list_cameras),
-    )
-    .await
-    {
-        Ok(Ok(Ok(cams))) => cams
-            .into_iter()
-            .map(|(idx, name)| CameraDeviceInfo {
-                index: format!("{idx:?}"),
-                name,
-            })
-            .collect(),
-        Ok(Ok(Err(e))) => {
-            log::warn!("tutoring: camera enumeration failed: {e}");
-            Vec::new()
-        }
-        Ok(Err(e)) => {
-            log::warn!("tutoring: camera enumeration task panicked: {e}");
-            Vec::new()
-        }
-        Err(_) => {
-            log::warn!("tutoring: camera enumeration timed out (5s) — may need camera permission");
-            Vec::new()
-        }
-    }
-}
-
-#[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
-async fn list_cameras() -> Vec<CameraDeviceInfo> {
-    Vec::new()
-}
-
-/// Result of a pre-join device availability check.
-#[derive(Debug, Clone, Serialize)]
-pub struct DeviceCheckResult {
-    /// Whether at least one camera was found.
-    pub has_camera: bool,
-    /// Name of the first camera (e.g. "FaceTime HD Camera").
-    pub camera_name: Option<String>,
-    /// Whether the audio backend initialized successfully.
-    pub has_audio: bool,
-    /// Error message if something failed (informational).
-    pub error: Option<String>,
-}
 
 /// Summary of a tutoring session from the database.
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +33,30 @@ pub struct TutoringSessionInfo {
     pub context_id: Option<String>,
 }
 
+/// The unlocked profile's database, for a call's session rows.
+pub(crate) fn records(state: &State<'_, AppState>) -> ProfileRecords {
+    ProfileRecords {
+        executor: state.db_executor.clone(),
+        lease: state.profile_lease(),
+    }
+}
+
+/// The iroh node a call rides on.
+pub(crate) async fn network(state: &State<'_, AppState>) -> Result<Network, String> {
+    let content_node = &state.content_node;
+    let endpoint = content_node
+        .endpoint()
+        .await
+        .ok_or("iroh node not running")?;
+    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
+    let live = content_node.live().await.ok_or("live not available")?;
+    Ok(Network {
+        endpoint,
+        gossip,
+        live,
+    })
+}
+
 /// Create a new tutoring room (host).
 ///
 /// Starts camera + mic capture, creates a gossip topic, and returns
@@ -119,77 +71,31 @@ pub async fn tutoring_create_room(
     speaker_id: Option<String>,
     kind: Option<String>,
     context_id: Option<String>,
-    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
     let kind = CallKind::parse(kind.as_deref())?;
     // Same gate as join: the host opens the same devices.
     crate::av_permissions::ensure_camera_and_microphone().await?;
     log::info!("[cmd] tutoring_create_room: start");
-    let content_node = &state.content_node;
-
-    let endpoint = content_node
-        .endpoint()
-        .await
-        .ok_or("iroh node not running")?;
-    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
-    let live = content_node.live().await.ok_or("live not available")?;
-
-    log::info!("[cmd] tutoring_create_room: got endpoint/gossip/live, calling create_room...");
+    let network = network(&state).await?;
     let session_id = uuid::Uuid::new_v4().to_string();
-    let name = display_name.unwrap_or_else(|| title.clone());
-
-    let devices = DeviceSelection {
-        camera_index: camera_id,
-        mic_device_id: mic_id,
-        speaker_device_id: speaker_id,
+    let request = RoomRequest {
+        session_id: session_id.clone(),
+        title: title.clone(),
+        display_name: display_name.unwrap_or_else(|| title.clone()),
+        kind,
+        context_id: context_id.clone(),
+        devices: DeviceSelection {
+            camera_index: camera_id,
+            mic_device_id: mic_id,
+            speaker_device_id: speaker_id,
+        },
+        classroom_call: None,
     };
-
     let ticket = state
         .tutoring
-        .create_room(
-            session_id.clone(),
-            title.clone(),
-            name,
-            &endpoint,
-            gossip,
-            live,
-            app,
-            devices,
-        )
+        .create_room(request, network, &records(&state))
         .await?;
-
-    log::info!("[cmd] tutoring_create_room: create_room returned, inserting into DB...");
-    // Persist to database after the media/network work has completed.
-    let persisted_session_id = session_id.clone();
-    let persisted_title = title.clone();
-    let persisted_ticket = ticket.clone();
-    let persisted_context = context_id.clone();
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "tutoring.create.persist-session",
-            move |db| {
-                crate::tutoring::call_kind::record_session(
-                    db.conn(),
-                    &persisted_session_id,
-                    &persisted_title,
-                    &persisted_ticket,
-                    kind,
-                    persisted_context.as_deref(),
-                )?;
-                crate::tutoring::presence::register(
-                    db.conn(),
-                    &persisted_session_id,
-                    &persisted_ticket,
-                )?;
-                Ok(())
-            },
-        )
-        .await?;
-
     log::info!("[cmd] tutoring_create_room: done, returning to frontend");
     Ok(TutoringSessionInfo {
         id: session_id,
@@ -215,91 +121,39 @@ pub async fn tutoring_join_room(
     speaker_id: Option<String>,
     kind: Option<String>,
     context_id: Option<String>,
-    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
     let kind = CallKind::parse(kind.as_deref())?;
-    let join_ticket = ticket.clone();
+    let records = records(&state);
     state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "tutoring.join.check-kind",
-            move |db| crate::tutoring::call_kind::check_join_kind(db.conn(), &join_ticket, kind),
-        )
+        .tutoring
+        .check_join_kind(&records, &ticket, kind)
         .await?;
     crate::tutoring::presence::check_join(&state, &ticket).await?;
     log::info!("[cmd] tutoring_join_room: start");
     // First consumption of the camera and microphone on this path: ask now,
     // not at app launch, and refuse cleanly rather than abort inside cpal.
     crate::av_permissions::ensure_camera_and_microphone().await?;
-    let content_node = &state.content_node;
-
-    let endpoint = content_node
-        .endpoint()
-        .await
-        .ok_or("iroh node not running")?;
-    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
-    let live = content_node.live().await.ok_or("live not available")?;
-
-    log::info!("[cmd] tutoring_join_room: got endpoint/gossip/live, calling join_room...");
+    let network = network(&state).await?;
     let session_id = uuid::Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "Joined session".into());
-    let name = display_name.unwrap_or_else(|| title.clone());
-
-    let devices = DeviceSelection {
-        camera_index: camera_id,
-        mic_device_id: mic_id,
-        speaker_device_id: speaker_id,
+    let request = RoomRequest {
+        session_id: session_id.clone(),
+        title: title.clone(),
+        display_name: display_name.unwrap_or_else(|| title.clone()),
+        kind,
+        context_id: context_id.clone(),
+        devices: DeviceSelection {
+            camera_index: camera_id,
+            mic_device_id: mic_id,
+            speaker_device_id: speaker_id,
+        },
+        classroom_call: None,
     };
-
     let resolved_ticket = state
         .tutoring
-        .join_room(
-            session_id.clone(),
-            title.clone(),
-            name,
-            &ticket,
-            &endpoint,
-            gossip,
-            live,
-            app,
-            devices,
-        )
+        .join_room(request, &ticket, network, &records)
         .await?;
-
-    log::info!("[cmd] tutoring_join_room: join_room returned, inserting into DB...");
-    // Persist to database after the media/network work has completed.
-    let persisted_session_id = session_id.clone();
-    let persisted_title = title.clone();
-    let persisted_ticket = resolved_ticket.clone();
-    let persisted_context = context_id.clone();
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "tutoring.join.persist-session",
-            move |db| {
-                crate::tutoring::call_kind::record_session(
-                    db.conn(),
-                    &persisted_session_id,
-                    &persisted_title,
-                    &persisted_ticket,
-                    kind,
-                    persisted_context.as_deref(),
-                )?;
-                crate::tutoring::presence::register(
-                    db.conn(),
-                    &persisted_session_id,
-                    &persisted_ticket,
-                )?;
-                Ok(())
-            },
-        )
-        .await?;
-
     log::info!("[cmd] tutoring_join_room: done, returning to frontend");
     Ok(TutoringSessionInfo {
         id: session_id,
@@ -316,33 +170,7 @@ pub async fn tutoring_join_room(
 /// Leave the current tutoring room.
 #[tauri::command]
 pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), String> {
-    // Get session ID before leaving
-    let session_id = state.tutoring.status().await.map(|s| s.session_id);
-
-    state.tutoring.leave_room().await?;
-
-    // Update database
-    if let Some(id) = session_id {
-        state
-            .db_executor
-            .execute(
-                DatabaseWorkload::Learner,
-                state.profile_lease(),
-                "tutoring.leave.persist-session",
-                move |db| {
-                    db.conn()
-                        .execute(
-                            "UPDATE tutoring_sessions SET last_occupied_at = unixepoch() WHERE id = ?1",
-                            params![id],
-                        )
-                        .map_err(|e| e.to_string())?;
-                    Ok(())
-                },
-            )
-            .await?;
-    }
-
-    Ok(())
+    state.tutoring.leave_room(&records(&state)).await
 }
 
 /// Toggle camera on/off.
@@ -373,13 +201,15 @@ pub async fn tutoring_set_camera(
     state.tutoring.set_camera(camera_id).await
 }
 
+/// Move the call's audio to other devices, where the platform allows it
+/// mid-call.
 #[tauri::command]
 pub async fn tutoring_set_audio_devices(
-    _mic_id: Option<String>,
-    _speaker_id: Option<String>,
-    _state: State<'_, AppState>,
+    mic_id: Option<String>,
+    speaker_id: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    Err("Changing audio devices during a live tutoring session is currently supported on iPhone and iPad only".into())
+    state.tutoring.set_audio_devices(mic_id, speaker_id).await
 }
 
 /// Toggle screen sharing on/off.
@@ -446,7 +276,7 @@ pub async fn tutoring_list_sessions(
                     .map_err(|e| e.to_string())?;
 
                 let sessions = stmt
-                    .query_map([], |row| {
+                    .query_map(params![], |row| {
                         Ok(TutoringSessionInfo {
                             id: row.get(0)?,
                             title: row.get(1)?,
@@ -471,105 +301,20 @@ pub async fn tutoring_list_sessions(
 /// Check device availability (camera + audio) before joining a session.
 ///
 /// Uses lightweight enumeration only — does NOT start audio streams or
-/// camera capture. Camera check runs on a blocking thread with timeout.
+/// camera capture.
 #[tauri::command]
-pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
-    // Check audio via cpal device enumeration (no streams started)
-    let has_audio = !AudioBackend::list_input_devices().is_empty();
-    let (has_camera, camera_name) = detect_camera().await;
-
-    Ok(DeviceCheckResult {
-        has_camera,
-        camera_name,
-        has_audio,
-        error: if cfg!(any(
-            feature = "tutoring-video",
-            feature = "tutoring-video-static"
-        )) {
-            None
-        } else {
-            Some(VIDEO_DISABLED_ERROR.into())
-        },
-    })
-}
-
-// ── Device listing & audio levels ─────────────────────────────────
-
-/// Info about an available audio device.
-#[derive(Debug, Clone, Serialize)]
-pub struct AudioDeviceInfo {
-    /// Device ID string (stable across restarts, can be passed back for selection).
-    pub id: String,
-    /// Human-readable name.
-    pub name: Option<String>,
-    /// Whether this is the system default device.
-    pub is_default: bool,
-}
-
-/// Info about an available camera.
-#[derive(Debug, Clone, Serialize)]
-pub struct CameraDeviceInfo {
-    /// Camera index (numeric or string key).
-    pub index: String,
-    /// Human-readable name.
-    pub name: String,
-}
-
-/// Available devices for audio and video.
-#[derive(Debug, Clone, Serialize)]
-pub struct DeviceList {
-    pub audio_inputs: Vec<AudioDeviceInfo>,
-    pub audio_outputs: Vec<AudioDeviceInfo>,
-    pub cameras: Vec<CameraDeviceInfo>,
-    pub selected_audio_input: Option<String>,
-    pub selected_audio_output: Option<String>,
+pub async fn tutoring_check_devices(
+    state: tauri::State<'_, AppState>,
+) -> Result<DeviceCheckResult, String> {
+    Ok(state.tutoring.check_devices().await)
 }
 
 /// List all available audio and camera devices.
-///
-/// Camera enumeration via nokhwa uses AVFoundation on macOS which can
-/// block waiting for the permission dialog. We run it on a blocking
-/// thread with a timeout to avoid hanging the UI.
 #[tauri::command]
-pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
-    // Audio devices (cpal enumeration — lightweight, no streams started)
-    let audio_inputs: Vec<AudioDeviceInfo> = AudioBackend::list_input_devices()
-        .into_iter()
-        .map(|d| AudioDeviceInfo {
-            id: d.id.to_string(),
-            name: d.name,
-            is_default: d.is_default,
-        })
-        .collect();
-
-    let audio_outputs: Vec<AudioDeviceInfo> = AudioBackend::list_output_devices()
-        .into_iter()
-        .map(|d| AudioDeviceInfo {
-            id: d.id.to_string(),
-            name: d.name,
-            is_default: d.is_default,
-        })
-        .collect();
-
-    let cameras = list_cameras().await;
-    let selected_audio_input = audio_inputs
-        .iter()
-        .find(|device| device.is_default)
-        .map(|device| device.id.clone())
-        .or_else(|| audio_inputs.first().map(|device| device.id.clone()));
-    let selected_audio_output = audio_outputs
-        .iter()
-        .find(|device| device.is_default)
-        .map(|device| device.id.clone())
-        .or_else(|| audio_outputs.first().map(|device| device.id.clone()));
-
-    Ok(DeviceList {
-        audio_inputs,
-        audio_outputs,
-        cameras,
-        selected_audio_input,
-        selected_audio_output,
-    })
+pub async fn tutoring_list_devices(
+    state: tauri::State<'_, AppState>,
+) -> Result<DeviceList, String> {
+    Ok(state.tutoring.list_devices().await)
 }
 
 /// Get current mic audio level (0.0–1.0) for the VU meter.
