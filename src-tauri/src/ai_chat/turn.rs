@@ -496,9 +496,10 @@ fn stale() -> String {
 }
 
 /// Begins a prepared turn. Refuses a repeated client request
-/// (`duplicate:<run id>`), a send during an assessment, and a snapshot that
-/// is missing, consumed, expired, or no longer rebuilds to the reviewed
-/// digest (`context_stale`).
+/// (`duplicate:<run id>`), a send during an assessment, a snapshot that is
+/// missing, consumed, expired, or no longer rebuilds to the reviewed digest
+/// (`context_stale`), and a connection the learner may no longer use
+/// ([`ai_access::may_use`]).
 pub fn begin(
     conn: &Connection,
     runtime: &ChatRuntime,
@@ -554,6 +555,9 @@ pub fn begin(
     if location_name(location) != manifest.destination.location {
         return Err(stale());
     }
+    // The age and guardian rules may have changed since the learner reviewed
+    // (a withdrawn approval, a corrected birthdate): they apply at send time.
+    ai_access::may_use(conn, &doc.value)?;
     if !runtime.has_capacity() {
         return Err("too_many_runs: wait for another answer to finish".into());
     }

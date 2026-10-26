@@ -562,6 +562,31 @@ mod tests {
     }
 
     #[test]
+    fn a_send_is_refused_when_the_rules_changed_after_it_was_prepared() {
+        let conn = db();
+        thread(&conn);
+        born_years_ago(&conn, 15);
+        link_guardian(&conn);
+        let openai = "https://api.openai.com/v1";
+        connection(&conn, "c1", "cloud", openai, None);
+        let asked = request_approval(&conn, "c1").unwrap();
+        assert!(record_decision(&conn, "link", &asked.id, openai, true).unwrap());
+        // The guardian withdraws the approval after the learner reviewed.
+        let prepared = prepare(&conn, "Hello").unwrap();
+        assert!(record_decision(&conn, "link", &asked.id, openai, false).unwrap());
+        let refused = start(&conn, &prepared, "q1").unwrap_err();
+        assert!(refused.starts_with("guardian_declined"), "{refused}");
+        // A corrected birthdate applies at send time too.
+        assert!(record_decision(&conn, "link", &asked.id, openai, true).unwrap());
+        let prepared = prepare(&conn, "Hello").unwrap();
+        born_years_ago(&conn, 12);
+        let refused = start(&conn, &prepared, "q2").unwrap_err();
+        assert!(refused.starts_with("under_13"), "{refused}");
+        born_years_ago(&conn, 15);
+        start(&conn, &prepared, "q3").unwrap();
+    }
+
+    #[test]
     fn provider_sign_in_follows_the_same_age_rules() {
         use crate::ai_auth::{chatgpt, openrouter};
         use crate::commands::ai_signin::sign_in_target;
