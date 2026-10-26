@@ -192,14 +192,25 @@ pub async fn studio_ask_tutor(
         if state.studio.epoch.load(Ordering::SeqCst) != epoch {
             return Err(StudioError::Locked);
         }
-        // An attempt that started while the answer was generating discards it.
-        no_attempt_in_progress(db, Surface::Tutor)?;
-        store::save_tutor_exchange(db, context.thread, expected_messages, &question, &answer)
+        save_tutor_answer(db, context.thread, expected_messages, &question, &answer)
     })?;
     Ok(TutorReply {
         thread,
         provider_location: location,
     })
+}
+
+/// Saves a tutor exchange. An attempt that started while the answer was
+/// generating discards it, without a flag: the question was asked before.
+pub(crate) fn save_tutor_answer(
+    db: &rusqlite::Connection,
+    thread: TutorThread,
+    expected_messages: usize,
+    question: &str,
+    answer: &str,
+) -> alexandria_studio::Result<TutorThread> {
+    no_attempt_in_progress(db, Surface::TutorSave)?;
+    store::save_tutor_exchange(db, thread, expected_messages, question, answer)
 }
 
 #[tauri::command]
@@ -627,6 +638,31 @@ mod tests {
         assert!(!runtime.blocked.load(Ordering::SeqCst));
         assert_ne!(runtime.epoch.load(Ordering::SeqCst), epoch);
         assert!(runtime.grants.lock().unwrap().list(101).is_empty());
+    }
+
+    #[test]
+    fn a_tutor_answer_that_finishes_after_an_attempt_starts_is_discarded_unflagged() {
+        use crate::ai_chat::turn::fixtures::{attempt, db, flagged};
+        let conn = db();
+        attempt(&conn, "attempt");
+        let thread = TutorThread {
+            id: "thread".into(),
+            course_id: "course".into(),
+            element_id: "lesson".into(),
+            connection_id: "c1".into(),
+            messages: Vec::new(),
+        };
+        assert!(matches!(
+            save_tutor_answer(&conn, thread, 0, "Why?", "Because."),
+            Err(StudioError::AssessmentActive)
+        ));
+        assert!(!flagged(&conn, "attempt"), "the question was asked before");
+        // Asking during the attempt is refused and flagged.
+        assert!(matches!(
+            no_attempt_in_progress(&conn, Surface::Tutor),
+            Err(alexandria_studio::access::Refused::AttemptInProgress)
+        ));
+        assert!(flagged(&conn, "attempt"));
     }
 
     #[test]
