@@ -75,4 +75,13 @@ test("release-sensitive inputs retain their release classification", () => {
   assert.equal(classifyChangedFiles(["scripts/check.sh"]).release, true)
   assert.equal(classifyChangedFiles(["src-tauri/tauri.android.conf.json"]).release, true)
   assert.equal(classifyChangedFiles(["src-tauri/src/commands/mod.rs"]).release, true)
+  assert.equal(classifyChangedFiles(["src-tauri/build.rs"]).release, true)
+  for (const path of [
+    "src-tauri/src/tutoring/media/mod.rs",
+    "src-tauri/src/tutoring/media/android.rs",
+    "src-tauri/src/tutoring/media/ios.rs",
+  ]) {
+    assert.equal(classifyChangedFiles([path]).release, true, path)
+  }
+  assert.equal(classifyChangedFiles(["src-tauri/src/tutoring/manager.rs"]).release, false)
 })

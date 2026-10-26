@@ -35,11 +35,12 @@ function isReleaseInput(path) {
       "package-lock.json",
       "package.json",
       "src-tauri/Cargo.toml",
+      "src-tauri/build.rs",
       "src-tauri/src/commands/mod.rs",
-      "src-tauri/src/commands/tutoring_stubs.rs",
-      "src-tauri/src/tutoring/manager_android.rs",
     ].includes(path) ||
     path.startsWith("scripts/") ||
+    // Which media adapter each platform's calls run on, and what it can do.
+    path.startsWith("src-tauri/src/tutoring/media/") ||
     /^src-tauri\/tauri.*\.json$/.test(path)
   )
 }
