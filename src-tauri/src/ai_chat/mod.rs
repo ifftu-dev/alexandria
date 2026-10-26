@@ -11,6 +11,7 @@ pub mod context;
 pub mod goal;
 pub mod memory;
 pub mod practice;
+pub mod run;
 pub mod store;
 pub mod turn;
 

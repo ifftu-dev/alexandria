@@ -472,8 +472,15 @@ pub struct StartedRun {
     pub existing: bool,
 }
 
+/// What completing a turn needs of a begun one: the run as recorded and the
+/// mode it was asked in. Small enough to carry into a database hop.
+#[derive(Debug, Clone)]
+pub struct Begun {
+    pub run: StartedRun,
+    pub mode: String,
+}
+
 /// A begun turn: the run as recorded, and everything needed to send it.
-#[derive(Clone)]
 pub struct Started {
     pub run: StartedRun,
     pub mode: String,
@@ -481,9 +488,25 @@ pub struct Started {
     pub endpoint: String,
     pub location: Location,
     pub protocol: Protocol,
-    pub key: Option<String>,
+    /// The provider secret. Read once, by whoever sends the request.
+    key: Option<String>,
     /// The connection as it was reviewed, to renew a sign-in before sending.
     pub connection: StudioConnection,
+}
+
+impl Started {
+    /// The part of this turn that [`complete`] needs.
+    pub fn begun(&self) -> Begun {
+        Begun {
+            run: self.run.clone(),
+            mode: self.mode.clone(),
+        }
+    }
+
+    /// Takes the provider secret out, so it is never copied.
+    pub(crate) fn take_key(&mut self) -> Option<String> {
+        self.key.take()
+    }
 }
 
 impl std::fmt::Debug for Started {
@@ -660,13 +683,13 @@ pub struct Outcome {
 /// item is dropped.
 pub fn complete(
     conn: &Connection,
-    started: &Started,
+    begun: &Begun,
     reply: &str,
     usage: Option<alexandria_ai::Usage>,
 ) -> Result<Outcome, String> {
-    let run_id = started.run.run_id.as_str();
-    let message_id = started.run.assistant_message.id.as_str();
-    let thread_id = started.run.thread_id.as_str();
+    let run_id = begun.run.run_id.as_str();
+    let message_id = begun.run.assistant_message.id.as_str();
+    let thread_id = begun.run.thread_id.as_str();
     let mut refused = Vec::new();
 
     let (without_artifact, artifact_block) = memory::split_block(reply, "artifact");
@@ -687,7 +710,7 @@ pub fn complete(
         Some(proposal) => proposal,
         None => None,
     };
-    let practice_mode = started.mode == "practice";
+    let practice_mode = begun.mode == "practice";
     let (prose, block) = if practice_mode {
         practice::split(&without_memory)
     } else {
@@ -821,9 +844,9 @@ pub(crate) fn resolve_draft(
     })
 }
 
-/// Shared by the turn's own tests and the streaming tests in the commands
-/// file: a migrated in-memory profile with a seeded learner, a course, and a
-/// local connection, and the turn driven directly.
+/// Shared by the turn's own tests and the run's: a migrated in-memory
+/// profile with a seeded learner, a course, and a local connection, and the
+/// turn driven directly.
 #[cfg(test)]
 pub(crate) mod fixtures {
     use super::*;
@@ -945,7 +968,7 @@ pub(crate) mod fixtures {
     }
 
     pub(crate) fn complete(conn: &Connection, started: &Started, text: &str) -> Outcome {
-        super::complete(conn, started, text, None).unwrap()
+        super::complete(conn, &started.begun(), text, None).unwrap()
     }
 
     pub(crate) fn goal(conn: &Connection) {
@@ -977,8 +1000,10 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use super::fixtures::*;
-    use super::{artifact, now, store, Inputs, Refused};
-    use crate::commands::ai_chat::{attach, attach_goal};
+    use super::{artifact, now, store, Inputs, Refused, Started};
+    use crate::ai_chat::action;
+    use crate::commands::ai_chat::{attach, attach_goal, save_note};
+    use crate::db::Database;
 
     #[test]
     fn an_attached_goal_sends_its_current_path_and_disappears_with_the_goal() {
@@ -1424,5 +1449,254 @@ mod tests {
         let again = complete(&conn, &started, "Something else");
         assert!(!again.saved);
         assert_eq!(store::artifacts_for_thread(&conn, "t").unwrap().len(), 1);
+    }
+
+    // ─── what a completed reply becomes ─────────────────────────────────
+
+    /// A profile database for tests that also allow proposals.
+    fn database() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        seed(db.conn());
+        db
+    }
+
+    /// Begins a turn in thread `t` in `mode`, attaching the lesson when the
+    /// thread is new, as a learner would from a lesson page.
+    fn begin_in(conn: &rusqlite::Connection, mode: &str, text: &str) -> Started {
+        if store::thread(conn, "t").is_err() {
+            thread(conn);
+            attach(conn, "t", "course", "lesson").unwrap();
+        }
+        store::set_thread_mode(conn, "t", mode, &now()).unwrap();
+        let prepared = prepare(conn, text).unwrap();
+        start(conn, &prepared, &uuid::Uuid::new_v4().to_string()).unwrap()
+    }
+
+    #[test]
+    fn a_proposed_flashcard_set_waits_to_be_saved_and_outlives_its_chat() {
+        let db = database();
+        let conn = db.conn();
+        let started = begin_in(conn, "ask", "Make flashcards");
+        let message_id = started.run.assistant_message.id.clone();
+        complete(
+            conn,
+            &started,
+            "Here are your cards.\n```artifact\n{\"type\":\"flashcards\",\"title\":\"Bayes terms\",\"cards\":[{\"front\":\"Prior\",\"back\":\"Belief before evidence\"}]}\n```",
+        );
+
+        let saved = store::message(conn, &message_id).unwrap();
+        assert_eq!(saved.content, "Here are your cards.");
+        let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+        assert_eq!(artifacts.len(), 1);
+        let proposal = &artifacts[0];
+        assert_eq!(
+            (proposal.status.as_str(), proposal.title.as_str()),
+            ("proposed", "Bayes terms")
+        );
+        assert_eq!(
+            proposal.sources.len(),
+            1,
+            "keeps the sources the answer carried"
+        );
+        assert!(store::saved_artifacts(conn).unwrap().is_empty());
+
+        // A note from the same answer, and the proposal saved.
+        let note = save_note(conn, &message_id, "Why rare events mislead").unwrap();
+        assert_eq!(note.status, "saved");
+        store::save_artifact(conn, &proposal.id, &now()).unwrap();
+        assert_eq!(store::saved_artifacts(conn).unwrap().len(), 2);
+
+        store::delete_thread(conn, "t").unwrap();
+        let kept = store::saved_artifacts(conn).unwrap();
+        assert_eq!(kept.len(), 2, "saved artifacts outlive the chat");
+        assert!(kept
+            .iter()
+            .all(|a| a.thread_id.is_none() && a.message_id.is_none()));
+    }
+
+    #[test]
+    fn a_proposed_goal_is_added_only_when_the_learner_allows_it() {
+        let db = database();
+        let conn = db.conn();
+        let started = begin_in(conn, "ask", "Help me pick a goal");
+        complete(
+            conn,
+            &started,
+            "A goal could be:\n```artifact\n{\"type\":\"goal\",\"title\":\"Data analyst\",\"text\":\"Analyse data with probability\"}\n```",
+        );
+
+        let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].status, "proposed");
+        goal(conn);
+        let id = artifacts[0].id.clone();
+        let picked = ["sk-counting".to_string()];
+        let allowed = action::allow(&db, &id, Some(&picked), &now()).unwrap();
+        assert_eq!(allowed.artifact.status, "added");
+        assert!(crate::ai_chat::goal::label(conn, "g1").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_goal_change_resolves_skill_names_and_applies_only_when_allowed() {
+        let db = database();
+        let conn = db.conn();
+        goal(conn);
+        thread(conn);
+        attach_goal(conn, "t", "g1").unwrap();
+        let started = begin_in(conn, "ask", "Add counting to my goal");
+        complete(
+            conn,
+            &started,
+            "Try this:\n```artifact\n{\"type\":\"goal_change\",\"title\":\"data analyst\",\"add\":[\"counting outcomes\",\"Astrology\"],\"remove\":[],\"text\":\"Start from counting.\"}\n```",
+        );
+
+        let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+        assert_eq!(artifacts.len(), 1);
+        let change = &artifacts[0];
+        assert_eq!(change.title, "Data analyst");
+        assert_eq!(
+            change.body,
+            artifact::Body::GoalChange {
+                goal_id: "g1".into(),
+                rename: None,
+                add: vec![artifact::SkillRef {
+                    id: "sk-counting".into(),
+                    name: "Counting outcomes".into()
+                }],
+                remove: vec![],
+                text: "Start from counting.".into(),
+            },
+            "unknown skill names are dropped"
+        );
+        assert!(store::save_artifact(conn, &change.id, &now()).is_err());
+        let id = change.id.clone();
+        assert_eq!(
+            action::allow(&db, &id, None, &now())
+                .unwrap()
+                .artifact
+                .status,
+            "added"
+        );
+        let skills: String = conn
+            .query_row(
+                "SELECT json_extract(value, '$[0].goal_skill_ids') FROM app_settings WHERE key = 'learner.targets'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(skills, r#"["sk-bayes","sk-counting"]"#);
+    }
+
+    #[test]
+    fn a_course_note_goes_to_the_attached_lesson_and_is_dropped_without_one() {
+        let db = database();
+        let conn = db.conn();
+        let started = begin_in(conn, "ask", "Add that to my notes");
+        complete(
+            conn,
+            &started,
+            "Here:\n```artifact\n{\"type\":\"course_note\",\"title\":\"Bayes\",\"text\":\"Update a prior.\"}\n```",
+        );
+        let artifacts = store::artifacts_for_thread(conn, "t").unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].title, "Bayes");
+        assert!(matches!(
+            &artifacts[0].body,
+            artifact::Body::CourseNote { course_id, element_id, text, .. }
+                if course_id == "course" && element_id == "lesson" && text == "Update a prior."
+        ));
+
+        let conn = super::fixtures::db();
+        thread(&conn);
+        let draft = artifact::Draft::CourseNote {
+            title: "Bayes".into(),
+            text: "Update a prior.".into(),
+        };
+        assert!(
+            super::resolve_draft(&conn, "t", draft).unwrap().is_none(),
+            "no lesson attached"
+        );
+    }
+
+    #[test]
+    fn a_practice_answer_becomes_a_checkable_question_without_its_answer() {
+        let db = database();
+        let conn = db.conn();
+        let started = begin_in(conn, "practice", "Give me a question");
+        let message_id = started.run.assistant_message.id.clone();
+        complete(
+            conn,
+            &started,
+            "Here is one.\n\n```practice\n{\"skill\":\"Conditional probability\",\"kind\":\"numeric\",\
+             \"prompt\":\"A die shows an even number. What is P(greater than 3)?\",\"answer\":\"2/3\",\"hints\":[\"List the even faces.\"],\"explanation\":\"4 and 6.\"}\n```",
+        );
+        let message = store::message(conn, &message_id).unwrap();
+        let items = store::practice_for_thread(conn, "t").unwrap();
+        assert_eq!(message.content, "Here is one.");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].message_id, message_id);
+        assert_eq!(items[0].kind, "numeric");
+        assert_eq!(items[0].answer, None);
+        let solved = store::practice_attempt(conn, &items[0].id, "x", "0.667", &now()).unwrap();
+        assert!(solved.solved_independently);
+    }
+
+    #[test]
+    fn a_generated_question_that_resembles_an_assessment_item_is_dropped() {
+        let db = database();
+        let conn = db.conn();
+        add_bank_item(conn);
+        let started = begin_in(conn, "practice", "Another one please");
+        let message_id = started.run.assistant_message.id.clone();
+        complete(
+            conn,
+            &started,
+            "Try this.\n```practice\n{\"kind\":\"multiple_choice\",\"prompt\":\"A bag has 4 red and 6 blue marbles. Two are drawn without replacement. What is the probability the second is red given the first was red?\",\
+             \"options\":[\"4/10\",\"3/9\"],\"answer\":1}\n```",
+        );
+        let message = store::message(conn, &message_id).unwrap();
+        let items = store::practice_for_thread(conn, "t").unwrap();
+        assert!(items.is_empty());
+        assert_eq!(message.error.as_deref(), Some("practice_rejected"));
+        assert!(!message.content.contains("4 red and 6 blue"));
+    }
+
+    #[test]
+    fn a_malformed_practice_block_leaves_the_reply_as_written() {
+        let db = database();
+        let conn = db.conn();
+        let started = begin_in(conn, "practice", "Quiz me");
+        let message_id = started.run.assistant_message.id.clone();
+        complete(conn, &started, "Sure! What is 2+2? (answer: 4)");
+        let message = store::message(conn, &message_id).unwrap();
+        assert_eq!(message.content, "Sure! What is 2+2? (answer: 4)");
+        assert_eq!(message.error, None);
+        assert!(store::practice_for_thread(conn, "t").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_memory_suggestion_waits_for_the_learner_and_is_not_shown_as_text() {
+        let db = database();
+        let conn = db.conn();
+        let started = begin_in(conn, "ask", "Use numbers please");
+        let message_id = started.run.assistant_message.id.clone();
+        complete(
+            conn,
+            &started,
+            "Sure, here it is with numbers.\n```memory\n{\"kind\":\"preference\",\"content\":\"Prefers worked numbers before formulas\"}\n```",
+        );
+        let message = store::message(conn, &message_id).unwrap();
+        let proposals = store::memory_proposals_for_thread(conn, "t").unwrap();
+        let sendable = store::sendable_memory(conn).unwrap();
+        assert_eq!(message.content, "Sure, here it is with numbers.");
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].source_message_id.as_deref(),
+            Some(message_id.as_str())
+        );
+        assert!(
+            sendable.is_empty(),
+            "nothing is sent until the learner saves it"
+        );
     }
 }
