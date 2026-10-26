@@ -455,9 +455,7 @@ mod tests {
             (
                 "chat_save_course_note",
                 false,
-                Box::new(|| {
-                    crate::commands::course_notes::save_from_chat(conn, "artifact").map(drop)
-                }),
+                Box::new(|| crate::course_notes::save_from_chat(conn, "artifact").map(drop)),
             ),
             (
                 "chat_allow_action",
