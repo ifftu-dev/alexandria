@@ -214,14 +214,14 @@ pub fn tutor_context(
     element_id: &str,
     connection_id: &str,
 ) -> Result<TutorContext> {
-    can_use_tutor(conn, course_id)?;
+    // Checks the learner takes or wrote the course, then the lesson rule.
+    let lesson = crate::access::visible_lesson(conn, Reader::Tutor, course_id, element_id)?;
     let policy = tutor_policy(conn, course_id)?;
     if !policy.enabled {
         return Err(Error::Unavailable(
             "The instructor has not enabled the tutor".into(),
         ));
     }
-    let lesson = crate::access::visible_lesson(conn, Reader::Tutor, course_id, element_id)?;
     let lesson_inline = lesson.inline().map(str::to_owned);
     let lesson_cid = lesson.blob().map(str::to_owned);
     let lesson_title = lesson.title;
