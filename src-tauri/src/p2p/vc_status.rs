@@ -41,7 +41,7 @@ struct StatusMessage {
     issuer: String,
     /// Optional explicit list_id — if absent we derive
     /// `urn:alexandria:status-list:<issuer>:1` so this matches the
-    /// list_id format `commands::credentials` uses for local issuance.
+    /// list_id format `credentials::status_list` uses for local issuance.
     #[serde(default)]
     list_id: Option<String>,
     version: i64,
@@ -212,7 +212,7 @@ pub fn handle_status_message(
         return Ok(StatusIngest::IgnoredBadSignature);
     }
     let bit_length = (bits.len() as i64) * 8;
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
 
     db.conn()
         .execute(

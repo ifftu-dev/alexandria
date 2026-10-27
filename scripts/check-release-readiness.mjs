@@ -60,11 +60,21 @@ if (!updaterPubkey || updaterPubkey === "PLACEHOLDER_PUBKEY") {
   failures.push("Updater public key is still unset or using PLACEHOLDER_PUBKEY.");
 }
 
-const commandsMod = readText("src-tauri/src/commands/mod.rs");
-if (/pub use tutoring_stubs as tutoring;/.test(commandsMod)) {
-  failures.push(
-    "Android still routes tutoring commands through src-tauri/src/commands/tutoring_stubs.rs.",
+// Phones must make real calls: each mobile target fills the call manager's
+// media seam with its own adapter, never the synthetic test media.
+const mediaMod = readText("src-tauri/src/tutoring/media/mod.rs");
+for (const [target, adapter] of [
+  ["android", "android::AndroidMedia"],
+  ["ios", "ios::IosMedia"],
+]) {
+  const mapping = new RegExp(
+    `#\\[cfg\\(target_os = "${target}"\\)\\]\\s*pub type PlatformMedia = ${adapter};`,
   );
+  if (!mapping.test(mediaMod)) {
+    failures.push(
+      `The ${target} build does not use ${adapter} for calls (src-tauri/src/tutoring/media/mod.rs).`,
+    );
+  }
 }
 
 const androidFeatures = androidConfig.build?.features ?? [];

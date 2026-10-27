@@ -91,7 +91,7 @@ fn issue_birthdate_vc(
     let did = crate::crypto::did::derive_did_key(signing_key);
     let mut properties = serde_json::Map::new();
     properties.insert("birthdate".to_string(), birthdate.into());
-    let req = crate::commands::credentials::IssueCredentialRequest {
+    let req = crate::credentials::IssueCredentialRequest {
         credential_type: CredentialType::SelfAssertion,
         subject: did.clone(),
         claim: Claim::Custom(CustomClaim { properties }),
@@ -101,8 +101,13 @@ fn issue_birthdate_vc(
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let now = crate::commands::credentials::now_rfc3339();
-    crate::commands::credentials::issue_credential_impl(conn, signing_key, &did, &req, &now)?;
+    let now = crate::clock::now_rfc3339();
+    crate::credentials::issue(
+        conn,
+        &crate::credentials::Issuer::from_key(signing_key.clone()),
+        &req,
+        &now,
+    )?;
     Ok(())
 }
 

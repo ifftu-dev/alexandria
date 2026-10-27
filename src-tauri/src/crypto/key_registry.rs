@@ -83,7 +83,7 @@ pub fn rotate_key(
     current: &Did,
     new_signing_key: &SigningKey,
 ) -> Result<KeyRegistryEntry, KeyRegistryError> {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = crate::clock::now_rfc3339();
     let new_pk = new_signing_key.verifying_key();
     let new_did = did_from_verifying_key(&new_pk);
     let pk_hex = hex::encode(new_pk.as_bytes());

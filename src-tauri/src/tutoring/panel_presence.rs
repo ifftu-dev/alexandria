@@ -6,7 +6,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use super::tasks::{SessionTasks, TaskHandle};
-use crate::commands::interview_panel::{panel_request, PanelLink};
+use crate::interview_panel::{panel_request, PanelLink};
 use crate::profile::scope::ProfileLease;
 
 pub(crate) struct Publication {

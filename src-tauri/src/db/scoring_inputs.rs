@@ -17,10 +17,10 @@ use rusqlite::{params, Connection};
 
 use alexandria_verify::trust::{classify_credential, CredentialTrust, TRUST_CALCULATION_VERSION};
 
-use crate::commands::attestation::{stored_completion_evidence, StoredCompletionEvidence};
 use crate::domain::vc::{
     verify_credential_db, SkillClaim, VerifiableCredential, VerificationPolicy,
 };
+use crate::evidence::completion::{stored_completion_evidence, StoredCompletionEvidence};
 
 const FINGERPRINT_DOMAIN: &[u8] = b"alexandria/scoring-input-fingerprint/v1";
 

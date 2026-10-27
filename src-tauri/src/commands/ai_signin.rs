@@ -8,15 +8,17 @@
 
 use std::sync::Mutex;
 
-use alexandria_ai::endpoint::{self, Location};
-use alexandria_ai::{Adapter, Protocol};
+use alexandria_ai::model::Limits;
+use alexandria_ai::{Connection, Location, Protocol};
 use alexandria_studio::model::{ConnectionAuth, StudioConnection, StudioDocument};
 use alexandria_studio::store as studio_store;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+use super::with_conn;
+use crate::ai_access;
 use crate::ai_auth::{self, chatgpt, openrouter, DonePage, SignInError};
-use crate::db::executor::DatabaseWorkload;
+use crate::ai_chat::vocab::refused;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -25,26 +27,6 @@ static ACTIVE: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
 /// Context window assumed for ChatGPT plan models, which are large.
 const CHATGPT_CONTEXT_TOKENS: u32 = 128_000;
-
-async fn with_conn<T, F>(
-    state: &State<'_, AppState>,
-    label: &'static str,
-    f: F,
-) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce(&rusqlite::Connection) -> Result<T, String> + Send + 'static,
-{
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            label,
-            move |db| f(db.conn()),
-        )
-        .await
-}
 
 /// Claims the single sign-in slot. Dropping the guard frees it.
 struct Slot;
@@ -131,7 +113,8 @@ async fn sign_in_chatgpt(
     page: &DonePage,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     let existing = with_conn(state, "ai-signin.chatgpt-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, chatgpt::API_BASE)?;
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(chatgpt::API_BASE))
+            .map_err(refused)?;
         signed_in_chatgpt(conn)
     })
     .await?;
@@ -152,19 +135,24 @@ async fn sign_in_chatgpt(
     .map_err(|e| e.to_string())
     .map_err(step("chatgpt authorize and verify"))?;
 
-    let endpoint = endpoint::resolve(chatgpt::API_BASE, Location::Remote)
-        .await
-        .map_err(|e| format!("unreachable: {e}"))
-        .map_err(step("resolve api.openai.com"))?;
-    let models = Adapter::new(
-        Protocol::Responses,
-        endpoint,
-        Some(credential.access_token.clone()),
+    let target = Connection {
+        endpoint: chatgpt::API_BASE.into(),
+        location: Location::Remote,
+        protocol: Protocol::Responses,
+    };
+    let adapter = alexandria_ai::connect(
+        &target,
+        Some(credential.access_token.as_str()),
+        Limits::default(),
     )
-    .list_models()
     .await
     .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))
-    .map_err(step("list ChatGPT plan models"))?;
+    .map_err(step("connect api.openai.com"))?;
+    let models = adapter
+        .list_models()
+        .await
+        .map_err(|e| format!("{}: {e}", crate::ai_chat::error_code(&e)))
+        .map_err(step("list ChatGPT plan models"))?;
     let current = existing.as_ref().map(|(doc, _)| doc.value.model.clone());
     let model = current
         .filter(|m| models.contains(m))
@@ -184,20 +172,18 @@ async fn sign_in_chatgpt(
         value: StudioConnection {
             id,
             name,
-            endpoint: chatgpt::API_BASE.into(),
             model,
-            location: "cloud".into(),
-            capability: "text".into(),
-            enabled: true,
-            has_key: true,
             context_tokens: Some(CHATGPT_CONTEXT_TOKENS),
             protocol: Protocol::Responses,
             auth: ConnectionAuth::ChatgptPlan,
+            ..ai_auth::sign_in_target(chatgpt::API_BASE)
         },
     };
     let encoded = credential.encode();
+    let bearer = credential.access_token;
     with_conn(state, "ai-signin.chatgpt-save", move |conn| {
-        studio_store::save_signed_in_connection(conn, &doc, &encoded).map_err(|e| e.to_string())
+        studio_store::save_signed_in_connection(conn, &doc, &encoded, &bearer)
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(step("save ChatGPT connection"))
@@ -208,7 +194,8 @@ async fn sign_in_openrouter(
     page: &DonePage,
 ) -> Result<StudioDocument<StudioConnection>, String> {
     with_conn(state, "ai-signin.openrouter-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(openrouter::API_BASE))
+            .map_err(refused)
     })
     .await?;
     let (_slot, mut cancel) = Slot::claim()?;
@@ -236,22 +223,14 @@ async fn save_openrouter(
         value: StudioConnection {
             id,
             name: "OpenRouter".into(),
-            endpoint: openrouter::API_BASE.into(),
             model: openrouter::DEFAULT_MODEL.into(),
-            location: "cloud".into(),
-            capability: "text".into(),
-            enabled: true,
-            has_key: true,
-            context_tokens: None,
             protocol: Protocol::Compatible,
             auth: ConnectionAuth::ApiKey,
+            ..ai_auth::sign_in_target(openrouter::API_BASE)
         },
     };
     with_conn(state, "ai-signin.openrouter-save", move |conn| {
-        let url = alexandria_ai::endpoint::parse(openrouter::API_BASE, Location::Remote)
-            .map_err(|e| e.to_string())?;
-        alexandria_ai::terms::check_credential(&url, &key, false).map_err(|e| e.to_string())?;
-        studio_store::save_signed_in_connection(conn, &doc, &key).map_err(|e| e.to_string())
+        studio_store::save_signed_in_connection(conn, &doc, &key, &key).map_err(|e| e.to_string())
     })
     .await
     .map_err(step("save OpenRouter connection"))
@@ -277,7 +256,8 @@ pub async fn ai_signin_code_start(
         return Err("invalid_input: unknown provider".into());
     }
     with_conn(&state, "ai-signin.code-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(openrouter::API_BASE))
+            .map_err(refused)
     })
     .await?;
     let (verifier, challenge) = ai_auth::pkce();
@@ -303,7 +283,8 @@ pub async fn ai_signin_code_finish(
         .ok_or_else(|| SignInError::CodeRejected.to_string())?
         .to_owned();
     with_conn(&state, "ai-signin.code-check", |conn| {
-        super::ai_chat::remote_allowed_for_age(conn, openrouter::API_BASE)
+        ai_access::may_connect(conn, &ai_auth::sign_in_target(openrouter::API_BASE))
+            .map_err(refused)
     })
     .await?;
     let verifier = take_pending(std::time::Instant::now()).map_err(|e| e.to_string())?;

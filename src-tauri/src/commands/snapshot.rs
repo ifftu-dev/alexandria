@@ -130,11 +130,10 @@ fn create_snapshot(
             .as_object()
             .cloned()
             .ok_or("snapshot claim must serialize as an object")?;
-        let credential = crate::commands::credentials::issue_credential_impl(
+        let credential = crate::credentials::issue(
             conn,
-            &wallet.signing_key,
-            &actor_did,
-            &crate::commands::credentials::IssueCredentialRequest {
+            &crate::credentials::Issuer::from_wallet(wallet),
+            &crate::credentials::IssueCredentialRequest {
                 credential_type: CredentialType::DerivedCredential,
                 subject: actor_did.clone(),
                 claim: Claim::Custom(CustomClaim { properties }),
@@ -522,7 +521,7 @@ mod tests {
         assert_eq!(signed.credential_subject.id, did);
         assert!(signed.type_.iter().any(|kind| kind == "DerivedCredential"));
         assert_eq!(
-            crate::commands::credentials::integrity_hash_of(&signed).unwrap(),
+            crate::domain::vc::integrity_hash_of(&signed).unwrap(),
             integrity_hash
         );
         let signed_value: serde_json::Value = serde_json::from_str(&signed_json).unwrap();

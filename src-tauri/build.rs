@@ -33,6 +33,24 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(grader)");
     println!("cargo:rustc-cfg=grader");
 
+    // `tutoring_video`: this target's video feature is on, so the media
+    // crate's video types exist and the platform adapter publishes and
+    // watches video. iOS has its own (VideoToolbox); desktop and Android
+    // share the ffmpeg ones, exactly as the two former managers gated it.
+    // Without it every platform still makes real audio-only calls. Which
+    // adapter fills the seam is decided per target in
+    // `tutoring/media/mod.rs`.
+    println!("cargo::rustc-check-cfg=cfg(tutoring_video)");
+    let has_feature = |f: &str| std::env::var(format!("CARGO_FEATURE_{f}")).is_ok();
+    let video = if target_os == "ios" {
+        has_feature("TUTORING_VIDEO_IOS")
+    } else {
+        has_feature("TUTORING_VIDEO") || has_feature("TUTORING_VIDEO_STATIC")
+    };
+    if video {
+        println!("cargo:rustc-cfg=tutoring_video");
+    }
+
     if target_os == "macos" {
         // Carbon provides IsSecureEventInputEnabled / DisableSecureEventInput,
         // used to clear a WKWebView Secure Event Input leak that otherwise

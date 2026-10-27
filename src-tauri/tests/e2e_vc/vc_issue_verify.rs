@@ -76,9 +76,7 @@ async fn tampered_payload_fails_verification() {
 #[tokio::test]
 async fn revoked_credential_is_rejected() {
     // Issue → revoke via status list → verify rejects (§11.2).
-    use app_lib::commands::credentials::{
-        issue_credential_impl, revoke_credential_impl, IssueCredentialRequest,
-    };
+    use app_lib::credentials::{self, lifecycle, IssueCredentialRequest};
     use app_lib::domain::vc::{CredentialType, SkillClaim};
 
     let db = new_test_db();
@@ -103,14 +101,19 @@ async fn revoked_credential_is_rejected() {
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let vc =
-        issue_credential_impl(db.conn(), &issuer_key, &issuer_did, &req, TEST_NOW).expect("issue");
+    let vc = credentials::issue(
+        db.conn(),
+        &app_lib::credentials::Issuer::from_key(issuer_key.clone()),
+        &req,
+        TEST_NOW,
+    )
+    .expect("issue");
 
     // Pre-revocation: verifier accepts.
     let before = verify_credential_db(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
     assert_eq!(before.acceptance_decision, AcceptanceDecision::Accept);
 
-    revoke_credential_impl(
+    lifecycle::revoke(
         db.conn(),
         &issuer_did,
         vc.id.as_deref().unwrap(),

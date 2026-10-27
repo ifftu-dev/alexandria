@@ -814,6 +814,27 @@ pub struct BuiltinBundle<'a> {
     pub ui_files: &'a [(&'a str, &'a [u8])],
 }
 
+/// The distinct plugin CIDs a course's elements reference.
+pub fn course_plugin_cids(db: &Database, course_id: &str) -> Result<Vec<String>, String> {
+    let conn = db.conn();
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT e.plugin_cid FROM course_elements e \
+             JOIN course_chapters c ON e.chapter_id = c.id \
+             WHERE c.course_id = ?1 AND e.element_type = 'plugin' \
+               AND e.plugin_cid IS NOT NULL AND e.plugin_cid <> ''",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![course_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
 /// Look up a single installed plugin by CID.
 pub fn get_installed(db: &Database, plugin_cid: &str) -> Result<Option<InstalledPlugin>, String> {
     db.conn()

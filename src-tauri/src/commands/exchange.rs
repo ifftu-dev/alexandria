@@ -6,8 +6,10 @@ use reqwest::Url;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::credentials::{load_issuer_key, now_rfc3339};
+use crate::clock::now_rfc3339;
+use crate::cloud::client;
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
+use crate::credentials::Issuer;
 use crate::db::executor::DatabaseWorkload;
 use crate::org_trust::{self, OrgCheck};
 use crate::profile::scope::ProfileState as State;
@@ -43,10 +45,7 @@ pub(super) async fn directory(
         .find(|d| d.url.trim_end_matches('/') == address.trim_end_matches('/'))
         .ok_or("configure this directory before contacting it")?;
     let url = Url::parse(&dir.url).map_err(|e| e.to_string())?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
-        || !url.username().is_empty()
-        || url.password().is_some()
+    if !crate::cloud::is_allowed_origin(&dir.url)
         || url.query().is_some()
         || url.fragment().is_some()
     {
@@ -55,39 +54,13 @@ pub(super) async fn directory(
     Ok(dir)
 }
 
-pub(super) fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())
-}
-
-pub(super) async fn response_json(
-    mut response: reqwest::Response,
-) -> Result<serde_json::Value, String> {
-    let status = response.status();
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err("directory response is too large".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    if !status.is_success() {
-        return Err(format!(
-            "directory returned {status}: {}",
-            String::from_utf8_lossy(&bytes)
-        ));
-    }
-    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
-}
+pub(super) use crate::cloud::response_json;
 
 async fn requests(
     state: &State<'_, AppState>,
     dir: &Directory,
 ) -> Result<Vec<RequestEnvelope>, String> {
-    let (key, did) = load_issuer_key(state).await?;
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let path = format!("/api/assessment-requests/for/{}", did.as_str());
     let timestamp = chrono::Utc::now().timestamp();
     let nonce = uuid::Uuid::new_v4().to_string();
@@ -173,7 +146,7 @@ pub async fn exchange_start_assessment(
         .await
         .require()?;
     let request = envelope.request;
-    let (_, did) = load_issuer_key(&state).await?;
+    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     validate_request(&request, did.as_str())?;
     let seed: u64 = rand::random();
     let now = now_rfc3339();
@@ -235,7 +208,7 @@ pub async fn exchange_credentials(
     state: State<'_, AppState>,
     request: CredentialRequest,
 ) -> Result<Vec<ShareableCredential>, String> {
-    let (_, did) = load_issuer_key(&state).await?;
+    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     validate_request(&request, did.as_str())?;
     state.db_executor.execute(DatabaseWorkload::Learner,state.profile_lease(),"exchange.credentials",move |db| {
         let mut query = db.conn().prepare("SELECT id,issuer_did,issuance_date,signed_vc_json FROM credentials WHERE subject_did=?1 AND skill_id=?2 AND revoked=0 ORDER BY issuance_date DESC").map_err(|e|e.to_string())?;
@@ -258,7 +231,7 @@ pub async fn exchange_preview(
     org_proof: Option<OrgProof>,
     credential_id: String,
 ) -> Result<VerifiablePresentation, String> {
-    let (key, did) = load_issuer_key(&state).await?;
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     validate_request(&request, did.as_str())?;
     // The presentation is bound to this organisation and is what leaves the
     // device, so it is only made for one whose domain vouches for it.
@@ -286,7 +259,7 @@ pub async fn exchange_send(
     signed: VerifiablePresentation,
 ) -> Result<serde_json::Value, String> {
     let dir = directory(&state, &directory_url).await?;
-    let (_, did) = load_issuer_key(&state).await?;
+    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let request = shared_credential(&signed)?.request;
     validate_request(&request, did.as_str())?;
     // Checked again here rather than trusted from the preview: this is the

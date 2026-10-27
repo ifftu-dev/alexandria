@@ -58,7 +58,7 @@ impl fmt::Debug for Responses {
 }
 
 impl Responses {
-    pub fn new(endpoint: Endpoint, key: Option<String>) -> Self {
+    pub(crate) fn new(endpoint: Endpoint, key: Option<String>) -> Self {
         Self {
             endpoint,
             key: key.filter(|k| !k.is_empty()),
@@ -66,17 +66,13 @@ impl Responses {
         }
     }
 
-    pub fn with_limits(mut self, limits: Limits) -> Self {
+    pub(crate) fn with_limits(mut self, limits: Limits) -> Self {
         self.limits = limits;
         self
     }
 
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
-    }
-
-    pub(crate) fn key(&self) -> Option<&str> {
-        self.key.as_deref()
     }
 
     /// One complete answer. The route only streams, so this streams and

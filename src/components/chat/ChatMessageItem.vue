@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProviderSignIn } from '@/composables/useProviderSignIn'
 import { renderChatMarkdown } from '@/utils/chatMarkdown'
+import { chatErrorMessageKey, parseChatError } from '@/utils/chatErrors'
+import { proseBeforeFences } from '@/utils/chatFences'
 import type { ChatMessage, ChatSourceRef } from '@/types'
 
 const props = defineProps<{
@@ -29,10 +31,9 @@ const streaming = computed(() => props.message.status === 'streaming')
 // streams, show only the prose before it.
 const text = computed(() => {
   const raw = streaming.value ? (props.live || props.message.content) : props.message.content
-  // Practice questions and memory suggestions arrive as fenced blocks that
-  // become cards; while streaming, hide them from the first fence on.
-  const fences = ['```practice', '```memory'].map((f) => raw.indexOf(f)).filter((i) => i >= 0)
-  return fences.length ? raw.slice(0, Math.min(...fences)).trimEnd() : raw
+  // Practice questions, memory suggestions, and proposals arrive as fenced
+  // blocks that become cards; while streaming, hide them from the first fence on.
+  return proseBeforeFences(raw)
 })
 
 // Markdown is parsed once the answer is final. While it streams the raw text
@@ -59,19 +60,13 @@ function openUsage() {
 }
 
 const errorText = computed(() => {
-  const code = props.message.error ?? ''
-  if (!code || code === 'cancelled') return ''
-  if (code.startsWith('rate_limited:')) {
-    return t('chat.errors.rate_limited_after', { seconds: code.split(':')[1] })
-  }
+  const raw = props.message.error ?? ''
+  if (!raw) return ''
+  const { code, detail } = parseChatError(raw)
+  if (code === 'cancelled') return ''
+  if (code === 'rate_limited' && detail) return t('chat.errors.rate_limited_after', { seconds: detail })
   if (code === 'unreachable' && props.message.location === 'device') return t('chat.errors.unreachable_device')
-  const key = code.startsWith('http:') ? 'http' : code
-  const known = [
-    'assessment_active', 'unreachable', 'timeout', 'interrupted', 'auth', 'rate_limited',
-    'model_unavailable', 'http', 'malformed', 'too_large', 'empty', 'provider', 'unsupported',
-    'invalid', 'too_many_runs', 'usage_limit', 'plan_ineligible', 'signin_required',
-  ]
-  return t(`chat.errors.${known.includes(key) ? key : 'generic'}`)
+  return t(chatErrorMessageKey(code ?? 'generic'))
 })
 
 function onClick(event: MouseEvent | KeyboardEvent) {

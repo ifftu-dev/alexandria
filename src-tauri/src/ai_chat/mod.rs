@@ -10,13 +10,28 @@ pub mod bank_guard;
 pub mod context;
 pub mod goal;
 pub mod memory;
+pub mod ops;
 pub mod practice;
+pub mod run;
 pub mod store;
+pub mod turn;
+pub mod vocab;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use chrono::SecondsFormat;
 use tokio::sync::oneshot;
+
+/// A moment as stored: RFC 3339 in UTC with millisecond precision, so
+/// timestamps compare as text in the order they happened.
+pub(crate) fn timestamp(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+pub(crate) fn now() -> String {
+    timestamp(chrono::Utc::now())
+}
 
 /// Most answers generating at once across all threads of a profile.
 pub const MAX_CONCURRENT_RUNS: usize = 2;
@@ -111,32 +126,13 @@ impl ChatRuntime {
 }
 
 /// Stable error code for a provider failure, stored with the message and
-/// translated by the UI. Codes never carry provider text.
+/// translated by the UI. Codes never carry provider text; see
+/// [`vocab::ChatErrorCode`] for the set and the numeric detail some carry.
 pub fn error_code(error: &alexandria_ai::Error) -> String {
-    use alexandria_ai::Error as E;
-    match error {
-        E::Invalid(_) => "invalid".into(),
-        E::Unreachable => "unreachable".into(),
-        E::Timeout => "timeout".into(),
-        E::Interrupted => "interrupted".into(),
-        E::Http {
-            status: 401 | 403, ..
-        } => "auth".into(),
-        E::Http {
-            status: 429,
-            retry_after: Some(s),
-        } => format!("rate_limited:{s}"),
-        E::Http { status: 429, .. } => "rate_limited".into(),
-        E::Http { status: 404, .. } => "model_unavailable".into(),
-        E::Http { status, .. } => format!("http:{status}"),
-        E::Malformed => "malformed".into(),
-        E::TooLarge => "too_large".into(),
-        E::Empty => "empty".into(),
-        E::Provider => "provider".into(),
-        E::Unsupported(_) => "unsupported".into(),
-        E::Cancelled => "cancelled".into(),
-        E::UsageLimit => "usage_limit".into(),
-        E::NotEligible => "plan_ineligible".into(),
+    let (code, detail) = vocab::ChatErrorCode::of_provider(error);
+    match detail {
+        Some(detail) => format!("{code}:{detail}"),
+        None => code.to_string(),
     }
 }
 

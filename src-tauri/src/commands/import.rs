@@ -102,7 +102,7 @@ pub fn import_credential_impl(
     if result.acceptance_decision == AcceptanceDecision::Pending {
         return Err(format!(
             "credential verification pending: {}",
-            super::credentials::rejection_reasons(&result).join(", ")
+            crate::credentials::bundle::rejection_reasons(&result).join(", ")
         ));
     }
     if result.acceptance_decision != AcceptanceDecision::Accept {
@@ -178,7 +178,7 @@ pub fn import_credential_impl(
     };
     // Same derivation `issue_credential` uses, reused rather than reimplemented
     // so an imported credential and a locally issued one hash identically.
-    let integrity_hash = super::credentials::integrity_hash_of(vc)?;
+    let integrity_hash = crate::domain::vc::integrity_hash_of(vc)?;
     let signed_json = serde_json::to_string(vc).map_err(|e| e.to_string())?;
 
     conn.execute(
@@ -216,7 +216,7 @@ pub async fn import_credential(
     state: State<'_, AppState>,
     credential: VerifiableCredential,
 ) -> Result<ImportOutcome, String> {
-    let now = super::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -298,7 +298,7 @@ pub async fn import_credential_from_peer(
         .map_err(|e| format!("read fetched credential {}: {e}", ticket.hash))?;
     let vc = credential_from_bytes(&bytes)?;
 
-    let now = super::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(
@@ -351,7 +351,7 @@ pub struct ImportFailure {
 /// keys, unsafe numbers, hostile nesting and oversized entries never reach
 /// verification or storage.
 fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
-    let value = super::credentials::parse_credential_payload(payload)?;
+    let value = crate::credentials::store::parse_credential_payload(payload)?;
 
     if let Some(list) = value.get("credentials").and_then(|c| c.as_array()) {
         return credential_entries(list, "bundle entry");
@@ -362,7 +362,7 @@ fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
         return credential_entries(list, "entry");
     }
 
-    let vc = super::credentials::credential_entry(&value)
+    let vc = crate::credentials::store::credential_entry(&value)
         .map_err(|e| format!("not a credential: {e}"))?;
     Ok(vec![vc])
 }
@@ -374,7 +374,7 @@ fn credential_entries(
     list.iter()
         .enumerate()
         .map(|(i, item)| {
-            super::credentials::credential_entry(item)
+            crate::credentials::store::credential_entry(item)
                 .map_err(|e| format!("{label} {i} is not a credential: {e}"))
         })
         .collect()
@@ -425,7 +425,7 @@ pub async fn import_credentials(
     state: State<'_, AppState>,
     payload: String,
 ) -> Result<ImportSummary, String> {
-    let now = super::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(

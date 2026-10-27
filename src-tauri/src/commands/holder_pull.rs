@@ -32,24 +32,16 @@
 //! resolves out of the `did:key` itself, so a directory needs to store nothing
 //! about the holder in order to authenticate them.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
-use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 
+use crate::cloud::is_allowed_origin;
 use crate::db::executor::DatabaseWorkload;
-use crate::settings::registry::keys;
-use crate::settings::SettingsStore;
 use crate::AppState;
 
-/// The Cloud service the app asks. Kept as a list so callers that fan out
-/// over services keep working; today it holds at most one.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Directory {
-    pub name: String,
-    /// Base URL, https only (http on loopback for local testing).
-    pub url: String,
-}
+pub use crate::cloud::Directory;
+pub(crate) use crate::cloud::{directories_db, nonce, proof, signed_get};
 
 /// One entry in a directory's record of who looked at this person.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,116 +88,6 @@ pub(crate) async fn directories(state: &State<'_, AppState>) -> Result<Vec<Direc
         .await
 }
 
-pub(crate) fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
-    if !SettingsStore::get(conn, keys::ORGANISATIONS_ENABLED) {
-        return Ok(Vec::new());
-    }
-    Ok(cloud_origin(conn)
-        .into_iter()
-        .map(|url| Directory {
-            name: "Alexandria Cloud".into(),
-            url,
-        })
-        .collect())
-}
-
-/// The Cloud origin this app talks to, whether or not requests are switched
-/// on: the developer override, else the network profile's. Only https, or
-/// http on loopback, counts.
-pub(crate) fn cloud_origin(conn: &rusqlite::Connection) -> Option<String> {
-    let configured = SettingsStore::get(conn, keys::CLOUD_ORIGIN);
-    let origin = if !configured.trim().is_empty() {
-        configured.trim().to_string()
-    } else {
-        crate::network_profile::embedded_preprod()
-            .ok()
-            .and_then(|profile| profile.cloud_https_origin.clone())?
-    };
-    let origin = origin.trim_end_matches('/').to_string();
-    (origin.starts_with("https://") || is_loopback(&origin)).then_some(origin)
-}
-
-/// A value used once, so two identical requests do not sign identically.
-///
-/// Ed25519 is deterministic (RFC 8032), so without this a second request to the
-/// same path in the same second produces the same 64 bytes as the first. The
-/// service treats a proof as single-use — that is what stops a captured header
-/// being replayed — and cannot tell "asked twice" from "replayed" unless the
-/// client makes them different. Releasing evidence in several batches is
-/// exactly that case.
-pub(crate) fn nonce() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-/// Sign the challenge a directory will check.
-///
-/// The path is signed along with the method, the timestamp and a per-request
-/// nonce, so a proof handed to one endpoint cannot be replayed against another
-/// — including another person's record on the same server — and cannot be
-/// replayed against the same one twice.
-pub(crate) fn proof(
-    sk: &SigningKey,
-    method: &str,
-    path: &str,
-    timestamp: i64,
-    nonce: &str,
-) -> String {
-    let challenge = format!("{method}\n{path}\n{timestamp}\n{nonce}");
-    let sig = sk.sign(challenge.as_bytes());
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes())
-}
-
-/// GET a path from a directory with a fresh proof attached.
-pub(crate) async fn signed_get(
-    client: &reqwest::Client,
-    dir: &Directory,
-    sk: &SigningKey,
-    path: &str,
-) -> Result<serde_json::Value, String> {
-    // https only. This carries a list of who is interested in a named person,
-    // and the proof header is a bearer credential for five minutes — neither
-    // belongs on a plaintext connection.
-    if !dir.url.starts_with("https://") && !is_loopback(&dir.url) {
-        return Err("a directory must be https".into());
-    }
-
-    let timestamp = chrono::Utc::now().timestamp();
-    let n = nonce();
-    let base = dir.url.trim_end_matches('/');
-    let resp = client
-        .get(format!("{base}{path}"))
-        .header("x-alexandria-timestamp", timestamp.to_string())
-        .header("x-alexandria-nonce", &n)
-        .header("x-alexandria-proof", proof(sk, "GET", path, timestamp, &n))
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    super::exchange::response_json(resp).await
-}
-
-/// Loopback is allowed so somebody can run a directory locally and try this
-/// without a certificate. Nothing else plaintext is.
-///
-/// The host has to *end* there. A prefix check alone would accept
-/// `http://127.0.0.1.example.com`, which is a domain somebody else controls
-/// wearing a loopback address as a costume — and it would arrive over
-/// plaintext carrying a proof header.
-pub(crate) fn is_loopback(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else {
-        return false;
-    };
-    for host in ["127.0.0.1", "localhost", "[::1]"] {
-        if let Some(after) = rest.strip_prefix(host) {
-            if after.is_empty() || after.starts_with(':') || after.starts_with('/') {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 // --- tauri command handlers ----------------------------------------------
 
 #[tauri::command]
@@ -213,8 +95,8 @@ pub async fn fetch_access_log(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessEntry>, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let client = reqwest::Client::new();
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -275,8 +157,8 @@ pub struct Grant {
 #[tauri::command]
 pub async fn fetch_visibility(state: State<'_, AppState>) -> Result<PullResult<Grant>, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let client = reqwest::Client::new();
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -323,12 +205,12 @@ pub async fn set_visibility(
     organisation_id: String,
     visible: bool,
 ) -> Result<(), String> {
-    if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
+    if !is_allowed_origin(&directory_url) {
         return Err("a directory must be https".into());
     }
 
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let now = crate::clock::now_rfc3339();
 
     // A record with no skills in it. The endpoint checks the signature and the
     // subject, and nothing else; sending the published listing would attach a
@@ -344,7 +226,7 @@ pub async fn set_visibility(
     let signed = crate::domain::talent_index::sign_record(&record, &sk, &now)?;
 
     let base = directory_url.trim_end_matches('/');
-    let resp = reqwest::Client::new()
+    let resp = crate::cloud::client()?
         .post(format!("{base}/api/cohorts/visibility/{}", did.as_str()))
         .json(&serde_json::json!({
             "org_id": organisation_id,
@@ -376,8 +258,8 @@ pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
         .into_iter()
         .next()
         .ok_or("requests from organisations are switched off, or no Alexandria Cloud is set")?;
-    let (key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let now = crate::clock::now_rfc3339();
     let now_unix = chrono::Utc::now().timestamp();
     let (sign_key, subject, at) = (key.clone(), did.as_str().to_string(), now.clone());
     let (digest, signed) = state
@@ -425,8 +307,12 @@ pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cloud;
     use crate::crypto::did::derive_did_key;
     use crate::db::Database;
+    use crate::settings::{registry::keys, SettingsStore};
+    use base64::Engine;
+    use ed25519_dalek::SigningKey;
 
     fn key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; 32])
@@ -553,21 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_is_refused_except_on_loopback() {
-        assert!(is_loopback("http://127.0.0.1:8787"));
-        assert!(is_loopback("http://localhost:8787"));
-        assert!(!is_loopback("http://registry.example.com"));
-        assert!(!is_loopback("http://127.0.0.1.example.com"));
-    }
-
-    #[test]
     fn cloud_is_the_override_else_the_profile_and_the_switch_stops_it() {
         let db = Database::open_in_memory().expect("database");
         db.run_migrations().expect("migrations");
         let profile_origin = crate::network_profile::embedded_preprod()
             .ok()
             .and_then(|p| p.cloud_https_origin.clone());
-        assert_eq!(cloud_origin(db.conn()), profile_origin);
+        assert_eq!(cloud::origin(db.conn()), profile_origin);
 
         SettingsStore::set(
             db.conn(),
@@ -576,7 +454,7 @@ mod tests {
         )
         .expect("override");
         assert_eq!(
-            cloud_origin(db.conn()).as_deref(),
+            cloud::origin(db.conn()).as_deref(),
             Some("http://127.0.0.1:8787")
         );
         assert_eq!(directories_db(db.conn()).expect("services").len(), 1);
@@ -584,7 +462,7 @@ mod tests {
         // Plaintext to anywhere but loopback is not a Cloud the app will use.
         SettingsStore::set(db.conn(), keys::CLOUD_ORIGIN, "http://cloud.example".into())
             .expect("override");
-        assert_eq!(cloud_origin(db.conn()), None);
+        assert_eq!(cloud::origin(db.conn()), None);
 
         SettingsStore::set(
             db.conn(),
@@ -596,7 +474,7 @@ mod tests {
         assert!(directories_db(db.conn()).expect("services").is_empty());
         // Status lists still have a home: the switch is about requests.
         assert_eq!(
-            cloud_origin(db.conn()).as_deref(),
+            cloud::origin(db.conn()).as_deref(),
             Some("https://cloud.example")
         );
     }

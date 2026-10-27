@@ -1,11 +1,11 @@
 //! §18 — Selective disclosure: field subset + audience + nonce.
 
 use super::common::{new_test_db, test_did, test_key, TEST_NOW};
-use app_lib::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
 use app_lib::commands::presentation::{
     create_presentation_impl, verify_presentation_impl, CreatePresentationRequest,
     PresentationVerification,
 };
+use app_lib::credentials::{self, IssueCredentialRequest};
 use app_lib::crypto::did::derive_did_key;
 use app_lib::domain::vc::{Claim, CredentialType, SkillClaim};
 
@@ -19,7 +19,7 @@ fn issue_for_subject() -> (
 ) {
     let db = new_test_db();
     let issuer_key = test_key("issuer");
-    let issuer = derive_did_key(&issuer_key);
+    let issuer = app_lib::credentials::Issuer::from_key(issuer_key.clone());
     let subject_key = test_key("subject");
     let subject = derive_did_key(&subject_key);
     let req = IssueCredentialRequest {
@@ -40,8 +40,7 @@ fn issue_for_subject() -> (
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW)
-        .expect("issue credential");
+    let vc = credentials::issue(db.conn(), &issuer, &req, TEST_NOW).expect("issue credential");
     (db, subject_key, subject, vc.id.expect("issued VC has id"))
 }
 

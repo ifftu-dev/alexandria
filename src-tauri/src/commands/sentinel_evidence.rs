@@ -15,10 +15,6 @@ use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::evidence::{self, EvidencePreview, EvidenceSummary};
 use crate::AppState;
 
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-}
-
 /// What is staged in memory for this session, and would be written if the
 /// learner consents. Reads nothing from disk.
 ///
@@ -44,7 +40,7 @@ pub async fn sentinel_evidence_decide(
     granted: bool,
 ) -> Result<usize, String> {
     let staging = state.evidence_staging.clone();
-    let now = now_iso();
+    let now = crate::clock::now_rfc3339();
     state
         .db_executor
         .execute(

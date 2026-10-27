@@ -1,18 +1,25 @@
 pub mod aggregation;
+pub mod ai_access;
 pub mod ai_auth;
 pub mod ai_chat;
 pub mod assessment;
 pub mod av_permissions;
 pub mod cardano;
 pub mod classroom;
+pub mod clock;
+pub mod cloud;
 pub mod commands;
 pub mod content_store;
+pub mod course_notes;
+pub mod credentials;
 pub mod crypto;
 pub mod db;
 pub mod diag;
 pub mod domain;
+pub mod enrollment;
 pub mod evidence;
 pub mod goals;
+pub mod interview_panel;
 #[cfg(test)]
 mod json_limit_boundaries;
 pub mod network_profile;
@@ -21,8 +28,10 @@ pub mod org_trust;
 pub mod p2p;
 pub mod plugins;
 pub mod profile;
+pub mod ratelimit;
 pub mod sentinel;
 pub mod settings;
+pub mod studio;
 pub mod tutoring;
 
 #[cfg(target_os = "macos")]
@@ -75,7 +84,7 @@ pub struct ActiveProfile {
 /// does not by itself permit concurrent access. Blocking SQL on runtime
 /// workers is a separate responsiveness concern to measure and address.
 pub struct AppState {
-    pub studio: Arc<commands::studio::StudioRuntime>,
+    pub studio: Arc<studio::StudioRuntime>,
     /// Live chat generations, so they can be stopped and recovered.
     pub ai_chat: Arc<ai_chat::ChatRuntime>,
     // ─── per-device singletons ──────────────────────────────────────
@@ -96,7 +105,7 @@ pub struct AppState {
     /// Last IPC activity timestamp for session timeout (auto-lock).
     pub last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
     /// IPC rate limiter for sensitive commands.
-    pub ipc_limiter: Arc<std::sync::Mutex<crate::commands::ratelimit::IpcRateLimiter>>,
+    pub ipc_limiter: Arc<std::sync::Mutex<crate::ratelimit::IpcRateLimiter>>,
     /// Sentinel appeal evidence awaiting a learner's consent decision. Held in
     /// memory only and cleared on lock — nothing here has been persisted, and
     /// nothing will be unless the learner says yes. See `sentinel::evidence`.
@@ -293,8 +302,8 @@ impl AppState {
         // the current decay, and records a dated history snapshot. Best-effort.
         if let Ok(guard) = self.db.lock() {
             if let Some(db) = guard.as_ref() {
-                let now = commands::credentials::now_rfc3339();
-                match commands::aggregation::recompute_all_impl(db.conn(), &now) {
+                let now = crate::clock::now_rfc3339();
+                match crate::aggregation::store::recompute_all_impl(db.conn(), &now) {
                     Ok(n) if n > 0 => log::info!("recomputed {n} derived skill states on unlock"),
                     Ok(_) => {}
                     Err(e) => log::warn!("skill-state recompute on unlock failed: {e}"),
@@ -497,7 +506,7 @@ impl AppState {
         // even when the app has been shut for the whole window — the deadline
         // is an absolute timestamp, not elapsed uptime.
         {
-            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let now = crate::clock::now_rfc3339();
             match crate::sentinel::evidence::purge_expired(database.conn(), &now) {
                 Ok(n) if n > 0 => log::info!("sentinel evidence: purged {n} expired row(s)"),
                 Ok(_) => {}
@@ -1047,7 +1056,7 @@ pub fn run() {
                                     let issuance = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => Some(commands::auto_issuance::tick(
+                                            Ok(Some(db)) => Some(credentials::auto::tick(
                                                 db.conn(),
                                                 &w.signing_key,
                                             )),
@@ -1084,47 +1093,48 @@ pub fn run() {
                                     }
                                 }
 
+                                // One issuer for the passes below that sign.
+                                let issuer = wallet.as_ref().map(credentials::Issuer::from_wallet);
+
                                 // Status lists a host has not yet seen. Every
                                 // issuance site creates or changes a list; the
                                 // commands that do so publish inline, and this
                                 // pass catches the rest and any push that failed.
-                                if let Some(w) = wallet.as_ref() {
-                                    let signing_key =
-                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
-                                    let issuer = crypto::did::derive_did_key(&signing_key);
+                                if let Some(issuer) = issuer.as_ref() {
                                     let pending = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => commands::credentials::pending_status_lists(
+                                            Ok(Some(db)) => credentials::status_list::pending(
                                                 db.conn(),
-                                                &issuer,
+                                                issuer.did(),
                                             )
                                             .unwrap_or_default(),
                                             _ => Vec::new(),
                                         }
                                     };
                                     if !pending.is_empty() {
-                                        let now = commands::credentials::now_rfc3339();
-                                        let (accepted, errors) = commands::credentials::push_status_lists(
-                                            &pending,
-                                            &signing_key,
-                                            &issuer,
-                                            &now,
-                                        )
-                                        .await;
+                                        let now = crate::clock::now_rfc3339();
+                                        let (accepted, errors) =
+                                            credentials::status_list::push(&pending, issuer, &now)
+                                                .await;
                                         if !errors.is_empty() {
                                             log::debug!("status list publication: {errors:?}");
                                         }
                                         if !accepted.is_empty() {
                                             let guard = db_for_queue.lock();
                                             if let Ok(Some(db)) = guard.as_deref() {
-                                                if let Err(e) = commands::credentials::mark_status_lists_published(
-                                                    db.conn(),
-                                                    &accepted,
-                                                ) {
+                                                if let Err(e) =
+                                                    credentials::status_list::mark_published(
+                                                        db.conn(),
+                                                        &accepted,
+                                                    )
+                                                {
                                                     log::warn!("status list publication: {e}");
                                                 } else {
-                                                    log::info!("status lists: published {}", accepted.len());
+                                                    log::info!(
+                                                        "status lists: published {}",
+                                                        accepted.len()
+                                                    );
                                                 }
                                             }
                                         }
@@ -1136,11 +1146,9 @@ pub fn run() {
                                 // against the database, sent without holding it,
                                 // recorded after. Unchanged records are skipped,
                                 // so most passes send nothing.
-                                if let Some(w) = wallet.as_ref() {
-                                    let signing_key =
-                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
-                                    let did = crypto::did::derive_did_key(&signing_key);
-                                    let now = commands::credentials::now_rfc3339();
+                                if let Some(issuer) = issuer.as_ref() {
+                                    let (signing_key, did) = (issuer.key(), issuer.did());
+                                    let now = crate::clock::now_rfc3339();
                                     let now_unix = chrono::Utc::now().timestamp();
                                     let plan = {
                                         let guard = db_for_queue.lock();
@@ -1148,14 +1156,14 @@ pub fn run() {
                                             Ok(Some(db)) => {
                                                 let grants = commands::organisations::plan_sync(
                                                     db.conn(),
-                                                    &signing_key,
+                                                    signing_key,
                                                     did.as_str(),
                                                     now_unix,
                                                     &now,
                                                 );
                                                 let listing = commands::organisations::plan_listing(
                                                     db.conn(),
-                                                    &signing_key,
+                                                    signing_key,
                                                     did.as_str(),
                                                     now_unix,
                                                     &now,
@@ -1243,16 +1251,19 @@ pub fn run() {
                                 // reported once each. Read without holding the
                                 // database, recorded with it.
                                 if let Some(w) = wallet.as_ref() {
-                                    let signing_key =
-                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
+                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
+                                        &w.signing_key.to_bytes(),
+                                    );
                                     let did = crypto::did::derive_did_key(&signing_key);
                                     let origin = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => commands::holder_pull::directories_db(db.conn())
-                                                .ok()
-                                                .and_then(|dirs| dirs.into_iter().next())
-                                                .map(|dir| dir.url),
+                                            Ok(Some(db)) => {
+                                                commands::holder_pull::directories_db(db.conn())
+                                                    .ok()
+                                                    .and_then(|dirs| dirs.into_iter().next())
+                                                    .map(|dir| dir.url)
+                                            }
                                             _ => None,
                                         }
                                     };
@@ -1271,7 +1282,8 @@ pub fn run() {
                                                     &items,
                                                 );
                                                 for item in fresh {
-                                                    let Some(notification) = item.notification() else {
+                                                    let Some(notification) = item.notification()
+                                                    else {
                                                         continue;
                                                     };
                                                     if let Err(e) = notifications::deliver(
@@ -1303,7 +1315,10 @@ pub fn run() {
             }
 
             diag::log("creating TutoringManager");
-            let tutoring = Arc::new(TutoringManager::new());
+            let tutoring = Arc::new(TutoringManager::new(
+                tutoring::PlatformMedia::new(),
+                app.handle().clone(),
+            ));
 
             diag::log("creating ClassroomManager");
             let classroom = Arc::new(ClassroomManager::new());
@@ -1320,7 +1335,7 @@ pub fn run() {
             );
 
             let app_state = AppState {
-                studio: Arc::new(commands::studio::StudioRuntime::default()),
+                studio: Arc::new(studio::StudioRuntime::default()),
                 ai_chat: Arc::new(ai_chat::ChatRuntime::default()),
                 app_data_dir: app_dir.clone(),
                 profile_manager,
@@ -1331,9 +1346,7 @@ pub fn run() {
                 #[cfg(grader)]
                 grader_runtime,
                 last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
-                ipc_limiter: Arc::new(std::sync::Mutex::new(
-                    commands::ratelimit::IpcRateLimiter::new(),
-                )),
+                ipc_limiter: Arc::new(std::sync::Mutex::new(ratelimit::IpcRateLimiter::new())),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 db,
                 db_executor,

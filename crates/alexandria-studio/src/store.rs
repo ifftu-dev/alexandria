@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::access::Reader;
 use crate::model::*;
 use crate::{Error, Result};
 
@@ -178,7 +179,7 @@ pub fn tutor_policy(conn: &Connection, course_id: &str) -> Result<TutorPolicy> {
         .unwrap_or_default())
 }
 
-fn can_use_tutor(conn: &Connection, course_id: &str) -> Result<()> {
+pub(crate) fn can_use_tutor(conn: &Connection, course_id: &str) -> Result<()> {
     let allowed: bool = conn.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM courses c
@@ -213,26 +214,17 @@ pub fn tutor_context(
     element_id: &str,
     connection_id: &str,
 ) -> Result<TutorContext> {
-    can_use_tutor(conn, course_id)?;
+    // Checks the learner takes or wrote the course, then the lesson rule.
+    let lesson = crate::access::visible_lesson(conn, Reader::Tutor, course_id, element_id)?;
     let policy = tutor_policy(conn, course_id)?;
     if !policy.enabled {
         return Err(Error::Unavailable(
             "The instructor has not enabled the tutor".into(),
         ));
     }
-    let lesson: Option<(String, Option<String>, Option<String>, String)> = conn
-        .query_row(
-            "SELECT e.title,e.content_inline,e.content_cid,e.element_type
-             FROM course_elements e JOIN course_chapters ch ON ch.id=e.chapter_id
-             WHERE e.id=?1 AND ch.course_id=?2",
-            params![element_id, course_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .optional()?;
-    let (lesson_title, lesson_inline, lesson_cid, kind) = lesson.ok_or(Error::Permission)?;
-    if kind != "text" {
-        return Err(Error::Permission);
-    }
+    let lesson_inline = lesson.inline().map(str::to_owned);
+    let lesson_cid = lesson.blob().map(str::to_owned);
+    let lesson_title = lesson.title;
     let connection = connection(conn, connection_id)?.value;
     if !connection.enabled || connection.capability != "text" {
         return Err(Error::Unavailable("Choose an enabled text model".into()));
@@ -478,7 +470,7 @@ pub fn save_connection(
     if let Some(key) = key {
         bounded(key, 4096, "API key")?;
         // Consumer sign-in tokens are never stored, not just never sent.
-        alexandria_ai::terms::check_credential(&url, key, false)
+        alexandria_ai::connection::admit(&url, doc.value.protocol, key)
             .map_err(|e| Error::Invalid(e.to_string()))?;
     }
     let tx = conn.unchecked_transaction()?;
@@ -494,16 +486,24 @@ pub fn save_connection(
 
 /// Saves a connection created by a provider sign-in, with the credential the
 /// provider issued. The host runs the sign-in; nothing else calls this.
+/// `credential` is stored as given (an API key, or a sign-in's encoded token
+/// set); `bearer` is what requests will carry (that key, or the token set's
+/// access token) and is admitted like a pasted key.
 pub fn save_signed_in_connection(
     conn: &Connection,
     doc: &StudioDocument<StudioConnection>,
     credential: &str,
+    bearer: &str,
 ) -> Result<StudioDocument<StudioConnection>> {
-    crate::provider::validate_connection(&doc.value)?;
+    let url = crate::provider::validate_connection(&doc.value)?;
     if doc.id != doc.value.id || credential.is_empty() {
         return Err(Error::Invalid("Connection identifier mismatch".into()));
     }
     bounded(credential, 32_768, "Sign-in credential")?;
+    // The same admission a pasted key gets: a sign-in that issued a consumer
+    // token is refused here, not left for the first request.
+    alexandria_ai::connection::admit(&url, doc.value.protocol, bearer)
+        .map_err(|e| Error::Invalid(e.to_string()))?;
     let tx = conn.unchecked_transaction()?;
     tx.execute("INSERT INTO studio_secrets(connection_id,secret) VALUES (?1,?2) ON CONFLICT(connection_id) DO UPDATE SET secret=excluded.secret",params![doc.id,credential])?;
     let mut value = doc.value.clone();

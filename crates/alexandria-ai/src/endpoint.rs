@@ -44,6 +44,15 @@ impl Location {
         }
     }
 
+    /// The stable name chat uses for this place; equal to its serde form.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Device => "device",
+            Self::PrivateNetwork => "private_network",
+            Self::Remote => "remote",
+        }
+    }
+
     /// Whether a request to this location leaves the device.
     pub fn leaves_device(self) -> bool {
         !matches!(self, Self::Device)
@@ -238,7 +247,12 @@ impl Endpoint {
 
 /// Validates `raw` for `location`, resolving and pinning host names.
 pub async fn resolve(raw: &str, location: Location) -> Result<Endpoint> {
-    let base = parse(raw, location)?;
+    resolve_parsed(parse(raw, location)?, location).await
+}
+
+/// Resolves and pins a base URL that [`parse`] already accepted for
+/// `location`.
+pub(crate) async fn resolve_parsed(base: Url, location: Location) -> Result<Endpoint> {
     let port = base
         .port_or_known_default()
         .ok_or_else(|| Error::Invalid("Enter a valid API base URL".into()))?;

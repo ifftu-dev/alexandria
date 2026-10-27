@@ -4,10 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAccountStatus } from '@/composables/useAccountStatus'
-import { chatErrorCode } from '@/composables/useChat'
 import type { StudioConnection, StudioDocument } from '@/types'
 import { restrictsAppsForMinors } from '@/utils/providerTerms'
-import { signInErrorCode, useProviderSignIn, type SignInProvider } from '@/composables/useProviderSignIn'
+import { parseChatError, signInErrorMessageKey, signInFailureCode } from '@/utils/chatErrors'
+import type { ConnectionLocation, Protocol as WireProtocol } from '@/generated/chat-vocab'
+import { useProviderSignIn, type SignInProvider } from '@/composables/useProviderSignIn'
 
 /**
  * Connecting chat to a model, one decision per screen: sign in with an
@@ -23,8 +24,10 @@ const { isMinor } = useAccountStatus()
 type Step = 'choose' | 'key' | 'local' | 'code' | 'welcome'
 const step = ref<Step>('choose')
 
-type Where = 'local' | 'private_network'
-type Protocol = 'compatible' | 'anthropic'
+/** The places a model the user runs can be; cloud connections come through the API-key step. */
+type Where = Extract<ConnectionLocation, 'local' | 'private_network'>
+/** The protocols an API key can speak; `responses` is reached only by signing in. */
+type Protocol = Exclude<WireProtocol, 'responses'>
 const localDefaults: Record<Where, string> = {
   local: 'http://localhost:11434/v1',
   private_network: 'http://192.168.1.10:1234/v1',
@@ -48,20 +51,6 @@ const signIn = useProviderSignIn()
 const signInError = ref('')
 /** A ChatGPT connection just made: the welcome OpenAI asks apps to show. */
 const planWelcome = ref<StudioDocument<StudioConnection> | null>(null)
-const signInMessages: Record<string, string> = {
-  signin_timeout: 'chat.signin.errors.timeout',
-  signin_declined: 'chat.signin.errors.declined',
-  plan_not_granted: 'chat.signin.errors.planNotGranted',
-  different_account: 'chat.signin.errors.differentAccount',
-  signin_busy: 'chat.signin.errors.busy',
-  unreachable: 'chat.signin.errors.unreachable',
-  under_13: 'chat.errors.under_13',
-  adults_only: 'chat.errors.adults_only',
-  model_unavailable: 'chat.signin.errors.noModels',
-  code_rejected: 'chat.signin.errors.codeRejected',
-  signin_expired: 'chat.signin.errors.expired',
-}
-
 /** Account sign-in is offered: in the browser on desktop, by pasted code on phones (adults only). */
 const offersSignIn = computed(() => signIn.available || (signIn.codeAvailable && !isMinor.value))
 
@@ -69,10 +58,10 @@ const pastedCode = ref('')
 const connecting = ref(false)
 
 function showSignInError(e: unknown) {
-  const code = signInErrorCode(e)
+  const { code } = parseChatError(e)
   if (code === 'signin_cancelled') return
-  const known = signInMessages[code]
-  signInError.value = known ? t(known) : t('chat.signin.errors.failedCode', { code })
+  const known = code && signInErrorMessageKey(code)
+  signInError.value = known ? t(known) : t('chat.signin.errors.failedCode', { code: signInFailureCode(e) })
 }
 
 function go(next: Step) {
@@ -110,7 +99,7 @@ async function finishCodeSignIn() {
     emit('saved', saved)
   } catch (e) {
     showSignInError(e)
-    if (signInErrorCode(e) === 'signin_expired') step.value = 'choose'
+    if (parseChatError(e).code === 'signin_expired') step.value = 'choose'
   } finally {
     connecting.value = false
   }
@@ -193,8 +182,10 @@ async function save() {
     emit('saved', saved)
   } catch (e) {
     // Validation messages from the backend are written for people.
-    const text = String(e)
-    message.value = chatErrorCode(e) === 'invalid_input' ? text.slice(text.indexOf(':') + 1).trim() : t('chat.errors.generic')
+    const { code, detail } = parseChatError(e)
+    message.value = code === 'invalid_input'
+      ? detail
+      : code === 'under_13' || code === 'adults_only' ? t(`chat.errors.${code}`) : t('chat.errors.generic')
   } finally {
     saving.value = false
   }

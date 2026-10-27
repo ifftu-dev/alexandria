@@ -23,7 +23,9 @@ use crate::cardano::{
     completion_queue::{self, WitnessState, WitnessStatus},
     completion_recovery, completion_tx_builder, script_refs,
 };
-use crate::commands::credentials::{now_rfc3339, IssueCredentialRequest};
+use crate::clock::now_rfc3339;
+use crate::credentials::IssueCredentialRequest;
+use crate::credentials::Issuer;
 use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
@@ -854,7 +856,7 @@ fn self_issue_completion(
         completion_obs::record_observation(conn, &obs).map_err(|e| e.to_string())?;
 
         let credential_id =
-            super::auto_issuance::issue_for_observation(conn, learner_key, &learner_did, &obs)?;
+            crate::credentials::auto::issue_for_observation(conn, learner_key, &learner_did, &obs)?;
         issued_ids.push(credential_id);
     }
 
@@ -894,10 +896,9 @@ fn self_issue_completion(
             integrity_session_id: None,
             integrity_policy: None,
         };
-        let vc = super::credentials::issue_credential_impl(
+        let vc = crate::credentials::issue(
             conn,
-            learner_key,
-            &learner_did,
+            &Issuer::from_key(learner_key.clone()),
             &self_claim,
             &now,
         )?;
@@ -906,7 +907,7 @@ fn self_issue_completion(
 
     // (4) Refresh derived proficiency so the skill graph reflects the
     // new evidence right away.
-    super::aggregation::recompute_all_impl(conn, &now)?;
+    crate::aggregation::store::recompute_all_impl(conn, &now)?;
 
     Ok(issued_ids)
 }
@@ -995,8 +996,7 @@ mod tests {
         assert_eq!(retry.claim_id, first.claim_id);
         assert_eq!(retry.witness_status, WitnessStatus::Pending);
         assert!(retry.tx_hash.is_empty());
-        let credentials =
-            super::super::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        let credentials = crate::credentials::store::list(db.conn(), None, None).unwrap();
         assert_eq!(credentials.len(), 2);
         assert!(credentials.iter().all(|vc| vc.witness.is_none()));
         let status: String = db
@@ -1212,8 +1212,7 @@ mod tests {
 
         // The course-completion VC carries the on-chain witness — this is
         // the row the frontend modal polls for by `witness.tx_hash`.
-        let creds =
-            crate::commands::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        let creds = crate::credentials::store::list(db.conn(), None, None).unwrap();
         let witness_hit = creds
             .iter()
             .find(|c| c.witness.as_ref().map(|w| w.tx_hash.as_str()) == Some(tx_hash.as_str()));
@@ -1323,8 +1322,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ids.len(), 1);
-        let credentials =
-            crate::commands::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        let credentials = crate::credentials::store::list(db.conn(), None, None).unwrap();
         assert_eq!(credentials.len(), 1);
         assert_eq!(
             credentials[0].issuer,
@@ -1338,7 +1336,7 @@ mod tests {
         assert!(completion_obs::pending_observations(db.conn())
             .unwrap()
             .is_empty());
-        let state = super::super::aggregation::list_derived_states_impl(db.conn(), None).unwrap();
+        let state = crate::aggregation::store::list_derived_states_impl(db.conn(), None).unwrap();
         assert_eq!(state.len(), 1);
         // The learner's own completion claim is scored but is not independent
         // corroboration, so it contributes no issuer cluster.

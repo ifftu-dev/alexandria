@@ -20,7 +20,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use super::{cloud_copy, kind, NewNotification};
-use crate::commands::holder_pull::{signed_get, Directory};
+use crate::cloud::{signed_get, Directory};
 
 /// One thing Cloud is holding for the learner.
 #[derive(Debug, Clone, PartialEq, Eq)]

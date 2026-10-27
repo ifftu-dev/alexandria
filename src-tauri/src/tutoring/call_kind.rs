@@ -152,6 +152,42 @@ pub(crate) fn record_session(
     Ok(())
 }
 
+/// The classroom side of a classroom call being started.
+#[derive(Debug, Clone)]
+pub struct ClassroomCallRow {
+    pub channel_id: Option<String>,
+    /// Stake address of the member starting the call.
+    pub started_by: String,
+}
+
+/// Write a classroom's `classroom_calls` row for a call it is starting. The
+/// classroom is the call's context.
+pub(crate) fn record_classroom_call(
+    conn: &Connection,
+    call_id: &str,
+    classroom_id: Option<&str>,
+    title: &str,
+    ticket: &str,
+    row: &ClassroomCallRow,
+) -> Result<(), String> {
+    let classroom_id = classroom_id.ok_or("a classroom call needs its classroom")?;
+    conn.execute(
+        "INSERT INTO classroom_calls \
+         (id, classroom_id, channel_id, title, ticket, started_by, status, started_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', datetime('now'))",
+        params![
+            call_id,
+            classroom_id,
+            row.channel_id,
+            title,
+            ticket,
+            row.started_by
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

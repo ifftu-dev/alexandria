@@ -289,7 +289,7 @@ pub fn record_if_enabled(
     if !SettingsStore::get(conn, keys::NOTIFICATIONS_ENABLED) {
         return Ok(None);
     }
-    let now = crate::commands::credentials::now_rfc3339();
+    let now = crate::clock::now_rfc3339();
     let locale = SettingsStore::get(conn, keys::USER_LANGUAGE);
     let (title, body) = copy::localized(&locale, &new.kind);
     let localized = NewNotification {

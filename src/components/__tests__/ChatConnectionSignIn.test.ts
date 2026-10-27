@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import ChatConnectionForm from '../chat/ChatConnectionForm.vue'
-import { signInErrorCode } from '@/composables/useProviderSignIn'
+import { parseChatError } from '@/utils/chatErrors'
 import en from '@/locales/en'
 import type { StudioConnection, StudioDocument } from '@/types'
 
@@ -81,8 +81,8 @@ describe('signing in to a provider instead of pasting a key', () => {
   })
 
   it('reads the stable code from backend errors', () => {
-    expect(signInErrorCode('different_account: that is another account')).toBe('different_account')
-    expect(signInErrorCode(new Error('under_13: no'))).toBe('under_13')
-    expect(signInErrorCode('Something odd')).toBe('signin_failed')
+    expect(parseChatError('different_account: that is another account').code).toBe('different_account')
+    expect(parseChatError(new Error('under_13: no')).code).toBe('under_13')
+    expect(parseChatError('Something odd').code).toBeNull()
   })
 })

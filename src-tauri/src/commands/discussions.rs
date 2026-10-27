@@ -112,7 +112,7 @@ pub async fn act_on_discussion(
             for proof in candidates {
                 if matches!(opinion_eligibility::check_opinion_credential(conn,policies,&proof,&actor,&req.subject_field_id,&now)?,opinion_eligibility::OpinionCredentialEligibility::Qualified(_)) {
                     let json:String=conn.query_row("SELECT signed_vc_json FROM credentials WHERE id=?1",[&proof],|r|r.get(0)).map_err(|e|e.to_string())?;
-                    let stored=crate::commands::attestation::stored_completion_evidence(conn,&proof)?;
+                    let stored=crate::evidence::completion::stored_completion_evidence(conn,&proof)?;
                     let endorsement=stored.as_ref().map(|s|{let e=s.as_evidence();DiscussionEndorsement{policy:e.policy.clone(),binding:e.binding.clone(),endorsements:e.endorsements.to_vec()}});
                     qualification_proofs.push(DiscussionProof{credential:serde_json::from_str(&json).map_err(|e|e.to_string())?,endorsement});
                     proofs.push(proof);break;

@@ -8,7 +8,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
 use super::{cloud_copy, recipients, NewNotification, Recorded};
-use crate::commands::holder_pull::{cloud_origin, is_loopback, nonce, proof};
+use crate::cloud::{is_loopback, nonce, origin as cloud_origin, proof};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileLease;
 use crate::settings::{registry::keys, SettingsStore};
@@ -609,4 +609,4 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
 
 #[cfg(test)]
 #[path = "push_tests.rs"]
-mod boundary_tests;
+pub(crate) mod boundary_tests;

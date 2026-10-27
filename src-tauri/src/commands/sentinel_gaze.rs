@@ -118,7 +118,7 @@ pub async fn sentinel_score_gaze(
             frame.width,
             frame.height,
             &frame.rgba,
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            &crate::clock::now_rfc3339(),
         );
     }
 

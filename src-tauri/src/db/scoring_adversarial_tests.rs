@@ -8,7 +8,7 @@
 use ed25519_dalek::SigningKey;
 
 use super::Database;
-use crate::commands::aggregation::{get_derived_skill_state_impl, list_derived_states_impl};
+use crate::aggregation::store::{get_derived_skill_state_impl, list_derived_states_impl};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::opinion_eligibility::test_support::store_scored_credential;
 use crate::evidence::reputation::{on_credential_accepted, recompute_for_subject, revalidate_rows};

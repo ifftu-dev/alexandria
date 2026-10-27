@@ -12,10 +12,8 @@
 //! verifier here proves the bundle is self-contained.
 
 use super::common::{new_test_db, test_did, test_key, TEST_NOW};
-use app_lib::commands::credentials::{
-    export_bundle_impl, issue_credential_impl, revoke_credential_impl, verify_bundle_offline_impl,
-    IssueCredentialRequest,
-};
+use app_lib::credentials::bundle;
+use app_lib::credentials::{self, lifecycle, IssueCredentialRequest};
 use app_lib::crypto::did::derive_did_key;
 use app_lib::domain::vc::{Claim, CredentialType, SkillClaim};
 
@@ -41,7 +39,13 @@ fn issue_one(db: &app_lib::db::Database, skill: &str) -> (app_lib::crypto::did::
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW).expect("issue");
+    let vc = credentials::issue(
+        db.conn(),
+        &app_lib::credentials::Issuer::from_key(issuer_key.clone()),
+        &req,
+        TEST_NOW,
+    )
+    .expect("issue");
     (issuer, vc.id.expect("issued VC always has an envelope id"))
 }
 
@@ -52,8 +56,8 @@ async fn exported_bundle_verifies_with_offline_tooling() {
     // shared state), no Alexandria services running.
     let db = new_test_db();
     let _ = issue_one(&db, "skill_survival_offline");
-    let bundle = export_bundle_impl(db.conn()).expect("export");
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, TEST_NOW).expect("verify");
+    let bundle = bundle::export(db.conn()).expect("export");
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, TEST_NOW).expect("verify");
     assert_eq!(total, 1);
     assert_eq!(
         accepted, 1,
@@ -67,9 +71,9 @@ async fn exported_bundle_propagates_revocation_to_offline_verifier() {
     // so the offline verifier sees the same Reject as the local one.
     let db = new_test_db();
     let (issuer, cred_id) = issue_one(&db, "skill_survival_revoked");
-    revoke_credential_impl(db.conn(), &issuer, &cred_id, "test", TEST_NOW).expect("revoke");
-    let bundle = export_bundle_impl(db.conn()).expect("export");
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, TEST_NOW).expect("verify");
+    lifecycle::revoke(db.conn(), &issuer, &cred_id, "test", TEST_NOW).expect("revoke");
+    let bundle = bundle::export(db.conn()).expect("export");
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, TEST_NOW).expect("verify");
     assert_eq!(total, 1);
     assert_eq!(accepted, 0, "revoked credential MUST NOT verify offline");
 }
@@ -81,8 +85,8 @@ async fn export_bundle_is_deterministic() {
     // (content-addressed by the bundle bytes).
     let db = new_test_db();
     let _ = issue_one(&db, "skill_survival_determinism");
-    let a = export_bundle_impl(db.conn()).expect("first export");
-    let b = export_bundle_impl(db.conn()).expect("second export");
+    let a = bundle::export(db.conn()).expect("first export");
+    let b = bundle::export(db.conn()).expect("second export");
     assert_eq!(
         a, b,
         "bundle MUST be byte-identical across repeated exports"
@@ -129,12 +133,17 @@ async fn exported_bundle_verifies_offline_under_a_rotated_issuer_key() {
         integrity_session_id: None,
         integrity_policy: None,
     };
-    issue_credential_impl(db.conn(), &issuer_key_v2, &issuer, &req, TEST_NOW).expect("issue");
+    // Issued after the rotation took effect, as a post-rotation issuance is.
+    let issued_at = app_lib::clock::now_rfc3339();
+    let rotated =
+        app_lib::credentials::Issuer::rotated(db.conn(), issuer.clone(), issuer_key_v2, &issued_at)
+            .expect("v2 is the DID's current key");
+    credentials::issue(db.conn(), &rotated, &req, &issued_at).expect("issue");
 
     // Verify well after the rotation, so the open registry window is v2's.
     let after_rotation = "2099-01-01T00:00:00Z";
-    let bundle = export_bundle_impl(db.conn()).expect("export");
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, after_rotation).expect("verify");
+    let bundle = bundle::export(db.conn()).expect("export");
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, after_rotation).expect("verify");
     assert_eq!(total, 1);
     assert_eq!(
         accepted, 1,

@@ -9,13 +9,11 @@ use std::path::PathBuf;
 use std::collections::HashSet;
 
 use crate::profile::scope::ProfileState as State;
-use ed25519_dalek::SigningKey;
 use rusqlite::params;
 use tauri::{AppHandle, Emitter};
 
-use crate::crypto::did::{derive_did_key, Did};
+use crate::credentials::Issuer;
 use crate::crypto::hash::entity_id;
-use crate::crypto::wallet;
 use crate::db::{executor::DatabaseWorkload, Database};
 use crate::domain::plugin::{
     InstalledPlugin, IrlSubmission, PluginCapability, PluginCatalogEntry, PluginManifest,
@@ -113,27 +111,6 @@ struct PluginInstallProgress {
     error: Option<String>,
 }
 
-/// The distinct plugin CIDs a course's elements reference.
-pub(crate) fn course_plugin_cids(db: &Database, course_id: &str) -> Result<Vec<String>, String> {
-    let conn = db.conn();
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT e.plugin_cid FROM course_elements e \
-             JOIN course_chapters c ON e.chapter_id = c.id \
-             WHERE c.course_id = ?1 AND e.element_type = 'plugin' \
-               AND e.plugin_cid IS NOT NULL AND e.plugin_cid <> ''",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![course_id], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(out)
-}
-
 /// Expand a set of directly-required builtin CIDs into the full ordered list of
 /// builtin bundles to install — including transitive builtin dependencies, and
 /// ordered so a dependency always precedes the plugin that needs it (the
@@ -173,7 +150,7 @@ pub async fn course_required_plugins(
         DatabaseWorkload::Learner,
         "plugin.course-required",
         move |db| {
-            let cids = course_plugin_cids(db, &course_id)?;
+            let cids = registry::course_plugin_cids(db, &course_id)?;
             let mut out = Vec::with_capacity(cids.len());
             for cid in cids {
                 let installed = registry::get_installed(db, &cid)?;
@@ -232,7 +209,7 @@ pub async fn install_course_plugins(
         DatabaseWorkload::Learner,
         "plugin.course-install-plan",
         move |db| {
-            let required = course_plugin_cids(db, &course_id)?;
+            let required = registry::course_plugin_cids(db, &course_id)?;
             let mut candidates = builtin_install_plan(&required);
             // Drop anything already installed (a dependency may already be present).
             let mut keep = Vec::new();
@@ -671,7 +648,8 @@ pub async fn plugin_submit_and_grade(
     // Derive the learner's DID from the unlocked keystore. The keystore
     // must be open — graded plugin submissions only make sense for an
     // enrolled learner whose vault is unlocked anyway.
-    let (signing_key, learner_did) = load_learner_did(&state).await?;
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let learner_did = issuer.did().clone();
     let learner_did_str = learner_did.0.clone();
 
     // Resolve the bundle directory from the *live* plugins dir rather than the
@@ -877,7 +855,7 @@ pub async fn plugin_submit_and_grade(
             if issuance_block.is_none() && persisted_record.score >= PLUGIN_PASS_THRESHOLD {
                 let skills = element_skill_ids(db, &persisted_element_id).unwrap_or_default();
                 if !skills.is_empty() {
-                    let now = crate::commands::credentials::now_rfc3339();
+                    let now = crate::clock::now_rfc3339();
                     let evidence = vec![
                         persisted_submission_cid.clone(),
                         persisted_content_cid.clone(),
@@ -893,7 +871,7 @@ pub async fn plugin_submit_and_grade(
                             assessment_method: Some("plugin_grader".to_string()),
                             provenance: None,
                         };
-                        let req = crate::commands::credentials::IssueCredentialRequest {
+                        let req = crate::credentials::IssueCredentialRequest {
                             credential_type:
                                 crate::domain::vc::CredentialType::AssessmentCredential,
                             subject: learner_did.clone(),
@@ -904,13 +882,7 @@ pub async fn plugin_submit_and_grade(
                             integrity_session_id: integrity_session_id.clone(),
                             integrity_policy: None,
                         };
-                        match crate::commands::credentials::issue_credential_impl(
-                            db.conn(),
-                            &signing_key,
-                            &learner_did,
-                            &req,
-                            &now,
-                        ) {
+                        match crate::credentials::issue(db.conn(), &issuer, &req, &now) {
                             Ok(vc) => log::info!(
                                 "plugin grade: issued credential {:?} for skill {skill_id}",
                                 vc.id
@@ -1106,19 +1078,6 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
     Ok(())
 }
 
-/// Load the local node's signing key + DID-Key. The keystore must be
-/// unlocked. Mirrors the pattern in `commands/pinning.rs::load_pinner_key`.
-async fn load_learner_did(state: &State<'_, AppState>) -> Result<(SigningKey, Did), String> {
-    let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    drop(ks_guard);
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-    let signing_key = SigningKey::from_bytes(&w.signing_key.to_bytes());
-    let did = derive_did_key(&signing_key);
-    Ok((signing_key, did))
-}
-
 fn check_rate_limit(state: &State<'_, AppState>, command: &str) -> Result<(), String> {
     let mut limiter = state
         .ipc_limiter
@@ -1144,7 +1103,7 @@ pub async fn irl_submit_for_review(
 ) -> Result<String, String> {
     check_rate_limit(&state, "irl_submit_for_review")?;
 
-    let (_sk, learner_did) = load_learner_did(&state).await?;
+    let (_sk, learner_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Learner,
@@ -1204,7 +1163,7 @@ pub async fn irl_list_my_submissions(
     state: State<'_, AppState>,
     plugin_cid: Option<String>,
 ) -> Result<Vec<IrlSubmission>, String> {
-    let (_sk, learner_did) = load_learner_did(&state).await?;
+    let (_sk, learner_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Learner,
@@ -1261,7 +1220,7 @@ pub async fn irl_post_review(
 ) -> Result<(), String> {
     check_rate_limit(&state, "irl_post_review")?;
 
-    let (_sk, reviewer_did) = load_learner_did(&state).await?;
+    let (_sk, reviewer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1389,7 +1348,7 @@ mod grade_credential_tests {
                 assessment_method: Some("plugin_grader".into()),
                 provenance: None,
             };
-            let req = crate::commands::credentials::IssueCredentialRequest {
+            let req = crate::credentials::IssueCredentialRequest {
                 credential_type: crate::domain::vc::CredentialType::AssessmentCredential,
                 subject: learner.clone(),
                 claim: crate::domain::vc::Claim::Skill(claim),
@@ -1399,10 +1358,9 @@ mod grade_credential_tests {
                 integrity_session_id: None,
                 integrity_policy: None,
             };
-            let vc = crate::commands::credentials::issue_credential_impl(
+            let vc = crate::credentials::issue(
                 db.conn(),
-                &signing_key,
-                &learner,
+                &Issuer::from_key(signing_key.clone()),
                 &req,
                 now,
             )

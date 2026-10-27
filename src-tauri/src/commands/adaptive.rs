@@ -27,6 +27,7 @@
 //! are a later, opt-in change. So adaptive delivery works on day one, just
 //! less sharply than it will once items are calibrated.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
@@ -35,11 +36,11 @@ use crate::assessment::adaptive::{select_next_item, should_stop, PoolItem, StopR
 use crate::assessment::irt::{estimate_theta_eap, theta_to_score, AbilityEstimate, ItemParams};
 use crate::assessment::items::{self, GradeEngine, ServedItem};
 use crate::assessment::{shuffle, SplitMix64};
+use crate::clock::now_rfc3339;
 use crate::commands::assessment::{
     end_interrupted_attempts, ensure_attempt_owner, load_attempt_history,
     require_live_integrity_session, resolve_bank_policy, GradeResult,
 };
-use crate::commands::credentials::{load_issuer_key, now_rfc3339};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};
@@ -391,7 +392,7 @@ pub async fn assessment_finalize_adaptive(
     state: State<'_, AppState>,
     attempt_id: String,
 ) -> Result<GradeResult, String> {
-    let (signing_key, issuer_did) = load_issuer_key(&state).await?;
+    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = now_rfc3339();
     state
         .db_executor
@@ -531,7 +532,7 @@ pub fn finalize_adaptive_impl(
             assessment_method: Some("adaptive_quiz".into()),
             provenance: None,
         };
-        let req = crate::commands::credentials::IssueCredentialRequest {
+        let req = crate::credentials::IssueCredentialRequest {
             credential_type: CredentialType::AssessmentCredential,
             subject: issuer_did.clone(),
             claim: Claim::Skill(claim),
@@ -541,13 +542,8 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::commands::credentials::issue_credential_impl(
-            conn,
-            signing_key,
-            issuer_did,
-            &req,
-            now,
-        )?;
+        let vc =
+            crate::credentials::issue(conn, &Issuer::from_key(signing_key.clone()), &req, now)?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
@@ -559,7 +555,7 @@ pub fn finalize_adaptive_impl(
     .map_err(|e| e.to_string())?;
 
     if passed {
-        crate::commands::aggregation::recompute_all_impl(conn, now)?;
+        crate::aggregation::store::recompute_all_impl(conn, now)?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;

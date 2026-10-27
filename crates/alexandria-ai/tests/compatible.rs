@@ -2,19 +2,28 @@
 
 use std::time::Duration;
 
-use alexandria_ai::compatible::Compatible;
-use alexandria_ai::endpoint::{self, Location};
 use alexandria_ai::model::Limits;
-use alexandria_ai::{ChatRequest, Error, FinishReason, Message, StreamEvent, Usage};
+use alexandria_ai::{
+    connect, Adapter, ChatRequest, Connection, Error, FinishReason, Location, Message, Protocol,
+    StreamEvent, Usage,
+};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 mod support;
 use support::{drain, serve, Reply};
 
-async fn adapter(base: &str, key: Option<&str>) -> Compatible {
-    let endpoint = endpoint::resolve(base, Location::Device).await.unwrap();
-    Compatible::new(endpoint, key.map(str::to_owned))
+async fn adapter(base: &str, key: Option<&str>) -> Adapter {
+    bounded(base, key, Limits::default()).await
+}
+
+async fn bounded(base: &str, key: Option<&str>, limits: Limits) -> Adapter {
+    let connection = Connection {
+        endpoint: base.into(),
+        location: Location::Device,
+        protocol: Protocol::Compatible,
+    };
+    connect(&connection, key, limits).await.unwrap()
 }
 
 fn request() -> ChatRequest {
@@ -215,9 +224,8 @@ async fn output_beyond_the_limit_is_refused() {
         max_output_bytes: 1000,
         ..Limits::default()
     };
-    let error = adapter(&base, None)
+    let error = bounded(&base, None, limits)
         .await
-        .with_limits(limits)
         .stream(&request(), tx)
         .await
         .unwrap_err();
@@ -255,9 +263,8 @@ async fn a_silent_server_times_out() {
         idle_timeout: Duration::from_millis(150),
         ..Limits::default()
     };
-    let error = adapter(&base, None)
+    let error = bounded(&base, None, limits)
         .await
-        .with_limits(limits)
         .stream(&request(), tx)
         .await
         .unwrap_err();

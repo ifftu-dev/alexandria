@@ -19,66 +19,11 @@ use serde_json::Value;
 use super::interview::{
     create_interview_impl, CreateInterviewParticipant, CreateInterviewRequest, InterviewBundle,
 };
-use crate::commands::credentials::now_rfc3339;
-use crate::commands::exchange::{client, response_json};
+use crate::clock::now_rfc3339;
 use crate::db::executor::DatabaseWorkload;
+use crate::interview_panel::{panel_request, parse_panel_link, PanelLink};
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
-
-/// What a join link carries.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PanelLink {
-    pub cloud: String,
-    pub interview_id: String,
-    pub panelist_id: String,
-    pub token: String,
-}
-
-/// Read `alexandria://interview/join?cloud=…&id=…&panelist=…&token=…`.
-///
-/// The Cloud origin comes from the link, so it is held to the same rule as
-/// every other Cloud address: https, or http on loopback for local testing.
-/// Anything else would send the panelist's token over plaintext.
-pub fn parse_panel_link(link: &str) -> Result<PanelLink, String> {
-    let url = reqwest::Url::parse(link.trim()).map_err(|_| "not an interview link".to_string())?;
-    if url.scheme() != "alexandria"
-        || url.host_str() != Some("interview")
-        || url.path().trim_end_matches('/') != "/join"
-    {
-        return Err("not an interview link".into());
-    }
-    let param = |name: &str| {
-        url.query_pairs()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| format!("the interview link has no {name}"))
-    };
-    let cloud = param("cloud")?.trim_end_matches('/').to_string();
-    if !cloud.starts_with("https://") && !super::holder_pull::is_loopback(&cloud) {
-        return Err("the interview link points at a service that is not https".into());
-    }
-    let interview_id = param("id")?;
-    let panelist_id = param("panelist")?;
-    for id in [&interview_id, &panelist_id] {
-        uuid::Uuid::parse_str(id).map_err(|_| "the interview link is damaged".to_string())?;
-    }
-    let token = param("token")?;
-    if token.len() < 32
-        || token.len() > 128
-        || !token
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        return Err("the interview link is damaged".into());
-    }
-    Ok(PanelLink {
-        cloud,
-        interview_id,
-        panelist_id,
-        token,
-    })
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,29 +87,6 @@ pub struct Rating {
     pub criterion: String,
     /// 1–4, or none when the panelist did not score it.
     pub rating: Option<u8>,
-}
-
-pub(crate) async fn panel_request(
-    link: &PanelLink,
-    method: reqwest::Method,
-    suffix: &str,
-    body: Option<&Value>,
-) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/panel/interviews/{}{suffix}",
-        link.cloud, link.interview_id
-    );
-    let mut request = client()?
-        .request(method, url)
-        .header("authorization", format!("Panelist {}", link.token));
-    if let Some(body) = body {
-        request = request.json(body);
-    }
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    if response.status() == reqwest::StatusCode::NO_CONTENT {
-        return Ok(Value::Null);
-    }
-    response_json(response).await
 }
 
 async fn fetch(link: &PanelLink) -> Result<PanelInterview, String> {

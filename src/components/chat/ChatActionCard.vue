@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { chatErrorCode, useChat } from '@/composables/useChat'
+import { useChat } from '@/composables/useChat'
+import { chatErrorCode } from '@/utils/chatErrors'
+import { assertNever } from '@/utils/exhaustive'
 import { useGoals } from '@/composables/useGoals'
 import { useLocalApi } from '@/composables/useLocalApi'
 import type { ChatArtifact, SkillInfo, SkillSuggestion } from '@/types'
@@ -107,8 +109,8 @@ const ask = computed(() => {
     case 'goal': return t('chat.actions.ask.goal')
     case 'goal_change': return t('chat.actions.ask.goalChange', { goal: goal.value?.label ?? props.item.title })
     case 'enroll': return t('chat.actions.ask.enroll')
+    default: return assertNever(b)
   }
-  return ''
 })
 
 /** Why Allow is not available yet, if it isn't. */
@@ -149,8 +151,9 @@ const done = computed<{ text: string; to?: string; muted?: boolean }>(() => {
       return { text: t('chat.actions.done.goalChange'), to: '/goals' }
     case 'enroll':
       return { text: t('chat.actions.done.enroll'), to: coursePage.value }
+    default:
+      return assertNever(b)
   }
-  return { text: '' }
 })
 
 function describe(e: unknown): { text: string; to?: string } {

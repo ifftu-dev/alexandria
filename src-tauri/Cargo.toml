@@ -186,6 +186,10 @@ iroh-gossip = "0.101"
 live = { path = "../crates/live", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
+# The synthetic media adapter's raw test codec speaks the media crate's
+# catalog (hang) and container (moq-mux) types directly.
+hang = "0.19"
+moq-mux = "0.7"
 # Organisations prove their domain with a TXT record. 0.26: the 0.25 line has
 # RUSTSEC-2026-0118/0119.
 hickory-resolver = "0.26"

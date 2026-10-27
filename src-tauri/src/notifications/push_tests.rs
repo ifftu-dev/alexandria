@@ -1,7 +1,7 @@
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn active(directory: &std::path::Path) -> std::sync::Arc<AppState> {
+pub(crate) async fn active(directory: &std::path::Path) -> std::sync::Arc<AppState> {
     active_named(directory, "Learner").await
 }
 
@@ -713,75 +713,6 @@ async fn local_banner_tap_survives_lock_and_rejects_legacy_profileless_extras() 
         .unwrap()
         .remove("profileId");
     assert!(tapped(&locked, legacy).unwrap().is_none());
-}
-
-#[tokio::test]
-async fn locked_pending_open_ipc_peeks_without_consuming_and_requires_session_for_ack() {
-    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
-    let directory = tempfile::tempdir().unwrap();
-    let state = active(directory.path()).await;
-    let profile = state.profile_manager.paths_for(&state.active_id().unwrap());
-    state.stop_active_profile().await.unwrap();
-    let mut intent = tapped(
-        &state,
-        serde_json::json!({"local": true, "data": {"__EXTRA__": {
-            "profileId": profile.id.as_str(), "networkId": recipients::network().unwrap(),
-            "notificationId": "11111111-1111-4111-8111-111111111111", "route": "/notifications"
-        }}}),
-    )
-    .unwrap()
-    .unwrap();
-    intent.route.clear();
-    let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
-    let app = mock_builder()
-        .manage(state)
-        .invoke_handler(tauri::generate_handler![
-            crate::commands::notifications::notifications_pending_open,
-            crate::commands::notifications::notifications_consume_open
-        ])
-        .build(mock_context(noop_assets()))
-        .unwrap();
-    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-        .build()
-        .unwrap();
-    for command in [
-        "notifications_pending_open",
-        "notifications_pending_open",
-        "notifications_consume_open",
-    ] {
-        let webview = webview.clone();
-        let id = intent.id.clone();
-        let response = tokio::task::spawn_blocking(move || {
-            get_ipc_response(
-                &webview,
-                tauri::webview::InvokeRequest {
-                    cmd: command.into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: "tauri://localhost".parse().unwrap(),
-                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({"id": id})),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
-                },
-            )
-        })
-        .await
-        .unwrap();
-        if command == "notifications_pending_open" {
-            assert_eq!(
-                response
-                    .unwrap()
-                    .deserialize::<super::super::opens::NotificationOpen>()
-                    .unwrap(),
-                intent
-            );
-        } else {
-            assert_eq!(
-                response.unwrap_err(),
-                serde_json::json!("profile session header is required")
-            );
-        }
-    }
 }
 
 #[tokio::test]

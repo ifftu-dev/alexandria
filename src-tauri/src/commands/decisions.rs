@@ -152,8 +152,27 @@ fn clear_shadow(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
     Ok(())
 }
 
+/// The access rules for sending a task to the decision service, checked
+/// before the client is prepared. Every task that sends the learner's own
+/// text (a goal, a job description, a document, a search query, a tutor
+/// exchange) is refused under 13, like any remote model. Only the tutor check
+/// is gated by an attempt: goal checks have no part in one, and search judges
+/// results as the learner types, so it is neither refused nor flagged then.
+/// Reviewing an author's course draft sends no learner data.
+fn task_allowed(db: &rusqlite::Connection, task: Task) -> Result<(), Error> {
+    match task {
+        Task::Tutor => tutor_review_allowed(db),
+        Task::LearningGoal | Task::JobDescription | Task::DocumentClaim | Task::Search => {
+            crate::ai_access::may_use_remote_service(db)?;
+            Ok(())
+        }
+        Task::StudioReview | Task::Incident => Ok(()),
+    }
+}
+
 async fn prepare(state: &AppState, task: Task) -> Result<(Client, i64), String> {
     let plan = with_db(state, |db| {
+        task_allowed(db, task)?;
         prune_shadow(db, chrono::Utc::now().timestamp())?;
         let doc = settings(db)?;
         if !doc.value.tasks.contains(&task)
@@ -462,6 +481,16 @@ pub async fn decision_search(
         .collect()
 }
 
+/// Checking a tutor answer sends the lesson and the last exchange to the
+/// decision service. Only the tutor's "check" button sends it, so during an
+/// attempt it is refused and flagged like asking the tutor; under 13 it is
+/// refused like any remote model.
+fn tutor_review_allowed(db: &rusqlite::Connection) -> Result<(), Error> {
+    crate::ai_access::no_attempt_in_progress(db, crate::ai_access::Surface::Tutor)?;
+    crate::ai_access::may_use_remote_service(db)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn decision_tutor_review(
     state: State<'_, AppState>,
@@ -521,6 +550,76 @@ pub async fn decision_tutor_review(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_goal_check_is_refused_for_learners_under_13() {
+        use crate::ai_chat::turn::fixtures::{born_years_ago, db};
+        let conn = db();
+        for task in [
+            Task::LearningGoal,
+            Task::JobDescription,
+            Task::DocumentClaim,
+        ] {
+            born_years_ago(&conn, 30);
+            assert!(task_allowed(&conn, task).is_ok(), "{task:?}");
+            born_years_ago(&conn, 15);
+            assert!(
+                task_allowed(&conn, task).is_ok(),
+                "{task:?}: not a model connection"
+            );
+            born_years_ago(&conn, 12);
+            match task_allowed(&conn, task) {
+                Err(Error::Unavailable(message)) => {
+                    assert!(message.contains("under 13"), "{task:?}: {message}")
+                }
+                other => panic!("{task:?}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_search_relevance_check_is_refused_for_learners_under_13() {
+        use crate::ai_chat::turn::fixtures::{attempt, born_years_ago, db, flagged};
+        let conn = db();
+        assert!(task_allowed(&conn, Task::Search).is_ok());
+        born_years_ago(&conn, 15);
+        assert!(task_allowed(&conn, Task::Search).is_ok());
+        born_years_ago(&conn, 12);
+        match task_allowed(&conn, Task::Search) {
+            Err(Error::Unavailable(message)) => assert!(message.contains("under 13"), "{message}"),
+            other => panic!("{other:?}"),
+        }
+        // Search judges results as the learner types, from a bar an
+        // assessment page may still show: no attempt gate, never a flag.
+        born_years_ago(&conn, 30);
+        attempt(&conn, "attempt");
+        assert!(task_allowed(&conn, Task::Search).is_ok());
+        assert!(!flagged(&conn, "attempt"));
+    }
+
+    #[test]
+    fn a_tutor_answer_check_follows_the_attempt_and_under_13_rules() {
+        use crate::ai_chat::turn::fixtures::{attempt, born_years_ago, db, flagged};
+        let conn = db();
+        assert!(tutor_review_allowed(&conn).is_ok());
+        born_years_ago(&conn, 15);
+        assert!(
+            tutor_review_allowed(&conn).is_ok(),
+            "not a model connection"
+        );
+        born_years_ago(&conn, 12);
+        match tutor_review_allowed(&conn) {
+            Err(Error::Unavailable(message)) => assert!(message.contains("under 13"), "{message}"),
+            other => panic!("{other:?}"),
+        }
+        born_years_ago(&conn, 30);
+        attempt(&conn, "attempt");
+        assert!(matches!(
+            tutor_review_allowed(&conn),
+            Err(Error::AssessmentActive)
+        ));
+        assert!(flagged(&conn, "attempt"));
+    }
 
     fn db() -> crate::db::Database {
         let db = crate::db::Database::open_in_memory().unwrap();

@@ -36,11 +36,13 @@
 //! person does; taking back is something they are owed, and being offline at
 //! the moment of the decision must not quietly cost them it.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use super::holder_pull::{directories, is_loopback, nonce, proof, Directory};
+use super::holder_pull::{directories, nonce, proof, Directory};
+use crate::cloud::is_allowed_origin;
 use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::evidence;
 use crate::AppState;
@@ -80,7 +82,7 @@ pub struct RunsResult {
 }
 
 fn https_only(url: &str) -> Result<(), String> {
-    if url.starts_with("https://") || is_loopback(url) {
+    if is_allowed_origin(url) {
         return Ok(());
     }
     Err("a directory must be https".into())
@@ -143,8 +145,8 @@ async fn signed_send(
 #[tauri::command]
 pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsResult, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let client = reqwest::Client::new();
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -425,7 +427,7 @@ pub async fn holder_release_evidence(
     session_id: String,
 ) -> Result<Released, String> {
     https_only(&directory_url)?;
-    let (sk, _did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (sk, _did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
 
     let evidence_session_id = session_id.clone();
     let items = state
@@ -461,7 +463,7 @@ pub async fn holder_release_evidence(
     let bytes = items.iter().map(|i| i.payload.len()).sum();
     let b64 = base64::engine::general_purpose::STANDARD;
     let path = format!("/api/runs/{run_id}/evidence");
-    let client = reqwest::Client::new();
+    let client = crate::cloud::client()?;
 
     // Sent in the order it was captured, so that a release interrupted partway
     // leaves the earlier part of the session at the other end rather than an
@@ -644,7 +646,7 @@ pub async fn holder_withdraw_evidence(
             },
         )
         .await?;
-    let (sk, _did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (sk, _did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     withdraw_one(&state, &sk, &session_id, &directory_url, &run_id).await
 }
 
@@ -673,7 +675,7 @@ async fn withdraw_one(
 ) -> Result<(), String> {
     let path = format!("/api/runs/{run_id}/evidence");
     signed_send(
-        &reqwest::Client::new(),
+        &crate::cloud::client()?,
         directory_url,
         sk,
         "DELETE",
@@ -745,7 +747,7 @@ pub async fn holder_retry_withdrawals(state: State<'_, AppState>) -> Result<usiz
         return Ok(0);
     }
 
-    let (sk, _did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (sk, _did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let mut remaining = 0usize;
     for (session_id, directory_url, run_id) in owed {
         if withdraw_one(&state, &sk, &session_id, &directory_url, &run_id)

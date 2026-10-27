@@ -3,6 +3,10 @@
 // Generated from Rust domain structs (src-tauri/src/domain/)
 // ============================================
 
+import type { ChatLocation, ConnectionLocation, ProposalKind, Protocol } from '@/generated/chat-vocab'
+
+export type { ChatLocation }
+
 // ---- Identity & Profile ----
 
 export interface Identity {
@@ -2286,7 +2290,7 @@ export interface CourseCompletionBinding {
 export interface StudioSource { id: string; title: string; text: string; selected: boolean }
 export interface TutorPolicy { enabled: boolean; guidance: 'socratic' | 'balanced' | 'direct'; initial_prompt: string }
 export interface CourseStudio { audience: string; prerequisites: string; outcome: string; initial_prompt: string; sources: StudioSource[]; tutor: TutorPolicy }
-export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'private_network' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean; context_tokens?: number | null; protocol?: 'compatible' | 'anthropic' | 'responses'; auth?: 'api_key' | 'chatgpt_plan' }
+export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: ConnectionLocation; capability: 'text'; enabled: boolean; has_key: boolean; context_tokens?: number | null; protocol?: Protocol; auth?: 'api_key' | 'chatgpt_plan' }
 export interface StudioRole { role: string; connection_id: string | null; initial_prompt: string }
 export interface StudioSettings { roles: StudioRole[] }
 export interface StudioStep { id: string; role: string; connection_id: string | null; initial_prompt: string }
@@ -2298,7 +2302,6 @@ export interface TutorMessage { role: 'learner' | 'tutor'; text: string; created
 export interface TutorThread { id: string; course_id: string; element_id: string; connection_id: string; messages: TutorMessage[] }
 export interface TutorReply { thread: TutorThread; provider_location: 'local' | 'cloud' }
 // ─── Global AI chat (src-tauri/src/commands/ai_chat.rs) ─────────────────
-export type ChatLocation = 'device' | 'private_network' | 'remote'
 export type ChatMessageStatus = 'complete' | 'streaming' | 'interrupted' | 'failed' | 'cancelled'
 /** A thread found by local search. `snippet` marks matches with U+0002 and U+0003. */
 export interface ChatSearchHit { thread: ChatThread; message_id: string | null; snippet: string | null }
@@ -2312,13 +2315,16 @@ export interface ChatGuardianApproval { id: string; connection_id: string; conne
 export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; received_at: string; decided_at: string | null; delivered: boolean }
 export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'; content: string; status: 'proposed' | 'approved'; active: boolean; thread_id: string | null; source_message_id: string | null; revision: number; created_at: string; updated_at: string }
 export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; artifacts: ChatArtifact[]; active_run_id: string | null }
-export type ChatArtifactBody =
-  | { kind: 'note'; text: string }
-  | { kind: 'flashcards'; cards: { front: string; back: string }[] }
-  | { kind: 'goal'; text: string; goal_id?: string }
-  | { kind: 'goal_change'; goal_id: string; rename?: string; add: { id: string; name: string }[]; remove: { id: string; name: string }[]; text: string }
-  | { kind: 'course_note'; course_id: string; element_id: string; lesson: string; text: string }
-  | { kind: 'enroll'; course_id: string; goal_id: string; text: string }
+/** The shape of each proposal body by kind. The kinds come from the backend; a kind without a shape here is a type error. */
+interface ChatArtifactBodies {
+  note: { text: string }
+  flashcards: { cards: { front: string; back: string }[] }
+  goal: { text: string; goal_id?: string }
+  goal_change: { goal_id: string; rename?: string; add: { id: string; name: string }[]; remove: { id: string; name: string }[]; text: string }
+  course_note: { course_id: string; element_id: string; lesson: string; text: string }
+  enroll: { course_id: string; goal_id: string; text: string }
+}
+export type ChatArtifactBody = { [K in ProposalKind]: { kind: K } & ChatArtifactBodies[K] }[ProposalKind]
 /** Something a chat asked to save or change. A proposal waits for the learner to allow or decline it; once allowed, notes and flashcards are `saved` (and outlive their chat) and everything else is `added` where it belongs; a declined one stays as a record. */
 export interface ChatArtifact { id: string; status: 'proposed' | 'saved' | 'added' | 'declined'; title: string; body: ChatArtifactBody; sources: ChatSourceRef[]; thread_id: string | null; message_id: string | null; created_at: string; updated_at: string }
 /** A learner's note on a course, at a lesson when it has one. */

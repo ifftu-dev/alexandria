@@ -53,7 +53,7 @@ pub async fn notifications_mark_read(
             state.profile_lease(),
             "notifications.mark_read",
             move |db| {
-                let now = crate::commands::credentials::now_rfc3339();
+                let now = crate::clock::now_rfc3339();
                 notifications::mark_read(db.conn(), &ids, &now)?;
                 notifications::unread_count(db.conn())
             },
@@ -75,7 +75,7 @@ pub async fn notifications_mark_all_read(
             state.profile_lease(),
             "notifications.mark_all_read",
             |db| {
-                let now = crate::commands::credentials::now_rfc3339();
+                let now = crate::clock::now_rfc3339();
                 notifications::mark_all_read(db.conn(), &now).map(drop)
             },
         )
@@ -225,4 +225,78 @@ pub async fn notifications_emit_test(
         .ok_or("notifications are switched off for this profile")?;
     notifications::announce(&app, &recorded);
     Ok(recorded.row)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::notifications::push;
+
+    #[tokio::test]
+    async fn locked_pending_open_ipc_peeks_without_consuming_and_requires_session_for_ack() {
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
+        let directory = tempfile::tempdir().unwrap();
+        let state = push::boundary_tests::active(directory.path()).await;
+        let profile = state.profile_manager.paths_for(&state.active_id().unwrap());
+        state.stop_active_profile().await.unwrap();
+        let mut intent = push::tapped(
+            &state,
+            serde_json::json!({"local": true, "data": {"__EXTRA__": {
+                "profileId": profile.id.as_str(), "networkId": crate::notifications::recipients::network().unwrap(),
+                "notificationId": "11111111-1111-4111-8111-111111111111", "route": "/notifications"
+            }}}),
+        )
+        .unwrap()
+        .unwrap();
+        intent.route.clear();
+        let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+        let app = mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![
+                super::notifications_pending_open,
+                super::notifications_consume_open
+            ])
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        for command in [
+            "notifications_pending_open",
+            "notifications_pending_open",
+            "notifications_consume_open",
+        ] {
+            let webview = webview.clone();
+            let id = intent.id.clone();
+            let response = tokio::task::spawn_blocking(move || {
+                get_ipc_response(
+                    &webview,
+                    tauri::webview::InvokeRequest {
+                        cmd: command.into(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: "tauri://localhost".parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(serde_json::json!({"id": id})),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                    },
+                )
+            })
+            .await
+            .unwrap();
+            if command == "notifications_pending_open" {
+                assert_eq!(
+                    response
+                        .unwrap()
+                        .deserialize::<crate::notifications::opens::NotificationOpen>()
+                        .unwrap(),
+                    intent
+                );
+            } else {
+                assert_eq!(
+                    response.unwrap_err(),
+                    serde_json::json!("profile session header is required")
+                );
+            }
+        }
+    }
 }

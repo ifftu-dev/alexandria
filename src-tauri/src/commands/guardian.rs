@@ -5,10 +5,12 @@
 //! Parent (guardian) side: accept an invite (issues the guardianship
 //! RoleCredential and dials the child), pull/receive activity, revoke.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
+use crate::ai_chat::vocab::refused;
 use crate::commands::pairing::NodeHandle;
 use crate::crypto::guardian as invite_codec;
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
@@ -174,8 +176,9 @@ pub async fn guardian_accept_invite(
 
     // Issue the guardianship credential (RoleCredential role=guardian,
     // subject = child DID) with our signing key.
-    let (signing_key, issuer_did) = crate::commands::credentials::load_issuer_key(&state).await?;
-    let now = crate::commands::credentials::now_rfc3339();
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer_did = issuer.did().clone();
+    let now = crate::clock::now_rfc3339();
     let invite_for_db = invite.clone();
     let code_hash_for_db = code_hash.clone();
     let issuer_did_for_db = issuer_did.clone();
@@ -189,7 +192,7 @@ pub async fn guardian_accept_invite(
             move |db| {
                 let conn = db.conn();
                 crate::db::with_transaction(conn, || {
-                    let req = crate::commands::credentials::IssueCredentialRequest {
+                    let req = crate::credentials::IssueCredentialRequest {
                         credential_type: CredentialType::RoleCredential,
                         subject: crate::crypto::did::Did(invite_for_db.child_did.clone()),
                         claim: Claim::Role(RoleClaim {
@@ -202,13 +205,7 @@ pub async fn guardian_accept_invite(
                         integrity_session_id: None,
                         integrity_policy: None,
                     };
-                    let vc = crate::commands::credentials::issue_credential_impl(
-                        conn,
-                        &signing_key,
-                        &issuer_did_for_db,
-                        &req,
-                        &now,
-                    )?;
+                    let vc = crate::credentials::issue(conn, &issuer, &req, &now)?;
                     let vc_json = serde_json::to_string(&vc).map_err(|e| e.to_string())?;
                     let vc_id = vc.id.clone().unwrap_or_default();
 
@@ -531,26 +528,17 @@ async fn send_approval_requests(
             lease.clone(),
             "guardian.approvals.pending",
             |db| {
-                let mut stmt = db
-                    .conn()
-                    .prepare(
-                        "SELECT id, connection_name, endpoint, model FROM ai_connection_approvals
-                      WHERE status = 'pending' ORDER BY requested_at LIMIT 20",
-                    )
-                    .map_err(|e| e.to_string())?;
-                let rows = stmt
-                    .query_map([], |r| {
-                        Ok(proto::ApprovalRequestPayload {
-                            request_id: r.get(0)?,
-                            connection_name: r.get(1)?,
-                            endpoint: r.get(2)?,
-                            model: r.get(3)?,
-                        })
+                let pending =
+                    crate::ai_access::pending_approvals(db.conn(), 20).map_err(refused)?;
+                Ok(pending
+                    .into_iter()
+                    .map(|p| proto::ApprovalRequestPayload {
+                        request_id: p.id,
+                        connection_name: p.connection_name,
+                        endpoint: p.endpoint,
+                        model: p.model,
                     })
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?;
-                Ok(rows)
+                    .collect())
             },
         )
         .await?;

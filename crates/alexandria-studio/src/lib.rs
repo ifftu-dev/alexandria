@@ -1,3 +1,4 @@
+pub mod access;
 #[cfg(unix)]
 pub mod broker;
 pub mod credentials;

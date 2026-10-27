@@ -1,41 +1,39 @@
-//! Live tutoring module — P2P video/audio sessions over iroh.
+//! Live calls — P2P video/audio sessions over iroh.
 //!
 //! Uses the `live` crate (Media over QUIC) for media transport and
-//! `iroh-gossip` for room peer discovery. All traffic flows
-//! through the same iroh `Endpoint` used for blob storage.
+//! `iroh-gossip` for room peer discovery. All traffic flows through the
+//! same iroh `Endpoint` used for blob storage.
 //!
 //! Architecture:
 //!   ContentNode.endpoint() + gossip() + live()
-//!       → TutoringManager (room lifecycle, session DB records)
+//!       → CallManager<PlatformMedia> (room lifecycle, chat, names, records)
+//!           → MediaDevices adapter (camera, screen, codecs, audio route)
 //!           → Room (gossip peer discovery + MoQ media)
 //!               → PublishBroadcast (local camera/mic → H264/Opus → MoQ)
 //!               → SubscribeBroadcast (remote MoQ → decode → frames)
 //!
-//! Desktop: full video + audio + screen share.
-//! iOS: full video + audio via platform camera + VideoToolbox.
-//! Android: shared tutoring manager path with mobile video enabled when the
-//! Android Tauri config opts into `tutoring-video-android`.
-
-#[cfg(any(desktop, target_os = "android"))]
-pub mod manager;
-
-pub(crate) mod panel_presence;
-mod tasks;
-
-#[cfg(target_os = "ios")]
-pub mod manager_mobile;
-
-#[cfg(any(desktop, target_os = "android"))]
-pub use manager::TutoringManager;
-
-#[cfg(target_os = "ios")]
-pub use manager_mobile::TutoringManager;
+//! One call manager serves every platform; `media` holds the adapters:
+//! desktop (nokhwa + ffmpeg + screen share), iOS (AVFoundation +
+//! VideoToolbox + AVAudioSession), Android (NDK Camera2 over ffmpeg) and
+//! synthetic (tests and builds without a video feature).
 
 pub(crate) mod call_kind;
+pub mod events;
+pub mod manager;
+pub mod media;
+pub(crate) mod panel_presence;
 pub(crate) mod presence;
-#[cfg(any(
-    feature = "tutoring-video",
-    feature = "tutoring-video-static",
-    feature = "tutoring-video-ios"
-))]
+pub mod records;
+mod tasks;
+
+#[cfg(tutoring_video)]
 mod preview_jpeg;
+
+#[cfg(test)]
+mod manager_tests;
+
+pub use manager::CallManager;
+pub use media::PlatformMedia;
+
+/// The call manager over this build's media adapter, as `AppState` holds it.
+pub type TutoringManager = CallManager<PlatformMedia>;
