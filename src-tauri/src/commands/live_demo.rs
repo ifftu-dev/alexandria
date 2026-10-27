@@ -3,7 +3,7 @@
 //! This drives the same functions the Tauri commands call — grading, issuing,
 //! signing, pushing, presenting — with a real database and real keys, and
 //! talks to a real Cloud over HTTP exactly as the app does. It is the
-//! rehearsal of `docs/demo-runbook.md`: learner earns a credential, publishes
+//! rehearsal of `docs/demo/runbook.md`: learner earns a credential, publishes
 //! a listing, is found, completes a requested assessment, shares the result,
 //! accepts an interview and an offer, is enrolled in a validity pilot, and
 //! the credential is verified by the stdlib script and then revoked. The IPC

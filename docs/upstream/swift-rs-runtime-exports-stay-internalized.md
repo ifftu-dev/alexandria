@@ -1,7 +1,11 @@
 # Draft issue — swift-rs
 
+Status: draft
+Updated: 2026-08-28
+
+Not yet filed upstream.
+
 **Repo:** https://github.com/Brendonovich/swift-rs
-**Status:** drafted, not filed. Reviewed by: —
 **Affects:** 1.0.8 (Xcode 27), any consumer with a Swift package
 **Our workaround:** `patches/swift-rs`, via `[patch.crates-io]`
 

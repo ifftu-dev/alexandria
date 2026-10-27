@@ -5,7 +5,7 @@
 //! side-repo bundled with the ONNX export pipeline); this CLI only
 //! emits the input data.
 //!
-//! Output blobs match the schema in `docs/sentinel-adversarial-priors.md`.
+//! Output blobs match the schema in `docs/sentinel.md` §Synthetic training blobs.
 //! Same seed → byte-identical bytes (tests assert via Blake2b).
 
 use std::fs;

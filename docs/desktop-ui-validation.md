@@ -1,5 +1,8 @@
 # Desktop UI validation
 
+Status: live
+Updated: 2026-10-22
+
 Desktop changes need both automated regressions and a native package check. The
 browser fixture uses production Vue components, onboarding, and theme CSS. It stubs
 goal templates, pre-account platform/profile calls, and an empty offline dashboard.

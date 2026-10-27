@@ -1,5 +1,8 @@
 # Alexandria — Performance Audit
 
+Status: implemented
+Updated: 2026-10-27
+
 **Date**: 2026-02-24 (updated 2026-03-25)
 **Scope**: Full Rust backend (`src-tauri/src/`), CLI (`cli/`), frontend config, Cargo workspace
 **Files audited**: Every file in `commands/` (52), `db/` (6), `evidence/` (5), `p2p/` (35), `content_store/` (12), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts` (counts current as of this update; the original snapshot predates the VC-first migration, which restructured these directories)

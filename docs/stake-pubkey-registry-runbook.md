@@ -1,5 +1,8 @@
 # Stake-Pubkey Registry — Pre-Launch Runbook
 
+Status: live
+Updated: 2026-09-15
+
 Operational steps for rotating the founder trust roots and signed bootstrap
 snapshot, plus repeating the preprod registration smoke test. The original
 three-key ceremony, signed snapshot, and first real preprod registration are

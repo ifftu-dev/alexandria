@@ -1,5 +1,8 @@
 # Default-network demo genesis
 
+Status: live
+Updated: 2026-10-02
+
 The current `preprod` demo uses **temporary single-operator governance**, explicitly
 chosen for the demo. Seven founder entries satisfy the protocol format; all seven
 key sets belong to the same operator. They do not represent seven independent people.

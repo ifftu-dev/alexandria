@@ -1,6 +1,8 @@
 # DHT Username Registry
 
-**Status:** Implemented (phases 1–4)
+Status: implemented
+Updated: 2026-10-27
+
 **Protocols:** Kademlia records · `/alexandria/username-reg/1.0` · Cardano metadata label 1698
 
 First-come-first-served `@username → DID` bindings, verifiable by any
@@ -31,8 +33,8 @@ Forging a claim *for someone else's DID* is impossible; the attack
 surface is competing claims, resolved by deterministic ordering.
 
 - DHT key: `SHA256("alexandria:username:v1:" + username)`.
-- Local cache: `username_claims` (migration 055) — the verified winner
-  per username; `anchor_verified` (migration 056) gates tier 2.
+- Local cache: `username_claims` — the verified winner
+  per username; `anchor_verified` gates tier 2.
 - Code: `domain::username_claim`, `commands::username_registry`,
   `p2p::username_reg`, `cardano::username_anchor`.
 

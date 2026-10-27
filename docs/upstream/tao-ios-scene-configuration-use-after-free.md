@@ -1,7 +1,11 @@
 # Draft issue — tao
 
+Status: draft
+Updated: 2026-08-28
+
+Not yet filed upstream.
+
 **Repo:** https://github.com/tauri-apps/tao
-**Status:** drafted, not filed. Reviewed by: —
 **Affects:** 0.35.3 (iOS, scene lifecycle mode)
 **Our workaround:** `patches/tao`, via `[patch.crates-io]`
 

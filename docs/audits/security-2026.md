@@ -1,5 +1,8 @@
 # Alexandria — Security Audit
 
+Status: implemented
+Updated: 2026-10-27
+
 > **Two passes are recorded in this file.**
 >
 > - **Pass 1 (2026-02-24, remediation verified 2026-03-23)** — the original
@@ -9,10 +12,8 @@
 >   and dependency surface that Pass 1 explicitly deferred. Findings `P2-*`.
 >   **[Jump to Pass 2](#pass-2--2026-08-18)**.
 >
-> Repo-level audits for the other monorepo components live in
-> `../../docs/security-audit.md` (index), `alexandria-cloud/docs/security-audit.md`,
-> `alexandria-relay/docs/security-audit.md` and
-> `alexandria-monitoring/docs/security-audit.md`.
+> The cross-repo index is [`monorepo-security-2026-08.md`](monorepo-security-2026-08.md);
+> Cloud, relay and monitoring keep their audits in their own `docs/audits/`.
 
 ---
 
@@ -674,7 +675,7 @@ webview delegates, and the Rust + npm dependency trees.
 
 **Summary**: 1 critical, 4 high, 6 medium, 4 low, 3 informational.
 
-### Remediation status (2026-08-18, branch `fix/security-audit-2026-08`)
+### Remediation status (2026-08-18)
 
 | Finding | Status | Notes |
 |---------|--------|-------|

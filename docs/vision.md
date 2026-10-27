@@ -1,5 +1,8 @@
 # Alexandria: Free Knowledge, Verified Skills, No Gatekeepers
 
+Status: live
+Updated: 2026-10-27
+
 > **What this document is:** the destination, not a description of the
 > software as it stands. It argues for what Alexandria is trying to be and
 > why that is worth doing. Much of what follows is written in the present
@@ -11,14 +14,6 @@
 > the *Honest limits* section of the technology page on the website. Where
 > this document and the README disagree about whether something exists, the
 > README is right.
-
-> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** This
-> document predates the retirement of the SkillProof pipeline.
-> Wherever it references `SkillProof`, `evidence_records`, or
-> "skill-proof NFT minting" the authoritative replacement is W3C
-> Verifiable Credentials auto-earned via a Cardano completion
-> validator. See [`vc-migration.md`](./vc-migration.md) for the
-> current model.
 
 ## A vision for public-interest education infrastructure
 
@@ -164,5 +159,4 @@ Alexandria is open-source, under active development, and looking for contributor
 
 - **Reference implementation**: github.com/ifftu-dev/alexandria
 - **Relay server**: github.com/ifftu-dev/alexandria-relay
-- **Technical specification**: See the Alexandria Protocol Specification (companion document)
-- **Author**: Pratyush Pundir
+- **Technical specification**: [protocol-specification.md](protocol-specification.md)
