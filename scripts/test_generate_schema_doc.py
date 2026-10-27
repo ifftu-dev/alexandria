@@ -13,9 +13,9 @@ spec.loader.exec_module(schema_doc)
 class GenerateSchemaDocTests(unittest.TestCase):
     def test_every_current_migration_is_documented(self):
         migrations = schema_doc.migrations()
-        self.assertEqual([version for version, _, _ in migrations], list(range(1, 28)))
+        self.assertEqual([version for version, _, _ in migrations], list(range(1, 31)))
         tables, indexes, views, triggers = schema_doc.inventory()
-        self.assertEqual(len(tables), 126)
+        self.assertEqual(len(tables), 130)
         self.assertIn('developer_discussion_drafts', tables)
         self.assertIn('discussion_events', tables)
         self.assertIn('tutoring_presence', tables)
@@ -25,6 +25,8 @@ class GenerateSchemaDocTests(unittest.TestCase):
         self.assertIn('chat_message_search', tables)
         self.assertNotIn('chat_message_search_data', tables)
         self.assertIn('guardian_ai_requests', tables)
+        self.assertIn('notifications', tables)
+        self.assertIn('push_operation_state', tables)
         self.assertEqual(schema_doc.render(tables, indexes, views, triggers),
                          schema_doc.DOC.read_text())
 
