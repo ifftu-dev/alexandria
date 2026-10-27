@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import MotionSettings from '@/components/ui/MotionSettings.vue'
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
@@ -21,7 +20,7 @@ import {
   getBiometricStatus,
   storeVaultPasswordForBiometric,
 } from '@/composables/useBiometricVault'
-import type { SettingsSectionId } from '@/composables/useSettingsModal'
+import MotionSettings from '@/components/ui/MotionSettings.vue'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import DeveloperSeedsPanel from '@/components/settings/DeveloperSeedsPanel.vue'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
@@ -35,6 +34,7 @@ import CloudOriginField from '@/components/settings/CloudOriginField.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
+import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import type { Identity, SeedCatalog } from '@/types'
 
 const { t } = useI18n()

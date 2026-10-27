@@ -1203,3 +1203,6 @@ select optgroup {
 :root[data-motion-hidden='true'] *,
 :root[data-motion-hidden='true'] *::before,
 :root[data-motion-hidden='true'] *::after { animation-play-state: paused !important; }
+
+/* Status remains visible after a single accent; recording and answering stay calm. */
+.animate-ping { animation-iteration-count: 1; animation-fill-mode: forwards; }

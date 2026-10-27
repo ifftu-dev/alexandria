@@ -75,7 +75,7 @@ async function refreshPeers() {
         <div class="mt-2 flex items-center gap-2">
           <span
             class="inline-block h-2.5 w-2.5 rounded-full"
-            :class="isRunning ? 'bg-success' : 'bg-warning animate-pulse'"
+            :class="isRunning ? 'bg-success' : 'bg-warning'"
           />
           <span class="text-xl font-bold text-foreground">
             {{ isRunning ? t('network.online') : p2pStatus != null ? t('network.offline') : t('network.starting') }}

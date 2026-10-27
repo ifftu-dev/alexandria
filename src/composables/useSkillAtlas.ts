@@ -1,6 +1,7 @@
 import { computed, readonly, ref, watch } from 'vue'
 import type { Router } from 'vue-router'
 
+import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked, onProfileReady, useProfiles } from '@/composables/useProfiles'
 import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
@@ -29,6 +30,7 @@ const modalView = ref<AtlasViewState>(createAtlasViewState())
 const skillsTab = ref<AtlasTab>('credentials')
 const modalOpen = ref(false)
 const feedback = ref<AtlasFeedback | null>(null)
+const feedbackSurface = ref<AtlasSurface | null>(null)
 const isLoading = computed(() => phase.value === 'loading')
 
 // A return belongs to one explicit Open skill action and one profile session.
@@ -48,6 +50,7 @@ function clearFeedback(): void {
   if (feedbackTimer !== undefined) clearTimeout(feedbackTimer)
   feedbackTimer = undefined
   feedback.value = null
+  feedbackSurface.value = null
 }
 
 export function activateSurface(surface: AtlasSurface): () => void {
@@ -56,7 +59,7 @@ export function activateSurface(surface: AtlasSurface): () => void {
   activeSurfaces.set(token, surface)
   return () => {
     activeSurfaces.delete(token)
-    if (activeSurfaces.size === 0) clearFeedback()
+    if (activeSurfaces.size === 0 || feedbackSurface.value === surface) clearFeedback()
   }
 }
 
@@ -107,13 +110,14 @@ async function load(): Promise<void> {
     const improvedIds: string[] = []
     const newlyEarned: string[] = []
     clearFeedback()
-    if (baselineEstablished && model.value && activeSurfaces.size > 0 && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+    if (baselineEstablished && model.value && activeSurfaces.size > 0 && !useCourseCompletion().isOpen.value && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       for (const node of nextModel.nodes) {
         const previous = model.value.nodes.find((item) => item.skill.id === node.skill.id)
         if (node.status === 'earned' && previous?.status !== 'earned') newlyEarned.push(node.skill.id)
         if (node.earnedBloom && previous?.earnedBloom && node.earnedBloom.rank > previous.earnedBloom.rank) improvedIds.push(node.skill.id)
       }
       if (newlyEarned.length || improvedIds.length) {
+        feedbackSurface.value = [...activeSurfaces.values()].includes('modal') ? 'modal' : 'page'
         feedback.value = { revision: ++feedbackRevision, earnedIds: newlyEarned.sort(), improvedIds: improvedIds.sort() }
         feedbackTimer = setTimeout(clearFeedback, 3000)
       }
@@ -168,7 +172,10 @@ function resetView(surface: AtlasSurface): void {
 }
 
 function setSkillsTab(tab: AtlasTab): void { skillsTab.value = tab }
-function setModalOpen(open: boolean): void { modalOpen.value = open }
+function setModalOpen(open: boolean): void { clearFeedback(); modalOpen.value = open }
+function feedbackFor(surface: AtlasSurface): AtlasFeedback | null {
+  return feedbackSurface.value === surface && !useCourseCompletion().isOpen.value ? feedback.value : null
+}
 function acknowledgeFeedback(revision: number): void {
   if (feedback.value?.revision === revision) clearFeedback()
 }
@@ -254,6 +261,6 @@ export function useSkillAtlas() {
   return {
     model: readonly(model), phase: readonly(phase), error: readonly(error), refreshing: readonly(refreshing), isLoading: readonly(isLoading),
     pageView: readonly(pageView), modalView: readonly(modalView), skillsTab: readonly(skillsTab), modalOpen: readonly(modalOpen), feedback: readonly(feedback),
-    ensureLoaded, refresh, openSkill, returnToAtlas, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, acknowledgeFeedback, reset: clearProfileState,
+    ensureLoaded, refresh, openSkill, returnToAtlas, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, feedbackFor, acknowledgeFeedback, reset: clearProfileState,
   }
 }

@@ -5,10 +5,11 @@
  * Mounted once globally (AppLayout); driven by useCourseCompletion so it
  * survives the Player navigating away, and shows live credential-mint progress.
  */
-import { computed, watch, ref, onBeforeUnmount } from 'vue'
+import { computed, watch, ref, onBeforeUnmount, useId } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useModalFocus } from '@/composables/useModalFocus'
 import { useMotion } from '@/composables/useMotion'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
@@ -23,6 +24,10 @@ const {
   endorsementLoading, endorsementError, endorsementMessage,
   refreshEndorsementStatus, importEndorsementJson, close,
 } = useCourseCompletion()
+
+const dialog = ref<HTMLElement | null>(null)
+const titleId = useId()
+useModalFocus(() => isOpen.value, dialog, close)
 
 const endorsementImportJson = ref('')
 const endorsementUiMessage = ref('')
@@ -122,14 +127,10 @@ watch(isOpen, (open) => {
   if (open) {
     endorsementImportJson.value = ''
     endorsementUiMessage.value = ''
-    document.body.style.overflow = 'hidden'
-    document.addEventListener('keydown', onKey)
     spawnConfetti()
     confettiTimer = setTimeout(clearConfetti, 650)
     document.addEventListener('visibilitychange', clearConfetti)
   } else {
-    document.body.style.overflow = ''
-    document.removeEventListener('keydown', onKey)
     clearConfetti()
     document.removeEventListener('visibilitychange', clearConfetti)
   }
@@ -154,15 +155,9 @@ async function importEndorsement() {
   }
 }
 
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') close()
-}
-
 onBeforeUnmount(() => {
   clearConfetti()
   document.removeEventListener('visibilitychange', clearConfetti)
-  document.body.style.overflow = ''
-  document.removeEventListener('keydown', onKey)
 })
 
 const shortTx = computed(() =>
@@ -226,7 +221,7 @@ function continueToDashboard() {
 
 <template>
   <Teleport to="body">
-    <Transition name="celebrate">
+    <Transition name="celebrate" @before-leave="(el: Element) => el.setAttribute('inert', '')" @before-enter="(el: Element) => el.removeAttribute('inert')">
       <div v-if="isOpen" class="celebrate-root" @click.self="close">
         <div class="celebrate-backdrop" />
 
@@ -250,7 +245,7 @@ function continueToDashboard() {
           />
         </div>
 
-        <div class="celebrate-card">
+        <div ref="dialog" class="celebrate-card" role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1">
           <!-- Emblem -->
           <div class="emblem-wrap">
             <div class="emblem-glow" />
@@ -264,7 +259,7 @@ function continueToDashboard() {
           </div>
 
           <p class="eyebrow">{{ $t('courses.completion.achievementUnlocked') }}</p>
-          <h2 class="title">{{ isTutorial ? $t('courses.completion.tutorialComplete') : $t('courses.completion.courseComplete') }}</h2>
+          <h2 :id="titleId" class="title">{{ isTutorial ? $t('courses.completion.tutorialComplete') : $t('courses.completion.courseComplete') }}</h2>
           <p class="course-name">{{ courseTitle }}</p>
 
           <!-- Credential mint progress -->
