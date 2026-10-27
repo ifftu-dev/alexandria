@@ -134,15 +134,14 @@ pub fn reinstate(conn: &Connection, issuer_did: &Did, credential_id: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials;
     use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
+    use crate::credentials::{self, Issuer};
     use crate::crypto::did::derive_did_key;
 
     #[test]
     fn revoke_sets_bit_and_marks_row_revoked() {
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         revoke(
             db.conn(),
             &issuer,
@@ -177,8 +176,7 @@ mod tests {
     #[test]
     fn revoke_is_idempotent() {
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "r1", NOW).unwrap();
         revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "r2", NOW).unwrap();
         // One bit set; not doubled up.
@@ -197,11 +195,9 @@ mod tests {
     fn one_local_issuer_cannot_revoke_another_issuers_credential() {
         let (db, _, local_issuer, subject) = setup();
         let other_key = test_key("other-issuer");
-        let other_issuer = derive_did_key(&other_key);
         let credential = credentials::issue(
             db.conn(),
-            &other_key,
-            &other_issuer,
+            &Issuer::from_key(other_key.clone()),
             &sample_request(subject),
             NOW,
         )
@@ -235,8 +231,7 @@ mod tests {
         let other_issuer = derive_did_key(&other_key);
         let credential = credentials::issue(
             db.conn(),
-            &other_key,
-            &other_issuer,
+            &Issuer::from_key(other_key.clone()),
             &sample_request(subject),
             NOW,
         )
@@ -283,8 +278,7 @@ mod tests {
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
 
         // Pre-suspension: accepted.
         let pre = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
@@ -318,8 +312,7 @@ mod tests {
         use crate::domain::vc::VerificationPolicy;
 
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
 
         // Suspended until a time before NOW — verifier sees the
         // suspension as auto-expired and treats the credential as
@@ -343,8 +336,7 @@ mod tests {
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         suspend(
             db.conn(),
             &issuer,

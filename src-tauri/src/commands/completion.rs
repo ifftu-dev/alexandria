@@ -25,6 +25,7 @@ use crate::cardano::{
 };
 use crate::clock::now_rfc3339;
 use crate::credentials::IssueCredentialRequest;
+use crate::credentials::Issuer;
 use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
@@ -895,7 +896,12 @@ fn self_issue_completion(
             integrity_session_id: None,
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, learner_key, &learner_did, &self_claim, &now)?;
+        let vc = crate::credentials::issue(
+            conn,
+            &Issuer::from_key(learner_key.clone()),
+            &self_claim,
+            &now,
+        )?;
         issued_ids.push(vc.id.ok_or("issued completion credential has no id")?);
     }
 

@@ -2,7 +2,6 @@
 //! it, store it, and gate it on the bound integrity session when there is
 //! one.
 
-use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
 // Imported rather than redeclared. These were local copies, and a duplicated
@@ -10,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 // the rest of the codebase had moved to v2.
 use alexandria_verify::vc::context::W3C_VC_V2;
 
-use super::status_list;
+use super::{status_list, Issuer};
 use crate::crypto::did::Did;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
@@ -248,11 +247,11 @@ pub struct IssueCredentialRequest {
 /// VC and its status-list slot, and returns the signed credential.
 pub fn issue(
     conn: &Connection,
-    issuer_key: &SigningKey,
-    issuer_did: &Did,
+    issuer: &Issuer,
     req: &IssueCredentialRequest,
     now: &str,
 ) -> Result<VerifiableCredential, String> {
+    let (issuer_key, issuer_did) = (issuer.key(), issuer.did());
     if !req.subject.as_str().starts_with("did:") {
         return Err("subject MUST be a DID (§10 non-transferability)".into());
     }
@@ -423,7 +422,6 @@ pub fn issue(
 mod tests {
     use super::*;
     use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
-    use crate::crypto::did::derive_did_key;
 
     /// Insert a terminal integrity session row for bridge tests.
     fn seed_session(
@@ -454,7 +452,7 @@ mod tests {
 
     #[test]
     fn camera_coverage_gate_reads_snapshots() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         seed_session(db.conn(), "sess_cam", "completed", Some(0.9), 0, 0);
         seed_snapshot(db.conn(), "sess_cam", "snap_1", Some(0.8));
         seed_snapshot(db.conn(), "sess_cam", "snap_2", Some(0.7));
@@ -467,13 +465,13 @@ mod tests {
             min_camera_coverage: Some(0.5),
             ..Default::default()
         });
-        assert!(issue(db.conn(), &key, &issuer, &req, NOW).is_ok());
+        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
 
         req.integrity_policy = Some(IssuancePolicy {
             min_camera_coverage: Some(0.9),
             ..Default::default()
         });
-        let err = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(
             err.contains("camera coverage 0.67 below minimum 0.90"),
             "{err}"
@@ -482,7 +480,7 @@ mod tests {
 
     #[test]
     fn camera_coverage_gate_refuses_sessions_without_snapshots() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         seed_session(db.conn(), "sess_empty", "completed", Some(0.9), 0, 0);
         let mut req = sample_request(subject);
         req.integrity_session_id = Some("sess_empty".into());
@@ -490,21 +488,21 @@ mod tests {
             min_camera_coverage: Some(0.1),
             ..Default::default()
         });
-        let err = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(err.contains("no snapshots"), "{err}");
 
         // Without the camera bound, the same session issues fine.
         req.integrity_policy = Some(IssuancePolicy::default());
-        assert!(issue(db.conn(), &key, &issuer, &req, NOW).is_ok());
+        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
     }
 
     #[test]
     fn integrity_assertion_embedded_when_session_bound() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         seed_session(db.conn(), "sess_ok", "completed", Some(0.91), 0, 1);
         let mut req = sample_request(subject);
         req.integrity_session_id = Some("sess_ok".into());
-        let vc = issue(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
         let a = vc.integrity.as_ref().expect("integrity assertion embedded");
         assert_eq!(a.session_id, "sess_ok");
         assert_eq!(a.status, "completed");
@@ -518,7 +516,7 @@ mod tests {
 
     #[test]
     fn stored_assurance_claims_never_raise_the_embedded_level() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         seed_session(db.conn(), "sess_claimed", "completed", Some(0.95), 0, 0);
         db.conn()
             .execute(
@@ -536,12 +534,12 @@ mod tests {
                 required_assurance_level: Some(required.into()),
                 ..Default::default()
             });
-            let error = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+            let error = issue(db.conn(), &key, &req, NOW).unwrap_err();
             assert!(error.contains("does not meet required"), "{error}");
         }
 
         req.integrity_policy = None;
-        let vc = issue(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
         let assertion = vc.integrity.as_ref().expect("integrity assertion embedded");
         assert_eq!(assertion.assurance_level, "local");
         assert_eq!(assertion.anchor_ref, None);
@@ -549,7 +547,7 @@ mod tests {
 
     #[test]
     fn issuance_policy_blocks_when_session_fails_gate() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         seed_session(db.conn(), "sess_bad", "suspended", Some(0.30), 2, 1);
         let mut req = sample_request(subject);
         req.integrity_session_id = Some("sess_bad".into());
@@ -558,13 +556,13 @@ mod tests {
             require_clean: true,
             ..Default::default()
         });
-        let err = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(err.contains("issuance policy"), "unexpected error: {err}");
     }
 
     #[test]
     fn issuance_policy_passes_when_session_meets_gate() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         seed_session(db.conn(), "sess_pass", "completed", Some(0.88), 0, 0);
         let mut req = sample_request(subject);
         req.integrity_session_id = Some("sess_pass".into());
@@ -574,27 +572,27 @@ mod tests {
             require_clean: true,
             ..Default::default()
         });
-        let vc = issue(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
         assert!(vc.integrity.is_some());
         assert!(!vc.proof.proof_value.is_empty());
     }
 
     #[test]
     fn issuance_policy_without_session_is_rejected() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         let mut req = sample_request(subject);
         req.integrity_policy = Some(IssuancePolicy {
             require_clean: true,
             ..Default::default()
         });
-        let err = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(err.contains("requires integrity_session_id"), "got: {err}");
     }
 
     #[test]
     fn issue_credential_returns_signed_vc_with_status_slot() {
-        let (db, key, issuer, subject) = setup();
-        let vc = issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let (db, key, _, subject) = setup();
+        let vc = issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         assert!(!vc.proof.proof_value.is_empty());
         assert!(vc.id.as_deref().unwrap().starts_with("urn:alexandria:vc:"));
         let status = vc.credential_status.expect("status attached");
@@ -608,25 +606,18 @@ mod tests {
     fn issue_credential_allocates_sequential_indices() {
         // Each new credential from the same issuer gets the next bit
         // in the status list, never reusing an index even after revoke.
-        let (db, key, issuer, subject) = setup();
-        let a = issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
-        let b = issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let (db, key, _, subject) = setup();
+        let a = issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
+        let b = issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         assert_eq!(a.credential_status.unwrap().status_list_index, "0");
         assert_eq!(b.credential_status.unwrap().status_list_index, "1");
     }
 
     #[test]
     fn issue_rejects_non_did_subject() {
-        let (db, key, issuer, _) = setup();
+        let (db, key, _, _) = setup();
         let req = sample_request(Did("alice@example.com".into()));
-        let err = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(err.contains("DID"), "got {err}");
     }
 
@@ -635,20 +626,13 @@ mod tests {
         use crate::domain::vc::verify_credential_db;
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
-        let (db, key, issuer, subject) = setup();
-        let old = issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
+        let (db, key, _, subject) = setup();
+        let old = issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
 
         // Issue a newer credential that supersedes the old one.
         let mut new_req = sample_request(subject);
         new_req.supersedes = old.id.clone();
-        let _new = issue(db.conn(), &key, &issuer, &new_req, NOW).unwrap();
+        let _new = issue(db.conn(), &key, &new_req, NOW).unwrap();
 
         let result = verify_credential_db(db.conn(), &old, NOW, &VerificationPolicy::default());
         assert!(result.superseded);
@@ -658,30 +642,28 @@ mod tests {
     #[test]
     fn supersession_rejects_cross_issuer() {
         // §11.4: same subject, claim kind, and issuer required.
-        let (db, key, issuer, subject) = setup();
-        let old = issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
+        let (db, key, _, subject) = setup();
+        let old = issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
 
         let other_key = test_key("other-issuer");
-        let other_issuer = derive_did_key(&other_key);
         let mut bad_req = sample_request(subject);
         bad_req.supersedes = old.id.clone();
-        let err = issue(db.conn(), &other_key, &other_issuer, &bad_req, NOW).unwrap_err();
+        let err = issue(
+            db.conn(),
+            &Issuer::from_key(other_key.clone()),
+            &bad_req,
+            NOW,
+        )
+        .unwrap_err();
         assert!(err.contains("issuer"), "got {err}");
     }
 
     #[test]
     fn supersession_rejects_unknown_prior_id() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         let mut req = sample_request(subject);
         req.supersedes = Some("urn:uuid:does-not-exist".into());
-        let err = issue(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(err.contains("not found"), "got {err}");
     }
 }

@@ -102,7 +102,12 @@ fn issue_birthdate_vc(
         integrity_policy: None,
     };
     let now = crate::clock::now_rfc3339();
-    crate::credentials::issue(conn, signing_key, &did, &req, &now)?;
+    crate::credentials::issue(
+        conn,
+        &crate::credentials::Issuer::from_key(signing_key.clone()),
+        &req,
+        &now,
+    )?;
     Ok(())
 }
 

@@ -32,6 +32,7 @@
 //! resolves out of the `did:key` itself, so a directory needs to store nothing
 //! about the holder in order to authenticate them.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
@@ -182,7 +183,7 @@ pub async fn fetch_access_log(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessEntry>, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let client = reqwest::Client::new();
 
     let mut items = Vec::new();
@@ -244,7 +245,7 @@ pub struct Grant {
 #[tauri::command]
 pub async fn fetch_visibility(state: State<'_, AppState>) -> Result<PullResult<Grant>, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let client = reqwest::Client::new();
 
     let mut items = Vec::new();
@@ -296,7 +297,7 @@ pub async fn set_visibility(
         return Err("a directory must be https".into());
     }
 
-    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = crate::clock::now_rfc3339();
 
     // A record with no skills in it. The endpoint checks the signature and the
@@ -345,7 +346,7 @@ pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
         .into_iter()
         .next()
         .ok_or("requests from organisations are switched off, or no Alexandria Cloud is set")?;
-    let (key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = crate::clock::now_rfc3339();
     let now_unix = chrono::Utc::now().timestamp();
     let (sign_key, subject, at) = (key.clone(), did.as_str().to_string(), now.clone());

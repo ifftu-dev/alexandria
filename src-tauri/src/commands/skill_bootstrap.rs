@@ -12,11 +12,11 @@
 //! These are low-confidence starting points; dynamic assessments (Phase D)
 //! raise them by issuing higher-weight `AssessmentCredential`s.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::Connection;
 use serde::Deserialize;
 
-use crate::commands::credentials::load_issuer_key;
 use crate::commands::goal_templates::SkillSuggestion;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, ProvenanceTier, SkillClaim};
@@ -155,7 +155,8 @@ pub async fn bootstrap_confirm(
     if skill_ids.is_empty() {
         return Ok(0);
     }
-    let (signing_key, issuer_did) = load_issuer_key(&state).await?;
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer_did = issuer.did().clone();
     let now = crate::clock::now_rfc3339();
     let provenance = doc_type.provenance();
     let evidence_refs: Vec<String> = content_hash.into_iter().collect();
@@ -189,7 +190,7 @@ pub async fn bootstrap_confirm(
                         integrity_session_id: None,
                         integrity_policy: None,
                     };
-                    match crate::credentials::issue(conn, &signing_key, &issuer_did, &req, &now) {
+                    match crate::credentials::issue(conn, &issuer, &req, &now) {
                         Ok(_) => claimed += 1,
                         Err(error) => log::warn!("bootstrap: skipping skill claim: {error}"),
                     }

@@ -15,6 +15,7 @@
 //! proctored. Passing raises the skill's confidence via aggregation (assessment
 //! type weight 0.90 >> self-assertion 0.25).
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,6 @@ use crate::assessment::policy::{
     evaluate_attempt_policy, AttemptPolicy, AttemptRecord, PolicyDecision, ScorePolicy,
 };
 use crate::assessment::randomizer::{draw, QuestionMeta};
-use crate::commands::credentials::load_issuer_key;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};
@@ -924,7 +924,7 @@ pub async fn assessment_grade(
     attempt_id: String,
     answers: Vec<SubmittedAnswer>,
 ) -> Result<GradeResult, String> {
-    let (signing_key, issuer_did) = load_issuer_key(&state).await?;
+    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
@@ -956,9 +956,7 @@ pub async fn assessment_grade(
         .await?;
     // A passed attempt may have issued a credential into a list its host has
     // not seen yet; a verifier fetching that list next minute must find it.
-    if let Err(e) = crate::commands::credentials::publish_status_lists_for(&state).await {
-        log::warn!("status list publication after grading: {e}");
-    }
+    crate::commands::credentials::publish_status_lists_quietly(&state).await;
     // A new credential can change what a synced grant or listing shows.
     crate::commands::organisations::sync_quietly(&state).await;
     Ok(graded)
@@ -1195,7 +1193,8 @@ pub fn grade_attempt_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, signing_key, issuer_did, &req, now)?;
+        let vc =
+            crate::credentials::issue(conn, &Issuer::from_key(signing_key.clone()), &req, now)?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 

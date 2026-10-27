@@ -101,8 +101,13 @@ async fn revoked_credential_is_rejected() {
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let vc =
-        credentials::issue(db.conn(), &issuer_key, &issuer_did, &req, TEST_NOW).expect("issue");
+    let vc = credentials::issue(
+        db.conn(),
+        &app_lib::credentials::Issuer::from_key(issuer_key.clone()),
+        &req,
+        TEST_NOW,
+    )
+    .expect("issue");
 
     // Pre-revocation: verifier accepts.
     let before = verify_credential_db(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());

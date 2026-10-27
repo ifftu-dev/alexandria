@@ -115,21 +115,14 @@ mod tests {
 
     #[test]
     fn list_credentials_filters_by_subject_and_skill() {
-        let (db, key, issuer, subject) = setup();
-        credentials::issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
+        let (db, key, _, subject) = setup();
+        credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
         // Different skill
         let mut req2 = sample_request(subject.clone());
         if let Claim::Skill(ref mut s) = req2.claim {
             s.skill_id = "other_skill".into();
         }
-        credentials::issue(db.conn(), &key, &issuer, &req2, NOW).unwrap();
+        credentials::issue(db.conn(), &key, &req2, NOW).unwrap();
 
         let all = list(db.conn(), Some(subject.as_str()), None).unwrap();
         assert_eq!(all.len(), 2);
@@ -140,14 +133,8 @@ mod tests {
     #[test]
     fn active_only_listing_leaves_out_revoked_credentials() {
         let (db, key, issuer, subject) = setup();
-        let vc = credentials::issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
+        let vc =
+            credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
         lifecycle::revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
 
         let all = list_filtered(db.conn(), Some(subject.as_str()), None, false).unwrap();

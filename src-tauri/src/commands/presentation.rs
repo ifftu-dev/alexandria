@@ -300,7 +300,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         let issuer_key = test_key("issuer");
-        let issuer = derive_did_key(&issuer_key);
+        let issuer = crate::credentials::Issuer::from_key(issuer_key.clone());
         let subject_key = test_key("subject");
         let subject = derive_did_key(&subject_key);
         let req = IssueCredentialRequest {
@@ -321,7 +321,7 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         };
-        let vc = credentials::issue(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &issuer, &req, NOW).unwrap();
         (db, subject_key, subject, vc.id.unwrap())
     }
 

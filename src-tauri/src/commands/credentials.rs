@@ -1,86 +1,35 @@
 //! IPC commands for Verifiable Credentials.
 //!
-//! The public `#[tauri::command]` handlers are thin adapters — they
-//! unlock the keystore, derive the issuer's signing key, and delegate
-//! to pure functions that take `&Connection` + `&SigningKey` +
-//! `&Did`. This split keeps the business logic unit-testable without
-//! constructing a full `State<AppState>`.
+//! The handlers are thin adapters over [`crate::credentials`]: they read
+//! the profile's [`Issuer`] from the keystore where one is needed, run the
+//! credential operation on the profile database, and publish status lists
+//! and sync organisations afterwards.
 
 use crate::clock::now_rfc3339;
 use crate::profile::scope::ProfileState as State;
-use ed25519_dalek::SigningKey;
 
-use crate::credentials::{self, bundle, lifecycle, status_list, store, IssueCredentialRequest};
-use crate::crypto::did::{derive_did_key, Did};
-use crate::crypto::wallet;
+use crate::credentials::{
+    self, bundle, lifecycle, status_list, store, IssueCredentialRequest, Issuer,
+};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{VerifiableCredential, VerificationResult};
 use crate::AppState;
 
-// --- internal helpers -----------------------------------------------------
-
-/// Publish every pending list this identity owns, and record what landed.
-///
-/// Called after anything that creates or changes a list, and on demand. A
-/// failed push is reported and left pending; the local revocation already
-/// happened and stands regardless.
-pub async fn publish_status_lists_for(
-    state: &State<'_, AppState>,
-) -> Result<status_list::StatusPublishReport, String> {
-    let (key, issuer_did) = load_issuer_key(state).await?;
-    let issuer_for_read = issuer_did.clone();
-    let pending = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "credentials.status_lists.pending",
-            move |db| status_list::pending(db.conn(), &issuer_for_read),
-        )
-        .await?;
-    if pending.is_empty() {
-        return Ok(status_list::StatusPublishReport::default());
-    }
-    let (accepted, errors) = status_list::push(&pending, &key, &issuer_did, &now_rfc3339()).await;
-    let published = accepted.iter().map(|(id, _)| id.clone()).collect();
-    if !accepted.is_empty() {
-        state
-            .db_executor
-            .execute(
-                DatabaseWorkload::Instructor,
-                state.profile_lease(),
-                "credentials.status_lists.mark",
-                move |db| status_list::mark_published(db.conn(), &accepted),
-            )
-            .await?;
-    }
-    Ok(status_list::StatusPublishReport { published, errors })
-}
-
 /// Best-effort publication after a command that touched a list. The command's
 /// own result is already decided; a host that is down is a warning here and a
 /// pending list for the next pass.
-async fn publish_status_lists_quietly(state: &State<'_, AppState>) {
-    match publish_status_lists_for(state).await {
+pub(crate) async fn publish_status_lists_quietly(state: &State<'_, AppState>) {
+    let published = match Issuer::from_keystore(&state.keystore).await {
+        Ok(issuer) => {
+            status_list::publish(&state.db_executor, &state.profile_lease(), &issuer).await
+        }
+        Err(e) => Err(e),
+    };
+    match published {
         Ok(report) if report.errors.is_empty() => {}
         Ok(report) => log::warn!("status list publication: {:?}", report.errors),
         Err(e) => log::warn!("status list publication: {e}"),
     }
-}
-
-pub(crate) async fn load_issuer_key(
-    state: &State<'_, AppState>,
-) -> Result<(SigningKey, Did), String> {
-    let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    drop(ks_guard);
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-    // `Wallet` implements `Drop` (zeroize) so we can't move out — clone
-    // the signing key bytes instead.
-    let signing_key = SigningKey::from_bytes(&w.signing_key.to_bytes());
-    let issuer_did = derive_did_key(&signing_key);
-    Ok((signing_key, issuer_did))
 }
 
 // --- tauri command handlers ----------------------------------------------
@@ -90,7 +39,7 @@ pub async fn issue_credential(
     state: State<'_, AppState>,
     req: IssueCredentialRequest,
 ) -> Result<VerifiableCredential, String> {
-    let (signing_key, issuer_did) = load_issuer_key(&state).await?;
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
     let now = now_rfc3339();
     let issued = state
         .db_executor
@@ -98,7 +47,7 @@ pub async fn issue_credential(
             DatabaseWorkload::Instructor,
             state.profile_lease(),
             "credentials.issue",
-            move |db| credentials::issue(db.conn(), &signing_key, &issuer_did, &req, &now),
+            move |db| credentials::issue(db.conn(), &issuer, &req, &now),
         )
         .await?;
     publish_status_lists_quietly(&state).await;
@@ -153,7 +102,7 @@ pub async fn revoke_credential(
     credential_id: String,
     reason: String,
 ) -> Result<(), String> {
-    let (_, issuer_did) = load_issuer_key(&state).await?;
+    let issuer_did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let now = now_rfc3339();
     state
         .db_executor
@@ -175,7 +124,8 @@ pub async fn revoke_credential(
 pub async fn publish_status_lists(
     state: State<'_, AppState>,
 ) -> Result<status_list::StatusPublishReport, String> {
-    publish_status_lists_for(&state).await
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    status_list::publish(&state.db_executor, &state.profile_lease(), &issuer).await
 }
 
 #[tauri::command]
@@ -185,7 +135,7 @@ pub async fn suspend_credential(
     until: Option<String>,
     reason: Option<String>,
 ) -> Result<(), String> {
-    let (_, issuer_did) = load_issuer_key(&state).await?;
+    let issuer_did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let now = now_rfc3339();
     state
         .db_executor
@@ -212,7 +162,7 @@ pub async fn reinstate_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<(), String> {
-    let (_, issuer_did) = load_issuer_key(&state).await?;
+    let issuer_did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     state
         .db_executor
         .execute(
@@ -291,14 +241,14 @@ pub async fn verify_credential_cmd(
 
 #[tauri::command]
 pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
-    let (key, did) = load_issuer_key(&state).await?;
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "credentials.export-bundle",
-            move |db| bundle::export_signed(db.conn(), Some((&key, &did))),
+            move |db| bundle::export_signed(db.conn(), Some(&issuer)),
         )
         .await
 }

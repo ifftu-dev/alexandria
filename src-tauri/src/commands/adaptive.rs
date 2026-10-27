@@ -27,6 +27,7 @@
 //! are a later, opt-in change. So adaptive delivery works on day one, just
 //! less sharply than it will once items are calibrated.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
@@ -40,7 +41,6 @@ use crate::commands::assessment::{
     end_interrupted_attempts, ensure_attempt_owner, load_attempt_history,
     require_live_integrity_session, resolve_bank_policy, GradeResult,
 };
-use crate::commands::credentials::load_issuer_key;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};
@@ -392,7 +392,7 @@ pub async fn assessment_finalize_adaptive(
     state: State<'_, AppState>,
     attempt_id: String,
 ) -> Result<GradeResult, String> {
-    let (signing_key, issuer_did) = load_issuer_key(&state).await?;
+    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = now_rfc3339();
     state
         .db_executor
@@ -542,7 +542,8 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, signing_key, issuer_did, &req, now)?;
+        let vc =
+            crate::credentials::issue(conn, &Issuer::from_key(signing_key.clone()), &req, now)?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 

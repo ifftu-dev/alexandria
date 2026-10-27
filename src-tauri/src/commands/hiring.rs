@@ -16,9 +16,9 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::cloud::client;
-use crate::commands::credentials::load_issuer_key;
 use crate::commands::exchange::{directory, response_json};
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
+use crate::credentials::Issuer;
 use crate::crypto::did::{resolve_did_key, Did};
 use crate::db::executor::DatabaseWorkload;
 use crate::org_trust::{self, OrgCheck};
@@ -304,7 +304,7 @@ async fn signed_get<T: serde::de::DeserializeOwned>(
     dir: &Directory,
     path: &str,
 ) -> Result<Vec<T>, String> {
-    let (key, _) = load_issuer_key(state).await?;
+    let (key, _) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let timestamp = chrono::Utc::now().timestamp();
     let nonce = uuid::Uuid::new_v4().to_string();
     let proof = super::holder_pull::proof(&key, "GET", path, timestamp, &nonce);
@@ -323,7 +323,7 @@ async fn signed_get<T: serde::de::DeserializeOwned>(
 pub async fn hiring_interviews(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryInterview>, String> {
-    let (_, did) = load_issuer_key(&state).await?;
+    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let path = format!("/api/interviews/for/{}", did.as_str());
     let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
@@ -367,7 +367,7 @@ pub async fn hiring_interviews(
 pub async fn hiring_offers(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryOffer>, String> {
-    let (_, did) = load_issuer_key(&state).await?;
+    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let path = format!("/api/offers/for/{}", did.as_str());
     let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
@@ -430,7 +430,7 @@ pub async fn hiring_interview_respond(
     org_trust::check_item(&state, &invite, org_proof.as_ref())
         .await
         .require()?;
-    let (key, did) = load_issuer_key(&state).await?;
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let signed = sign_interview_response(
         invite,
         &decision,
@@ -491,7 +491,7 @@ pub async fn hiring_offer_respond(
     org_trust::check_item(&state, &offer, org_proof.as_ref())
         .await
         .require()?;
-    let (key, did) = load_issuer_key(&state).await?;
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let signed = sign_offer_response(
         offer,
         &decision,
@@ -549,7 +549,7 @@ pub async fn hiring_interview_room(
 ) -> Result<serde_json::Value, String> {
     let dir = directory(&state, &directory_url).await?;
     let id = uuid::Uuid::parse_str(&interview_id).map_err(|e| e.to_string())?;
-    let (key, _) = load_issuer_key(&state).await?;
+    let (key, _) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let path = format!("/api/interviews/{id}/room");
     let timestamp = chrono::Utc::now().timestamp();
     let nonce = uuid::Uuid::new_v4().to_string();
@@ -876,7 +876,7 @@ pub async fn hiring_interview_integrity_send(
         return Ok(sent);
     }
     let dir = directory(&state, &directory_url).await?;
-    let (key, did) = load_issuer_key(&state).await?;
+    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let report = build_integrity_report(invite, &run, chrono::Utc::now().timestamp())?;
     let signed = sign_integrity_report(report, &key, did.as_str())?;
     if !state.profile_lease().is_current() {

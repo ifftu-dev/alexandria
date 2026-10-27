@@ -7,11 +7,13 @@
 
 pub mod bundle;
 pub mod issue;
+pub mod issuer;
 pub mod lifecycle;
 pub mod status_list;
 pub mod store;
 
 pub use issue::{issue, IssuancePolicy, IssueCredentialRequest};
+pub use issuer::Issuer;
 
 #[cfg(test)]
 pub(crate) mod fixtures;

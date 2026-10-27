@@ -6,11 +6,14 @@
 //! and every version the host has not acknowledged is [`pending`] until
 //! [`push`] delivers it signed and [`mark_published`] records that.
 
-use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection};
 
+use super::Issuer;
+use crate::clock::now_rfc3339;
 use crate::crypto::did::Did;
+use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::domain::vc::VerifiableCredential;
+use crate::profile::scope::ProfileLease;
 
 /// Slots per list: a 16 KiB bitmap.
 pub const BITS: usize = alexandria_verify::vc::status::MIN_BITS;
@@ -138,10 +141,10 @@ pub fn pending(conn: &Connection, issuer_did: &Did) -> Result<Vec<PendingStatusL
 /// The signed `BitstringStatusListCredential` a host serves for `list`.
 pub fn signed(
     list: &PendingStatusList,
-    key: &SigningKey,
-    issuer_did: &Did,
+    issuer: &Issuer,
     now: &str,
 ) -> Result<VerifiableCredential, String> {
+    let (key, issuer_did) = (issuer.key(), issuer.did());
     alexandria_verify::vc::status::status_list_credential(
         &list.list_id,
         issuer_did,
@@ -181,14 +184,13 @@ pub struct StatusPublishReport {
 /// can mark them, and the failures, which stay pending for the next pass.
 pub async fn push(
     pending: &[PendingStatusList],
-    key: &SigningKey,
-    issuer_did: &Did,
+    issuer: &Issuer,
     now: &str,
 ) -> (Vec<(String, i64)>, Vec<String>) {
     let mut accepted = Vec::new();
     let mut errors = Vec::new();
     for list in pending {
-        match push_one(list, key, issuer_did, now).await {
+        match push_one(list, issuer, now).await {
             Ok(()) => accepted.push((list.list_id.clone(), list.version)),
             Err(e) => errors.push(format!("{}: {e}", list.list_id)),
         }
@@ -196,18 +198,14 @@ pub async fn push(
     (accepted, errors)
 }
 
-async fn push_one(
-    list: &PendingStatusList,
-    key: &SigningKey,
-    issuer_did: &Did,
-    now: &str,
-) -> Result<(), String> {
+async fn push_one(list: &PendingStatusList, issuer: &Issuer, now: &str) -> Result<(), String> {
+    let issuer_did = issuer.did();
     let location = alexandria_verify::vc::status::parse_list_url(&list.list_id)
         .ok_or("list is not served by a host")?;
     if &location.issuer != issuer_did {
         return Err("list belongs to another issuer".into());
     }
-    let document = signed(list, key, issuer_did, now)?;
+    let document = signed(list, issuer, now)?;
     let response = crate::cloud::client()?
         .put(&list.list_id)
         .json(&document)
@@ -224,6 +222,43 @@ async fn push_one(
         ));
     }
     Ok(())
+}
+
+/// Publish every pending list `issuer` owns, and record what landed.
+///
+/// Called after anything that creates or changes a list, and on demand. A
+/// failed push is reported and left pending; the local revocation already
+/// happened and stands regardless.
+pub(crate) async fn publish(
+    executor: &DatabaseExecutor,
+    lease: &ProfileLease,
+    issuer: &Issuer,
+) -> Result<StatusPublishReport, String> {
+    let issuer_for_read = issuer.did().clone();
+    let pending = executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            lease.clone(),
+            "credentials.status_lists.pending",
+            move |db| pending(db.conn(), &issuer_for_read),
+        )
+        .await?;
+    if pending.is_empty() {
+        return Ok(StatusPublishReport::default());
+    }
+    let (accepted, errors) = push(&pending, issuer, &now_rfc3339()).await;
+    let published = accepted.iter().map(|(id, _)| id.clone()).collect();
+    if !accepted.is_empty() {
+        executor
+            .execute(
+                DatabaseWorkload::Instructor,
+                lease.clone(),
+                "credentials.status_lists.mark",
+                move |db| mark_published(db.conn(), &accepted),
+            )
+            .await?;
+    }
+    Ok(StatusPublishReport { published, errors })
 }
 
 #[cfg(test)]
@@ -326,7 +361,7 @@ mod tests {
             bits,
             version: 3,
         }];
-        let (accepted, errors) = push(&pending, &key, &issuer, NOW).await;
+        let (accepted, errors) = push(&pending, &Issuer::from_key(key.clone()), NOW).await;
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(accepted, vec![(list_id.clone(), 3)]);
         let document: VerifiableCredential =
@@ -356,7 +391,7 @@ mod tests {
                 version: 1,
             },
         ];
-        let (accepted, errors) = push(&pending, &key, &issuer, NOW).await;
+        let (accepted, errors) = push(&pending, &Issuer::from_key(key.clone()), NOW).await;
         assert!(accepted.is_empty());
         assert_eq!(errors.len(), 2);
         assert!(errors[1].contains("another issuer"), "{errors:?}");
@@ -375,8 +410,7 @@ mod tests {
         .unwrap();
         assert_eq!(host(db.conn()).as_deref(), Some("http://127.0.0.1:8080"));
 
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         let reference = vc.credential_status.expect("status attached");
         let expected = status::list_url("http://127.0.0.1:8080", &issuer, 1);
         assert_eq!(reference.status_list_credential, expected);
@@ -386,7 +420,7 @@ mod tests {
         let pending = super::pending(db.conn(), &issuer).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].version, 1);
-        let signed = super::signed(&pending[0], &key, &issuer, NOW).unwrap();
+        let signed = super::signed(&pending[0], &key, NOW).unwrap();
         let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
         assert_eq!(status::get_bit(&bits, 0), Some(false));
 
@@ -398,7 +432,7 @@ mod tests {
         let pending = super::pending(db.conn(), &issuer).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].version, 2);
-        let signed = super::signed(&pending[0], &key, &issuer, NOW).unwrap();
+        let signed = super::signed(&pending[0], &key, NOW).unwrap();
         let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
         assert_eq!(status::get_bit(&bits, 0), Some(true));
 
@@ -412,8 +446,7 @@ mod tests {
     fn without_a_host_lists_are_urns_and_never_pending() {
         let (db, key, issuer, subject) = setup();
         assert!(host(db.conn()).is_none());
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         lifecycle::revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
         assert!(super::pending(db.conn(), &issuer).unwrap().is_empty());
     }

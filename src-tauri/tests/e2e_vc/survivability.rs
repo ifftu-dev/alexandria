@@ -39,7 +39,13 @@ fn issue_one(db: &app_lib::db::Database, skill: &str) -> (app_lib::crypto::did::
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let vc = credentials::issue(db.conn(), &issuer_key, &issuer, &req, TEST_NOW).expect("issue");
+    let vc = credentials::issue(
+        db.conn(),
+        &app_lib::credentials::Issuer::from_key(issuer_key.clone()),
+        &req,
+        TEST_NOW,
+    )
+    .expect("issue");
     (issuer, vc.id.expect("issued VC always has an envelope id"))
 }
 
@@ -127,7 +133,9 @@ async fn exported_bundle_verifies_offline_under_a_rotated_issuer_key() {
         integrity_session_id: None,
         integrity_policy: None,
     };
-    credentials::issue(db.conn(), &issuer_key_v2, &issuer, &req, TEST_NOW).expect("issue");
+    let rotated = app_lib::credentials::Issuer::rotated(db.conn(), issuer.clone(), issuer_key_v2)
+        .expect("v2 is the DID's current key");
+    credentials::issue(db.conn(), &rotated, &req, TEST_NOW).expect("issue");
 
     // Verify well after the rotation, so the open registry window is v2's.
     let after_rotation = "2099-01-01T00:00:00Z";

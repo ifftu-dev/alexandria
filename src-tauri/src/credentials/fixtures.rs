@@ -5,6 +5,7 @@
 use ed25519_dalek::SigningKey;
 
 use crate::credentials::issue::IssueCredentialRequest;
+use crate::credentials::Issuer;
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::Database;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
@@ -20,11 +21,11 @@ pub(crate) fn test_key(role: &str) -> SigningKey {
     SigningKey::from_bytes(&bytes)
 }
 
-pub(crate) fn setup() -> (Database, SigningKey, Did, Did) {
+pub(crate) fn setup() -> (Database, Issuer, Did, Did) {
     let db = Database::open_in_memory().unwrap();
     db.run_migrations().unwrap();
-    let issuer_key = test_key("issuer");
-    let issuer = derive_did_key(&issuer_key);
+    let issuer_key = Issuer::from_key(test_key("issuer"));
+    let issuer = issuer_key.did().clone();
     let subject = derive_did_key(&test_key("subject"));
     (db, issuer_key, issuer, subject)
 }

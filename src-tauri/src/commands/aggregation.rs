@@ -156,7 +156,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         let issuer_key = key("issuer");
-        let issuer = derive_did_key(&issuer_key);
+        let issuer = crate::credentials::Issuer::from_key(issuer_key.clone());
         let subject = derive_did_key(&key("subject"));
         let req = IssueCredentialRequest {
             credential_type: CredentialType::FormalCredential,
@@ -176,7 +176,7 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         };
-        credentials::issue(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
+        credentials::issue(db.conn(), &issuer, &req, NOW).unwrap();
         (db, subject, skill.to_string())
     }
 

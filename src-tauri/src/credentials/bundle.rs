@@ -10,12 +10,10 @@
 //! byte-identical bundle, which is what the survivability tests assert
 //! and what archival storage relies on for content-addressing.
 
-use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 
-use super::store;
+use super::{store, Issuer};
 use crate::clock::now_rfc3339;
-use crate::crypto::did::Did;
 use crate::domain::vc::{VerifiableCredential, VerificationPendingReason, VerificationResult};
 
 /// Bundle wire shape. Keys sort under JCS so the canonical bytes are
@@ -96,10 +94,7 @@ pub fn export(conn: &Connection) -> Result<String, String> {
 /// As [`export`], and when `signer` is this node's issuer key,
 /// also carry each list this node issues as a signed
 /// `BitstringStatusListCredential`.
-pub fn export_signed(
-    conn: &Connection,
-    signer: Option<(&SigningKey, &Did)>,
-) -> Result<String, String> {
+pub fn export_signed(conn: &Connection, signer: Option<&Issuer>) -> Result<String, String> {
     use base64::Engine;
 
     // Credentials, ordered deterministically by id so ad-hoc ordering
@@ -163,7 +158,8 @@ pub fn export_signed(
         status_lists.push(r.map_err(|e| e.to_string())?);
     }
     let mut status_list_credentials = Vec::new();
-    if let Some((key, did)) = signer {
+    if let Some(issuer) = signer {
+        let (key, did) = (issuer.key(), issuer.did());
         let created = now_rfc3339();
         for list in status_lists.iter().filter(|l| l.issuer_did == did.as_str()) {
             let bits = base64::engine::general_purpose::STANDARD
@@ -502,15 +498,8 @@ mod tests {
         // failed with "missing field `format_version`", because only the
         // bundle shape was accepted. A credential signed by a `did:key` issuer
         // is verifiable on its own — the DID embeds the public key.
-        let (db, issuer_key, issuer, subject) = setup();
-        let vc = credentials::issue(
-            db.conn(),
-            &issuer_key,
-            &issuer,
-            &sample_request(subject),
-            NOW,
-        )
-        .unwrap();
+        let (db, issuer_key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
 
         let json = serde_json::to_string(&vc).unwrap();
         let report = verify_offline(&json, NOW).unwrap();
@@ -534,15 +523,8 @@ mod tests {
 
     #[test]
     fn credential_payloads_are_bounded_before_verification() {
-        let (db, issuer_key, issuer, subject) = setup();
-        credentials::issue(
-            db.conn(),
-            &issuer_key,
-            &issuer,
-            &sample_request(subject),
-            NOW,
-        )
-        .unwrap();
+        let (db, issuer_key, _, subject) = setup();
+        credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
         let bundle = export(db.conn()).unwrap();
 
         let max = store::CREDENTIAL_PAYLOAD_JSON_LIMITS.max_bytes;
@@ -569,15 +551,8 @@ mod tests {
 
     #[test]
     fn verify_offline_still_accepts_a_bundle_and_knows_the_difference() {
-        let (db, issuer_key, issuer, subject) = setup();
-        credentials::issue(
-            db.conn(),
-            &issuer_key,
-            &issuer,
-            &sample_request(subject),
-            NOW,
-        )
-        .unwrap();
+        let (db, issuer_key, _, subject) = setup();
+        credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
         let bundle = export(db.conn()).unwrap();
 
         let report = verify_offline(&bundle, NOW).unwrap();
@@ -589,15 +564,8 @@ mod tests {
 
     #[test]
     fn verify_offline_marks_status_bearing_credential_arrays_pending() {
-        let (db, issuer_key, issuer, subject) = setup();
-        let vc = credentials::issue(
-            db.conn(),
-            &issuer_key,
-            &issuer,
-            &sample_request(subject),
-            NOW,
-        )
-        .unwrap();
+        let (db, issuer_key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
 
         let json = serde_json::to_string(&vec![vc.clone(), vc]).unwrap();
         let report = verify_offline(&json, NOW).unwrap();
@@ -613,15 +581,8 @@ mod tests {
     fn verify_offline_detects_a_tampered_credential() {
         // The point of the whole exercise: a modified claim must fail the
         // signature check rather than being waved through.
-        let (db, issuer_key, issuer, subject) = setup();
-        let vc = credentials::issue(
-            db.conn(),
-            &issuer_key,
-            &issuer,
-            &sample_request(subject),
-            NOW,
-        )
-        .unwrap();
+        let (db, issuer_key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
 
         let mut doc: serde_json::Value = serde_json::to_value(&vc).unwrap();
         doc["credentialSubject"]["level"] = serde_json::json!(99);
@@ -688,15 +649,8 @@ mod tests {
     fn a_resolvable_issuer_with_a_broken_signature_says_so() {
         // The other side of the same coin: when the DID does resolve, a
         // signature failure is a real finding and must be named.
-        let (db, issuer_key, issuer, subject) = setup();
-        let vc = credentials::issue(
-            db.conn(),
-            &issuer_key,
-            &issuer,
-            &sample_request(subject),
-            NOW,
-        )
-        .unwrap();
+        let (db, issuer_key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
         let mut doc: serde_json::Value = serde_json::to_value(&vc).unwrap();
         doc["credentialSubject"]["level"] = serde_json::json!(99);
 
@@ -726,15 +680,9 @@ mod tests {
             "https://cloud.example".to_string(),
         )
         .unwrap();
-        let first = credentials::issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
-        credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let first =
+            credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
+        credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         lifecycle::revoke(
             db.conn(),
             &issuer,
@@ -743,7 +691,7 @@ mod tests {
             NOW,
         )
         .unwrap();
-        let bundle = export_signed(db.conn(), Some((&key, &issuer))).unwrap();
+        let bundle = export_signed(db.conn(), Some(&key)).unwrap();
         let mut value: serde_json::Value = serde_json::from_str(&bundle).unwrap();
         value["origin"] = serde_json::Value::String("https://cloud.example".into());
         let pretty = serde_json::to_string_pretty(&value).unwrap() + "\n";
@@ -802,15 +750,9 @@ mod tests {
         // the list's issuer, and a revocation set here reads as revoked
         // from that document alone.
         let (db, key, issuer, subject) = setup();
-        let vc = credentials::issue(
-            db.conn(),
-            &key,
-            &issuer,
-            &sample_request(subject.clone()),
-            NOW,
-        )
-        .unwrap();
-        let json = export_signed(db.conn(), Some((&key, &issuer))).unwrap();
+        let vc =
+            credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
+        let json = export_signed(db.conn(), Some(&key)).unwrap();
         let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
         assert_eq!(bundle.status_list_credentials.len(), 1);
         let list = &bundle.status_list_credentials[0];
@@ -827,7 +769,7 @@ mod tests {
         assert_eq!(list.proof.cryptosuite, "eddsa-jcs-2022");
         let bits = alexandria_verify::vc::status::verify_status_list_credential(
             list,
-            &key.verifying_key(),
+            &key.key().verifying_key(),
         )
         .unwrap();
         assert_eq!(bits.len() * 8, alexandria_verify::vc::status::MIN_BITS);
@@ -838,7 +780,7 @@ mod tests {
         );
 
         lifecycle::revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
-        let json = export_signed(db.conn(), Some((&key, &issuer))).unwrap();
+        let json = export_signed(db.conn(), Some(&key)).unwrap();
         let mut bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
         // Drop the raw rows: the signed list credential alone must carry the revocation.
         bundle.status_lists.clear();
@@ -861,8 +803,7 @@ mod tests {
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
 
         let accepted = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert_eq!(accepted.acceptance_decision, AcceptanceDecision::Accept);
@@ -880,9 +821,8 @@ mod tests {
         // §20.4: same credential set + same fixed clock + same key
         // ⇒ byte-identical bundle. This is what lets the bundle
         // round-trip through content-addressed archival.
-        let (db, key, issuer, subject) = setup();
-        let _ =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let (db, key, _, subject) = setup();
+        let _ = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         let a = export(db.conn()).unwrap();
         let b = export(db.conn()).unwrap();
         assert_eq!(a, b, "bundle MUST be byte-identical");
@@ -891,8 +831,7 @@ mod tests {
     #[test]
     fn export_bundle_includes_credentials_and_status_lists() {
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         let json = export(db.conn()).unwrap();
         let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
         assert_eq!(bundle.format_version, BUNDLE_FORMAT_VERSION);
@@ -906,9 +845,8 @@ mod tests {
     fn offline_verifier_accepts_a_well_signed_bundle() {
         // §20: bundle survives Alexandria shutdown — verify uses an
         // ephemeral DB with no shared state.
-        let (db, key, issuer, subject) = setup();
-        let _ =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let (db, key, _, subject) = setup();
+        let _ = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         let json = export(db.conn()).unwrap();
         let (accepted, total) = verify_bundle_offline(&json, NOW).unwrap();
         assert_eq!(total, 1);
@@ -921,8 +859,7 @@ mod tests {
         // bit, so the offline verifier sees the same Reject as the
         // local one.
         let (db, key, issuer, subject) = setup();
-        let vc =
-            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         lifecycle::revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
         let json = export(db.conn()).unwrap();
         let (accepted, total) = verify_bundle_offline(&json, NOW).unwrap();

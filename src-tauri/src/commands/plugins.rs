@@ -9,13 +9,11 @@ use std::path::PathBuf;
 use std::collections::HashSet;
 
 use crate::profile::scope::ProfileState as State;
-use ed25519_dalek::SigningKey;
 use rusqlite::params;
 use tauri::{AppHandle, Emitter};
 
-use crate::crypto::did::{derive_did_key, Did};
+use crate::credentials::Issuer;
 use crate::crypto::hash::entity_id;
-use crate::crypto::wallet;
 use crate::db::{executor::DatabaseWorkload, Database};
 use crate::domain::plugin::{
     InstalledPlugin, IrlSubmission, PluginCapability, PluginCatalogEntry, PluginManifest,
@@ -650,7 +648,8 @@ pub async fn plugin_submit_and_grade(
     // Derive the learner's DID from the unlocked keystore. The keystore
     // must be open — graded plugin submissions only make sense for an
     // enrolled learner whose vault is unlocked anyway.
-    let (signing_key, learner_did) = load_learner_did(&state).await?;
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let learner_did = issuer.did().clone();
     let learner_did_str = learner_did.0.clone();
 
     // Resolve the bundle directory from the *live* plugins dir rather than the
@@ -883,13 +882,7 @@ pub async fn plugin_submit_and_grade(
                             integrity_session_id: integrity_session_id.clone(),
                             integrity_policy: None,
                         };
-                        match crate::credentials::issue(
-                            db.conn(),
-                            &signing_key,
-                            &learner_did,
-                            &req,
-                            &now,
-                        ) {
+                        match crate::credentials::issue(db.conn(), &issuer, &req, &now) {
                             Ok(vc) => log::info!(
                                 "plugin grade: issued credential {:?} for skill {skill_id}",
                                 vc.id
@@ -1085,19 +1078,6 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
     Ok(())
 }
 
-/// Load the local node's signing key + DID-Key. The keystore must be
-/// unlocked. Mirrors the pattern in `commands/pinning.rs::load_pinner_key`.
-async fn load_learner_did(state: &State<'_, AppState>) -> Result<(SigningKey, Did), String> {
-    let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    drop(ks_guard);
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-    let signing_key = SigningKey::from_bytes(&w.signing_key.to_bytes());
-    let did = derive_did_key(&signing_key);
-    Ok((signing_key, did))
-}
-
 fn check_rate_limit(state: &State<'_, AppState>, command: &str) -> Result<(), String> {
     let mut limiter = state
         .ipc_limiter
@@ -1123,7 +1103,7 @@ pub async fn irl_submit_for_review(
 ) -> Result<String, String> {
     check_rate_limit(&state, "irl_submit_for_review")?;
 
-    let (_sk, learner_did) = load_learner_did(&state).await?;
+    let (_sk, learner_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Learner,
@@ -1183,7 +1163,7 @@ pub async fn irl_list_my_submissions(
     state: State<'_, AppState>,
     plugin_cid: Option<String>,
 ) -> Result<Vec<IrlSubmission>, String> {
-    let (_sk, learner_did) = load_learner_did(&state).await?;
+    let (_sk, learner_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Learner,
@@ -1240,7 +1220,7 @@ pub async fn irl_post_review(
 ) -> Result<(), String> {
     check_rate_limit(&state, "irl_post_review")?;
 
-    let (_sk, reviewer_did) = load_learner_did(&state).await?;
+    let (_sk, reviewer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1378,8 +1358,13 @@ mod grade_credential_tests {
                 integrity_session_id: None,
                 integrity_policy: None,
             };
-            let vc = crate::credentials::issue(db.conn(), &signing_key, &learner, &req, now)
-                .expect("issue credential");
+            let vc = crate::credentials::issue(
+                db.conn(),
+                &Issuer::from_key(signing_key.clone()),
+                &req,
+                now,
+            )
+            .expect("issue credential");
             // Self-issued: subject == issuer == learner.
             assert_eq!(vc.credential_subject.id.0, learner.0);
         }

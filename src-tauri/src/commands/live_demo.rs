@@ -231,7 +231,8 @@ async fn publish_lists(db: &Database, key: &SigningKey, did: &Did) {
     if pending.is_empty() {
         return;
     }
-    let (accepted, errors) = status_list::push(&pending, key, did, &now_rfc3339()).await;
+    let issuer = crate::credentials::Issuer::from_key(key.clone());
+    let (accepted, errors) = status_list::push(&pending, &issuer, &now_rfc3339()).await;
     assert!(errors.is_empty(), "{errors:?}");
     status_list::mark_published(db.conn(), &accepted).unwrap();
     assert!(status_list::pending(db.conn(), did).unwrap().is_empty());
@@ -658,7 +659,11 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("status     revoked"), "{out}");
     // And the exported bundle still verifies on its own, revocation included.
-    let bundle = bundle::export_signed(db.conn(), Some((&key, &did))).unwrap();
+    let bundle = bundle::export_signed(
+        db.conn(),
+        Some(&crate::credentials::Issuer::from_key(key.clone())),
+    )
+    .unwrap();
     let (accepted, total) = bundle::verify_bundle_offline(&bundle, &now_rfc3339()).unwrap();
     assert_eq!(
         (accepted, total),

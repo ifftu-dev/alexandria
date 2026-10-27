@@ -1080,16 +1080,13 @@ pub fn run() {
                                 // commands that do so publish inline, and this
                                 // pass catches the rest and any push that failed.
                                 if let Some(w) = wallet.as_ref() {
-                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
-                                        &w.signing_key.to_bytes(),
-                                    );
-                                    let issuer = crypto::did::derive_did_key(&signing_key);
+                                    let issuer = credentials::Issuer::from_wallet(w);
                                     let pending = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
                                             Ok(Some(db)) => credentials::status_list::pending(
                                                 db.conn(),
-                                                &issuer,
+                                                issuer.did(),
                                             )
                                             .unwrap_or_default(),
                                             _ => Vec::new(),
@@ -1097,13 +1094,9 @@ pub fn run() {
                                     };
                                     if !pending.is_empty() {
                                         let now = crate::clock::now_rfc3339();
-                                        let (accepted, errors) = credentials::status_list::push(
-                                            &pending,
-                                            &signing_key,
-                                            &issuer,
-                                            &now,
-                                        )
-                                        .await;
+                                        let (accepted, errors) =
+                                            credentials::status_list::push(&pending, &issuer, &now)
+                                                .await;
                                         if !errors.is_empty() {
                                             log::debug!("status list publication: {errors:?}");
                                         }

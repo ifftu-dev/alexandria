@@ -5,6 +5,7 @@
 //! Parent (guardian) side: accept an invite (issues the guardianship
 //! RoleCredential and dials the child), pull/receive activity, revoke.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::OptionalExtension;
 use serde::Serialize;
@@ -175,7 +176,8 @@ pub async fn guardian_accept_invite(
 
     // Issue the guardianship credential (RoleCredential role=guardian,
     // subject = child DID) with our signing key.
-    let (signing_key, issuer_did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer_did = issuer.did().clone();
     let now = crate::clock::now_rfc3339();
     let invite_for_db = invite.clone();
     let code_hash_for_db = code_hash.clone();
@@ -203,13 +205,7 @@ pub async fn guardian_accept_invite(
                         integrity_session_id: None,
                         integrity_policy: None,
                     };
-                    let vc = crate::credentials::issue(
-                        conn,
-                        &signing_key,
-                        &issuer_did_for_db,
-                        &req,
-                        &now,
-                    )?;
+                    let vc = crate::credentials::issue(conn, &issuer, &req, &now)?;
                     let vc_json = serde_json::to_string(&vc).map_err(|e| e.to_string())?;
                     let vc_id = vc.id.clone().unwrap_or_default();
 

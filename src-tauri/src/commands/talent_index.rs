@@ -12,6 +12,7 @@
 //! Building this first means the wire schema is fixed from the auditable side
 //! rather than back-derived from whatever a server happens to accept.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -320,7 +321,7 @@ pub async fn sign_consented_record(
     state: State<'_, AppState>,
     only: Option<&[String]>,
 ) -> Result<Option<SignedTalentIndexRecord>, String> {
-    let (signing_key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let (signing_key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = crate::clock::now_rfc3339();
     let only = only.map(<[String]>::to_vec);
     state

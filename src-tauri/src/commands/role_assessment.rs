@@ -11,13 +11,13 @@
 //! Thin `#[tauri::command]` handlers delegate to pure `*_impl` functions
 //! taking `&Connection`, keeping the logic unit-testable.
 
+use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::now_rfc3339;
-use crate::commands::credentials::load_issuer_key;
 use crate::credentials::{self, IssuancePolicy, IssueCredentialRequest};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
@@ -414,9 +414,11 @@ pub fn issue_role_credential_impl(
         integrity_policy: Some(policy),
     };
     // `issuer_did` is retained in the signature for API compatibility but the
-    // credential is issued under the org's DID.
+    // credential is issued under the org's DID, which is the signer's own
+    // (checked above), so the issuer is built from the key.
     let _ = issuer_did;
-    credentials::issue(conn, issuer_key, &org_issuer, &req, now)
+    debug_assert_eq!(org_issuer, signer_did);
+    credentials::issue(conn, &Issuer::from_key(issuer_key.clone()), &req, now)
 }
 
 fn issue_role_credential_transactional(
@@ -574,7 +576,7 @@ pub async fn issue_role_credential(
     subject: String,
     integrity_session_id: String,
 ) -> Result<VerifiableCredential, String> {
-    let (signing_key, issuer_did) = load_issuer_key(&state).await?;
+    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     let now = now_rfc3339();
     state
         .db_executor
@@ -985,7 +987,7 @@ mod tests {
         use crate::credentials::{self, IssueCredentialRequest};
         use crate::domain::vc::SkillClaim;
 
-        let (db, owner_key, owner, _subject) = setup();
+        let (db, owner_key, _owner, _subject) = setup();
         let conn = db.conn();
         let learner_key = SigningKey::from_bytes(&[7u8; 32]);
         let learner = derive_did_key(&learner_key);
@@ -1010,7 +1012,13 @@ mod tests {
                 integrity_session_id: None,
                 integrity_policy: None,
             };
-            credentials::issue(conn, &learner_key, &learner, &req, NOW).unwrap();
+            credentials::issue(
+                conn,
+                &crate::credentials::Issuer::from_key(learner_key.clone()),
+                &req,
+                NOW,
+            )
+            .unwrap();
         }
         recompute_all_impl(conn, NOW).unwrap();
         let self_only: i64 = conn
@@ -1041,7 +1049,13 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         };
-        credentials::issue(conn, &owner_key, &owner, &skill_req, NOW).unwrap();
+        credentials::issue(
+            conn,
+            &crate::credentials::Issuer::from_key(owner_key.clone()),
+            &skill_req,
+            NOW,
+        )
+        .unwrap();
         recompute_all_impl(conn, NOW).unwrap();
         let with_org: i64 = conn
             .query_row(

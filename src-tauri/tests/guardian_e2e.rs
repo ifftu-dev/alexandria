@@ -131,7 +131,7 @@ fn parent_builds_link(
     code: &str,
     link_id: &str,
 ) -> GuardianRequest {
-    let parent_did = derive_did_key(&parent.signing_key);
+    let parent_did = app_lib::credentials::Issuer::from_key(parent.signing_key.clone());
     let req = IssueCredentialRequest {
         credential_type: CredentialType::RoleCredential,
         subject: app_lib::crypto::did::Did(invite.child_did.clone()),
@@ -146,14 +146,8 @@ fn parent_builds_link(
         integrity_policy: None,
     };
     let now = chrono::Utc::now().to_rfc3339();
-    let vc = credentials::issue(
-        parent.db.conn(),
-        &parent.signing_key,
-        &parent_did,
-        &req,
-        &now,
-    )
-    .expect("parent issues guardianship VC");
+    let vc = credentials::issue(parent.db.conn(), &parent_did, &req, &now)
+        .expect("parent issues guardianship VC");
     let vc_json = serde_json::to_string(&vc).expect("serialize VC");
 
     // Parent records its side of the link (status pending until Linked).
