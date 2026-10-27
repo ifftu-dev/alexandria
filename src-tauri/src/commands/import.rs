@@ -102,7 +102,7 @@ pub fn import_credential_impl(
     if result.acceptance_decision == AcceptanceDecision::Pending {
         return Err(format!(
             "credential verification pending: {}",
-            super::credentials::rejection_reasons(&result).join(", ")
+            crate::credentials::bundle::rejection_reasons(&result).join(", ")
         ));
     }
     if result.acceptance_decision != AcceptanceDecision::Accept {

@@ -27,11 +27,11 @@ use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 
 use crate::clock::now_rfc3339;
-use crate::commands::credentials::{export_bundle_signed_impl, verify_bundle_offline_impl};
 use crate::commands::hiring::{
     sign_interview_response, sign_offer_response, InterviewInvite, Offer,
 };
 use crate::commands::talent_index::{get_talent_index_preview_impl, set_talent_index_consent_impl};
+use crate::credentials::bundle;
 use crate::credentials::{lifecycle, status_list};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::Database;
@@ -658,8 +658,8 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("status     revoked"), "{out}");
     // And the exported bundle still verifies on its own, revocation included.
-    let bundle = export_bundle_signed_impl(db.conn(), Some((&key, &did))).unwrap();
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, &now_rfc3339()).unwrap();
+    let bundle = bundle::export_signed(db.conn(), Some((&key, &did))).unwrap();
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, &now_rfc3339()).unwrap();
     assert_eq!(
         (accepted, total),
         (1, 2),
@@ -1347,7 +1347,7 @@ mod ipc {
         assert!(out.contains("status     revoked"), "{out}");
         let bundle = app.call("export_credentials_bundle", json!({})).await;
         let (accepted, total) =
-            verify_bundle_offline_impl(bundle.as_str().unwrap(), &now_rfc3339()).unwrap();
+            bundle::verify_bundle_offline(bundle.as_str().unwrap(), &now_rfc3339()).unwrap();
         assert!(total >= 2 && accepted == total - 1, "{accepted} of {total}");
         println!("7. revoked via IPC; verifier REJECTs; bundle {accepted} of {total} accepted");
 

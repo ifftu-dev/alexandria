@@ -12,7 +12,7 @@
 //! verifier here proves the bundle is self-contained.
 
 use super::common::{new_test_db, test_did, test_key, TEST_NOW};
-use app_lib::commands::credentials::{export_bundle_impl, verify_bundle_offline_impl};
+use app_lib::credentials::bundle;
 use app_lib::credentials::{self, lifecycle, IssueCredentialRequest};
 use app_lib::crypto::did::derive_did_key;
 use app_lib::domain::vc::{Claim, CredentialType, SkillClaim};
@@ -50,8 +50,8 @@ async fn exported_bundle_verifies_with_offline_tooling() {
     // shared state), no Alexandria services running.
     let db = new_test_db();
     let _ = issue_one(&db, "skill_survival_offline");
-    let bundle = export_bundle_impl(db.conn()).expect("export");
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, TEST_NOW).expect("verify");
+    let bundle = bundle::export(db.conn()).expect("export");
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, TEST_NOW).expect("verify");
     assert_eq!(total, 1);
     assert_eq!(
         accepted, 1,
@@ -66,8 +66,8 @@ async fn exported_bundle_propagates_revocation_to_offline_verifier() {
     let db = new_test_db();
     let (issuer, cred_id) = issue_one(&db, "skill_survival_revoked");
     lifecycle::revoke(db.conn(), &issuer, &cred_id, "test", TEST_NOW).expect("revoke");
-    let bundle = export_bundle_impl(db.conn()).expect("export");
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, TEST_NOW).expect("verify");
+    let bundle = bundle::export(db.conn()).expect("export");
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, TEST_NOW).expect("verify");
     assert_eq!(total, 1);
     assert_eq!(accepted, 0, "revoked credential MUST NOT verify offline");
 }
@@ -79,8 +79,8 @@ async fn export_bundle_is_deterministic() {
     // (content-addressed by the bundle bytes).
     let db = new_test_db();
     let _ = issue_one(&db, "skill_survival_determinism");
-    let a = export_bundle_impl(db.conn()).expect("first export");
-    let b = export_bundle_impl(db.conn()).expect("second export");
+    let a = bundle::export(db.conn()).expect("first export");
+    let b = bundle::export(db.conn()).expect("second export");
     assert_eq!(
         a, b,
         "bundle MUST be byte-identical across repeated exports"
@@ -131,8 +131,8 @@ async fn exported_bundle_verifies_offline_under_a_rotated_issuer_key() {
 
     // Verify well after the rotation, so the open registry window is v2's.
     let after_rotation = "2099-01-01T00:00:00Z";
-    let bundle = export_bundle_impl(db.conn()).expect("export");
-    let (accepted, total) = verify_bundle_offline_impl(&bundle, after_rotation).expect("verify");
+    let bundle = bundle::export(db.conn()).expect("export");
+    let (accepted, total) = bundle::verify_bundle_offline(&bundle, after_rotation).expect("verify");
     assert_eq!(total, 1);
     assert_eq!(
         accepted, 1,
