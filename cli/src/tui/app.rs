@@ -1317,8 +1317,14 @@ impl App {
             .signer
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::credentials::lifecycle::revoke(&signer.conn, &signer.issuer_did, id, reason, &now)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        app_lib::credentials::lifecycle::revoke(
+            &signer.conn,
+            signer.issuer.did(),
+            id,
+            reason,
+            &now,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
         Ok(format!("Revoked {id}"))
     }
 
@@ -1330,7 +1336,7 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
         app_lib::credentials::lifecycle::suspend(
             &signer.conn,
-            &signer.issuer_did,
+            signer.issuer.did(),
             id,
             until,
             reason,
@@ -1346,7 +1352,7 @@ impl App {
                 .signer
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-            app_lib::credentials::lifecycle::reinstate(&signer.conn, &signer.issuer_did, id)
+            app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id)
                 .map_err(|e| anyhow::anyhow!(e))?;
             Ok(format!("Reinstated {id}"))
         })();
@@ -1424,8 +1430,8 @@ impl App {
 
         let vc = app_lib::commands::role_assessment::issue_role_credential_impl(
             &signer.conn,
-            &signer.signing_key,
-            &signer.issuer_did,
+            signer.issuer.key(),
+            signer.issuer.did(),
             assessment_id,
             &subject_did,
             session,
@@ -1488,13 +1494,8 @@ impl App {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
 
-        let vc = app_lib::credentials::issue(
-            &signer.conn,
-            &app_lib::credentials::Issuer::from_key(signer.signing_key.clone()),
-            &req,
-            &now,
-        )
-        .map_err(|e| anyhow::anyhow!(e))?;
+        let vc = app_lib::credentials::issue(&signer.conn, &signer.issuer, &req, &now)
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(format!(
             "Issued {}",

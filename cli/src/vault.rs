@@ -20,10 +20,9 @@ use rusqlite::{Connection, OpenFlags};
 // `crypto::did` re-exports the pure DID primitives from `alexandria-verify`,
 // so the CLI reaches them through `app_lib` rather than taking a second
 // direct dependency on that crate.
-use app_lib::crypto::did::{derive_did_key, Did};
+use app_lib::credentials::Issuer;
 use app_lib::crypto::keystore::Keystore;
 use app_lib::crypto::wallet;
-use ed25519_dalek::SigningKey;
 
 use crate::context::ProjectContext;
 
@@ -85,8 +84,7 @@ pub fn open_db(ctx: &ProjectContext, password_file: Option<&Path>) -> Result<Con
 /// An unlocked vault: the database plus the issuer identity to sign with.
 pub struct Signer {
     pub conn: Connection,
-    pub signing_key: SigningKey,
-    pub issuer_did: Did,
+    pub issuer: Issuer,
 }
 
 /// Unlock Stronghold and derive the issuer signing key alongside an open
@@ -122,18 +120,13 @@ pub fn unlock_with_password(ctx: &ProjectContext, password: &str) -> Result<Sign
         .map_err(|e| anyhow::anyhow!("{e}"))
         .context("Failed to derive the wallet from its mnemonic")?;
 
-    // `Wallet` implements `Drop` (zeroize), so the key bytes are copied out
-    // rather than moved — same reason the GUI path clones here.
-    let signing_key = SigningKey::from_bytes(&w.signing_key.to_bytes());
-    let issuer_did = derive_did_key(&signing_key);
+    // The same derivation the GUI path makes: the wallet's key and the DID it
+    // embeds, as one issuer.
+    let issuer = Issuer::from_wallet(&w);
 
     let conn = open_db_with_key(ctx, keystore.derive_db_key())?;
 
-    Ok(Signer {
-        conn,
-        signing_key,
-        issuer_did,
-    })
+    Ok(Signer { conn, issuer })
 }
 
 /// RFC 3339 "now", matching the timestamps the app writes.

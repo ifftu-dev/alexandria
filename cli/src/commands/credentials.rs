@@ -192,7 +192,7 @@ fn run_list(
 
     let creds = app_lib::credentials::store::list(&conn, subject, skill)
         .map_err(|e| anyhow::anyhow!(e))
-        .context("list_credentials_impl failed")?;
+        .context("credentials::store::list failed")?;
 
     if creds.is_empty() {
         output::info("No credentials in the local store.");
@@ -236,14 +236,9 @@ fn run_issue(ctx: &ProjectContext, password_file: Option<&Path>, request: &Path)
     let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    let vc = app_lib::credentials::issue(
-        &signer.conn,
-        &app_lib::credentials::Issuer::from_key(signer.signing_key.clone()),
-        &req,
-        &now,
-    )
-    .map_err(|e| anyhow::anyhow!(e))
-    .context("credentials::issue failed")?;
+    let vc = app_lib::credentials::issue(&signer.conn, &signer.issuer, &req, &now)
+        .map_err(|e| anyhow::anyhow!(e))
+        .context("credentials::issue failed")?;
 
     output::blank();
     print_vc_summary(&vc);
@@ -266,9 +261,9 @@ fn run_revoke(
     let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    app_lib::credentials::lifecycle::revoke(&signer.conn, &signer.issuer_did, id, reason, &now)
+    app_lib::credentials::lifecycle::revoke(&signer.conn, signer.issuer.did(), id, reason, &now)
         .map_err(|e| anyhow::anyhow!(e))
-        .context("revoke_credential_impl failed")?;
+        .context("credentials::lifecycle::revoke failed")?;
 
     output::blank();
     output::success("Revoked — this is permanent and cannot be reinstated");
@@ -297,14 +292,14 @@ fn run_suspend(
 
     app_lib::credentials::lifecycle::suspend(
         &signer.conn,
-        &signer.issuer_did,
+        signer.issuer.did(),
         id,
         until,
         reason,
         &now,
     )
     .map_err(|e| anyhow::anyhow!(e))
-    .context("suspend_credential_impl failed")?;
+    .context("credentials::lifecycle::suspend failed")?;
 
     output::blank();
     output::success("Suspended — reversible with `alexandria credentials reinstate`");
@@ -323,9 +318,9 @@ fn run_reinstate(ctx: &ProjectContext, password_file: Option<&Path>, id: &str) -
     output::kv("ID", id);
 
     let signer = vault::unlock(ctx, password_file)?;
-    app_lib::credentials::lifecycle::reinstate(&signer.conn, &signer.issuer_did, id)
+    app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id)
         .map_err(|e| anyhow::anyhow!(e))
-        .context("reinstate_credential_impl failed")?;
+        .context("credentials::lifecycle::reinstate failed")?;
 
     output::blank();
     output::success("Suspension lifted");
@@ -379,7 +374,7 @@ fn run_export(ctx: &ProjectContext, password_file: Option<&Path>, out: &Path) ->
 
     let bundle_json = app_lib::credentials::bundle::export(&conn)
         .map_err(|e| anyhow::anyhow!(e))
-        .context("export_bundle_impl failed")?;
+        .context("credentials::bundle::export failed")?;
 
     if let Some(parent) = out.parent() {
         if !parent.as_os_str().is_empty() {
