@@ -3,14 +3,9 @@
 Triage: done
 Repos: alexandria
 
-## Source and scope
+## Scope
 
-Implement the user-confirmed design in [skill-graph-visual-research.md](skill-graph-visual-research.md#confirmed-design-brief). The interview decisions override the exploratory HTML examples. This work covers the personal skills page, expanded modal, and sidebar only. Public instructor graphs, guided-learning-path restrictions, taxonomy storage, prerequisite relationships, and credential authority are unchanged.
-
-Integration branch: `feat/skill-graph-atlas`.
-Integration checkout: `/Users/hack/Documents/Personal/Code/alexandria-mark3/worktrees/skill-graph-atlas-integration`.
-Starting commit: `d894a10badbf74975e9cc615e13e48e8c7f9c98b`.
-Tracker: local Markdown; close tickets with `Triage: done` and a dated note. No PR is requested.
+Implement the [confirmed design](skill-graph-visual-research.md#confirmed-design-brief) across the personal skills page, expanded modal, and sidebar. Public instructor graphs, guided paths, taxonomy storage, prerequisite relationships, and credential authority are unchanged.
 
 ## Acceptance criteria
 
@@ -23,42 +18,16 @@ Tracker: local Markdown; close tickets with `Triage: done` and a dated note. No 
 7. All three personal surfaces use consistent data and visual meanings. The compact sidebar makes fields/earned levels legible and expanding the graph explicit. Refresh after credential changes and navigation, including level-only changes. Reset profile-specific data/view state on lock or profile change and reject stale async responses.
 8. Preserve existing browse, credentials, graph visibility, goals, and skill-detail functionality. No new backend commands or schema changes are necessary. Follow existing i18n conventions and strict Vue/TypeScript checks.
 
-## Tickets and dependencies
+## Completed tickets
 
-- [01 — Shared graph model and profile-safe state](skill-graph-atlas/01-model-state.md): done 2026-10-27; API handoff and verification recorded in the ticket.
-- [02 — Interactive subject atlas and inspector](skill-graph-atlas/02-explorer.md): done 2026-10-27; reusable explorer API and component verification recorded in the ticket.
-- [03 — Personal surfaces and end-to-end verification](skill-graph-atlas/03-personal-surfaces.md): done 2026-10-27 in `t3/personal-surfaces-integration`; integration handoff, full-surface fixture, and verification recorded in the ticket.
+- [Shared model and profile-safe state](skill-graph-atlas/01-model-state.md)
+- [Interactive explorer and inspector](skill-graph-atlas/02-explorer.md)
+- [Personal surfaces](skill-graph-atlas/03-personal-surfaces.md)
 
-## Approved public test boundaries
+## Verification
 
-The user approved all three public test boundaries and review base `d894a10b` on 2026-10-27. This approval applies to implementer and fix agents; do not ask again for these seams. The user also authorized temporarily rebinding this T3 project to the app repository for isolated ticket worktrees, restoring the original parent workspace after cleanup.
+Completed 2026-10-27. Approved test boundaries cover the data adapter, mounted graph interactions, and shared refresh/profile/view state. Independent standards and spec reviews found five issues; all were resolved, including actual learning destinations for earned skills and visible overview Bloom emphasis.
 
-- **Graph adapter API:** active credential-to-earned-Bloom mapping, Ready state, counts, field metadata, stable presentation, and preservation of prerequisite references. Does not test canvas/SVG pixels or backend credential verification.
-- **Mounted graph component API:** user-visible search/select/inspect/open/reset interactions and reduced-motion behavior. Tests public props/events/rendered controls, not private renderer internals.
-- **Shared graph-state API:** credential refresh, level-only updates, camera/selection restoration, profile reset, and stale-load rejection. Does not re-test backend acceptance policy.
+441 frontend tests and 45 Chromium/WebKit checks pass, with one WebKit native-touch-synthesis skip. Strict typechecking, production build, i18n checks, and the command guard pass. Native WebView validation and native-speaker review of new copy remain outstanding. No Rust or backend behavior changed.
 
-## Verification and completion
-
-Use the required TDD workflow at approved boundaries. Run focused tests per ticket, `vue-tsc -b --noEmit`, frontend tests, production build, applicable i18n checks, and desktop/mobile visual verification. Rust checks are required if Rust changes become necessary; the planned implementation is frontend only. Review the complete integration diff for both documented standards and the confirmed spec, then fix findings before closing work.
-
-The implementation workflow authorizes maintaining this spec/ticket lifecycle. Assess other documentation after code changes and ask before editing it, following the standing repository instructions.
-
-## Notes
-
-- 2026-10-27: Created the ticket graph from the confirmed research brief. Existing unrelated untracked research is excluded from this work.
-
-
-## Review-fix handoff — 2026-10-27
-
-All five accepted findings from `review-standards-v1.md` and `review-spec-v1.md` are resolved in isolated branch `t3/skill-atlas-review-fixes`, starting exactly at integration `eb5786fc31a8213d8e15a89fa7d40dcd567a3fcd` with ancestry verified. Tickets 01–03 append the updated APIs and evidence. The fix handoff is ready for parent integration; no integration checkout was modified, pushed, or merged by the implementer.
-
-- Standards: readonly action errors, a shared pure view-state factory, and unified camera bounds/clamping.
-- Spec: earned and Ready learning opens skill-filtered existing course browse/detail routes; Bloom emphasis works in overview previews and full-label lists with truthful counts and preserved context.
-- Both functional fixes were reproduced red before implementation at approved mounted seams. Final checks: 36 focused tests, 441 frontend tests, strict typecheck, build, i18n keys/parity/no-raw-text, and 45 browser checks pass (one existing WebKit native-touch-synthesis skip). All nine catalogs include the three new keys. Existing large-chunk warnings and 437 unrelated pending translations remain.
-- Detailed response: `/Users/hack/Documents/Personal/Code/alexandria-mark3/work/skill-graph-implementation/review-fix-response-v1.md`; verification artifacts are in its adjacent `review-fixes-v1/` directory. Port 5199 isolates the documented Playwright fixture. No guided-path, assessment-policy, taxonomy, or backend changes.
-
-## Completion — 2026-10-27
-
-Tickets 01–03 and the review fix pass are merged on `feat/skill-graph-atlas`, implementation commit `a605c7d78d80c78d4f862915851201b4fa88e883`. The independent reviews against approved base `d894a10b` found three standards issues (one convention breach and two duplication heuristics) and two spec gaps; all five are resolved. Parent inspection confirmed the fixes and rendered emphasis evidence. Final merge checks passed 46 atlas/course tests, strict typechecking, diff whitespace, and commit conventions. The complete implementation passed 441 frontend tests and 45 Chromium/WebKit browser checks, with one expected WebKit native-touch-synthesis skip, plus production build and i18n checks.
-
-No backend, taxonomy, prerequisite-policy, guided-path, or public instructor graph changes were made. Native WebView validation and native-speaker review of new translations remain outside the completed browser verification. README and other documentation were assessed; no broader edits are needed. No push or PR was requested or performed.
+Reproduce browser checks with `npm run test:desktop-ui`. The production-surface fixture is at `tests/desktop-ui/?screen=personal-atlas`; add `theme=dark`, `scenario=stress`, or `locale=ur` to exercise presentation variants.

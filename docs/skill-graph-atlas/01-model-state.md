@@ -2,8 +2,7 @@
 
 Triage: done
 Repos: alexandria
-Part of: alexandria/docs/skill-graph-atlas-spec.md
-Assignee: atlas-model-state
+Part of: ../skill-graph-atlas-spec.md
 
 ## Work
 
@@ -19,40 +18,6 @@ Implement the public graph-data adapter and shared data/view-state boundaries ne
 
 Use TDD at the approved graph-adapter and shared-state seams. Verify subject isolation, current levels, Ready semantics, field counts, prerequisite preservation, refresh and restoration. Run focused tests and strict typecheck; report existing unrelated failures separately. Commit signed-off conventional subjects and report the public API, head SHA, checks, and remaining integration requirements.
 
-## Notes
+## Completion
 
-- 2026-10-27: Created; all parent-spec test seams approved by the user. Claimed for isolated implementation.
-- 2026-10-27: Completed in app-owned worktree `t3-85532d4f`, branch `t3/skill-atlas-model-state`, against approved review base `d894a10b`. Reconciled recovery drafts with real domain types and the existing backend listing contract. Adapter/state behavior tests and strict `vue-tsc -b --noEmit` pass; legacy Bloom, profile, and sidebar tests pass. No UI consumer or backend changes. Tickets 02/03 own rendering and integration.
-
-## Public API handoff for tickets 02/03
-
-`src/utils/skillAtlas.ts` exports `buildSkillAtlas({ skills, edges, activeCredentials, subjectDid, subjectFields? })` and its presentation types. The adapter is deterministic and has no Vue, IPC, clock, or localization dependency.
-
-- `AtlasModel` exposes nodes, fields, original edges (including duplicates and unresolved endpoints), and distinct loaded-skill counts. Nodes and field membership lists use stable ID ordering, independent of achievements and exploration controls. Ticket 02 owns deterministic coordinates keyed by these IDs; the state layer does not run a layout engine.
-- Each node retains `skill` metadata, `fieldId`, `status: 'earned' | 'ready'`, nullable `earnedBloom: { rank, name }`, nullable `intrinsicBloom`, deduplicated prerequisite/dependent relations, and `prerequisitesSatisfied`. Rank is the raw integer 0–5; display rank + 1 and localize the name using `common.bloom.*`. An earned node with null Bloom needs an earned-level-unavailable label, not Remember or Ready.
-- Achievements require an exact nonempty subject DID and a nonempty skill ID. Valid ranks compete by maximum; malformed ranks never override valid ones. No derived aggregation band is used. `activeCredentials` means the caller's existing `list_credentials({ subject: did, activeOnly: true })` result: backend nonrevoked listing, not fresh verification or a new date/acceptance policy. Legacy credential helpers are unchanged.
-- Relations expose `skillId`, `name`, `loaded`, and `earned`. Evidence for unloaded prerequisites remains usable without counting those skills as loaded nodes. Missing evidence or missing prerequisite references implied by `prerequisite_count` prevents satisfaction emphasis. Satisfaction never controls access.
-- Null/empty field IDs become Unassigned (`id: null`, localized by consumers). Existing IDs remain separate from Unassigned even if their label is unavailable. `subjectFields` resolves labels, with loaded skill metadata as fallback. Counts are `total`, `earned`, and `ready`; further learning for earned skills remains a separate UI action.
-
-`src/composables/useSkillAtlas.ts` exports the shared `useSkillAtlas()` singleton:
-
-- Readonly refs: `model`, `phase`, `error`, `refreshing`, `isLoading`, `pageView`, `modalView`, `skillsTab`, `modalOpen`, and `feedback`.
-- `ensureLoaded()` covers already-unlocked startup. `refresh('navigation' | 'credentials' | 'retry')` refreshes the entire snapshot, including level-only changes. Navigation is throttled at 1500 ms; concurrent initial loads share work and forced refreshes queue one trailing request. Callers await the trailing work. Initial failures expose phase `error`; refresh failures retain the last good model with phase `ready` and an error. Successful retry clears the error.
-- `updateView(surface, patch)` and `resetView(surface)` preserve independent page/modal state: selection, field focus (with `unassignedFocused` distinct from overview), query, Bloom emphasis, neighborhood/depth, camera, and inspector collapse. Camera `{ x, y, zoom }` is a copied snapshot in renderer world units; null requests initial fit. Refresh never resets these controls. `setSkillsTab` and `setModalOpen` persist session navigation state. No automatic route navigation or modal-return reopening is implemented.
-- `activateSurface('page' | 'modal')` returns an idempotent release function. Register only while that graph is visible; release on hide/unmount. Initial snapshots are silent. Later newly earned or strictly improved known ranks produce `feedback: { revision, earnedIds, improvedIds }` only while a surface and the document are visible. `acknowledgeFeedback(revision)` consumes exactly that revision. Feedback expires after three seconds and is discarded on remount, final surface release, document hiding, reset, or a subsequent snapshot. Consumers still own reduced-motion rendering.
-- `reset()` clears private data, both views, tab/modal state, pending feedback, throttle, and request ownership. Synchronous profile/lock/identity watchers reset before delayed lock hooks; generation checks reject stale successes, errors, and trailing work. A new profile can load without waiting for old IPC. Identity change detection uses the actual `Identity.stake_address`; the subject DID comes from `get_local_did`.
-
-`installSkillAtlasRefresh(router)` installs reference-counted credential-event and successful-navigation listeners plus document-visibility cleanup. It returns an idempotent teardown function. Ticket 03 should install it from the app owner and use `ensureLoaded()` at startup/surface entry. Existing consumers remain untouched until that ticket.
-
-## Verification record
-
-- Recovered the earlier subject-bound Bloom/malformed-rank tests and kept their behavior green.
-- Observed red → green for listing-policy preservation, partially loaded prerequisite emphasis, field-label fallback, startup field loading, new-profile loading during stale IPC, credential events, hidden/expired/consumed feedback, identity invalidation, cancelled navigation, document hiding, and camera ownership.
-- Shared-state tests use the real profile lifecycle, local API/session guard, event publisher, and memory router. Only the external Tauri IPC boundary and time/visibility are faked. Additional checks cover forced-refresh coalescing, failure/retry, missing DID, stale errors/queued work, and synchronous clearing before delayed lock hooks.
-- Focused command: `npx vitest run src/utils/__tests__/skillAtlas.test.ts src/composables/useSkillAtlas.test.ts src/composables/__tests__/provenBloom.test.ts src/composables/__tests__/useProfiles.test.ts src/components/layout/SidebarSkillGraph.test.ts` — 33 tests pass.
-- `npx vue-tsc -b --noEmit` passes. Rendering, browser validation, UI translations, and full application integration remain for tickets 02/03.
-
-## Accepted review fixes — 2026-10-27
-
-- Standards finding 2: moved `AtlasCamera`, `AtlasViewState`, and fresh defaults to the pure `src/utils/skillAtlasView.ts` module. `createAtlasViewState()` is shared by profile initialization/reset and explorer Reset. The composable re-exports the types for existing consumers; the explorer has no runtime singleton dependency.
-- Existing shared-state/profile reset, view restoration, mounted reset, keyboard and pointer tests remain green. Final review-fix validation: 36 focused tests, 441 full frontend tests, strict `vue-tsc`, and production build pass. The parent spec records the full review-fix handoff.
+2026-10-27: The pure `src/utils/skillAtlas.ts` adapter preserves existing relations and derives subject-bound earned Bloom without changing credential listing policy. `src/composables/useSkillAtlas.ts` owns profile-safe loading, refresh coalescing, per-surface views, and consumable feedback. Pure view types/defaults live in `src/utils/skillAtlasView.ts`. Missing identity yields no achievements; malformed earned ranks remain explicitly unavailable. Adapter and shared-state regression tests pass.
