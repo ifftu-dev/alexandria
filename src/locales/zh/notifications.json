@@ -1,0 +1,78 @@
+{
+  "title": "通知",
+  "bell": "通知",
+  "bellUnread": "通知，{count} 条未读",
+  "page": {
+    "markAllRead": "全部标为已读",
+    "clear": "清空",
+    "clearConfirm": "删除所有通知？此操作无法撤销。",
+    "empty": "暂无通知",
+    "emptyHint": "面试邀请、录用邀约、课堂通话和新凭证将显示在这里。",
+    "unreadLabel": "未读",
+    "viaPush": "推送",
+    "open": "打开"
+  },
+  "kinds": {
+    "interview_invited": {
+      "title": "新的面试邀请",
+      "body": "一个组织邀请您参加面试。打开 Alexandria 以回复。"
+    },
+    "interview_room_opened": {
+      "title": "您的面试室已开放",
+      "body": "面试小组正在等候。打开 Alexandria 以加入。"
+    },
+    "offer_sent": {
+      "title": "新的录用邀约",
+      "body": "一个组织向您发送了录用邀约。"
+    },
+    "access_requested": {
+      "title": "访问请求",
+      "body": "一个组织请求查看您的凭证。"
+    },
+    "assessment_requested": {
+      "title": "新的评估请求",
+      "body": "一个组织邀请您参加评估。"
+    },
+    "classroom_call_started": {
+      "title": "课堂通话已开始",
+      "body": "您的一个课堂中已开始通话。"
+    },
+    "classroom_join_requested": {
+      "title": "加入请求",
+      "body": "有人请求加入您管理的课堂。"
+    },
+    "credential_issued": {
+      "title": "凭证已签发",
+      "body": "新凭证已添加到您的钱包。"
+    },
+    "guardian_request": {
+      "title": "监护人已关联您的账户",
+      "body": "一位监护人现在可以监督此账户。"
+    },
+    "generic": {
+      "title": "新动态",
+      "body": "打开 Alexandria 查看更新。"
+    }
+  },
+  "settings": {
+    "title": "通知",
+    "description": "应用内角标、系统横幅，以及应用关闭时发送到此设备的推送。",
+    "inApp": "显示通知",
+    "inAppHint": "显示新凭证、课堂通话和组织请求的角标、收件箱消息与系统横幅。",
+    "push": "此设备上的推送通知",
+    "pushHint": "当组织发送邀请或开放面试室时，Alexandria Cloud 可以唤醒此设备。推送不包含姓名，仅包含事件类型。",
+    "pushUnsupported": "推送功能适用于 iOS 和 Android 应用。在此电脑上，Alexandria 运行时才会收到通知。",
+    "pushRegistered": "已在 {origin} 注册",
+    "pushNotRegistered": "未注册",
+    "pushNoCloud": "此网络尚未配置 Alexandria Cloud，因此无法注册。",
+    "pushCleanupPending": "正在等待远程移除。之前已排队的横幅仍可能送达。",
+    "pushRegistrationPending": "设备注册正在等待确认。",
+    "pushError": "上次尝试失败：{error}",
+    "register": "立即注册",
+    "unregister": "取消注册",
+    "working": "处理中…",
+    "permission": "请求权限",
+    "permissionGranted": "系统允许显示横幅。",
+    "permissionDenied": "系统正在阻止横幅。请在设备通知设置中允许 Alexandria 发送通知。"
+  }
+}

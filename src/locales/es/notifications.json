@@ -1,0 +1,78 @@
+{
+  "title": "Notificaciones",
+  "bell": "Notificaciones",
+  "bellUnread": "Notificaciones, {count} sin leer",
+  "page": {
+    "markAllRead": "Marcar todas como leídas",
+    "clear": "Borrar",
+    "clearConfirm": "¿Eliminar todas las notificaciones? Esta acción no se puede deshacer.",
+    "empty": "Nada que mostrar",
+    "emptyHint": "Aquí aparecerán las invitaciones a entrevistas, las ofertas, las llamadas de clase y las nuevas credenciales.",
+    "unreadLabel": "Sin leer",
+    "viaPush": "Notificación push",
+    "open": "Abrir"
+  },
+  "kinds": {
+    "interview_invited": {
+      "title": "Nueva invitación a una entrevista",
+      "body": "Una organización te ha invitado a una entrevista. Abre Alexandria para responder."
+    },
+    "interview_room_opened": {
+      "title": "Tu sala de entrevista está abierta",
+      "body": "El panel te está esperando. Abre Alexandria para unirte."
+    },
+    "offer_sent": {
+      "title": "Nueva oferta",
+      "body": "Una organización te ha enviado una oferta."
+    },
+    "access_requested": {
+      "title": "Solicitud de acceso",
+      "body": "Una organización solicita ver tus credenciales."
+    },
+    "assessment_requested": {
+      "title": "Nueva solicitud de evaluación",
+      "body": "Una organización te ha pedido que realices una evaluación."
+    },
+    "classroom_call_started": {
+      "title": "Ha comenzado una llamada de clase",
+      "body": "Ha comenzado una llamada en una de tus clases."
+    },
+    "classroom_join_requested": {
+      "title": "Solicitud para unirse",
+      "body": "Alguien ha solicitado unirse a una clase que moderas."
+    },
+    "credential_issued": {
+      "title": "Credencial emitida",
+      "body": "Se ha añadido una nueva credencial a tu cartera."
+    },
+    "guardian_request": {
+      "title": "Un tutor se ha vinculado a tu cuenta",
+      "body": "Un tutor supervisa ahora esta cuenta."
+    },
+    "generic": {
+      "title": "Nueva actividad",
+      "body": "Abre Alexandria para ver la actualización."
+    }
+  },
+  "settings": {
+    "title": "Notificaciones",
+    "description": "Insignias en la aplicación, avisos del sistema y notificaciones push en este dispositivo cuando la aplicación está cerrada.",
+    "inApp": "Mostrar notificaciones",
+    "inAppHint": "Insignias, bandeja de entrada y avisos del sistema para nuevas credenciales, llamadas de clase y solicitudes de organizaciones.",
+    "push": "Notificaciones push en este dispositivo",
+    "pushHint": "Alexandria Cloud puede activar este dispositivo cuando una organización envía una invitación o abre tu sala de entrevista. Las notificaciones push no incluyen nombres, solo el tipo de evento.",
+    "pushUnsupported": "Las notificaciones push están disponibles en las aplicaciones de iOS y Android. En este ordenador, las notificaciones llegan mientras Alexandria está en ejecución.",
+    "pushRegistered": "Registrado en {origin}",
+    "pushNotRegistered": "Sin registrar",
+    "pushNoCloud": "No hay ningún servicio de Alexandria Cloud configurado para esta red, por lo que no es posible registrarse.",
+    "pushCleanupPending": "La eliminación remota está pendiente. Aún pueden llegar avisos que ya estaban en cola.",
+    "pushRegistrationPending": "El registro del dispositivo está pendiente de confirmación.",
+    "pushError": "El último intento ha fallado: {error}",
+    "register": "Registrar ahora",
+    "unregister": "Anular registro",
+    "working": "En curso…",
+    "permission": "Solicitar permiso",
+    "permissionGranted": "El sistema permite los avisos.",
+    "permissionDenied": "El sistema bloquea los avisos. Permite las notificaciones de Alexandria en los ajustes del dispositivo."
+  }
+}

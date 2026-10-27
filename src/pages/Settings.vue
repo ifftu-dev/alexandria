@@ -27,6 +27,7 @@ import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.v
 import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
+import NotificationsPanel from '@/components/settings/NotificationsPanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
 import OrganisationsSettings from '@/components/organisations/OrganisationsSettings.vue'
@@ -846,6 +847,7 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── System ──────────── -->
                 <template v-else-if="activeSection === 'system'">
                   <UpdatePanel />
+                  <NotificationsPanel />
 
                   <div>
                     <h4 class="settings-group-title">{{ $t('settings.storage.title') }}</h4>

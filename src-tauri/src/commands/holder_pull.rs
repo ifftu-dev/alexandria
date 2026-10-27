@@ -156,7 +156,7 @@ pub(crate) fn proof(
 }
 
 /// GET a path from a directory with a fresh proof attached.
-async fn signed_get(
+pub(crate) async fn signed_get(
     client: &reqwest::Client,
     dir: &Directory,
     sk: &SigningKey,
@@ -182,12 +182,7 @@ async fn signed_get(
         .await
         .map_err(|e| e.to_string())?;
 
-    if !resp.status().is_success() {
-        let code = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{code}: {body}"));
-    }
-    resp.json().await.map_err(|e| e.to_string())
+    super::exchange::response_json(resp).await
 }
 
 /// Loopback is allowed so somebody can run a directory locally and try this

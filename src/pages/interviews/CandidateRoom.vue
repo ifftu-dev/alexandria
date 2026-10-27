@@ -28,7 +28,7 @@ const deviceChoice = callDevices.choice
 const interviewCheck = useInterviewCheck()
 
 const interviewId = computed(() => String(route.params.id))
-const cloud = computed(() => String(route.query.cloud ?? ''))
+const cloud = ref(String(route.query.cloud ?? ''))
 const ticket = ref<string | null>(null)
 const checkAsked = ref(false)
 const error = ref<string | null>(null)
@@ -65,6 +65,7 @@ async function check() {
   try {
     const room = await panelApi.candidateRoom(cloud.value, interviewId.value)
     error.value = null
+    if (room.directoryUrl) cloud.value = room.directoryUrl
     ticket.value = room.ticket
     checkAsked.value = room.integrityCheck === true
     if (room.ticket && timer) {
@@ -80,8 +81,15 @@ async function join() {
   if (!ticket.value || needsChoice.value) return
   joining.value = true
   error.value = null
-  const runCheck = checkAsked.value && checkChoice.value === 'run'
+  let runCheck = checkAsked.value && checkChoice.value === 'run'
   try {
+    // Discovery and a cached ticket are prompts, never permission to join.
+    const current = await panelApi.candidateRoom(cloud.value, interviewId.value)
+    if (current.directoryUrl) cloud.value = current.directoryUrl
+    ticket.value = current.ticket
+    checkAsked.value = current.integrityCheck === true
+    if (!ticket.value || needsChoice.value) return
+    runCheck = checkAsked.value && checkChoice.value === 'run'
     if (runCheck) {
       await interviewCheck.begin({ interviewId: interviewId.value, cloud: cloud.value, camera: checkCamera.value })
     }
@@ -91,6 +99,8 @@ async function join() {
     })
     await router.push(`/interview-call/${room.id}?cloud=${encodeURIComponent(cloud.value)}`)
   } catch (cause) {
+    ticket.value = null
+    if (!timer) timer = window.setInterval(() => void check(), POLL_MS)
     if (runCheck) await interviewCheck.abandon()
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {

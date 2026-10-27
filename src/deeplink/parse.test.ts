@@ -98,6 +98,32 @@ describe('parseDeepLink', () => {
     })
   })
 
+  describe('notifications', () => {
+    it('maps the bare action to the inbox (custom + https)', () => {
+      expect(parseDeepLink('alexandria://notifications')).toEqual({
+        kind: 'route',
+        path: '/notifications',
+      })
+      expect(parseDeepLink('https://alexandria.ifftu.dev/notifications')).toEqual({
+        kind: 'route',
+        path: '/notifications',
+      })
+    })
+    it('rejects anything under notifications', () => {
+      expect(parseDeepLink('alexandria://notifications/x')).toBeNull()
+    })
+    it('maps notification/<id> to the inbox with that row opened', () => {
+      expect(parseDeepLink('alexandria://notification/n-1')).toEqual({
+        kind: 'route',
+        path: '/notifications?open=n-1',
+      })
+    })
+    it('rejects notification without an id or with more segments', () => {
+      expect(parseDeepLink('alexandria://notification')).toBeNull()
+      expect(parseDeepLink('alexandria://notification/n-1/extra')).toBeNull()
+    })
+  })
+
   describe('generic open?route', () => {
     it('accepts an absolute in-app path', () => {
       expect(parseDeepLink('alexandria://open?route=/skills/rust')).toEqual({

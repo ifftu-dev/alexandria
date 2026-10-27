@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useDeepLinks } from '@/deeplink/useDeepLinks'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -19,6 +20,8 @@ const router = useRouter()
 const { t } = useI18n()
 const { profiles, refreshProfiles, unlockProfile } = useProfiles()
 
+let selectionGeneration = 0
+let disposed = false
 const selectedId = ref<string | null>(null)
 const password = ref('')
 const unlocking = ref(false)
@@ -79,10 +82,15 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  selectionGeneration++
+  clearUnlockStages()
   window.removeEventListener('blur', releaseSecureInputOnBlur)
 })
 
 function onSelect(id: string) {
+  selectionGeneration++
+  biometricLoading.value = false
   selectedId.value = id
   password.value = ''
   error.value = null
@@ -100,9 +108,13 @@ function onSelect(id: string) {
 }
 
 async function offerBiometric(id: string) {
+  const generation = selectionGeneration
   try {
-    selectedHasCredential.value = await biometricCredentialExists(id)
+    const exists = await biometricCredentialExists(id)
+    if (disposed || generation !== selectionGeneration) return
+    selectedHasCredential.value = exists
   } catch {
+    if (disposed || generation !== selectionGeneration) return
     selectedHasCredential.value = false
   }
   if (selectedHasCredential.value && selectedId.value === id) {
@@ -119,6 +131,8 @@ watch(passwordInput, (el) => {
 })
 
 function onBack() {
+  selectionGeneration++
+  biometricLoading.value = false
   selectedId.value = null
   password.value = ''
   error.value = null
@@ -142,7 +156,7 @@ async function onUnlock() {
     // hotkey tools (CGEventTaps) app-wide until restart. Explicitly blurring
     // first makes macOS release it.
     passwordInput.value?.blur()
-    router.replace('/home')
+    if (!useDeepLinks().hasUnlockDestination()) await router.replace('/home')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     password.value = ''
@@ -160,10 +174,13 @@ async function unlockWithBiometric(auto = false) {
   if (!auto) error.value = null
 
   const profileId = selectedId.value
+  const generation = selectionGeneration
   let vaultPassword: string
   try {
     vaultPassword = await getVaultPasswordViaBiometric(profileId, 'Unlock Alexandria')
+    if (disposed || generation !== selectionGeneration) return
   } catch (e) {
+    if (disposed || generation !== selectionGeneration) return
     // Retrieval failed (user cancelled, not enrolled on this device, or
     // missing keychain entitlement). Stay silent on auto; explain on a
     // deliberate tap.
@@ -191,7 +208,7 @@ async function unlockWithBiometric(auto = false) {
     unlockStatus.value = t('onboarding.profileSelect.welcomeBack')
     // See onUnlock: release Secure Event Input before unmounting.
     passwordInput.value?.blur()
-    router.replace('/home')
+    if (!useDeepLinks().hasUnlockDestination()) await router.replace('/home')
   } catch (e) {
     // Stored credential was rejected by the vault. Drop to the password
     // form; only nag on a deliberate tap.

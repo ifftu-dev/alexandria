@@ -16,6 +16,8 @@
     "process:allow-exit",
     "deep-link:default",
     "dialog:default",
+    "notification:default",
+    "mobile-push:default",
     "os:allow-locale",
     {
       "identifier": "fs:allow-read-file",

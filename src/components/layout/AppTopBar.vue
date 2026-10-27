@@ -18,6 +18,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useOmniSearch } from '@/composables/useOmniSearch'
 import { useKeyboardShortcuts, formatCombo } from '@/composables/useKeyboardShortcuts'
 import { useDiagnostics } from '@/composables/useDiagnostics'
+import { useNotifications } from '@/composables/useNotifications'
 import { useChat } from '@/composables/useChat'
 import { useChatAvailability } from '@/composables/useChatAvailability'
 
@@ -36,6 +37,12 @@ const omniSearch = useOmniSearch()
 const { shortcuts, registerAction } = useKeyboardShortcuts()
 const shortcutsHelpOpen = ref(false)
 const diagnostics = useDiagnostics()
+const { unread: unreadNotifications } = useNotifications()
+const bellLabel = computed(() =>
+  unreadNotifications.value > 0
+    ? t('notifications.bellUnread', { count: unreadNotifications.value })
+    : t('notifications.bell'),
+)
 const chat = useChat()
 const { restricted: chatRestricted } = useChatAvailability()
 
@@ -303,6 +310,20 @@ const avatarEmoji = computed(() => {
         {{ p2pStatus?.is_running ? t('common.status.connected') : p2pStatus != null ? t('network.offline') : t('network.starting') }}
       </div>
 
+      <!-- Notifications bell: the inbox, with the unread count -->
+      <button
+        class="topbar-icon-btn topbar-bell relative"
+        :aria-label="bellLabel"
+        :title="bellLabel"
+        @click="router.push('/notifications')"
+      >
+        <svg class="w-[1.125rem] h-[1.125rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+        </svg>
+        <span v-if="unreadNotifications > 0" class="topbar-bell-count" aria-hidden="true">
+          {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}
+        </span>
+      </button>
       <!-- Global chat. Disabled, not hidden, during assessments so the
            learner can see where it went. Narrow windows use a floating button. -->
       <div class="hidden md:flex">
@@ -557,6 +578,23 @@ const avatarEmoji = computed(() => {
 }
 
 /* Icon buttons (sidebar toggle, app icon) */
+.topbar-bell-count {
+  position: absolute;
+  top: 0.1rem;
+  inset-inline-end: 0.15rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: 9999px;
+  background: var(--app-error, #dc2626);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1rem;
+  text-align: center;
+  pointer-events: none;
+}
+
 .topbar-icon-btn.topbar-icon-btn--active {
   color: var(--app-primary);
   background: color-mix(in srgb, var(--app-primary) 12%, transparent);

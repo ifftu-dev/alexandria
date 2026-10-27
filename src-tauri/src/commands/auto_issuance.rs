@@ -37,6 +37,9 @@ const STATUS_LIST_TYPE: &str = "BitstringStatusListEntry";
 pub struct AutoIssuanceReport {
     /// Number of credentials successfully issued this tick.
     pub issued: usize,
+    /// Their ids, so the caller can tell the learner about each one.
+    pub issued_ids: Vec<String>,
+    pub notifications: Vec<crate::notifications::Recorded>,
     /// Number of pending observations skipped because they did not
     /// belong to the local learner (subject pubkey mismatch).
     pub skipped_foreign: usize,
@@ -61,8 +64,14 @@ pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceR
             continue;
         }
 
-        match issue_for_observation(conn, learner_key, &local_did, &obs) {
-            Ok(_) => report.issued += 1,
+        match issue_and_notify(conn, learner_key, &local_did, &obs) {
+            Ok((credential_id, notification)) => {
+                if let Some(notification) = notification {
+                    report.notifications.push(notification);
+                }
+                report.issued += 1;
+                report.issued_ids.push(credential_id);
+            }
             Err(e) => {
                 report.errors.push(format!("issue({}): {e}", obs.tx_hash));
             }
@@ -80,6 +89,15 @@ pub fn issue_for_observation(
     learner_did: &Did,
     obs: &CompletionObservation,
 ) -> Result<String, String> {
+    issue_and_notify(conn, learner_key, learner_did, obs).map(|(id, _)| id)
+}
+
+fn issue_and_notify(
+    conn: &Connection,
+    learner_key: &SigningKey,
+    learner_did: &Did,
+    obs: &CompletionObservation,
+) -> Result<(String, Option<crate::notifications::Recorded>), String> {
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     let stored = completion::find_by_asset(&tx, &obs.policy_id, &obs.asset_name_hex)
@@ -96,13 +114,17 @@ pub fn issue_for_observation(
         return Err("completion issuance does not match the stored observation and learner".into());
     }
     if let Some(existing) = stored.credential_id {
-        return Ok(existing);
+        return Ok((existing, None));
     }
     let credential_id = issue_new_observation(&tx, learner_key, learner_did, obs)?;
     completion::mark_issued(&tx, &obs.policy_id, &obs.asset_name_hex, &credential_id)
         .map_err(|e| e.to_string())?;
+    let notification = crate::notifications::record_if_enabled(
+        &tx,
+        &crate::notifications::for_issued_credential(&credential_id),
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(credential_id)
+    Ok((credential_id, notification))
 }
 
 fn issue_new_observation(
@@ -319,6 +341,18 @@ mod tests {
 
         let report = tick(db.conn(), &key).unwrap();
         assert_eq!(report.issued, 1, "expected one issuance");
+        let inbox = crate::notifications::list(db.conn(), None, false).unwrap();
+        assert_eq!(
+            inbox.len(),
+            1,
+            "committed issuance must leave an inbox entry even before its UI event"
+        );
+        assert_eq!(inbox[0].kind, crate::notifications::kind::CREDENTIAL_ISSUED);
+        assert_eq!(
+            inbox[0].route,
+            Some(format!("/credentials/{}", report.issued_ids[0]))
+        );
+
         assert_eq!(report.skipped_foreign, 0);
         assert!(
             report.errors.is_empty(),

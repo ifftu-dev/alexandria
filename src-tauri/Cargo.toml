@@ -59,6 +59,21 @@ tauri-plugin-process = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# OS notifications on every platform (desktop toasts, iOS/Android local
+# notifications). Remote push tokens come from the vendored plugin below;
+# this one only shows what the app decided to show.
+#
+# Resolved to `patches/tauri-plugin-notification` (see the workspace
+# Cargo.toml): 2.7 as published asks for tauri 2.12, which would drag tao to
+# 0.37 and swift-rs to 1.0.9 and silently drop `patches/tao` and
+# `patches/swift-rs`. The patch only relaxes that requirement. 2.7 is wanted
+# for `on_action`, which is what routes a click on a desktop or Android
+# banner to the notification's screen.
+tauri-plugin-notification = "2.7"
+# APNs / FCM device tokens and push events. Vendored (see crates/VENDORING.md)
+# and compiled on every target: the desktop half is a stub that reports
+# "unsupported", which keeps one capability file and one plugin list.
+tauri-plugin-mobile-push = { path = "../crates/tauri-plugin-mobile-push" }
 # On-device PDF text extraction for the resume/transcript skill bootstrap.
 pdf-extract = "0.12"
 
@@ -290,6 +305,7 @@ wasmtime = { version = "36", default-features = false, features = ["cranelift", 
 objc2-core-foundation = { version = "0.3", features = ["objc2"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 # Synthetic App Attest certificate chains for the attestation verifier tests.
 rcgen = "0.13"

@@ -99,6 +99,10 @@ pub struct PanelCandidate {
 pub struct PanelRoom {
     pub ticket: Option<String>,
     pub opened_at: Option<String>,
+    pub opening_id: Option<String>,
+    pub event_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub live: bool,
 }
 
 /// The interview as Cloud shows it to one panelist.
@@ -140,7 +144,7 @@ pub struct Rating {
     pub rating: Option<u8>,
 }
 
-async fn panel_request(
+pub(crate) async fn panel_request(
     link: &PanelLink,
     method: reqwest::Method,
     suffix: &str,
@@ -156,7 +160,11 @@ async fn panel_request(
     if let Some(body) = body {
         request = request.json(body);
     }
-    response_json(request.send().await.map_err(|e| e.to_string())?).await
+    let response = request.send().await.map_err(|e| e.to_string())?;
+    if response.status() == reqwest::StatusCode::NO_CONTENT {
+        return Ok(Value::Null);
+    }
+    response_json(response).await
 }
 
 async fn fetch(link: &PanelLink) -> Result<PanelInterview, String> {
@@ -386,19 +394,49 @@ pub async fn interview_panel_set_room(
     state: State<'_, AppState>,
     session_id: String,
     ticket: String,
+    room_session_id: String,
+    opening_id: Option<String>,
+    previous_opening_id: Option<String>,
 ) -> Result<PanelInterview, String> {
     if ticket.trim().is_empty() || ticket.len() > 4096 {
         return Err("not a room ticket".into());
     }
+    for id in [&opening_id, &previous_opening_id].into_iter().flatten() {
+        let parsed = uuid::Uuid::parse_str(id).map_err(|_| "invalid opening ID")?;
+        if parsed.is_nil() || parsed.to_string() != *id {
+            return Err("invalid opening ID".into());
+        }
+    }
     let link = link_for(&state, &session_id).await?;
-    let value = panel_request(
-        &link,
-        reqwest::Method::POST,
-        "/room",
-        Some(&serde_json::json!({ "ticket": ticket })),
-    )
-    .await?;
-    serde_json::from_value(value).map_err(|e| e.to_string())
+    let room_id = room_session_id.clone();
+    state.db_executor.execute(DatabaseWorkload::Instructor, state.profile_lease(), "interview.panel.runtime", move |db| {
+        let matches: bool = db.conn().query_row("SELECT EXISTS(SELECT 1 FROM tutoring_sessions WHERE id=?1 AND context_id=?2 AND kind='interview_panel' AND status='active')", params![room_id, session_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if matches { Ok(()) } else { Err("this runtime does not belong to the panel seat".into()) }
+    }).await?;
+    let endpoint = state
+        .content_node
+        .endpoint()
+        .await
+        .ok_or("room transport is unavailable")?;
+    let value = state
+        .tutoring
+        .attach_panel_presence(
+            &room_session_id,
+            link.clone(),
+            crate::tutoring::panel_presence::Publication {
+                ticket,
+                opening_id,
+                previous_opening_id,
+            },
+            state.profile_lease(),
+            endpoint,
+        )
+        .await?;
+    let panel: PanelInterview = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    if panel.interview_id != link.interview_id || panel.me.id != link.panelist_id {
+        return Err("Cloud answered for a different interview".into());
+    }
+    Ok(panel)
 }
 
 /// Send this panelist's scorecard to the organisation.
@@ -475,6 +513,10 @@ mod tests {
             room: PanelRoom {
                 ticket: None,
                 opened_at: None,
+                opening_id: None,
+                event_id: None,
+                expires_at: None,
+                live: false,
             },
             candidate_evidence: Vec::new(),
             integrity: None,

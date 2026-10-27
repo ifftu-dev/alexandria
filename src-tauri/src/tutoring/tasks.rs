@@ -34,6 +34,10 @@ impl Drop for StartupGuard<'_> {
 }
 
 impl TaskHandle {
+    pub(super) fn is_finished(&self) -> bool {
+        self.0.as_ref().is_none_or(|handle| handle.is_finished())
+    }
+
     pub(super) fn abort(&self) {
         if let Some(handle) = &self.0 {
             handle.abort();

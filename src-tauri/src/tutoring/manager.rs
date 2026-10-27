@@ -332,6 +332,7 @@ const MAX_LOG_ENTRIES: usize = 50;
 
 /// Internal state for an active room.
 struct ActiveSession {
+    panel_presence: Option<TaskHandle>,
     session_id: String,
     session_title: String,
     handle: RoomHandle,
@@ -578,6 +579,7 @@ impl TutoringManager {
             ];
 
             *inner = Some(ActiveSession {
+                panel_presence: None,
                 session_id,
                 session_title: title,
                 handle,
@@ -754,6 +756,7 @@ impl TutoringManager {
             ];
 
             *inner = Some(ActiveSession {
+                panel_presence: None,
                 session_id,
                 session_title: title,
                 handle,
@@ -804,6 +807,37 @@ impl TutoringManager {
             self.tasks.shutdown().await;
         }
         result
+    }
+
+    /// Attach Cloud presence to this exact connected runtime. Page navigation
+    /// does not own this task; room shutdown and profile admission do.
+    pub(crate) async fn attach_panel_presence(
+        &self,
+        room_session_id: &str,
+        link: crate::commands::interview_panel::PanelLink,
+        publication: super::panel_presence::Publication,
+        lease: crate::profile::scope::ProfileLease,
+        endpoint: Endpoint,
+    ) -> Result<serde_json::Value, String> {
+        let receive = {
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|s| s.session_id == room_session_id)
+                .ok_or("the connected panel room has changed")?;
+            super::panel_presence::attach(
+                &self.tasks,
+                &session.handle,
+                &mut session.panel_presence,
+                endpoint,
+                lease,
+                link,
+                publication,
+            )?
+        };
+        receive
+            .await
+            .map_err(|_| "the panel room stopped before admission completed".to_string())?
     }
 
     /// Leave the current room.
@@ -2189,6 +2223,7 @@ impl TutoringManager {
                 }
             }
         }
+        tasks.close();
         log::info!("tutoring: event loop ended");
     }
 
