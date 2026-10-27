@@ -1,6 +1,6 @@
 # Personal Skill Graph atlas
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 
 ## Source and scope
@@ -56,3 +56,9 @@ All five accepted findings from `review-standards-v1.md` and `review-spec-v1.md`
 - Spec: earned and Ready learning opens skill-filtered existing course browse/detail routes; Bloom emphasis works in overview previews and full-label lists with truthful counts and preserved context.
 - Both functional fixes were reproduced red before implementation at approved mounted seams. Final checks: 36 focused tests, 441 frontend tests, strict typecheck, build, i18n keys/parity/no-raw-text, and 45 browser checks pass (one existing WebKit native-touch-synthesis skip). All nine catalogs include the three new keys. Existing large-chunk warnings and 437 unrelated pending translations remain.
 - Detailed response: `/Users/hack/Documents/Personal/Code/alexandria-mark3/work/skill-graph-implementation/review-fix-response-v1.md`; verification artifacts are in its adjacent `review-fixes-v1/` directory. Port 5199 isolates the documented Playwright fixture. No guided-path, assessment-policy, taxonomy, or backend changes.
+
+## Completion — 2026-10-27
+
+Tickets 01–03 and the review fix pass are merged on `feat/skill-graph-atlas`, implementation commit `a605c7d78d80c78d4f862915851201b4fa88e883`. The independent reviews against approved base `d894a10b` found three standards issues (one convention breach and two duplication heuristics) and two spec gaps; all five are resolved. Parent inspection confirmed the fixes and rendered emphasis evidence. Final merge checks passed 46 atlas/course tests, strict typechecking, diff whitespace, and commit conventions. The complete implementation passed 441 frontend tests and 45 Chromium/WebKit browser checks, with one expected WebKit native-touch-synthesis skip, plus production build and i18n checks.
+
+No backend, taxonomy, prerequisite-policy, guided-path, or public instructor graph changes were made. Native WebView validation and native-speaker review of new translations remain outside the completed browser verification. README and other documentation were assessed; no broader edits are needed. No push or PR was requested or performed.
