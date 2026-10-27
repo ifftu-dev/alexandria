@@ -37,6 +37,7 @@ use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 
+use crate::cloud::{self, is_loopback};
 use crate::db::executor::DatabaseWorkload;
 use crate::settings::registry::keys;
 use crate::settings::SettingsStore;
@@ -100,29 +101,13 @@ pub(crate) fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Director
     if !SettingsStore::get(conn, keys::ORGANISATIONS_ENABLED) {
         return Ok(Vec::new());
     }
-    Ok(cloud_origin(conn)
+    Ok(cloud::origin(conn)
         .into_iter()
         .map(|url| Directory {
             name: "Alexandria Cloud".into(),
             url,
         })
         .collect())
-}
-
-/// The Cloud origin this app talks to, whether or not requests are switched
-/// on: the developer override, else the network profile's. Only https, or
-/// http on loopback, counts.
-pub(crate) fn cloud_origin(conn: &rusqlite::Connection) -> Option<String> {
-    let configured = SettingsStore::get(conn, keys::CLOUD_ORIGIN);
-    let origin = if !configured.trim().is_empty() {
-        configured.trim().to_string()
-    } else {
-        crate::network_profile::embedded_preprod()
-            .ok()
-            .and_then(|profile| profile.cloud_https_origin.clone())?
-    };
-    let origin = origin.trim_end_matches('/').to_string();
-    (origin.starts_with("https://") || is_loopback(&origin)).then_some(origin)
 }
 
 /// A value used once, so two identical requests do not sign identically.
@@ -188,27 +173,6 @@ async fn signed_get(
         return Err(format!("{code}: {body}"));
     }
     resp.json().await.map_err(|e| e.to_string())
-}
-
-/// Loopback is allowed so somebody can run a directory locally and try this
-/// without a certificate. Nothing else plaintext is.
-///
-/// The host has to *end* there. A prefix check alone would accept
-/// `http://127.0.0.1.example.com`, which is a domain somebody else controls
-/// wearing a loopback address as a costume — and it would arrive over
-/// plaintext carrying a proof header.
-pub(crate) fn is_loopback(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else {
-        return false;
-    };
-    for host in ["127.0.0.1", "localhost", "[::1]"] {
-        if let Some(after) = rest.strip_prefix(host) {
-            if after.is_empty() || after.starts_with(':') || after.starts_with('/') {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 // --- tauri command handlers ----------------------------------------------
@@ -558,21 +522,13 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_is_refused_except_on_loopback() {
-        assert!(is_loopback("http://127.0.0.1:8787"));
-        assert!(is_loopback("http://localhost:8787"));
-        assert!(!is_loopback("http://registry.example.com"));
-        assert!(!is_loopback("http://127.0.0.1.example.com"));
-    }
-
-    #[test]
     fn cloud_is_the_override_else_the_profile_and_the_switch_stops_it() {
         let db = Database::open_in_memory().expect("database");
         db.run_migrations().expect("migrations");
         let profile_origin = crate::network_profile::embedded_preprod()
             .ok()
             .and_then(|p| p.cloud_https_origin.clone());
-        assert_eq!(cloud_origin(db.conn()), profile_origin);
+        assert_eq!(cloud::origin(db.conn()), profile_origin);
 
         SettingsStore::set(
             db.conn(),
@@ -581,7 +537,7 @@ mod tests {
         )
         .expect("override");
         assert_eq!(
-            cloud_origin(db.conn()).as_deref(),
+            cloud::origin(db.conn()).as_deref(),
             Some("http://127.0.0.1:8787")
         );
         assert_eq!(directories_db(db.conn()).expect("services").len(), 1);
@@ -589,7 +545,7 @@ mod tests {
         // Plaintext to anywhere but loopback is not a Cloud the app will use.
         SettingsStore::set(db.conn(), keys::CLOUD_ORIGIN, "http://cloud.example".into())
             .expect("override");
-        assert_eq!(cloud_origin(db.conn()), None);
+        assert_eq!(cloud::origin(db.conn()), None);
 
         SettingsStore::set(
             db.conn(),
@@ -601,7 +557,7 @@ mod tests {
         assert!(directories_db(db.conn()).expect("services").is_empty());
         // Status lists still have a home: the switch is about requests.
         assert_eq!(
-            cloud_origin(db.conn()).as_deref(),
+            cloud::origin(db.conn()).as_deref(),
             Some("https://cloud.example")
         );
     }

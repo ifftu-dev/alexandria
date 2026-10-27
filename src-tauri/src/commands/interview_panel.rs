@@ -20,7 +20,8 @@ use super::interview::{
     create_interview_impl, CreateInterviewParticipant, CreateInterviewRequest, InterviewBundle,
 };
 use crate::clock::now_rfc3339;
-use crate::commands::exchange::{client, response_json};
+use crate::cloud::{self, client};
+use crate::commands::exchange::response_json;
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
@@ -55,7 +56,7 @@ pub fn parse_panel_link(link: &str) -> Result<PanelLink, String> {
             .ok_or_else(|| format!("the interview link has no {name}"))
     };
     let cloud = param("cloud")?.trim_end_matches('/').to_string();
-    if !cloud.starts_with("https://") && !super::holder_pull::is_loopback(&cloud) {
+    if !cloud.starts_with("https://") && !cloud::is_loopback(&cloud) {
         return Err("the interview link points at a service that is not https".into());
     }
     let interview_id = param("id")?;

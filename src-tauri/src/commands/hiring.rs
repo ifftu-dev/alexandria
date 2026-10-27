@@ -15,8 +15,9 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::cloud::client;
 use crate::commands::credentials::load_issuer_key;
-use crate::commands::exchange::{client, directory, response_json};
+use crate::commands::exchange::{directory, response_json};
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
 use crate::crypto::did::{resolve_did_key, Did};
 use crate::db::executor::DatabaseWorkload;

@@ -40,7 +40,8 @@ use crate::profile::scope::ProfileState as State;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use super::holder_pull::{directories, is_loopback, nonce, proof, Directory};
+use super::holder_pull::{directories, nonce, proof, Directory};
+use crate::cloud::is_loopback;
 use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::evidence;
 use crate::AppState;

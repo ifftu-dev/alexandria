@@ -7,6 +7,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::now_rfc3339;
+use crate::cloud::client;
 use crate::commands::credentials::load_issuer_key;
 use crate::commands::holder_pull::{Directory, Problem, PullResult};
 use crate::db::executor::DatabaseWorkload;
@@ -54,14 +55,6 @@ pub(super) async fn directory(
         return Err("directory requires HTTPS, or HTTP on loopback".into());
     }
     Ok(dir)
-}
-
-pub(super) fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())
 }
 
 pub(super) async fn response_json(

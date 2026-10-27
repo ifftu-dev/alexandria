@@ -637,12 +637,12 @@ pub(crate) fn status_list_host(conn: &Connection) -> Option<String> {
     let candidate = if !configured.trim().is_empty() {
         Some(configured.trim().to_string())
     } else {
-        super::holder_pull::cloud_origin(conn)
+        crate::cloud::origin(conn)
     };
     candidate
         .map(|origin| origin.trim_end_matches('/').to_string())
         .filter(|origin| {
-            (origin.starts_with("https://") || super::holder_pull::is_loopback(origin))
+            (origin.starts_with("https://") || crate::cloud::is_loopback(origin))
                 && alexandria_verify::vc::status::parse_list_url(
                     &alexandria_verify::vc::status::list_url(
                         origin,
@@ -804,7 +804,7 @@ async fn push_status_list(
         return Err("list belongs to another issuer".into());
     }
     let document = signed_status_list(list, key, issuer_did, now)?;
-    let response = super::exchange::client()?
+    let response = crate::cloud::client()?
         .put(&list.list_id)
         .json(&document)
         .send()

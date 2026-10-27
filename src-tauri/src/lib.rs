@@ -7,6 +7,7 @@ pub mod av_permissions;
 pub mod cardano;
 pub mod classroom;
 pub mod clock;
+pub mod cloud;
 pub mod commands;
 pub mod content_store;
 pub mod course_notes;
