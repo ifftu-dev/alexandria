@@ -2,8 +2,8 @@
 //! lifecycle.
 //!
 //! Opens the SQLCipher-encrypted database against the same vault password
-//! the app uses, then delegates to the impl functions in
-//! `app_lib::commands::credentials::*` so there is one source of truth
+//! the app uses, then delegates to the functions in
+//! `app_lib::credentials` so there is one source of truth
 //! between the GUI's IPC handlers and the CLI. Commands that mint a
 //! credential additionally unlock Stronghold to obtain the issuer signing
 //! key — see [`crate::vault`].
@@ -161,7 +161,7 @@ fn read_json_arg(path: &Path) -> Result<String> {
 /// Render a credential as aligned key-value lines.
 ///
 /// `VerifiableCredential` lives in `alexandria-verify` and reaches us through
-/// `app_lib::domain::vc`; `commands::credentials` only imports it privately.
+/// `app_lib::domain::vc`; `credentials` only imports it privately.
 fn print_vc_summary(vc: &app_lib::domain::vc::VerifiableCredential) {
     let class = vc
         .type_
@@ -190,7 +190,7 @@ fn run_list(
     output::header("Credentials");
     let conn = vault::open_db(ctx, password_file)?;
 
-    let creds = app_lib::commands::credentials::list_credentials_impl(&conn, subject, skill)
+    let creds = app_lib::credentials::store::list(&conn, subject, skill)
         .map_err(|e| anyhow::anyhow!(e))
         .context("list_credentials_impl failed")?;
 
@@ -211,7 +211,7 @@ fn run_list(
 
 fn run_get(ctx: &ProjectContext, password_file: Option<&Path>, id: &str) -> Result<()> {
     let conn = vault::open_db(ctx, password_file)?;
-    let vc = app_lib::commands::credentials::get_credential_impl(&conn, id)
+    let vc = app_lib::credentials::store::get(&conn, id)
         .map_err(|e| anyhow::anyhow!(e))?
         .ok_or_else(|| anyhow::anyhow!("credential `{id}` not found"))?;
 
@@ -229,22 +229,21 @@ fn run_issue(ctx: &ProjectContext, password_file: Option<&Path>, request: &Path)
     output::header("Issue credential");
 
     let raw = read_json_arg(request)?;
-    let req: app_lib::commands::credentials::IssueCredentialRequest =
+    let req: app_lib::credentials::IssueCredentialRequest =
         serde_json::from_str(&raw).context("parse IssueCredentialRequest JSON")?;
 
     // Unlocks Stronghold, not just the database — issuance signs.
     let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    let vc = app_lib::commands::credentials::issue_credential_impl(
+    let vc = app_lib::credentials::issue(
         &signer.conn,
-        &signer.signing_key,
-        &signer.issuer_did,
+        &app_lib::credentials::Issuer::from_key(signer.signing_key.clone()),
         &req,
         &now,
     )
     .map_err(|e| anyhow::anyhow!(e))
-    .context("issue_credential_impl failed")?;
+    .context("credentials::issue failed")?;
 
     output::blank();
     print_vc_summary(&vc);
@@ -267,15 +266,9 @@ fn run_revoke(
     let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    app_lib::commands::credentials::revoke_credential_impl(
-        &signer.conn,
-        &signer.issuer_did,
-        id,
-        reason,
-        &now,
-    )
-    .map_err(|e| anyhow::anyhow!(e))
-    .context("revoke_credential_impl failed")?;
+    app_lib::credentials::lifecycle::revoke(&signer.conn, &signer.issuer_did, id, reason, &now)
+        .map_err(|e| anyhow::anyhow!(e))
+        .context("revoke_credential_impl failed")?;
 
     output::blank();
     output::success("Revoked — this is permanent and cannot be reinstated");
@@ -302,7 +295,7 @@ fn run_suspend(
     let signer = vault::unlock(ctx, password_file)?;
     let now = vault::now_rfc3339();
 
-    app_lib::commands::credentials::suspend_credential_impl(
+    app_lib::credentials::lifecycle::suspend(
         &signer.conn,
         &signer.issuer_did,
         id,
@@ -330,7 +323,7 @@ fn run_reinstate(ctx: &ProjectContext, password_file: Option<&Path>, id: &str) -
     output::kv("ID", id);
 
     let signer = vault::unlock(ctx, password_file)?;
-    app_lib::commands::credentials::reinstate_credential_impl(&signer.conn, &signer.issuer_did, id)
+    app_lib::credentials::lifecycle::reinstate(&signer.conn, &signer.issuer_did, id)
         .map_err(|e| anyhow::anyhow!(e))
         .context("reinstate_credential_impl failed")?;
 
@@ -384,7 +377,7 @@ fn run_export(ctx: &ProjectContext, password_file: Option<&Path>, out: &Path) ->
     output::kv("Output", &out.display().to_string());
     let conn = vault::open_db(ctx, password_file)?;
 
-    let bundle_json = app_lib::commands::credentials::export_bundle_impl(&conn)
+    let bundle_json = app_lib::credentials::bundle::export(&conn)
         .map_err(|e| anyhow::anyhow!(e))
         .context("export_bundle_impl failed")?;
 
@@ -416,10 +409,10 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
     };
     output::kv("At", now);
 
-    let report = app_lib::commands::credentials::verify_offline_impl(&json_text, now)
+    let report = app_lib::credentials::bundle::verify_offline(&json_text, now)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    use app_lib::commands::credentials::OfflineSource;
+    use app_lib::credentials::bundle::OfflineSource;
     output::kv(
         "Input kind",
         match report.source {
@@ -444,7 +437,7 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
         } else {
             &result.credential_id
         };
-        let reasons = app_lib::commands::credentials::rejection_reasons(result);
+        let reasons = app_lib::credentials::bundle::rejection_reasons(result);
         output::warning(&format!("{id}: {}", reasons.join(", ")));
     }
 

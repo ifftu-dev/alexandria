@@ -4,7 +4,7 @@
 //! Both halves come from `app_lib` rather than being reimplemented here:
 //! `Keystore::open` is a plain synchronous constructor with no Tauri state
 //! involved, so the CLI can walk the same path the GUI walks
-//! (`commands::credentials::load_issuer_key`) — Stronghold → mnemonic →
+//! (`credentials::Issuer::from_keystore`) — Stronghold → mnemonic →
 //! wallet → Ed25519 signing key → `did:key`.
 //!
 //! Issuing a credential from the CLI therefore produces a signature
@@ -92,7 +92,7 @@ pub struct Signer {
 /// Unlock Stronghold and derive the issuer signing key alongside an open
 /// database.
 ///
-/// Mirrors `app_lib::commands::credentials::load_issuer_key`. The database
+/// Mirrors `app_lib::credentials::Issuer::from_keystore`. The database
 /// key comes from the same `Keystore` here rather than from
 /// `ProjectContext::derive_db_key`, so a single password unlock serves both
 /// and the two derivations cannot drift apart.

@@ -443,7 +443,7 @@ impl App {
         // Every query runs first, while `conn` is borrowed; the results are
         // owned, so the borrow has ended by the time we assign or toast.
         let Some(conn) = self.conn() else { return };
-        let creds = app_lib::commands::credentials::list_credentials_impl(conn, None, None);
+        let creds = app_lib::credentials::store::list(conn, None, None);
         let assessments =
             app_lib::commands::role_assessment::list_role_assessments_impl(conn, None);
         let orgs = app_lib::commands::role_assessment::list_organizations_impl(conn, None);
@@ -1317,14 +1317,8 @@ impl App {
             .signer
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::commands::credentials::revoke_credential_impl(
-            &signer.conn,
-            &signer.issuer_did,
-            id,
-            reason,
-            &now,
-        )
-        .map_err(|e| anyhow::anyhow!(e))?;
+        app_lib::credentials::lifecycle::revoke(&signer.conn, &signer.issuer_did, id, reason, &now)
+            .map_err(|e| anyhow::anyhow!(e))?;
         Ok(format!("Revoked {id}"))
     }
 
@@ -1334,7 +1328,7 @@ impl App {
             .signer
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        app_lib::commands::credentials::suspend_credential_impl(
+        app_lib::credentials::lifecycle::suspend(
             &signer.conn,
             &signer.issuer_did,
             id,
@@ -1352,12 +1346,8 @@ impl App {
                 .signer
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-            app_lib::commands::credentials::reinstate_credential_impl(
-                &signer.conn,
-                &signer.issuer_did,
-                id,
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
+            app_lib::credentials::lifecycle::reinstate(&signer.conn, &signer.issuer_did, id)
+                .map_err(|e| anyhow::anyhow!(e))?;
             Ok(format!("Reinstated {id}"))
         })();
         match result {
@@ -1371,8 +1361,7 @@ impl App {
 
     fn export_bundle(&mut self, path: &str) -> Result<String> {
         let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-        let bundle = app_lib::commands::credentials::export_bundle_impl(conn)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let bundle = app_lib::credentials::bundle::export(conn).map_err(|e| anyhow::anyhow!(e))?;
         std::fs::write(path, &bundle)?;
         Ok(format!("Wrote {} bytes to {path}", bundle.len()))
     }
@@ -1492,18 +1481,16 @@ impl App {
 
     fn issue_credential(&mut self, request_path: &str) -> Result<String> {
         let raw = read_json_input(request_path)?;
-        let req: app_lib::commands::credentials::IssueCredentialRequest =
-            serde_json::from_str(&raw)?;
+        let req: app_lib::credentials::IssueCredentialRequest = serde_json::from_str(&raw)?;
         let now = vault::now_rfc3339();
         let signer = self
             .signer
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
 
-        let vc = app_lib::commands::credentials::issue_credential_impl(
+        let vc = app_lib::credentials::issue(
             &signer.conn,
-            &signer.signing_key,
-            &signer.issuer_did,
+            &app_lib::credentials::Issuer::from_key(signer.signing_key.clone()),
             &req,
             &now,
         )
@@ -1527,11 +1514,11 @@ impl App {
     }
 
     fn verify_bundle(&mut self, path: &str, at: Option<&str>) -> Result<String> {
-        use app_lib::commands::credentials::OfflineSource;
+        use app_lib::credentials::bundle::OfflineSource;
 
         let json = read_json_input(path)?;
         let now = at.map(str::to_string).unwrap_or_else(vault::now_rfc3339);
-        let report = app_lib::commands::credentials::verify_offline_impl(&json, &now)
+        let report = app_lib::credentials::bundle::verify_offline(&json, &now)
             .map_err(|e| anyhow::anyhow!(e))?;
 
         let kind = match report.source {
@@ -1557,7 +1544,7 @@ impl App {
             } else {
                 result.credential_id.clone()
             };
-            let reasons = app_lib::commands::credentials::rejection_reasons(result);
+            let reasons = app_lib::credentials::bundle::rejection_reasons(result);
             lines.push((id, reasons.join(", ")));
         }
 
