@@ -7,10 +7,11 @@
 
 import { computed, readonly, ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { getProfileSessionToken } from '@/composables/profileSession'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { isMobilePlatform } from '@/composables/usePlatform'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
-import type { AppNotification, PushStatus } from '@/types'
+import type { AppNotification, PushStatus, NotificationOpen } from '@/types'
 
 const { invoke } = useLocalApi()
 
@@ -19,9 +20,18 @@ const unread = ref(0)
 const loading = ref(false)
 const pushStatus = ref<PushStatus | null>(null)
 
+let opensInitialized = false
 let initialized = false
 let generation = 0
 let unlisteners: UnlistenFn[] = []
+let retryTimer: ReturnType<typeof setInterval> | null = null
+let onResume: (() => void) | null = null
+
+function currentAction(): () => boolean {
+  const gen = generation
+  const session = getProfileSessionToken()
+  return () => gen === generation && session === getProfileSessionToken()
+}
 
 /**
  * Follow a notification's route. A row's `route` is normally an in-app path;
@@ -40,24 +50,26 @@ async function openRoute(route: string | null | undefined): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  const gen = generation
+  const current = currentAction()
   loading.value = true
   try {
     const [rows, count] = await Promise.all([
       invoke<AppNotification[]>('notifications_list', { limit: 100, unreadOnly: false }),
       invoke<number>('notifications_unread_count'),
     ])
-    if (gen !== generation) return
+    if (!current()) return
     items.value = rows
     unread.value = count
   } finally {
-    if (gen === generation) loading.value = false
+    if (current()) loading.value = false
   }
 }
 
 async function markRead(ids: string[]): Promise<void> {
+  const current = currentAction()
   if (ids.length === 0) return
   await invoke('notifications_mark_read', { ids })
+  if (!current()) return
   const now = new Date().toISOString()
   const set = new Set(ids)
   let cleared = 0
@@ -71,42 +83,58 @@ async function markRead(ids: string[]): Promise<void> {
 }
 
 async function markAllRead(): Promise<void> {
+  const current = currentAction()
   await invoke('notifications_mark_all_read')
+  if (!current()) return
   const now = new Date().toISOString()
   for (const n of items.value) if (!n.readAt) n.readAt = now
   unread.value = 0
 }
 
 async function clear(): Promise<void> {
+  const current = currentAction()
   await invoke('notifications_clear')
+  if (!current()) return
   items.value = []
   unread.value = 0
 }
 
 /** Tap a row: mark it read and follow its route. */
 async function open(n: AppNotification): Promise<void> {
+  const current = currentAction()
   if (!n.readAt) await markRead([n.id]).catch(() => {})
-  await openRoute(n.route)
+  if (current()) await openRoute(n.route)
 }
 
 async function refreshPushStatus(): Promise<PushStatus | null> {
+  const current = currentAction()
   try {
-    pushStatus.value = await invoke<PushStatus>('push_status')
+    const status = await invoke<PushStatus>('push_status')
+    if (current()) pushStatus.value = status
   } catch {
-    pushStatus.value = null
+    if (current()) pushStatus.value = null
   }
   return pushStatus.value
 }
 
 async function registerPush(): Promise<PushStatus> {
+  const current = currentAction()
   const status = await invoke<PushStatus>('push_register')
-  pushStatus.value = status
+  if (current()) pushStatus.value = status
   return status
 }
 
 async function unregisterPush(): Promise<PushStatus> {
+  const current = currentAction()
   const status = await invoke<PushStatus>('push_unregister')
-  pushStatus.value = status
+  if (current()) pushStatus.value = status
+  return status
+}
+
+async function setPushEnabled(enabled: boolean): Promise<PushStatus> {
+  const current = currentAction()
+  const status = await invoke<PushStatus>('push_set_enabled', { enabled })
+  if (current()) pushStatus.value = status
   return status
 }
 
@@ -127,29 +155,36 @@ async function init(): Promise<void> {
   if (initialized) return
   initialized = true
   const gen = ++generation
+  const session = getProfileSessionToken()
+  if (isMobilePlatform) {
+    const retry = () => {
+      if (gen === generation && session === getProfileSessionToken()) void reconcilePush()
+    }
+    retryTimer = setInterval(retry, 60_000)
+    onResume = () => { if (document.visibilityState === 'visible') retry() }
+    document.addEventListener('visibilitychange', onResume)
+  }
 
   await load().catch((e) => console.warn('[notifications] load failed:', e))
   if (gen !== generation) return
 
   try {
     const releases = await Promise.all([
-      listen<AppNotification>('notifications:new', (event) => {
-        if (gen !== generation) return
-        const row = event.payload
+      listen<{ session: string; row: AppNotification }>('notifications:new', (event) => {
+        if (gen !== generation || session !== getProfileSessionToken() || event.payload.session !== session) return
+        const row = event.payload.row
         if (!items.value.some((n) => n.id === row.id)) {
           items.value.unshift(row)
           if (!row.readAt) unread.value++
         }
       }),
-      listen<{ unread: number }>('notifications:changed', (event) => {
-        if (gen !== generation) return
+      listen<{ session: string; unread: number }>('notifications:changed', (event) => {
+        if (gen !== generation || session !== getProfileSessionToken() || event.payload.session !== session) return
         unread.value = event.payload.unread
         // Another window or the backend changed rows; resync the list.
         void load().catch(() => {})
       }),
-      listen<{ route: string }>('notifications:open', (event) => {
-        void openRoute(event.payload.route)
-      }),
+
     ])
     if (gen !== generation) {
       for (const release of releases) release()
@@ -161,12 +196,20 @@ async function init(): Promise<void> {
     return
   }
 
-  // A tap that launched the app fired before any listener existed; the
-  // backend holds that route until somebody asks. Taken once.
+}
+
+/** Process-lifetime listener: taps must reach the picker while the vault is locked. */
+async function initOpens(): Promise<void> {
+  if (opensInitialized) return
+  opensInitialized = true
   try {
-    const held = await invoke<string | null>('notifications_pending_open')
-    if (gen === generation) await openRoute(held)
+    await listen<NotificationOpen>('notifications:open', (event) => {
+      void useDeepLinks().openNotification(event.payload)
+    })
+    const held = await invoke<NotificationOpen | null>('notifications_pending_open')
+    if (held) await useDeepLinks().openNotification(held)
   } catch (e) {
+    opensInitialized = false
     console.warn('[notifications] pending open failed:', e)
   }
 }
@@ -174,6 +217,10 @@ async function init(): Promise<void> {
 /** Drop listeners and cached rows so the next profile starts clean. */
 function teardown(): void {
   generation++
+  if (retryTimer) clearInterval(retryTimer)
+  retryTimer = null
+  if (onResume) document.removeEventListener('visibilitychange', onResume)
+  onResume = null
   initialized = false
   for (const release of unlisteners) release()
   unlisteners = []
@@ -188,13 +235,14 @@ function teardown(): void {
  * and the person has not switched it off. Failures are logged, never shown:
  * the Settings panel reports them on demand.
  */
-async function registerPushIfEnabled(pushEnabled: boolean): Promise<void> {
-  if (!isMobilePlatform || !pushEnabled) return
+async function reconcilePush(): Promise<void> {
+  const current = currentAction()
+  if (!isMobilePlatform) return
   try {
     await registerPush()
   } catch (e) {
     console.warn('[notifications] push registration failed:', e)
-    await refreshPushStatus()
+    if (current()) await refreshPushStatus()
   }
 }
 
@@ -206,6 +254,7 @@ export function useNotifications() {
     pushStatus: readonly(pushStatus),
     hasUnread: computed(() => unread.value > 0),
     init,
+    initOpens,
     teardown,
     load,
     markRead,
@@ -217,6 +266,7 @@ export function useNotifications() {
     refreshPushStatus,
     registerPush,
     unregisterPush,
-    registerPushIfEnabled,
+    setPushEnabled,
+    reconcilePush,
   }
 }

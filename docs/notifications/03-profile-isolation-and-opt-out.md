@@ -1,6 +1,7 @@
 # Bind receipt, taps, and registration lifecycle to profiles
 
-Triage: ready-for-agent
+Triage: in-progress
+Assignee: notification profile isolation implementer
 Repos: alexandria, alexandria-cloud
 Part of: alexandria/docs/notifications-spec.md
 Blocked by: alexandria/docs/notifications/02-cloud-delivery-contract.md

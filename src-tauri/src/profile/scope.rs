@@ -139,12 +139,10 @@ pub struct ProfileLease {
 }
 
 impl ProfileLease {
-    #[cfg(feature = "personhood-lab")]
     pub(crate) fn session_id(&self) -> &str {
         &self.inner.session
     }
 
-    #[cfg(feature = "personhood-lab")]
     pub(crate) fn with_current<T>(
         &self,
         operation: impl FnOnce() -> Result<T, String>,

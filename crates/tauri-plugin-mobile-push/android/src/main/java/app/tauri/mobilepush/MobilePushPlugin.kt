@@ -110,16 +110,14 @@ class MobilePushPlugin(private val activity: android.app.Activity) : Plugin(acti
     private fun deliverTap(intent: Intent?) {
         val extras: Bundle = intent?.extras ?: return
         val data = JSObject()
-        // Snapshot the keys: the loop removes from the bundle, and Bundle's
-        // key set is a view of it.
-        for (key in extras.keySet().toList()) {
-            val value = extras.get(key)
-            if (value is String) {
-                data.put(key, value)
-                intent.removeExtra(key)
-            }
+        // FCM bookkeeping and unrelated deep-link extras belong to their
+        // owners. Forward only the settled seven-string notification data.
+        val keys = listOf("recipient", "eventId", "kind", "id", "route", "title", "body")
+        if (!keys.all { extras.get(it) is String }) return
+        for (key in keys) {
+            data.put(key, extras.getString(key))
+            intent.removeExtra(key)
         }
-        if (data.length() == 0) return
 
         val event = JSObject()
         event.put("data", data)

@@ -2,9 +2,10 @@
 // Settings → System → Notifications. Two switches from the settings registry
 // (`notifications.enabled`, `notifications.push_enabled`) and, on a phone,
 // the state of this device's push registration with Alexandria Cloud.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton, AppSwitch } from '@/components/ui'
+import { getProfileSessionToken } from '@/composables/profileSession'
 import { useSetting } from '@/composables/useSettings'
 import { useNotifications } from '@/composables/useNotifications'
 import { isMobilePlatform } from '@/composables/usePlatform'
@@ -16,7 +17,7 @@ const {
   pushStatus,
   refreshPushStatus,
   registerPush,
-  unregisterPush,
+  setPushEnabled,
   requestPermission,
 } = useNotifications()
 
@@ -27,17 +28,11 @@ onMounted(() => {
   void refreshPushStatus()
 })
 
-// Flipping the push switch registers or unregisters right away: a switch that
-// only takes effect at the next unlock is a switch that looks broken.
-watch(() => pushEnabled.ref.value, async (next, previous) => {
-  if (previous === null || next === null || next === previous) return
-  if (!isMobilePlatform) return
-  await (next ? doRegister() : doUnregister())
-})
-
 const statusLine = computed(() => {
   const s = pushStatus.value
   if (!s) return ''
+  if (s.pendingCleanup) return t('notifications.settings.pushCleanupPending')
+  if (s.pendingRegistration) return t('notifications.settings.pushRegistrationPending')
   if (!s.supported) return t('notifications.settings.pushUnsupported')
   if (!s.cloudOrigin) return t('notifications.settings.pushNoCloud')
   return s.registered
@@ -46,29 +41,33 @@ const statusLine = computed(() => {
 })
 
 async function doRegister() {
+  const session = getProfileSessionToken()
   busy.value = true
   try {
     await registerPush()
   } catch {
-    await refreshPushStatus()
+    if (session === getProfileSessionToken()) await refreshPushStatus()
   } finally {
-    busy.value = false
+    if (session === getProfileSessionToken()) busy.value = false
   }
 }
 
-async function doUnregister() {
+async function changePush(enabled: boolean) {
+  const session = getProfileSessionToken()
   busy.value = true
   try {
-    await unregisterPush()
+    await setPushEnabled(enabled)
   } catch {
-    await refreshPushStatus()
+    if (session === getProfileSessionToken()) await refreshPushStatus()
   } finally {
-    busy.value = false
+    if (session === getProfileSessionToken()) busy.value = false
   }
 }
 
 async function askPermission() {
-  permission.value = await requestPermission()
+  const session = getProfileSessionToken()
+  const result = await requestPermission()
+  if (session === getProfileSessionToken()) permission.value = result
 }
 </script>
 
@@ -96,10 +95,10 @@ async function askPermission() {
           <p class="text-xs text-muted-foreground mt-0.5">{{ $t('notifications.settings.pushHint') }}</p>
         </div>
         <AppSwitch
-          :model-value="pushEnabled.ref.value ?? true"
+          :model-value="pushStatus?.enabled ?? pushEnabled.ref.value ?? true"
           :label="$t('notifications.settings.push')"
           :disabled="!isMobilePlatform || busy"
-          @update:model-value="(v: boolean) => pushEnabled.set(v)"
+          @update:model-value="changePush"
         />
       </div>
 
@@ -123,7 +122,7 @@ async function askPermission() {
             variant="ghost"
             size="sm"
             :disabled="busy"
-            @click="doUnregister"
+            @click="changePush(false)"
           >
             {{ busy ? $t('notifications.settings.working') : $t('notifications.settings.unregister') }}
           </AppButton>

@@ -21,10 +21,11 @@ import DiagnosticsControls from '@/components/developer/DiagnosticsControls.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
+import { getProfileSessionToken } from '@/composables/profileSession'
 import { useNotifications } from '@/composables/useNotifications'
 
 
-import { clearSettingsCache, useSetting, useSettings } from '@/composables/useSettings'
+import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
@@ -49,10 +50,11 @@ const notifications = useNotifications()
 // unlock, never on boot, so the first thing a new person sees is not a
 // system dialog.
 async function startNotifications() {
+  const session = getProfileSessionToken()
   await notifications.init()
+  if (!session || session !== getProfileSessionToken()) return
   void notifications.requestPermission()
-  const pushEnabled = useSetting<boolean>('notifications.push_enabled').ref.value ?? true
-  void notifications.registerPushIfEnabled(pushEnabled)
+  void notifications.reconcilePush()
 }
 function onSentinelShortcut(event: KeyboardEvent) {
   if (isUnlocked.value && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.code === 'KeyS') {
@@ -118,8 +120,11 @@ const layout = computed(() => {
  * each `initXFromSettings` is idempotent.
  */
 onProfileReady(async () => {
+  const session = getProfileSessionToken()
   await hydrateProfileScopedState()
+  if (session !== getProfileSessionToken()) return
   await diagnostics.initialize().catch(e => console.warn('[App] diagnostics hydration failed:', e))
+  if (session !== getProfileSessionToken()) return
   // Unlock just blurred/destroyed the password field; clear any leaked
   // Secure Event Input now (no focus event fires since the window is
   // already key).
@@ -239,6 +244,7 @@ onMounted(async () => {
   // URL dispatches now (navigating if a profile is already unlocked, else
   // queuing until one unlocks). Warm opens are handled for the app's lifetime.
   void useDeepLinks().init()
+  void notifications.initOpens()
 
   // Show the window now that the frontend is rendered and themed
   getCurrentWebviewWindow().show()

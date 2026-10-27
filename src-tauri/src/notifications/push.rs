@@ -1,198 +1,122 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Remote push: registering this device with Alexandria Cloud, and acting on
-//! what the platform delivers.
-//!
-//! # Why Cloud, and why only mobile
-//!
-//! A phone cannot keep a peer connection open while asleep, and the only way
-//! to wake it is the platform's push service. Alexandria Cloud is the party
-//! that already knows the events worth waking a phone for — it holds the
-//! interview invitations, offers and requests — and already authenticates the
-//! learner by DID proof, so the token goes there. The desktop app is a
-//! long-running node and gets the same notifications from its own
-//! background pass, so it registers nothing.
-//!
-//! # What Cloud learns
-//!
-//! A DID it already serves, a platform, a token the platform issued, and a
-//! random device id. The token is what Firebase Cloud Messaging can be asked
-//! to wake — Google delivers to Android itself and relays to Apple for iOS —
-//! and it is not tied to anything else about the person. A push payload
-//! carries a kind, an id and a route — never a name — so Google and Apple
-//! learn only that an Alexandria event of some kind reached this device.
-//!
-//! # Several profiles on one phone
-//!
-//! Each profile registers the same platform token under its own DID and its
-//! own device id, so Cloud reaches whichever profile the event is for; the
-//! payload names no profile. A tap opens the app, the app asks for a profile
-//! if none is unlocked, and the route is replayed once one is.
-
+//! Recipient-bound mobile push. The encrypted profile DB owns registration
+//! intent; the locked-access sidecar contains only routing associations.
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Mutex;
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_notification::{NotificationExt, PermissionState};
 
-use super::{cloud_copy, kind, NewNotification};
+use super::{cloud_copy, recipients, NewNotification, Recorded};
 use crate::commands::holder_pull::{cloud_origin, is_loopback, nonce, proof};
 use crate::db::executor::DatabaseWorkload;
+use crate::profile::scope::ProfileLease;
 use crate::settings::{registry::keys, SettingsStore};
 use crate::AppState;
 
-/// Where this device stands with push, as the settings page shows it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+// Serialize intent, PUT and DELETE, including SDK callbacks. The profile lease
+// cancels waiters on lock; this gate owns no profile resources or session state.
+static OPERATIONS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PushStatus {
-    /// This platform can receive remote pushes at all.
     pub supported: bool,
-    /// A registration with the configured Cloud is on record for this profile.
     pub registered: bool,
     pub platform: Option<String>,
     pub cloud_origin: Option<String>,
-    /// Why the last attempt did not register, if it did not.
     pub last_error: Option<String>,
+    pub enabled: bool,
+    pub pending_cleanup: bool,
+    pub pending_registration: bool,
 }
 
-/// The last failure, kept so the settings page can say why rather than
-/// just "not registered".
-static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
-
-fn set_last_error(error: Option<String>) {
-    if let Ok(mut slot) = LAST_ERROR.lock() {
-        *slot = error;
-    }
-}
-
-fn last_error() -> Option<String> {
-    LAST_ERROR.lock().ok().and_then(|slot| slot.clone())
-}
-
-/// The push service this build's token belongs to: Firebase Cloud Messaging
-/// on both phones. On iOS the plugin hands Apple's device token to the
-/// Firebase SDK and reports the FCM token it gets back, so Cloud addresses
-/// an iPhone and an Android phone the same way. Desktop has none.
 pub fn platform() -> Option<&'static str> {
-    if cfg!(any(target_os = "ios", target_os = "android")) {
-        Some("fcm")
-    } else {
-        None
-    }
+    cfg!(any(target_os = "ios", target_os = "android")).then_some("fcm")
 }
 
-/// This profile's registration with one Cloud origin.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Registration {
-    pub cloud_origin: String,
-    pub device_id: String,
-    pub platform: String,
-    pub token: String,
-    pub registered_at: String,
+#[derive(Clone)]
+struct Registration {
+    origin: String,
+    device_id: String,
+    recipient: Option<String>,
+    pending: String,
+    revision: i64,
+    error: Option<String>,
 }
 
-pub fn load_registration(conn: &Connection, origin: &str) -> Result<Option<Registration>, String> {
-    conn.query_row(
-        "SELECT cloud_origin, device_id, platform, token, registered_at \
-         FROM push_registrations WHERE cloud_origin = ?1",
-        params![origin],
-        |row| {
+fn registrations(conn: &Connection) -> Result<Vec<Registration>, String> {
+    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error FROM push_registrations ORDER BY cloud_origin").map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
             Ok(Registration {
-                cloud_origin: row.get(0)?,
+                origin: row.get(0)?,
                 device_id: row.get(1)?,
-                platform: row.get(2)?,
-                token: row.get(3)?,
-                registered_at: row.get(4)?,
+                recipient: row.get(2)?,
+                pending: row.get(3)?,
+                revision: row.get(4)?,
+                error: row.get(5)?,
             })
-        },
-    )
-    .optional()
-    .map_err(|e| e.to_string())
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
-pub fn save_registration(conn: &Connection, registration: &Registration) -> Result<(), String> {
-    conn.execute(
-        "INSERT OR REPLACE INTO push_registrations \
-         (cloud_origin, device_id, platform, token, registered_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            registration.cloud_origin,
-            registration.device_id,
-            registration.platform,
-            registration.token,
-            registration.registered_at,
-        ],
-    )
-    .map(drop)
-    .map_err(|e| e.to_string())
-}
-
-pub fn delete_registration(conn: &Connection, origin: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM push_registrations WHERE cloud_origin = ?1",
-        params![origin],
-    )
-    .map(drop)
-    .map_err(|e| e.to_string())
-}
-
-/// What a registration sends. Field names are Cloud's.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RegisterBody<'a> {
-    device_id: &'a str,
-    platform: &'a str,
-    token: &'a str,
-    app_version: &'a str,
-    locale: &'a str,
-}
-
-/// Sign and send one request to Cloud. Only https, or http on loopback: the
-/// proof header is a bearer credential for five minutes.
-async fn signed_send(
-    origin: &str,
-    signing_key: &SigningKey,
-    method: reqwest::Method,
-    path: &str,
-    body: Option<Value>,
-) -> Result<(), String> {
-    if !origin.starts_with("https://") && !is_loopback(origin) {
-        return Err("Alexandria Cloud must be https".into());
-    }
-    let timestamp = chrono::Utc::now().timestamp();
-    let n = nonce();
-    let signature = proof(signing_key, method.as_str(), path, timestamp, &n);
-    let client = reqwest::Client::new();
-    let mut request = client
-        .request(method, format!("{}{path}", origin.trim_end_matches('/')))
-        .header("x-alexandria-timestamp", timestamp.to_string())
-        .header("x-alexandria-nonce", &n)
-        .header("x-alexandria-proof", signature)
-        .timeout(std::time::Duration::from_secs(15));
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        let code = response.status().as_u16();
-        let text = response.text().await.unwrap_or_default();
-        return Err(format!("{code}: {text}"));
-    }
-    Ok(())
-}
-
-/// Everything about the profile that registering needs, read in one job.
-struct ProfileFacts {
+struct Facts {
     origin: Option<String>,
-    existing: Option<Registration>,
+    rows: Vec<Registration>,
+    enabled: bool,
     locale: String,
-    push_enabled: bool,
+    revision: i64,
+    native_error: Option<String>,
 }
 
-/// The learner's signing key and DID, from the unlocked vault. The same
-/// derivation the commands use; this runs outside a command, so it reads the
-/// keystore directly.
+async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, String> {
+    state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.facts", |db| {
+        Ok(Facts { origin: cloud_origin(db.conn()), rows: registrations(db.conn())?,
+            enabled: SettingsStore::get(db.conn(), keys::NOTIFICATIONS_PUSH_ENABLED),
+            locale: SettingsStore::get(db.conn(), keys::USER_LANGUAGE),
+            revision: db.conn().query_row("SELECT revision FROM push_operation_state WHERE singleton=1", [], |r| r.get(0)).map_err(|e| e.to_string())?,
+            native_error: db.conn().query_row("SELECT last_error FROM push_operation_state WHERE singleton=1 AND error_origin IS ?1", params![cloud_origin(db.conn())], |r| r.get(0)).optional().map_err(|e| e.to_string())?.flatten(),
+        })
+    }).await
+}
+
+fn status_from(f: &Facts) -> PushStatus {
+    PushStatus {
+        supported: platform().is_some(),
+        platform: platform().map(str::to_string),
+        cloud_origin: f.origin.clone(),
+        enabled: f.enabled,
+        registered: f.enabled
+            && f.rows.iter().any(|r| {
+                Some(&r.origin) == f.origin.as_ref() && r.pending == "none" && r.recipient.is_some()
+            }),
+        pending_cleanup: f
+            .rows
+            .iter()
+            .any(|r| r.pending == "delete" || !f.enabled || Some(&r.origin) != f.origin.as_ref()),
+        pending_registration: f
+            .rows
+            .iter()
+            .any(|r| r.pending == "put" && f.enabled && Some(&r.origin) == f.origin.as_ref()),
+        last_error: f
+            .rows
+            .iter()
+            .find_map(|r| r.error.clone())
+            .or_else(|| f.native_error.clone()),
+    }
+}
+
+pub async fn status(state: &AppState, lease: ProfileLease) -> Result<PushStatus, String> {
+    let f = facts(state, &lease).await?;
+    if !lease.is_current() {
+        return Err("profile session changed".into());
+    }
+    Ok(status_from(&f))
+}
+
 async fn issuer_key(state: &AppState) -> Result<(SigningKey, crate::crypto::did::Did), String> {
     let guard = state.keystore.lock().await;
     let keystore = guard.as_ref().ok_or("vault is locked — unlock first")?;
@@ -205,405 +129,446 @@ async fn issuer_key(state: &AppState) -> Result<(SigningKey, crate::crypto::did:
     Ok((signing_key, did))
 }
 
-fn lease(
-    state: &tauri::State<'_, AppState>,
-) -> Result<crate::profile::scope::ProfileLease, String> {
-    let session = state
-        .profile_operations
-        .session()
-        .ok_or("no profile is unlocked")?;
-    state.profile_operations.admit(&session)
+async fn signed_send(
+    origin: &str,
+    key: &SigningKey,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<Value>,
+) -> Result<reqwest::Response, String> {
+    if !origin.starts_with("https://") && !is_loopback(origin) {
+        return Err("Alexandria Cloud must be https".into());
+    }
+    let timestamp = chrono::Utc::now().timestamp();
+    let n = nonce();
+    let signature = proof(key, method.as_str(), path, timestamp, &n);
+    // A redirect must never forward holder proofs to another origin.
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut request = client
+        .request(method, format!("{}{path}", origin.trim_end_matches('/')))
+        .header("x-alexandria-timestamp", timestamp.to_string())
+        .header("x-alexandria-nonce", n)
+        .header("x-alexandria-proof", signature)
+        .timeout(std::time::Duration::from_secs(15));
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Cloud push request failed".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Cloud push request returned {}",
+            response.status().as_u16()
+        ));
+    }
+    Ok(response)
 }
 
-async fn facts<R: Runtime>(app: &AppHandle<R>) -> Result<ProfileFacts, String> {
-    let state = app.state::<AppState>();
-    let lease = lease(&state)?;
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            lease,
-            "notifications.push.facts",
-            |db| {
-                let conn = db.conn();
-                let origin = cloud_origin(conn);
-                let existing = match &origin {
-                    Some(origin) => load_registration(conn, origin)?,
-                    None => None,
-                };
-                Ok(ProfileFacts {
-                    origin,
-                    existing,
-                    locale: SettingsStore::get(conn, keys::USER_LANGUAGE),
-                    push_enabled: SettingsStore::get(conn, keys::NOTIFICATIONS_PUSH_ENABLED),
-                })
-            },
+pub(crate) fn canonical_uuid(value: &str) -> bool {
+    uuid::Uuid::parse_str(value).is_ok_and(|uuid| uuid.to_string() == value)
+}
+
+/// Reconcile a captured profile session using a token obtained at the native
+/// boundary. A missing token still permits cleanup. Never infer opt-in from it.
+pub(crate) async fn reconcile(
+    state: &AppState,
+    lease: ProfileLease,
+    token: Option<String>,
+    enabled: Option<bool>,
+) -> Result<PushStatus, String> {
+    let work = lease.clone();
+    lease
+        .run_until_closed(async {
+            let _serial = OPERATIONS.lock().await;
+            reconcile_inner(state, &work, token, enabled).await
+        })
+        .await
+        .ok_or("profile session changed")?
+}
+
+async fn reconcile_inner(
+    state: &AppState,
+    lease: &ProfileLease,
+    token: Option<String>,
+    enabled: Option<bool>,
+) -> Result<PushStatus, String> {
+    let profile = state
+        .active_id()
+        .ok_or("no profile is unlocked")?
+        .to_string();
+    let before = facts(state, lease).await?;
+    let desired = enabled.unwrap_or(before.enabled);
+    // Retire routing first. A crash before the DB transaction can lose a
+    // usable association, never leave a retired one routable while locked.
+    for row in &before.rows {
+        if !desired || Some(&row.origin) != before.origin.as_ref() || row.pending == "delete" {
+            recipients::replace(state, &profile, &row.origin, None)?;
+        }
+    }
+    let current_origin = before.origin.clone();
+    state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.intent", move |db| {
+        let tx = db.conn().unchecked_transaction().map_err(|e| e.to_string())?;
+        if let Some(enabled) = enabled {
+            SettingsStore::set(&tx, keys::NOTIFICATIONS_PUSH_ENABLED, enabled).map_err(|e| e.to_string())?;
+        }
+        tx.execute("UPDATE push_registrations SET pending='delete',recipient=NULL,revision=revision+1 WHERE pending!='delete' AND (?1=0 OR cloud_origin IS NOT ?2)", params![desired, current_origin]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE push_operation_state SET revision=revision+1, last_error=CASE WHEN ?1 THEN last_error ELSE NULL END, error_origin=CASE WHEN ?1 THEN error_origin ELSE NULL END WHERE singleton=1", params![desired]).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }).await?;
+    let staged = facts(state, lease).await?;
+    for row in staged.rows.iter().filter(|r| r.pending == "delete") {
+        let (key, did) = issuer_key(state).await?;
+        let result = signed_send(
+            &row.origin,
+            &key,
+            reqwest::Method::DELETE,
+            &format!("/api/push/devices/for/{}/{}", did.as_str(), row.device_id),
+            None,
         )
         .await
-}
-
-fn status_from(facts: Option<&ProfileFacts>) -> PushStatus {
-    PushStatus {
-        supported: platform().is_some(),
-        registered: facts.is_some_and(|f| f.existing.is_some()),
-        platform: platform().map(str::to_string),
-        cloud_origin: facts.and_then(|f| f.origin.clone()),
-        last_error: last_error(),
+        .and_then(|response| {
+            if response.status() == reqwest::StatusCode::NO_CONTENT {
+                Ok(())
+            } else {
+                Err("Cloud did not acknowledge removal".into())
+            }
+        });
+        let origin = row.origin.clone();
+        let revision = row.revision;
+        state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.cleanup", move |db| {
+            match result {
+                Ok(()) => db.conn().execute("DELETE FROM push_registrations WHERE cloud_origin=?1 AND revision=?2 AND pending='delete'", params![origin, revision]),
+                Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1 WHERE cloud_origin=?2 AND revision=?3", params![error, origin, revision]),
+            }.map(drop).map_err(|e| e.to_string())
+        }).await?;
     }
-}
-
-/// Where this device stands, without touching the network.
-pub async fn status<R: Runtime>(app: &AppHandle<R>) -> Result<PushStatus, String> {
-    let facts = facts(app).await?;
-    Ok(status_from(Some(&facts)))
-}
-
-/// Ask the platform for a token and tell Cloud about it.
-///
-/// Idempotent: a second call re-sends the same device id, which Cloud
-/// treats as an update. That is also what a rotated token does.
-pub async fn register<R: Runtime>(app: &AppHandle<R>) -> Result<PushStatus, String> {
-    let facts = facts(app).await?;
-    if platform().is_none() {
-        return Ok(status_from(Some(&facts)));
+    let f = facts(state, lease).await?;
+    if !f.enabled
+        || f.rows
+            .iter()
+            .any(|r| Some(&r.origin) == f.origin.as_ref() && r.pending == "delete")
+    {
+        return Ok(status_from(&f));
     }
-    match register_inner(app, &facts).await {
-        Ok(()) => {
-            set_last_error(None);
-            status(app).await
-        }
-        Err(error) => {
-            log::warn!("push: registration failed: {error}");
-            set_last_error(Some(error));
-            status(app).await
-        }
-    }
-}
-
-async fn register_inner<R: Runtime>(
-    app: &AppHandle<R>,
-    facts: &ProfileFacts,
-) -> Result<(), String> {
-    let platform = platform().ok_or("push is not available on this platform")?;
-    let origin = facts
-        .origin
-        .clone()
-        .ok_or("no Alexandria Cloud is configured for this network")?;
-
-    match app.notification().request_permission() {
-        Ok(PermissionState::Granted) => {}
-        Ok(_) => return Err("notification permission was not granted".into()),
-        Err(error) => return Err(format!("notification permission: {error}")),
-    }
-    let token = tauri_plugin_mobile_push::get_token(app)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let state = app.state::<AppState>();
-    let (signing_key, did) = issuer_key(&state).await?;
-    let device_id = facts
-        .existing
-        .as_ref()
+    let (Some(origin), Some(token)) = (f.origin, token) else {
+        return status(state, lease.clone()).await;
+    };
+    let existing = f.rows.iter().find(|r| r.origin == origin);
+    let device_id = existing
         .map(|r| r.device_id.clone())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let app_version = app.package_info().version.to_string();
-    let path = format!("/api/push/devices/for/{}", did.as_str());
-    let body = serde_json::to_value(RegisterBody {
-        device_id: &device_id,
-        platform,
-        token: &token,
-        app_version: &app_version,
-        locale: &facts.locale,
-    })
-    .map_err(|e| e.to_string())?;
-    signed_send(
-        &origin,
-        &signing_key,
-        reqwest::Method::PUT,
-        &path,
-        Some(body),
-    )
-    .await?;
-
-    let registration = Registration {
-        cloud_origin: origin,
-        device_id,
-        platform: platform.to_string(),
-        token,
-        registered_at: crate::commands::credentials::now_rfc3339(),
-    };
-    let lease = lease(&state)?;
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            lease,
-            "notifications.push.save",
-            move |db| save_registration(db.conn(), &registration),
-        )
-        .await
-}
-
-/// Tell Cloud to forget this device and forget the registration locally.
-/// The local row goes even when Cloud cannot be reached: the learner asked
-/// for this device to stop, and a registration Cloud still holds for a token
-/// the app no longer refreshes expires on its own.
-pub async fn unregister<R: Runtime>(app: &AppHandle<R>) -> Result<PushStatus, String> {
-    let facts = facts(app).await?;
-    let (Some(origin), Some(existing)) = (facts.origin.clone(), facts.existing.clone()) else {
-        return Ok(status_from(Some(&facts)));
-    };
-    let state = app.state::<AppState>();
-    let (signing_key, did) = issuer_key(&state).await?;
-    let path = format!(
-        "/api/push/devices/for/{}/{}",
-        did.as_str(),
-        existing.device_id
-    );
-    if let Err(error) =
-        signed_send(&origin, &signing_key, reqwest::Method::DELETE, &path, None).await
-    {
-        log::warn!("push: Cloud did not acknowledge unregistering: {error}");
-        set_last_error(Some(error));
-    } else {
-        set_last_error(None);
-    }
-    let lease = lease(&state)?;
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            lease,
-            "notifications.push.delete",
-            move |db| delete_registration(db.conn(), &origin),
+    let revision = existing.map_or(1, |r| r.revision + 1);
+    recipients::replace(state, &profile, &origin, None)?;
+    let staged_origin = origin.clone();
+    let staged_device = device_id.clone();
+    let staged_token = token.clone();
+    let network = recipients::network()?;
+    state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.stage", move |db| {
+        db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id) VALUES (?1,?2,'fcm',?3,'','put',?4,?5) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, network_id=excluded.network_id", params![staged_origin, staged_device, staged_token, revision, network]).map(drop).map_err(|e| e.to_string())
+    }).await?;
+    let (key, did) = issuer_key(state).await?;
+    let result = async {
+        let response = signed_send(
+            &origin,
+            &key,
+            reqwest::Method::PUT,
+            &format!("/api/push/devices/for/{}", did.as_str()),
+            Some(serde_json::json!({
+                "deviceId": device_id, "platform": "fcm", "token": token,
+                "appVersion": env!("CARGO_PKG_VERSION"), "locale": f.locale
+            })),
         )
         .await?;
-    status(app).await
+        if response.status() != reqwest::StatusCode::OK {
+            return Err("Cloud did not return a recipient binding".to_string());
+        }
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|_| "Cloud returned an invalid recipient binding".to_string())?;
+        let recipient = body
+            .get("recipient")
+            .and_then(Value::as_str)
+            .filter(|v| canonical_uuid(v))
+            .ok_or("Cloud returned an invalid recipient binding")?
+            .to_string();
+        Ok::<_, String>(recipient)
+    }
+    .await;
+    let saved_origin = origin.clone();
+    let saved_result = result.clone();
+    let committed = state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.commit", move |db| {
+        if !SettingsStore::get(db.conn(), keys::NOTIFICATIONS_PUSH_ENABLED)
+            || cloud_origin(db.conn()).as_ref() != Some(&saved_origin) {
+            db.conn().execute("UPDATE push_registrations SET recipient=NULL,pending='delete',revision=revision+1 WHERE cloud_origin=?1 AND revision=?2", params![saved_origin, revision]).map_err(|e| e.to_string())?;
+            return Ok(false);
+        }
+        match saved_result {
+            Ok(recipient) => {
+                let count = db.conn().execute("UPDATE push_registrations SET recipient=?1,pending='none',registered_at=datetime('now'),last_error=NULL WHERE cloud_origin=?2 AND revision=?3", params![recipient, saved_origin, revision]).map_err(|e| e.to_string())?;
+                db.conn().execute("UPDATE push_operation_state SET last_error=NULL,error_origin=NULL WHERE singleton=1", []).map_err(|e| e.to_string())?;
+                Ok(count == 1)
+            },
+            Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1 WHERE cloud_origin=?2 AND revision=?3", params![error, saved_origin, revision]).map(|_| false),
+        }.map_err(|e| e.to_string())
+    }).await?;
+    if committed && lease.is_current() {
+        if let Ok(recipient) = result {
+            recipients::replace(state, &profile, &origin, Some(&recipient))?;
+        }
+    }
+    status(state, lease.clone()).await
 }
 
-/// A push the platform handed over while the app was running, as the
-/// vendored plugin reports it on both platforms.
-#[derive(Debug, Clone, Deserialize)]
-struct Received {
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    body: Option<String>,
-    #[serde(default)]
-    data: PushData,
+fn admit(state: &AppState) -> Result<ProfileLease, String> {
+    state.profile_operations.admit(
+        &state
+            .profile_operations
+            .session()
+            .ok_or("no profile is unlocked")?,
+    )
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+/// Native SDK work owns only device-global resources. Release admission while
+/// awaiting it (and join it normally), then re-admit the exact original session.
+/// An intervening registration/preference operation makes its token obsolete.
+pub(crate) async fn register_with_token(
+    state: &AppState,
+    lease: ProfileLease,
+    token: impl std::future::Future<Output = Result<String, String>>,
+) -> Result<PushStatus, String> {
+    let session = lease.session_id().to_string();
+    let cleaned = reconcile(state, lease.clone(), None, None).await?;
+    if !cleaned.enabled || cleaned.cloud_origin.is_none() {
+        return Ok(cleaned);
+    }
+    let before = facts(state, &lease).await?;
+    drop(lease);
+    let token = token.await;
+    let lease = state.profile_operations.admit(&session)?;
+    let work = lease.clone();
+    lease.run_until_closed(async {
+        let _serial = OPERATIONS.lock().await;
+        let now = facts(state, &work).await?;
+        if now.revision != before.revision || now.origin != before.origin || !now.enabled {
+            return Ok(status_from(&now));
+        }
+        let error = token.as_ref().err().cloned();
+        let origin = now.origin.clone();
+        state.db_executor.execute(DatabaseWorkload::Learner, work.clone(), "notifications.push.native_status", move |db| {
+            db.conn().execute("UPDATE push_operation_state SET last_error=?1,error_origin=?2 WHERE singleton=1", params![error, origin]).map(drop).map_err(|e| e.to_string())
+        }).await?;
+        match token {
+            Ok(token) => reconcile_inner(state, &work, Some(token), None).await,
+            Err(_) => status(state, work.clone()).await,
+        }
+    }).await.ok_or("profile session changed")?
+}
+
+pub async fn register<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: ProfileLease,
+) -> Result<PushStatus, String> {
+    let state = app.state::<AppState>();
+    if platform().is_none() {
+        return reconcile(&state, lease, None, None).await;
+    }
+    register_with_token(&state, lease, async {
+        let granted = tauri_plugin_mobile_push::request_permission(app)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !granted {
+            return Err("Notification permission was not granted".into());
+        }
+        tauri_plugin_mobile_push::get_token(app)
+            .await
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+pub async fn unregister<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: ProfileLease,
+) -> Result<PushStatus, String> {
+    reconcile(&app.state::<AppState>(), lease, None, Some(false)).await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PushData {
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    route: Option<String>,
+    recipient: String,
+    event_id: String,
+    kind: String,
+    id: String,
+    route: String,
+    title: String,
+    body: String,
 }
 
-/// The notification a received push becomes, or `None` for a payload that
-/// names no kind the app knows. Copy comes from the push when it carried
-/// some, else from the app's own table for that kind.
-fn notification_from_push(received: &Received) -> Option<NewNotification> {
-    let kind_name = received.data.kind.as_deref()?;
-    if !kind::ALL.contains(&kind_name) {
+fn parse(payload: Value) -> Option<PushData> {
+    let data: PushData = serde_json::from_value(payload.get("data")?.clone()).ok()?;
+    if !canonical_uuid(&data.recipient)
+        || !canonical_uuid(&data.id)
+        || data.title.len() + data.body.len() > 4096
+    {
         return None;
     }
-    let id = received.data.id.clone().unwrap_or_default();
-    let copy = cloud_copy(kind_name, &id);
-    let title = received
-        .title
-        .clone()
-        .or_else(|| copy.as_ref().map(|c| c.0.to_string()))?;
-    let body = received
-        .body
-        .clone()
-        .or_else(|| copy.as_ref().map(|c| c.1.to_string()))
-        .unwrap_or_default();
-    let route = received.data.route.clone().or_else(|| copy.map(|c| c.2));
-    let mut notification = NewNotification::new(kind_name, title, body)
-        .payload(serde_json::json!({ "id": id }))
-        .from_push();
-    if let Some(route) = route {
-        notification = notification.route(route);
+    let (_, _, route) = cloud_copy(&data.kind, &data.id)?;
+    if route != data.route {
+        return None;
     }
-    if !id.is_empty() {
-        notification = notification.dedupe(format!("{kind_name}:{id}"));
+    let prefix = format!("{}:{}", data.kind, data.id);
+    if data.kind == super::kind::INTERVIEW_ROOM_OPENED {
+        if !data
+            .event_id
+            .strip_prefix(&format!("{prefix}:"))
+            .is_some_and(canonical_uuid)
+        {
+            return None;
+        }
+    } else if data.event_id != prefix {
+        return None;
     }
-    Some(notification)
+    Some(data)
 }
 
-/// Record a received push in the unlocked profile and announce it.
-async fn deliver_received<R: Runtime>(app: AppHandle<R>, payload: Value) {
-    let received: Received = match serde_json::from_value(payload) {
-        Ok(received) => received,
-        Err(error) => {
-            log::debug!("push: unreadable payload: {error}");
-            return;
-        }
+fn notification(data: &PushData, origin: &str) -> Option<NewNotification> {
+    let (title, body, mut route) = cloud_copy(&data.kind, &data.id)?;
+    if data.kind == super::kind::INTERVIEW_ROOM_OPENED {
+        route = format!(
+            "{route}?cloud={}",
+            url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
+        );
+    }
+    Some(
+        NewNotification::new(&data.kind, title, body)
+            .route(route)
+            .dedupe(&data.event_id)
+            .payload(serde_json::json!({"id": data.id}))
+            .from_push(),
+    )
+}
+
+pub(crate) async fn receive(
+    state: &AppState,
+    lease: ProfileLease,
+    payload: Value,
+) -> Result<Option<Recorded>, String> {
+    let Some(data) = parse(payload) else {
+        return Ok(None);
     };
-    let Some(notification) = notification_from_push(&received) else {
-        log::debug!("push: payload names no known kind; ignored");
-        return;
+    let Some(binding) = recipients::resolve(state, &data.recipient) else {
+        return Ok(None);
     };
-    let state = app.state::<AppState>();
-    let lease = match lease(&state) {
-        Ok(lease) => lease,
-        Err(_) => {
-            // No profile is unlocked, so there is nowhere to record it. The
-            // platform's own banner (when it showed one) is what the learner
-            // has; the next background pass reports the event once a profile
-            // is open.
-            return;
-        }
+    if state.active_id().as_ref().map(|p| p.as_str()) != Some(binding.profile_id.as_str()) {
+        return Ok(None);
+    }
+    let Some(new) = notification(&data, &binding.origin) else {
+        return Ok(None);
     };
-    let recorded = state
+    state
         .db_executor
         .execute(
             DatabaseWorkload::Background,
             lease,
             "notifications.push.received",
-            move |db| super::record_if_enabled(db.conn(), &notification),
+            move |db| {
+                if !registrations(db.conn())?.iter().any(|r| {
+                    r.origin == binding.origin
+                        && r.pending == "none"
+                        && r.recipient.as_deref() == Some(&data.recipient)
+                }) {
+                    return Ok(None);
+                }
+                super::record_if_enabled(db.conn(), &new)
+            },
         )
-        .await;
-    match recorded {
-        Ok(Some(recorded)) => super::announce(&app, &recorded),
-        Ok(None) => {}
-        Err(error) => log::debug!("push: could not record: {error}"),
-    }
+        .await
 }
 
-/// Subscribe to what the platform reports. Called once from the app's setup
-/// hook; the plugin holds the subscriptions for the life of the process.
+pub(crate) fn tapped(
+    state: &AppState,
+    payload: Value,
+) -> Result<Option<super::opens::NotificationOpen>, String> {
+    if payload.get("local").and_then(Value::as_bool) == Some(true) {
+        return match payload
+            .get("data")
+            .and_then(|d| d.get("__EXTRA__"))
+            .and_then(Value::as_object)
+        {
+            Some(extra) => super::opens::local_tap(state, extra),
+            None => Ok(None),
+        };
+    }
+    let Some(data) = parse(payload) else {
+        return Ok(None);
+    };
+    let Some(binding) = recipients::resolve(state, &data.recipient) else {
+        return Ok(None);
+    };
+    let Some(new) = notification(&data, &binding.origin) else {
+        return Ok(None);
+    };
+    super::opens::hold(
+        state,
+        super::opens::NotificationOpen {
+            id: format!("{}:{}", data.recipient, data.event_id),
+            profile_id: binding.profile_id,
+            recipient: Some(data.recipient),
+            route: new.route.unwrap_or_default(),
+            network_id: binding.network_id,
+        },
+    )
+}
+
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
     if platform().is_none() {
         return;
     }
-
-    let on_received = app.clone();
+    let received_app = app.clone();
     tauri_plugin_mobile_push::subscribe("notification-received", move |payload| {
-        let app = on_received.clone();
+        let app = received_app.clone();
+        let Ok(lease) = admit(&app.state::<AppState>()) else {
+            return;
+        };
         let payload = payload.clone();
-        tauri::async_runtime::spawn(deliver_received(app, payload));
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            if let Ok(Some(recorded)) = receive(&state, lease.clone(), payload).await {
+                if lease.is_current() {
+                    super::announce(&app, &recorded);
+                }
+            }
+        });
     });
-
-    let on_tapped = app.clone();
+    let tapped_app = app.clone();
     tauri_plugin_mobile_push::subscribe("notification-tapped", move |payload| {
-        // A remote push carries the route at the top of `data`. A local
-        // banner that iOS handed to this plugin's delegate carries it where
-        // the notification plugin put it, under `__EXTRA__`.
-        let route = payload
-            .get("data")
-            .and_then(|data| {
-                data.get("route")
-                    .or_else(|| data.get("__EXTRA__")?.get("route"))
-            })
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| {
-                // A payload with a kind and id but no route still names a
-                // place to go.
-                let data = payload.get("data")?;
-                let kind_name = data.get("kind")?.as_str()?;
-                let id = data.get("id").and_then(Value::as_str).unwrap_or_default();
-                cloud_copy(kind_name, id).map(|c| c.2)
-            });
-        if let Some(route) = route {
-            super::emit_open(&on_tapped, &route);
+        if let Ok(Some(intent)) = tapped(&tapped_app.state::<AppState>(), payload.clone()) {
+            super::emit_open(&tapped_app, &intent);
         }
     });
-
-    // The platform rotated the token. Re-register only a profile that has a
-    // registration on record: one that never opted in stays out.
-    let on_token = app.clone();
-    tauri_plugin_mobile_push::subscribe("token-received", move |_payload| {
-        let app = on_token.clone();
+    let token_app = app.clone();
+    tauri_plugin_mobile_push::subscribe("token-received", move |payload| {
+        let app = token_app.clone();
+        let Ok(lease) = admit(&app.state::<AppState>()) else {
+            return;
+        };
+        let token = payload
+            .get("token")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         tauri::async_runtime::spawn(async move {
-            match facts(&app).await {
-                Ok(facts) if facts.existing.is_some() && facts.push_enabled => {
-                    if let Err(error) = register(&app).await {
-                        log::debug!("push: re-registration after token rotation: {error}");
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => log::debug!("push: token rotated with no profile open: {error}"),
-            }
+            let _ = reconcile(&app.state::<AppState>(), lease, token, None).await;
         });
     });
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn registration_round_trips() {
-        let db = crate::db::Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let conn = db.conn();
-        assert_eq!(load_registration(conn, "https://cloud").unwrap(), None);
-        let registration = Registration {
-            cloud_origin: "https://cloud".into(),
-            device_id: "dev-1".into(),
-            platform: "fcm".into(),
-            token: "abcd".into(),
-            registered_at: "t".into(),
-        };
-        save_registration(conn, &registration).unwrap();
-        assert_eq!(
-            load_registration(conn, "https://cloud").unwrap(),
-            Some(registration.clone())
-        );
-        // Re-registering keeps one row per origin.
-        let rotated = Registration {
-            token: "efgh".into(),
-            ..registration
-        };
-        save_registration(conn, &rotated).unwrap();
-        assert_eq!(
-            load_registration(conn, "https://cloud").unwrap(),
-            Some(rotated)
-        );
-        delete_registration(conn, "https://cloud").unwrap();
-        assert_eq!(load_registration(conn, "https://cloud").unwrap(), None);
-    }
-
-    #[test]
-    fn a_push_becomes_a_notification_with_cloud_copy_as_fallback() {
-        let received: Received = serde_json::from_value(serde_json::json!({
-            "data": { "kind": "offer_sent", "id": "o-1" }
-        }))
-        .unwrap();
-        let n = notification_from_push(&received).unwrap();
-        assert_eq!(n.title, "New offer");
-        assert_eq!(n.route.as_deref(), Some("/settings/organisations"));
-        assert_eq!(n.dedupe_key.as_deref(), Some("offer_sent:o-1"));
-        assert_eq!(n.source, crate::notifications::Source::Push);
-
-        let with_copy: Received = serde_json::from_value(serde_json::json!({
-            "title": "T", "body": "B",
-            "data": { "kind": "interview_room_opened", "id": "i-1", "route": "/interview-room/i-1" }
-        }))
-        .unwrap();
-        let n = notification_from_push(&with_copy).unwrap();
-        assert_eq!((n.title.as_str(), n.body.as_str()), ("T", "B"));
-        assert_eq!(n.route.as_deref(), Some("/interview-room/i-1"));
-
-        let unknown: Received = serde_json::from_value(serde_json::json!({
-            "data": { "kind": "something_else", "id": "x" }
-        }))
-        .unwrap();
-        assert!(notification_from_push(&unknown).is_none());
-    }
-
-    #[test]
-    fn the_platform_is_fcm_on_phones_and_nothing_on_desktop() {
-        if cfg!(any(target_os = "ios", target_os = "android")) {
-            assert_eq!(platform(), Some("fcm"));
-        } else {
-            assert_eq!(platform(), None);
-        }
-    }
-}
+#[path = "push_tests.rs"]
+mod boundary_tests;

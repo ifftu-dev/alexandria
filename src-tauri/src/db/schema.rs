@@ -112,6 +112,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // decided not to repeat, and this device's push registration with the
     // network's Cloud. See `crate::notifications`.
     (28, "notifications", MIGRATION_028_NOTIFICATIONS),
+    (29, "notification_recipient_lifecycle", include_str!("notification_recipient_lifecycle.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

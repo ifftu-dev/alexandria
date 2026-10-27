@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  currentRoute: { value: { fullPath: '/' } },
   push: vi.fn<(to: unknown) => Promise<void>>(),
-  resolve: vi.fn<(path: string) => { matched: unknown[] }>(),
+  resolve: vi.fn<(path: string) => { matched: unknown[]; fullPath?: string }>(),
   unlocked: { value: false },
+  profile: { value: null as string | null },
   readyCallbacks: [] as Array<() => void | Promise<void>>,
 }))
 
-vi.mock('@/router', () => ({ default: { push: mocks.push, resolve: mocks.resolve } }))
+vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
+
+vi.mock('@/router', () => ({ default: { push: mocks.push, resolve: mocks.resolve, currentRoute: mocks.currentRoute, beforeResolve: () => () => {} } }))
 vi.mock('@/composables/useProfiles', () => ({
-  useProfiles: () => ({ isUnlocked: mocks.unlocked }),
+  useProfiles: () => ({ isUnlocked: mocks.unlocked, activeProfileId: mocks.profile }),
   onProfileReady: (cb: () => void | Promise<void>) => {
     mocks.readyCallbacks.push(cb)
     return () => {}
@@ -22,10 +27,11 @@ async function fresh() {
 }
 
 beforeEach(() => {
+  mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.unlocked.value = false
   mocks.readyCallbacks.length = 0
-  mocks.push.mockReset().mockResolvedValue()
-  mocks.resolve.mockReset().mockImplementation((path) => ({ matched: path.startsWith('/nowhere') ? [] : [{}] }))
+  mocks.push.mockReset().mockImplementation(async to => { mocks.currentRoute.value.fullPath = typeof to === 'string' ? to : '/' })
+  mocks.resolve.mockReset().mockImplementation((path) => ({ matched: path.startsWith('/nowhere') ? [] : [{}], fullPath: path }))
 })
 
 describe('openPath', () => {
@@ -83,4 +89,36 @@ describe('openLink', () => {
     await links.openLink('https://example.com/notifications')
     expect(mocks.push).toHaveBeenCalledTimes(1)
   })
+})
+
+describe('recipient-bound notification taps', () => {
+  it('holds A through B unlock, then routes A once despite event and drain delivery', async () => {
+    const links = await fresh()
+    const tap = { id: 'tap-1', profileId: 'A', networkId: 'network', recipient: 'binding-A', route: '/settings/organisations' }
+    await links.openNotification(tap)
+    mocks.profile.value = 'B'
+    mocks.unlocked.value = true
+    for (const cb of mocks.readyCallbacks) await cb()
+    expect(mocks.push).not.toHaveBeenCalled()
+    mocks.profile.value = 'A'
+    for (const cb of mocks.readyCallbacks) await cb()
+    await links.openNotification(tap)
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/settings/organisations')
+    expect(links.hasUnlockDestination()).toBe(true)
+  })
+})
+
+it('does not navigate after a panel link resolves in an obsolete profile session', async () => {
+  const links = await fresh()
+  const sessions = await import('@/composables/profileSession')
+  sessions.setProfileSessionToken('session-A')
+  mocks.unlocked.value = true
+  let finish!: (value: unknown) => void
+  mocks.invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const opening = links.openLink('alexandria://interview/join?cloud=https%3A%2F%2Fcloud.example&id=i&panelist=p&token=t')
+  await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalled())
+  sessions.setProfileSessionToken('session-B')
+  finish({ sessionId: 'private-A-panel' })
+  await opening
+  expect(mocks.push).not.toHaveBeenCalled()
 })

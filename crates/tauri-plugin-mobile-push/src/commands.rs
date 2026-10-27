@@ -71,7 +71,9 @@ pub(crate) async fn request_permission<R: Runtime>(
             let _ = tx.send(unsafe { mobile_push_request_permission() } == 1);
         });
         Ok(PermissionResponse {
-            granted: rx.recv().unwrap_or(false),
+            granted: tauri::async_runtime::spawn_blocking(move || rx.recv().unwrap_or(false))
+                .await
+                .map_err(|e| crate::Error::Response(e.to_string()))?,
         })
     }
 
@@ -113,7 +115,10 @@ pub(crate) async fn get_token<R: Runtime>(app: AppHandle<R>) -> Result<TokenResp
             }
         });
 
-        match rx.recv() {
+        match tauri::async_runtime::spawn_blocking(move || rx.recv())
+            .await
+            .map_err(|e| crate::Error::Response(e.to_string()))?
+        {
             Ok(Ok(token)) => Ok(token),
             Ok(Err(e)) => Err(crate::Error::Response(e)),
             Err(_) => Err(crate::Error::Response(
