@@ -1,7 +1,8 @@
 # Interactive subject atlas and inspector
 
-Triage: ready-for-agent
+Triage: in-progress
 Repos: alexandria
+Assignee: skill-graph-explorer
 Part of: alexandria/docs/skill-graph-atlas-spec.md
 Blocked by: alexandria/docs/skill-graph-atlas/01-model-state.md
 
@@ -22,3 +23,5 @@ Use TDD at the approved mounted graph component seam for meaningful user-visible
 ## Notes
 
 - 2026-10-27: Created; blocked by the model/state API.
+
+- 2026-10-27: Claimed in isolated worktree `t3-36ffe649`, branch `t3/skill-graph-explorer`; confirmed HEAD and ancestry at integration `f989e3f0`. Approved mounted props/events seam and ticket 01 final API govern implementation.
