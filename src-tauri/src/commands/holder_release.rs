@@ -146,7 +146,7 @@ async fn signed_send(
 pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsResult, String> {
     let dirs = directories(&state).await?;
     let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
-    let client = reqwest::Client::new();
+    let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -463,7 +463,7 @@ pub async fn holder_release_evidence(
     let bytes = items.iter().map(|i| i.payload.len()).sum();
     let b64 = base64::engine::general_purpose::STANDARD;
     let path = format!("/api/runs/{run_id}/evidence");
-    let client = reqwest::Client::new();
+    let client = crate::cloud::client()?;
 
     // Sent in the order it was captured, so that a release interrupted partway
     // leaves the earlier part of the session at the other end rather than an
@@ -675,7 +675,7 @@ async fn withdraw_one(
 ) -> Result<(), String> {
     let path = format!("/api/runs/{run_id}/evidence");
     signed_send(
-        &reqwest::Client::new(),
+        &crate::cloud::client()?,
         directory_url,
         sk,
         "DELETE",

@@ -138,4 +138,27 @@ mod tests {
             assert!(!is_allowed_origin(url), "{url:?}");
         }
     }
+
+    /// Signed directory requests carry a proof header; a redirect must not
+    /// carry it on to another host.
+    #[tokio::test]
+    async fn the_client_does_not_follow_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 302 Found\r\nlocation: http://attacker.example/\r\n\
+                      content-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+        });
+        let response = client().unwrap().get(&origin).send().await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+    }
 }

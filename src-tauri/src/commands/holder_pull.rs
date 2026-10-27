@@ -184,7 +184,7 @@ pub async fn fetch_access_log(
 ) -> Result<PullResult<AccessEntry>, String> {
     let dirs = directories(&state).await?;
     let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
-    let client = reqwest::Client::new();
+    let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -246,7 +246,7 @@ pub struct Grant {
 pub async fn fetch_visibility(state: State<'_, AppState>) -> Result<PullResult<Grant>, String> {
     let dirs = directories(&state).await?;
     let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
-    let client = reqwest::Client::new();
+    let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -314,7 +314,7 @@ pub async fn set_visibility(
     let signed = crate::domain::talent_index::sign_record(&record, &sk, &now)?;
 
     let base = directory_url.trim_end_matches('/');
-    let resp = reqwest::Client::new()
+    let resp = crate::cloud::client()?
         .post(format!("{base}/api/cohorts/visibility/{}", did.as_str()))
         .json(&serde_json::json!({
             "org_id": organisation_id,
