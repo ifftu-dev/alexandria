@@ -546,7 +546,27 @@ pub async fn hiring_interview_room(
     directory_url: String,
     interview_id: String,
 ) -> Result<serde_json::Value, String> {
-    let dir = directory(&state, &directory_url).await?;
+    // Notification destinations carry no remote origin. Resolve the origin
+    // from this profile's authenticated discovery before falling back to its
+    // configured service. The directory guard below still authorizes contact.
+    let address = if directory_url.is_empty() {
+        let route = format!("/interview-room/{interview_id}");
+        state.db_executor.execute(
+            DatabaseWorkload::Learner, state.profile_lease(), "interview.room.origin",
+            move |db| {
+                use rusqlite::OptionalExtension;
+                let original: Option<String> = db.conn().query_row(
+                    "SELECT json_extract(payload_json, '$.cloudOrigin') FROM notifications WHERE route=?1 AND json_extract(payload_json, '$.cloudOrigin') IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                    [route], |row| row.get(0),
+                ).optional().map_err(|e| e.to_string())?;
+                original.or_else(|| super::holder_pull::cloud_origin(db.conn()))
+                    .ok_or_else(|| "configure a Cloud service before joining".to_string())
+            },
+        ).await?
+    } else {
+        directory_url
+    };
+    let dir = directory(&state, &address).await?;
     let id = uuid::Uuid::parse_str(&interview_id).map_err(|e| e.to_string())?;
     let (key, _) = load_issuer_key(&state).await?;
     let path = format!("/api/interviews/{id}/room");
@@ -561,7 +581,9 @@ pub async fn hiring_interview_room(
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    response_json(response).await
+    let mut room = response_json(response).await?;
+    room["directoryUrl"] = serde_json::Value::String(dir.url);
+    Ok(room)
 }
 
 // ── The candidate's integrity check ─────────────────────────────────────

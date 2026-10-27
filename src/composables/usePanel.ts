@@ -27,7 +27,7 @@ export interface PanelInterview {
   criteria: string[]
   me: PanelMember
   panel: PanelMember[]
-  room: { ticket: string | null; openedAt: string | null }
+  room: { ticket: string | null; openingId: string | null; eventId: string | null; openedAt: string | null; expiresAt: string | null; live: boolean }
   candidateEvidence: PanelEvidence[]
   /** Present when Cloud knows about the integrity check (always, for a current Cloud). */
   integrity?: PanelIntegrity | null
@@ -65,6 +65,7 @@ export interface PanelRating {
 
 /** Where an interview held in Alexandria can be joined, once it is open. */
 export interface CandidateRoom {
+  directoryUrl?: string
   ticket: string | null
   openedAt: string | null
   /** The organisation asked the candidate to run the integrity check. */
@@ -84,8 +85,8 @@ export function usePanel() {
     return invoke<PanelInterview>('interview_panel_status', { sessionId })
   }
 
-  function setRoom(sessionId: string, ticket: string) {
-    return invoke<PanelInterview>('interview_panel_set_room', { sessionId, ticket })
+  function setRoom(sessionId: string, ticket: string, roomSessionId: string, openingId: string | null, previousOpeningId: string | null) {
+    return invoke<PanelInterview>('interview_panel_set_room', { sessionId, ticket, roomSessionId, openingId, previousOpeningId })
   }
 
   function sendScorecard(

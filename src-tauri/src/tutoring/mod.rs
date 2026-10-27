@@ -19,6 +19,7 @@
 #[cfg(any(desktop, target_os = "android"))]
 pub mod manager;
 
+pub(crate) mod panel_presence;
 mod tasks;
 
 #[cfg(target_os = "ios")]

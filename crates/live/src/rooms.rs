@@ -71,6 +71,16 @@ pub struct RoomHandle {
 }
 
 impl RoomHandle {
+    /// Whether the room actor has stopped accepting work.
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
+
+    /// Observe transport/runtime termination without keeping a separate lease.
+    pub async fn closed(&self) {
+        self.tx.closed().await;
+    }
+
     /// A ticket that points joiners at this endpoint as the bootstrap peer.
     pub fn ticket(&self) -> RoomTicket {
         let mut ticket = self.ticket.clone();
