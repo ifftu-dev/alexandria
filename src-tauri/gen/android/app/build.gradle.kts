@@ -102,9 +102,23 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     // Play Integrity classic requests for Sentinel's device_attested rung.
     implementation("com.google.android.play:integrity:1.4.0")
+    // Push notifications (FCM). The vendored mobile-push plugin brings
+    // firebase-messaging itself; the BoM pins the rest to a matching set.
+    implementation(platform("com.google.firebase:firebase-bom:33.8.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }
 
 apply(from = "tauri.build.gradle.kts")
+
+// Firebase is configured by google-services.json, a per-project file that is
+// not committed (see .gitignore). Without it the google-services plugin fails
+// the build, so it is applied only when the file is there; without it the app
+// builds and runs, and push registration reports that Firebase is not set up.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.lifecycle("google-services.json absent: building without Firebase push")
+}

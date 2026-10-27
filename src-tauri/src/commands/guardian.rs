@@ -334,7 +334,9 @@ async fn send_link_request(
     };
 
     match response {
-        GuardianResponse::Linked { sealed_snapshot } => {
+        GuardianResponse::Linked {
+            sealed_snapshot, ..
+        } => {
             let payload: GuardianActivityPayload =
                 proto::open(&invite.shared_key, &sealed_snapshot)?;
             let link_id = link_id.to_string();

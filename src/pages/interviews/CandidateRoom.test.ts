@@ -5,6 +5,7 @@ import CandidateRoom from './CandidateRoom.vue'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
+  query: {} as Record<string, string>,
   joinRoom: vi.fn(),
   listDevices: vi.fn(),
   push: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock('@/composables/useInterviewCheck', () => ({
   }),
 }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: 'int-1' }, query: { cloud: 'http://127.0.0.1:8787' } }),
+  useRoute: () => ({ params: { id: 'int-1' }, query: mocks.query }),
   useRouter: () => ({ push: mocks.push }),
 }))
 
@@ -34,6 +35,7 @@ const mountRoom = () => mount(CandidateRoom, {
 })
 
 beforeEach(() => {
+  mocks.query = { cloud: 'http://127.0.0.1:8787' }
   vi.useFakeTimers()
   mocks.invoke.mockReset()
   mocks.joinRoom.mockReset().mockResolvedValue({ id: 'room-7' })
@@ -56,6 +58,19 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('CandidateRoom', () => {
+  it('resolves a notification route locally and rechecks authority before joining', async () => {
+    mocks.query = {}
+    mocks.invoke.mockResolvedValue({ ticket: 'old-ticket', directoryUrl: 'https://cloud.example', live: true })
+    const wrapper = mountRoom(); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('hiring_interview_room', { directoryUrl: '', interviewId: 'int-1' })
+    mocks.invoke.mockRejectedValueOnce(new Error('directory returned 409: room closed'))
+    await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
+    expect(mocks.joinRoom).not.toHaveBeenCalled()
+    expect(mocks.invoke).toHaveBeenLastCalledWith('hiring_interview_room', { directoryUrl: 'https://cloud.example', interviewId: 'int-1' })
+    expect(wrapper.text()).toContain('409')
+    wrapper.unmount()
+  })
+
   it('waits for the panel, then joins the room it opened', async () => {
     mocks.invoke.mockResolvedValueOnce({ ticket: null, openedAt: null })
     const wrapper = mountRoom(); await flushPromises()

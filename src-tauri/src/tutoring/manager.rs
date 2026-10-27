@@ -269,6 +269,9 @@ type Shared<M> = Arc<Mutex<Option<ActiveSession<M>>>>;
 
 /// Internal state for an active room.
 pub(super) struct ActiveSession<M: MediaDevices> {
+    /// Cloud panel presence for this exact room, when it is a panel
+    /// interview; see [`CallManager::attach_panel_presence`].
+    panel_presence: Option<TaskHandle>,
     session_id: String,
     /// Which start of the platform media this session owns; see
     /// [`Core::generation`].
@@ -584,6 +587,7 @@ impl<M: MediaDevices> CallManager<M> {
             ];
 
             *inner = Some(ActiveSession {
+                panel_presence: None,
                 session_id: session_id.clone(),
                 generation,
                 session_title: title.clone(),
@@ -702,6 +706,37 @@ impl<M: MediaDevices> CallManager<M> {
             return Err(error);
         }
         Ok(ticket_str)
+    }
+
+    /// Attach Cloud presence to this exact connected runtime. Page navigation
+    /// does not own this task; room shutdown and profile admission do.
+    pub(crate) async fn attach_panel_presence(
+        &self,
+        room_session_id: &str,
+        link: crate::interview_panel::PanelLink,
+        publication: super::panel_presence::Publication,
+        lease: crate::profile::scope::ProfileLease,
+        endpoint: Endpoint,
+    ) -> Result<serde_json::Value, String> {
+        let receive = {
+            let mut inner = self.core.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|s| s.session_id == room_session_id)
+                .ok_or("the connected panel room has changed")?;
+            super::panel_presence::attach(
+                &self.core.tasks,
+                &session.handle,
+                &mut session.panel_presence,
+                endpoint,
+                lease,
+                link,
+                publication,
+            )?
+        };
+        receive
+            .await
+            .map_err(|_| "the panel room stopped before admission completed".to_string())?
     }
 
     /// Leave the current room and note when it was last occupied.

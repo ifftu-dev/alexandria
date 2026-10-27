@@ -121,6 +121,8 @@ pub enum GuardianResponse {
     /// Link established; carries the child's initial sealed snapshot.
     Linked {
         sealed_snapshot: Vec<u8>,
+        #[serde(skip)]
+        notification: Option<Box<crate::notifications::Recorded>>,
     },
     /// Push applied; how many entity rows merged.
     Merged {
@@ -573,7 +575,10 @@ fn handle_link(
             guardian_vc_json,
         )
     }) {
-        Ok(sealed_snapshot) => GuardianResponse::Linked { sealed_snapshot },
+        Ok((sealed_snapshot, notification)) => GuardianResponse::Linked {
+            sealed_snapshot,
+            notification: notification.map(Box::new),
+        },
         Err(error) => GuardianResponse::Error(error),
     }
 }
@@ -588,7 +593,7 @@ fn complete_guardian_link(
     guardian_stake_address: &str,
     guardian_display_name: Option<&str>,
     guardian_vc_json: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, Option<crate::notifications::Recorded>), String> {
     // Consume the invite inside the same transaction as credential verification,
     // link persistence, profile activation, and initial snapshot construction.
     let key = take_pending_invite(conn, code_hash)?
@@ -680,7 +685,12 @@ fn complete_guardian_link(
 
     // Reply with the initial sealed snapshot.
     let snapshot = build_activity_snapshot(conn).map_err(|error| format!("snapshot: {error}"))?;
-    seal(&key, &snapshot)
+    let sealed = seal(&key, &snapshot)?;
+    let notification = crate::notifications::record_if_enabled(
+        conn,
+        &crate::notifications::for_guardian_linked(link_id, guardian_display_name),
+    )?;
+    Ok((sealed, notification))
 }
 
 fn handle_revoke(conn: &Connection, link_id: &str, sealed_marker: &[u8]) -> GuardianResponse {
@@ -801,6 +811,73 @@ mod tests {
                 "guardian table `{t}` must not be device-synced"
             );
         }
+    }
+
+    #[test]
+    fn an_authenticated_completed_guardian_link_records_the_ward_inbox_once() {
+        use crate::credentials::{IssueCredentialRequest, Issuer};
+        use crate::domain::vc::{Claim, CredentialType, RoleClaim};
+        let guardian_db = test_db();
+        let ward_db = test_db();
+        seed_identity(ward_db.conn(), Some("2012-01-01"), "pending_guardian");
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let guardian = crate::crypto::did::did_from_verifying_key(&key.verifying_key());
+        let ward_key = ed25519_dalek::SigningKey::from_bytes(&[8; 32]);
+        let ward = crate::crypto::did::did_from_verifying_key(&ward_key.verifying_key());
+        ward_db
+            .conn()
+            .execute(
+                "INSERT INTO app_settings (key,value) VALUES ('identity.local_did',?1)",
+                [ward.as_str()],
+            )
+            .unwrap();
+        let vc = crate::credentials::issue(
+            guardian_db.conn(),
+            &Issuer::from_key(key.clone()),
+            &IssueCredentialRequest {
+                credential_type: CredentialType::RoleCredential,
+                subject: ward,
+                claim: Claim::Role(RoleClaim {
+                    role: "guardian".into(),
+                    scope: Some(guardian.as_str().into()),
+                }),
+                evidence_refs: vec![],
+                expiration_date: None,
+                supersedes: None,
+                integrity_session_id: None,
+                integrity_policy: None,
+            },
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        record_pending_invite(ward_db.conn(), "hash-valid", &[7; 32], 300).unwrap();
+        let request = GuardianRequest::Link {
+            code_hash: "hash-valid".into(),
+            link_id: "link-valid".into(),
+            guardian_did: guardian.as_str().into(),
+            guardian_stake_address: "stake_parent".into(),
+            guardian_display_name: Some("Parent".into()),
+            guardian_vc_json: serde_json::to_string(&vc).unwrap(),
+        };
+        let response = handle_guardian_request(ward_db.conn(), "parent-peer", &request);
+        assert!(
+            matches!(response, GuardianResponse::Linked { .. }),
+            "{response:?}"
+        );
+        let inbox = crate::notifications::list(ward_db.conn(), None, false).unwrap();
+        assert_eq!(inbox.len(), 1, "the committed link owns its notification");
+        assert_eq!(inbox[0].route.as_deref(), Some("/settings/guardian"));
+        crate::notifications::clear(ward_db.conn()).unwrap();
+        assert!(matches!(
+            handle_guardian_request(ward_db.conn(), "parent-peer", &request),
+            GuardianResponse::Unauthorized
+        ));
+        assert!(crate::notifications::list(ward_db.conn(), None, false)
+            .unwrap()
+            .is_empty());
+        assert!(crate::notifications::list(guardian_db.conn(), None, false)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

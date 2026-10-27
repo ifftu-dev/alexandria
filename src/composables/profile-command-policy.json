@@ -26,6 +26,7 @@
     "delete_profile": "Serialized, password-checked profile removal.",
     "is_biometric_available": "Unlock-screen device capability check.",
     "tutoring_check_devices": "Device capability enumeration.",
-    "tutoring_list_devices": "Device capability enumeration."
+    "tutoring_list_devices": "Device capability enumeration.",
+    "notifications_pending_open": "Validated recipient-bound tap available to the locked picker; contains only local routing IDs and destination. A matching admitted profile consumes it separately."
   }
 }

@@ -4,6 +4,9 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+use base64::Engine;
+use ed25519_dalek::{Signer, SigningKey};
+use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 
 use crate::settings::registry::keys;
@@ -68,6 +71,104 @@ pub fn client() -> Result<reqwest::Client, String> {
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())
+}
+
+/// Read a JSON response of at most 1 MiB, turning an error status into an
+/// error that carries the body.
+pub async fn response_json(mut response: reqwest::Response) -> Result<serde_json::Value, String> {
+    let status = response.status();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        if bytes.len() + chunk.len() > 1024 * 1024 {
+            return Err("directory response is too large".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if !status.is_success() {
+        return Err(format!(
+            "directory returned {status}: {}",
+            String::from_utf8_lossy(&bytes)
+        ));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+}
+
+// ── Signed directory requests ─────────────────────────────────────
+
+/// The Cloud service the app asks. Kept as a list so callers that fan out
+/// over services keep working; today it holds at most one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Directory {
+    pub name: String,
+    /// Base URL, https only (http on loopback for local testing).
+    pub url: String,
+}
+
+pub fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
+    if !SettingsStore::get(conn, keys::ORGANISATIONS_ENABLED) {
+        return Ok(Vec::new());
+    }
+    Ok(origin(conn)
+        .into_iter()
+        .map(|url| Directory {
+            name: "Alexandria Cloud".into(),
+            url,
+        })
+        .collect())
+}
+
+/// A value used once, so two identical requests do not sign identically.
+///
+/// Ed25519 is deterministic (RFC 8032), so without this a second request to the
+/// same path in the same second produces the same 64 bytes as the first. The
+/// service treats a proof as single-use — that is what stops a captured header
+/// being replayed — and cannot tell "asked twice" from "replayed" unless the
+/// client makes them different. Releasing evidence in several batches is
+/// exactly that case.
+pub fn nonce() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// Sign the challenge a directory will check.
+///
+/// The path is signed along with the method, the timestamp and a per-request
+/// nonce, so a proof handed to one endpoint cannot be replayed against another
+/// — including another person's record on the same server — and cannot be
+/// replayed against the same one twice.
+pub fn proof(sk: &SigningKey, method: &str, path: &str, timestamp: i64, nonce: &str) -> String {
+    let challenge = format!("{method}\n{path}\n{timestamp}\n{nonce}");
+    let sig = sk.sign(challenge.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes())
+}
+
+/// GET a path from a directory with a fresh proof attached.
+pub async fn signed_get(
+    client: &reqwest::Client,
+    dir: &Directory,
+    sk: &SigningKey,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    // https only. This carries a list of who is interested in a named person,
+    // and the proof header is a bearer credential for five minutes — neither
+    // belongs on a plaintext connection.
+    if !is_allowed_origin(&dir.url) {
+        return Err("a directory must be https".into());
+    }
+
+    let timestamp = chrono::Utc::now().timestamp();
+    let n = nonce();
+    let base = dir.url.trim_end_matches('/');
+    let resp = client
+        .get(format!("{base}{path}"))
+        .header("x-alexandria-timestamp", timestamp.to_string())
+        .header("x-alexandria-nonce", &n)
+        .header("x-alexandria-proof", proof(sk, "GET", path, timestamp, &n))
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    response_json(resp).await
 }
 
 #[cfg(test)]

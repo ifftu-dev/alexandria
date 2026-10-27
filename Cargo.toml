@@ -13,6 +13,7 @@ members = [
     "crates/iroh-moq",
     "crates/moq-media",
     "crates/live",
+    "crates/tauri-plugin-mobile-push",
 ]
 # Built-in plugin graders compile to wasm32-unknown-unknown and live
 # outside the desktop/mobile workspace so the main build doesn't try to
@@ -94,11 +95,21 @@ audiopus_sys = { path = "patches/audiopus_sys" }
 webrtc-audio-processing-sys = { path = "patches/webrtc-audio-processing-sys" }
 ffmpeg-sys-next = { path = "patches/ffmpeg-sys-next" }
 ffmpeg-next = { path = "patches/ffmpeg-next" }
+# tauri-plugin-notification 2.7.0 verbatim, except that its Cargo.toml asks
+# for tauri 2.11 and tauri-plugin 2.6 rather than 2.12 / 2.7.1. It uses
+# nothing newer; the published requirement would pull tauri-utils 2.10 and an
+# unpatched swift-rs 1.0.9 in beside the patched 1.0.8, and the iOS link
+# would lose the Xcode 27 fix below. Re-copy from the registry on every bump
+# and re-apply the two version lines.
+tauri-plugin-notification = { path = "patches/tauri-plugin-notification" }
 # swift-rs 1.0.8 promotes Xcode 27's internalized @_cdecl exports back to global,
 # but only in each package's own object member. Its own Swift runtime is vendored
 # into every archive as SwiftRs.o, so retain_object/release_object/string_from_bytes
 # stay internal everywhere and no iOS link can resolve them. Our patch promotes
 # those three as weak globals, which coalesce across archives.
+# It also strips the vendored Tauri.o/SwiftRs.o copies from every plugin archive
+# but Tauri's own: with -ObjC (Firebase, via the mobile-push plugin) the linker
+# force-loads every Objective-C member, and the copies would collide.
 swift-rs = { path = "patches/swift-rs" }
 # tao 0.35.3 returns the UISceneConfiguration from
 # application:configurationForConnectingSceneSession: with `Retained::as_ptr`,

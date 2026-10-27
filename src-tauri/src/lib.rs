@@ -19,9 +19,11 @@ pub mod domain;
 pub mod enrollment;
 pub mod evidence;
 pub mod goals;
+pub mod interview_panel;
 #[cfg(test)]
 mod json_limit_boundaries;
 pub mod network_profile;
+pub mod notifications;
 pub mod org_trust;
 pub mod p2p;
 pub mod plugins;
@@ -226,6 +228,8 @@ impl AppState {
         // 1. Open the encrypted DB and run migrations.
         let db_key = zeroize::Zeroizing::new(keystore.derive_db_key());
         self.open_database(&paths, &db_key, initialize_defaults)?;
+
+        notifications::opens::prepare(&paths, &keystore)?;
 
         // 2. Stash keystore in shared state so background workers see it.
         {
@@ -898,6 +902,7 @@ pub fn run() {
                 let ks_for_queue = keystore.clone();
                 let node_for_sync = p2p_node.clone();
                 let operations_for_queue = profile_operations.clone();
+                let app_for_notifications = app.handle().clone();
                 diag::log("spawning on-chain queue processor");
                 tauri::async_runtime::spawn(async move {
                     // Wait for app to fully initialize before processing
@@ -1058,20 +1063,33 @@ pub fn run() {
                                             _ => None,
                                         }
                                     };
-                                    match issuance {
-                                        Some(Ok(report)) if report.issued > 0 => log::info!(
-                                            "auto-issuance: issued {} VC(s)",
-                                            report.issued,
-                                        ),
-                                        Some(Ok(report)) if !report.errors.is_empty() => {
-                                            log::warn!(
-                                                "auto-issuance: {} error(s): {:?}",
-                                                report.errors.len(),
-                                                report.errors
-                                            );
+                                    let issued_notifications = match issuance {
+                                        Some(Ok(report)) => {
+                                            if report.issued > 0 {
+                                                log::info!(
+                                                    "auto-issuance: issued {} VC(s)",
+                                                    report.issued,
+                                                );
+                                            }
+                                            if !report.errors.is_empty() {
+                                                log::warn!(
+                                                    "auto-issuance: {} error(s): {:?}",
+                                                    report.errors.len(),
+                                                    report.errors
+                                                );
+                                            }
+                                            report.notifications
                                         }
-                                        Some(Err(e)) => log::debug!("auto-issuance: {e}"),
-                                        _ => {}
+                                        Some(Err(e)) => {
+                                            log::debug!("auto-issuance: {e}");
+                                            Vec::new()
+                                        }
+                                        None => Vec::new(),
+                                    };
+                                    // Each new credential is something to tell
+                                    // the learner about.
+                                    for recorded in issued_notifications {
+                                        notifications::announce(&app_for_notifications, &recorded);
                                     }
                                 }
 
@@ -1228,6 +1246,59 @@ pub fn run() {
                                     Err(e) => log::debug!("guardian-sync: {e}"),
                                 }
 
+                                // What Alexandria Cloud is holding for the
+                                // learner — invitations, offers, requests —
+                                // reported once each. Read without holding the
+                                // database, recorded with it.
+                                if let Some(w) = wallet.as_ref() {
+                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
+                                        &w.signing_key.to_bytes(),
+                                    );
+                                    let did = crypto::did::derive_did_key(&signing_key);
+                                    let origin = {
+                                        let guard = db_for_queue.lock();
+                                        match guard.as_deref() {
+                                            Ok(Some(db)) => {
+                                                commands::holder_pull::directories_db(db.conn())
+                                                    .ok()
+                                                    .and_then(|dirs| dirs.into_iter().next())
+                                                    .map(|dir| dir.url)
+                                            }
+                                            _ => None,
+                                        }
+                                    };
+                                    if let Some(origin) = origin {
+                                        let items = notifications::cloud_pull::fetch(
+                                            &origin,
+                                            &signing_key,
+                                            did.as_str(),
+                                        )
+                                        .await;
+                                        if !items.is_empty() {
+                                            let guard = db_for_queue.lock();
+                                            if let Ok(Some(db)) = guard.as_deref() {
+                                                let fresh = notifications::cloud_pull::unreported(
+                                                    db.conn(),
+                                                    &items,
+                                                );
+                                                for item in fresh {
+                                                    let Some(notification) = item.notification()
+                                                    else {
+                                                        continue;
+                                                    };
+                                                    if let Err(e) = notifications::deliver(
+                                                        &app_for_notifications,
+                                                        db.conn(),
+                                                        &notification,
+                                                    ) {
+                                                        log::debug!("cloud notification: {e}");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 drop(wallet);
                                 drop(bf);
                             })
@@ -1291,6 +1362,10 @@ pub fn run() {
 
             diag::log("managing app state in Tauri");
             app.manage(app_state);
+            // Banner click-through, the Android channel and the push plugin's
+            // events. After `manage`: a tap handler reaches the profile's
+            // database through the managed state.
+            notifications::install(&app.handle().clone());
             #[cfg(all(desktop, unix))]
             commands::studio_mcp::start(app.handle().clone());
             diag::log("app setup complete — webview should be loading");
@@ -1421,6 +1496,12 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        // iOS shows its own banner for a push that arrives in the foreground
+        // (the default presentation); `notifications::should_interrupt` knows
+        // not to add a second one. Android shows nothing for a foreground
+        // push, so the pipeline's banner is the only one there.
+        .plugin(tauri_plugin_mobile_push::init())
         // Community plugin asset protocol — serves files out of
         // `app_data_dir/plugins/<cid>/` with a per-plugin CSP and the
         // alex bootstrap injected into HTML responses. See
@@ -1683,6 +1764,19 @@ pub fn run() {
             commands::exchange::exchange_preview,
             commands::exchange::exchange_send,
             commands::credentials::publish_status_lists,
+            commands::notifications::notifications_list,
+            commands::notifications::notifications_unread_count,
+            commands::notifications::notifications_mark_read,
+            commands::notifications::notifications_mark_all_read,
+            commands::notifications::notifications_clear,
+            commands::notifications::notifications_permission_request,
+            commands::notifications::notifications_pending_open,
+            commands::notifications::notifications_consume_open,
+            commands::notifications::notifications_emit_test,
+            commands::notifications::push_status,
+            commands::notifications::push_register,
+            commands::notifications::push_unregister,
+            commands::notifications::push_set_enabled,
             commands::hiring::hiring_interviews,
             commands::hiring::hiring_interview_respond,
             commands::hiring::hiring_offers,

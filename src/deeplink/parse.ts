@@ -88,6 +88,19 @@ export function parseDeepLink(raw: string): DeepLinkTarget | null {
       }
       return { kind: 'governance-genesis-locator', locator: url.href }
     }
+    case 'notifications': {
+      // alexandria://notifications  →  the inbox
+      return segments.length === 0 ? { kind: 'route', path: '/notifications' } : null
+    }
+    case 'notification': {
+      // alexandria://notification/<id>  →  the inbox, opening that row (the
+      // page marks it read and follows its route). The id stays as the URL
+      // encoded it, for the same reason as `course`.
+      const id = segments[0]
+      return id && segments.length === 1
+        ? { kind: 'route', path: `/notifications?open=${id}` }
+        : null
+    }
     case 'open': {
       // alexandria://open?route=/any/in-app/path  (generic fallback)
       const route = url.searchParams.get('route')

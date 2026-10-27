@@ -20,66 +20,10 @@ use super::interview::{
     create_interview_impl, CreateInterviewParticipant, CreateInterviewRequest, InterviewBundle,
 };
 use crate::clock::now_rfc3339;
-use crate::cloud::{self, client};
-use crate::commands::exchange::response_json;
 use crate::db::executor::DatabaseWorkload;
+use crate::interview_panel::{panel_request, parse_panel_link, PanelLink};
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
-
-/// What a join link carries.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PanelLink {
-    pub cloud: String,
-    pub interview_id: String,
-    pub panelist_id: String,
-    pub token: String,
-}
-
-/// Read `alexandria://interview/join?cloud=…&id=…&panelist=…&token=…`.
-///
-/// The Cloud origin comes from the link, so it is held to the same rule as
-/// every other Cloud address: https, or http on loopback for local testing.
-/// Anything else would send the panelist's token over plaintext.
-pub fn parse_panel_link(link: &str) -> Result<PanelLink, String> {
-    let url = reqwest::Url::parse(link.trim()).map_err(|_| "not an interview link".to_string())?;
-    if url.scheme() != "alexandria"
-        || url.host_str() != Some("interview")
-        || url.path().trim_end_matches('/') != "/join"
-    {
-        return Err("not an interview link".into());
-    }
-    let param = |name: &str| {
-        url.query_pairs()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| format!("the interview link has no {name}"))
-    };
-    let cloud = param("cloud")?.trim_end_matches('/').to_string();
-    if !cloud::is_allowed_origin(&cloud) {
-        return Err("the interview link points at a service that is not https".into());
-    }
-    let interview_id = param("id")?;
-    let panelist_id = param("panelist")?;
-    for id in [&interview_id, &panelist_id] {
-        uuid::Uuid::parse_str(id).map_err(|_| "the interview link is damaged".to_string())?;
-    }
-    let token = param("token")?;
-    if token.len() < 32
-        || token.len() > 128
-        || !token
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        return Err("the interview link is damaged".into());
-    }
-    Ok(PanelLink {
-        cloud,
-        interview_id,
-        panelist_id,
-        token,
-    })
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +44,10 @@ pub struct PanelCandidate {
 pub struct PanelRoom {
     pub ticket: Option<String>,
     pub opened_at: Option<String>,
+    pub opening_id: Option<String>,
+    pub event_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub live: bool,
 }
 
 /// The interview as Cloud shows it to one panelist.
@@ -139,25 +87,6 @@ pub struct Rating {
     pub criterion: String,
     /// 1–4, or none when the panelist did not score it.
     pub rating: Option<u8>,
-}
-
-async fn panel_request(
-    link: &PanelLink,
-    method: reqwest::Method,
-    suffix: &str,
-    body: Option<&Value>,
-) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/panel/interviews/{}{suffix}",
-        link.cloud, link.interview_id
-    );
-    let mut request = client()?
-        .request(method, url)
-        .header("authorization", format!("Panelist {}", link.token));
-    if let Some(body) = body {
-        request = request.json(body);
-    }
-    response_json(request.send().await.map_err(|e| e.to_string())?).await
 }
 
 async fn fetch(link: &PanelLink) -> Result<PanelInterview, String> {
@@ -387,19 +316,49 @@ pub async fn interview_panel_set_room(
     state: State<'_, AppState>,
     session_id: String,
     ticket: String,
+    room_session_id: String,
+    opening_id: Option<String>,
+    previous_opening_id: Option<String>,
 ) -> Result<PanelInterview, String> {
     if ticket.trim().is_empty() || ticket.len() > 4096 {
         return Err("not a room ticket".into());
     }
+    for id in [&opening_id, &previous_opening_id].into_iter().flatten() {
+        let parsed = uuid::Uuid::parse_str(id).map_err(|_| "invalid opening ID")?;
+        if parsed.is_nil() || parsed.to_string() != *id {
+            return Err("invalid opening ID".into());
+        }
+    }
     let link = link_for(&state, &session_id).await?;
-    let value = panel_request(
-        &link,
-        reqwest::Method::POST,
-        "/room",
-        Some(&serde_json::json!({ "ticket": ticket })),
-    )
-    .await?;
-    serde_json::from_value(value).map_err(|e| e.to_string())
+    let room_id = room_session_id.clone();
+    state.db_executor.execute(DatabaseWorkload::Instructor, state.profile_lease(), "interview.panel.runtime", move |db| {
+        let matches: bool = db.conn().query_row("SELECT EXISTS(SELECT 1 FROM tutoring_sessions WHERE id=?1 AND context_id=?2 AND kind='interview_panel' AND status='active')", params![room_id, session_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if matches { Ok(()) } else { Err("this runtime does not belong to the panel seat".into()) }
+    }).await?;
+    let endpoint = state
+        .content_node
+        .endpoint()
+        .await
+        .ok_or("room transport is unavailable")?;
+    let value = state
+        .tutoring
+        .attach_panel_presence(
+            &room_session_id,
+            link.clone(),
+            crate::tutoring::panel_presence::Publication {
+                ticket,
+                opening_id,
+                previous_opening_id,
+            },
+            state.profile_lease(),
+            endpoint,
+        )
+        .await?;
+    let panel: PanelInterview = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    if panel.interview_id != link.interview_id || panel.me.id != link.panelist_id {
+        return Err("Cloud answered for a different interview".into());
+    }
+    Ok(panel)
 }
 
 /// Send this panelist's scorecard to the organisation.
@@ -476,6 +435,10 @@ mod tests {
             room: PanelRoom {
                 ticket: None,
                 opened_at: None,
+                opening_id: None,
+                event_id: None,
+                expires_at: None,
+                live: false,
             },
             candidate_evidence: Vec::new(),
             integrity: None,

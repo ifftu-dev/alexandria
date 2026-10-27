@@ -232,7 +232,12 @@ pub(crate) fn fallback_unless_busy<R>(error: &str, fallback: R) -> Option<R> {
 #[derive(Debug, Clone)]
 pub(crate) enum InboundUiEvent {
     ClassroomMessage(ClassroomMessageEvent),
-    ClassroomMeta(ClassroomMetaTauriEvent),
+    /// A meta change, and the notification recorded for it in the same job
+    /// when the change was one the learner should hear about.
+    ClassroomMeta(
+        ClassroomMetaTauriEvent,
+        Option<crate::notifications::Recorded>,
+    ),
 }
 
 impl InboundUiEvent {
@@ -240,10 +245,40 @@ impl InboundUiEvent {
         use tauri::Emitter;
         let result = match self {
             Self::ClassroomMessage(event) => app.emit(classroom_manager::MESSAGE_EVENT, event),
-            Self::ClassroomMeta(event) => app.emit(classroom_manager::META_EVENT, event),
+            Self::ClassroomMeta(event, recorded) => {
+                if let Some(recorded) = recorded {
+                    crate::notifications::announce(app, &recorded);
+                }
+                app.emit(classroom_manager::META_EVENT, event)
+            }
         };
         if let Err(error) = result {
             log::debug!("inbound gossip: UI event emission failed: {error}");
+        }
+    }
+}
+
+/// Record the notification a committed meta event warrants, in the job that
+/// committed it. A failure to record is logged, not fatal: the classroom
+/// state is already applied and the UI event still goes out.
+fn classroom_notification(
+    db: &Database,
+    event: &ClassroomMetaTauriEvent,
+) -> Option<crate::notifications::Recorded> {
+    let local_address: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT stake_address FROM local_identity WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let notification = crate::notifications::for_classroom_meta(event, local_address.as_deref())?;
+    match crate::notifications::record_if_enabled(db.conn(), &notification) {
+        Ok(recorded) => recorded,
+        Err(error) => {
+            log::debug!("inbound gossip: classroom notification not recorded: {error}");
+            None
         }
     }
 }
@@ -427,8 +462,10 @@ impl GossipWork {
                     .map(InboundUiEvent::ClassroomMessage);
             }
             Self::ClassroomMeta(event) => {
-                return classroom_manager::apply_incoming_meta(db, message, event)
-                    .map(InboundUiEvent::ClassroomMeta);
+                return classroom_manager::apply_incoming_meta(db, message, event).map(|event| {
+                    let recorded = classroom_notification(db, &event);
+                    InboundUiEvent::ClassroomMeta(event, recorded)
+                });
             }
         };
         if let Err(error) = outcome {
@@ -567,6 +604,102 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("catalog count")
+    }
+
+    #[tokio::test]
+    async fn classroom_notifications_follow_committed_membership_and_moderator_authority() {
+        for local in ["owner", "moderator", "member"] {
+            let shared = shared_database();
+            {
+                let guard = shared.lock().unwrap();
+                let db = guard.as_ref().unwrap();
+                db.conn().execute_batch("INSERT INTO classrooms (id,name,owner_address) VALUES ('class','Class','owner'); INSERT INTO classroom_members(classroom_id,stake_address,role) VALUES ('class','owner','owner'),('class','moderator','moderator'),('class','member','member');").unwrap();
+                db.conn().execute("INSERT INTO local_identity(id,stake_address,payment_address) VALUES(1,?1,'addr')", [local]).unwrap();
+            }
+            let (operations, session) = active_operations().await;
+            let inbound =
+                InboundDatabase::pinned(DatabaseExecutor::new(shared.clone()), operations, session);
+            let (mut ingest, dispatcher) = gossip_ingest(inbound, |_| {});
+            let counters = ingest.counters();
+            let dispatcher = tokio::spawn(dispatcher);
+            let topic = crate::classroom::types::classroom_meta_topic("class");
+            let events = [
+                (
+                    local,
+                    ClassroomMetaEvent::CallStarted {
+                        classroom_id: "class".into(),
+                        call_id: "self-call".into(),
+                        ticket: "ticket".into(),
+                        started_by: local.into(),
+                    },
+                ),
+                (
+                    "newcomer",
+                    ClassroomMetaEvent::JoinRequest {
+                        classroom_id: "class".into(),
+                        request_id: "request".into(),
+                        display_name: None,
+                        message: None,
+                    },
+                ),
+                (
+                    if local == "owner" { "member" } else { "owner" },
+                    ClassroomMetaEvent::CallStarted {
+                        classroom_id: "class".into(),
+                        call_id: "other-call".into(),
+                        ticket: "ticket".into(),
+                        started_by: if local == "owner" {
+                            "member".into()
+                        } else {
+                            "owner".into()
+                        },
+                    },
+                ),
+                (
+                    "newcomer",
+                    ClassroomMetaEvent::CallStarted {
+                        classroom_id: "class".into(),
+                        call_id: "forged-call".into(),
+                        ticket: "ticket".into(),
+                        started_by: "owner".into(),
+                    },
+                ),
+            ];
+            for (sender, event) in events {
+                assert!(ingest.offer(
+                    topic.clone(),
+                    SignedGossipMessage {
+                        topic: topic.clone(),
+                        payload: serde_json::to_vec(&event).unwrap(),
+                        signature: vec![0; 64],
+                        public_key: vec![0; 32],
+                        stake_address: sender.into(),
+                        timestamp: 0,
+                        encrypted: false,
+                        key_id: None
+                    }
+                ));
+            }
+            wait_until(|| counters.completed.load(Ordering::Relaxed) == 4).await;
+            {
+                let guard = shared.lock().unwrap();
+                let inbox = crate::notifications::list(guard.as_ref().unwrap().conn(), None, false)
+                    .unwrap();
+                assert_eq!(
+                    inbox.len(),
+                    if local == "member" { 1 } else { 2 },
+                    "wrong recipient role: {local}"
+                );
+                assert!(inbox
+                    .iter()
+                    .any(|row| row.payload.as_ref().unwrap()["callId"] == "other-call"));
+                assert!(!inbox
+                    .iter()
+                    .any(|row| row.payload.as_ref().unwrap()["callId"] == "self-call"));
+            }
+            drop(ingest);
+            dispatcher.await.unwrap();
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

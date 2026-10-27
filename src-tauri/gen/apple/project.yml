@@ -27,6 +27,10 @@ targets:
   alexandria-node_iOS:
     type: application
     platform: iOS
+    attributes:
+      SystemCapabilities:
+        com.apple.Push:
+          enabled: 1
     sources:
       - path: Sources
       - path: Assets.xcassets
@@ -56,6 +60,11 @@ targets:
         # App uses only standard, exempt encryption — suppresses the
         # per-upload TestFlight export-compliance prompt.
         ITSAppUsesNonExemptEncryption: false
+        # Push goes through Firebase on iOS too. The Firebase SDK normally
+        # swizzles the AppDelegate to catch the APNs token; the mobile-push
+        # plugin injects those methods itself into the class tao generates at
+        # launch, and the two must not race, so the proxy is off.
+        FirebaseAppDelegateProxyEnabled: false
         # Required from the iOS 26 SDK onwards, and fatal from iOS 27.
         #
         # UIKit checks for scene-lifecycle adoption when it creates the first
@@ -104,6 +113,13 @@ targets:
         LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(DT_TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+        # Firebase (linked into libapp.a by the mobile-push plugin) is
+        # Objective-C with categories; without -ObjC they are dropped at link
+        # time and fail at runtime with "unrecognized selector". libz and
+        # CoreTelephony are what its Messaging graph (GoogleUtilities,
+        # GoogleDataTransport) declares in its own linker settings, which do
+        # not reach Xcode through a static archive.
+        OTHER_LDFLAGS: $(inherited) -ObjC -lz -framework CoreTelephony
       groups: [app]
     dependencies:
       - framework: libapp.a
@@ -135,3 +151,15 @@ targets:
         outputFiles:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+    postCompileScripts:
+      # The Firebase project file is per deployment and not committed (see
+      # .gitignore); a build without it still succeeds, with remote push off.
+      - script: |
+          PLIST="${SRCROOT}/alexandria-node_iOS/GoogleService-Info.plist"
+          if [ -f "$PLIST" ]; then
+            cp "$PLIST" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/"
+          else
+            echo "warning: GoogleService-Info.plist absent: building without Firebase push"
+          fi
+        name: Copy GoogleService-Info.plist
+        basedOnDependencyAnalysis: false

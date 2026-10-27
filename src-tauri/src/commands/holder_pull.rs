@@ -34,24 +34,14 @@
 
 use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
-use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 
-use crate::cloud::{self, is_allowed_origin};
+use crate::cloud::is_allowed_origin;
 use crate::db::executor::DatabaseWorkload;
-use crate::settings::registry::keys;
-use crate::settings::SettingsStore;
 use crate::AppState;
 
-/// The Cloud service the app asks. Kept as a list so callers that fan out
-/// over services keep working; today it holds at most one.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Directory {
-    pub name: String,
-    /// Base URL, https only (http on loopback for local testing).
-    pub url: String,
-}
+pub use crate::cloud::Directory;
+pub(crate) use crate::cloud::{directories_db, nonce, proof, signed_get};
 
 /// One entry in a directory's record of who looked at this person.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,84 +86,6 @@ pub(crate) async fn directories(state: &State<'_, AppState>) -> Result<Vec<Direc
             |db| directories_db(db.conn()),
         )
         .await
-}
-
-pub(crate) fn directories_db(conn: &rusqlite::Connection) -> Result<Vec<Directory>, String> {
-    if !SettingsStore::get(conn, keys::ORGANISATIONS_ENABLED) {
-        return Ok(Vec::new());
-    }
-    Ok(cloud::origin(conn)
-        .into_iter()
-        .map(|url| Directory {
-            name: "Alexandria Cloud".into(),
-            url,
-        })
-        .collect())
-}
-
-/// A value used once, so two identical requests do not sign identically.
-///
-/// Ed25519 is deterministic (RFC 8032), so without this a second request to the
-/// same path in the same second produces the same 64 bytes as the first. The
-/// service treats a proof as single-use — that is what stops a captured header
-/// being replayed — and cannot tell "asked twice" from "replayed" unless the
-/// client makes them different. Releasing evidence in several batches is
-/// exactly that case.
-pub(crate) fn nonce() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-/// Sign the challenge a directory will check.
-///
-/// The path is signed along with the method, the timestamp and a per-request
-/// nonce, so a proof handed to one endpoint cannot be replayed against another
-/// — including another person's record on the same server — and cannot be
-/// replayed against the same one twice.
-pub(crate) fn proof(
-    sk: &SigningKey,
-    method: &str,
-    path: &str,
-    timestamp: i64,
-    nonce: &str,
-) -> String {
-    let challenge = format!("{method}\n{path}\n{timestamp}\n{nonce}");
-    let sig = sk.sign(challenge.as_bytes());
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes())
-}
-
-/// GET a path from a directory with a fresh proof attached.
-async fn signed_get(
-    client: &reqwest::Client,
-    dir: &Directory,
-    sk: &SigningKey,
-    path: &str,
-) -> Result<serde_json::Value, String> {
-    // https only. This carries a list of who is interested in a named person,
-    // and the proof header is a bearer credential for five minutes — neither
-    // belongs on a plaintext connection.
-    if !is_allowed_origin(&dir.url) {
-        return Err("a directory must be https".into());
-    }
-
-    let timestamp = chrono::Utc::now().timestamp();
-    let n = nonce();
-    let base = dir.url.trim_end_matches('/');
-    let resp = client
-        .get(format!("{base}{path}"))
-        .header("x-alexandria-timestamp", timestamp.to_string())
-        .header("x-alexandria-nonce", &n)
-        .header("x-alexandria-proof", proof(sk, "GET", path, timestamp, &n))
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !resp.status().is_success() {
-        let code = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{code}: {body}"));
-    }
-    resp.json().await.map_err(|e| e.to_string())
 }
 
 // --- tauri command handlers ----------------------------------------------
@@ -395,8 +307,12 @@ pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cloud;
     use crate::crypto::did::derive_did_key;
     use crate::db::Database;
+    use crate::settings::{registry::keys, SettingsStore};
+    use base64::Engine;
+    use ed25519_dalek::SigningKey;
 
     fn key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; 32])

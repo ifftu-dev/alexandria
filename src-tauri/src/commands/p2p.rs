@@ -149,6 +149,7 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
             let (mut gossip, gossip_dispatcher) =
                 inbound::gossip_ingest(inbound_db.clone(), move |event| event.emit(&app_events));
             operations.spawn_job(gossip_dispatcher).await;
+            let app_for_guardian = app_for_events.clone();
 
             // Spawn event consumer
             operations
@@ -167,6 +168,11 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                             }
                             crate::p2p::types::P2pEvent::StatusChanged(status) => {
                                 log::debug!("P2P: {} peers", status.connected_peers);
+                            }
+                            crate::p2p::types::P2pEvent::GuardianLinked {
+                                notification: Some(recorded),
+                            } => {
+                                crate::notifications::announce(&app_for_guardian, &recorded);
                             }
                             _ => {}
                         }

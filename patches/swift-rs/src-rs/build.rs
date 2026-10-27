@@ -379,11 +379,70 @@ impl SwiftLinker {
                 );
             }
 
+            // Every package archive SwiftPM builds here carries its own copy of
+            // the modules it depends on: `Tauri.o` and `SwiftRs.o` sit in every
+            // plugin archive beside the copies in Tauri's own. The linker
+            // ignores the extras until something force-loads archive members,
+            // and `-ObjC` — which Firebase needs for its Objective-C categories
+            // — loads every member that defines an Objective-C class, so the
+            // copies then collide as duplicate symbols. Keep the shared
+            // modules in the `Tauri` package's archive only; every plugin
+            // resolves against that one.
+            if package.name != SHARED_MODULE_PACKAGE {
+                drop_shared_modules(&search_path.join(format!("lib{}.a", package.name)));
+            }
+
             println!("cargo:rerun-if-changed={}", package_path.display());
             println!("cargo:rustc-link-search=native={}", search_path.display());
             println!("cargo:rustc-link-lib=static={}", package.name);
         }
     }
+}
+
+/// The package whose archive keeps the shared Swift modules; see
+/// `drop_shared_modules`.
+const SHARED_MODULE_PACKAGE: &str = "Tauri";
+/// The members SwiftPM vendors into every dependent archive.
+const SHARED_MODULE_MEMBERS: &[&str] = &["Tauri.o", "SwiftRs.o"];
+
+/// Removes the vendored copies of the shared modules from a plugin archive,
+/// so that `-ObjC` in the final link finds exactly one definition of each.
+/// A missing archive or member is nothing to do; a failing `ar` is reported
+/// and left for the linker to explain.
+fn drop_shared_modules(archive: &std::path::Path) {
+    use std::process::Command;
+
+    if !archive.exists() {
+        return;
+    }
+    let Ok(listing) = Command::new("ar").arg("-t").arg(archive).output() else {
+        return;
+    };
+    let listing = String::from_utf8_lossy(&listing.stdout);
+    let present: Vec<&str> = SHARED_MODULE_MEMBERS
+        .iter()
+        .copied()
+        .filter(|member| listing.lines().any(|line| line.trim() == *member))
+        .collect();
+    if present.is_empty() {
+        return;
+    }
+    let dropped = Command::new("ar")
+        .arg("-d")
+        .arg(archive)
+        .args(&present)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !dropped {
+        println!(
+            "cargo:warning=swift-rs: could not drop {present:?} from {}",
+            archive.display()
+        );
+        return;
+    }
+    // `ar -d` leaves the symbol table stale.
+    let _ = Command::new("ranlib").arg(archive).status();
 }
 
 fn link_clang_rt(rust_target: &RustTarget) {

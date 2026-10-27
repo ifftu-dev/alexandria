@@ -45,6 +45,7 @@ pub mod integrity;
 pub mod interview;
 #[cfg(test)]
 mod live_demo;
+pub mod notifications;
 pub mod opinions;
 pub mod personhood_lab;
 pub mod personhood_receipts;

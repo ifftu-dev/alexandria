@@ -274,6 +274,18 @@ pub mod keys {
         default: || true,
     };
 
+    /// Device-scoped: a push token belongs to one installation, so whether
+    /// this one registers for remote wake-ups is not something another
+    /// device should inherit through sync.
+    pub const NOTIFICATIONS_PUSH_ENABLED: SettingKey<bool> = SettingKey {
+        key: "notifications.push_enabled",
+        scope: Scope::Device,
+        category: "Notifications",
+        label: "Push notifications on this device",
+        description: "Let Alexandria Cloud wake this device for interview invitations, offers and requests while the app is closed. Mobile only.",
+        default: || true,
+    };
+
     pub const SYNC_AUTO: SettingKey<bool> = SettingKey {
         key: "sync.auto",
         scope: Scope::Sync,
@@ -590,6 +602,7 @@ pub fn all_entries(
         entry!(SENTINEL_CAMERA_ENABLED),
         entry!(SENTINEL_KEYBOARD_ENABLED),
         entry!(NOTIFICATIONS_ENABLED),
+        entry!(NOTIFICATIONS_PUSH_ENABLED),
         entry!(SYNC_AUTO),
         entry!(USER_LANGUAGE),
         entry!(UI_DISMISSED_LOCALE_NOTICES),
@@ -639,6 +652,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(SENTINEL_CAMERA_ENABLED);
     check!(SENTINEL_KEYBOARD_ENABLED);
     check!(NOTIFICATIONS_ENABLED);
+    check!(NOTIFICATIONS_PUSH_ENABLED);
     check!(SYNC_AUTO);
     check!(USER_LANGUAGE);
     check!(UI_DISMISSED_LOCALE_NOTICES);

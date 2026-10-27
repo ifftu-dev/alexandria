@@ -54,25 +54,7 @@ pub(super) async fn directory(
     Ok(dir)
 }
 
-pub(super) async fn response_json(
-    mut response: reqwest::Response,
-) -> Result<serde_json::Value, String> {
-    let status = response.status();
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err("directory response is too large".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    if !status.is_success() {
-        return Err(format!(
-            "directory returned {status}: {}",
-            String::from_utf8_lossy(&bytes)
-        ));
-    }
-    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
-}
+pub(super) use crate::cloud::response_json;
 
 async fn requests(
     state: &State<'_, AppState>,
