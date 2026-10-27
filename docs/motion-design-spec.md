@@ -125,7 +125,26 @@ an ad-hoc audit bundle with isolated test data. This is not installer validation
   Compositor work is shared with other desktop activity, so this does not
   establish exclusive app GPU cost or a frame-pacing pass.
 
+Mobile preparation at source `0a2fa78e` (motion code unchanged from `7db4c17f`):
+arm64 iOS release compilation, development signing and wireless installation
+succeeded on the physical iPhone 17, iOS 27.2 (24B119). The separate
+`org.alexandria.node.motionaudit` app preserves the installed regular app and its
+data. Android arm64 release compilation and APK packaging also succeeded, with
+the same isolated package ID, release minification, local test signing and
+shell profiling enabled; the APK is not debuggable. Both use their production
+mobile video features. Packaging used the repository Tauri CLI and Java 21;
+the older global CLI omitted Android features, and Java 25 failed with the
+project's Gradle version. Those failed attempts are not validation evidence.
+Signed baseline `827a687d` artifacts are also prepared for both mobile targets
+under the same audit IDs and release configuration. Android packaging uses
+preserved, successfully compiled release libraries for both versions, skipping
+the redundant Gradle Rust rebuild. Baseline apps have not been installed.
+
 Native acceptance remains open. Returning-profile unlock, authenticated
 atlas/completion journeys, first-paint theme handoffs and other physical targets
-remain unverified. The paired iPhone is offline in Instruments; no Android
-device is connected. No Windows/Linux physical-device result is claimed.
+remain unverified. The iPhone's developer service can install the audit app,
+but Instruments still reports the phone offline. The OnePlus is currently
+absent from ADB discovery and its previous wireless addresses are unreachable.
+No mobile runtime measurements or Windows/Linux physical-device results are
+claimed. Build, signing and installation checks do not satisfy performance
+acceptance.
