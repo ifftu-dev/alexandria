@@ -8,6 +8,9 @@ let package = Package(
     // Firebase 13 supports iOS 15 and later; the app's own deployment target
     // is higher still.
     .iOS(.v15),
+    // Never built for macOS, but SwiftPM checks every platform: without
+    // this the package defaults to macOS 10.13, below FirebaseMessaging's 11.
+    .macOS(.v11),
   ],
   products: [
     .library(
