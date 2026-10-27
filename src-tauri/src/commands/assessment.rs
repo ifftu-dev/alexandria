@@ -924,7 +924,8 @@ pub async fn assessment_grade(
     attempt_id: String,
     answers: Vec<SubmittedAnswer>,
 ) -> Result<GradeResult, String> {
-    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let (signing_key, issuer_did) = issuer.clone().into_parts();
     let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
@@ -956,7 +957,8 @@ pub async fn assessment_grade(
         .await?;
     // A passed attempt may have issued a credential into a list its host has
     // not seen yet; a verifier fetching that list next minute must find it.
-    crate::commands::credentials::publish_status_lists_quietly(&state).await;
+    crate::commands::credentials::publish_status_lists_quietly(&state, &issuer, "after grading")
+        .await;
     // A new credential can change what a synced grant or listing shows.
     crate::commands::organisations::sync_quietly(&state).await;
     Ok(graded)

@@ -15,20 +15,20 @@ use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{VerifiableCredential, VerificationResult};
 use crate::AppState;
 
-/// Best-effort publication after a command that touched a list. The command's
-/// own result is already decided; a host that is down is a warning here and a
-/// pending list for the next pass.
-pub(crate) async fn publish_status_lists_quietly(state: &State<'_, AppState>) {
-    let published = match Issuer::from_keystore(&state.keystore).await {
-        Ok(issuer) => {
-            status_list::publish(&state.db_executor, &state.profile_lease(), &issuer).await
-        }
-        Err(e) => Err(e),
-    };
-    match published {
+/// Best-effort publication after a command that touched a list, with the
+/// issuer that command already read from the keystore. The command's own
+/// result is already decided; a host that is down is a warning here and a
+/// pending list for the next pass. `after` names the flow in the log
+/// ("after grading").
+pub(crate) async fn publish_status_lists_quietly(
+    state: &State<'_, AppState>,
+    issuer: &Issuer,
+    after: &str,
+) {
+    match status_list::publish(&state.db_executor, &state.profile_lease(), issuer).await {
         Ok(report) if report.errors.is_empty() => {}
-        Ok(report) => log::warn!("status list publication: {:?}", report.errors),
-        Err(e) => log::warn!("status list publication: {e}"),
+        Ok(report) => log::warn!("status list publication {after}: {:?}", report.errors),
+        Err(e) => log::warn!("status list publication {after}: {e}"),
     }
 }
 
@@ -40,6 +40,7 @@ pub async fn issue_credential(
     req: IssueCredentialRequest,
 ) -> Result<VerifiableCredential, String> {
     let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let signer = issuer.clone();
     let now = now_rfc3339();
     let issued = state
         .db_executor
@@ -47,10 +48,10 @@ pub async fn issue_credential(
             DatabaseWorkload::Instructor,
             state.profile_lease(),
             "credentials.issue",
-            move |db| credentials::issue(db.conn(), &issuer, &req, &now),
+            move |db| credentials::issue(db.conn(), &signer, &req, &now),
         )
         .await?;
-    publish_status_lists_quietly(&state).await;
+    publish_status_lists_quietly(&state, &issuer, "after issue").await;
     super::organisations::sync_quietly(&state).await;
     Ok(issued)
 }
@@ -102,7 +103,8 @@ pub async fn revoke_credential(
     credential_id: String,
     reason: String,
 ) -> Result<(), String> {
-    let issuer_did = Issuer::from_keystore(&state.keystore).await?.did().clone();
+    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer_did = issuer.did().clone();
     let now = now_rfc3339();
     state
         .db_executor
@@ -113,7 +115,7 @@ pub async fn revoke_credential(
             move |db| lifecycle::revoke(db.conn(), &issuer_did, &credential_id, &reason, &now),
         )
         .await?;
-    publish_status_lists_quietly(&state).await;
+    publish_status_lists_quietly(&state, &issuer, "after revoke").await;
     // A revoked credential stops counting, so what a synced grant shows changes.
     super::organisations::sync_quietly(&state).await;
     Ok(())
