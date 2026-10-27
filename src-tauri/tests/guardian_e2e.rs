@@ -196,9 +196,23 @@ fn establish_link(birthdate: &str) -> (Person, Person, [u8; 32], String) {
 
     // The Link request crosses the wire; the child's node handles it.
     let resp = handle_guardian_request(child.db.conn(), PARENT_PEER, &link_req);
-    let GuardianResponse::Linked { sealed_snapshot } = resp else {
+    let wire = serde_json::to_value(&resp).expect("wire response");
+    assert!(
+        !wire.to_string().contains("notification"),
+        "the inbox stays device-local"
+    );
+    let GuardianResponse::Linked {
+        sealed_snapshot,
+        notification,
+    } = resp
+    else {
         panic!("expected Linked, got {resp:?}");
     };
+
+    assert!(notification.is_some());
+    let inbox = app_lib::notifications::list(child.db.conn(), None, false).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].route.as_deref(), Some("/settings/guardian"));
 
     // Parent opens the initial snapshot and goes active.
     let snapshot: GuardianActivityPayload =
