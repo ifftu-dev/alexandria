@@ -51,3 +51,8 @@ Use TDD at the approved graph-adapter and shared-state seams. Verify subject iso
 - Shared-state tests use the real profile lifecycle, local API/session guard, event publisher, and memory router. Only the external Tauri IPC boundary and time/visibility are faked. Additional checks cover forced-refresh coalescing, failure/retry, missing DID, stale errors/queued work, and synchronous clearing before delayed lock hooks.
 - Focused command: `npx vitest run src/utils/__tests__/skillAtlas.test.ts src/composables/useSkillAtlas.test.ts src/composables/__tests__/provenBloom.test.ts src/composables/__tests__/useProfiles.test.ts src/components/layout/SidebarSkillGraph.test.ts` — 33 tests pass.
 - `npx vue-tsc -b --noEmit` passes. Rendering, browser validation, UI translations, and full application integration remain for tickets 02/03.
+
+## Accepted review fixes — 2026-10-27
+
+- Standards finding 2: moved `AtlasCamera`, `AtlasViewState`, and fresh defaults to the pure `src/utils/skillAtlasView.ts` module. `createAtlasViewState()` is shared by profile initialization/reset and explorer Reset. The composable re-exports the types for existing consumers; the explorer has no runtime singleton dependency.
+- Existing shared-state/profile reset, view restoration, mounted reset, keyboard and pointer tests remain green. Final review-fix validation: 36 focused tests, 441 full frontend tests, strict `vue-tsc`, and production build pass. The parent spec records the full review-fix handoff.

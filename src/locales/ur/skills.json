@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "{level} نمایاں ہے · فہرست میں مماثلتیں: {count}۔ دوسری مہارتیں بھی دستیاب ہیں۔",
     "title": "مہارتوں کا اٹلس",
     "ready": "تیار",
     "earned": "حاصل شدہ",

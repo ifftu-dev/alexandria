@@ -5,41 +5,27 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked, onProfileReady, useProfiles } from '@/composables/useProfiles'
 import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
-import { buildSkillAtlas, type AtlasModel, type BloomRank } from '@/utils/skillAtlas'
+import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
+import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
 
 export type AtlasSurface = 'page' | 'modal'
 export type AtlasTab = 'credentials' | 'graph' | 'browse'
 export type AtlasPhase = 'idle' | 'loading' | 'ready' | 'error'
 export type AtlasRefreshReason = 'navigation' | 'credentials' | 'retry'
 
-export interface AtlasCamera { x: number; y: number; zoom: number }
-export interface AtlasViewState {
-  selectedSkillId: string | null
-  focusedFieldId: string | null
-  unassignedFocused: boolean
-  query: string
-  bloomEmphasis: BloomRank | null
-  neighborhood: 'none' | 'prerequisites' | 'dependents'
-  neighborhoodDepth: 1 | 2
-  camera: AtlasCamera | null
-  inspectorCollapsed: boolean
-}
+export type { AtlasCamera, AtlasViewState } from '@/utils/skillAtlasView'
 export interface AtlasFeedback {
   revision: number
   earnedIds: readonly string[]
   improvedIds: readonly string[]
 }
 
-const emptyView = (): AtlasViewState => ({
-  selectedSkillId: null, focusedFieldId: null, unassignedFocused: false, query: '', bloomEmphasis: null,
-  neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false,
-})
 const model = ref<AtlasModel | null>(null)
 const phase = ref<AtlasPhase>('idle')
 const error = ref<string | null>(null)
 const refreshing = ref(false)
-const pageView = ref<AtlasViewState>(emptyView())
-const modalView = ref<AtlasViewState>(emptyView())
+const pageView = ref<AtlasViewState>(createAtlasViewState())
+const modalView = ref<AtlasViewState>(createAtlasViewState())
 const skillsTab = ref<AtlasTab>('credentials')
 const modalOpen = ref(false)
 const feedback = ref<AtlasFeedback | null>(null)
@@ -88,8 +74,8 @@ function clearProfileState(): void {
   phase.value = 'idle'
   error.value = null
   refreshing.value = false
-  pageView.value = emptyView()
-  modalView.value = emptyView()
+  pageView.value = createAtlasViewState()
+  modalView.value = createAtlasViewState()
   skillsTab.value = 'credentials'
   modalOpen.value = false
   clearFeedback()
@@ -178,7 +164,7 @@ function updateView(surface: AtlasSurface, patch: Partial<AtlasViewState>): void
 }
 
 function resetView(surface: AtlasSurface): void {
-  ;(surface === 'page' ? pageView : modalView).value = emptyView()
+  ;(surface === 'page' ? pageView : modalView).value = createAtlasViewState()
 }
 
 function setSkillsTab(tab: AtlasTab): void { skillsTab.value = tab }

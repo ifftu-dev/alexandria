@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "{level} তুলে ধরা হচ্ছে · তালিকায় মিল: {count}। অন্যান্য দক্ষতাও উপলব্ধ আছে।",
     "title": "দক্ষতার অ্যাটলাস",
     "ready": "প্রস্তুত",
     "earned": "অর্জিত",

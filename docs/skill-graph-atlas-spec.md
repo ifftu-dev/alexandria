@@ -46,3 +46,13 @@ The implementation workflow authorizes maintaining this spec/ticket lifecycle. A
 ## Notes
 
 - 2026-10-27: Created the ticket graph from the confirmed research brief. Existing unrelated untracked research is excluded from this work.
+
+
+## Review-fix handoff — 2026-10-27
+
+All five accepted findings from `review-standards-v1.md` and `review-spec-v1.md` are resolved in isolated branch `t3/skill-atlas-review-fixes`, starting exactly at integration `eb5786fc31a8213d8e15a89fa7d40dcd567a3fcd` with ancestry verified. Tickets 01–03 append the updated APIs and evidence. The fix handoff is ready for parent integration; no integration checkout was modified, pushed, or merged by the implementer.
+
+- Standards: readonly action errors, a shared pure view-state factory, and unified camera bounds/clamping.
+- Spec: earned and Ready learning opens skill-filtered existing course browse/detail routes; Bloom emphasis works in overview previews and full-label lists with truthful counts and preserved context.
+- Both functional fixes were reproduced red before implementation at approved mounted seams. Final checks: 36 focused tests, 441 frontend tests, strict typecheck, build, i18n keys/parity/no-raw-text, and 45 browser checks pass (one existing WebKit native-touch-synthesis skip). All nine catalogs include the three new keys. Existing large-chunk warnings and 437 unrelated pending translations remain.
+- Detailed response: `/Users/hack/Documents/Personal/Code/alexandria-mark3/work/skill-graph-implementation/review-fix-response-v1.md`; verification artifacts are in its adjacent `review-fixes-v1/` directory. Port 5199 isolates the documented Playwright fixture. No guided-path, assessment-policy, taxonomy, or backend changes.

@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "Resaltando {level} · Coincidencias en la lista: {count}. Las demás habilidades siguen disponibles.",
     "title": "Atlas de habilidades",
     "ready": "Lista",
     "earned": "Adquirida",

@@ -1,16 +1,13 @@
-import { onScopeDispose, ref, watch } from 'vue'
+import { onScopeDispose, readonly, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useGoals } from '@/composables/useGoals'
 import { useProfiles } from '@/composables/useProfiles'
-import { useSettings } from '@/composables/useSettings'
 import { useSkillAtlas, type AtlasSurface } from '@/composables/useSkillAtlas'
 
-/** Existing goal workflow, with session ownership shared by both atlas surfaces. */
+/** Skill-scoped course discovery, with session ownership shared by both atlas surfaces. */
 export function useSkillAtlasActions(surface: AtlasSurface) {
   const atlas = useSkillAtlas()
   const router = useRouter()
   const profiles = useProfiles()
-  const { addGoal } = useGoals()
   const actionError = ref<string | null>(null)
   let generation = 0
   let busy = false
@@ -25,11 +22,7 @@ export function useSkillAtlasActions(surface: AtlasSurface) {
     busy = true
     actionError.value = null
     try {
-      await useSettings().initialize()
-      if (ticket !== generation) return
-      await addGoal({ label: skill.name, goalSkillIds: [id] })
-      if (ticket !== generation) return
-      const failure = await router.push('/goals')
+      const failure = await router.push({ path: '/courses', query: { skillId: id } })
       if (!failure && ticket === generation && surface === 'modal') atlas.setModalOpen(false)
     } catch (cause) {
       if (ticket === generation) actionError.value = cause instanceof Error ? cause.message : String(cause)
@@ -41,5 +34,5 @@ export function useSkillAtlasActions(surface: AtlasSurface) {
     try { await atlas.openSkill(router, surface, id) }
     catch (cause) { if (ticket === generation) actionError.value = cause instanceof Error ? cause.message : String(cause) }
   }
-  return { learnSkill, openSkill, actionError }
+  return { learnSkill, openSkill, actionError: readonly(actionError) }
 }

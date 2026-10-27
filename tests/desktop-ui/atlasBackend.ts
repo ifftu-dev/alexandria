@@ -1,5 +1,5 @@
 import taxonomy from '../../bootstrap/public_taxonomy.json'
-import type { Identity, SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
+import type { Chapter, Course, Element, Identity, SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
 import type { SettingEntry } from '@/composables/useSettings'
 
 /** Strict external IPC fixture shared by mounted surfaces and browser journeys. */
@@ -27,6 +27,22 @@ export function atlasBackend(stress = false) {
     edges.push({ skill_id: 'fixture-unassigned', skill_name: 'Long label', skill_bloom: 'evaluate',
       prerequisite_id: 'missing', prerequisite_name: 'An unloaded prerequisite', prerequisite_bloom: 'apply' })
   }
+  // Illustrative learning content, distinct from the bootstrap taxonomy.
+  const courses: Course[] = [
+    { id: 'fixture-big-o', title: 'Further algorithm analysis', skill_ids: ['skill_big_o'] },
+    { id: 'fixture-ready', title: 'Practising sorting algorithms', skill_ids: ['skill_sorting'] },
+    { id: 'fixture-stewardship', title: 'Practising community stewardship', skill_ids: ['fixture-unassigned'] },
+  ].map(course => ({
+    ...course, kind: 'course',
+    description: 'Fixture learning content', author_address: 'stake-instructor', author_name: 'Fixture instructor',
+    content_cid: 'fixture-content', thumbnail_cid: null, thumbnail_svg: null, tags: null,
+    version: 1, status: 'published', published_at: '2026-10-27', on_chain_tx: null,
+    created_at: '2026-10-27', updated_at: '2026-10-27',
+  }))
+  const chapters: Chapter[] = [{ id: 'fixture-analysis-chapter', course_id: 'fixture-big-o', title: 'Comparing algorithm growth', description: null, position: 0 }]
+  const elements: Element[] = [{ id: 'fixture-analysis-reading', chapter_id: 'fixture-analysis-chapter', title: 'Linear and quadratic growth',
+    element_type: 'text', content_inline: 'Compare how doubling the input changes the work for a linear scan and a pairwise comparison.',
+    content_cid: null, position: 0, duration_seconds: null }]
   const identity: Identity = { stake_address: 'stake-fixture', payment_address: 'payment-fixture', username: null,
     display_name: 'Atlas learner', bio: null, avatar_cid: null, visibility: null, profile_hash: null, created_at: '', updated_at: '' }
   const settings: SettingEntry[] = ['learner.targets', 'instructor.graph_prefs'].map(key => ({ key, scope: 'sync', category: '', label: key,
@@ -79,7 +95,13 @@ export function atlasBackend(stress = false) {
       }
       case 'plugin:event|listen': return 1
       case 'plugin:event|unlisten': return null
-      case 'list_courses': case 'list_opinions': case 'list_derived_states': case 'list_goal_templates': return []
+      case 'hydrate_catalog_courses': return 0
+      case 'list_courses': return courses
+      case 'get_course': return courses.find(course => course.id === args?.courseId) ?? null
+      case 'list_chapters': return chapters.filter(chapter => chapter.course_id === args?.courseId)
+      case 'list_elements': return elements.filter(element => element.chapter_id === args?.chapterId)
+      case 'list_enrollments': return []
+      case 'list_opinions': case 'list_derived_states': case 'list_goal_templates': return []
       case 'recompute_all': return 0
       case 'compute_learning_path': return { steps: [], total: 0, earned_count: 0, goal_skill_ids: args?.goalSkillIds ?? [] }
       case 'assessment_plan_goal': return { steps: [] }

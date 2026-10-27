@@ -67,6 +67,8 @@ if (screen === 'personal-atlas') {
   const { useProfiles } = await import('@/composables/useProfiles')
   await useProfiles().initialize()
   const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/courses', component: (await import('@/pages/courses/Index.vue')).default },
+    { path: '/courses/:id', component: (await import('@/pages/courses/Detail.vue')).default },
     { path: '/skills', component: Skills }, { path: '/skills/:id', component: Detail }, { path: '/goals', component: Goals },
   ] })
   await router.push('/skills')

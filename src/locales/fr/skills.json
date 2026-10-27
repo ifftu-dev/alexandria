@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "Mise en évidence de {level} · Correspondances dans la liste : {count}. Les autres compétences restent accessibles.",
     "title": "Atlas des compétences",
     "ready": "Prête",
     "earned": "Acquise",

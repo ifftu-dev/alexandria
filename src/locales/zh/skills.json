@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "突出显示{level} · 列表中匹配的技能：{count}。其他技能仍然可用。",
     "title": "技能图谱",
     "ready": "就绪",
     "earned": "已获得",

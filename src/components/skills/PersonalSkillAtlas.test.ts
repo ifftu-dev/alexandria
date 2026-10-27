@@ -10,7 +10,7 @@ const ipc = vi.hoisted(() => vi.fn())
 vi.mock('@tauri-apps/api/core', () => ({ invoke: ipc, transformCallback: () => 1 }))
 let wrapper: VueWrapper | undefined
 beforeEach(() => { vi.resetModules(); ipc.mockReset(); Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke: ipc, transformCallback: () => 1, unregisterCallback: () => {} } }) })
-afterEach(() => { wrapper?.unmount(); document.body.innerHTML = '' })
+afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; sessionStorage.clear() })
 function button(name: string, root: ParentNode = document) {
   const target = [...root.querySelectorAll('button')].find(el => (el.getAttribute('aria-label') ?? el.textContent?.trim()) === name)
   if (!target) throw new Error(`Missing button ${name}`)
@@ -27,6 +27,8 @@ async function setup() {
   const { default: Sidebar } = await import('@/components/layout/SidebarSkillGraph.vue')
   const { default: Host } = await import('@/components/skills/SkillAtlasHost.vue')
   const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/courses', component: (await import('@/pages/courses/Index.vue')).default },
+    { path: '/courses/:id', component: (await import('@/pages/courses/Detail.vue')).default },
     { path: '/skills', component: Page }, { path: '/skills/:id', component: Detail }, { path: '/goals', component: (await import('@/pages/goals/Index.vue')).default }, { path: '/other', component: { template: '<p>Other</p>' } },
   ] })
   await useProfiles().initialize()
@@ -92,45 +94,65 @@ it('returns to the expanded context once, releases scroll locks and does not reo
   expect(backend.state.unexpected).toEqual([])
 })
 
-it('adds existing learning goals for both earned and Ready skills from the modal and page', async () => {
-  const { atlas, backend, router } = await setup()
-  // The modal must work even before visiting the graph visibility editor/settings loader.
+it('offers a course and enrollment for an already earned skill from the modal', async () => {
+  const { atlas, backend } = await setup()
+  // A previous kind preference must not silently hide matching learning content.
+  sessionStorage.setItem('courses-kind-filter', 'tutorial')
   atlas.setModalOpen(true)
   await flushPromises()
   await click('Big-O Analysis · 2 Understand', document.querySelector('[role="dialog"]')!)
   await click('Find learning opportunities', document.querySelector('[role="dialog"]')!)
-  expect(router.currentRoute.value.path).toBe('/goals')
-  expect(wrapper!.text()).toContain('Big-O Analysis')
-  expect(document.body.style.overflow).toBe('')
-  await router.push('/skills')
+  expect(wrapper!.text()).toContain('Learning for Big-O Analysis')
+  const courses = wrapper!.findAll('a.cc-grid')
+  expect(courses.map(course => course.text())).toEqual([expect.stringContaining('Further algorithm analysis')])
+  await courses[0]!.trigger('click')
   await flushPromises()
+  expect(wrapper!.get('h1').text()).toBe('Further algorithm analysis')
+  expect(wrapper!.text()).toContain('Linear and quadratic growth')
+  expect(button('Enroll').disabled).toBe(false)
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.body.style.overflow).toBe('')
+  expect(backend.state.unexpected).toEqual([])
+  sessionStorage.clear()
+})
+
+it('keeps Ready learning accessible, updates the skill filter on route reuse and explains an empty result', async () => {
+  const { router, backend } = await setup()
   await click('My Graph')
-  const list = wrapper!.get('[aria-label="Full-label skill list"]')
-  const ready = list.findAll('button').find(item => item.text().includes('Ready'))!
-  await ready.trigger('click')
+  await click('Sorting Algorithms · Ready')
   await click('Find learning opportunities')
-  expect(router.currentRoute.value.path).toBe('/goals')
-  const goals = JSON.parse(backend.settings.find(item => item.key === 'learner.targets')!.current_value)
-  expect(goals).toHaveLength(2)
-  expect(goals[0].goal_skill_ids).toEqual(['skill_big_o'])
-  expect(goals[1].goal_skill_ids).not.toEqual(['skill_big_o'])
+  expect(wrapper!.text()).toContain('Learning for Sorting Algorithms')
+  expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Practising sorting algorithms')])
+  await router.push('/courses?skillId=skill_big_o')
+  await flushPromises()
+  expect(wrapper!.text()).toContain('Learning for Big-O Analysis')
+  expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Further algorithm analysis')])
+  await router.push('/courses?skillId=skill_logic')
+  await flushPromises()
+  expect(wrapper!.text()).toContain('No courses or tutorials for this skill in the selected category yet.')
+  expect(wrapper!.findAll('a.cc-grid')).toHaveLength(0)
+  await click('Browse Courses')
+  expect(wrapper!.findAll('a.cc-grid')).toHaveLength(3)
   expect(backend.state.unexpected).toEqual([])
 })
 
-it('keeps the modal open with an actionable error when saving a learning goal fails', async () => {
-  const { atlas, router, backend } = await setup()
+it('keeps the modal open with an actionable error when learning navigation fails and allows retry', async () => {
+  const { atlas, router } = await setup()
   atlas.setModalOpen(true)
   await flushPromises()
   const dialog = document.querySelector('[role="dialog"]')!
   await click('Big-O Analysis · 2 Understand', dialog)
-  ipc.mockImplementation((command: string, args?: Record<string, unknown>) => command === 'set_setting'
-    ? Promise.reject(new Error('Could not save goal')) : backend.invoke(command, args))
+  router.onError(() => {})
+  const removeGuard = router.beforeEach(to => {
+    if (to.path === '/courses') throw new Error('Could not open courses')
+  })
   await click('Find learning opportunities', dialog)
   expect(router.currentRoute.value.path).toBe('/skills')
-  expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('Could not save goal')
-  ipc.mockImplementation(backend.invoke)
+  expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('Could not open courses')
+  removeGuard()
   await click('Find learning opportunities', dialog)
-  expect(router.currentRoute.value.path).toBe('/goals')
+  expect(wrapper!.text()).toContain('Further algorithm analysis')
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
 })
 
 it('clears modal returns on lock and tears down the app refresh owner without leaking the scroll lock', async () => {

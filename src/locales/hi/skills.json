@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "{level} पर ज़ोर · सूची में मेल: {count}। अन्य कौशल भी उपलब्ध हैं।",
     "title": "कौशल एटलस",
     "ready": "तैयार",
     "earned": "अर्जित",

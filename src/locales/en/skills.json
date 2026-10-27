@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "Emphasizing {level} · Matches in the list: {count}. Other skills remain available.",
     "title": "Skill atlas",
     "ready": "Ready",
     "earned": "Earned",

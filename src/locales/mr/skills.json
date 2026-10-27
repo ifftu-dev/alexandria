@@ -130,6 +130,7 @@
     "cooldownUntil": "in {when}"
   },
   "atlas": {
+    "bloomSummary": "{level} ठळक केले आहे · यादीतील जुळणारे कौशल्य: {count}. इतर कौशल्येही उपलब्ध आहेत.",
     "title": "कौशल्यांचा अॅटलस",
     "ready": "तयार",
     "earned": "मिळवलेले",

@@ -70,6 +70,46 @@ describe('personal atlas explorer public interactions', () => {
     expect(inspector.text()).toContain('Unassigned')
   })
 
+  it('emphasizes earned Bloom in overview previews and the full-label list without removing Ready or prerequisite context', async () => {
+    const wrapper = setup()
+    await wrapper.get('select').setValue('3')
+    expect(wrapper.find('.atlas-overview').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Emphasizing 4 Analyze · Matches in the list: 1. Other skills remain available.')
+    expect(wrapper.get('.field-earned.is-bloom-match').text()).toContain('Algebra')
+    expect(wrapper.get('.field-earned.is-bloom-match').text()).toContain('✓ 4 Analyze')
+    expect(wrapper.get('.atlas-list .is-bloom-match').text()).toContain('Algebra')
+    expect(wrapper.findAll('.atlas-list button')).toHaveLength(3)
+    await wrapper.get('select').setValue('5')
+    expect(wrapper.text()).toContain('Emphasizing 6 Create · Matches in the list: 0.')
+    expect(wrapper.findAll('.is-bloom-match')).toHaveLength(0)
+    expect(wrapper.text()).toContain('2 earned · 1 Ready · 3 loaded skills')
+    await button(wrapper, 'Bridges · Ready').trigger('click')
+    expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Unloaded foundation')
+    expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Algebra')
+    await button(wrapper, 'Find learning opportunities').trigger('click')
+    expect(wrapper.emitted('learn-skill')).toEqual([['b']])
+    await wrapper.get('select').setValue('')
+    expect(wrapper.text()).not.toContain('Emphasizing')
+  })
+
+  it('brings a matching earned skill into a capped field preview while keeping loaded and search counts truthful', async () => {
+    const wrapper = setup()
+    await wrapper.setProps({ model: buildSkillAtlas({
+      skills: [skill('a', 'Algebra', 'Mathematics'), skill('b', 'Basic geometry', 'Mathematics'), skill('c', 'Calculus', 'Mathematics')],
+      edges: [], activeCredentials: [credential('a', 1), credential('b', 2), credential('c', 5)], subjectDid: 'did:me',
+    }) })
+    expect(wrapper.findAll('.field-earned').map(node => node.text())).not.toContain(expect.stringContaining('Calculus'))
+    await wrapper.get('select').setValue('5')
+    expect(wrapper.get('.field-earned.is-bloom-match').text()).toContain('Calculus')
+    expect(wrapper.get('.field-earned.is-bloom-match').text()).toContain('✓ 6 Create')
+    expect(wrapper.text()).toContain('3 earned · 0 Ready · 3 loaded skills')
+    expect(wrapper.findAll('.field-earned')).toHaveLength(2)
+    await wrapper.get('input[type="search"]').setValue('Algebra')
+    expect(wrapper.get('.bloom-summary').text()).toContain('Matches in the list: 0.')
+    expect(wrapper.findAll('.atlas-list button')).toHaveLength(1)
+    expect(wrapper.text()).toContain('3 earned · 0 Ready · 3 loaded skills')
+  })
+
   it('searches across fields, retains cross-field context, and reverses prerequisite focus without losing selection', async () => {
     const wrapper = setup()
     await wrapper.get('input[type="search"]').setValue('bridg')
