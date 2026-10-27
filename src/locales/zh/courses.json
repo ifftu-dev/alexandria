@@ -1,5 +1,7 @@
 {
   "index": {
+    "learningFor": "学习{name}",
+    "emptySkill": "所选类别中暂无此技能的课程或教程。",
     "title": "课程",
     "subtitle": "你设备上的课程和教程，以及从其他学习者处发现的更多内容。",
     "newTutorial": "新建教程",

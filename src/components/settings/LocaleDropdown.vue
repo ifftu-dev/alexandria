@@ -176,7 +176,7 @@ onBeforeUnmount(unbind)
   background: var(--app-card);
   box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35);
 }
-:global([dir='rtl']) .locale-dd__menu {
+[dir='rtl'] .locale-dd__menu {
   transform: translateX(50%);
 }
 

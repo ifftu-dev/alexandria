@@ -1,5 +1,7 @@
 {
   "index": {
+    "learningFor": "Apprendre : {name}",
+    "emptySkill": "Aucun cours ni tutoriel pour cette compétence dans la catégorie sélectionnée pour le moment.",
     "title": "Cours",
     "subtitle": "Cours et tutoriels sur votre appareil, ainsi que d'autres trouvés auprès d'autres apprenants.",
     "newTutorial": "Nouveau tutoriel",

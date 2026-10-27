@@ -1,6 +1,8 @@
 {
   "index": {
     "title": "Courses",
+    "learningFor": "Learning for {name}",
+    "emptySkill": "No courses or tutorials for this skill in the selected category yet.",
     "subtitle": "Courses and tutorials on your device, plus more found from other learners.",
     "newTutorial": "New Tutorial",
     "newCourse": "New Course",
