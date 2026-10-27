@@ -4,7 +4,7 @@
 //! (compiled from `cardano/governance/validators/completion.ak`) and
 //! turns each newly-observed mint into a [`CompletionObservation`] row
 //! in the local DB. The auto-issuance pipeline (see
-//! `commands::auto_issuance`) then signs a Verifiable Credential for
+//! `credentials::auto`) then signs a Verifiable Credential for
 //! each pending row and stamps the VC's `witness` block with the mint
 //! tx hash + validator script hash.
 //!

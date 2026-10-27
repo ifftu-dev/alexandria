@@ -1051,7 +1051,7 @@ pub fn run() {
                                     let issuance = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => Some(commands::auto_issuance::tick(
+                                            Ok(Some(db)) => Some(credentials::auto::tick(
                                                 db.conn(),
                                                 &w.signing_key,
                                             )),

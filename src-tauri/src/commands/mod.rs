@@ -15,7 +15,6 @@ pub mod adaptive;
 pub mod aggregation;
 pub mod assessment;
 pub mod attestation;
-pub mod auto_issuance;
 pub mod catalog;
 pub mod chapters;
 pub mod classroom;

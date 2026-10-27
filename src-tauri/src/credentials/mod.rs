@@ -5,6 +5,7 @@
 //! issues credentials and keeps their revocation status lists. The
 //! credential commands are thin wrappers over it.
 
+pub mod auto;
 pub mod bundle;
 pub mod issue;
 pub mod issuer;

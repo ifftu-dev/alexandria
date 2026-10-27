@@ -35,8 +35,8 @@
 //! `learner_count` on read (see `commands::reputation`).
 //!
 //! Entry point: [`on_credential_accepted`]. Callers — the VC
-//! issuance paths in `commands::credentials` and
-//! `commands::auto_issuance` — should invoke it after a credential
+//! issuance paths in `credentials::issue` and
+//! `credentials::auto` — should invoke it after a credential
 //! lands. `recompute_for_subject` is available for full rebuild from
 //! scratch (seeds/tests).
 

@@ -856,7 +856,7 @@ fn self_issue_completion(
         completion_obs::record_observation(conn, &obs).map_err(|e| e.to_string())?;
 
         let credential_id =
-            super::auto_issuance::issue_for_observation(conn, learner_key, &learner_did, &obs)?;
+            crate::credentials::auto::issue_for_observation(conn, learner_key, &learner_did, &obs)?;
         issued_ids.push(credential_id);
     }
 
