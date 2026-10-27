@@ -140,11 +140,27 @@ under the same audit IDs and release configuration. Android packaging uses
 preserved, successfully compiled release libraries for both versions, skipping
 the redundant Gradle Rust rebuild. Baseline apps have not been installed.
 
+Physical OnePlus CPH2447 audit: Android 16, WebView 155.0.8059.43,
+1080×2412 at 480 dpi, configured 120 Hz with adaptive refresh not yet measured.
+The final isolated release APK installed over wireless debugging. Before
+capture the phone was unplugged at 63% battery, 29.4 °C battery temperature and
+thermal status 0; device streaming and the automation helper were active.
+A 29.91-second Perfetto sample on the settled fresh-onboarding screen recorded
+0.020612 CPU seconds for the app and 0.008061 for its verified WebView renderer:
+0.028673 combined, about 0.096% of one core. Neither process produced an
+app-owned FrameTimeline frame, and Perfetto reported no nonzero error stats.
+App RSS stayed between 299.10 and 299.23 MB; renderer RSS stayed at 221.43 MB.
+RSS can include shared pages and is not an additive physical-memory total.
+This single System-mode idle sample does not measure GPU utilization or
+establish startup, interaction, Off-mode or baseline performance. Repeated
+launch and interaction capture paused when the phone returned to its lock
+screen; subsequent accessibility commands timed out.
+
 Native acceptance remains open. Returning-profile unlock, authenticated
 atlas/completion journeys, first-paint theme handoffs and other physical targets
-remain unverified. The iPhone's developer service can install the audit app,
-but Instruments still reports the phone offline. The OnePlus is currently
-absent from ADB discovery and its previous wireless addresses are unreachable.
-No mobile runtime measurements or Windows/Linux physical-device results are
-claimed. Build, signing and installation checks do not satisfy performance
-acceptance.
+remain unverified. The iPhone audit app was confirmed running, but Instruments
+attachment failed by PID and timed out waiting for the device to boot when
+attaching by app name; it subsequently listed the phone offline again. No
+usable iOS trace or Windows/Linux physical-device result is claimed. Mobile
+System/Off/baseline comparisons and repeated sequences remain outstanding.
+Build, signing and installation checks do not satisfy performance acceptance.
