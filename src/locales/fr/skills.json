@@ -162,7 +162,7 @@
     "results": "{count} compétences correspondantes",
     "noResults": "Aucun résultat. Essayez une autre recherche.",
     "map": "Carte des compétences",
-    "mapHelp": "Les flèches vont du prérequis à la compétence dépendante. Utilisez les commandes ou les touches fléchées pour vous déplacer ; sélectionnez un domaine ou une compétence pour le centrer.",
+    "mapHelp": "Les flèches indiquent prérequis → dépendants. Faites glisser pour déplacer la carte ; sur écran tactile, balayez horizontalement. Les gestes verticaux font défiler la page. Les commandes et les touches fléchées déplacent aussi la carte.",
     "zoomIn": "Agrandir",
     "zoomOut": "Réduire",
     "panLeft": "Déplacer la carte à gauche",

@@ -26,8 +26,8 @@ Tracker: local Markdown; close tickets with `Triage: done` and a dated note. No 
 ## Tickets and dependencies
 
 - [01 — Shared graph model and profile-safe state](skill-graph-atlas/01-model-state.md): done 2026-10-27; API handoff and verification recorded in the ticket.
-- [02 — Interactive subject atlas and inspector](skill-graph-atlas/02-explorer.md): next, using 01's adapter/state API.
-- [03 — Personal surfaces and end-to-end verification](skill-graph-atlas/03-personal-surfaces.md): blocked by 02; 01 is complete.
+- [02 — Interactive subject atlas and inspector](skill-graph-atlas/02-explorer.md): done 2026-10-27; reusable explorer API and component verification recorded in the ticket.
+- [03 — Personal surfaces and end-to-end verification](skill-graph-atlas/03-personal-surfaces.md): done 2026-10-27 in `t3/personal-surfaces-integration`; integration handoff, full-surface fixture, and verification recorded in the ticket.
 
 ## Approved public test boundaries
 

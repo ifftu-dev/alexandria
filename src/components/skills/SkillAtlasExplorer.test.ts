@@ -154,3 +154,29 @@ describe('personal atlas explorer public interactions', () => {
   })
 
 })
+
+it('drags the public map camera without selecting the node under a drag, while preserving tap and keyboard selection', async () => {
+  const wrapper = setup()
+  await button(wrapper, 'Explore Engineering').trigger('click')
+  const map = wrapper.get('.atlas-map')
+  const before = wrapper.props('view').camera!
+  const pointer = async (name: string, x: number, y: number) => {
+    const event = new MouseEvent(name, { bubbles: true, button: 0, clientX: x, clientY: y })
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: 'mouse' } })
+    map.element.dispatchEvent(event)
+    await nextTick()
+  }
+  await pointer('pointerdown', 200, 200)
+  await pointer('pointermove', 120, 160)
+  await pointer('pointerup', 120, 160)
+  expect(wrapper.props('view').camera).toEqual({ ...before, x: before.x + 80, y: before.y + 40 })
+  const node = wrapper.findAll('.map-node').find(item => item.text().includes('Bridges'))!
+  node.element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await nextTick()
+  expect(wrapper.props('view').selectedSkillId).toBeNull()
+  node.element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); await nextTick()
+  expect(wrapper.props('view').selectedSkillId).toBe('b')
+  await pointer('pointerdown', 100, 100)
+  await pointer('pointerup', 100, 100)
+  node.element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await nextTick()
+  expect(wrapper.props('view').selectedSkillId).toBe('b')
+})

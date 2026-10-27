@@ -1,80 +1,52 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createI18n } from 'vue-i18n'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import en from '@/locales/en'
+import { atlasBackend } from '../../../tests/desktop-ui/atlasBackend'
 
-const state = vi.hoisted(() => ({
-  creds: [] as unknown[],
-  listCalls: 0,
-  navigate: [] as Array<() => void>,
-}))
+const ipc = vi.hoisted(() => vi.fn())
+vi.mock('@tauri-apps/api/core', () => ({ invoke: ipc, transformCallback: () => 1 }))
+let wrapper: VueWrapper | undefined
+let release: (() => void) | undefined
+beforeEach(() => { vi.resetModules(); ipc.mockReset() })
+afterEach(() => { wrapper?.unmount(); release?.(); vi.useRealTimers() })
 
-vi.mock('@/composables/useLocalApi', () => ({
-  useLocalApi: () => ({
-    invoke: async (command: string) => {
-      if (command === 'list_skills') return [{ id: 'skill_big_o', name: 'Big-O', bloom_level: 'remember' }, { id: 'skill_js', name: 'JavaScript', bloom_level: 'remember' }]
-      if (command === 'list_skill_graph_edges') return []
-      if (command === 'get_local_did') return 'did:key:me'
-      if (command === 'list_credentials') { state.listCalls++; return state.creds }
-      throw new Error(command)
-    },
-  }),
-}))
-vi.mock('@/composables/useCredentials', () => ({ useCredentials: () => ({ listDerivedStates: async () => [] }) }))
-vi.mock('@/composables/useAuth', () => ({ useAuth: () => ({ vaultUnlocked: ref(true) }) }))
-vi.mock('vue-router', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    afterEach: (hook: () => void) => { state.navigate.push(hook); return () => {} },
-  }),
-}))
-// The canvas library is irrelevant here; any call on it returns itself.
-vi.mock('@/utils/forceGraph', () => {
-  const chain: unknown = new Proxy(function () {}, { get: () => () => chain, apply: () => chain })
-  return { createForceGraph: async () => chain }
-})
-
-import SidebarSkillGraph from './SidebarSkillGraph.vue'
-import { announceCredentialsChanged } from '@/composables/credentialEvents'
-
-const credentialFor = (skillId: string) => ({ credentialSubject: { id: 'did:key:me', skillId, level: 0, score: 1 } })
-const t = (key: string, params?: Record<string, unknown>) => `${key}${params ? JSON.stringify(params) : ''}`
-
-beforeEach(() => { vi.useFakeTimers(); state.creds = []; state.listCalls = 0; state.navigate = [] })
-afterEach(() => { vi.useRealTimers() })
-
-async function settle() {
-  await flushPromises(); await vi.advanceTimersByTimeAsync(600); await flushPromises()
-}
-
-describe('SidebarSkillGraph earned count', () => {
-  it('recounts when a credential is issued, and on navigation after the throttle', async () => {
-    const wrapper = mount(SidebarSkillGraph, {
-      attachTo: document.body,
-      global: { mocks: { $t: t }, stubs: { SkillGraphModal: true } },
-    })
-    await settle()
-    expect(wrapper.text()).toContain('skills.graph.legendEarned{"count":0}')
-
-    // An assessment issues a credential: the panel announces it and the count moves.
-    state.creds = [credentialFor('skill_big_o')]
-    announceCredentialsChanged()
-    await settle()
-    expect(wrapper.text()).toContain('skills.graph.legendEarned{"count":1}')
-    expect(wrapper.text()).toContain('skills.graph.skillsProgress{"earned":1,"total":2}')
-
-    // A credential arriving some other way shows up on the next navigation...
-    state.creds = [credentialFor('skill_big_o'), credentialFor('skill_js')]
-    await vi.advanceTimersByTimeAsync(2000)
-    state.navigate.forEach((hook) => hook())
-    await settle()
-    expect(wrapper.text()).toContain('skills.graph.legendEarned{"count":2}')
-
-    // ...but rapid navigation does not re-read on every hop.
-    const before = state.listCalls
-    state.navigate.forEach((hook) => hook())
-    state.navigate.forEach((hook) => hook())
-    await flushPromises()
-    expect(state.listCalls).toBe(before)
-    wrapper.unmount()
-  })
+it('shows fields and current earned levels; refreshes on evidence and navigation without duplicate subscriptions', async () => {
+  const backend = atlasBackend()
+  ipc.mockImplementation(backend.invoke)
+  const { useProfiles } = await import('@/composables/useProfiles')
+  const { installSkillAtlasRefresh } = await import('@/composables/useSkillAtlas')
+  const { announceCredentialsChanged } = await import('@/composables/credentialEvents')
+  const { default: Sidebar } = await import('./SidebarSkillGraph.vue')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: {} }] })
+  await router.push('/skills')
+  await useProfiles().initialize()
+  release = installSkillAtlasRefresh(router)
+  wrapper = mount(Sidebar, { global: { plugins: [router, createI18n({ legacy: false, locale: 'en', messages: { en } })] } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('Computer Science')
+  expect(wrapper.text()).toContain('Big-O Analysis')
+  expect(wrapper.text()).toContain('2 Understand')
+  expect(wrapper.text()).toContain('Ready')
+  expect(wrapper.text()).not.toContain('Locked')
+  const before = backend.state.reads
+  backend.state.level = 4
+  announceCredentialsChanged()
+  await flushPromises()
+  expect(wrapper.text()).toContain('5 Evaluate')
+  expect(backend.state.reads).toBe(before + 1)
+  vi.useFakeTimers()
+  await vi.advanceTimersByTimeAsync(1600)
+  backend.state.earned = false
+  await router.push('/other')
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('5 Evaluate')
+  const after = backend.state.reads
+  await router.push('/again')
+  expect(backend.state.reads).toBe(after)
+  await useProfiles().lockProfile()
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('Big-O Analysis')
+  expect(backend.state.unexpected).toEqual([])
 })

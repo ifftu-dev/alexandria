@@ -162,7 +162,7 @@
     "results": "{count} habilidades coincidentes",
     "noResults": "No hay coincidencias. Prueba otra búsqueda.",
     "map": "Mapa de habilidades",
-    "mapHelp": "Las flechas van del requisito previo a la habilidad dependiente. Usa los controles o las flechas del teclado para moverte; selecciona un campo o habilidad para centrarlo.",
+    "mapHelp": "Las flechas muestran requisitos → dependientes. Arrastra para mover el mapa; en pantalla táctil, desliza horizontalmente. Los gestos verticales desplazan la página. También puedes usar los controles y las teclas de flecha.",
     "zoomIn": "Acercar",
     "zoomOut": "Alejar",
     "panLeft": "Mover mapa a la izquierda",

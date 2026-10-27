@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '@/assets/css/skill-atlas.css'
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BLOOM_ORDER } from '@/utils/bloom'
@@ -138,6 +139,42 @@ function pan(x: number, y: number): void {
   update({ camera: { ...camera.value, x: Math.max(0, Math.min(maxX, camera.value.x + x / camera.value.zoom)),
     y: Math.max(0, Math.min(maxY, camera.value.y + y / camera.value.zoom)) } })
 }
+let drag: { id: number; x: number; y: number; camera: AtlasCamera; moved: boolean; touch: boolean } | null = null
+let suppressMapClick = false
+const dragging = ref(false)
+function pointerDown(event: PointerEvent): void {
+  // Native vertical scrolling and browser pinch zoom stay available on touch.
+  if (event.isPrimary === false) { drag = null; dragging.value = false; return }
+  if (event.button !== 0) return
+  suppressMapClick = false
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, camera: { ...camera.value }, moved: false, touch: event.pointerType === 'touch' }
+}
+function pointerMove(event: PointerEvent): void {
+  if (!drag || event.pointerId !== drag.id) return
+  const dx = event.clientX - drag.x, dy = event.clientY - drag.y
+  if (!drag.moved && Math.hypot(dx, dy) < 6) return
+  if (drag.touch && !drag.moved && Math.abs(dy) > Math.abs(dx)) { drag = null; return }
+  drag.moved = true
+  dragging.value = true
+  suppressMapClick = true
+  const map = event.currentTarget as SVGSVGElement
+  map.setPointerCapture?.(event.pointerId)
+  const maxX = Math.max(800, ...layout.value.regions.map(region => region.x + region.width))
+  const maxY = Math.max(520, ...layout.value.regions.map(region => region.y + region.height))
+  update({ camera: { ...drag.camera,
+    x: Math.max(0, Math.min(maxX, drag.camera.x - dx / drag.camera.zoom)),
+    y: Math.max(0, Math.min(maxY, drag.camera.y - (drag.touch ? 0 : dy) / drag.camera.zoom)) } })
+}
+function pointerEnd(event: PointerEvent): void {
+  if (drag?.id !== event.pointerId) return
+  drag = null
+  dragging.value = false
+  const map = event.currentTarget as SVGSVGElement
+  if (map.hasPointerCapture?.(event.pointerId)) map.releasePointerCapture(event.pointerId)
+}
+function mapClick(event: MouseEvent): void {
+  if (suppressMapClick && event.detail !== 0) { event.stopPropagation(); event.preventDefault() }
+}
 function keyPan(event: KeyboardEvent): void {
   if (event.target !== event.currentTarget) return
   const moves: Record<string, [number, number]> = { ArrowLeft: [-180, 0], ArrowRight: [180, 0], ArrowUp: [0, -180], ArrowDown: [0, 180] }
@@ -184,7 +221,7 @@ function setBloom(event: Event): void {
 </script>
 
 <template>
-  <section class="atlas" :class="{ 'motion-reduced': motionReduced }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
+  <section class="atlas skill-atlas-colors" :class="{ 'motion-reduced': motionReduced }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
     <header class="atlas-heading">
       <div><p class="atlas-eyebrow">{{ t('skills.atlas.title') }}</p><h2>{{ t('skills.atlas.fieldCounts', model.counts) }}</h2></div>
       <button type="button" @click="reset">{{ t('skills.atlas.reset') }}</button>
@@ -225,7 +262,7 @@ function setBloom(event: Event): void {
               <button type="button" :aria-label="t('skills.atlas.panDown')" @click="pan(0, 180)">↓</button>
               <button type="button" :aria-label="t('skills.atlas.panRight')" @click="pan(180, 0)">→</button>
             </div>
-            <svg class="atlas-map" :viewBox="viewBox" :height="height" tabindex="0" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="`${id}-map-help`" @keydown="keyPan">
+            <svg class="atlas-map" :viewBox="viewBox" :height="height" tabindex="0" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="`${id}-map-help`" @keydown="keyPan" :class="{ dragging }" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
               <defs><marker :id="`${id}-arrow`" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke" /></marker></defs>
               <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
                 <rect :x="region.x" :y="region.y" :width="region.width" :height="region.height" rx="24" class="map-region" />
@@ -274,8 +311,7 @@ function setBloom(event: Event): void {
 </template>
 
 <style scoped>
-.atlas { --atlas-field-0: #5561be; --atlas-field-1: #ad5b23; --atlas-field-2: #26776d; --atlas-field-3: #92609f; --atlas-field-4: #9e4860; --atlas-field-5: #497598; --atlas-field-6: #72702d; --atlas-field-7: #8b6049; color: var(--app-foreground); font-size: 14px; line-height: 1.5; min-width: 0; }
-:global(.dark .atlas) { --atlas-field-0: #a7b0ff; --atlas-field-1: #edac78; --atlas-field-2: #7dc7b7; --atlas-field-3: #cea4db; --atlas-field-4: #e99eb4; --atlas-field-5: #92bbdf; --atlas-field-6: #c6c885; --atlas-field-7: #d3b09a; }
+.atlas { color: var(--app-foreground); font-size: 14px; line-height: 1.5; min-width: 0; }
 .atlas button, .atlas input, .atlas select { font: inherit; color: inherit; }
 .atlas button { cursor: pointer; min-height: 44px; padding: 8px 12px; border: 1px solid var(--app-border); border-radius: 9px; background: var(--app-card); text-align: start; overflow-wrap: anywhere; }
 .atlas button:hover { background: var(--app-muted); }
@@ -317,7 +353,7 @@ function setBloom(event: Event): void {
 .map-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-block-end: 1px solid var(--app-border); }
 .map-tools span { font-size: 12px; margin-inline: 6px; }
 .map-tools button { min-width: 44px; text-align: center; }
-.atlas-map { display: block; width: 100%; overflow: hidden; background-image: radial-gradient(var(--app-border) .7px, transparent .7px); background-size: 18px 18px; }
+.atlas-map { touch-action: pan-y pinch-zoom; cursor: grab; user-select: none; display: block; width: 100%; overflow: hidden; background-image: radial-gradient(var(--app-border) .7px, transparent .7px); background-size: 18px 18px; }
 .map-region { fill: color-mix(in srgb, var(--field) 5%, var(--app-background)); stroke: color-mix(in srgb, var(--field) 40%, var(--app-border)); stroke-width: 1; }
 .region-heading { display: flex; flex-direction: column; gap: 4px; color: var(--field); }
 .region-heading strong { font-size: 22px; font-weight: 650; }
@@ -328,6 +364,7 @@ function setBloom(event: Event): void {
 .node-evidence { display: flex; gap: 6px; color: var(--field); font-size: 13px; font-weight: 650; }
 .map-node.is-dimmed .skill-name { color: var(--app-muted-foreground); font-weight: 400; }
 .atlas .map-node.is-selected { border-color: var(--app-primary); box-shadow: inset 0 0 0 2px var(--app-primary); }
+.atlas-map.dragging, .atlas-map.dragging .map-node { cursor: grabbing; }
 .map-help { padding: 10px 14px; color: var(--app-muted-foreground); font-size: 12px; border-block-start: 1px solid var(--app-border); }
 .atlas-list { margin-block-start: 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-card); }
 .atlas-list summary { cursor: pointer; padding: 14px; font-weight: 600; }

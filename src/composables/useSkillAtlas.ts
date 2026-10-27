@@ -45,6 +45,8 @@ const modalOpen = ref(false)
 const feedback = ref<AtlasFeedback | null>(null)
 const isLoading = computed(() => phase.value === 'loading')
 
+// A return belongs to one explicit Open skill action and one profile session.
+let skillReturn: { router: Router; origin: string; detail: string; surface: AtlasSurface; explicit: boolean } | null = null
 let generation = 0
 let feedbackRevision = 0
 let baselineEstablished = false
@@ -79,6 +81,7 @@ function current(generationAtStart: number, profileId: string | null): boolean {
 
 function clearProfileState(): void {
   generation++
+  skillReturn = null
   inFlight = null
   lastNavigationAt = -Infinity
   model.value = null
@@ -184,6 +187,26 @@ function acknowledgeFeedback(revision: number): void {
   if (feedback.value?.revision === revision) clearFeedback()
 }
 
+async function openSkill(router: Router, surface: AtlasSurface, id: string): Promise<void> {
+  const ticket = generation
+  const pending = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false }
+  skillReturn = pending
+  try {
+    const failure = await router.push(pending.detail)
+    if (failure) { if (skillReturn === pending) skillReturn = null; return }
+    if (ticket === generation && surface === 'modal') modalOpen.value = false
+  } catch (cause) {
+    if (skillReturn === pending) skillReturn = null
+    throw cause
+  }
+}
+function returnToAtlas(router: Router): void {
+  if (skillReturn?.router === router && router.currentRoute.value.fullPath === skillReturn.detail) {
+    skillReturn.explicit = true
+    void router.push(skillReturn.origin)
+  } else void router.push('/skills')
+}
+
 const profiles = useProfiles()
 watch([profiles.activeProfileId, profiles.isLockBlocked, () => profiles.activeIdentity.value?.stake_address], clearProfileState, { flush: 'sync' })
 onProfileReady(() => { void ensureLoaded() })
@@ -197,12 +220,23 @@ export function installSkillAtlasRefresh(router: Router): () => void {
   }
   let bridge = routerBridges.get(router)
   if (!bridge) {
-    bridge = {
-      owners: 0,
-      remove: router.afterEach((_to, _from, failure) => {
-        if (!failure) void refresh('navigation')
-      }),
-    }
+    let returningBack = false
+    const removeHistory = router.options.history.listen((_to, _from, info) => { returningBack = info.direction === 'back' })
+    const removeNavigation = router.afterEach((to, from, failure) => {
+      const back = returningBack
+      returningBack = false
+      if (failure) return
+      if (skillReturn?.router === router && to.fullPath !== skillReturn.detail) {
+        const pending = skillReturn
+        skillReturn = null
+        if (from.fullPath === pending.detail && to.fullPath === pending.origin && (back || pending.explicit)) {
+          if (pending.surface === 'modal') modalOpen.value = true
+          else skillsTab.value = 'graph'
+        }
+      }
+      void refresh('navigation')
+    })
+    bridge = { owners: 0, remove: () => { removeHistory(); removeNavigation(); if (skillReturn?.router === router) skillReturn = null } }
     routerBridges.set(router, bridge)
   }
   bridge.owners++
@@ -234,6 +268,6 @@ export function useSkillAtlas() {
   return {
     model: readonly(model), phase: readonly(phase), error: readonly(error), refreshing: readonly(refreshing), isLoading: readonly(isLoading),
     pageView: readonly(pageView), modalView: readonly(modalView), skillsTab: readonly(skillsTab), modalOpen: readonly(modalOpen), feedback: readonly(feedback),
-    ensureLoaded, refresh, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, acknowledgeFeedback, reset: clearProfileState,
+    ensureLoaded, refresh, openSkill, returnToAtlas, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, acknowledgeFeedback, reset: clearProfileState,
   }
 }

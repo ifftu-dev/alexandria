@@ -24,6 +24,7 @@ const disabledLab: PersonhoodLabStatus = {
 }
 
 Object.defineProperty(window, '__TAURI_INTERNALS__', {
+  configurable: true,
   value: {
     transformCallback: () => 1,
     invoke: async (command: string) => {
@@ -52,7 +53,25 @@ if (isAppLocale(requestedLocale)) {
   document.documentElement.dir = directionOf(requestedLocale)
 }
 const screen = params.get('screen')
-if (screen === 'skill-atlas') {
+if (screen === 'personal-atlas') {
+  const { atlasBackend } = await import('./atlasBackend')
+  const backend = atlasBackend(params.get('scenario') === 'stress')
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { default: PersonalAtlasFixture } = await import('./PersonalAtlasFixture.vue')
+  const { default: Skills } = await import('@/pages/skills/Index.vue')
+  const { default: Detail } = await import('@/pages/skills/Detail.vue')
+  const { default: Goals } = await import('@/pages/goals/Index.vue')
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/skills', component: Skills }, { path: '/skills/:id', component: Detail }, { path: '/goals', component: Goals },
+  ] })
+  await router.push('/skills')
+  createApp(PersonalAtlasFixture, { backend }).use(i18n).use(router).mount('#app')
+} else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
   createApp(SkillAtlasFixture).use(i18n).mount('#app')

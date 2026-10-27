@@ -1,240 +1,28 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
-import {
-  useSkillGraphHover,
-  createLabelCollisionForce,
-  measureLabelBoxes,
-  labelLinkDistance,
-} from '@/composables/useSkillGraphHover'
-import type { SkillStatus } from '@/composables/useSkillGraphState'
-import {
-  createForceGraph,
-  type ForceGraphInstance,
-  type SkillGraphLink,
-  type SkillGraphNode,
-} from '@/utils/forceGraph'
+import { watch } from 'vue'
+import { useSkillAtlas } from '@/composables/useSkillAtlas'
+import { useSkillAtlasActions } from '@/composables/useSkillAtlasActions'
+import { AppModal } from '@/components/ui'
+import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
 
-interface ModalSkillNode extends SkillGraphNode {
-  status: SkillStatus
-  /** User's proven proficiency (VC-derived Bloom level); undefined until earned. */
-  proficiency?: string
-  /** Derived confidence in `proficiency`, 0..1. */
-  confidence?: number
-}
-
-const props = defineProps<{
-  visible: boolean
-  nodes: ModalSkillNode[]
-  earnedCount: number
-  availableCount: number
-  lockedCount: number
-  totalCount: number
-}>()
-
+const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ close: [] }>()
-
-const router = useRouter()
-const containerRef = ref<HTMLElement | null>(null)
-let graphInstance: ForceGraphInstance | null = null
-let resizeObserver: ResizeObserver | null = null
-let graphGeneration = 0
-
-const { buildAdjacency, createHoverHandler, renderNode, renderLink, nodePointerAreaPaint } = useSkillGraphHover()
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
-}
-
-watch(() => props.visible, async (val) => {
-  if (val) {
-    document.body.style.overflow = 'hidden'
-    document.addEventListener('keydown', onKeydown)
-    await nextTick()
-    initGraph()
-  } else {
-    document.body.style.overflow = ''
-    document.removeEventListener('keydown', onKeydown)
-    destroyGraph()
-  }
-})
-
-watch(() => props.nodes, async () => {
-  if (!props.visible) return
-  await nextTick()
-  initGraph()
-}, { deep: true })
-
-function destroyGraph() {
-  graphGeneration++
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  if (graphInstance) {
-    graphInstance._destructor()
-    graphInstance = null
-  }
-}
-
-async function initGraph() {
-  const container = containerRef.value
-  if (!container || !props.nodes.length) return
-
-  destroyGraph()
-  const generation = graphGeneration
-
-  const links: SkillGraphLink[] = []
-  for (const node of props.nodes) {
-    for (const prereqId of node.prerequisites ?? []) {
-      links.push({ source: prereqId, target: node.id })
-    }
-  }
-  buildAdjacency(links.map(link => ({
-    source: String(link.source),
-    target: String(link.target),
-  })))
-
-  const width = container.clientWidth
-  const height = container.clientHeight
-
-  const graph = await createForceGraph(container)
-  if (generation !== graphGeneration || container !== containerRef.value) {
-    graph._destructor()
-    return
-  }
-  graph
-    .width(width)
-    .height(height)
-    .graphData({ nodes: props.nodes, links })
-    .autoPauseRedraw(false)
-    .nodeLabel(() => '')
-    .onNodeHover(createHoverHandler())
-    .nodeCanvasObject((node: Record<string, unknown>, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      renderNode(node, ctx, globalScale)
-    })
-    .linkCanvasObject((link: Record<string, unknown>, ctx: CanvasRenderingContext2D) => {
-      renderLink(link, ctx)
-    })
-    .linkCanvasObjectMode(() => 'replace' as const)
-    .nodePointerAreaPaint(nodePointerAreaPaint)
-    .backgroundColor('transparent')
-    .onNodeClick((node: Record<string, unknown>) => {
-      const routeId = String(node.routeId ?? node.id ?? '')
-      if (routeId) {
-        router.push(`/skills/${routeId}`)
-        emit('close')
-      }
-    })
-    .cooldownTicks(100)
-    .onEngineStop(() => {
-      graph.zoomToFit(400, 40)
-    })
-
-  graph.d3Force('charge')?.strength(-80)
-
-  // Obsidian-style: spread nodes so labels never overlap. First reserve each
-  // node's label box, then (a) size the link rest-length from those boxes so
-  // directly-connected nodes sit far enough apart for their labels, and
-  // (b) add a label-box collision force for everything else.
-  measureLabelBoxes(props.nodes)
-  const linkForce = graph.d3Force('link')
-  if (linkForce) {
-    linkForce.distance((l: Record<string, unknown>) =>
-      labelLinkDistance(
-        l.source as { __halfW?: number } | undefined,
-        l.target as { __halfW?: number } | undefined,
-      ),
-    )
-    // Re-register so d3 recomputes per-link distances with the new accessor.
-    graph.d3Force('link', linkForce)
-  }
-  graph.d3Force('collide', createLabelCollisionForce())
-  graph.d3ReheatSimulation?.()
-
-  graphInstance = graph
-
-  resizeObserver = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      graph.width(entry.contentRect.width)
-      graph.height(entry.contentRect.height)
-    }
-  })
-  resizeObserver.observe(container)
-}
-
-onBeforeUnmount(() => {
-  document.body.style.overflow = ''
-  document.removeEventListener('keydown', onKeydown)
-  destroyGraph()
-})
+const atlas = useSkillAtlas()
+const { model, modalView, feedback, error } = atlas
+const { learnSkill, openSkill, actionError } = useSkillAtlasActions('modal')
+watch(() => props.visible, (visible, _old, onCleanup) => {
+  if (!visible) return
+  void atlas.ensureLoaded()
+  onCleanup(atlas.activateSurface('modal'))
+}, { immediate: true })
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div v-if="visible" class="fixed inset-0 z-[60] flex items-center justify-center">
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="emit('close')" />
-
-        <div class="relative z-10 mx-4 flex h-[85vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-          <div class="flex items-center justify-between border-b border-border px-6 py-4">
-            <div class="flex items-center gap-3">
-              <h2 class="text-lg font-semibold text-foreground">{{ $t('skills.graph.modalTitle') }}</h2>
-              <span class="text-sm text-muted-foreground">{{ $t('skills.graph.skillsEarnedProgress', { earned: earnedCount, total: totalCount }) }}</span>
-            </div>
-            <button
-              :title="$t('common.actions.close')"
-              class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              @click="emit('close')"
-            >
-              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <div class="relative flex-1 bg-slate-950">
-            <div ref="containerRef" class="h-full w-full" />
-
-            <div class="absolute bottom-4 start-4 flex items-center gap-4 rounded-lg bg-black/80 px-3 py-2 text-xs backdrop-blur-sm">
-              <span class="flex items-center gap-1.5">
-                <span class="inline-block h-2.5 w-2.5 rounded-full bg-success" />
-                <span class="text-white">{{ $t('skills.graph.legendEarned', { count: earnedCount }) }}</span>
-              </span>
-              <span v-if="availableCount > 0" class="flex items-center gap-1.5">
-                <span class="inline-block h-2.5 w-2.5 rounded-full bg-warning" />
-                <span class="text-white">{{ $t('skills.graph.legendAvailable', { count: availableCount }) }}</span>
-              </span>
-              <span class="flex items-center gap-1.5">
-                <span class="inline-block h-2 w-2 rounded-full bg-slate-500/40" />
-                <span class="text-slate-300/80">{{ $t('skills.graph.legendLocked', { count: lockedCount }) }}</span>
-              </span>
-              <span class="text-slate-500/70">·</span>
-              <span class="text-slate-300/80">{{ $t('skills.graph.legendNodeSize') }}</span>
-            </div>
-
-            <div class="pointer-events-none absolute bottom-0 start-0 end-0 h-16 bg-gradient-to-t from-slate-950 to-transparent" />
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+  <AppModal :open="visible" :title="$t('skills.graph.modalTitle')" max-width="90rem" @close="emit('close')">
+    <p v-if="actionError" role="alert">{{ actionError }}</p>
+    <div v-if="error" role="alert"><p>{{ error }}</p><button type="button" @click="atlas.refresh('retry')">{{ $t('common.actions.retry') }}</button></div>
+    <SkillAtlasExplorer v-if="visible && model" :model="model" :view="modalView" :feedback="feedback"
+      @update:view="atlas.updateView('modal', $event)" @open-skill="openSkill"
+      @learn-skill="learnSkill" @feedback-consumed="atlas.acknowledgeFeedback" />
+  </AppModal>
 </template>
-
-<style scoped>
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-
-.modal-enter-active > .relative {
-  transition: transform 0.25s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
-.modal-enter-from > .relative {
-  transform: scale(0.95);
-}
-</style>
