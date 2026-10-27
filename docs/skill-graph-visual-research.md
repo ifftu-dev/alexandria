@@ -1,7 +1,7 @@
 # Skill Graph visual research
 
-**Researched:** 2026-10-27  
-**Scope:** Visual presentation and navigation over Alexandria's existing taxonomy, prerequisites, and credential-derived state. No application changes. The design brief below was confirmed by the user after the design interview; implementation has not started.  
+**Researched:** 2026-10-27
+**Scope:** Visual presentation and navigation over Alexandria's existing taxonomy, prerequisites, and credential-derived state. No application changes. The design brief below was confirmed by the user after the design interview; implementation has not started.
 **Method:** Primary sources only: product documentation, first-party screenshots, W3C guidance, a paper by a taxonomy author, and animation research by its authors. “Documented” means stated by the source; “observed” means visible in a screenshot inspected during this research; “proposal” means a design inference requiring validation. No live Alexandria UI was tested.
 
 ## Confirmed design brief
