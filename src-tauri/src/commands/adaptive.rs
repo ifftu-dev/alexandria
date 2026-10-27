@@ -532,7 +532,7 @@ pub fn finalize_adaptive_impl(
             assessment_method: Some("adaptive_quiz".into()),
             provenance: None,
         };
-        let req = crate::commands::credentials::IssueCredentialRequest {
+        let req = crate::credentials::IssueCredentialRequest {
             credential_type: CredentialType::AssessmentCredential,
             subject: issuer_did.clone(),
             claim: Claim::Skill(claim),
@@ -542,13 +542,7 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::commands::credentials::issue_credential_impl(
-            conn,
-            signing_key,
-            issuer_did,
-            &req,
-            now,
-        )?;
+        let vc = crate::credentials::issue(conn, signing_key, issuer_did, &req, now)?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 

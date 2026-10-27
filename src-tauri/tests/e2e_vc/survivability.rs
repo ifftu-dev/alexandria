@@ -13,9 +13,9 @@
 
 use super::common::{new_test_db, test_did, test_key, TEST_NOW};
 use app_lib::commands::credentials::{
-    export_bundle_impl, issue_credential_impl, revoke_credential_impl, verify_bundle_offline_impl,
-    IssueCredentialRequest,
+    export_bundle_impl, revoke_credential_impl, verify_bundle_offline_impl,
 };
+use app_lib::credentials::{self, IssueCredentialRequest};
 use app_lib::crypto::did::derive_did_key;
 use app_lib::domain::vc::{Claim, CredentialType, SkillClaim};
 
@@ -41,7 +41,7 @@ fn issue_one(db: &app_lib::db::Database, skill: &str) -> (app_lib::crypto::did::
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW).expect("issue");
+    let vc = credentials::issue(db.conn(), &issuer_key, &issuer, &req, TEST_NOW).expect("issue");
     (issuer, vc.id.expect("issued VC always has an envelope id"))
 }
 
@@ -129,7 +129,7 @@ async fn exported_bundle_verifies_offline_under_a_rotated_issuer_key() {
         integrity_session_id: None,
         integrity_policy: None,
     };
-    issue_credential_impl(db.conn(), &issuer_key_v2, &issuer, &req, TEST_NOW).expect("issue");
+    credentials::issue(db.conn(), &issuer_key_v2, &issuer, &req, TEST_NOW).expect("issue");
 
     // Verify well after the rotation, so the open registry window is v2's.
     let after_rotation = "2099-01-01T00:00:00Z";

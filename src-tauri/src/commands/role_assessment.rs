@@ -17,9 +17,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::now_rfc3339;
-use crate::commands::credentials::{
-    issue_credential_impl, load_issuer_key, IssuancePolicy, IssueCredentialRequest,
-};
+use crate::commands::credentials::load_issuer_key;
+use crate::credentials::{self, IssuancePolicy, IssueCredentialRequest};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
@@ -417,7 +416,7 @@ pub fn issue_role_credential_impl(
     // `issuer_did` is retained in the signature for API compatibility but the
     // credential is issued under the org's DID.
     let _ = issuer_did;
-    issue_credential_impl(conn, issuer_key, &org_issuer, &req, now)
+    credentials::issue(conn, issuer_key, &org_issuer, &req, now)
 }
 
 fn issue_role_credential_transactional(
@@ -983,7 +982,7 @@ mod tests {
         // org-issued skill credential is an independent cluster, so it raises
         // the count aggregation weighs.
         use crate::aggregation::store::recompute_all_impl;
-        use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
+        use crate::credentials::{self, IssueCredentialRequest};
         use crate::domain::vc::SkillClaim;
 
         let (db, owner_key, owner, _subject) = setup();
@@ -1011,7 +1010,7 @@ mod tests {
                 integrity_session_id: None,
                 integrity_policy: None,
             };
-            issue_credential_impl(conn, &learner_key, &learner, &req, NOW).unwrap();
+            credentials::issue(conn, &learner_key, &learner, &req, NOW).unwrap();
         }
         recompute_all_impl(conn, NOW).unwrap();
         let self_only: i64 = conn
@@ -1042,7 +1041,7 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         };
-        issue_credential_impl(conn, &owner_key, &owner, &skill_req, NOW).unwrap();
+        credentials::issue(conn, &owner_key, &owner, &skill_req, NOW).unwrap();
         recompute_all_impl(conn, NOW).unwrap();
         let with_org: i64 = conn
             .query_row(

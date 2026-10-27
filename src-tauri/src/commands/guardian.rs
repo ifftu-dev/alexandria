@@ -190,7 +190,7 @@ pub async fn guardian_accept_invite(
             move |db| {
                 let conn = db.conn();
                 crate::db::with_transaction(conn, || {
-                    let req = crate::commands::credentials::IssueCredentialRequest {
+                    let req = crate::credentials::IssueCredentialRequest {
                         credential_type: CredentialType::RoleCredential,
                         subject: crate::crypto::did::Did(invite_for_db.child_did.clone()),
                         claim: Claim::Role(RoleClaim {
@@ -203,7 +203,7 @@ pub async fn guardian_accept_invite(
                         integrity_session_id: None,
                         integrity_policy: None,
                     };
-                    let vc = crate::commands::credentials::issue_credential_impl(
+                    let vc = crate::credentials::issue(
                         conn,
                         &signing_key,
                         &issuer_did_for_db,

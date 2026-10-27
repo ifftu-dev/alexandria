@@ -4,7 +4,7 @@
 //! their parent ("guardian") — with REAL cryptography end to end:
 //! freshly generated wallets, real did:key derivation, a real
 //! Ed25519-signed guardianship RoleCredential issued through the
-//! production `issue_credential_impl` pipeline, and real signature
+//! production `credentials::issue` pipeline, and real signature
 //! verification inside the child's `handle_guardian_request`.
 //!
 //! It drives the production protocol path exactly as bytes would
@@ -22,7 +22,7 @@
 //!   8. Guardian revokes → still-minor child re-gates.
 //!   9. The same revoke against an 18-year-old leaves them active.
 
-use app_lib::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
+use app_lib::credentials::{self, IssueCredentialRequest};
 use app_lib::crypto::did::derive_did_key;
 use app_lib::crypto::guardian as invite_codec;
 use app_lib::crypto::wallet;
@@ -146,7 +146,7 @@ fn parent_builds_link(
         integrity_policy: None,
     };
     let now = chrono::Utc::now().to_rfc3339();
-    let vc = issue_credential_impl(
+    let vc = credentials::issue(
         parent.db.conn(),
         &parent.signing_key,
         &parent_did,

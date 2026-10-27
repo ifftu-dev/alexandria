@@ -88,7 +88,7 @@ const ROLE_ROW_SELECT: &str = "SELECT ra.id, ra.role_title, o.name, ra.issuance_
 fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
     // A policy that does not parse must not silently become "no camera
     // required": surface it so the row errors instead of under-enforcing.
-    let policy: Option<crate::commands::credentials::IssuancePolicy> = r
+    let policy: Option<crate::credentials::IssuancePolicy> = r
         .get::<_, Option<String>>(3)?
         .map(|s| {
             serde_json::from_str(&s).map_err(|e| {
@@ -1185,7 +1185,7 @@ pub fn grade_attempt_impl(
             assessment_method: Some("proctored_quiz".into()),
             provenance: None, // AssessmentCredential type weight already dominates
         };
-        let req = crate::commands::credentials::IssueCredentialRequest {
+        let req = crate::credentials::IssueCredentialRequest {
             credential_type: CredentialType::AssessmentCredential,
             subject: issuer_did.clone(),
             claim: Claim::Skill(claim),
@@ -1195,13 +1195,7 @@ pub fn grade_attempt_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::commands::credentials::issue_credential_impl(
-            conn,
-            signing_key,
-            issuer_did,
-            &req,
-            now,
-        )?;
+        let vc = crate::credentials::issue(conn, signing_key, issuer_did, &req, now)?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
@@ -2181,11 +2175,11 @@ mod tests {
 #[cfg(test)]
 mod role_target_tests {
     use super::*;
-    use crate::commands::credentials::IssuancePolicy;
     use crate::commands::role_assessment::{
         create_organization_impl, create_role_assessment_impl, set_role_assessment_status_impl,
         CreateRoleAssessmentRequest,
     };
+    use crate::credentials::IssuancePolicy;
     use crate::db::Database;
 
     const NOW: &str = "2026-10-09T00:00:00Z";

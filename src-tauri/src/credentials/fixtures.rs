@@ -1,10 +1,13 @@
-//! Shared test fixtures: a fixed time, deterministic keys, and a migrated
-//! database with an issuer and a subject.
+//! Shared test fixtures: a fixed time, deterministic keys, a migrated
+//! database with an issuer and a subject, and a sample skill credential
+//! request.
 
 use ed25519_dalek::SigningKey;
 
+use crate::credentials::issue::IssueCredentialRequest;
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::Database;
+use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 
 pub(crate) const NOW: &str = "2026-04-13T00:00:00Z";
 
@@ -24,4 +27,25 @@ pub(crate) fn setup() -> (Database, SigningKey, Did, Did) {
     let issuer = derive_did_key(&issuer_key);
     let subject = derive_did_key(&test_key("subject"));
     (db, issuer_key, issuer, subject)
+}
+
+pub(crate) fn sample_request(subject: Did) -> IssueCredentialRequest {
+    IssueCredentialRequest {
+        credential_type: CredentialType::FormalCredential,
+        subject,
+        claim: Claim::Skill(SkillClaim {
+            skill_id: "skill_test".into(),
+            level: 4,
+            score: 0.82,
+            evidence_refs: vec![],
+            rubric_version: Some("v1".into()),
+            assessment_method: Some("exam".into()),
+            provenance: None,
+        }),
+        evidence_refs: vec!["urn:uuid:e1".into()],
+        expiration_date: None,
+        supersedes: None,
+        integrity_session_id: None,
+        integrity_policy: None,
+    }
 }

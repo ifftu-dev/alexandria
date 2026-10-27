@@ -135,7 +135,7 @@ mod tests {
     use super::*;
     use crate::aggregation::store::test_support::parse_credential_type;
     use crate::aggregation::AggregationConfig;
-    use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
+    use crate::credentials::{self, IssueCredentialRequest};
     use crate::crypto::did::derive_did_key;
     use crate::db::Database;
     use crate::domain::vc::{Claim, CredentialType, SkillClaim, VerifiableCredential};
@@ -176,7 +176,7 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         };
-        issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
+        credentials::issue(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
         (db, subject, skill.to_string())
     }
 

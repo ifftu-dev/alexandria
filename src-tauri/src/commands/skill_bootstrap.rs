@@ -179,7 +179,7 @@ pub async fn bootstrap_confirm(
                         assessment_method: Some("document_bootstrap".into()),
                         provenance: Some(provenance),
                     };
-                    let req = crate::commands::credentials::IssueCredentialRequest {
+                    let req = crate::credentials::IssueCredentialRequest {
                         credential_type: CredentialType::SelfAssertion,
                         subject: issuer_did.clone(), // self-issued
                         claim: Claim::Skill(claim),
@@ -189,13 +189,7 @@ pub async fn bootstrap_confirm(
                         integrity_session_id: None,
                         integrity_policy: None,
                     };
-                    match crate::commands::credentials::issue_credential_impl(
-                        conn,
-                        &signing_key,
-                        &issuer_did,
-                        &req,
-                        &now,
-                    ) {
+                    match crate::credentials::issue(conn, &signing_key, &issuer_did, &req, &now) {
                         Ok(_) => claimed += 1,
                         Err(error) => log::warn!("bootstrap: skipping skill claim: {error}"),
                     }

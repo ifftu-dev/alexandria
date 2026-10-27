@@ -245,7 +245,7 @@ pub async fn verify_presentation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
+    use crate::credentials::{self, IssueCredentialRequest};
     use crate::db::Database;
     use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 
@@ -321,7 +321,7 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         };
-        let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
+        let vc = credentials::issue(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
         (db, subject_key, subject, vc.id.unwrap())
     }
 

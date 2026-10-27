@@ -130,11 +130,11 @@ fn create_snapshot(
             .as_object()
             .cloned()
             .ok_or("snapshot claim must serialize as an object")?;
-        let credential = crate::commands::credentials::issue_credential_impl(
+        let credential = crate::credentials::issue(
             conn,
             &wallet.signing_key,
             &actor_did,
-            &crate::commands::credentials::IssueCredentialRequest {
+            &crate::credentials::IssueCredentialRequest {
                 credential_type: CredentialType::DerivedCredential,
                 subject: actor_did.clone(),
                 claim: Claim::Custom(CustomClaim { properties }),

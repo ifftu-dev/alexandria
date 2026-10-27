@@ -872,7 +872,7 @@ pub async fn plugin_submit_and_grade(
                             assessment_method: Some("plugin_grader".to_string()),
                             provenance: None,
                         };
-                        let req = crate::commands::credentials::IssueCredentialRequest {
+                        let req = crate::credentials::IssueCredentialRequest {
                             credential_type:
                                 crate::domain::vc::CredentialType::AssessmentCredential,
                             subject: learner_did.clone(),
@@ -883,7 +883,7 @@ pub async fn plugin_submit_and_grade(
                             integrity_session_id: integrity_session_id.clone(),
                             integrity_policy: None,
                         };
-                        match crate::commands::credentials::issue_credential_impl(
+                        match crate::credentials::issue(
                             db.conn(),
                             &signing_key,
                             &learner_did,
@@ -1368,7 +1368,7 @@ mod grade_credential_tests {
                 assessment_method: Some("plugin_grader".into()),
                 provenance: None,
             };
-            let req = crate::commands::credentials::IssueCredentialRequest {
+            let req = crate::credentials::IssueCredentialRequest {
                 credential_type: crate::domain::vc::CredentialType::AssessmentCredential,
                 subject: learner.clone(),
                 claim: crate::domain::vc::Claim::Skill(claim),
@@ -1378,14 +1378,8 @@ mod grade_credential_tests {
                 integrity_session_id: None,
                 integrity_policy: None,
             };
-            let vc = crate::commands::credentials::issue_credential_impl(
-                db.conn(),
-                &signing_key,
-                &learner,
-                &req,
-                now,
-            )
-            .expect("issue credential");
+            let vc = crate::credentials::issue(db.conn(), &signing_key, &learner, &req, now)
+                .expect("issue credential");
             // Self-issued: subject == issuer == learner.
             assert_eq!(vc.credential_subject.id.0, learner.0);
         }
