@@ -1,6 +1,6 @@
 # Motion and visual polish
 
-Status: implementation in progress
+Status: code implemented and reviewed; native acceptance open
 
 ## Confirmed direction
 
@@ -87,8 +87,45 @@ never substitute desktop emulation for mobile power/GPU measurements.
 
 ## Evidence
 
-Frontend verification: 446 tests passed; browser verification: 51 passed with
-one existing WebKit touch-synthesis skip. Strict typechecking, locale parity,
-raw-text and CSP checks passed. Native release compilation and performance
-capture are in progress. A paired iPhone is currently unavailable to Instruments;
-no Android physical device is connected. These targets remain unverified.
+Source `7db4c17f`: 450 frontend tests and 59 browser checks passed, with one
+existing WebKit touch-synthesis skip. Strict typechecking, locale parity,
+raw-text, CSP and backend-command checks passed. Independent reviews found no
+remaining code defects or documented-standard violations; small pre-existing
+atlas presentation duplication remains a nonblocking judgment call.
+
+Physical Mac audit: Apple M4 Pro, 48 GB, macOS 27.2 (26B118), WebKit
+22625.2.8.11.9, 120 Hz display at 2x scale, AC power, Low Power Mode disabled,
+nominal thermal state before capture. The optimized release executable ran in
+an ad-hoc audit bundle with isolated test data. This is not installer validation.
+
+- System and Off each completed ten fresh-process launches and ten welcome/role
+  round trips. Launch-to-accessibility-observation medians were 781 ms and 773 ms;
+  nearest-rank p95 values were 939 ms and 811 ms. The same ten-launch audit of
+  baseline `827a687d` measured 929 ms median and 1549 ms p95. These are automation
+  upper bounds with warm OS caches, not instrumented startup or input-to-present
+  times. The ordered, small samples do not establish a general startup speedup.
+- The System idle sample used 0.02 CPU seconds in 30.62 seconds for the app
+  process (0.065% of one core). Its WebContent/GPU/network processes showed no
+  increase at the CPU counter's precision. Off showed no measurable increase
+  in any of those processes over 30.72 seconds. CPU counters do not measure
+  GPU utilization. Both modes had zero running web animations after settling.
+  The baseline retained 13 infinite web animations and used 6.90 CPU seconds
+  across the same app/WebKit process roles in 30.75 seconds (22.44% of one core).
+  This comparison covers the fresh-onboarding screen, not authenticated work.
+- Native OS Reduce Motion resolved System to Reduced with no running web
+  animations; restoring the OS setting resolved back to full motion live.
+  Minimize/resume delivered hidden/visible events without replaying the opening.
+- Targeted Instruments Hitches captures are readable. Correlating compositor
+  swaps with the app's commits gives frame-lifetime p95 of 40.81 ms for System
+  and 40.73 ms for Off, compared with 40.71 ms in the baseline. These are pipeline
+  [frame lifetimes](https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app),
+  not inter-frame spacing or measured input-to-present latency;
+  they do not close the two-frame criterion. Corresponding GPU durations have
+  p95 of 1.35 ms, 1.07 ms and 1.55 ms; no correlated stage exceeded 100 ms.
+  Compositor work is shared with other desktop activity, so this does not
+  establish exclusive app GPU cost or a frame-pacing pass.
+
+Native acceptance remains open. Returning-profile unlock, authenticated
+atlas/completion journeys, first-paint theme handoffs and other physical targets
+remain unverified. The paired iPhone is offline in Instruments; no Android
+device is connected. No Windows/Linux physical-device result is claimed.
