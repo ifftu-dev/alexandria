@@ -110,3 +110,19 @@ src-tauri/macos-frameworks/
 
 # python bytecode from cardano/governance/deploy_*.py
 __pycache__/
+
+# Vendored mobile-push plugin: native build outputs (the sources ARE tracked)
+crates/tauri-plugin-mobile-push/.tauri/
+crates/tauri-plugin-mobile-push/ios/.build/
+crates/tauri-plugin-mobile-push/ios/.swiftpm/
+crates/tauri-plugin-mobile-push/ios/.tauri/
+crates/tauri-plugin-mobile-push/ios/Package.resolved
+crates/tauri-plugin-mobile-push/android/build/
+crates/tauri-plugin-mobile-push/android/.gradle/
+
+# Firebase project file for Android push: per-developer, never committed.
+src-tauri/gen/android/app/google-services.json
+
+# Firebase configuration for push on iOS, downloaded per project from the
+# Firebase console; the Android counterpart is the google-services.json above.
+src-tauri/gen/apple/alexandria-node_iOS/GoogleService-Info.plist

@@ -83,6 +83,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // The candidate's own copy of each integrity result they sent an
     // organisation: what they signed, and where it went.
     (17, "interview_integrity_reports", MIGRATION_017_INTERVIEW_INTEGRITY),
+    // What the app has told the learner about, with what it has already
+    // decided not to repeat, and this device's push registration with the
+    // network's Cloud. See `crate::notifications`.
+    (18, "notifications", MIGRATION_018_NOTIFICATIONS),
 ];
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
@@ -103,6 +107,33 @@ const MIGRATION_013_ATTEMPT_ROLE_TARGET: &str = r#"
 ALTER TABLE assessment_attempts
     ADD COLUMN role_assessment_id TEXT REFERENCES role_assessments(id) ON DELETE SET NULL;
 CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
+"#;
+
+const MIGRATION_018_NOTIFICATIONS: &str = r#"
+CREATE TABLE notifications (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    route TEXT,
+    source TEXT NOT NULL DEFAULT 'local' CHECK (source IN ('local','push')),
+    dedupe_key TEXT UNIQUE,
+    payload_json TEXT CHECK (payload_json IS NULL OR json_valid(payload_json)),
+    created_at TEXT NOT NULL,
+    read_at TEXT
+);
+CREATE INDEX idx_notifications_unread ON notifications(created_at) WHERE read_at IS NULL;
+CREATE TABLE notification_dedupe (
+    dedupe_key TEXT PRIMARY KEY,
+    seen_at TEXT NOT NULL
+);
+CREATE TABLE push_registrations (
+    cloud_origin TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    token TEXT NOT NULL,
+    registered_at TEXT NOT NULL
+);
 "#;
 
 const MIGRATION_017_INTERVIEW_INTEGRITY: &str = r#"

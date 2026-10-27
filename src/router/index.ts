@@ -395,6 +395,14 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // The notifications inbox: every badge, banner and push lands here.
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: () => import('@/pages/Notifications.vue'),
+      meta: { layout: 'app' },
+    },
+
     // Requests from organisations used to live under "directories". Kept as
     // a redirect: a finished assessment and older links still point here.
     {

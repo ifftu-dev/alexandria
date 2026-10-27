@@ -156,7 +156,7 @@ pub(crate) fn proof(
 }
 
 /// GET a path from a directory with a fresh proof attached.
-async fn signed_get(
+pub(crate) async fn signed_get(
     client: &reqwest::Client,
     dir: &Directory,
     sk: &SigningKey,

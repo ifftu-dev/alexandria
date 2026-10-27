@@ -21,9 +21,10 @@ import DiagnosticsControls from '@/components/developer/DiagnosticsControls.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
+import { useNotifications } from '@/composables/useNotifications'
 
 
-import { clearSettingsCache, useSettings } from '@/composables/useSettings'
+import { clearSettingsCache, useSetting, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
@@ -40,6 +41,19 @@ const {
 } = useSentinel()
 const diagnostics = useDiagnostics()
 const sentinelView = useSentinelView()
+const notifications = useNotifications()
+
+// The inbox follows the profile: listeners and rows come up after unlock and
+// go away on lock, so one profile's notifications never show for the next.
+// Push registration and the OS permission prompt belong here too — after
+// unlock, never on boot, so the first thing a new person sees is not a
+// system dialog.
+async function startNotifications() {
+  await notifications.init()
+  void notifications.requestPermission()
+  const pushEnabled = useSetting<boolean>('notifications.push_enabled').ref.value ?? true
+  void notifications.registerPushIfEnabled(pushEnabled)
+}
 function onSentinelShortcut(event: KeyboardEvent) {
   if (isUnlocked.value && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.code === 'KeyS') {
     event.preventDefault()
@@ -120,8 +134,10 @@ onProfileReady(async () => {
   // Needs the vault, which is why it is here rather than in the Rust unlock
   // path: the withdrawal is signed with the learner's own key.
   void invoke('holder_retry_withdrawals').catch(() => {})
+  void startNotifications().catch(e => console.warn('[App] notifications start failed:', e))
 })
 onProfileLocked(async () => {
+  notifications.teardown()
   // Drop the in-memory settings cache so the picker (and the next
   // profile that unlocks) does not flash the previously-active
   // profile's preferences.
@@ -207,6 +223,9 @@ onMounted(async () => {
       if (account?.activation_state === 'pending_guardian' && route.name !== 'guardian-gate') {
         router.replace('/guardian-gate')
       }
+      // Warm start with a profile already unlocked: onProfileReady did not
+      // fire, so bring the inbox up here.
+      void startNotifications().catch(e => console.warn('[App] notifications start failed:', e))
     }
   } catch {
     if (route.name !== 'onboarding' && route.name !== 'profiles') {

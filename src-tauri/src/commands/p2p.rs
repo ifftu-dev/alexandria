@@ -120,6 +120,7 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
 
     // Clone handles for the spawned task
     let p2p_node = state.p2p_node.clone();
+    let db_for_consumer = state.db.clone();
     let peer_id_for_return = peer_id.clone();
     let app_for_events = app.clone();
     let operations = state.profile_operations.clone();
@@ -149,6 +150,8 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
             let (mut gossip, gossip_dispatcher) =
                 inbound::gossip_ingest(inbound_db.clone(), move |event| event.emit(&app_events));
             operations.spawn_job(gossip_dispatcher).await;
+            let app_for_guardian = app_for_events.clone();
+            let db_for_guardian = db_for_consumer.clone();
 
             // Spawn event consumer
             operations
@@ -167,6 +170,25 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                             }
                             crate::p2p::types::P2pEvent::StatusChanged(status) => {
                                 log::debug!("P2P: {} peers", status.connected_peers);
+                            }
+                            crate::p2p::types::P2pEvent::GuardianLinked {
+                                link_id,
+                                guardian_display_name,
+                            } => {
+                                let notification = crate::notifications::for_guardian_linked(
+                                    &link_id,
+                                    guardian_display_name.as_deref(),
+                                );
+                                let guard = db_for_guardian.lock();
+                                if let Ok(Some(db)) = guard.as_deref() {
+                                    if let Err(error) = crate::notifications::deliver(
+                                        &app_for_guardian,
+                                        db.conn(),
+                                        &notification,
+                                    ) {
+                                        log::debug!("guardian link notification: {error}");
+                                    }
+                                }
                             }
                             _ => {}
                         }

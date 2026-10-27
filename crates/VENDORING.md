@@ -1,5 +1,9 @@
 # Vendored third-party crates
 
+Two bodies of third-party code live under `crates/`: the iroh-live derived
+media crates (the bulk of this file) and, since October 2026, the mobile push
+plugin (its own section at the end).
+
 `crates/iroh-moq`, `crates/moq-media` and `crates/live` are **not original
 Alexandria work**. They derive from [`n0-computer/iroh-live`][upstream], which is
 Copyright (C) 2025 N0, INC and licensed `MIT OR Apache-2.0`.
@@ -82,3 +86,47 @@ Taking an upstream fix requires reconciling by hand — there is no shared histo
 with `n0-computer/iroh-live` to rebase onto.
 
 [upstream]: https://github.com/n0-computer/iroh-live
+
+## `crates/tauri-plugin-mobile-push`
+
+**Not original Alexandria work.** Vendored from
+[`muni-town/tauri-plugin-mobile-push`](https://github.com/muni-town/tauri-plugin-mobile-push)
+(itself a fork of `yanqianglu/tauri-plugin-mobile-push`), Copyright (C) Yanqiang
+Lu and contributors, licensed `MIT OR Apache-2.0`. Alexandria distributes it
+under the **Apache License 2.0**; both licence texts are kept in the crate
+directory as upstream shipped them.
+
+| Step | Where | Reference |
+|---|---|---|
+| Upstream | `github.com/yanqianglu/tauri-plugin-mobile-push` | crate version 0.2.0 |
+| Fork vendored from | `github.com/muni-town/tauri-plugin-mobile-push` | commit of 2026-10-12, "fix(ios): install the notification-center delegate at plugin init" |
+| Vendored into this repo | branch `feat/notifications`, 2026-10-20 | |
+
+Why vendored rather than depended on: the crate is not on crates.io, its
+`links` key means only one copy may exist in the build, and the iOS half
+injects methods into the tao-generated `AppDelegate` at runtime — a thing
+Alexandria already patches (`patches/tao`), so the two have to be reviewed
+together.
+
+### Modifications
+
+- `Cargo.toml`: `publish = false`.
+- `guest-js/` dropped. Alexandria drives the plugin from Rust; nothing in the
+  webview calls it.
+- `src/events.rs`: a Rust listener registry (`subscribe`) beside the JS
+  channel registry, fed by the same `emit`; a sticky tap is replayed to a Rust
+  subscriber exactly as to a JS listener.
+- `src/lib.rs`: `request_permission` and `get_token` exported as plain Rust
+  functions over the command bodies, and `subscribe` re-exported.
+- `ios/Package.swift`, `ios/Sources/MobilePushPlugin.swift`: the token is a
+  Firebase Cloud Messaging registration token on iOS as on Android. The
+  plugin still obtains the APNs token by method injection, then hands it to
+  `FirebaseMessaging` (a new SwiftPM dependency on `firebase-ios-sdk`) and
+  reports the FCM token Firebase issues for it; token refreshes come from
+  `MessagingDelegate`. Firebase is configured from `GoogleService-Info.plist`
+  in the app bundle and is simply off without it. The app sets
+  `FirebaseAppDelegateProxyEnabled` to false so Firebase does not swizzle
+  the same methods. Minimum iOS raised to 15 (Firebase 13).
+
+Everything else is upstream's. Taking an upstream change means reapplying the
+list above by hand.

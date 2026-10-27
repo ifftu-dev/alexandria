@@ -1,6 +1,8 @@
 package org.alexandria.node
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -28,6 +30,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : TauriActivity() {
   companion object {
+    /** Must match `notifications::ANDROID_CHANNEL` on the Rust side and the
+     *  FCM default channel in the manifest. */
+    private const val NOTIFICATION_CHANNEL_ID = "alexandria_default"
     private const val AV_PERMISSION_REQUEST = 0x4156
 
     /** Runtime permissions the native A/V pipeline needs. */
@@ -295,6 +300,7 @@ class MainActivity : TauriActivity() {
     // assessment shield the Rust side asked for.
     if (shieldOn) applyShield(true)
     PersonhoodLab.initialize(applicationContext)
+    createNotificationChannel()
     // Hide the native OS status bar (clock/battery) so the app owns the full
     // screen height. It can still be revealed with a swipe from the top edge.
     WindowCompat.getInsetsController(window, window.decorView).apply {
@@ -306,6 +312,23 @@ class MainActivity : TauriActivity() {
     // task keeps its peer connections instead of being killed by Doze /
     // battery optimisation. See P2pForegroundService for details.
     P2pForegroundService.start(this)
+  }
+
+  /**
+   * The channel every Alexandria notification is delivered on: the local ones
+   * the Rust side shows and the FCM ones the system shows while the app is in
+   * the background (the manifest names it as FCM's default). Creating a
+   * channel that exists is a no-op, so this runs on every start.
+   */
+  private fun createNotificationChannel() {
+    val manager = getSystemService(NotificationManager::class.java) ?: return
+    val channel = NotificationChannel(
+      NOTIFICATION_CHANNEL_ID,
+      "Alexandria",
+      NotificationManager.IMPORTANCE_HIGH,
+    )
+    channel.description = "Interviews, offers, requests and classroom activity"
+    manager.createNotificationChannel(channel)
   }
 
   override fun onStart() {

@@ -2513,6 +2513,18 @@ async fn swarm_event_loop(
                                     Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
                                         let job_db = inbound_db.clone();
                                         let peer_id = peer.to_string();
+                                        // A link request that succeeds is
+                                        // something the ward should hear
+                                        // about; the handler is pure, so the
+                                        // facts are taken here and reported
+                                        // once the reply is known.
+                                        let link = match &request {
+                                            GuardianRequest::Link { link_id, guardian_display_name, .. } => {
+                                                Some((link_id.clone(), guardian_display_name.clone()))
+                                            }
+                                            _ => None,
+                                        };
+                                        let events = event_tx.clone();
                                         inbound_requests.spawn(async move {
                                             let response = job_db
                                                 .run("p2p.guardian", move |database| {
@@ -2526,6 +2538,16 @@ async fn swarm_event_loop(
                                                 .unwrap_or_else(|error| {
                                                     GuardianResponse::Error(inbound::refusal_text(&error))
                                                 });
+                                            if let (Some((link_id, guardian_display_name)), GuardianResponse::Linked { .. }) =
+                                                (link, &response)
+                                            {
+                                                let _ = events
+                                                    .send(P2pEvent::GuardianLinked {
+                                                        link_id,
+                                                        guardian_display_name,
+                                                    })
+                                                    .await;
+                                            }
                                             InboundCompletion::Guardian(channel, response)
                                         });
                                     }

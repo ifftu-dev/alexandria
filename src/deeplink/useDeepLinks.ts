@@ -3,6 +3,11 @@
 // received on the picker / onboarding / unlock screens is queued and replayed
 // the instant a profile becomes ready (unlock, create, or restore). Singleton,
 // mirroring the lazy-listener pattern in `useSettings`.
+//
+// It is also the one door every other "take me there" goes through: a
+// notification tap (banner, push, or a row in the inbox) hands its route or
+// link to `openPath` / `openLink`, so one allowlist, one hold-until-unlocked
+// queue and one set of special cases serve them all.
 
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import router from '@/router'
@@ -10,6 +15,7 @@ import { useProfiles, onProfileReady } from '@/composables/useProfiles'
 import { parseDeepLink, type DeepLinkTarget } from './parse'
 
 let initialized = false
+let replayRegistered = false
 let unlisten: UnlistenFn | null = null
 let pending: DeepLinkTarget | null = null
 
@@ -49,9 +55,29 @@ async function navigate(target: DeepLinkTarget): Promise<void> {
   await router.push(target.path)
 }
 
-async function dispatch(raw: string): Promise<void> {
-  const target = parseDeepLink(raw)
-  if (!target) return
+/**
+ * Replay a queued target on the next unlock/create/restore (warm or cold).
+ * Registered once, by whichever caller comes first: `init` on boot, or a
+ * notification that arrived before it.
+ */
+function ensureReplay(): void {
+  if (replayRegistered) return
+  replayRegistered = true
+  onProfileReady(() => {
+    if (!pending) return
+    const target = pending
+    pending = null
+    void navigate(target)
+  })
+}
+
+/**
+ * Go to a parsed target — now if a profile is unlocked, else once one is. A
+ * second target arriving while one is held replaces it: the most recent
+ * thing the person asked for is the one they meant.
+ */
+async function openTarget(target: DeepLinkTarget): Promise<void> {
+  ensureReplay()
   if (useProfiles().isUnlocked.value) {
     await navigate(target)
   } else {
@@ -61,17 +87,31 @@ async function dispatch(raw: string): Promise<void> {
   }
 }
 
+/**
+ * Go to an in-app path. The same shape `alexandria://open?route=` accepts:
+ * absolute, same-document, and known to the router (checked at navigation).
+ */
+async function openPath(path: string | null | undefined): Promise<void> {
+  if (!path || !path.startsWith('/') || path.startsWith('//')) return
+  await openTarget({ kind: 'route', path })
+}
+
+/** Go wherever a raw deep-link URL points, if it is one of ours. */
+async function openLink(raw: string): Promise<void> {
+  const target = parseDeepLink(raw)
+  if (!target) return
+  await openTarget(target)
+}
+
+/** The target currently held for replay, if any (exposed for tests). */
+function heldTarget(): DeepLinkTarget | null {
+  return pending
+}
+
 async function init(): Promise<void> {
   if (initialized) return
   initialized = true
-
-  // Replay a queued link on the next unlock/create/restore (warm or cold).
-  onProfileReady(() => {
-    if (!pending) return
-    const target = pending
-    pending = null
-    void navigate(target)
-  })
+  ensureReplay()
 
   // Plugin JS API is the single source of truth for opened URLs.
   let plugin: typeof import('@tauri-apps/plugin-deep-link') | null = null
@@ -85,7 +125,7 @@ async function init(): Promise<void> {
   // Cold start: the launching URL may already be queued by the OS.
   try {
     const urls = await plugin.getCurrent()
-    for (const u of urls ?? []) void dispatch(u)
+    for (const u of urls ?? []) void openLink(u)
   } catch {
     /* getCurrent throws outside a Tauri webview — ignore */
   }
@@ -94,7 +134,7 @@ async function init(): Promise<void> {
   // forwarded by single-instance, and macOS/mobile native delivery).
   try {
     unlisten = await plugin.onOpenUrl((urls) => {
-      for (const u of urls) void dispatch(u)
+      for (const u of urls) void openLink(u)
     })
   } catch {
     /* ignore in web dev */
@@ -110,5 +150,5 @@ function dispose(): void {
 }
 
 export function useDeepLinks() {
-  return { init, dispose }
+  return { init, dispose, openTarget, openPath, openLink, heldTarget }
 }

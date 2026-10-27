@@ -232,7 +232,12 @@ pub(crate) fn fallback_unless_busy<R>(error: &str, fallback: R) -> Option<R> {
 #[derive(Debug, Clone)]
 pub(crate) enum InboundUiEvent {
     ClassroomMessage(ClassroomMessageEvent),
-    ClassroomMeta(ClassroomMetaTauriEvent),
+    /// A meta change, and the notification recorded for it in the same job
+    /// when the change was one the learner should hear about.
+    ClassroomMeta(
+        ClassroomMetaTauriEvent,
+        Option<crate::notifications::Recorded>,
+    ),
 }
 
 impl InboundUiEvent {
@@ -240,10 +245,40 @@ impl InboundUiEvent {
         use tauri::Emitter;
         let result = match self {
             Self::ClassroomMessage(event) => app.emit(classroom_manager::MESSAGE_EVENT, event),
-            Self::ClassroomMeta(event) => app.emit(classroom_manager::META_EVENT, event),
+            Self::ClassroomMeta(event, recorded) => {
+                if let Some(recorded) = recorded {
+                    crate::notifications::announce(app, &recorded);
+                }
+                app.emit(classroom_manager::META_EVENT, event)
+            }
         };
         if let Err(error) = result {
             log::debug!("inbound gossip: UI event emission failed: {error}");
+        }
+    }
+}
+
+/// Record the notification a committed meta event warrants, in the job that
+/// committed it. A failure to record is logged, not fatal: the classroom
+/// state is already applied and the UI event still goes out.
+fn classroom_notification(
+    db: &Database,
+    event: &ClassroomMetaTauriEvent,
+) -> Option<crate::notifications::Recorded> {
+    let local_address: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT stake_address FROM local_identity WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let notification = crate::notifications::for_classroom_meta(event, local_address.as_deref())?;
+    match crate::notifications::record_if_enabled(db.conn(), &notification) {
+        Ok(recorded) => recorded,
+        Err(error) => {
+            log::debug!("inbound gossip: classroom notification not recorded: {error}");
+            None
         }
     }
 }
@@ -427,8 +462,10 @@ impl GossipWork {
                     .map(InboundUiEvent::ClassroomMessage);
             }
             Self::ClassroomMeta(event) => {
-                return classroom_manager::apply_incoming_meta(db, message, event)
-                    .map(InboundUiEvent::ClassroomMeta);
+                return classroom_manager::apply_incoming_meta(db, message, event).map(|event| {
+                    let recorded = classroom_notification(db, &event);
+                    InboundUiEvent::ClassroomMeta(event, recorded)
+                });
             }
         };
         if let Err(error) = outcome {

@@ -2625,3 +2625,40 @@ export interface SeedResetPlan {
   resources: SeedResetItem[]
   token: string
 }
+
+// ── Notifications ──────────────────────────────────────────────
+
+/** The kinds the backend records (`src-tauri/src/notifications`). */
+export type NotificationKind =
+  | 'interview_invited'
+  | 'interview_room_opened'
+  | 'offer_sent'
+  | 'access_requested'
+  | 'assessment_requested'
+  | 'classroom_call_started'
+  | 'classroom_join_requested'
+  | 'credential_issued'
+  | 'guardian_request'
+  | 'generic'
+
+/** One row in the per-profile notifications inbox. */
+export interface AppNotification {
+  id: string
+  kind: NotificationKind | string
+  title: string
+  body: string
+  route: string | null
+  source: 'local' | 'push'
+  createdAt: string
+  readAt: string | null
+  payload: Record<string, unknown> | null
+}
+
+/** Whether this device is registered for push, and with which service. */
+export interface PushStatus {
+  supported: boolean
+  registered: boolean
+  platform: string | null
+  cloudOrigin: string | null
+  lastError: string | null
+}

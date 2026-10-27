@@ -37,6 +37,8 @@ const STATUS_LIST_TYPE: &str = "BitstringStatusListEntry";
 pub struct AutoIssuanceReport {
     /// Number of credentials successfully issued this tick.
     pub issued: usize,
+    /// Their ids, so the caller can tell the learner about each one.
+    pub issued_ids: Vec<String>,
     /// Number of pending observations skipped because they did not
     /// belong to the local learner (subject pubkey mismatch).
     pub skipped_foreign: usize,
@@ -62,7 +64,10 @@ pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceR
         }
 
         match issue_for_observation(conn, learner_key, &local_did, &obs) {
-            Ok(_) => report.issued += 1,
+            Ok(credential_id) => {
+                report.issued += 1;
+                report.issued_ids.push(credential_id);
+            }
             Err(e) => {
                 report.errors.push(format!("issue({}): {e}", obs.tx_hash));
             }

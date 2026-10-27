@@ -39,6 +39,21 @@
         android:label="${appLabel}"
         android:theme="@style/Theme.alexandria_node"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- Push notifications. FCM hands messages and token rotations to the
+             vendored mobile-push plugin's service; a message that arrives
+             while the app is in the background is shown by the system on the
+             channel below, which MainActivity creates at start. -->
+        <service
+            android:name="app.tauri.mobilepush.FCMService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="alexandria_default" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"

@@ -26,6 +26,8 @@
     "delete_profile": "Serialized, password-checked profile removal.",
     "is_biometric_available": "Unlock-screen device capability check.",
     "tutoring_check_devices": "Device capability enumeration.",
-    "tutoring_list_devices": "Device capability enumeration."
+    "tutoring_list_devices": "Device capability enumeration.",
+    "notifications_permission_request": "OS notification permission is a device property; asked once, before or after unlock.",
+    "notifications_pending_open": "The route of a notification tap that launched the app, taken by the picker before any profile is unlocked; carries no profile data."
   }
 }
