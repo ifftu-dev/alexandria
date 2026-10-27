@@ -6,8 +6,6 @@ use alexandria_verify::did::resolve_did_key;
 use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 
-use crate::clock::now_rfc3339;
-
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::key_registry;
 use crate::crypto::keystore::Keystore;
@@ -52,19 +50,23 @@ impl Issuer {
 
     /// The issuer for `did` after it rotated to `key`: the DID keeps its
     /// identity, so it is no longer derived from the key. Refused unless
-    /// `key` is the DID's current key, which is the key registry's entry for
-    /// it now, or with no entry, the key the `did:key` embeds.
-    pub fn rotated(conn: &Connection, did: Did, key: SigningKey) -> Result<Self, String> {
-        let current = match key_registry::resolve_key_at(conn, &did, &now_rfc3339())
-            .map_err(|e| e.to_string())?
-        {
-            Some(entry) => entry.public_key_bytes,
-            None => resolve_did_key(&did)
-                .map_err(|e| e.to_string())?
-                .as_bytes()
-                .to_vec(),
+    /// `key` is the DID's key at `at` (the issuance time): the key registry's
+    /// window open then. Only a DID the registry has never seen falls back to
+    /// the key its `did:key` embeds; one with history but no open window has
+    /// no current key, so its retired original key is refused too.
+    pub fn rotated(conn: &Connection, did: Did, key: SigningKey, at: &str) -> Result<Self, String> {
+        let open = key_registry::resolve_key_at(conn, &did, at).map_err(|e| e.to_string())?;
+        let current = match open {
+            Some(entry) => Some(entry.public_key_bytes),
+            None if has_history(conn, &did)? => None,
+            None => Some(
+                resolve_did_key(&did)
+                    .map_err(|e| e.to_string())?
+                    .as_bytes()
+                    .to_vec(),
+            ),
         };
-        if current != key.verifying_key().as_bytes() {
+        if current.as_deref() != Some(key.verifying_key().as_bytes().as_slice()) {
             return Err(format!(
                 "the signing key is not this DID's current key: {}",
                 did.as_str()
@@ -88,10 +90,20 @@ impl Issuer {
     }
 }
 
+/// Whether the key registry holds any window, open or not, for `did`.
+fn has_history(conn: &Connection, did: &Did) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM key_registry WHERE did = ?1)",
+        [did.as_str()],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials::fixtures::test_key;
+    use crate::credentials::fixtures::{test_key, NOW};
 
     #[tokio::test]
     async fn a_locked_vault_has_no_issuer() {
@@ -112,16 +124,39 @@ mod tests {
     fn a_rotated_key_signs_for_its_did_only_once_the_registry_holds_it() {
         let (db, original, did, _) = crate::credentials::fixtures::setup();
         let rotated = test_key("issuer-rotated");
-        let error = Issuer::rotated(db.conn(), did.clone(), rotated.clone())
+        // A rotation takes effect at the wall clock; issue after it.
+        let now = crate::clock::now_rfc3339();
+        let error = Issuer::rotated(db.conn(), did.clone(), rotated.clone(), &now)
             .err()
             .unwrap();
         assert!(error.contains("not this DID's current key"), "{error}");
 
         crate::crypto::key_registry::rotate_key(db.conn(), &did, &rotated).unwrap();
-        let issuer = Issuer::rotated(db.conn(), did.clone(), rotated.clone()).unwrap();
+        let issuer = Issuer::rotated(db.conn(), did.clone(), rotated.clone(), &now).unwrap();
         assert_eq!(issuer.did(), &did);
         assert_eq!(issuer.key().to_bytes(), rotated.to_bytes());
         // The pre-rotation key is no longer the DID's current key.
-        assert!(Issuer::rotated(db.conn(), did, original.key().clone()).is_err());
+        assert!(Issuer::rotated(db.conn(), did, original.key().clone(), &now).is_err());
+    }
+
+    #[test]
+    fn a_retired_original_key_is_refused_when_no_window_is_open() {
+        let (db, original, did, _) = crate::credentials::fixtures::setup();
+        // The DID has history: its original key, retired, and no key open now.
+        db.conn()
+            .execute(
+                "INSERT INTO key_registry \
+                 (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
+                 VALUES (?1, 'key-1', ?2, '1970-01-01T00:00:00Z', '2000-01-01T00:00:00Z', NULL)",
+                rusqlite::params![
+                    did.as_str(),
+                    hex::encode(original.key().verifying_key().as_bytes())
+                ],
+            )
+            .unwrap();
+        let error = Issuer::rotated(db.conn(), did, original.key().clone(), NOW)
+            .err()
+            .unwrap();
+        assert!(error.contains("not this DID's current key"), "{error}");
     }
 }

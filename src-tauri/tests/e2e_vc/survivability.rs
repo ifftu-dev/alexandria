@@ -133,9 +133,12 @@ async fn exported_bundle_verifies_offline_under_a_rotated_issuer_key() {
         integrity_session_id: None,
         integrity_policy: None,
     };
-    let rotated = app_lib::credentials::Issuer::rotated(db.conn(), issuer.clone(), issuer_key_v2)
-        .expect("v2 is the DID's current key");
-    credentials::issue(db.conn(), &rotated, &req, TEST_NOW).expect("issue");
+    // Issued after the rotation took effect, as a post-rotation issuance is.
+    let issued_at = app_lib::clock::now_rfc3339();
+    let rotated =
+        app_lib::credentials::Issuer::rotated(db.conn(), issuer.clone(), issuer_key_v2, &issued_at)
+            .expect("v2 is the DID's current key");
+    credentials::issue(db.conn(), &rotated, &req, &issued_at).expect("issue");
 
     // Verify well after the rotation, so the open registry window is v2's.
     let after_rotation = "2099-01-01T00:00:00Z";
