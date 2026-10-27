@@ -41,7 +41,7 @@ struct StatusMessage {
     issuer: String,
     /// Optional explicit list_id — if absent we derive
     /// `urn:alexandria:status-list:<issuer>:1` so this matches the
-    /// list_id format `commands::credentials` uses for local issuance.
+    /// list_id format `credentials::status_list` uses for local issuance.
     #[serde(default)]
     list_id: Option<String>,
     version: i64,
