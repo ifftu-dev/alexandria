@@ -2724,9 +2724,21 @@ export interface AppNotification {
 
 /** Whether this device is registered for push, and with which service. */
 export interface PushStatus {
+  enabled: boolean
+  pendingCleanup: boolean
+  pendingRegistration: boolean
   supported: boolean
   registered: boolean
   platform: string | null
   cloudOrigin: string | null
   lastError: string | null
+}
+
+/** Locally resolved tap; profile and origin are never taken from provider data. */
+export interface NotificationOpen {
+  networkId: string
+  id: string
+  profileId: string
+  recipient: string | null
+  route: string
 }

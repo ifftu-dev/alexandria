@@ -9,6 +9,10 @@
 // link to `openPath` / `openLink`, so one allowlist, one hold-until-unlocked
 // queue and one set of special cases serve them all.
 
+import { getProfileSessionToken } from '@/composables/profileSession'
+import { useLocalApi } from '@/composables/useLocalApi'
+import type { NotificationOpen } from '@/types'
+import { isNavigationFailure, NavigationFailureType, type RouteLocationRaw } from 'vue-router'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import router from '@/router'
 import { useProfiles, onProfileReady } from '@/composables/useProfiles'
@@ -18,41 +22,102 @@ let initialized = false
 let replayRegistered = false
 let unlisten: UnlistenFn | null = null
 let pending: DeepLinkTarget | null = null
+let notification: NotificationOpen | null = null
+let pendingProfile: string | null = null
+const consumed = new Set<string>()
+let navigating: Promise<void> | null = null
+let destinationSession: string | null | undefined
+
+function hasUnlockDestination(): boolean {
+  return destinationSession !== undefined && destinationSession === getProfileSessionToken()
+}
+
+async function replay(): Promise<void> {
+  if (navigating) return navigating
+  if (!useProfiles().isUnlocked.value || !pending) return
+  if (pendingProfile && pendingProfile !== useProfiles().activeProfileId.value) return
+  const target = pending
+  const intent = notification
+  const session = getProfileSessionToken()
+  navigating = (async () => {
+    if (!await navigate(target)) return
+    if (session !== getProfileSessionToken()) return
+    destinationSession = session
+    if (intent) {
+      consumed.add(intent.id)
+      await useLocalApi().invoke('notifications_consume_open', { id: intent.id }).catch(() => {})
+    }
+    if (pending === target) { pending = null; notification = null }
+  })()
+  try { await navigating } finally {
+    navigating = null
+    if (pending && pending !== target) await replay()
+  }
+}
+
+async function openNotification(intent: NotificationOpen): Promise<void> {
+  if (!intent.id || !intent.profileId || !intent.route?.startsWith('/') || intent.route.startsWith('//')) return
+  if (consumed.has(intent.id) || notification?.id === intent.id) return
+  ensureReplay()
+  pending = { kind: 'route', path: intent.route }
+  notification = intent
+  pendingProfile = intent.profileId
+  await replay()
+}
 
 /** Does this path resolve to a real registered route? (open-redirect guard) */
 function isKnownRoute(path: string): boolean {
   try {
-    return router.resolve(path).matched.length > 0
+    const route = router.resolve(path)
+    return route.matched.length > 0 && route.name !== 'not-found'
   } catch {
     return false
   }
 }
 
-async function navigate(target: DeepLinkTarget): Promise<void> {
+async function pushForSession(to: RouteLocationRaw, current: () => boolean): Promise<boolean> {
+  const path = router.resolve(to).fullPath
+  // Router guards and lazy components can await after openTarget has checked
+  // the session. Recheck at the final navigation boundary, before commitment.
+  const removeGuard = router.beforeResolve(next => next.fullPath !== path || current())
+  try {
+    const failure = await router.push(to)
+    return current()
+      && (!failure || isNavigationFailure(failure, NavigationFailureType.duplicated))
+      && router.currentRoute.value.fullPath === path
+  } finally {
+    removeGuard()
+  }
+}
+
+async function navigate(target: DeepLinkTarget): Promise<boolean> {
+  const session = getProfileSessionToken()
+  const current = () => session === getProfileSessionToken() && useProfiles().isUnlocked.value
+  if (!current()) return false
   if (target.kind === 'guardian-accept') {
     // Hand the code to the guardian dashboard, which prompts the parent to
     // confirm and runs `guardian_accept_invite` (surfaces its own errors).
-    await router.push({ path: '/guardian', query: { accept: target.code } })
-    return
+    return pushForSession({ path: '/guardian', query: { accept: target.code } }, current)
   }
   if (target.kind === 'interview-panel') {
     // The backend checks the link and fetches the interview; a bad link just
     // lands the panelist on the organisations page with nothing opened.
     const { usePanel } = await import('@/composables/usePanel')
+    if (!current()) return false
     try {
       const seat = await usePanel().openLink(target.link)
-      await router.push(`/panel/${seat.sessionId}`)
+      if (!current()) return false
+      return await pushForSession(`/panel/${seat.sessionId}`, current)
     } catch (cause) {
       console.warn('could not open interview link', cause)
+      return false
     }
-    return
   }
   if (target.kind === 'governance-genesis-locator') {
-    await router.push({ path: '/community/import', query: { locator: target.locator } })
-    return
+    return pushForSession({ path: '/community/import', query: { locator: target.locator } }, current)
   }
-  if (!isKnownRoute(target.path)) return
-  await router.push(target.path)
+  if (!isKnownRoute(target.path)) return false
+  return pushForSession(target.path, current)
 }
 
 /**
@@ -63,12 +128,7 @@ async function navigate(target: DeepLinkTarget): Promise<void> {
 function ensureReplay(): void {
   if (replayRegistered) return
   replayRegistered = true
-  onProfileReady(() => {
-    if (!pending) return
-    const target = pending
-    pending = null
-    void navigate(target)
-  })
+  onProfileReady(replay)
 }
 
 /**
@@ -78,13 +138,10 @@ function ensureReplay(): void {
  */
 async function openTarget(target: DeepLinkTarget): Promise<void> {
   ensureReplay()
-  if (useProfiles().isUnlocked.value) {
-    await navigate(target)
-  } else {
-    // Navigating now would be clobbered by the App.vue boot flow routing to
-    // the picker/onboarding. Hold it; onProfileReady replays it.
-    pending = target
-  }
+  pending = target
+  notification = null
+  pendingProfile = useProfiles().isUnlocked.value ? useProfiles().activeProfileId.value : null
+  await replay()
 }
 
 /**
@@ -147,8 +204,12 @@ function dispose(): void {
   unlisten = null
   initialized = false
   pending = null
+  notification = null
+  pendingProfile = null
+  consumed.clear()
+  destinationSession = undefined
 }
 
 export function useDeepLinks() {
-  return { init, dispose, openTarget, openPath, openLink, heldTarget }
+  return { init, dispose, openTarget, openPath, openLink, heldTarget, openNotification, hasUnlockDestination }
 }

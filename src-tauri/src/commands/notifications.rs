@@ -2,10 +2,10 @@
 //! IPC for the notification list and this device's push registration.
 
 use tauri::AppHandle;
-use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::db::executor::DatabaseWorkload;
 use crate::notifications::{self, push::PushStatus, NewNotification, NotificationRow};
+use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -106,54 +106,86 @@ pub async fn notifications_clear(app: AppHandle, state: State<'_, AppState>) -> 
 ///
 /// `granted` | `denied` | `unavailable`.
 #[tauri::command]
-pub async fn notifications_permission_request(app: AppHandle) -> Result<String, String> {
-    let state = match app.notification().permission_state() {
-        Ok(PermissionState::Granted) => PermissionState::Granted,
-        Ok(PermissionState::Denied) => PermissionState::Denied,
-        Ok(_) => app
-            .notification()
-            .request_permission()
-            .map_err(|e| e.to_string())?,
-        Err(error) => return Err(error.to_string()),
-    };
-    Ok(match state {
-        PermissionState::Granted => "granted",
-        PermissionState::Denied => "denied",
-        _ => "unavailable",
+pub async fn notifications_permission_request(
+    app: AppHandle,
+    lease: ProfileLease,
+) -> Result<String, String> {
+    if !lease.is_current() {
+        return Err("profile session changed".into());
     }
-    .to_string())
+    // Permission is device-global; do not retain a profile while awaiting the OS.
+    drop(lease);
+    if cfg!(mobile) {
+        let granted = tauri_plugin_mobile_push::request_permission(&app)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(if granted { "granted" } else { "denied" }.into())
+    } else {
+        Ok("granted".into())
+    }
 }
 
-/// The route of a banner or push the learner tapped before the webview was
-/// listening, if any. Taken once. The webview calls this when it starts
-/// listening, so a tap that launched the app still lands.
+/// Peek at a validated tap even while locked. Only the matching admitted
+/// profile can consume it after navigation through notifications_consume_open.
 #[tauri::command]
-pub async fn notifications_pending_open() -> Result<Option<String>, String> {
-    Ok(notifications::take_pending_open())
+pub async fn notifications_pending_open(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<notifications::opens::NotificationOpen>, String> {
+    notifications::opens::pending(&state)
 }
 
 #[tauri::command]
-pub async fn push_status(
-    app: AppHandle,
-    _state: State<'_, AppState>,
-) -> Result<PushStatus, String> {
-    notifications::push::status(&app).await
+pub async fn notifications_consume_open(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    notifications::opens::consume(&state, &state.profile_lease(), &id)
 }
 
 #[tauri::command]
-pub async fn push_register(
-    app: AppHandle,
-    _state: State<'_, AppState>,
-) -> Result<PushStatus, String> {
-    notifications::push::register(&app).await
+pub async fn push_status(state: State<'_, AppState>) -> Result<PushStatus, String> {
+    notifications::push::status(&state, state.profile_lease()).await
+}
+
+#[tauri::command]
+pub async fn push_register(app: AppHandle, lease: ProfileLease) -> Result<PushStatus, String> {
+    notifications::push::register(&app, lease).await
 }
 
 #[tauri::command]
 pub async fn push_unregister(
     app: AppHandle,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<PushStatus, String> {
-    notifications::push::unregister(&app).await
+    notifications::push::unregister(&app, state.profile_lease()).await
+}
+
+#[tauri::command]
+pub async fn push_set_enabled(
+    app: AppHandle,
+    lease: ProfileLease,
+    enabled: bool,
+) -> Result<PushStatus, String> {
+    use tauri::Manager;
+    let status = notifications::push::reconcile(
+        &app.state::<AppState>(),
+        lease.clone(),
+        None,
+        Some(enabled),
+    )
+    .await?;
+    use tauri::Emitter;
+    if lease.is_current() {
+        let _ = app.emit(
+            "settings-changed",
+            serde_json::json!({ "key": "notifications.push_enabled" }),
+        );
+    }
+    if enabled {
+        notifications::push::register(&app, lease).await
+    } else {
+        Ok(status)
+    }
 }
 
 /// Push a notification of `kind` through the whole pipeline, for trying the

@@ -137,7 +137,9 @@ private class PushNotificationHandler: NSObject, UNUserNotificationCenterDelegat
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        emit("notification-tapped", Self.eventPayload(for: response.notification))
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            emit("notification-tapped", Self.eventPayload(for: response.notification))
+        }
         completionHandler()
     }
 
@@ -151,18 +153,16 @@ private class PushNotificationHandler: NSObject, UNUserNotificationCenterDelegat
     /// visible text is not something a handler navigates on.
     private static func eventPayload(for notification: UNNotification) -> [String: Any] {
         var data: [String: Any] = [:]
-        for (key, value) in notification.request.content.userInfo {
-            guard let key = key as? String, key != "aps" else { continue }
-            if let string = value as? String {
-                data[key] = string
-            } else if let number = value as? NSNumber {
-                data[key] = number
-            } else if let nested = value as? [String: Any] {
-                data[key] = nested
+        let remote = notification.request.trigger is UNPushNotificationTrigger
+        let info = notification.request.content.userInfo
+        if remote {
+            for key in ["recipient", "eventId", "kind", "id", "route", "title", "body"] {
+                if let value = info[key] as? String { data[key] = value }
             }
+        } else if let extras = info["__EXTRA__"] as? [String: Any] {
+            data["__EXTRA__"] = extras
         }
-
-        var payload: [String: Any] = ["data": data]
+        var payload: [String: Any] = ["data": data, "local": !remote]
         let content = notification.request.content
         if !content.title.isEmpty {
             payload["title"] = content.title

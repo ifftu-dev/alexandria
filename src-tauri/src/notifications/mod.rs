@@ -34,10 +34,10 @@
 //! whether the app or the phone's push service produced it.
 
 pub mod cloud_pull;
+pub mod opens;
 pub mod push;
+pub(crate) mod recipients;
 mod store;
-
-use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -318,7 +318,16 @@ pub fn record_if_enabled(
 
 /// Tell the webview, and the OS when nobody is looking at the app.
 pub fn announce<R: Runtime>(app: &AppHandle<R>, recorded: &Recorded) {
-    if let Err(error) = app.emit(EVENT_NEW, &recorded.row) {
+    let Some(session) = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.profile_operations.session())
+    else {
+        return;
+    };
+    if let Err(error) = app.emit(
+        EVENT_NEW,
+        serde_json::json!({ "session": session, "row": &recorded.row }),
+    ) {
         log::debug!("notifications: emit failed: {error}");
     }
     emit_changed(app, recorded.unread);
@@ -343,30 +352,21 @@ pub fn deliver<R: Runtime>(
 
 /// Emit the unread count, after anything that changes it.
 pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, unread: u32) {
-    let _ = app.emit(EVENT_CHANGED, serde_json::json!({ "unread": unread }));
+    let Some(session) = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.profile_operations.session())
+    else {
+        return;
+    };
+    let _ = app.emit(
+        EVENT_CHANGED,
+        serde_json::json!({ "session": session, "unread": unread }),
+    );
 }
 
-/// A route the learner asked for by tapping a notification, held until the
-/// webview asks. A tap can arrive before the webview has any listener — it
-/// may be the reason the app is launching — and a Tauri event emitted into
-/// an empty room is gone. The route waits here as well.
-static PENDING_OPEN: Mutex<Option<String>> = Mutex::new(None);
-
-/// The learner tapped something that names a route: tell the webview, and
-/// keep the route for a webview that is not listening yet.
-pub fn emit_open<R: Runtime>(app: &AppHandle<R>, route: &str) {
-    if let Ok(mut pending) = PENDING_OPEN.lock() {
-        *pending = Some(route.to_string());
-    }
-    let _ = app.emit(EVENT_OPEN, serde_json::json!({ "route": route }));
-}
-
-/// The route of the last tap nobody has acted on yet, taken once.
-pub fn take_pending_open() -> Option<String> {
-    PENDING_OPEN
-        .lock()
-        .ok()
-        .and_then(|mut pending| pending.take())
+/// Publish an already persisted and locally resolved tap.
+pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &opens::NotificationOpen) {
+    let _ = app.emit(EVENT_OPEN, intent);
 }
 
 /// Whether a banner is warranted: on a phone always, on the desktop only
@@ -390,14 +390,39 @@ fn should_interrupt<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) -> bo
 }
 
 fn os_banner<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) {
+    let Some(state) = app.try_state::<crate::AppState>() else {
+        return;
+    };
+    let Some(profile) = state.active_id() else {
+        return;
+    };
+    let Ok(network) = recipients::network() else {
+        return;
+    };
     let mut builder = app
         .notification()
         .builder()
         .title(&row.title)
         .body(&row.body)
-        .extra("notificationId", &row.id);
+        .extra("notificationId", &row.id)
+        .extra("profileId", profile.as_str())
+        .extra("networkId", network);
     if let Some(route) = &row.route {
-        builder = builder.extra("route", route);
+        // Keep the locally discovered/registered origin even if the learner
+        // clears this row before tapping its OS banner.
+        let origin = row
+            .payload
+            .as_ref()
+            .and_then(|p| p.get("cloudOrigin"))
+            .and_then(serde_json::Value::as_str);
+        let destination = match origin {
+            Some(origin) if row.kind == kind::INTERVIEW_ROOM_OPENED => format!(
+                "{route}?cloud={}",
+                url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
+            ),
+            _ => route.clone(),
+        };
+        builder = builder.extra("route", destination);
     }
     #[cfg(target_os = "android")]
     {
@@ -431,8 +456,18 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     // the route under `__EXTRA__`; the two never both fire for one tap.
     let on_banner = app.clone();
     if let Err(error) = app.notification().on_action(move |performed| {
-        if let Some(route) = route_of_action(performed) {
-            emit_open(&on_banner, &route);
+        if route_of_action(performed).is_none() {
+            return;
+        }
+        if let Some(notification) = performed.notification() {
+            let extras = serde_json::to_value(notification.extra()).ok();
+            if let Some(extras) = extras.as_ref().and_then(serde_json::Value::as_object) {
+                if let Ok(Some(intent)) =
+                    opens::local_tap(&on_banner.state::<crate::AppState>(), extras)
+                {
+                    emit_open(&on_banner, &intent);
+                }
+            }
         }
     }) {
         log::warn!("notifications: banner taps will not route: {error}");
@@ -554,14 +589,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(route_of_action(&bare), None);
-    }
-
-    #[test]
-    fn a_pending_open_is_taken_once() {
-        if let Ok(mut pending) = PENDING_OPEN.lock() {
-            *pending = Some("/credentials/1".into());
-        }
-        assert_eq!(take_pending_open().as_deref(), Some("/credentials/1"));
-        assert_eq!(take_pending_open(), None);
     }
 }

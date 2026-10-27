@@ -34,6 +34,8 @@
     "pushRegistered": "Registered with {origin}",
     "pushNotRegistered": "Not registered",
     "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
+    "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
+    "pushRegistrationPending": "Device registration is awaiting confirmation.",
     "pushError": "Last attempt failed: {error}",
     "register": "Register now",
     "unregister": "Unregister",
