@@ -1,6 +1,8 @@
 import { createApp, h } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
-import { i18n } from '@/i18n'
+import { i18n, setActiveLocale } from '@/i18n'
+import { loadLocaleMessages } from '@/i18n/loadLocale'
+import { directionOf, isAppLocale } from '@/locales/meta'
 import '@/assets/css/main.css'
 import type { GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
 
@@ -40,21 +42,35 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
   },
 })
 
-document.documentElement.classList.toggle('dark', new URLSearchParams(location.search).get('theme') === 'dark')
-const { default: Fixture } = await import('./Fixture.vue')
-const { default: Onboarding } = await import('@/pages/Onboarding.vue')
-const { default: BlankLayout } = await import('@/layouts/BlankLayout.vue')
-const { default: Home } = await import('@/pages/Home.vue')
-const { default: Goals } = await import('@/pages/goals/Index.vue')
-const router = createRouter({ history: createMemoryHistory(), routes: [
-  { path: '/', component: Home },
-  { path: '/goals', component: Goals },
-  { path: '/:pathMatch(.*)*', component: Fixture },
-] })
-const screen = new URLSearchParams(location.search).get('screen')
-const root = screen === 'onboarding'
-  ? { render: () => h(BlankLayout, null, { default: () => h(Onboarding) }) }
-  : screen === 'home'
-  ? { render: () => h(BlankLayout, null, { default: () => h('div', { class: 'p-6' }, [h(RouterView)]) }) }
-  : Fixture
-createApp(root).use(i18n).use(router).mount('#app')
+const params = new URLSearchParams(location.search)
+document.documentElement.classList.toggle('dark', params.get('theme') === 'dark')
+const requestedLocale = params.get('locale')
+if (isAppLocale(requestedLocale)) {
+  await loadLocaleMessages(requestedLocale)
+  setActiveLocale(requestedLocale)
+  document.documentElement.lang = requestedLocale
+  document.documentElement.dir = directionOf(requestedLocale)
+}
+const screen = params.get('screen')
+if (screen === 'skill-atlas') {
+  // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
+  const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
+  createApp(SkillAtlasFixture).use(i18n).mount('#app')
+} else {
+  const { default: Fixture } = await import('./Fixture.vue')
+  const { default: Onboarding } = await import('@/pages/Onboarding.vue')
+  const { default: BlankLayout } = await import('@/layouts/BlankLayout.vue')
+  const { default: Home } = await import('@/pages/Home.vue')
+  const { default: Goals } = await import('@/pages/goals/Index.vue')
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/', component: Home },
+    { path: '/goals', component: Goals },
+    { path: '/:pathMatch(.*)*', component: Fixture },
+  ] })
+  const root = screen === 'onboarding'
+    ? { render: () => h(BlankLayout, null, { default: () => h(Onboarding) }) }
+    : screen === 'home'
+    ? { render: () => h(BlankLayout, null, { default: () => h('div', { class: 'p-6' }, [h(RouterView)]) }) }
+    : Fixture
+  createApp(root).use(i18n).use(router).mount('#app')
+}
