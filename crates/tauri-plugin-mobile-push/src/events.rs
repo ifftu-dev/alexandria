@@ -20,40 +20,27 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::Mutex;
 use serde_json::Value;
 use tauri::ipc::Channel;
 
-/// Listeners by event name.
-///
-/// A process-global rather than a field on the plugin struct because the
-/// platforms reach [`emit`] from outside Rust's plugin state — the JNI symbol
-/// and the `@_cdecl` function are plain functions.
-static LISTENERS: LazyLock<Mutex<HashMap<String, Vec<Channel<Value>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Alexandria addition: listener admission and sticky handoff share one lock.
+/// Platforms call from plain JNI/FFI functions, outside the plugin instance.
+/// All callbacks and channel sends run after this lock has been released.
+#[derive(Default)]
+struct Registry {
+    channels: HashMap<String, Vec<Channel<Value>>>,
+    rust_listeners: HashMap<String, Vec<RustListener>>,
+    pending: HashMap<String, Value>,
+}
 
-/// Sticky payloads waiting for their first listener, by event name.
-///
-/// A notification tapped while the app is not running is delivered before the
-/// webview has run any JavaScript, so there is nothing to receive it. The tap
-/// is held here and replayed to the first listener that registers, which is
-/// what makes a cold-start tap open the room the notification referred to.
-static PENDING: LazyLock<Mutex<HashMap<String, Value>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
 
 /// A Rust-side listener. Alexandria addition: the host app handles push
 /// events in Rust (recording them, showing a local notification, routing a
 /// tap) rather than in the webview, so the platforms need a Rust audience as
 /// well as the JS channels above.
 pub type RustListener = Arc<dyn Fn(&Value) + Send + Sync + 'static>;
-
-/// Rust listeners by event name. Alexandria addition — see [`subscribe`].
-static RUST_LISTENERS: LazyLock<Mutex<HashMap<String, Vec<RustListener>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn registry() -> MutexGuard<'static, HashMap<String, Vec<Channel<Value>>>> {
-    LISTENERS.lock()
-}
 
 /// Registers a listener for `event`, delivering a sticky payload if one is
 /// waiting.
@@ -62,13 +49,21 @@ pub fn register(event: String, channel: Channel<Value>) {
         "[mobile-push] listener registered for event `{event}` (channel {})",
         channel.id()
     );
-    if let Some(pending) = PENDING.lock().remove(&event) {
+    let pending = {
+        let mut registry = REGISTRY.lock();
+        registry
+            .channels
+            .entry(event.clone())
+            .or_default()
+            .push(channel.clone());
+        registry.pending.remove(&event)
+    };
+    if let Some(pending) = pending {
         log::debug!("[mobile-push] replaying the pending `{event}` payload");
         if let Err(e) = channel.send(pending) {
             log::warn!("[mobile-push] could not replay `{event}`: {e}");
         }
     }
-    registry().entry(event).or_default().push(channel);
 }
 
 /// Registers a Rust listener for `event`. Alexandria addition.
@@ -83,15 +78,19 @@ where
     F: Fn(&Value) + Send + Sync + 'static,
 {
     let listener: RustListener = Arc::new(listener);
-    if let Some(pending) = PENDING.lock().remove(event) {
+    let pending = {
+        let mut registry = REGISTRY.lock();
+        registry
+            .rust_listeners
+            .entry(event.to_string())
+            .or_default()
+            .push(listener.clone());
+        registry.pending.remove(event)
+    };
+    if let Some(pending) = pending {
         log::debug!("[mobile-push] replaying the pending `{event}` payload to a Rust listener");
         listener(&pending);
     }
-    RUST_LISTENERS
-        .lock()
-        .entry(event.to_string())
-        .or_default()
-        .push(listener);
 }
 
 /// Drops the listener for `event` with the given channel id.
@@ -99,7 +98,8 @@ where
 /// `PluginListener::unregister` calls the `remove_listener` command with the
 /// channel id it was given at registration.
 pub fn remove(event: &str, channel_id: u32) {
-    let mut map = registry();
+    let mut registry = REGISTRY.lock();
+    let map = &mut registry.channels;
     let Some(channels) = map.get_mut(event) else {
         return;
     };
@@ -114,9 +114,7 @@ pub fn remove(event: &str, channel_id: u32) {
 /// Listeners outlive the webview that registered them, so they are cleared
 /// when the app exits rather than left behind.
 pub fn clear() {
-    registry().clear();
-    RUST_LISTENERS.lock().clear();
-    PENDING.lock().clear();
+    *REGISTRY.lock() = Registry::default();
 }
 
 /// Delivers a platform event to every listener registered for `event`.
@@ -146,38 +144,30 @@ pub fn emit(event: &str, payload: &str, sticky: bool) {
         }
     };
 
-    // Rust listeners first (Alexandria addition). Snapshotted so a listener
-    // that subscribes another never deadlocks on the registry.
-    let rust_listeners: Vec<RustListener> = match RUST_LISTENERS.lock().get(event) {
-        Some(listeners) => listeners.clone(),
-        None => Vec::new(),
+    // Choose delivery or buffering atomically with listener admission. A
+    // subscriber either takes this pending payload or appears in this snapshot.
+    let (rust_listeners, channels) = {
+        let mut registry = REGISTRY.lock();
+        let rust_listeners = registry
+            .rust_listeners
+            .get(event)
+            .cloned()
+            .unwrap_or_default();
+        let channels = registry.channels.get(event).cloned().unwrap_or_default();
+        if rust_listeners.is_empty() && channels.is_empty() {
+            if sticky {
+                log::debug!("[mobile-push] holding `{event}` until a listener registers");
+                registry.pending.insert(event.to_string(), data);
+            }
+            return;
+        }
+        (rust_listeners, channels)
     };
+
+    // Callbacks may subscribe or emit again; channel sends may need the main
+    // thread. Neither can run under the registry lock.
     for listener in &rust_listeners {
         listener(&data);
-    }
-
-    // Snapshot the channels and drop the lock before sending: `Channel::send`
-    // evaluates JavaScript in the webview, which needs the main thread, so it
-    // must never run while the lock is held.
-    let channels: Vec<Channel<Value>> = match registry().get(event) {
-        Some(channels) => channels.clone(),
-        None => Vec::new(),
-    };
-
-    if channels.is_empty() && !rust_listeners.is_empty() {
-        log::debug!(
-            "[mobile-push] `{event}` delivered to {} Rust listener(s)",
-            rust_listeners.len()
-        );
-        return;
-    }
-
-    if channels.is_empty() {
-        if sticky {
-            log::debug!("[mobile-push] holding `{event}` until a listener registers");
-            PENDING.lock().insert(event.to_string(), data);
-        }
-        return;
     }
 
     let mut delivered = 0usize;
@@ -196,7 +186,8 @@ pub fn emit(event: &str, payload: &str, sticky: bool) {
     }
 
     if !dead.is_empty() {
-        let mut map = registry();
+        let mut registry = REGISTRY.lock();
+        let map = &mut registry.channels;
         if let Some(channels) = map.get_mut(event) {
             channels.retain(|c| !dead.contains(&c.id()));
             if channels.is_empty() {
@@ -284,7 +275,15 @@ mod tests {
 
         assert!(got.lock().is_empty());
         // Still registered: a bad payload says nothing about the listener.
-        assert_eq!(registry().get("notification-received").unwrap().len(), 1);
+        assert_eq!(
+            REGISTRY
+                .lock()
+                .channels
+                .get("notification-received")
+                .unwrap()
+                .len(),
+            1
+        );
         remove("notification-received", id);
     }
 
@@ -314,7 +313,15 @@ mod tests {
         emit("notification-tapped", r#"{"n":1}"#, false);
         assert_eq!(got.lock().len(), 1);
         // The dead channel is gone, the live one remains.
-        assert_eq!(registry().get("notification-tapped").unwrap().len(), 1);
+        assert_eq!(
+            REGISTRY
+                .lock()
+                .channels
+                .get("notification-tapped")
+                .unwrap()
+                .len(),
+            1
+        );
 
         emit("notification-tapped", r#"{"n":2}"#, false);
         assert_eq!(got.lock().len(), 2);
@@ -326,7 +333,7 @@ mod tests {
         // The cold-start ordering: the platform reports the tap before any
         // JavaScript has run, so registration is what delivers it.
         emit("notification-tapped", r#"{"data":{"roomId":"r"}}"#, true);
-        assert!(PENDING.lock().contains_key("notification-tapped"));
+        assert!(REGISTRY.lock().pending.contains_key("notification-tapped"));
 
         let (channel, got) = recorder();
         register("notification-tapped".into(), channel);
@@ -336,7 +343,7 @@ mod tests {
             vec![serde_json::json!({"data": {"roomId": "r"}})]
         );
         // Delivered once, not held for every later listener.
-        assert!(!PENDING.lock().contains_key("notification-tapped"));
+        assert!(!REGISTRY.lock().pending.contains_key("notification-tapped"));
     }
 
     #[test]
@@ -350,12 +357,72 @@ mod tests {
         });
         // The sticky tap reached the subscriber at registration and is gone.
         assert_eq!(got.lock().len(), 1);
-        assert!(!PENDING.lock().contains_key("notification-tapped"));
+        assert!(!REGISTRY.lock().pending.contains_key("notification-tapped"));
 
         emit("notification-tapped", r#"{"data":{"route":"/y"}}"#, true);
         assert_eq!(got.lock().len(), 2);
         // Delivered, so not held for a JS listener that never comes.
-        assert!(!PENDING.lock().contains_key("notification-tapped"));
+        assert!(!REGISTRY.lock().pending.contains_key("notification-tapped"));
+    }
+
+    #[test]
+    fn a_tap_racing_cold_replay_reaches_the_subscriber_once_without_blocking() {
+        let _serial = serial();
+        emit("notification-tapped", r#"{"tap":"cold"}"#, true);
+        let got: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let sink = got.clone();
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let native_start = start.clone();
+        let (finished, completion) = std::sync::mpsc::channel();
+        let completion = Mutex::new(completion);
+        let replay_completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let replay_result = replay_completed.clone();
+        let native = std::thread::spawn(move || {
+            native_start.wait();
+            emit("notification-tapped", r#"{"tap":"racing"}"#, true);
+            finished.send(()).unwrap();
+        });
+
+        subscribe("notification-tapped", move |payload| {
+            sink.lock().push(payload.clone());
+            if payload["tap"] == "cold" {
+                // Keep the initial replay callback active until another native
+                // tap is emitted. Registration must already be effective, and
+                // neither replay nor live delivery may hold the registry lock.
+                start.wait();
+                replay_result.store(
+                    completion
+                        .lock()
+                        .recv_timeout(std::time::Duration::from_secs(5))
+                        .is_ok(),
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }
+        });
+        native.join().unwrap();
+
+        // Public subscription observes any stranded tap without inspecting
+        // the registry. A second subscriber must not replay either tap.
+        let late: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let late_sink = late.clone();
+        subscribe("notification-tapped", move |payload| {
+            late_sink.lock().push(payload.clone());
+        });
+        assert_eq!(
+            *got.lock(),
+            vec![
+                serde_json::json!({"tap": "cold"}),
+                serde_json::json!({"tap": "racing"}),
+            ]
+        );
+        assert!(
+            late.lock().is_empty(),
+            "a tap was stranded for a later listener"
+        );
+        assert!(
+            replay_completed.load(std::sync::atomic::Ordering::SeqCst),
+            "native emission blocked behind the replay callback"
+        );
     }
 
     #[test]
