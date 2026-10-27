@@ -1,5 +1,8 @@
 # Interview Assistant
 
+Status: live
+Updated: 2026-10-12
+
 > Local-first support for planning, conducting, transcribing, and reviewing
 > structured interviews — for instructors, and for panelists on an
 > organisation's interview held in Alexandria. The attributed transcript is the

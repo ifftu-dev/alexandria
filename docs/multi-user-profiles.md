@@ -1,6 +1,7 @@
 # Multi-User Profiles
 
-**Status:** Implemented; profile index upgraded to network-bound format v2 · **Last updated:** 2026-09-15
+Status: implemented
+Updated: 2026-10-27
 
 ## Motivation
 
@@ -19,8 +20,8 @@ Multi-user accounts let one device host several learners, each with their own cr
 
 ## Non-Goals (this RFC)
 
-- Remote push notifications (covered in [push-notifications-rfc.md](./push-notifications-rfc.md)).
-- Deep linking (covered in a follow-up RFC; multi-profile must land first because deep links queue until a profile is unlocked).
+- Remote push notifications (planned, using Firebase Cloud Messaging).
+- Deep linking (see [deeplink/README.md](deeplink/README.md); deep links queue until a profile is unlocked).
 - Cross-profile content deduplication. Each profile keeps its own iroh blob cache for now; a shared read-only blob pool can come later.
 - Per-profile parental controls / content filtering. **Update:** account roles
   and cross-device parental oversight shipped in a follow-up — a minor learner's
@@ -63,7 +64,7 @@ Multi-user accounts let one device host several learners, each with their own cr
     {
       "id": "0f5a…",
       "network_id": "preprod",
-      "display_name": "Pratyush",
+      "display_name": "Ada",
       "avatar": { "kind": "emoji", "value": "🦊" },
       "color": "#7c3aed",
       "created_at": "2026-05-18T09:21:00Z",
@@ -251,10 +252,10 @@ From the investigation pass:
 - `src/App.vue` — initial routing decision based on profile count.
 - `src/components/layout/AppTopBar.vue` — avatar dropdown.
 
-## Out of scope for this worktree
+## Out of scope
 
-- Deep linking (`tauri-plugin-deep-link`). Requires multi-profile because cold-start deep links must queue per-profile.
-- Push notifications. See [push-notifications-rfc.md](./push-notifications-rfc.md) for the researched architecture (relay-mediated APNs + FCM + UnifiedPush + native WS).
+- Deep linking (`tauri-plugin-deep-link`); see [deeplink/README.md](deeplink/README.md).
+- Push notifications (planned, using Firebase Cloud Messaging).
 - Cross-profile content deduplication.
 
 ## Test plan

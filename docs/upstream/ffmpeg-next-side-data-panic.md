@@ -1,7 +1,11 @@
 # Draft issue — ffmpeg-next
 
+Status: draft
+Updated: 2026-08-20
+
+Not yet filed upstream.
+
 **Repo:** https://github.com/zmwangx/rust-ffmpeg
-**Status:** drafted, not filed. Reviewed by: —
 **Affects:** 9.0.0 (and 8.1.0, differently — see below)
 
 ---

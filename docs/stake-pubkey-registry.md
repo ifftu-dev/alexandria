@@ -1,13 +1,15 @@
 # Stake-Address → Public-Key Registry
 
-**Status:** Implemented — schema (migration 052), registry module,
-chain-side fetcher with witness verification, registration tx
-builder, validator integration, embedded multisig-signed bootstrap
-snapshot, and refresh-task spawn all live in the codebase. First
-real preprod registration confirmed on 2026-05-25. Operator runbook:
+Status: implemented
+Updated: 2026-10-27
+
+The `stake_pubkey_registry` table, registry module, chain-side fetcher with
+witness verification, registration tx builder, validator integration, embedded
+multisig-signed bootstrap snapshot and refresh task are all in the codebase.
+First real preprod registration confirmed on 2026-05-25. Operator runbook:
 [`stake-pubkey-registry-runbook.md`](./stake-pubkey-registry-runbook.md).
-**Last updated:** 2026-09-15
-**Spec link:** §7.3 (authority on privileged gossip topics)
+
+**Spec link:** [protocol-specification.md §6.7](protocol-specification.md#67-validation-pipeline) (identity check on privileged gossip topics)
 **Replaces:** the in-memory TOFU binding that previously lived in
 `src-tauri/src/p2p/validation.rs`.
 
@@ -77,7 +79,7 @@ the bundled snapshot. The application validates the profile and digest before
 opening profiles, so an altered or mismatched bootstrap resource prevents
 application setup.
 
-### 4.2 SQLite schema (migration 052)
+### 4.2 SQLite schema (`stake_pubkey_registry`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS stake_pubkey_registry (
@@ -249,19 +251,19 @@ version)`.
   cadence at which the background refresh task reconciles against
   on-chain registrations. Clamped up to 60s at runtime to avoid
   hot-looping Blockfrost. Lives in the standard
-  `app_settings`/registry plumbing (migration 048 scope) and is
+  `app_settings`/registry plumbing and is
   re-read on every tick, so changes take effect on the next
   reconciliation without a restart.
 - `registry.require_chain_verification` *(not implemented; on the
   roadmap)* — would reject any binding that hasn't been confirmed
   against the chain since app start. Tracked as a follow-up.
 
-## 5. Migration status (pre-launch)
+## 5. Implementation status
 
-Migration 052, the registry module, bundled signed snapshot, validation lookup,
+The registry table and module, bundled signed snapshot, validation lookup,
 and background refresh are implemented. The old in-memory TOFU binding has
-been removed. N01 subsequently moved founder keys and the bootstrap resource
-digest into the strict network profile. Profiles are immutably bound to that
+been removed. Founder keys and the bootstrap resource digest live in the
+strict network profile ([ADR 0002](adr/0002-bundled-network-profiles.md)). Profiles are immutably bound to that
 profile's `network_id`.
 
 ## 6. Testing plan

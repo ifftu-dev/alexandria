@@ -1,5 +1,8 @@
 # Project Structure
 
+Status: live
+Updated: 2026-10-27
+
 > Alexandria — Tauri v2 desktop and mobile application (macOS, iOS, Android)
 
 ---
@@ -100,8 +103,8 @@ src-tauri/
     │   ├── randomizer.rs   # Difficulty-stratified question draw (per-attempt seed)
     │   ├── irt.rs          # Item-response-theory ability estimation
     │   ├── adaptive.rs     # Adaptive item selection over the IRT engine
-    │   ├── items.rs        # Unified assessment items (migration 072)
-    │   ├── policy.rs       # Attempt limits + cooldowns (migration 074)
+    │   ├── items.rs        # Unified assessment items
+    │   ├── policy.rs       # Attempt limits + cooldowns
     │   ├── mcq.rs          # MCQ item handling
     │   ├── goal_plan.rs    # Goal → prerequisite path planning
     │   └── grader.rs       # Host-side grading against the withheld answer key

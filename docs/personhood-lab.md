@@ -1,5 +1,8 @@
 # Personhood Lab
 
+Status: live
+Updated: 2026-09-30
+
 Personhood Lab is an opt-in Android debug experiment that generates and verifies
 a proof from a bundled synthetic fixture. It does not accept identity documents,
 issue credentials, establish uniqueness, or change permissions. An unlocked

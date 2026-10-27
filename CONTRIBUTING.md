@@ -84,6 +84,48 @@ Run the local mirror of CI:
 This runs the same gates CI does: `cargo fmt --check`, `cargo clippy -D
 warnings`, the Rust test suite, both build configurations, the enterprise
 boundary guard, the Tauri command guard, i18n parity, `vue-tsc`, and vitest.
+One deliberate difference: CI builds Linux with `tutoring-video-static`, which
+needs a static FFmpeg that does not build on macOS, so the script uses the
+default features locally. Anything that only breaks under the static feature
+still surfaces in CI.
+
+If you changed Markdown, also run `scripts/check-docs.sh` (see
+[Documentation](#documentation)).
+
+### Running tests selectively
+
+```bash
+# Full desktop tutoring test surface
+cargo test -p alexandria-node --features tutoring-video         # macOS / Windows
+cargo test -p alexandria-node --features tutoring-video-static  # Linux
+
+# One module: append a filter (wallet, p2p, evidence, …)
+cargo test -p alexandria-node --features tutoring-video p2p
+
+# iOS simulator compile check (full mobile A/V tutoring path)
+cargo check -p alexandria-node --target aarch64-apple-ios-sim --features tutoring-video-ios
+
+# Frontend
+npx vue-tsc -b --noEmit
+npm test                 # vitest
+npm run test:desktop-ui  # Playwright (Chromium + WebKit); see docs/desktop-ui-validation.md
+```
+
+What the suites cover:
+
+- **Unit tests** across crypto, database, P2P, evidence, Cardano, credentials,
+  aggregation, governance and domain modules (900+; run
+  `cargo test -p alexandria-node --lib` for the current count), plus tokio
+  async tests for iroh content operations, the P2P swarm lifecycle and network
+  integration.
+- **End-to-end suites** in `src-tauri/tests/`: `e2e_vc` (VC issue/verify,
+  anchoring, offline peer fetch, DID status), `guardian_e2e` and
+  `settings_sync_e2e`.
+- **Frontend Vitest** for composables, parsers and components.
+
+`p2p/stress.rs` is a stub since the VC-first cutover retired the old stress
+suite; it is not live coverage. Build prerequisites and Cargo features are in
+[docs/building.md](docs/building.md).
 
 ## Code style
 
@@ -115,6 +157,29 @@ the change, not to update the test:
   manifest budgets and new plugins, never by changing the runtime config.
 - **The community build never depends on `ee/`.** A checkout with both
   `ee/` directories deleted must build, typecheck, and pass tests.
+
+## Documentation
+
+Start at [docs/README.md](docs/README.md), the index. Every file under `docs/`
+(except indexes, `docs/adr/` and `docs/agents/`) opens with a status block
+directly under its title:
+
+`Status:` followed by `Updated: YYYY-MM-DD`.
+
+| Status | Meaning |
+|---|---|
+| `draft` | Proposed, not started |
+| `active` | Being implemented |
+| `live` | Maintained guide, reference or runbook |
+| `implemented` | Finished spec or audit. Frozen: later changes start a new doc |
+| `superseded` | Replaced; add `Superseded-by: <path>` |
+| `retired` | Describes something that was removed |
+
+Specs may carry their `Triage:` line instead. Update docs in the same change as the
+code they describe, and keep the README short: detail belongs in `docs/`.
+`scripts/check-docs.sh` (run by the `Docs` workflow) checks the README length,
+the status lines, that no absolute home-directory paths are committed, and
+that relative links resolve.
 
 ## Commits and pull requests
 

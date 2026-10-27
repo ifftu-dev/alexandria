@@ -1,5 +1,8 @@
 # Optional Jev integration
 
+Status: live
+Updated: 2026-10-27
+
 Jev is off by default. It proposes structured checks; it does not generate course prose, grade assessments, establish proficiency, issue credentials, change prerequisites, or make governance decisions.
 
 ## App configuration
@@ -18,7 +21,7 @@ Profile changes and settings revisions invalidate pending responses. Learning ch
 
 ## Local learning shadow comparisons
 
-Storage is a separate profile opt-in, off for existing and new settings. Enable **Keep local learning shadow comparisons** to retain JD, learning-goal and document-claim comparisons in the SQLCipher profile database (migration 4). Each sample includes submitted source text, candidate IDs, local matcher suggestions, validated provider response/usage, the source/taxonomy-bound record, and elapsed time. Search, Studio and tutor shadow results are not retained.
+Storage is a separate profile opt-in, off for existing and new settings. Enable **Keep local learning shadow comparisons** to retain JD, learning-goal and document-claim comparisons in the SQLCipher profile database (`decision_shadow_samples`). Each sample includes submitted source text, candidate IDs, local matcher suggestions, validated provider response/usage, the source/taxonomy-bound record, and elapsed time. Search, Studio and tutor shadow results are not retained.
 
 At most 100 samples remain. Seven-day expiry is enforced on settings reads, decision preparation, saving and export; a locked or unused profile is not decrypted by a background retention worker. Turning mode off, disabling cloud permission or retention deletes the samples. **Delete learning comparisons** also invalidates pending checks so an old request cannot repopulate the table. Samples are local only, outside synced settings and the audit chain. Deleting the profile removes its database.
 

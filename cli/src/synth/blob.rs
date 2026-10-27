@@ -1,6 +1,6 @@
 //! Blob format for synthetic Sentinel priors.
 //!
-//! Mirrors the on-wire schema in `docs/sentinel-adversarial-priors.md`:
+//! Mirrors the schema in `docs/sentinel.md` §Synthetic training blobs:
 //! one `PriorBlob` per (label, run); each blob carries `samples`, where
 //! every sample is a per-keystroke time series with parallel arrays
 //! (`digraphs`, `dwell_ms`, `flight_ms`, `speed_ratio`).

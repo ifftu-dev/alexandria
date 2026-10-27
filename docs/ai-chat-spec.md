@@ -1,8 +1,9 @@
 # Alexandria AI Chat and Tutoring — Feature Architecture
 
-Status: Proposed architecture, not an implementation claim. Existing capabilities are identified separately below. The UI mocks use illustrative data and scripted responses.
+Status: active
+Updated: 2026-10-27
 
-Updated: 24 October 2026 (revision 3: Phase 1 implemented; section 26 records where the implementation differs from earlier revisions)
+Phases 1 and 2 are implemented; section 26 records where the implementation differs from earlier revisions. Phase 3 items remain proposals.
 
 ## 1. Product objective
 
@@ -757,7 +758,7 @@ Paths below are relative to the repository root.
 - `src-tauri/src/commands/assessment.rs`, `src-tauri/src/commands/integrity.rs`, `src-tauri/src/assessment/randomizer.rs`
 - `src-tauri/src/sentinel/` (signal sources) and `docs/sentinel.md`
 - `src-tauri/src/commands/decisions.rs`, `crates/alexandria-decisions/src/lib.rs`
-- `crates/alexandria-mcp/src/{main.rs,broker.rs,stdio.rs}`, `src-tauri/src/commands/studio_mcp.rs`, `docs/instructor-studio-mcp-plan.md`
+- `crates/alexandria-mcp/src/{main.rs,broker.rs,stdio.rs}`, `src-tauri/src/commands/studio_mcp.rs`
 - `src/utils/markdown.ts`, `src/utils/sanitize.ts`, `src/composables/useKeyboardShortcuts.ts`
 - `src-tauri/tauri.conf.json` (CSP)
 
