@@ -192,7 +192,8 @@ fn the_view_set_is_exact() {
 /// indexes; learning memory adds 1 table and 1 index;
 /// guardian approval of remote models adds 2 tables and 1 index; chat
 /// search adds one FTS5 table (6 schema tables with its shadows) and 3
-/// triggers; chat artifacts add 1 table and 2 indexes.
+/// triggers; chat artifacts add 1 table and 2 indexes. Notifications add
+/// 3 tables (inbox, deduplication, registration) and 1 unread index.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -200,8 +201,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 131, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 126, "index count changed");
+    assert_eq!(tables, 134, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 127, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         6,
@@ -484,4 +485,353 @@ fn a_failed_baseline_leaves_no_schema_and_can_retry() {
     db.run_migrations()
         .expect("retry after the fault is cleared");
     assert!(table_exists(db.conn(), "credentials"));
+}
+
+// Frozen SQL from the provisional notification branch, before main assigned
+// version 18 to call kinds. Keep this fixture independent of migration 28.
+const PROVISIONAL_NOTIFICATIONS: &str = r#"
+CREATE TABLE notifications (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    route TEXT,
+    source TEXT NOT NULL DEFAULT 'local' CHECK (source IN ('local','push')),
+    dedupe_key TEXT UNIQUE,
+    payload_json TEXT CHECK (payload_json IS NULL OR json_valid(payload_json)),
+    created_at TEXT NOT NULL,
+    read_at TEXT
+);
+CREATE INDEX idx_notifications_unread ON notifications(created_at) WHERE read_at IS NULL;
+CREATE TABLE notification_dedupe (
+    dedupe_key TEXT PRIMARY KEY,
+    seen_at TEXT NOT NULL
+);
+CREATE TABLE push_registrations (
+    cloud_origin TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    token TEXT NOT NULL,
+    registered_at TEXT NOT NULL
+);
+"#;
+
+fn provisional_notification_database() -> Database {
+    with_provisional_notifications(Database::open_in_memory().unwrap())
+}
+
+fn with_provisional_notifications(db: Database) -> Database {
+    let mut history = MIGRATIONS[..17].to_vec();
+    history.push((18, "notifications", PROVISIONAL_NOTIFICATIONS));
+    db.run_migrations_from(&history).unwrap();
+    db.conn()
+        .execute_batch(
+            r#"INSERT INTO notifications
+            (id, kind, title, body, route, source, dedupe_key, payload_json, created_at, read_at)
+         VALUES ('saved', 'interview', 'Invitation', 'Saved body', '/interviews', 'push',
+                 'interview:saved', '{"ref":"saved"}', '2026-10-25', '2026-10-26');
+         INSERT INTO notification_dedupe VALUES ('interview:saved', '2026-10-25');
+         INSERT INTO notification_dedupe VALUES ('offer:cleared', '2026-10-24');
+         INSERT INTO push_registrations VALUES
+            ('https://cloud.example', 'device-saved', 'fcm', 'test-token', '2026-10-25');
+         INSERT INTO tutoring_sessions (id, title) VALUES ('old-call', 'Saved call');
+         INSERT INTO interview_sessions
+            (id, title, tutoring_session_id, expires_at, cloud_interview_id)
+         VALUES ('old-interview', 'Saved interview', 'old-call', '2026-10-28', 'cloud-interview');
+         UPDATE _migrations SET applied_at = '2026-10-25' WHERE version = 18;"#,
+        )
+        .unwrap();
+    db
+}
+
+#[test]
+fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
+    let db = provisional_notification_database();
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 10);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
+    let saved: (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+    ) = db
+        .conn()
+        .query_row(
+            "SELECT kind, title, body, route, source, dedupe_key, payload_json, created_at, read_at
+         FROM notifications WHERE id = 'saved'",
+            [],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        saved,
+        (
+            "interview".into(),
+            "Invitation".into(),
+            "Saved body".into(),
+            "/interviews".into(),
+            "push".into(),
+            "interview:saved".into(),
+            r#"{"ref":"saved"}"#.into(),
+            "2026-10-25".into(),
+            "2026-10-26".into()
+        )
+    );
+    let dedupe: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM notification_dedupe WHERE
+         (dedupe_key = 'interview:saved' AND seen_at = '2026-10-25') OR
+         (dedupe_key = 'offer:cleared' AND seen_at = '2026-10-24')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(dedupe, 2);
+    let registration: (String, String, String, String) = db
+        .conn()
+        .query_row(
+            "SELECT device_id, platform, token, registered_at FROM push_registrations
+         WHERE cloud_origin = 'https://cloud.example'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        registration,
+        (
+            "device-saved".into(),
+            "fcm".into(),
+            "test-token".into(),
+            "2026-10-25".into()
+        )
+    );
+    let call: (String, String, String) = db
+        .conn()
+        .query_row(
+            "SELECT title, kind, context_id FROM tutoring_sessions WHERE id = 'old-call'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        call,
+        (
+            "Saved call".into(),
+            "interview_panel".into(),
+            "old-interview".into()
+        )
+    );
+    let history: Vec<(i64, String)> = db
+        .conn()
+        .prepare("SELECT version, name FROM _migrations WHERE version >= 18 ORDER BY version")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        history,
+        vec![
+            (18, "call_kinds".into()),
+            (19, "ai_chat".into()),
+            (20, "ai_chat_practice".into()),
+            (21, "learning_memory".into()),
+            (22, "ai_connection_approvals".into()),
+            (23, "ai_chat_search".into()),
+            (24, "ai_chat_goal_bindings".into()),
+            (25, "ai_chat_artifacts".into()),
+            (26, "course_notes_body".into()),
+            (27, "ai_chat_actions".into()),
+            (28, "notifications".into())
+        ]
+    );
+    let applied_at: String = db
+        .conn()
+        .query_row(
+            "SELECT applied_at FROM _migrations WHERE version = 28",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(applied_at, "2026-10-25");
+}
+
+#[test]
+fn provisional_notifications_with_missing_storage_are_not_marked_upgraded() {
+    for table in ["notifications", "notification_dedupe", "push_registrations"] {
+        let db = provisional_notification_database();
+        db.conn()
+            .execute_batch(&format!("DROP TABLE {table}"))
+            .unwrap();
+        assert!(db.run_migrations().is_err(), "accepted missing {table}");
+        let marker: String = db
+            .conn()
+            .query_row("SELECT name FROM _migrations WHERE version = 18", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(marker, "notifications");
+        assert!(!columns(db.conn(), "tutoring_sessions").contains(&"kind".to_string()));
+    }
+}
+
+#[test]
+fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls() {
+    for prior_version in [0, 27] {
+        let db = Database::open_in_memory().unwrap();
+        if prior_version == 27 {
+            db.run_migrations_from(&MIGRATIONS[..27]).unwrap();
+            db.conn()
+                .execute_batch(
+                    "INSERT INTO tutoring_sessions (id, title, kind, context_id)
+                 VALUES ('saved', 'Existing call', 'plugin', 'plugin-saved');",
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            super::run_migrations_on_connection(db.conn()).unwrap(),
+            28 - prior_version
+        );
+        assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
+        db.conn().execute_batch(
+            "INSERT INTO notifications (id, kind, title, created_at)
+             VALUES ('new', 'credential', 'New credential', '2026-10-27');
+             INSERT INTO notification_dedupe VALUES ('credential:new', '2026-10-27');
+             INSERT INTO push_registrations VALUES ('https://cloud.example', 'device', 'fcm', 'token', '2026-10-27');"
+        ).unwrap();
+        assert_eq!(crate::notifications::unread_count(db.conn()).unwrap(), 1);
+        let kind_marker: String = db
+            .conn()
+            .query_row("SELECT name FROM _migrations WHERE version = 18", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kind_marker, "call_kinds");
+        let notification_marker: String = db
+            .conn()
+            .query_row("SELECT name FROM _migrations WHERE version = 28", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(notification_marker, "notifications");
+        if prior_version == 27 {
+            let call: (String, String, String) = db
+                .conn()
+                .query_row(
+                    "SELECT title, kind, context_id FROM tutoring_sessions WHERE id = 'saved'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                call,
+                (
+                    "Existing call".into(),
+                    "plugin".into(),
+                    "plugin-saved".into()
+                )
+            );
+        }
+    }
+}
+
+#[test]
+fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provisional.db");
+    let key = [37; 32];
+    {
+        let db = with_provisional_notifications(Database::open_encrypted(&path, &key).unwrap());
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_upgrade BEFORE INSERT ON _migrations WHEN NEW.version = 25
+             BEGIN SELECT RAISE(ABORT, 'injected upgrade failure'); END;",
+            )
+            .unwrap();
+        let error = db.run_migrations().unwrap_err().to_string();
+        assert!(error.contains("injected upgrade failure"), "{error}");
+    }
+    assert!(!Database::is_plaintext(&path));
+    let db = Database::open_encrypted(&path, &key).unwrap();
+    let marker: (String, String) = db
+        .conn()
+        .query_row(
+            "SELECT name, applied_at FROM _migrations WHERE version = 18",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(marker, ("notifications".into(), "2026-10-25".into()));
+    assert!(!columns(db.conn(), "tutoring_sessions").contains(&"kind".to_string()));
+    assert!(!table_exists(db.conn(), "chat_threads"));
+    let read_at: String = db
+        .conn()
+        .query_row(
+            "SELECT read_at FROM notifications WHERE id = 'saved'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(read_at, "2026-10-26");
+    db.conn()
+        .execute_batch("DROP TRIGGER fail_upgrade")
+        .unwrap();
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 10);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
+}
+
+#[test]
+fn provisional_notifications_unknown_histories_are_refused_without_rewriting_them() {
+    for damage in [
+        "UPDATE _migrations SET name = 'unknown_notifications' WHERE version = 18",
+        "UPDATE _migrations SET name = 'other_baseline' WHERE version = 1",
+        "DELETE FROM _migrations WHERE version = 5",
+        "INSERT INTO _migrations (version, name) VALUES (19, 'unknown_extension')",
+    ] {
+        let db = provisional_notification_database();
+        db.conn().execute_batch(damage).unwrap();
+        let history = || {
+            db.conn()
+                .prepare("SELECT version, name, applied_at FROM _migrations ORDER BY version")
+                .unwrap()
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let before = history();
+        assert!(db.run_migrations().is_err());
+        assert_eq!(history(), before);
+        assert!(!columns(db.conn(), "tutoring_sessions").contains(&"kind".to_string()));
+        assert_eq!(
+            crate::notifications::list(db.conn(), None, false)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 }

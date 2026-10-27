@@ -122,6 +122,7 @@ crates/tauri-plugin-mobile-push/ios/.tauri/
 crates/tauri-plugin-mobile-push/ios/Package.resolved
 crates/tauri-plugin-mobile-push/android/build/
 crates/tauri-plugin-mobile-push/android/.gradle/
+crates/tauri-plugin-mobile-push/android/.tauri/
 
 # Firebase project file for Android push: per-developer, never committed.
 src-tauri/gen/android/app/google-services.json
@@ -131,3 +132,10 @@ src-tauri/gen/android/app/google-services.json
 src-tauri/gen/apple/alexandria-node_iOS/GoogleService-Info.plist
 playwright-report/
 test-results/
+
+# Tauri copies this API from the locked tauri dependency during iOS builds.
+patches/tauri-plugin-notification/.tauri/
+patches/tauri-plugin-notification/ios/.build/
+patches/tauri-plugin-notification/ios/.swiftpm/
+patches/tauri-plugin-notification/ios/Package.resolved
+src-tauri/gen/android/buildSrc/.kotlin/

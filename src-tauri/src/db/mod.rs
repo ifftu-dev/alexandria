@@ -283,6 +283,7 @@ fn run_migrations_from_connection(
     // understand.
     validate_or_stamp_identity(conn)?;
     ensure_migration_table(conn)?;
+    let mut migrated = reconcile_provisional_notifications(conn, migrations)?;
 
     let applied = {
         let mut stmt = conn.prepare("SELECT version, name FROM _migrations ORDER BY version")?;
@@ -302,7 +303,6 @@ fn run_migrations_from_connection(
         }
     }
 
-    let mut migrated = 0;
     for (version, name, sql) in migrations.iter().skip(applied.len()) {
         let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
         // Another connection may have migrated while this one waited for
@@ -336,6 +336,72 @@ fn run_migrations_from_connection(
     }
 
     Ok(migrated)
+}
+
+/// The development notification branch used version 18 before main assigned
+/// it to call kinds. Bridge only that exact history, keeping its tables and
+/// original timestamp. Moving the marker and applying main's intervening
+/// migrations are one transaction: a failed upgrade must remain retryable as
+/// the original provisional database, never as a history with a gap.
+fn reconcile_provisional_notifications(
+    conn: &Connection,
+    migrations: &[(i64, &str, &str)],
+) -> Result<usize, DbError> {
+    if !matches!(migrations.get(17), Some((18, "call_kinds", _)))
+        || !matches!(migrations.get(27), Some((28, "notifications", _)))
+    {
+        return Ok(0);
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let history = {
+        let mut stmt = tx.prepare("SELECT version, name FROM _migrations ORDER BY version")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    if !history
+        .iter()
+        .any(|(v, n)| *v == 18 && n == "notifications")
+    {
+        return Ok(0);
+    }
+    if history.len() != 18
+        || history[..17]
+            .iter()
+            .zip(migrations)
+            .any(|((v, n), (expected_v, expected_n, _))| v != expected_v || n != expected_n)
+    {
+        return Err(DbError::Migration(
+            "unsupported provisional notification history; database left unchanged".into(),
+        ));
+    }
+    // A provisional marker alone is insufficient to adopt the notification
+    // schema. Refuse missing/incomplete storage instead of marking it current
+    // and hiding the damage behind a successful upgrade.
+    for query in [
+        "SELECT id, kind, title, body, route, source, dedupe_key, payload_json, created_at, read_at FROM notifications LIMIT 0",
+        "SELECT dedupe_key, seen_at FROM notification_dedupe LIMIT 0",
+        "SELECT cloud_origin, device_id, platform, token, registered_at FROM push_registrations LIMIT 0",
+    ] {
+        tx.prepare(query).map_err(|e| {
+            DbError::Migration(format!("incomplete provisional notification schema: {e}"))
+        })?;
+    }
+    tx.execute(
+        "UPDATE _migrations SET version = 28 WHERE version = 18 AND name = 'notifications'",
+        [],
+    )?;
+    for (version, name, sql) in &migrations[17..27] {
+        tx.execute_batch(sql)
+            .map_err(|e| DbError::Migration(format!("migration {version} ({name}) failed: {e}")))?;
+        tx.execute(
+            "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
+            rusqlite::params![version, name],
+        )?;
+    }
+    tx.commit()?;
+    Ok(10)
 }
 
 /// Join a caller-owned transaction, or own one until the complete derived-state
