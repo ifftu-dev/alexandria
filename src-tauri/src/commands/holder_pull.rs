@@ -38,7 +38,7 @@ use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 
-use crate::cloud::{self, is_loopback};
+use crate::cloud::{self, is_allowed_origin};
 use crate::db::executor::DatabaseWorkload;
 use crate::settings::registry::keys;
 use crate::settings::SettingsStore;
@@ -151,7 +151,7 @@ async fn signed_get(
     // https only. This carries a list of who is interested in a named person,
     // and the proof header is a bearer credential for five minutes — neither
     // belongs on a plaintext connection.
-    if !dir.url.starts_with("https://") && !is_loopback(&dir.url) {
+    if !is_allowed_origin(&dir.url) {
         return Err("a directory must be https".into());
     }
 
@@ -293,7 +293,7 @@ pub async fn set_visibility(
     organisation_id: String,
     visible: bool,
 ) -> Result<(), String> {
-    if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
+    if !is_allowed_origin(&directory_url) {
         return Err("a directory must be https".into());
     }
 

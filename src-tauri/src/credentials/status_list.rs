@@ -23,30 +23,27 @@ pub const ENTRY_TYPE: &str = "BitstringStatusListEntry";
 /// The origin this identity's status lists are served from, if any.
 ///
 /// The `credentials.status_host` setting wins; the Alexandria Cloud the app
-/// talks to stands in when it is empty.
-/// Only `https`, or `http` on loopback, counts — a list named at a plain
-/// `http` host could be swapped on the wire, and a verifier would believe it.
+/// talks to ([`crate::cloud::origin`], already checked) stands in when it is
+/// empty. A configured host must be an allowed origin
+/// ([`crate::cloud::is_allowed_origin`]) — a list named at a plain `http`
+/// host could be swapped on the wire, and a verifier would believe it.
 pub fn host(conn: &Connection) -> Option<String> {
     use crate::settings::{registry::keys, SettingsStore};
     let configured = SettingsStore::get(conn, keys::CREDENTIAL_STATUS_HOST);
-    let candidate = if !configured.trim().is_empty() {
-        Some(configured.trim().to_string())
-    } else {
-        crate::cloud::origin(conn)
-    };
-    candidate
-        .map(|origin| origin.trim_end_matches('/').to_string())
-        .filter(|origin| {
-            (origin.starts_with("https://") || crate::cloud::is_loopback(origin))
-                && alexandria_verify::vc::status::parse_list_url(
-                    &alexandria_verify::vc::status::list_url(
-                        origin,
-                        &Did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK".into()),
-                        1,
-                    ),
-                )
-                .is_some()
-        })
+    if configured.trim().is_empty() {
+        return crate::cloud::origin(conn);
+    }
+    Some(configured.trim().trim_end_matches('/').to_string()).filter(|origin| {
+        crate::cloud::is_allowed_origin(origin)
+            && alexandria_verify::vc::status::parse_list_url(
+                &alexandria_verify::vc::status::list_url(
+                    origin,
+                    &Did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK".into()),
+                    1,
+                ),
+            )
+            .is_some()
+    })
 }
 
 /// The list a credential issued now by `issuer_did` belongs to.

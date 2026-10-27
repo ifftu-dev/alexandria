@@ -42,7 +42,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 use super::holder_pull::{directories, nonce, proof, Directory};
-use crate::cloud::is_loopback;
+use crate::cloud::is_allowed_origin;
 use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::evidence;
 use crate::AppState;
@@ -82,7 +82,7 @@ pub struct RunsResult {
 }
 
 fn https_only(url: &str) -> Result<(), String> {
-    if url.starts_with("https://") || is_loopback(url) {
+    if is_allowed_origin(url) {
         return Ok(());
     }
     Err("a directory must be https".into())

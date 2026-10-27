@@ -56,7 +56,7 @@ pub fn parse_panel_link(link: &str) -> Result<PanelLink, String> {
             .ok_or_else(|| format!("the interview link has no {name}"))
     };
     let cloud = param("cloud")?.trim_end_matches('/').to_string();
-    if !cloud.starts_with("https://") && !cloud::is_loopback(&cloud) {
+    if !cloud::is_allowed_origin(&cloud) {
         return Err("the interview link points at a service that is not https".into());
     }
     let interview_id = param("id")?;

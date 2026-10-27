@@ -45,10 +45,7 @@ pub(super) async fn directory(
         .find(|d| d.url.trim_end_matches('/') == address.trim_end_matches('/'))
         .ok_or("configure this directory before contacting it")?;
     let url = Url::parse(&dir.url).map_err(|e| e.to_string())?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
-        || !url.username().is_empty()
-        || url.password().is_some()
+    if !crate::cloud::is_allowed_origin(&dir.url)
         || url.query().is_some()
         || url.fragment().is_some()
     {
