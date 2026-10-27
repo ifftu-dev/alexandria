@@ -2,6 +2,10 @@
 //! Alexandria Cloud origin, the loopback exception to HTTPS, and the HTTP
 //! client for directory and status-list requests.
 
+use std::net::{Ipv4Addr, Ipv6Addr};
+
+use url::{Host, Url};
+
 use crate::settings::registry::keys;
 use crate::settings::SettingsStore;
 
@@ -18,28 +22,43 @@ pub fn origin(conn: &rusqlite::Connection) -> Option<String> {
             .and_then(|profile| profile.cloud_https_origin.clone())?
     };
     let origin = origin.trim_end_matches('/').to_string();
-    (origin.starts_with("https://") || is_loopback(&origin)).then_some(origin)
+    is_allowed_origin(&origin).then_some(origin)
 }
 
 /// Loopback is allowed so somebody can run a directory locally and try this
 /// without a certificate. Nothing else plaintext is.
 ///
-/// The host has to *end* there. A prefix check alone would accept
-/// `http://127.0.0.1.example.com`, which is a domain somebody else controls
-/// wearing a loopback address as a costume — and it would arrive over
-/// plaintext carrying a proof header.
+/// The URL is parsed, and its host has to *be* loopback. A prefix check would
+/// accept `http://127.0.0.1.example.com`, a domain somebody else controls
+/// wearing a loopback address as a costume, and `http://127.0.0.1:80@evil`,
+/// whose host is `evil`; either would receive a proof header over plaintext.
+/// A URL with userinfo is refused outright.
 pub fn is_loopback(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else {
+    let Some(url) = parse(url) else {
         return false;
     };
-    for host in ["127.0.0.1", "localhost", "[::1]"] {
-        if let Some(after) = rest.strip_prefix(host) {
-            if after.is_empty() || after.starts_with(':') || after.starts_with('/') {
-                return true;
-            }
+    url.scheme() == "http"
+        && match url.host() {
+            Some(Host::Domain(name)) => name == "localhost",
+            Some(Host::Ipv4(ip)) => ip == Ipv4Addr::LOCALHOST,
+            Some(Host::Ipv6(ip)) => ip == Ipv6Addr::LOCALHOST,
+            None => false,
         }
-    }
-    false
+}
+
+/// Whether the app may send requests to `url`: `https`, or `http` on
+/// loopback ([`is_loopback`]), with a host and no userinfo. A status list
+/// named at any other origin could be swapped on the wire, and a verifier
+/// would believe it.
+pub fn is_allowed_origin(url: &str) -> bool {
+    parse(url).is_some_and(|parsed| parsed.scheme() == "https" && parsed.host().is_some())
+        || is_loopback(url)
+}
+
+/// `url` parsed, unless it carries userinfo.
+fn parse(url: &str) -> Option<Url> {
+    let url = Url::parse(url).ok()?;
+    (url.username().is_empty() && url.password().is_none()).then_some(url)
 }
 
 /// An HTTP client that follows no redirects and gives up after 15 seconds.
@@ -61,5 +80,62 @@ mod tests {
         assert!(is_loopback("http://localhost:8787"));
         assert!(!is_loopback("http://registry.example.com"));
         assert!(!is_loopback("http://127.0.0.1.example.com"));
+    }
+
+    #[test]
+    fn a_loopback_address_in_the_userinfo_is_not_loopback() {
+        for url in [
+            "http://127.0.0.1:80@attacker.example",
+            "http://127.0.0.1@attacker.example/status-lists/x/1",
+            "http://localhost:8787@attacker.example",
+            "http://[::1]:80@attacker.example",
+            "http://user:pass@127.0.0.1:8787",
+        ] {
+            assert!(!is_loopback(url), "{url}");
+            assert!(!is_allowed_origin(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_loopback_name_inside_a_longer_host_is_not_loopback() {
+        for url in [
+            "http://127.0.0.1.evil.com",
+            "http://127.0.0.1.evil.com:8787/path",
+            "http://localhost.evil.com",
+            "http://localhost.evil.com:8787",
+        ] {
+            assert!(!is_loopback(url), "{url}");
+            assert!(!is_allowed_origin(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn ipv6_loopback_and_any_scheme_case_count() {
+        assert!(is_loopback("http://[::1]"));
+        assert!(is_loopback("http://[::1]:8787/status-lists"));
+        assert!(is_loopback("HTTP://127.0.0.1:8787"));
+        assert!(is_allowed_origin("HTTPS://cloud.example"));
+        assert!(
+            !is_loopback("https://127.0.0.1:8787"),
+            "loopback is the http exception"
+        );
+    }
+
+    #[test]
+    fn an_allowed_origin_is_https_or_http_on_loopback() {
+        assert!(is_allowed_origin("https://cloud.example"));
+        assert!(is_allowed_origin("https://cloud.example/status-lists/x/1"));
+        assert!(is_allowed_origin("http://127.0.0.1:8787"));
+        assert!(is_allowed_origin("http://localhost"));
+        for url in [
+            "http://cloud.example",
+            "ftp://cloud.example",
+            "cloud.example",
+            "",
+            "https://user@cloud.example",
+            "https://user:pass@cloud.example",
+        ] {
+            assert!(!is_allowed_origin(url), "{url:?}");
+        }
     }
 }
