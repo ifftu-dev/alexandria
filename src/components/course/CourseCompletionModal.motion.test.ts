@@ -8,7 +8,7 @@ import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import CourseCompletionModal from './CourseCompletionModal.vue'
 
 afterEach(() => { useCourseCompletion().close(); clearMocks(); document.body.innerHTML = '' })
-test('course celebration receives dialog focus and Escape dismisses it without waiting for effects', async () => {
+test('course celebration receives focus and dismisses through Close, backdrop or Escape without waiting for effects', async () => {
   mockIPC(command => {
     if (command === 'unlock_profile') return { profile: { display_name: 'Learner', stake_address: 'test' }, wallet: { stake_address: 'test' } }
     if (command === 'get_profile_session_token') return 'test-session'
@@ -23,6 +23,18 @@ test('course celebration receives dialog focus and Escape dismisses it without w
   const dialog = document.querySelector('[role="dialog"]')
   expect(dialog).not.toBeNull()
   expect(dialog?.contains(document.activeElement)).toBe(true)
+  const closeButton = dialog?.querySelector<HTMLButtonElement>('button[aria-label="Close"]')
+  expect(closeButton).not.toBeNull()
+  closeButton?.click()
+  expect(useCourseCompletion().isOpen.value).toBe(false)
+  await flushPromises()
+  await useCourseCompletion().open({ courseTitle: 'Completed learning', courseId: 'course', skillIds: [], credentialIds: [], txHash: null })
+  await flushPromises()
+  document.querySelector('.celebrate-backdrop')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(useCourseCompletion().isOpen.value).toBe(false)
+  await flushPromises()
+  await useCourseCompletion().open({ courseTitle: 'Completed learning', courseId: 'course', skillIds: [], credentialIds: [], txHash: null })
+  await flushPromises()
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   await flushPromises()
   expect(useCourseCompletion().isOpen.value).toBe(false)

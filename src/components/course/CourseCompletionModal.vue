@@ -223,7 +223,7 @@ function continueToDashboard() {
   <Teleport to="body">
     <Transition name="celebrate" @before-leave="(el: Element) => el.setAttribute('inert', '')" @before-enter="(el: Element) => el.removeAttribute('inert')">
       <div v-if="isOpen" class="celebrate-root" @click.self="close">
-        <div class="celebrate-backdrop" />
+        <div class="celebrate-backdrop" aria-hidden="true" @click="close" />
 
         <!-- Confetti layer -->
         <div class="confetti" aria-hidden="true">
@@ -246,6 +246,11 @@ function continueToDashboard() {
         </div>
 
         <div ref="dialog" class="celebrate-card" role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1">
+          <button type="button" class="celebrate-close" :aria-label="$t('common.actions.close')" @click="close">
+            <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="m6 6 12 12M6 18 18 6" />
+            </svg>
+          </button>
           <!-- Emblem -->
           <div class="emblem-wrap">
             <div class="emblem-glow" />
@@ -474,6 +479,22 @@ function continueToDashboard() {
   overflow-y: auto;
   animation: card-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+.celebrate-close {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -1rem -0.75rem -1.75rem auto;
+  border-radius: 0.75rem;
+  background: var(--app-card, #0b1220);
+  color: var(--app-muted-foreground, #94a3b8);
+}
+.celebrate-close:hover { color: var(--app-foreground, #e2e8f0); }
+.celebrate-close:focus-visible { outline: 2px solid var(--app-primary, #818cf8); outline-offset: 2px; }
 
 .endorsement {
   margin-top: 1rem;

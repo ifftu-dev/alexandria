@@ -3,18 +3,18 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
-import Starfield from '@/components/auth/Starfield.vue'
-import BrandMark from '@/components/auth/BrandMark.vue'
-import AddProfileTile from '@/components/profile/AddProfileTile.vue'
-import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
-import ProfileTile from '@/components/profile/ProfileTile.vue'
-import { AppButton, AppInput } from '@/components/ui'
 import { useProfiles } from '@/composables/useProfiles'
 import {
   biometricCredentialExists,
   biometricSupported,
   getVaultPasswordViaBiometric,
 } from '@/composables/useBiometricVault'
+import Starfield from '@/components/auth/Starfield.vue'
+import BrandMark from '@/components/auth/BrandMark.vue'
+import AddProfileTile from '@/components/profile/AddProfileTile.vue'
+import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
+import ProfileTile from '@/components/profile/ProfileTile.vue'
+import { AppButton, AppInput } from '@/components/ui'
 
 const router = useRouter()
 const { t } = useI18n()

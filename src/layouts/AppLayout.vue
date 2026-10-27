@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { usePlatform } from '@/composables/usePlatform'
+import { useMode } from '@/composables/useMode'
+import { useAccountStatus } from '@/composables/useAccountStatus'
+import { useSettings, useSetting } from '@/composables/useSettings'
+import { animateMotion } from '@/composables/useMotion'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
@@ -8,14 +16,6 @@ import GlobalChatHost from '@/components/chat/GlobalChatHost.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
 import CourseCompletionModal from '@/components/course/CourseCompletionModal.vue'
 import UnreviewedLocaleBanner from '@/components/i18n/UnreviewedLocaleBanner.vue'
-import { usePlatform } from '@/composables/usePlatform'
-import { useMode } from '@/composables/useMode'
-import { useAccountStatus } from '@/composables/useAccountStatus'
-import { useSettings, useSetting } from '@/composables/useSettings'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { animateMotion } from '@/composables/useMotion'
-import { useRoute } from 'vue-router'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 
 // Players, settings, classrooms, and sessions own their internal layout.
 // Let these views reach the content edges and manage their own scrolling.
