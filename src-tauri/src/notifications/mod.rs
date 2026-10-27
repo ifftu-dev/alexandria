@@ -481,6 +481,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn disabled_recording_preserves_history_without_claiming_new_events() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let first = for_issued_credential("first");
+        record_if_enabled(db.conn(), &first).unwrap().unwrap();
+        SettingsStore::set(db.conn(), keys::NOTIFICATIONS_ENABLED, false).unwrap();
+        let next = for_issued_credential("next");
+        assert!(record_if_enabled(db.conn(), &next).unwrap().is_none());
+        assert_eq!(list(db.conn(), None, false).unwrap().len(), 1);
+        assert_eq!(unread_count(db.conn()).unwrap(), 1);
+        SettingsStore::set(db.conn(), keys::NOTIFICATIONS_ENABLED, true).unwrap();
+        assert!(record_if_enabled(db.conn(), &next).unwrap().is_some());
+        mark_all_read(db.conn(), "read").unwrap();
+        assert_eq!(unread_count(db.conn()).unwrap(), 0);
+        clear(db.conn()).unwrap();
+        assert!(record_if_enabled(db.conn(), &first).unwrap().is_none());
+        assert!(record_if_enabled(db.conn(), &next).unwrap().is_none());
+    }
+
+    #[test]
     fn cloud_copy_names_a_route_per_kind() {
         let (title, _, route) = cloud_copy(kind::INTERVIEW_ROOM_OPENED, "abc").unwrap();
         assert_eq!(title, "Your interview room is open");

@@ -305,6 +305,7 @@ wasmtime = { version = "36", default-features = false, features = ["cranelift", 
 objc2-core-foundation = { version = "0.3", features = ["objc2"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 # Synthetic App Attest certificate chains for the attestation verifier tests.
 rcgen = "0.13"

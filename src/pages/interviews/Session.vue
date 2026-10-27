@@ -242,33 +242,45 @@ async function saveConsent() {
 async function enterPanelRoom(title: string, name: string) {
   if (!session.value) throw new Error('no interview')
   panelError.value = null
-  const current = await panelApi.status(session.value.id)
-  panel.value = current
-  if (!current.room.ticket && current.status !== 'accepted') {
-    throw new Error(t('interviews.panel.notAccepted'))
-  }
-  if (current.room.ticket) {
+  const id = session.value.id
+  let current = await panelApi.status(id)
+  // One reconciliation after a concurrent winner; never update a CAS guard
+  // merely to overwrite another panelist's live room.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    panel.value = current
+    if (current.status !== 'accepted') throw new Error(t('interviews.panel.notAccepted'))
+    if (current.room.live && current.room.ticket && current.room.openingId) {
+      let joined = false
+      try {
+        const room = await tutoring.joinRoom(current.room.ticket, title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
+        joined = true
+        panel.value = await panelApi.setRoom(id, current.room.ticket, room.id, current.room.openingId, null)
+        return room
+      } catch (cause) {
+        if (joined) await tutoring.leaveRoom()
+        const message = cause instanceof Error ? cause.message : String(cause)
+        if (!/^SESSION_(UNAVAILABLE|ENDED)/.test(message) && !/\b409\b/.test(message)) throw cause
+        current = await panelApi.status(id)
+        panel.value = current
+        // Reachability failure does not grant authority to evict the remaining
+        // panel. Cloud will allow replacement only after their leases expire.
+        if (current.room.live) throw cause
+        tutoring.clearError()
+      }
+    }
+    const room = await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
     try {
-      return await tutoring.joinRoom(current.room.ticket, title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
+      if (!room.ticket) throw new Error('the room has no ticket to share')
+      panel.value = await panelApi.setRoom(id, room.ticket, room.id, null, current.room.openingId)
+      return room
     } catch (cause) {
-      // Nobody is left in the room Cloud knows about (every panelist's app
-      // closed): open a new one below and hand Cloud its ticket instead.
+      await tutoring.leaveRoom()
       const message = cause instanceof Error ? cause.message : String(cause)
-      if (!/^SESSION_(UNAVAILABLE|ENDED)/.test(message)) throw cause
-      tutoring.clearError()
+      if (!/\b409\b/.test(message) || attempt !== 0) throw cause
+      current = await panelApi.status(id)
     }
   }
-  const room = await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
-  try {
-    if (!room.ticket) throw new Error('the room has no ticket to share')
-    panel.value = await panelApi.setRoom(session.value.id, room.ticket)
-  } catch (cause) {
-    // Nobody else can find a room Cloud does not know about; close it rather
-    // than leave this device's camera and microphone running for no one.
-    await tutoring.leaveRoom()
-    throw cause
-  }
-  return room
+  throw new Error('the interview room changed; try joining again')
 }
 
 async function startInterview() {

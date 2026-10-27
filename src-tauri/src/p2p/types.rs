@@ -234,7 +234,6 @@ pub enum P2pEvent {
     /// A guardian completed a link to this profile (the ward's side). The
     /// link is already recorded; this is what lets the app tell the learner.
     GuardianLinked {
-        link_id: String,
-        guardian_display_name: Option<String>,
+        notification: Option<Box<crate::notifications::Recorded>>,
     },
 }

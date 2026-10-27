@@ -1052,7 +1052,7 @@ pub fn run() {
                                             _ => None,
                                         }
                                     };
-                                    let issued_ids = match issuance {
+                                    let issued_notifications = match issuance {
                                         Some(Ok(report)) => {
                                             if report.issued > 0 {
                                                 log::info!(
@@ -1067,7 +1067,7 @@ pub fn run() {
                                                     report.errors
                                                 );
                                             }
-                                            report.issued_ids
+                                            report.notifications
                                         }
                                         Some(Err(e)) => {
                                             log::debug!("auto-issuance: {e}");
@@ -1077,19 +1077,8 @@ pub fn run() {
                                     };
                                     // Each new credential is something to tell
                                     // the learner about.
-                                    if !issued_ids.is_empty() {
-                                        let guard = db_for_queue.lock();
-                                        if let Ok(Some(db)) = guard.as_deref() {
-                                            for id in &issued_ids {
-                                                if let Err(e) = notifications::deliver(
-                                                    &app_for_notifications,
-                                                    db.conn(),
-                                                    &notifications::for_issued_credential(id),
-                                                ) {
-                                                    log::debug!("credential notification: {e}");
-                                                }
-                                            }
-                                        }
+                                    for recorded in issued_notifications {
+                                        notifications::announce(&app_for_notifications, &recorded);
                                     }
                                 }
 
