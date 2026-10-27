@@ -7,7 +7,8 @@ Repos: alexandria
 
 Implement the user-confirmed design in [skill-graph-visual-research.md](skill-graph-visual-research.md#confirmed-design-brief). The interview decisions override the exploratory HTML examples. This work covers the personal skills page, expanded modal, and sidebar only. Public instructor graphs, guided-learning-path restrictions, taxonomy storage, prerequisite relationships, and credential authority are unchanged.
 
-Integration branch: `feat/skill-graph-atlas-integration`.
+Integration branch: `feat/skill-graph-atlas`.
+Integration checkout: `/Users/hack/Documents/Personal/Code/alexandria-mark3/worktrees/skill-graph-atlas-integration`.
 Starting commit: `d894a10badbf74975e9cc615e13e48e8c7f9c98b`.
 Tracker: local Markdown; close tickets with `Triage: done` and a dated note. No PR is requested.
 
