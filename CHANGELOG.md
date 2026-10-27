@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project loosely follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 - **Candidate integrity check for interviews held in Alexandria.** An
   organisation can ask, in the signed invitation, for the candidate to run
@@ -55,14 +60,6 @@
   `alexandria-verify` 0.4.0 adds `vc::status::{list_url, parse_list_url,
   verify_fetched_list}`. Lists issued without a host keep `urn:` ids and
   travel in the bundle as before.
-
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project loosely follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
 
 ### Changed
 

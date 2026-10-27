@@ -1,5 +1,7 @@
 {
   "index": {
+    "learningFor": "Aprendizaje para {name}",
+    "emptySkill": "Aún no hay cursos ni tutoriales para esta habilidad en la categoría seleccionada.",
     "title": "Cursos",
     "subtitle": "Cursos y tutoriales en tu dispositivo, además de más contenido encontrado de otros estudiantes.",
     "newTutorial": "Nuevo tutorial",

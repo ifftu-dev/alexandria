@@ -1,16 +1,10 @@
 # Skills & Reputation
 
+Status: live
+Updated: 2026-10-27
+
 > Open skill graph, evidence-based credentials, and reputation system.
 
-> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** Every
-> reference to `skill_proofs`, `evidence_records`, or
-> `skill_assessments` in this doc describes the retired pipeline.
-> Credentials are now W3C VCs, including locally issued learner
-> self-claims with optional Cardano completion witnesses. Reputation
-> computation has been repointed at credentials
-> (distribution math unchanged). See [`vc-migration.md`](./vc-migration.md).
-
-**Status:** Draft
 **Audience:** Platform builders, education providers, governments, recruitment services, LLM-based tooling
 
 ---
@@ -84,7 +78,7 @@ Course elements (`course_elements`) are tagged with skills via `element_skill_ta
 
 ## 6. Evidence Model
 
-The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. There are three issuance paths:
+The verifiable outcome of an assessment is a **W3C Verifiable Credential** (see [ADR 0001](./adr/0001-vc-first-credentials.md) and `domain::vc`). There are three issuance paths:
 
 1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's persisted graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), and computes a Merkle root. New enrollments freeze the verified signed course-document CID, version, and author-selected completion policy; the completion claim and any instructor endorsement bind those exact values. It issues one learner-signed **`SelfAssertion` per course skill** immediately. If the exact course policy requires instructor endorsements, the result includes a canonical signing request and the separately imported endorsements count only after shared verification against the policy allowlist and threshold. Authors edit this policy before publication; learners export/import the exact JSON artifacts; instructors review every bound fact before signing locally. The exchange remains manual. A satisfied endorsement is classified as exact course-endorsement provenance (§6.1) but is not yet promoted into privilege-bearing trust state. An optional Cardano completion-witness mint is treasury-funded when configured (the learner still signs), otherwise learner-funded. A witnessed completion credential requires a confirmed successful ledger receipt and its matching stored observation; a submission acknowledgement is insufficient. Courses with no gradeable elements use `CONTENT_COMPLETION_SCORE = 0.3`, a deterministic completion root bound to the exact course document, and no on-chain witness. `get_course_completion_status` reports still-unmet gradeable elements.
 2. **Document bootstrap** — skills confirmed from an uploaded resume / transcript are self-issued as `SelfAssertion` credentials carrying a provenance tier (see §6.1).
@@ -95,11 +89,11 @@ Each credential binds:
 - the course, submissions, or assessment attempt it derives from
 - the issuer DID and an Ed25519 Data Integrity proof (`eddsa-jcs-2022`)
 
-There is no `/alexandria/evidence/1.0` topic (it was removed in migration 040). Credentials cross the network via the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols.
+Credentials cross the network via the `vc-did` and `vc-status` gossip topics and the `vc-fetch/1.0` request-response protocol.
 
 ### 6.1 Provenance tiers
 
-A `SkillClaim` may carry an optional `ProvenanceTier` (migration 068) that grades how the evidence was obtained, feeding the aggregation quality weight (§ below and `aggregation/config.rs`):
+A `SkillClaim` may carry an optional `ProvenanceTier` that grades how the evidence was obtained, feeding the aggregation quality weight (`aggregation/config.rs`):
 
 | Tier | Meaning | Example |
 |------|---------|---------|
@@ -108,7 +102,7 @@ A `SkillClaim` may carry an optional `ProvenanceTier` (migration 068) that grade
 | `accredited_document` | Backed by an accredited institution's document | a university transcript |
 | `issuer_signed` | Issued by a third party (issuer ≠ subject) | a formal credential |
 
-Higher tiers carry more aggregation confidence. A `None` provenance retains the pre-068 quality triple `(1,1,1)` under calculation version `1.2`. These weights apply only to verified scoring inputs and never change a credential's signed payload.
+Higher tiers carry more aggregation confidence. A claim with no provenance uses the full quality triple `(1,1,1)` (calculation version `1.2`). These weights apply only to verified scoring inputs and never change a credential's signed payload.
 
 #### Authenticity, trust, and privilege
 
@@ -158,10 +152,9 @@ among those verified inputs. An altered or revoked input removes the listing
 instead of offering an old strength or an inflated level. Publication still
 requires explicit talent-index consent.
 
-The shared credential verifier now classifies incomplete issuer-key or
+The shared credential verifier classifies incomplete issuer-key or
 status-list evidence as `pending`, separately from `reject`. Only `accept` is an
-active verification result; pending credentials must not be treated as clean
-inputs while T03 connects this result to every scoring and privilege boundary.
+active verification result; scoring inputs exclude pending credentials.
 
 `alexandria_verify::trust::classify_credential` layers a typed provenance state
 on that result: `invalid` with stable reason codes, `pending` with the missing
@@ -178,9 +171,9 @@ is reported as `verified_issuer_signed`, never as independent or approved.
 `get_credential_trust` applies this rule to stored credentials; corrupt or
 ambiguous stored completion evidence is an error rather than a lower trust
 state. These states describe provenance only. None of them grants a privilege;
-T03 adds the policy-qualified state that privilege checks will require.
+privilege checks evaluate a pinned qualification policy (below).
 
-#### Action-to-policy matrix (T03)
+#### Action-to-policy matrix
 
 Each action names the evidence it requires and what happens when no policy
 applies. "Pinned policy" means a subject qualification policy whose exact
@@ -194,8 +187,8 @@ a login, or a local row never makes a policy applicable.
 | Visible credential provenance | `get_credential_trust` | trust classification of the signed credential | none; display only | provenance still shown at its own level |
 | Field-opinion posting | `publish_opinion`, inbound `handle_opinion_message`, `promote_pending_opinions`, `list_eligible_subject_fields_for_posting` | signed skill credential whose subject is the signing actor, level at or above the policy minimum, skill in the built-in taxonomy under the field, and either an accepted issuer's signature or an exact course endorsement with enough accepted-issuer attestors | pinned policy for `opinion_posting` in that subject field | refused with an explanation; inbound messages referencing unknown or pending credentials stay queued, known unqualified ones are rejected |
 | Talent-index claims | `talent_index` | verified credentials only; no privilege is granted | none | claims show provenance, not approval |
-| Governance eligibility | none; the legacy local proficiency gate is deleted | qualification policy bound to the pinned genesis/opening (G02/G06), evaluated at certified submission | committee genesis, not the network profile | not active |
-| Role evidence | cloud role specification (C04) | signed organisation specification plus learner-signed result | organisation signature | out of scope for T03 |
+| Governance eligibility | none; there is no local proficiency gate | qualification policy bound to the pinned genesis/opening, evaluated at certified submission | committee genesis, not the network profile | not active |
+| Role evidence | cloud role specification | signed organisation specification plus learner-signed result | organisation signature | not governed by a qualification policy |
 | Derived skill states | `commands/aggregation.rs`, `db/scoring_inputs.rs` | re-verified proofs; self-issued claims gain no independence weight; fingerprinted cache invalidation | calculation version `1.2` | implemented; no privilege is granted |
 | Reputation rows and snapshots | `evidence/reputation.rs`, `commands/snapshot.rs` | re-verified proofs; instructor credit only from verified issuer-signed credentials; empty samples excluded; snapshots cite the same verified set | computation spec `v4-verified-vc` | implemented; no privilege is granted |
 
@@ -209,15 +202,15 @@ profile change, not a background refresh, and no IPC command edits accepted
 issuers.
 
 Plugin grading has a narrower temporary rule. New credential issuance accepts
-only the exact manifest and grader bytes embedded for a bundled plugin. A
-matching CID string or a row in the legacy `plugin_attestations` table is
-insufficient. General community-grader authorization remains pending G06.
+only the exact manifest and grader bytes embedded for a bundled plugin; a
+matching CID string is insufficient. This holds until the policy-backed
+community grader path is implemented.
 
 ### 6.2 Dynamic assessments
 
-Seeded **question banks** (migration 070; see [`protocol-specification.md`](./protocol-specification.md) §8.4) verify claimed skills:
+Seeded **question banks** (see [`protocol-specification.md`](./protocol-specification.md) §8.4), whose items live in `assessment_items`, verify claimed skills:
 
-- `assessment_start_attempt` draws a randomized, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`bank_questions.correct_indices`) is **never** included in the returned questions.
+- `assessment_start_attempt` draws a randomized, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`assessment_items.grader_private`) is **never** included in the returned questions.
 - Sentinel auto-activates for every attempt (the learner is told), binding the attempt to an integrity session.
 - `assessment_grade` grades **host-side** against the locally-held key and, on pass, issues an `AssessmentCredential` bound to that integrity session, then recomputes derived skill states.
 
@@ -262,28 +255,24 @@ grade, failure, credential, or misconduct penalty, but it remains consumed for
 the bank's ordinary attempt limit and cooldown because its questions were shown.
 See [Sentinel](sentinel.md#diagnostics-transition).
 
-### 6.3 Completion endorsement and retired issuer exclusion
+### 6.3 Completion endorsement and receipts
 
 Offline completion produces a learner's own claim, not an instructor's endorsement. The application does not derive an instructor signing key from a public author address. A genuine instructor endorsement is a separate artifact signed by a key allowlisted in the exact author-signed course policy. Backend request export, local signing, verified import, and status are implemented; the human review and authenticated delivery experience is pending. A valid signature proves control of a key, not expertise or qualification under a DAO policy.
 
-Migration 085 once excluded credentials whose signed payload named a legacy course-authority issuer, whose key anyone could reproduce from a public author address. Scoring now re-verifies every input and caches by input fingerprint, so migration 094 retired that machinery: the recognition table and its triggers, the repair queue, the filtered `scoring_credentials` view, and the history validity marker. A credential signed by such a key is scored like any other unaccepted issuer's. It counts as one more issuer, as any fresh key would, and grants no privilege; only pinned qualification policies confer privilege (see Authenticity, trust, and privilege). Credential bytes and revocation flags were not rewritten. Invalidated history points were discarded, and reputation rows awaiting repair are recomputed on their next read. Old signed on-chain claims are not rewritten or automatically replaced.
+Completion returns after local persistence, without awaiting an instructor or making a Cardano request, including when Cardano is configured. `completion_claims` stores an idempotent completion receipt (unique per learner, course and completion root): the original credential IDs, enrollment completion, and any optional `completion_witness_requests` row commit together. Retrying the same learner/course/root returns those IDs rather than issuing duplicate self-claims. The existing profile-scoped worker resumes unsigned requests after restart while the profile is unlocked; it builds at most one per pass, with persisted retry backoff. Once a transaction is signed and journaled, only its original identity is reconciled—no automatic replacement. Changed evidence cannot inherit an earlier witness.
 
-Completion returns after local persistence, without awaiting an instructor or making a Cardano request, including when Cardano is configured. Migration 086 stores an idempotent completion receipt: the original credential IDs, enrollment completion, and any optional witness request commit together. Retrying the same learner/course/root returns those IDs rather than issuing duplicate self-claims. The existing profile-scoped worker resumes unsigned requests after restart while the profile is unlocked; it builds at most one per pass, with persisted retry backoff. Once a transaction is signed and journaled, only its original identity is reconciled—no automatic replacement. Changed evidence cannot inherit an earlier witness.
-
-The celebration shows local credential readiness separately from the optional witness's pending, submitted, outcome-unknown, confirmed, failed, or unavailable state. Time elapsed and a transaction hash do not imply confirmation. Locking clears the private celebration and discards late responses. The approved request deadlines and bounded background cleanup remain tracked in the [remediation plan](assessment-remediation-plan.md); removing provider I/O from completion does not establish device performance budgets or a cleanup-time guarantee.
+The celebration shows local credential readiness separately from the optional witness's pending, submitted, outcome-unknown, confirmed, failed, or unavailable state. Time elapsed and a transaction hash do not imply confirmation. Locking clears the private celebration and discards late responses.
 
 ---
 
 ## 7. Credentials
 
-Credentials are W3C Verifiable Credentials stored in the `credentials` table (the `skill_proofs` / `skill_proof_evidence` aggregation tables were dropped in migration 040):
+Credentials are W3C Verifiable Credentials (Data Model 2.0) stored in the `credentials` table:
 - Subject- and skill-scoped, signed with a W3C Data Integrity proof, cryptosuite `eddsa-jcs-2022` (Ed25519 over SHA-256 of RFC 8785 JCS bytes)
 - Lifecycle (issue / suspend / reinstate / revoke) tracked via a Bitstring Status List (`credential_status_lists`). Only the credential issuer may revoke, suspend, or reinstate it; the command path verifies both the credential issuer and status-list issuer against the active signing DID.
 - Credential **integrity** is anchored on Cardano with a metadata-only transaction (label 1697) that timestamps the canonical VC hash — no NFT mint, no on-chain credential content
 
-The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. Migration 088 also retires new CIP-68 reputation-token minting. A new reputation snapshot is a self-signed `DerivedCredential`: its subject properties freeze an explicit as-of time, the `as_of_all_eligible_evidence` scope, scaled scores, confidence method, computation specification, and the ID plus integrity hash of every contributing eligible credential. The normal credential-hash queue can optionally anchor the snapshot VC's canonical hash without publishing the credential or delaying local creation. `submit_snapshot_tx` now only schedules that background anchor; it never performs provider I/O itself.
-
-Historical CIP-68 snapshot rows remain labelled `legacy_cip68`. If an exact signed transaction was already journaled, the recovery worker may reconcile that transaction and project its receipt. An unsigned legacy row cannot initiate a mint, and neither path rebuilds or replaces signed bytes.
+A reputation snapshot is a self-signed `DerivedCredential`: its subject properties freeze an explicit as-of time, the `as_of_all_eligible_evidence` scope, scaled scores, confidence method, computation specification, and the ID plus integrity hash of every contributing eligible credential. The normal credential-hash queue can optionally anchor the snapshot VC's canonical hash without publishing the credential or delaying local creation. `submit_snapshot_tx` only schedules that background anchor; it never performs provider I/O itself.
 
 ---
 
@@ -291,7 +280,7 @@ Historical CIP-68 snapshot rows remain labelled `legacy_cip68`. If an exact sign
 
 All credentials are stored locally in the learner's SQLite database and iroh content store. The learner controls:
 - Which credentials to allow other peers to fetch (`allow_credential_fetch` / `disallow_credential_fetch` over the `vc-fetch/1.0` protocol)
-- Which credentials to disclose via selective-disclosure presentations (§18)
+- Which credentials to disclose via selective-disclosure presentations ([`protocol-specification.md`](./protocol-specification.md) §14.18)
 - Cross-device sync of learning state via explicit device pairing (AES-256-GCM-sealed `/alexandria/sync/1.0`)
 
 No server holds or controls credential data.
@@ -320,7 +309,7 @@ Schemas are designed as authoritative inputs for LLM reasoning:
 ## 11. Security and Trust Considerations
 
 - All credentials are Ed25519 signed by the issuer DID's key
-- The stake-based credential-challenge and escrow experiment is retired. Old tables may remain until cleanup migration D03 but grant no authority.
+- The stake-based credential-challenge and escrow experiment is retired; its tables are not in the schema and it grants no authority.
 - Exact course-version endorsement policies with allowlisted attestor keys and distinct-signer thresholds (`commands::attestation`)
 - Behavioral integrity scores from the Sentinel anti-cheat system feed the trust signal on flagged assessments
 - Identity binding via the persistent `stake_pubkey_registry` in the P2P validation pipeline (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md))
@@ -356,18 +345,18 @@ ReputationAssertion {
 }
 ```
 
-Stored in `reputation_assertions`, computed from non-revoked credentials that verify now and whose signed subject, skill and id match their row (`db::scoring_inputs`). The `reputation_evidence` table was dropped in migration 040. Each row records a fingerprint of the inputs it was computed from (migration 094). Readers revalidate rows first: a row whose inputs changed is recomputed in place, and a row whose verified inputs are gone is kept but excluded. Current readers use `current_reputation_assertions`, which presents only valid rows. The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
+Stored in `reputation_assertions`, computed from non-revoked credentials that verify now and whose signed subject, skill and id match their row (`db::scoring_inputs`). The engine (`evidence/reputation.rs`) runs `on_credential_accepted` after each credential lands (`commands::credentials`, `commands::auto_issuance`) and writes only `learner` and `instructor` rows; the other roles are reserved. Each row records a fingerprint of the inputs it was computed from (`input_fingerprint`). Readers revalidate rows first: a row whose inputs changed is recomputed in place, and a row whose verified inputs are gone is kept but excluded. Current readers use `current_reputation_assertions`, which presents only valid rows. The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
 
-### 12.4 Instructor Impact
+### 12.4 Scoring
 
-```
-Impact(I, S, P) =
-  Σ learners [ ΔConfidence × Attribution ]
-```
+| Row | Credited actor | Headline `score` | Sample |
+|---|---|---|---|
+| `learner` | credential subject | highest verified `SkillClaim.score` at (skill, level) | every verified credential about the subject, across distinct issuers |
+| `instructor` | issuer | mean of the scores they issued at (skill, level) | only verified issuer-signed credentials, across distinct learners |
 
-The expression above is the historical design, not the current VC implementation. `evidence/reputation.rs` currently uses the maximum accepted sample score for learners and the mean score issued for instructors, with distribution statistics and distinct counterparties computed over non-revoked credentials that verify now. Self-claims contribute only to learner reputation. The `reputation_impact_deltas` table was dropped in migration 040; there is no per-evidence delta store.
+Distribution statistics (median, p25/p75, variance) and the distinct-counterparty count are computed over the same sample. Self-claims, including course-endorsed ones, contribute only to learner reputation. There is no per-evidence delta store.
 
-Reputation snapshots are as-of views of all evidence eligible under the scoring policy at creation time; they are not rolling 30-day scores. The snapshot is a signed `DerivedCredential`, while `reputation_snapshots` stores its display/index metadata and joins to `credential_anchors` for optional background anchoring status. The signed payload declares each skill's actual computation specification and freezes the complete contributing credential ID/hash set. Creation fails if that set no longer matches the derived evidence count, rather than certifying a stale score. Historical CIP-68 rows remain recovery-only and retain their original window interpretation.
+Reputation snapshots are as-of views of all evidence eligible under the scoring policy at creation time; they are not rolling 30-day scores. The snapshot is a signed `DerivedCredential`, while `reputation_snapshots` stores its display/index metadata and joins to `credential_anchors` for optional background anchoring status. The signed payload declares each skill's actual computation specification and freezes the complete contributing credential ID/hash set. Creation fails if that set no longer matches the derived evidence count, rather than certifying a stale score.
 
 ---
 
@@ -453,7 +442,7 @@ taxonomy_version?, created_at }`); a user may hold many.
 Beyond hand-picking skills, a goal can be **resolved** (`resolve_goal`,
 `commands::goal_templates`) from a seeded **goal template** — a
 nationalized exam, a K-12 board-grade curriculum, or a job role
-(migration 069, seeded genesis set) — or from a job description: a public
+(seeded genesis set in `goal_templates`) — or from a job description: a public
 JD link is fetched and stripped to text, or pasted text is parsed
 on-device (`goals::jd_parser`) against skill names + `skills.synonyms`,
 producing skill suggestions the user confirms. The resolved
@@ -537,27 +526,25 @@ Atomic skills, explicit evidence, confidence-aware reputation.
 
 ## Implementation Status
 
-The reputation aggregation pipeline described above (§12) is now
-backed by the **Alexandria Credential & Reputation Protocol v1**
-end-to-end. See `docs/architecture.md` §13 for the layered
-implementation and `docs/protocol-specification.md` for the
-implementation-status preamble.
+The credential and reputation pipeline implements the Verifiable
+Credentials protocol in [`protocol-specification.md`](./protocol-specification.md)
+§14; [`architecture.md`](./architecture.md) §13 describes the layers.
+Spec section numbers below refer to that document.
 
-| Component | Module | PR |
-|-----------|--------|----|
-| Skill proofs (legacy NFT pipeline) | retired in migration 040 (`evidence::aggregator` and `mint_skill_proof_nft` removed) | — |
-| Local-first completion credentials (+ optional on-chain anchor, content-only fallback) | `commands::completion::claim_course_completion` | VC-first |
-| Document-bootstrap self-assertions (resume/transcript) | `commands::skill_bootstrap` | mig 068 |
-| Dynamic Sentinel-gated assessments (randomized draw, host-side grade) | `assessment::*`, `commands::assessment` | mig 070 |
-| W3C-style Verifiable Credentials | `domain::vc`, `commands::credentials` | PR 4–5 |
-| Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` | PR 6 |
-| Type weights, freshness, **provenance-weighted quality**, independence (§14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, calc version 1.2) | PR 6 / mig 068 |
-| Anti-gaming (cluster cap, inflation z-score, §15) | `aggregation::antigaming` | PR 7 |
-| Issuer clustering / pairwise dependence | `aggregation::independence` | PR 7 (per-DID v1; richer signals deferred) |
-| Persisted derived-state cache (§16) | `commands::aggregation` (`derived_skill_states` table) | PR 13 |
-| Verified scoring inputs, fingerprinted skill-state caches and reputation revalidation (§6.3, §12.3) | `db::scoring_inputs`, `commands::aggregation`, `evidence::reputation` | mig 093 / 094 |
-| Recruiter / consumer query API (§17) | `get_derived_skill_state`, `list_derived_states`, `recompute_all` IPC | PR 13 |
+| Component | Module |
+|-----------|--------|
+| Local-first completion credentials (optional Cardano completion witness; content-only fallback) | `commands::completion::claim_course_completion` |
+| Document-bootstrap self-assertions (resume/transcript) | `commands::skill_bootstrap` |
+| Dynamic Sentinel-gated assessments (randomized draw, host-side grade) | `assessment::*`, `commands::assessment`, `commands::adaptive` |
+| W3C Verifiable Credentials | `domain::vc` (re-exports `alexandria-verify`), `commands::credentials` |
+| Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` |
+| Type weights, freshness, provenance-weighted quality, independence (§14.14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, calc version 1.2) |
+| Anti-gaming (cluster cap, inflation z-score, §14.15) | `aggregation::antigaming` |
+| Issuer clustering / pairwise dependence (one cluster per DID) | `aggregation::independence` |
+| Persisted derived-state cache (§14.16) | `commands::aggregation` (`derived_skill_states` table) |
+| Verified scoring inputs, fingerprinted skill-state caches and reputation revalidation ([§6.1](#authenticity-trust-and-privilege), [§12.3](#123-reputationassertion)) | `db::scoring_inputs`, `commands::aggregation`, `evidence::reputation` |
+| Recruiter / consumer query API (§14.17) | `get_derived_skill_state`, `list_derived_states`, `recompute_all` IPC |
 
-The §26 worked example is reproduced end-to-end by the four
-assertions in `tests/e2e_vc/aggregation.rs`:
+The §14.26 worked example is reproduced end-to-end by the four
+assertions in `src-tauri/tests/e2e_vc/aggregation.rs`:
 `Q ≈ 0.846`, `C ≈ 0.514`, `L = 5`, `T = Q · C`.

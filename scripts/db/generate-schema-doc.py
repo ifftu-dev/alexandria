@@ -199,6 +199,8 @@ def render(tables, indexes, views, triggers):
     w = out.append
     w("# Database Schema")
     w("")
+    w("Status: live")
+    w("")
     w("> Alexandria — SQLite (local-first)")
     w("")
     w("> **Generated** from `src-tauri/src/db/schema.rs` by")

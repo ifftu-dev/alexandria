@@ -1,6 +1,9 @@
 # Community Plugin System
 
-**Status:** Phase 1–2 implemented (iframe-sandboxed interactive plugins,
+Status: live
+Updated: 2026-10-27
+
+Phase 1–2 implemented (iframe-sandboxed interactive plugins,
 WASM graders, capability consent, management UI). Phase-3 P2P catalog
 discovery is partial. The earlier Plugin DAO attestation authority is retired;
 its gossip topic remains reserved compatibility traffic only.
@@ -40,7 +43,7 @@ A manifest may declare other plugins it requires via an optional
 
 When a plugin is installed the host resolves each dependency to an
 already-installed bundle (a built-in, or one installed earlier / by the
-user) and records the edge in `plugin_dependencies` (migration 063). A
+user) and records the edge in `plugin_dependencies`. A
 dependency that can't be resolved fails the install and rolls it back —
 Phase 1 has no on-demand bundle fetch, so dependencies must already be
 present (built-ins always are). Resolution is by id, not CID, so it

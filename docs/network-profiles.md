@@ -1,8 +1,12 @@
 # Network Profiles
 
-**Status:** Version-1 preprod profile implemented in the main app; coordinated
-wire-protocol and service migration remains in progress (N01)
-**Last updated:** 2026-09-15
+Status: live
+Updated: 2026-10-27
+
+The version-1 preprod profile is implemented in the main app. Moving the
+remaining wire protocol IDs under the namespace is still to do (see
+[Coordinated work still required](#coordinated-work-still-required)). Decision
+record: [ADR 0002](adr/0002-bundled-network-profiles.md).
 
 ## Purpose
 
@@ -27,17 +31,18 @@ opens the profile manager or activates a user profile.
 |---|---|---|
 | `schema_version` | Parser compatibility version | `1` |
 | `network_id` | Immutable application-network identity | `preprod` |
-| `profile_revision` | Revision of this network's configuration | `1` |
+| `profile_revision` | Revision of this network's configuration | `2` |
 | `cardano_network` / `cardano_network_magic` | Ledger selection | Cardano preprod / `1` |
 | `relays` | Relay PeerId, DNS name, port, fallback IPs, and registry HTTPS origin | Mumbai and Frankfurt Fly.io relays |
 | `receipt_issuer_keys` | Relay PeerIds trusted to sign username receipts | Both configured relays |
 | `stake_registry_founder_keys` | Named Ed25519 keys that verify the bootstrap registry | Three founder public keys |
 | `signed_bootstrap_registry_identity` | Expected schema and SHA-256 of the bundled signed registry | Bound to `bootstrap_registry.json` |
-| `subject_qualification_policy_digests` | SHA-256 digests of the exact canonical subject qualification policies this network pins; each needs its document embedded in the build, and app setup refuses a missing, extra or overlapping policy | Empty: no pinned policy, so field-opinion posting is refused until reviewed demo policies are pinned |
+| `subject_qualification_policy_digests` | SHA-256 digests of the exact canonical subject qualification policies this network pins; each needs its document embedded in the build, and app setup refuses a missing, extra or overlapping policy | One pinned demo policy (`demo-opinions-policy.json`) |
 | `cloud_https_origin` / `cloud_service_id` | Optional Alexandria Cloud identity | Disabled (`null`) |
 | `governance_locator` / committee fields | Optional governance/committee service identity | Disabled |
 | `protocol_namespace` | Namespace intended for all network protocols | `/alexandria/preprod` |
 | `optional_governance_anchor_address` | Optional Cardano governance anchor | Disabled |
+| `default_governance_anchor` | Governance DAO pinned for new profiles (`dao_id`, `envelope_blake3`) | Demo genesis pinned |
 
 The cloud fields remaining unset is deliberate. The hosted demo may later opt
 into cloud custody of its organization signing key, but the cloud service,
@@ -104,7 +109,7 @@ request-response, Identify, and Kademlia protocol IDs such as
 services expect those IDs too. Changing only one component would partition or
 misreport the network.
 
-N01 must therefore switch these in one reviewed compatibility plan:
+They must therefore switch in one reviewed compatibility plan:
 
 1. main-app GossipSub topics;
 2. main-app request-response, Identify, and Kademlia protocol IDs;

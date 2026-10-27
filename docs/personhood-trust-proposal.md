@@ -1,6 +1,9 @@
 # Personhood issuer trust and account binding — proposal
 
-Status: proposed design, not implemented or activated. The current lab still uses
+Status: draft
+Updated: 2026-09-30
+
+Proposed design, not implemented or activated. The current lab still uses
 fixed synthetic input and grants no authority. The user selected a private
 verification receipt as the first real-input outcome on 2026-09-30, with no
 account permissions change. The protocol and operational details below remain

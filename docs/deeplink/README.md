@@ -1,5 +1,8 @@
 # Deep Linking
 
+Status: live
+Updated: 2026-10-12
+
 Alexandria opens shared links straight into the app on all five platforms
 (macOS, Windows, Linux, iOS, Android). Two link forms resolve to the same
 in-app destinations:

@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
-import type { Course } from '@/types'
+import type { Course, SkillDetail } from '@/types'
 
 const { invoke } = useLocalApi()
+const route = useRoute()
+const router = useRouter()
+const skillId = computed(() => typeof route.query.skillId === 'string' ? route.query.skillId : '')
+const skillName = ref('')
 
 const courses = ref<Course[]>([])
 const loading = ref(true)
@@ -20,16 +25,30 @@ function setKindFilter(k: 'all' | 'course' | 'tutorial') {
   sessionStorage.setItem('courses-kind-filter', k)
 }
 
+watch(skillId, async (id, _previous, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  skillName.value = ''
+  if (!id) return
+  // Atlas entry must include courses and tutorials, regardless of the last browse preference.
+  kindFilter.value = 'all'
+  const detail = await invoke<SkillDetail>('get_skill', { skillId: id }).catch(() => null)
+  if (current) skillName.value = detail?.skill.name ?? id
+}, { immediate: true })
+
+const skillCourses = computed(() => skillId.value
+  ? courses.value.filter(course => course.skill_ids?.includes(skillId.value))
+  : courses.value)
 const filteredCourses = computed(() =>
   kindFilter.value === 'all'
-    ? courses.value
-    : courses.value.filter((c) => c.kind === kindFilter.value),
+    ? skillCourses.value
+    : skillCourses.value.filter((c) => c.kind === kindFilter.value),
 )
 
 const counts = computed(() => ({
-  all: courses.value.length,
-  course: courses.value.filter((c) => c.kind === 'course').length,
-  tutorial: courses.value.filter((c) => c.kind === 'tutorial').length,
+  all: skillCourses.value.length,
+  course: skillCourses.value.filter((c) => c.kind === 'course').length,
+  tutorial: skillCourses.value.filter((c) => c.kind === 'tutorial').length,
 }))
 
 onMounted(async () => {
@@ -70,6 +89,13 @@ onMounted(async () => {
           {{ $t('courses.index.newCourse') }}
         </AppButton>
       </div>
+    </div>
+
+    <div v-if="skillId" class="mb-4 flex flex-wrap items-center gap-3">
+      <p>{{ $t('courses.index.learningFor', { name: skillName || skillId }) }}</p>
+      <AppButton variant="ghost" size="sm" @click="router.push('/courses')">
+        {{ $t('courses.dashboard.browseCourses') }}
+      </AppButton>
     </div>
 
     <!-- Kind filter chips -->
@@ -121,9 +147,9 @@ onMounted(async () => {
         </svg>
       </div>
       <p class="text-sm font-medium text-foreground">
-        {{ kindFilter === 'tutorial' ? $t('courses.index.emptyTutorialsTitle') : $t('courses.index.emptyCoursesTitle') }}
+        {{ skillId ? $t('courses.index.emptySkill') : kindFilter === 'tutorial' ? $t('courses.index.emptyTutorialsTitle') : $t('courses.index.emptyCoursesTitle') }}
       </p>
-      <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
+      <p v-if="!skillId" class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
         <template v-if="kindFilter === 'tutorial'">
           {{ $t('courses.index.emptyTutorialsBody') }}
         </template>
@@ -132,6 +158,7 @@ onMounted(async () => {
         </template>
       </p>
       <AppButton
+        v-if="!skillId"
         variant="primary"
         size="sm"
         class="mt-5"

@@ -1,5 +1,8 @@
 # The enterprise boundary
 
+Status: live
+Updated: 2026-10-12
+
 Alexandria is AGPL-3.0-or-later in full. The commercial Enterprise Edition is a **shell
 around** this application, in a separate repository, and nothing here references
 or depends on it.

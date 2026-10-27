@@ -1,76 +1,56 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
+import { useProfiles } from '@/composables/useProfiles'
+import { useSkillAtlas, type AtlasTab } from '@/composables/useSkillAtlas'
+import { useSkillAtlasActions } from '@/composables/useSkillAtlasActions'
 import { AppBadge, AppTabs } from '@/components/ui'
+import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
 import GraphVisibilityEditor from '@/components/skills/GraphVisibilityEditor.vue'
 import CredentialsPanel from '@/pages/dashboard/Credentials.vue'
-import {
-  type SubjectFieldInfo,
-  type SubjectInfo,
-  type SkillInfo,
-  type SkillGraphEdge,
-  type VerifiableCredential,
-} from '@/types'
-import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
-import { useGoals } from '@/composables/useGoals'
+import type { SubjectInfo, SkillInfo } from '@/types'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
-import {
-  createForceGraph,
-  type ForceGraphInstance,
-  type SkillGraphLink,
-  type SkillGraphNode,
-} from '@/utils/forceGraph'
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
 const router = useRouter()
-const { addGoal } = useGoals()
-
-const loading = ref(true)
-const fields = ref<SubjectFieldInfo[]>([])
+const { learnSkill, openSkill, actionError } = useSkillAtlasActions('page')
+const atlas = useSkillAtlas()
+const { model, pageView, feedback, error } = atlas
+const profiles = useProfiles()
+const loading = computed(() => atlas.isLoading.value)
 const subjects = ref<SubjectInfo[]>([])
-const skills = ref<SkillInfo[]>([])
-const graphEdges = ref<SkillGraphEdge[]>([])
-const myCredentials = ref<VerifiableCredential[]>([])
-const localDid = ref<string | null>(null)
-
+const skills = computed(() => model.value?.nodes.map(node => node.skill) ?? [])
+const fields = computed(() => model.value?.fields.filter(field => field.id !== null).map(field => ({
+  id: field.id!, name: field.name ?? t('skills.atlas.unknownField', { id: field.id }), icon_emoji: null, skill_count: field.total,
+})) ?? [])
 const search = ref('')
 const selectedField = ref<string | null>(null)
 const selectedSubject = ref<string | null>(null)
-
-const activeTab = ref('credentials')
+const activeTab = computed({ get: () => atlas.skillsTab.value, set: (tab: string) => atlas.setSkillsTab(tab as AtlasTab) })
 const tabs = computed(() => [
   { key: 'credentials', label: t('skills.tabs.credentials') },
   { key: 'graph', label: t('skills.tabs.graph') },
   { key: 'browse', label: t('skills.tabs.browse') },
 ])
-
-onMounted(async () => {
+onMounted(() => { void atlas.ensureLoaded() })
+watch([profiles.activeProfileId, profiles.isLockBlocked], async ([profile, blocked], _old, onCleanup) => {
+  let stale = false
+  onCleanup(() => { stale = true })
+  subjects.value = []
+  search.value = ''
+  selectedField.value = selectedSubject.value = null
+  if (!profile || blocked) return
   try {
-    const [f, s, sk, edges, did, creds] = await Promise.all([
-      invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
-      invoke<SubjectInfo[]>('list_subjects', {}),
-      invoke<SkillInfo[]>('list_skills', {}),
-      invoke<SkillGraphEdge[]>('list_skill_graph_edges', {}),
-      invoke<string | null>('get_local_did').catch(() => null),
-      invoke<VerifiableCredential[]>('list_credentials', { activeOnly: true }).catch(() => []),
-    ])
-    fields.value = f
-    subjects.value = s
-    skills.value = sk
-    graphEdges.value = edges
-    localDid.value = did
-    myCredentials.value = creds
-  } catch (e) {
-    console.error('Failed to load taxonomy:', e)
-  } finally {
-    loading.value = false
-  }
-})
-
+    const result = await invoke<SubjectInfo[]>('list_subjects')
+    if (!stale) subjects.value = result
+  } catch { /* The shared snapshot exposes load failures and retry. */ }
+}, { immediate: true })
+watch(() => activeTab.value === 'graph' && model.value !== null, (visible, _old, onCleanup) => {
+  if (visible) onCleanup(atlas.activateSurface('page'))
+}, { immediate: true })
 // Filter subjects when a field is selected
 const filteredSubjects = computed(() => {
   if (!selectedField.value) return subjects.value
@@ -116,164 +96,7 @@ function goToSkill(id: string) {
   router.push(`/skills/${id}`)
 }
 
-async function goalSkill(skill: SkillInfo) {
-  await addGoal({ label: skill.name, goalSkillIds: [skill.id] })
-  router.push('/goals')
-}
-
-const earnedSkillIdSet = computed(() =>
-  earnedSkillIdsFromCredentials(myCredentials.value, localDid.value),
-)
-
-
-const prereqMap = computed(() => {
-  const map = new Map<string, string[]>()
-  for (const edge of graphEdges.value) {
-    if (!map.has(edge.skill_id)) map.set(edge.skill_id, [])
-    map.get(edge.skill_id)!.push(edge.prerequisite_id)
-  }
-  return map
-})
-
-const availableSkillIdSet = computed(() => {
-  const earned = earnedSkillIdSet.value
-  const set = new Set<string>()
-  for (const skill of skills.value) {
-    if (earned.has(skill.id)) continue
-    const prereqs = prereqMap.value.get(skill.id) ?? []
-    if (prereqs.length === 0 || prereqs.every((id) => earned.has(id))) {
-      set.add(skill.id)
-    }
-  }
-  return set
-})
-
-const earnedSkillsCount = computed(() => earnedSkillIdSet.value.size)
-const availableSkillsCount = computed(() => availableSkillIdSet.value.size)
-const lockedSkillsCount = computed(() =>
-  Math.max(0, skills.value.length - earnedSkillsCount.value - availableSkillsCount.value)
-)
-
-// ============ Force-graph (same renderer as sidebar/modal) ============
-const graphContainerRef = ref<HTMLElement | null>(null)
-let forceGraphInstance: ForceGraphInstance | null = null
-let graphResizeObserver: ResizeObserver | null = null
-let graphGeneration = 0
-const { buildAdjacency, createHoverHandler, renderNode, renderLink, nodePointerAreaPaint } = useSkillGraphHover()
-
-const forceGraphNodes = computed<SkillGraphNode[]>(() => {
-  const earned = earnedSkillIdSet.value
-  // Full taxonomy (respecting the active field/subject/search filter),
-  // matching the sidebar graph. Status colours every node.
-  return filteredSkills.value.map(skill => {
-    const prereqs = prereqMap.value.get(skill.id) ?? []
-    const status = earned.has(skill.id)
-      ? 'earned'
-      : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
-          ? 'available'
-          : 'locked'
-    return { id: skill.id, name: skill.name, routeId: skill.id, status, prerequisites: prereqs, bloom_level: skill.bloom_level }
-  })
-})
-
-function destroyForceGraph() {
-  graphGeneration++
-  graphResizeObserver?.disconnect()
-  graphResizeObserver = null
-  if (forceGraphInstance) {
-    forceGraphInstance._destructor()
-    forceGraphInstance = null
-  }
-}
-
-async function initForceGraph() {
-  const container = graphContainerRef.value
-  if (!container || !forceGraphNodes.value.length) return
-  destroyForceGraph()
-  const generation = graphGeneration
-
-  const visibleIds = new Set(forceGraphNodes.value.map(n => n.id))
-  const links: SkillGraphLink[] = []
-  for (const node of forceGraphNodes.value) {
-    for (const prereqId of node.prerequisites) {
-      if (visibleIds.has(prereqId)) {
-        links.push({ source: prereqId, target: node.id })
-      }
-    }
-  }
-  buildAdjacency(links.map(link => ({
-    source: String(link.source),
-    target: String(link.target),
-  })))
-
-  const width = container.clientWidth
-  const height = container.clientHeight
-
-  const graph = await createForceGraph(container)
-  if (generation !== graphGeneration || container !== graphContainerRef.value) {
-    graph._destructor()
-    return
-  }
-  graph
-    .width(width)
-    .height(height)
-    .graphData({ nodes: forceGraphNodes.value, links })
-    .autoPauseRedraw(false)
-    .nodeLabel(() => '')
-    .onNodeHover(createHoverHandler())
-    .nodeCanvasObject((node: Record<string, unknown>, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      renderNode(node, ctx, globalScale)
-    })
-    .linkCanvasObject((link: Record<string, unknown>, ctx: CanvasRenderingContext2D) => {
-      renderLink(link, ctx)
-    })
-    .linkCanvasObjectMode(() => 'replace' as const)
-    .nodePointerAreaPaint(nodePointerAreaPaint)
-    .backgroundColor('transparent')
-    .onNodeClick((node: Record<string, unknown>) => {
-      const routeId = String(node.routeId ?? node.id ?? '')
-      if (routeId) router.push(`/skills/${routeId}`)
-    })
-    .cooldownTicks(100)
-    .onEngineStop(() => {
-      graph.zoomToFit(400, 40)
-    })
-
-  graph.d3Force('charge')?.strength(-80)
-  graph.d3Force('link')?.distance(50)
-
-  forceGraphInstance = graph
-
-  graphResizeObserver = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      graph.width(entry.contentRect.width)
-      graph.height(entry.contentRect.height)
-    }
-  })
-  graphResizeObserver.observe(container)
-}
-
-// Init/destroy the force graph when switching to/from the graph tab
-watch(activeTab, async (tab) => {
-  if (tab === 'graph' && !loading.value) {
-    await nextTick()
-    initForceGraph()
-  } else {
-    destroyForceGraph()
-  }
-})
-
-// Also init if data loads while graph tab is already active
-watch(loading, async (isLoading) => {
-  if (!isLoading && activeTab.value === 'graph') {
-    await nextTick()
-    initForceGraph()
-  }
-})
-
-onBeforeUnmount(() => {
-  destroyForceGraph()
-})
+function goalSkill(skill: SkillInfo) { void learnSkill(skill.id) }
 </script>
 
 <template>
@@ -324,45 +147,13 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
-      <!-- Stats bar -->
-      <div class="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-success">{{ earnedSkillsCount }}</p>
-          <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-            </svg>
-            {{ $t('skills.stats.earned') }}
-          </p>
-        </div>
-        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-warning">{{ availableSkillsCount }}</p>
-          <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-            </svg>
-            {{ $t('skills.stats.available') }}
-          </p>
-        </div>
-        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-muted-foreground">{{ lockedSkillsCount }}</p>
-          <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-            </svg>
-            {{ $t('skills.stats.locked') }}
-          </p>
-        </div>
-        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-foreground">{{ totalSkills }}</p>
-          <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-            </svg>
-            {{ $t('skills.stats.total') }}
-          </p>
+      <div v-if="activeTab !== 'graph'" class="mb-6 grid grid-cols-3 gap-4">
+        <div v-for="stat in [{ count: model?.counts.earned ?? 0, label: $t('skills.atlas.earned') }, { count: model?.counts.ready ?? 0, label: $t('skills.atlas.ready') }, { count: totalSkills, label: $t('skills.stats.total') }]" :key="stat.label" class="rounded-xl bg-card p-4 text-center">
+          <p class="font-mono text-2xl font-bold">{{ stat.count }}</p><p class="text-xs text-muted-foreground">{{ stat.label }}</p>
         </div>
       </div>
+      <p v-if="actionError" role="alert">{{ actionError }}</p>
+      <div v-if="error" role="alert" class="mb-4"><p>{{ error }}</p><button type="button" @click="atlas.refresh('retry')">{{ $t('common.actions.retry') }}</button></div>
 
       <!-- Tabs -->
       <AppTabs :tabs="tabs" v-model="activeTab" class="mb-6" />
@@ -519,41 +310,10 @@ onBeforeUnmount(() => {
 
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'" class="space-y-6">
-        <!-- Visibility + teaching editor (feature: choose public parts) -->
+        <SkillAtlasExplorer v-if="model" :model="model" :view="pageView" :feedback="feedback"
+          @update:view="atlas.updateView('page', $event)" @open-skill="openSkill" @learn-skill="learnSkill"
+          @feedback-consumed="atlas.acknowledgeFeedback" />
         <GraphVisibilityEditor />
-
-        <div v-if="forceGraphNodes.length === 0" class="py-16 text-center">
-          <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
-            <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-            </svg>
-          </div>
-          <h3 class="text-sm font-medium text-foreground">{{ $t('skills.graph.emptyTitle') }}</h3>
-          <p class="mt-1 text-xs text-muted-foreground">
-            {{ $t('skills.graph.emptyBody') }}
-          </p>
-        </div>
-        <div v-else class="rounded-2xl border border-border overflow-hidden bg-slate-950">
-          <div ref="graphContainerRef" class="h-[600px] w-full" />
-
-          <!-- Legend overlay -->
-          <div class="flex items-center justify-center gap-6 border-t border-border bg-card px-4 py-3 text-xs">
-            <span class="flex items-center gap-1.5">
-              <span class="inline-block h-2.5 w-2.5 rounded-full bg-success" />
-              <span class="text-muted-foreground">{{ $t('skills.graph.legendEarned', { count: earnedSkillsCount }) }}</span>
-            </span>
-            <span v-if="availableSkillsCount > 0" class="flex items-center gap-1.5">
-              <span class="inline-block h-2.5 w-2.5 rounded-full bg-warning" />
-              <span class="text-muted-foreground">{{ $t('skills.graph.legendAvailable', { count: availableSkillsCount }) }}</span>
-            </span>
-            <span class="flex items-center gap-1.5">
-              <span class="inline-block h-2 w-2 rounded-full" style="background: rgba(148, 163, 184, 0.4)" />
-              <span class="text-muted-foreground">{{ $t('skills.graph.legendLocked', { count: lockedSkillsCount }) }}</span>
-            </span>
-            <span class="text-muted-foreground/50">·</span>
-            <span class="text-muted-foreground">{{ $t('skills.graph.legendNodeSize') }}</span>
-          </div>
-        </div>
       </div>
 
       <!-- ============ CREDENTIALS TAB ============ -->

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useLocalApi } from '@/composables/useLocalApi'
+import SkillAtlasHost from '@/components/skills/SkillAtlasHost.vue'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
@@ -263,6 +264,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <SkillAtlasHost />
   <div v-if="showLockScreen" class="flex items-center justify-center h-full bg-background safe-area-top" role="status" aria-live="polite">
     <div class="text-center max-w-sm p-6">
       <template v-if="lockState === 'failed'">

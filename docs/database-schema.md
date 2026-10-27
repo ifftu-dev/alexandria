@@ -1,5 +1,7 @@
 # Database Schema
 
+Status: live
+
 > Alexandria — SQLite (local-first)
 
 > **Generated** from `src-tauri/src/db/schema.rs` by

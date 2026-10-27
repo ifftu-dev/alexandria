@@ -1,16 +1,19 @@
 # Demo runbook — learner to offer, and the validity pilot
 
-Everything needed to run the full demo without getting lost: what is where, in
-which order to click, what to say, and what to do when something does not
-arrive. The product narrative is in [`assessment-demo.md`](assessment-demo.md);
-this is the operator's sheet.
+Status: live
+Updated: 2026-10-27
+
+The operator's sheet: what is where, in which order to click, what to say, and
+what to do when something does not arrive. Machine preparation, seeded content
+and limits are in [setup](setup.md); the one-page cue card is
+[presenter notes](presenter-notes.md).
 
 ## Where everything is
 
 | Thing | Location |
 |---|---|
-| Learner app source | this repository (`alexandria`), `main` |
-| Cloud source | the `alexandria-cloud` repository, `main`, checked out next to this one |
+| Learner app source | this repository (`alexandria`) |
+| Cloud source | the `alexandria-cloud` repository, checked out next to this one |
 | Cloud console | <http://127.0.0.1:8787> (sign-in page → **Continue**; loopback dev sign-in only) |
 | Cloud Postgres | Docker container `alexandria-assessment-demo-db`, loopback port 5544, database `alexandria_demo` |
 | Cloud launcher | `scripts/demo-assessment.sh` in the Cloud repository (needs Docker Desktop running) |
@@ -41,32 +44,18 @@ attempt cooldown applies.
 
 ## 0. Before the audience arrives (10 minutes)
 
-1. Start Docker Desktop. In the Cloud repository run `scripts/demo-assessment.sh`.
-   Wait for "listening on 127.0.0.1:8787". The script creates the empty demo
-   organisation, activates the exported taxonomy, builds the console if
-   `web/dist` is missing, and starts Ollama for the role-requirements step. It
-   then gives the organisation the signing key in `.demo/org-signing-seed`
-   (when that file exists), claims `alexandria.ifftu.dev` for it as **IFFTU**,
-   and verifies the claim; a verified claim renames the organisation to
-   **IFFTU**. Nothing else is seeded: no candidates, credentials, interviews or
-   pilots.
-   - **Prerequisite:** the DNS TXT record `_alexandria.alexandria.ifftu.dev`
-     must read `v=alexandria-org1; name=IFFTU; key=<did:key of that seed>`.
-     Cloud → **Settings → Organisation identity** shows the exact record to
-     publish. If the record is missing or lists another key, the script prints a
-     warning and keeps going, but Cloud refuses to send assessment requests,
-     access requests, interview invitations and offers until the claim verifies.
-   - Both Cloud and the app read the record from public DNS (the app through
-     the system's resolver). The demo machine needs a network connection for
-     that lookup, even though everything else is on loopback.
-2. Open <http://127.0.0.1:8787>, press **Continue**. You are signed in as the
-   demo organisation. **Settings → Organisation identity** should say
-   **Verified**.
-3. Open Alexandria (built from this repository), unlock the demo profile.
-   **Settings → Developer → Alexandria Cloud address** → `http://127.0.0.1:8787`
-   (it saves on Enter or when you leave the field). Then **Settings →
-   Organisations**: *Receive requests from organisations* is on, and the
-   section shows *Requests* rather than "No Alexandria Cloud is set up".
+Details and the reasons behind each step are in
+[setup → Prepare the machine](setup.md#prepare-the-machine).
+
+1. Start Docker Desktop. In the Cloud repository run `scripts/demo-assessment.sh`
+   and wait for "listening on 127.0.0.1:8787". If it warns that the
+   `_alexandria.alexandria.ifftu.dev` claim did not verify, fix DNS first:
+   Cloud will not contact candidates until it does.
+2. Open <http://127.0.0.1:8787>, press **Continue**. **Settings → Organisation
+   identity** should say **Verified**.
+3. Open Alexandria, unlock the demo profile, set **Settings → Developer →
+   Alexandria Cloud address** to `http://127.0.0.1:8787`, and check **Settings →
+   Organisations** shows *Requests*.
 4. Optional: **Settings → Developer → Test data → Seed everything** for courses,
    discussions and proposals to show around the assessment. The two assessable
    banks are installed when the profile is created, in every build; seeds never
@@ -97,9 +86,23 @@ attempt cooldown applies.
    invitation and pilot forms. It prints one line per screen.
 7. Have a terminal open in this repository for §6.
 
+## Optional opener: role requirements (Cloud)
+
+Cloud → **Hiring → Role requirements**. Paste the job description, or use
+**Load from link** with a public HTTPS URL and review the loaded text. Click
+**Read it**, review the quoted skill proposals and Bloom levels (preferred
+proposals start unchecked), then enter a code/title and **Create this role**.
+The local Ollama model is started by the Cloud launcher; allow up to two
+minutes. **Create role manually** is the fallback. Coverage reflects real
+published listings and can be zero; Remember evidence will not clear
+Apply/Analyze bars. The Cloud runbook covers model startup and configuration.
+
 ## 1. Learner earns a credential (app)
 
 **Goals → Engineering Manager → View path → Big-O Analysis → Assess.**
+(To add a separate goal: **Skills & Credentials → Browse → Big-O Analysis →
+🎯 Goal**. Big-O has no prerequisite; JavaScript's goal path needs HTML & CSS
+first.)
 Press ⌘⇧S → **Start camera preview** if you want the Sentinel view visible.
 Answer, submit. On a pass one credential is issued on the device.
 
@@ -131,7 +134,10 @@ Say: "Zero issuer clusters is honest: nobody independent has vouched yet."
 
 ## 4. Organisation requests another assessment; learner completes it (both)
 
-Cloud → person record → **Invite to assess or share a credential**. Choose
+Cloud → person record → **Invite to assess or share a credential**. (To start
+organisation-first instead, add a candidate in **People** using the demo
+profile's DID.) To request the credential from §1 rather than a new one,
+uncheck **Require a new assessment**. Otherwise choose
 **JavaScript** (the other skill, to avoid the cooldown), keep **Require a new
 assessment** checked → **Create request**. The run page says the learner will
 see it in Alexandria under Organisations, and has a copyable `alexandria://`
