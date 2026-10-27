@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 27 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 126 tables, 126 indexes, 1 view, 6 triggers.
+**Schema**: 30 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 130 tables, 127 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -50,6 +50,9 @@ and requires a database's history to be an exact prefix of this list:
 25. `ai_chat_artifacts`
 26. `course_notes_body`
 27. `ai_chat_actions`
+28. `notifications`
+29. `notification_recipient_lifecycle`
+30. `notification_mutation_body`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1592,6 +1595,47 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `revision` INTEGER NOT NULL default `1`
 - `created_at` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
+
+### Notifications (4)
+
+#### `notification_dedupe`
+
+- `dedupe_key` TEXT PK
+- `seen_at` TEXT NOT NULL
+
+#### `notifications`
+
+- `id` TEXT PK
+- `kind` TEXT NOT NULL
+- `title` TEXT NOT NULL
+- `body` TEXT NOT NULL default `''`
+- `route` TEXT
+- `source` TEXT NOT NULL default `'local'`
+- `dedupe_key` TEXT
+- `payload_json` TEXT
+- `created_at` TEXT NOT NULL
+- `read_at` TEXT
+
+#### `push_operation_state`
+
+- `singleton` INTEGER PK
+- `revision` INTEGER NOT NULL default `0`
+- `last_error` TEXT
+- `error_origin` TEXT
+
+#### `push_registrations`
+
+- `cloud_origin` TEXT PK
+- `device_id` TEXT NOT NULL
+- `platform` TEXT NOT NULL
+- `token` TEXT NOT NULL
+- `registered_at` TEXT NOT NULL
+- `recipient` TEXT
+- `pending` TEXT NOT NULL default `'put'`
+- `revision` INTEGER NOT NULL default `0`
+- `last_error` TEXT
+- `network_id` TEXT
+- `put_body` TEXT
 
 ---
 

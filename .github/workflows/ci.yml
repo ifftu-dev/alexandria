@@ -348,6 +348,12 @@ jobs:
             features: tutoring-video-android,personhood-lab,dev-seeding
 
     steps:
+      - name: Select Xcode 26.3
+        # The push plugin's Firebase 13 package needs Swift tools 6.2; the
+        # runner default is Xcode 16.x. Matches the release workflow.
+        if: matrix.label == 'iOS'
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+
       - name: Checkout alexandria
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

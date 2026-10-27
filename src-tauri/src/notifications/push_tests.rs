@@ -22,7 +22,9 @@ async fn active_named(directory: &std::path::Path, name: &str) -> std::sync::Arc
     let vault = if crate::crypto::keystore::Keystore::exists(&paths.vault_dir) {
         crate::crypto::keystore::Keystore::open(&paths.vault_dir, "test-password-123").unwrap()
     } else {
-        let vault =
+        // Android's keystore stores through `&mut self`.
+        #[allow(unused_mut)]
+        let mut vault =
             crate::crypto::keystore::Keystore::create(&paths.vault_dir, "test-password-123")
                 .unwrap();
         vault.store_mnemonic(if name == "B" { "legal winner thank year wave sausage worth useful legal winner thank yellow" } else { "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }).unwrap();

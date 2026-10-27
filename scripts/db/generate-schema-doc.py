@@ -62,6 +62,7 @@ DOMAINS = [
     ("Settings", r"^app_settings$"),
     ("Instructor studio", r"^(studio_|course_tutor_policies$|course_lesson_feedback$)"),
     ("AI chat", r"^(chat_|learning_memory$|ai_connection_approvals$)"),
+    ("Notifications", r"^(notification|push_)"),
 ]
 
 
