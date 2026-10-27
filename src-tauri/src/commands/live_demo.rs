@@ -27,14 +27,12 @@ use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 
 use crate::clock::now_rfc3339;
-use crate::commands::credentials::{
-    export_bundle_signed_impl, revoke_credential_impl, verify_bundle_offline_impl,
-};
+use crate::commands::credentials::{export_bundle_signed_impl, verify_bundle_offline_impl};
 use crate::commands::hiring::{
     sign_interview_response, sign_offer_response, InterviewInvite, Offer,
 };
 use crate::commands::talent_index::{get_talent_index_preview_impl, set_talent_index_consent_impl};
-use crate::credentials::status_list;
+use crate::credentials::{lifecycle, status_list};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::Database;
 use crate::domain::talent_index::{sign_record, TalentIndexConsent};
@@ -649,7 +647,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     );
 
     // ── 8. Revoke: the hosted list flips, the verifier sees it ────────
-    revoke_credential_impl(db.conn(), &did, &first_id, "live rehearsal", &now_rfc3339()).unwrap();
+    lifecycle::revoke(db.conn(), &did, &first_id, "live rehearsal", &now_rfc3339()).unwrap();
     assert_eq!(
         status_list::pending(db.conn(), &did).unwrap().len(),
         1,

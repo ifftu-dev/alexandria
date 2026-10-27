@@ -990,8 +990,7 @@ mod tests {
         assert_eq!(retry.claim_id, first.claim_id);
         assert_eq!(retry.witness_status, WitnessStatus::Pending);
         assert!(retry.tx_hash.is_empty());
-        let credentials =
-            super::super::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        let credentials = crate::credentials::store::list(db.conn(), None, None).unwrap();
         assert_eq!(credentials.len(), 2);
         assert!(credentials.iter().all(|vc| vc.witness.is_none()));
         let status: String = db
@@ -1207,8 +1206,7 @@ mod tests {
 
         // The course-completion VC carries the on-chain witness — this is
         // the row the frontend modal polls for by `witness.tx_hash`.
-        let creds =
-            crate::commands::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        let creds = crate::credentials::store::list(db.conn(), None, None).unwrap();
         let witness_hit = creds
             .iter()
             .find(|c| c.witness.as_ref().map(|w| w.tx_hash.as_str()) == Some(tx_hash.as_str()));
@@ -1318,8 +1316,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ids.len(), 1);
-        let credentials =
-            crate::commands::credentials::list_credentials_impl(db.conn(), None, None).unwrap();
+        let credentials = crate::credentials::store::list(db.conn(), None, None).unwrap();
         assert_eq!(credentials.len(), 1);
         assert_eq!(
             credentials[0].issuer,

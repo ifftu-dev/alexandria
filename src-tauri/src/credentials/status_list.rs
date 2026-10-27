@@ -229,7 +229,8 @@ async fn push_one(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials::fixtures::{setup, test_key, NOW};
+    use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
+    use crate::credentials::{self, lifecycle};
     use crate::crypto::did::derive_did_key;
 
     #[test]
@@ -359,5 +360,61 @@ mod tests {
         assert!(accepted.is_empty());
         assert_eq!(errors.len(), 2);
         assert!(errors[1].contains("another issuer"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_configured_host_makes_status_lists_url_addressed_and_pending() {
+        use crate::settings::{registry::keys, SettingsStore};
+        use alexandria_verify::vc::status;
+        let (db, key, issuer, subject) = setup();
+        SettingsStore::set(
+            db.conn(),
+            keys::CREDENTIAL_STATUS_HOST,
+            "http://127.0.0.1:8080/".to_string(),
+        )
+        .unwrap();
+        assert_eq!(host(db.conn()).as_deref(), Some("http://127.0.0.1:8080"));
+
+        let vc =
+            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let reference = vc.credential_status.expect("status attached");
+        let expected = status::list_url("http://127.0.0.1:8080", &issuer, 1);
+        assert_eq!(reference.status_list_credential, expected);
+        assert_eq!(reference.id, format!("{expected}#0"));
+
+        // A new list is version 1 and nothing has served it: pending.
+        let pending = super::pending(db.conn(), &issuer).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].version, 1);
+        let signed = super::signed(&pending[0], &key, &issuer, NOW).unwrap();
+        let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
+        assert_eq!(status::get_bit(&bits, 0), Some(false));
+
+        mark_published(db.conn(), &[(expected.clone(), 1)]).unwrap();
+        assert!(super::pending(db.conn(), &issuer).unwrap().is_empty());
+
+        // Revocation bumps the version past what the host has.
+        lifecycle::revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        let pending = super::pending(db.conn(), &issuer).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].version, 2);
+        let signed = super::signed(&pending[0], &key, &issuer, NOW).unwrap();
+        let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
+        assert_eq!(status::get_bit(&bits, 0), Some(true));
+
+        // An older acknowledgement never moves the mark backwards.
+        mark_published(db.conn(), &[(expected.clone(), 2)]).unwrap();
+        mark_published(db.conn(), &[(expected, 1)]).unwrap();
+        assert!(super::pending(db.conn(), &issuer).unwrap().is_empty());
+    }
+
+    #[test]
+    fn without_a_host_lists_are_urns_and_never_pending() {
+        let (db, key, issuer, subject) = setup();
+        assert!(host(db.conn()).is_none());
+        let vc =
+            credentials::issue(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        lifecycle::revoke(db.conn(), &issuer, vc.id.as_deref().unwrap(), "test", NOW).unwrap();
+        assert!(super::pending(db.conn(), &issuer).unwrap().is_empty());
     }
 }

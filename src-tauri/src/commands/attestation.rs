@@ -11,8 +11,8 @@ use rusqlite::Connection;
 use alexandria_verify::course::sign_completion_endorsement;
 use alexandria_verify::trust::{classify_credential, CredentialTrust};
 
-use crate::commands::credentials::get_credential_impl;
 use crate::content_store::course as content_course;
+use crate::credentials::store;
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::attestation::{
@@ -37,7 +37,7 @@ pub fn credential_trust_impl(
     verification_time: &str,
     network_id: &str,
 ) -> Result<Option<CredentialTrust>, String> {
-    let Some(credential) = get_credential_impl(conn, credential_id)? else {
+    let Some(credential) = store::get(conn, credential_id)? else {
         return Ok(None);
     };
     let policy = VerificationPolicy::default();

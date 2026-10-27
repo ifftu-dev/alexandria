@@ -6,7 +6,9 @@
 //! credential commands are thin wrappers over it.
 
 pub mod issue;
+pub mod lifecycle;
 pub mod status_list;
+pub mod store;
 
 pub use issue::{issue, IssuancePolicy, IssueCredentialRequest};
 

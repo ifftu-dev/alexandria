@@ -12,10 +12,8 @@
 //! verifier here proves the bundle is self-contained.
 
 use super::common::{new_test_db, test_did, test_key, TEST_NOW};
-use app_lib::commands::credentials::{
-    export_bundle_impl, revoke_credential_impl, verify_bundle_offline_impl,
-};
-use app_lib::credentials::{self, IssueCredentialRequest};
+use app_lib::commands::credentials::{export_bundle_impl, verify_bundle_offline_impl};
+use app_lib::credentials::{self, lifecycle, IssueCredentialRequest};
 use app_lib::crypto::did::derive_did_key;
 use app_lib::domain::vc::{Claim, CredentialType, SkillClaim};
 
@@ -67,7 +65,7 @@ async fn exported_bundle_propagates_revocation_to_offline_verifier() {
     // so the offline verifier sees the same Reject as the local one.
     let db = new_test_db();
     let (issuer, cred_id) = issue_one(&db, "skill_survival_revoked");
-    revoke_credential_impl(db.conn(), &issuer, &cred_id, "test", TEST_NOW).expect("revoke");
+    lifecycle::revoke(db.conn(), &issuer, &cred_id, "test", TEST_NOW).expect("revoke");
     let bundle = export_bundle_impl(db.conn()).expect("export");
     let (accepted, total) = verify_bundle_offline_impl(&bundle, TEST_NOW).expect("verify");
     assert_eq!(total, 1);

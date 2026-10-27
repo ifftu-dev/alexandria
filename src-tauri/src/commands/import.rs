@@ -351,7 +351,7 @@ pub struct ImportFailure {
 /// keys, unsafe numbers, hostile nesting and oversized entries never reach
 /// verification or storage.
 fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
-    let value = super::credentials::parse_credential_payload(payload)?;
+    let value = crate::credentials::store::parse_credential_payload(payload)?;
 
     if let Some(list) = value.get("credentials").and_then(|c| c.as_array()) {
         return credential_entries(list, "bundle entry");
@@ -362,7 +362,7 @@ fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
         return credential_entries(list, "entry");
     }
 
-    let vc = super::credentials::credential_entry(&value)
+    let vc = crate::credentials::store::credential_entry(&value)
         .map_err(|e| format!("not a credential: {e}"))?;
     Ok(vec![vc])
 }
@@ -374,7 +374,7 @@ fn credential_entries(
     list.iter()
         .enumerate()
         .map(|(i, item)| {
-            super::credentials::credential_entry(item)
+            crate::credentials::store::credential_entry(item)
                 .map_err(|e| format!("{label} {i} is not a credential: {e}"))
         })
         .collect()
