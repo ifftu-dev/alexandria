@@ -313,7 +313,12 @@ async fn locking_while_native_token_is_pending_does_not_wait_or_register_in_a_ne
     let directory = tempfile::tempdir().unwrap();
     let state = active(directory.path()).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    SettingsStore::set(state.db.lock().unwrap().as_ref().unwrap().conn(), keys::CLOUD_ORIGIN, format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
     let old_session = state.profile_operations.session().unwrap();
     let lease = admitted(&state);
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -647,13 +652,11 @@ async fn legacy_response_and_rotated_bindings_fail_closed_and_wire_routes_are_ex
     assert_eq!(recorded.unread, 1);
     assert_eq!(
         recorded.row.route.as_deref(),
-        Some(
-            format!(
-                "/interview-room/22222222-2222-4222-8222-222222222222?cloud={}",
-                url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
-            )
-            .as_str()
-        )
+        Some("/interview-room/22222222-2222-4222-8222-222222222222")
+    );
+    assert_eq!(
+        recorded.row.payload.as_ref().unwrap()["cloudOrigin"],
+        origin
     );
     assert!(receive(&state, admitted(&state), room)
         .await
@@ -804,12 +807,20 @@ async fn a_native_token_result_cannot_overwrite_a_newer_rotation_in_the_same_ses
 
 #[tokio::test]
 async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
     let directory = tempfile::tempdir().unwrap();
     let state = active(directory.path()).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
-    SettingsStore::set(state.db.lock().unwrap().as_ref().unwrap().conn(), keys::CLOUD_ORIGIN, origin.clone()).unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        origin.clone(),
+    )
+    .unwrap();
     let next_opening = Arc::new(AtomicBool::new(false));
     let server_next = next_opening.clone();
     let server = tokio::spawn(async move {
@@ -820,48 +831,112 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
             let body = if header.starts_with("PUT ") {
                 serde_json::json!({"recipient":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"})
             } else if header.starts_with("GET /api/interviews/rooms/for/") {
-                let opening = if server_next.load(Ordering::SeqCst) { "44444444-4444-4444-8444-444444444444" } else { "33333333-3333-4333-8333-333333333333" };
+                let opening = if server_next.load(Ordering::SeqCst) {
+                    "44444444-4444-4444-8444-444444444444"
+                } else {
+                    "33333333-3333-4333-8333-333333333333"
+                };
                 serde_json::json!([{
                     "id":"22222222-2222-4222-8222-222222222222", "openingId":opening,
                     "kind":"interview_room_opened", "eventId":format!("interview_room_opened:22222222-2222-4222-8222-222222222222:{opening}"),
                     "route":"/interview-room/22222222-2222-4222-8222-222222222222",
                     "openedAt":"2026-10-27T00:00:00Z", "expiresAt":"2099-01-01T00:00:00Z"
                 }])
-            } else { serde_json::json!([]) };
+            } else {
+                serde_json::json!([])
+            };
             respond(&mut socket, 200, &body.to_string()).await;
         }
     });
-    reconcile(&state, admitted(&state), Some("shared-device-token".into()), None).await.unwrap();
+    reconcile(
+        &state,
+        admitted(&state),
+        Some("shared-device-token".into()),
+        None,
+    )
+    .await
+    .unwrap();
     let mut push = offer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     push["data"]["kind"] = "interview_room_opened".into();
     push["data"]["eventId"] = "interview_room_opened:22222222-2222-4222-8222-222222222222:33333333-3333-4333-8333-333333333333".into();
     push["data"]["route"] = "/interview-room/22222222-2222-4222-8222-222222222222".into();
-    let received = receive(&state, admitted(&state), push.clone()).await.unwrap().unwrap();
-    assert_eq!(received.row.payload.as_ref().unwrap()["cloudOrigin"], origin);
-    assert_eq!(received.row.payload.as_ref().unwrap()["eventId"], push["data"]["eventId"]);
-    assert_eq!(received.row.route.as_deref(), Some("/interview-room/22222222-2222-4222-8222-222222222222"));
+    let received = receive(&state, admitted(&state), push.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        received.row.payload.as_ref().unwrap()["cloudOrigin"],
+        origin
+    );
+    assert_eq!(
+        received.row.payload.as_ref().unwrap()["eventId"],
+        push["data"]["eventId"]
+    );
+    assert_eq!(
+        received.row.route.as_deref(),
+        Some("/interview-room/22222222-2222-4222-8222-222222222222")
+    );
     let (key, did) = issuer_key(&state).await.unwrap();
     for clear in [false, true] {
         let items = super::super::cloud_pull::fetch(&origin, &key, did.as_str()).await;
         assert_eq!(items.len(), 1);
-        let fresh = state.db_executor.execute(DatabaseWorkload::Background, admitted(&state), "test.notification_recovery", move |db| {
-            if clear { super::super::clear(db.conn())?; }
-            Ok(super::super::cloud_pull::unreported(db.conn(), &items).len())
-        }).await.unwrap();
-        assert_eq!(fresh, 0, "push then pull, including after clear, must stay deduplicated");
-        assert!(receive(&state, admitted(&state), push.clone()).await.unwrap().is_none());
+        let fresh = state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Background,
+                admitted(&state),
+                "test.notification_recovery",
+                move |db| {
+                    if clear {
+                        super::super::clear(db.conn())?;
+                    }
+                    Ok(super::super::cloud_pull::unreported(db.conn(), &items).len())
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            fresh, 0,
+            "push then pull, including after clear, must stay deduplicated"
+        );
+        assert!(receive(&state, admitted(&state), push.clone())
+            .await
+            .unwrap()
+            .is_none());
     }
     next_opening.store(true, Ordering::SeqCst);
     let items = super::super::cloud_pull::fetch(&origin, &key, did.as_str()).await;
-    let recorded = state.db_executor.execute(DatabaseWorkload::Background, admitted(&state), "test.notification_recovery", move |db| {
-        let fresh = super::super::cloud_pull::unreported(db.conn(), &items);
-        assert_eq!(fresh.len(), 1, "a genuine new room opening is a new event");
-        super::super::record_if_enabled(db.conn(), &fresh[0].notification().unwrap())
-    }).await.unwrap().unwrap();
+    let recorded = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            admitted(&state),
+            "test.notification_recovery",
+            move |db| {
+                let fresh = super::super::cloud_pull::unreported(db.conn(), &items);
+                assert_eq!(fresh.len(), 1, "a genuine new room opening is a new event");
+                super::super::record_if_enabled(db.conn(), &fresh[0].notification().unwrap())
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(recorded.unread, 1);
     push["data"]["eventId"] = "interview_room_opened:22222222-2222-4222-8222-222222222222:44444444-4444-4444-8444-444444444444".into();
-    assert!(receive(&state, admitted(&state), push.clone()).await.unwrap().is_none(), "pull then push must also deduplicate");
+    assert!(
+        receive(&state, admitted(&state), push.clone())
+            .await
+            .unwrap()
+            .is_none(),
+        "pull then push must also deduplicate"
+    );
     let held = tapped(&state, push).unwrap().unwrap();
-    assert_eq!(held.route, format!("/interview-room/22222222-2222-4222-8222-222222222222?cloud={}", url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()));
+    assert_eq!(
+        held.route,
+        format!(
+            "/interview-room/22222222-2222-4222-8222-222222222222?cloud={}",
+            url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
+        )
+    );
     server.abort();
 }

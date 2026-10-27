@@ -170,7 +170,7 @@ async fn signed_send(
 }
 
 pub(crate) fn canonical_uuid(value: &str) -> bool {
-    uuid::Uuid::parse_str(value).is_ok_and(|uuid| uuid.to_string() == value)
+    uuid::Uuid::parse_str(value).is_ok_and(|uuid| !uuid.is_nil() && uuid.to_string() == value)
 }
 
 /// Reconcile a captured profile session using a token obtained at the native
@@ -439,18 +439,14 @@ fn parse(payload: Value) -> Option<PushData> {
 }
 
 fn notification(data: &PushData, origin: &str) -> Option<NewNotification> {
-    let (title, body, mut route) = cloud_copy(&data.kind, &data.id)?;
-    if data.kind == super::kind::INTERVIEW_ROOM_OPENED {
-        route = format!(
-            "{route}?cloud={}",
-            url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
-        );
-    }
+    let (title, body, route) = cloud_copy(&data.kind, &data.id)?;
     Some(
         NewNotification::new(&data.kind, title, body)
             .route(route)
             .dedupe(&data.event_id)
-            .payload(serde_json::json!({"id": data.id}))
+            .payload(
+                serde_json::json!({"id": data.id, "eventId": data.event_id, "cloudOrigin": origin}),
+            )
             .from_push(),
     )
 }
@@ -515,13 +511,22 @@ pub(crate) fn tapped(
     let Some(new) = notification(&data, &binding.origin) else {
         return Ok(None);
     };
+    let mut route = new.route.unwrap_or_default();
+    // A locked/inactive tap has no inbox row yet. Carry only the origin
+    // resolved from this local binding; provider routes cannot supply one.
+    if data.kind == super::kind::INTERVIEW_ROOM_OPENED {
+        route = format!(
+            "{route}?cloud={}",
+            url::form_urlencoded::byte_serialize(binding.origin.as_bytes()).collect::<String>()
+        );
+    }
     super::opens::hold(
         state,
         super::opens::NotificationOpen {
             id: format!("{}:{}", data.recipient, data.event_id),
             profile_id: binding.profile_id,
             recipient: Some(data.recipient),
-            route: new.route.unwrap_or_default(),
+            route,
             network_id: binding.network_id,
         },
     )

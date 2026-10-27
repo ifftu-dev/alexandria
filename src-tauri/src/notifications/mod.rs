@@ -408,7 +408,21 @@ fn os_banner<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) {
         .extra("profileId", profile.as_str())
         .extra("networkId", network);
     if let Some(route) = &row.route {
-        builder = builder.extra("route", route);
+        // Keep the locally discovered/registered origin even if the learner
+        // clears this row before tapping its OS banner.
+        let origin = row
+            .payload
+            .as_ref()
+            .and_then(|p| p.get("cloudOrigin"))
+            .and_then(serde_json::Value::as_str);
+        let destination = match origin {
+            Some(origin) if row.kind == kind::INTERVIEW_ROOM_OPENED => format!(
+                "{route}?cloud={}",
+                url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
+            ),
+            _ => route.clone(),
+        };
+        builder = builder.extra("route", destination);
     }
     #[cfg(target_os = "android")]
     {
