@@ -1,5 +1,8 @@
 # Sentinel Model Runbook
 
+Status: live
+Updated: 2026-10-10
+
 > Operational playbook for the bundled Sentinel paste classifier.
 > Audience: maintainers who retrain or roll back the model.
 > Companion docs: [sentinel.md](sentinel.md),

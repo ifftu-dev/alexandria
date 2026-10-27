@@ -10,620 +10,80 @@
 
 **Free, open-source learning that runs on every device — you own your credentials and your data.**
 
-<p>
-  <a href="docs/architecture.md">Architecture</a> &middot;
-  <a href="docs/database-schema.md">Database Schema</a> &middot;
-  <a href="docs/protocol-specification.md">Protocol Specification</a> &middot;
-  <a href="docs/project-structure.md">Project Structure</a> &middot;
-  <a href="docs/skills-and-reputation.md">Skills & Reputation</a> &middot;
-  <a href="docs/sentinel.md">Sentinel</a> &middot;
-  <a href="docs/interview-assistant.md">Interview Assistant</a> &middot;
-  <a href="docs/plugins.md">Plugins</a> &middot;
-  <a href="CHANGELOG.md">Changelog</a>
-</p>
+> **This software is in active development. It is NOT production-ready. Do not use it with real credentials, real funds, or sensitive data.**
 
-> **This software is in active development. It is NOT production-ready. Do not use with real credentials, real funds, or sensitive data.**
+## What it is
 
-## What Alexandria Does
+- **Learn for free, offline.** Courses, tutorials and interactive lessons, plus skill assessments graded on the device. See [skills and reputation](docs/skills-and-reputation.md).
+- **Earn portable credentials.** W3C Verifiable Credentials you store, export and verify offline. An issuer can revoke or suspend only the credentials it issued.
+- **Keep your data on your device.** No accounts and no data collection: each profile has its own encrypted database and vault.
+- **Peer-to-peer.** A libp2p mesh plus iroh for content and live media, with no application server. Relays help peers connect but cannot read traffic. See [architecture](docs/architecture.md).
+- **One device, many learners.** Isolated profiles for households, classrooms and shared devices, with guardian links for minors. See [multi-user profiles](docs/multi-user-profiles.md).
+- **Assessment integrity on the device.** [Sentinel](docs/sentinel.md) fuses behavioural and environment signals locally; raw signals never leave the device unless the learner releases them to contest a flag.
+- **Every platform, nine languages.** macOS, Windows, Linux, iOS and Android, in 9 languages including right-to-left Urdu.
 
-**In plain terms — what you get as a learner:**
+## Quick start (desktop)
 
-- **Learn for free** — courses, tutorials, and interactive lessons that work offline.
-- **Earn portable credentials** — signed proof of your skills that you can store, export, and verify offline. An issuer can revoke or suspend only credentials that it issued.
-- **Keep your data on your device** — no accounts, no data collection, and nothing to sign up for; the app connects you directly to other learners.
-- **One device, many learners** — fully separate, private profiles for households, classrooms, and shared devices.
-- **In your language** — the interface ships in 9 languages, including right-to-left (Urdu).
-
-The capabilities below describe how each of these works — the underlying technical implementation.
-
-- **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging. Separately, **dynamic assessments** verify claimed skills through bundled question banks: each attempt draws a randomized, difficulty-stratified subset, is graded host-side (the answer key never reaches the client), and auto-activates Sentinel — a pass issues an `AssessmentCredential`.
-- **Interview Assistant** — Instructors can prepare standalone or sponsored-role interviews, record per-participant consent choices, conduct the call over the live tutoring transport, capture an attributed transcript, track rubric coverage, receive local follow-up suggestions, keep private notes, and edit/export a timestamped summary. Interview records stay in the active profile's encrypted database, expire on a configurable schedule, and export with pseudonyms and without private notes by default. Raw audio/video is not recorded, and speech-to-text is available only when the WebView guarantees on-device processing. See [`docs/interview-assistant.md`](docs/interview-assistant.md).
-- **Goals & Learning Paths** — learners set a goal (a nationalized exam, a K-12 board-grade curriculum, a job role, or a pasted/linked job description); it resolves to an ideal skill graph via bundled goal templates or on-device job-description parsing, and computed prerequisite paths chart the route.
-- **Skill-Graph Bootstrap** — a new learner uploads a resume, transcript, or credential; on-device parsing suggests skills to confirm, each becoming a self-asserted credential whose **provenance tier** (self-declared → document-backed → accredited-document → issuer-signed) weights how much aggregation confidence it carries.
-- **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching) while network discovery catches up.
-- **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Completion credentials are **self-issued locally at claim time** — a Cardano completion validator witnesses the element-completion tx as an optional on-chain anchor (treasury-funded when configured), not a hard requirement. A course author may separately require endorsements from exact keys in the signed course version; the app supports explicit request export, fact review, local signing, verified import, and threshold status. Courses with no gradeable elements issue a content-only credential at a baseline proficiency. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
-- **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Usernames & Public Profiles** — decentralized @handles backed by a DHT registry (relay-receipted, optionally Cardano-anchored under metadata label 1698), public/private profiles and skill graphs fetched over P2P, and learner goals with computed paths. See [docs/username-registry.md](docs/username-registry.md).
-- **Cardano's role** — VC integrity anchoring, DAO governance, completion-witness minting, and historical reputation-token experiments. The active app no longer exposes the challenge escrow flow. Reference scripts exist on **preprod testnet** only; no shipped build submits by default.
-- **Governance** — DAOs mirror the knowledge taxonomy. This demo build automatically pins the [bundled preprod demo genesis](docs/default-network-genesis.md) when creating or restoring a profile. Its seven founder key sets belong to one operator. Existing profiles can explicitly accept it in Community; custom genesis import remains available. Inbound governance mutations are rejected until committee outcome certificates are implemented. Older Aiken/Plutus governance reference scripts remain deployed on **preprod testnet**; deployment alone does not make their flows part of the release authority path.
-- **Assessment Integrity** — Sentinel anti-cheat fuses on-device behavioural and environment signals. Behavioural: a keystroke autoencoder and mouse-trajectory CNN (Rust + `candle`, trained per-user on-device), a paste/typing-bot classifier, YuNet face detection with gaze/second-device estimation (head-pose proxies + per-user calibration MLP), and a MiniFASNet liveness check that catches a photo, screen or replay held up to the camera (frozen ONNX via `tract`). Environment: frontmost-app and display topology on every platform (second screen, mirroring, iPad Split View / Android multi-window); on desktop, windows hidden from screen capture, a watchlist of interview-cheat, remote-control and virtual-camera programs, and keyboard shortcuts that reached another app instead of the assessment; on Android, an assessment shield (`FLAG_SECURE` + hidden overlays) plus accessibility-service and debug-bridge checks. Only the LBP face embedder remains in TypeScript. `tract` is pure Rust, so every model compiles for all targets including iOS and Android. Sponsor roles can require the camera from the first question. On iOS and Android a session can also be **device attested**: Apple App Attest or Google Play Integrity vouches that a genuine build on a genuine device produced it, verified again on the issuing device before a credential claims it. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics. There is exactly one path off the device and the learner is the only one who can use it: a flagged session's evidence may be kept on-device for 14 days at their explicit choice, and released by them to contest the flag. Nothing can request it, the reviewer it reaches is one named person, and deleting it locally withdraws the copy they were sent. See [`docs/sentinel.md`](docs/sentinel.md#review-and-adjudication).
-- **Peer-to-Peer** — Two stacks. The mesh runs on libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR; content blobs and live tutoring media run on iroh. There is no application server and no account server, but connectivity does rely on relays: the libp2p relays are self-hosted, listed in an on-chain registry, and anyone can run one, while iroh currently falls back to relays and DNS discovery operated by [N0, INC](https://n0.computer) when a direct connection can't be made. Traffic is end-to-end encrypted either way, so a relay can see connection metadata but never content. See [`docs/architecture.md`](docs/architecture.md#relay-and-discovery-dependency).
-- **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
-- **Multi-User on One Device** — A single device can host any number of fully-isolated learner profiles. Each profile owns its own vault, SQLCipher database, iroh blob cache, and libp2p peer id; switching profiles tears all per-profile services down and brings the next one online. Designed for households, classrooms, and shared-device contexts in regions where personal hardware isn't a given. See [`docs/multi-user-profiles.md`](docs/multi-user-profiles.md).
-- **Cross-Device Synced Settings** — Every user preference (theme, sidebar layout, keyboard shortcuts, Sentinel toggles, notifications, ...) lives in one per-profile store and propagates to the user's other devices via peer-to-peer sync. Device-local settings (window geometry, disk quota) stay where they belong. See [`docs/settings.md`](docs/settings.md).
-- **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
-- **Roles, Modes & Parental Controls** — onboarding asks whether you are a **Learner**, **Instructor**, or **Parent/Guardian**. Learners give a birthdate (stored locally, never published; age is recomputed each unlock, never stored) — minors land in a `pending_guardian` state and must link a parent on a *separate device* before their profile activates. Instructors get a Learner↔Instructor **mode switch** (with an amber "instructor" accent so the active surface is obvious), a **unified course/tutorial composer**, and **dashboards** (per-course learner progress + a submissions inbox). Parents get a **guardian dashboard** to follow each linked child's activity. See [`docs/architecture.md`](docs/architecture.md#roles-modes--guardianship).
-- **Cross-Device Guardian Link** — the parent↔child link is a P2P handshake, not a server account: the minor generates a single-use invite code, the parent accepts it from their own device, and the two exchange W3C guardianship credentials (Ed25519) plus an AEAD-sealed activity channel over a dedicated `/alexandria/guardian/1.0` protocol. Guardianship VCs, birthdates, and oversight rows never touch public gossip or device-sync — the invariant is test-enforced. See [`docs/protocol-specification.md`](docs/protocol-specification.md#guardian-link-protocol).
-
-## What Is Not Built Yet
-
-Everything listed above runs in the alpha today. This section is the other half,
-kept here rather than spread across the documents that own each subsystem, so
-that a reader who only reads one file still learns what is missing. Each line
-names where the detail lives.
-
-| Not built | Where it stands |
-|---|---|
-| **On-chain anchoring, in practice** | The credential-anchor queue is written, wired and submits real transactions, but it silently does nothing unless a Blockfrost project id and a funded wallet are configured. No shipped build anchors anything by default. Validators are deployed on **preprod testnet only** — never mainnet. |
-| **Remote assessor review** | Practical-trade and other plugin submissions are queued locally and reviewed by an instructor **on the same node**. Routing a submission to an assessor on another device is a later phase — see [`plugins/irl_review.rs`](src-tauri/src/plugins/irl_review.rs). |
-| **A grader for the music plugin** | `music-reviews` detects pitch and marks notes live, but has no grader, so it cannot yet produce a score a credential is issued from. |
-| **Authenticated DAO model distribution** | The Sentinel prior signature is a **public Blake2b digest, not a signature** — it binds metadata to a row and authenticates nobody. Advisory AI scoring is therefore off by default. See [`docs/sentinel-federation.md`](docs/sentinel-federation.md) §12. |
-| **Federated learning (Option A)** | Per-user gradient sharing, DP-SGD, secure aggregation and stake-gated submissions are design-phase. Option B — DAO-published adversarial priors — is what shipped. |
-| **Real-world integrity measurement** | Sentinel's false-positive rate is measured against a **synthetic** holdout only. No real-world validity study has been done, by us or independently. |
-| **Android device attestation verdicts** | The Play Integrity request runs and the verifier is built and tested, but tokens can only be opened once the Play Console response keys are in the network profile (`play_integrity_response_keys`, null in `preprod`). Until then Android sessions stay `local`. See [`docs/sentinel-runbook.md`](docs/sentinel-runbook.md) Procedure 5. |
-| **Recorded interview media or generative interview coaching** | The interview assistant stores attributed text, criteria, notes, and an editable deterministic summary. It does not yet record raw audio/video, call a hosted transcription service, or use an LLM for follow-up questions. On-device speech recognition depends on WebView support. See [`docs/interview-assistant.md`](docs/interview-assistant.md#scope-and-status). |
-| **Push notifications** | Research complete, not scheduled. See [`docs/push-notifications-rfc.md`](docs/push-notifications-rfc.md). |
-| **Relay-independent bootstrap** | Fresh peer discovery uses the relays in the bundled, validated `preprod` network profile. The profile centralizes relay identities, HTTPS registry origins, fallback IPs, and trust roots, but remains part of the application release. DNS seeds and user-pinned bootstrap lists are post-launch. Existing credentials and content survive relays disappearing; discovering new peers does not. |
-| **Privilege qualification policy** | Credentials from any authentic issuer remain visible, but field-opinion posting and other proficiency-derived privileges are not yet restricted by the explicit subject/DAO accepted-issuer policy. This is the next trust-policy package in the remediation plan. |
-| **Automatic instructor endorsement delivery** | The exact endorsement artifact workflow is implemented, but learners and instructors currently exchange request and response JSON manually. Authenticated addressed delivery across peers or the hosted service remains part of the headless/cloud integration. |
-| **Full network namespace isolation** | The profile declares `/alexandria/preprod` and DHT provider-record keys include it. Gossip and request-response protocol paths still use the unscoped `/alexandria/...` paths until the app, relay, and monitoring services switch together. |
-| **Independent security audit** | Not commissioned. An internal review was carried out in February 2026 and its remediation is unfinished — see [`docs/security-audit.md`](docs/security-audit.md). |
-| **The non-profit instrument** | The dilution-proof veto over free learner access described in [`docs/vision.md`](docs/vision.md) **has not been drafted or executed**. Free access rests today on the AGPL licence and on intent. |
-| **Anything organizational** | Single sign-on, ATS delivery, bulk verification, cohort analytics and the employer console are built and under test in a separate, proprietary control-plane repository. Nobody outside this project runs any of it, and none of it is purchasable. Student-record (SIS) and SCIM provisioning have not been started. See [`docs/enterprise-boundary.md`](docs/enterprise-boundary.md). |
-
-No institution has deployed Alexandria, nobody has been hired on a credential it
-issued, and no external user has stress-tested any of it.
-
-## System Requirements
-
-Alexandria is a full peer-to-peer node, not a thin client — every device runs the
-P2P swarm (DHT, relay, username registry), content store, encrypted database, and
-(during live tutoring) real-time audio/video. Requirements are higher than a
-typical "viewer" app.
-
-### Desktop
-
-| Platform | Minimum |
-|----------|---------|
-| macOS    | 10.15 Catalina or later (Intel or Apple Silicon) |
-| Windows  | Windows 10+ with WebView2 (preinstalled on Windows 11) |
-| Linux    | x86_64 with webkit2gtk 4.1 |
-
-### iOS
-
-- **iOS 16.4 or later.** The build's deployment target is iOS 14, but the UI
-  requires a WebKit version shipped in iOS 16.4+ — older versions will not
-  render correctly.
-- **Recommended**: iPhone SE (3rd gen), iPhone 13, or newer. Live tutoring uses
-  the hardware H.264 encoder (VideoToolbox), so any supported iPhone handles
-  video well.
-- **Face ID / Touch ID** enables one-tap vault unlock. Without it, you unlock
-  each profile with its password.
-
-### Android
-
-- **Android 9 (API 28) or later** with Android System WebView (Chromium) 111+.
-  WebView auto-updates through Google Play.
-- **Minimum hardware**: 4 GB RAM. The app runs, but live tutoring may stutter on
-  entry-level chipsets.
-- **Recommended hardware**: 6–8 GB RAM and a mid-range 2023+ chipset (Snapdragon
-  7-series, Dimensity 7300-class, Tensor G3, or better). Unlike iOS, Android
-  video tutoring encodes in software (FFmpeg/x264) — the most CPU-intensive
-  thing the app does.
-- **Fingerprint / face unlock** enables one-tap vault unlock; otherwise use the
-  profile password.
-
-### Storage
-
-Plan for **2–4 GB free** beyond the app: each profile keeps its own encrypted
-database, content-addressed blob store, and video cache, which grow with
-downloaded course content.
-
-### Battery
-
-The P2P node maintains live network connections while the app is open. On phones,
-expect higher battery use than a typical content app — comparable to a messaging
-app doing an active sync.
-
-## Architecture
-
-Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There is no application server, no Docker container, and no external database — the app is the whole platform. Relays exist to help peers find each other and traverse NAT; they hold no application state and cannot read traffic.
-
-```
-alexandria/
-├── src-tauri/        # Rust backend (Tauri v2)
-│   └── src/
-│       ├── aggregation/ # Deterministic aggregation engine with anti-gaming penalties, weights, independence
-│       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies, metadata anchoring
-│       ├── classroom/ # Encrypted group messaging, membership, gossip
-│       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including interviews and profile lifecycle
-│       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite schema (27 migrations + bundled built-in data) — one encrypted DB per profile
-│       ├── diag.rs   # File-based diagnostic logger + panic hook
-│       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
-│       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine; legacy evidence/challenge pipeline retired
-│       ├── network_profile.rs # Strict, versioned network identity and trust-root configuration
-│       ├── content_store/ # iroh node, BLAKE3 content-addressed blobs, URL resolution
-│       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch, graph-fetch, profile-fetch, username-reg
-│       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar (the pre-profile layout is refused, not migrated)
-│       ├── settings/ # Unified per-profile settings: typed registry + sync/device-scoped store
-│       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)
-├── src/              # Vue 3 + TypeScript frontend
-│   ├── pages/        # Route views (ProfileSelect, Onboarding, courses, skills, interviews, tutoring, ...)
-│   ├── components/   # UI components + auth + course + shared live-session + layout + profile
-│   ├── composables/  # Shared state/services, including profiles, settings, Sentinel, interviews, local STT, and tutoring rooms
-│   └── assets/       # Tailwind CSS v4 design system
-├── cli/              # Developer CLI (alexandria) — Rust + clap
-├── crates/           # Workspace members: live (our room/session layer),
-│                     #   iroh-moq + moq-media (vendored MoQ transport + media)
-├── patches/          # Local crate patches (6: netdev, if-watch, ffmpeg-sys-next, ffmpeg-next, audiopus_sys, webrtc-audio-processing-sys)
-└── docs/             # Architecture, schema, protocol, structure docs
-```
-
-| Layer | Technology |
-|-------|------------|
-| Shell | Tauri 2.10, WebKit (macOS/iOS) / WebView2 (Windows) / Android WebView (Chromium) |
-| Backend | Rust (2021 edition), tokio async runtime |
-| Frontend | Vue 3, TypeScript, Vite, Tailwind CSS 4 |
-| Database | SQLite + SQLCipher (rusqlite, bundled-sqlcipher) |
-| Content storage | iroh 1.0.2 / iroh-blobs 0.103 (BLAKE3 content-addressed blobs) |
-| P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
-| Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
-| Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
-| Cardano | pallas 0.35 (Conway tx builder), Blockfrost preprod |
-| Developer CLI | Rust, clap 4, owo-colors |
-
-For the full architecture breakdown, see [Architecture](docs/architecture.md).
-
-## P2P Network
-
-All nodes connect to a private Alexandria Kademlia DHT (`/alexandria/kad/1.0`) using a relay server as the bootstrap node. The relay provides:
-
-- **Circuit Relay v2** — NAT traversal for mobile and firewalled nodes
-- **Kademlia DHT** — Peer discovery via `get_providers` on the namespace key `SHA256("ifftu.alexandria")`
-- **Identify** — Protocol negotiation and agent version exchange
-
-After connecting to the relay, each node:
-
-1. Requests a circuit relay reservation (reachable address for NAT'd peers)
-2. Bootstraps the Kademlia DHT
-3. Registers as a provider on the namespace key
-4. Discovers other providers and dials them directly (or via relay hop)
-
-Known peer addresses are persisted to a `peers` table in SQLite and reloaded on subsequent launches. GossipSub peer exchange messages propagate addresses across the mesh.
-
-The P2P node auto-starts after the active profile is unlocked. Each device gets its own libp2p peer id — derived per-device via `HKDF(payment_key, device_id)` — so the same mnemonic restored onto a second device appears as a separate peer. Home also attempts a content sync (bootstrap + hydrate) after unlock and surfaces completion stats in the bottom status bar.
-
-The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay). Fresh peer discovery still depends on these hardcoded Alexandria relay nodes today; locally-held credentials and content survive the relay infrastructure disappearing, but bootstrapping new peers into the mesh would not — DNS seeds and user-pinned bootstrap lists are on the post-launch roadmap.
-
-For the local assessment-to-credential and Cloud candidate walkthrough, see [the demo runbook](docs/assessment-demo.md).
-
-## Getting Started
-
-### Prerequisites
-
-- **Rust 1.91+** with `cargo` (iroh 1.0 sets the MSRV; see `rust-version` in `src-tauri/Cargo.toml`)
-- **Node.js 24.22.1** with `npm` (see [`.nvmrc`](.nvmrc)); supported alternatives are 22.23.4+ within 22.x, 24.22.1+ within 24.x, and 26.12.1+ within 26.x.
-- **Tauri CLI**: `cargo install tauri-cli`
-
-If you use nvm, run `nvm install` and `nvm use` from the repository root.
-[`package.json`](package.json) declares the supported Node versions, and
-[`.npmrc`](.npmrc) makes `npm install` and `npm ci` reject versions outside that
-range. These minimum versions include the CVE-2026-111497 Brotli decoder fix.
-
-For fresh desktop builds with full audio-video live tutoring:
-
-- **macOS**: `brew install cmake ffmpeg libtool automake autoconf`
-- **Linux**: `sudo apt-get install -y cmake libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf nasm libclang-dev pkg-config libopus-dev libssl-dev libx264-dev libva-dev libgbm-dev libdrm-dev libvdpau-dev`
-- **Windows**: install CMake, install MSYS2 autotools (`pacman -S --noconfirm libtool automake autoconf`), download a shared FFmpeg build, set `FFMPEG_DIR`, and add `FFMPEG_DIR\\bin` to `PATH`
-
-Desktop builds use `tutoring-video` on macOS/Windows and `tutoring-video-static` on Linux. iOS builds use `tutoring-video-ios`. Android builds can opt into the shared video pipeline with `tutoring-video-android`.
-
-For iOS builds:
-
-- **Xcode 15+** with command-line tools
-- **Rust iOS targets**: `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
-- **Apple Development Team** configured in `src-tauri/tauri.conf.json`
-
-For Android builds:
-
-- **Android Studio** with SDK, NDK 26+, and Build Tools 34+
-- **Rust Android targets**: `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
-- **Environment variables**: `ANDROID_HOME`, `NDK_HOME`, `JAVA_HOME` (pointing to Android Studio's bundled JDK)
-
-### Cardano (Optional)
-
-For on-chain features (NFT wrappers, governance transactions, soulbound/reputation flows):
-
-- **Blockfrost API key**: Sign up at [blockfrost.io](https://blockfrost.io), create a preprod project. Two ways to configure it:
-  - **In-app (recommended)**: Settings → Cardano → "Blockfrost project id". Stored per-device, picked up at runtime without restart.
-  - **Env var (CI / dev scripts)**:
-    ```bash
-    export BLOCKFROST_PROJECT_ID="preprodXXX..."
-    ```
-  The in-app setting takes precedence over the env var.
-- **Testnet ADA**: Fund your wallet address from the [Cardano Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/) (minimum 5 tADA for wrapper/NFT minting, ~40 tADA for deploying governance validators)
-- **Aiken** (for smart contract development): Install from [aiken-lang.org](https://aiken-lang.org/installation-instructions) v1.1.21+
-
-Without either source set, the app works fully offline — blockchain features are simply unavailable.
-
-### Development (Desktop)
+You need Rust 1.91+, Node.js 24.22.1 (see [`.nvmrc`](.nvmrc)), the Tauri CLI
+(`cargo install tauri-cli`), and the native packages for your OS listed in
+[building](docs/building.md#native-packages-for-live-audiovideo-tutoring).
 
 ```bash
 git clone git@github.com:ifftu-dev/alexandria.git
 cd alexandria
-npm install
-cargo tauri dev
+npm ci
+npm run dev                                   # terminal 1: Vite dev server
+cargo tauri dev --features tutoring-video     # terminal 2 (Linux: tutoring-video-static)
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database. Every profile open runs migrations, installs or refreshes the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
-
-### Building for iOS
-
-**Simulator (Apple Silicon):**
-
-```bash
-cargo tauri ios build --target aarch64-sim
-```
-
-**Physical device:**
-
-```bash
-cargo tauri ios build --target aarch64
-```
-
-**Deploy to simulator:**
-
-```bash
-xcrun simctl install <SIMULATOR_UDID> src-tauri/gen/apple/build/arm64-sim/Alexandria.app
-xcrun simctl launch <SIMULATOR_UDID> org.alexandria.node
-```
-
-**Deploy to device:**
-
-```bash
-xcrun devicectl device install app --device <DEVICE_UDID> src-tauri/gen/apple/build/arm64/Alexandria.ipa
-xcrun devicectl device process launch --device <DEVICE_UDID> org.alexandria.node
-```
-
-Clean build artifacts before rebuilding to avoid "Directory not empty" errors:
-
-```bash
-rm -rf src-tauri/gen/apple/build
-```
-
-### Building for Android
-
-Use the wrapper script — a bare `cargo tauri android build` will fail on the
-native dependency chain because Tauri does not export the NDK cross-compile
-environment those crates need:
-
-- `openssl-sys` (vendored, via SQLCipher) needs `ANDROID_NDK_ROOT` **and** the
-  NDK `llvm` bin on `PATH` (its Makefile calls `ranlib` by bare name).
-- `ffmpeg-sys-next` needs `CARGO_NDK_SYSROOT_PATH` (normally set by `cargo ndk`,
-  but Tauri drives `cargo build` directly).
-- `audiopus_sys` (Opus) builds with CMake + Ninja and aborts if a stale build
-  dir was generated with a different generator.
-
-`scripts/android-build.sh` sets all of this up (installs `cargo-ndk` if missing,
-clears the stale CMake cache), then forwards its args to `cargo tauri android
-build`:
-
-**Debug APK (for emulator or sideloading):**
-
-```bash
-./scripts/android-build.sh --debug
-```
-
-**Release APK (unsigned — requires signing for distribution):**
-
-```bash
-./scripts/android-build.sh --release
-```
-
-Env overrides: `ANDROID_HOME`, `NDK_HOME`, `ANDROID_API` (default 28),
-`ANDROID_TARGET` (default `aarch64`). Requires `ninja` on `PATH`.
-
-**Deploy to emulator:**
-
-```bash
-adb install src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
-adb shell am start -n org.alexandria.node/.MainActivity
-```
-
-Clean build artifacts:
-
-```bash
-rm -rf src-tauri/gen/android/app/build
-```
-
-> **Note:** Android safe area insets (`env(safe-area-inset-*)`) are not natively supported by Android WebView. `MainActivity.kt` reads actual `WindowInsets` and injects them as CSS custom properties (`--sat`, `--sab`, `--sal`, `--sar`).
-
-### Developer CLI (`alexandria`)
-
-The `alexandria` CLI operates on the same encrypted store the app uses. It is
-deliberately **not** general dev tooling — `scripts/check.sh`, `npm run check`,
-and `cargo tauri` own building and linting. The CLI covers what nothing else
-does: the vault and its credentials, the mobile device pickers, environment
-diagnostics, and the Sentinel synthetic-data generator.
-
-```bash
-cargo install --path cli    # install globally as `alexandria`
-```
-
-Every command takes two global flags:
-
-| Flag | Purpose |
-|------|---------|
-| `--json` | Emit the result as JSON on stdout. Human output goes to stderr, so `alexandria --json … > out.json` captures exactly the result document. Failures emit `{"error": …}` on stderr. |
-| `--password-file <PATH>` | Read the vault password from a file instead of prompting, for CI and scripted runs. |
-| `--profile <ID\|NAME>` | Which profile's data to operate on — a profile id, an id prefix, or a display name. Defaults to the most recently unlocked profile, which is the one the app itself opens. |
-
-Every command that touches the vault or database operates on one profile's
-data under `profiles/<uuid>/`. `alexandria doctor` reports which profile was
-selected; an unrecognised `--profile` lists the ones that exist.
-
-#### Interactive UI
-
-```bash
-alexandria tui        # browse and act on credentials, roles, orgs, and the database
-```
-
-Tabs for credentials, role assessments, organizations, the database,
-verification, and diagnostics. Select a row and act on it rather than copying a
-URN between commands. Press `?` for the full key list on the active tab.
-
-#### Credentials (`alexandria vc` is an alias)
-
-```bash
-alexandria credentials list                      # every credential in the store
-alexandria credentials list --subject did:key:z6Mk…   # filter by subject
-alexandria credentials list --skill rust-basics       # filter by skill
-
-alexandria credentials get urn:uuid:…            # one credential as JSON
-alexandria credentials issue --request req.json  # mint and sign (reads stdin with `-`)
-alexandria credentials import bundle.json        # verify and store
-
-alexandria credentials revoke urn:uuid:… --reason "issued in error"
-alexandria credentials suspend urn:uuid:… --until 2026-12-01T00:00:00Z
-alexandria credentials reinstate urn:uuid:…
-
-alexandria credentials export --out bundle.json  # §20.4 survivability bundle
-alexandria credentials verify bundle.json        # offline, no infrastructure needed
-```
-
-Revocation is permanent and written to the credential's status list. Suspension
-is reversible — prefer it when the outcome is not yet settled.
-
-`issue` reads a JSON `IssueCredentialRequest` rather than taking a wall of
-flags, so the full shape (credential type, claim, evidence refs, supersession,
-integrity binding and policy) stays expressible. It unlocks the vault to obtain
-the issuer signing key, so a credential minted here is indistinguishable from
-one the app mints.
-
-#### Presentations
-
-```bash
-alexandria vp verify envelope.json --audience acme-corp
-```
-
-The audience is required: a presentation built for one verifier is rejected at
-another rather than silently accepted. The verdict is a result, not a command
-failure — branch on `accepted` in the JSON form.
-
-#### Role assessments (`alexandria ra` is an alias)
-
-```bash
-alexandria role-assessment org create "Acme Corp" --owner addr1…
-alexandria role-assessment org list
-
-alexandria role-assessment create --request role.json
-alexandria role-assessment list --org <org-id>
-alexandria role-assessment status <id> published      # draft | published | archived
-alexandria role-assessment issue <id> --subject did:key:z6Mk… --session <integrity-session-id>
-```
-
-The headless half of the role-assessment surface, for callers with no Tauri
-window in the loop.
-
-#### Running on mobile
-
-```bash
-alexandria run ios                                  # pick from available simulators
-alexandria run ios --device "iPhone 17 Pro"         # skip the picker
-alexandria run ios --physical                       # target a connected iPhone
-alexandria run ios --open                           # open in Xcode instead
-
-alexandria run android                              # pick from available AVDs + devices
-alexandria run android --device "Pixel_9_Pro"
-alexandria run android --open                       # open in Android Studio
-
-alexandria run ios --release
-```
-
-Android runs set up the NDK cross-compilation environment automatically. For
-desktop, use `npm run tauri dev`.
-
-#### Database & data
-
-The CLI operates on the same SQLCipher-encrypted database as the app, and
-prompts for the active profile's password.
-
-```bash
-alexandria db status        # Table row counts, migration version, data sizes
-alexandria db migrate       # Run pending schema migrations
-alexandria db reset --force # Delete ALL app data on this device
-```
-
-> **Note**: Each profile's database is encrypted with a key derived from that
-> profile's vault password (Argon2id + HKDF-SHA256). The app must have been
-> launched at least once to create the profile (via onboarding) before CLI
-> database commands will work. `alexandria db reset --force` is destructive
-> across every profile on the device — use the picker's per-profile delete to
-> remove a single user instead.
-
-#### Diagnostics & cleanup
-
-```bash
-alexandria doctor              # project, app data, toolchain, mobile prerequisites
-alexandria doctor --no-mobile  # skip the Android/iOS checks
-
-alexandria path                # print the selected profile's data directory
-
-alexandria clean build         # Remove target/, dist/, .vite cache
-alexandria clean data --force  # Remove app data
-alexandria clean all --force   # Remove everything
-```
-
-`doctor` always exits 0 — a missing Android NDK is a fact to report, not a
-failure of the command. Branch on `ok` in the JSON form.
-
-#### Sentinel synthetic data
-
-```bash
-alexandria synth-sentinel generate-all --out-dir tools/sentinel-train/priors
-alexandria synth-sentinel generate-holdout --out-dir tools/sentinel-train/holdout
-alexandria synth-sentinel stats <blob.json>
-```
-
-Deterministic per seed. See [`docs/sentinel-runbook.md`](docs/sentinel-runbook.md).
-
-#### Shell completions
-
-```bash
-alexandria completions zsh > ~/.zfunc/_alexandria
-alexandria completions bash > /etc/bash_completion.d/alexandria
-```
-
-Supports bash, zsh, fish, elvish, and powershell.
-
-### First-Time Onboarding
-
-1. Launch the app — you see the onboarding screen
-2. Everyone is a **learner**. Add **Instructor** and/or **Parent/Guardian** on
-   top if they apply — you can change this later in Settings
-3. Give a **birthdate** (kept on-device, never published) — if you are under 18
-   you will be asked to invite a guardian at the end
-4. Pick a profile name / username (shown later on the picker — renameable)
-5. Create a password — this encrypts that profile's vault
-6. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation); payment and
-   stake addresses are derived (preprod testnet)
-7. Back up the mnemonic — it is the identity and wallet for *this profile*
-8. Learners then set a **goal** (exam, curriculum, job role, or job description) that
-   resolves to a target skill graph, and can upload a **resume/transcript** to bootstrap
-   the skills they already have
-9. The P2P node starts automatically and connects to the network
-
-**Minors:** the profile stays in a `pending_guardian` holding screen that shows a
-single-use invite code. A parent installs Alexandria on their own device, creates
-a Parent profile, and enters the code; the moment they accept (both devices
-online) the minor's profile unlocks automatically. **Instructors** land in
-instructor mode with the composer and dashboards; toggle to learner mode any time
-(`Cmd/Ctrl + Shift + M`). **Parents** land on the guardian dashboard.
-
-Subsequent launches land on the **profile picker** (`/profiles`) — an avatar grid of every profile on the device. Pick one, enter its password, and you're in.
-
-### Switching users
-
-- **From the avatar dropdown** in the top right: **Switch user** locks the current profile and returns to the picker.
-- **Keyboard shortcut**: `Cmd/Ctrl + Shift + U` from anywhere.
-- **Add another profile** from the picker's **Add user** tile — runs onboarding again with a fresh name + password.
-
-Each profile is fully isolated: its own vault, SQLCipher database, iroh blob cache, plugin directory, and libp2p peer id. Switching tears all per-profile services down and brings the next one online — any in-flight tutoring session is ended.
-
-To use the same identity on another device, restore the mnemonic into a new profile on that device.
-
-To reset and start fresh:
-
-```bash
-alexandria db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org.alexandria.node/
-```
-
-> **Upgrading from a single-vault install?** That layout is no longer supported and is never migrated. The app leaves the legacy `alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/` and `videocache/` entries untouched, reports them, and starts onboarding for a fresh profile. Move them aside once you have exported anything you still need.
->
-> ⚠ **Encrypted databases only:** this build refuses to open an unencrypted legacy `alexandria.db`. If your install ever ran in plaintext mode, move that file aside (or delete it) and re-run onboarding before launching — the app will surface an explicit error rather than touch it. The earlier "no data loss" auto-conversion path was removed because it overwrote the legacy file instead of converting it.
-
-## Testing
-
-```bash
-# Full desktop tutoring test surface
-cargo test -p alexandria-node --features tutoring-video        # macOS / Windows
-cargo test -p alexandria-node --features tutoring-video-static # Linux
-
-# Individual module tests
-cargo test -p alexandria-node --features tutoring-video wallet        # macOS / Windows
-cargo test -p alexandria-node --features tutoring-video-static wallet # Linux
-cargo test -p alexandria-node --features tutoring-video p2p           # macOS / Windows
-cargo test -p alexandria-node --features tutoring-video evidence      # macOS / Windows
-cargo test -p alexandria-node --features tutoring-video-static p2p    # Linux
-cargo test -p alexandria-node --features tutoring-video-static evidence # Linux
-
-# iOS simulator compile check (full mobile A/V tutoring path)
-cargo check -p alexandria-node --target aarch64-apple-ios-sim --features tutoring-video-ios
-
-# Frontend type check
-npx vue-tsc -b
-```
-
-The test suite includes:
-- **900+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules (run `cargo test -p alexandria-node --lib` for the exact current count)
-- **Async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
-- **End-to-end integration suites** — `e2e_vc` (VC issue/verify, anchoring, offline peer fetch, DID status), `guardian_e2e`, and `settings_sync_e2e`
-- **Frontend Vitest suite** — first wave of composable/parser tests (e.g. `useOmniSearch`, deeplink parsing, i18n), expanding
-
-> The original ~1500-line P2P stress suite was retired in the VC-first cutover. `p2p/stress.rs` is now a stub tracking VC gossip and credential-sync replacements and is not live coverage.
-
-## Data Storage
-
-All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). The layout is **per-profile** — each user owns an isolated tree.
-
-| File/Directory | Purpose |
-|----------------|---------|
-| `profiles_index.json` | Version-2 public sidecar — immutable `network_id`, display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** Version-1 and cross-network indexes fail closed. |
-| `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database, key derived from that profile's password |
-| `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
-| `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
-| `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
-
-Legacy top-level files from the pre-profile layout (`alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/`) are not migrated. They are reported and left in place, and the app onboards a fresh profile.
-
-Use `alexandria path` to print the active profile's directory on any platform, and `alexandria --json path` for the app data root alongside it.
+`cargo tauri dev` does not start Vite for you, so keep `npm run dev` running.
+On first launch the app walks you through creating a profile; see the
+[user guide](docs/user-guide.md). For iOS and Android, see
+[building for mobile](docs/building-mobile.md).
+
+## Status
+
+Everything listed above runs in the alpha today. This is what is missing. No
+institution has deployed Alexandria, nobody has been hired on a credential it
+issued, and no external user has stress-tested any of it.
+
+| Area | Where it stands |
+|---|---|
+| **On-chain anchoring** | The anchor queue is wired and submits real transactions, but does nothing unless a Blockfrost project id and a funded wallet are configured. No shipped build anchors by default. Validators are on **preprod testnet only**. |
+| **Network** | New peers are found through the relays in the bundled `preprod` [network profile](docs/network-profiles.md); DNS seeds and user-pinned bootstrap lists are post-launch. Existing credentials and content survive relays disappearing; discovering new peers does not. Only DHT provider-record keys use the `/alexandria/preprod` namespace; gossip and request-response protocols keep the unscoped `/alexandria/...` paths until the app, relay and monitoring switch together. |
+| **Sentinel** | The false-positive rate is measured against a **synthetic** holdout only; there is no real-world validity study. Android Play Integrity verdicts need the Play Console response keys in the network profile (null in `preprod`), so Android sessions stay `local` ([runbook](docs/sentinel-runbook.md) Procedure 5). Federated learning is design-phase ([sentinel-federation](docs/sentinel-federation.md)). |
+| **Plugins** | Practical-trade submissions are reviewed by an instructor on the same node; routing to a remote assessor is a later phase. `music-reviews` has no grader yet, so it cannot produce a score a credential is issued from. |
+| **Credential trust policy** | Credentials from any authentic issuer stay visible. Field-opinion posting requires a credential that satisfies the subject qualification policy pinned in the network profile; self-claims never qualify. Instructor endorsement requests and responses are exchanged as JSON by hand. |
+| **Push notifications** | In progress, using Firebase Cloud Messaging on iOS and Android. |
+| **Independent security audit** | Not commissioned. Internal audits: Pass 1 remediation verified 2026-03-23; Pass 2 completed 2026-08-18 ([report](docs/audits/security-2026.md)). |
+| **Organisations and governance** | SSO, ATS delivery, bulk verification, cohort analytics and the employer console are under test in a separate, proprietary repository; none of it is run by anyone outside the project or purchasable, and SIS/SCIM provisioning has not started ([enterprise boundary](docs/enterprise-boundary.md)). Inbound governance changes are rejected until committee outcome certificates exist. The non-profit veto over free learner access in [vision](docs/vision.md) has not been drafted. |
+
+Subsystem docs carry their own scope and status, for example the
+[interview assistant](docs/interview-assistant.md#scope-and-status).
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
-| [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, refusal of the pre-profile layout |
-| [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
-| [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
-| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 15 gossip topics, validation, peer scoring |
-| [Network Profiles](docs/network-profiles.md) | Versioned network identity, trust roots, immutable local binding, and N01 rollout boundary |
-| [Stake-Pubkey Registry](docs/stake-pubkey-registry.md) | Persistent stake-address ↔ gossip pubkey registry that backs privileged-topic authority (replaces in-memory TOFU) |
-| [Stake-Pubkey Runbook](docs/stake-pubkey-registry-runbook.md) | Operational steps: founder keypair ceremony + multisig signing of `bootstrap_registry.json` + preprod smoke test |
-| [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
-| [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
-| [Username Registry](docs/username-registry.md) | Decentralized @handles: DHT claims, relay receipts, Cardano anchoring |
-| [Sentinel](docs/sentinel.md) | Assessment and interview integrity — behavioral fingerprinting, ML models |
-| [Interview Assistant](docs/interview-assistant.md) | Structured live interviews — consent, attributed transcript, follow-ups, review, and PII boundaries |
-| [Security Audit](docs/security-audit.md) | 32 findings (1 critical, 7 high, 10 medium, 9 low, 5 informational) |
-| [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 informational) |
+The full, annotated list is the [documentation index](docs/README.md).
+
+| For | Start with |
+|---|---|
+| Using the app | [User guide](docs/user-guide.md) · [Demo setup](docs/demo/setup.md) · [Optional AI checks](docs/jev-integration.md) |
+| Building and contributing | [Building](docs/building.md) · [Mobile](docs/building-mobile.md) · [Developer CLI](cli/README.md) · [Contributing](CONTRIBUTING.md) · [Releasing](docs/releasing.md) |
+| How it works | [Architecture](docs/architecture.md) · [Protocol specification](docs/protocol-specification.md) · [Skills and reputation](docs/skills-and-reputation.md) · [Sentinel](docs/sentinel.md) · [Plugins](docs/plugins.md) · [Network profiles](docs/network-profiles.md) |
+| Reference | [Database schema](docs/database-schema.md) · [Project structure](docs/project-structure.md) · [Settings](docs/settings.md) · [Changelog](CHANGELOG.md) |
+| Audits | [Security](docs/audits/security-2026.md) · [Performance](docs/audits/performance-2026.md) |
+
+## Contributing
+
+Contributions are welcome under the DCO sign-off; no contributor agreement is
+needed. Read [CONTRIBUTING.md](CONTRIBUTING.md) for licensing, the pre-push
+checks (`./scripts/check.sh`), and the commit message format.
+
+## Security
+
+No independent audit has been commissioned yet. The internal audit reports
+and their remediation status are in [docs/audits/](docs/audits/security-2026.md).
 
 ## License
 
-Alexandria is free software under the [GNU Affero General Public License v3 or later](LICENSE.md). You may use, study, modify and redistribute it; if you modify it and offer it to others — including over a network — your changes must be published under the same licence. Vendored third-party crates keep their own licences (`crates/iroh-moq` and `crates/moq-media` are Copyright (C) 2025 N0, INC, MIT OR Apache-2.0, as is `crates/live`).
-
-## Optional AI checks
-
-See [configuration, shared Cloud/app contracts, and evaluation](docs/jev-integration.md). The provider (Jev) is not named in the UI, which calls these **Optional AI checks**. Features default to off and require explicit hosted-processing consent.
+Alexandria is free software under the [GNU Affero General Public License v3 or later](LICENSE.md). `crates/alexandria-verify` is MIT OR Apache-2.0 so anyone can embed credential verification. Vendored third-party crates keep their own licences (`crates/iroh-moq`, `crates/moq-media` and `crates/live` are Copyright (C) 2025 N0, INC, MIT OR Apache-2.0).

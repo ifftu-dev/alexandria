@@ -1,7 +1,11 @@
 # Draft issue — ffmpeg-sys-next
 
+Status: draft
+Updated: 2026-08-20
+
+Not yet filed upstream.
+
 **Repo:** https://github.com/zmwangx/rust-ffmpeg-sys
-**Status:** drafted, not filed. Reviewed by: —
 **Affects:** 8.1.0 and 9.0.0 (checked both)
 
 ---

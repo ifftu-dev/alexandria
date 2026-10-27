@@ -2,7 +2,7 @@
 //! classifier.
 //!
 //! Produces JSON blobs matching the schema in
-//! `docs/sentinel-adversarial-priors.md` §Phase 2 plus a new
+//! `docs/sentinel.md` §Synthetic training blobs plus a
 //! `model_kind = "keystroke_aggregate"` variant for windowed-feature
 //! training data. The same code path produces both the training corpus
 //! and the holdout — callers use disjoint seed ranges to keep them

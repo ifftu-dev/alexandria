@@ -1,7 +1,7 @@
 # App Settings
 
-**Status:** Implemented on `feat/synced-settings`
-**Date:** 2026-05-19
+Status: implemented
+Updated: 2026-10-27
 
 Every user-controlled preference Alexandria has — theme, sidebar
 collapsed, keyboard shortcuts, sentinel toggles, video defaults,

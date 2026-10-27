@@ -1,498 +1,59 @@
 <script setup lang="ts">
-/**
- * SidebarSkillGraph — compact force-directed skill graph in the sidebar.
- *
- * Compact force-directed skill graph using `force-graph` library,
- * node coloring (earned=green, available=yellow, locked=gray),
- * glow effects, and legend.
- *
- * Data fetched once via Tauri IPC and cached in useSkillGraphState(). The
- * earned set is recounted on navigation and when this app issues or revokes
- * a credential, so the counts do not stay at their unlock-time values.
- */
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
-import { useLocalApi } from '@/composables/useLocalApi'
-import { useAuth } from '@/composables/useAuth'
-import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
-import {
-  useSkillGraphState,
-  earnedSkillIdsFromCredentials,
-  type SkillStatus,
-} from '@/composables/useSkillGraphState'
-import type {
-  SkillInfo,
-  SkillGraphEdge,
-  VerifiableCredential,
-  DerivedSkillState,
-} from '@/types'
-import SkillGraphModal from '@/components/layout/SkillGraphModal.vue'
-import { bloomRadius, BLOOM_ORDER } from '@/utils/bloom'
-import { useCredentials } from '@/composables/useCredentials'
-import {
-  createForceGraph,
-  type ForceGraphInstance,
-  type SkillGraphLink,
-  type SkillGraphNode,
-} from '@/utils/forceGraph'
+import { onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useSkillAtlas } from '@/composables/useSkillAtlas'
+import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
+import '@/assets/css/skill-atlas.css'
 
-const router = useRouter()
-const { invoke } = useLocalApi()
-const { vaultUnlocked } = useAuth()
-
-const containerRef = ref<HTMLElement | null>(null)
-let graphInstance: ForceGraphInstance | null = null
-let graphGeneration = 0
-const loadError = ref(false)
-
-const {
-  skills,
-  edges,
-  credentials,
-  earnedSkillIds,
-  earnedCount,
-  availableCount,
-  lockedCount,
-  totalCount,
-  loaded,
-  isModalOpen,
-  skillStates,
-} = useSkillGraphState()
-
-const { listDerivedStates } = useCredentials()
-
-const prereqMap = computed(() => {
-  const map = new Map<string, string[]>()
-  for (const e of edges.value) {
-    if (!map.has(e.skill_id)) map.set(e.skill_id, [])
-    map.get(e.skill_id)!.push(e.prerequisite_id)
-  }
-  return map
-})
-
-const miniGraphNodes = computed<SkillGraphNode[]>(() => {
-  const earned = earnedSkillIds.value
-  return skills.value.map((skill) => {
-    const prereqs = prereqMap.value.get(skill.id) ?? []
-    const status: SkillStatus = earned.has(skill.id)
-      ? 'earned'
-      : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
-          ? 'available'
-          : 'locked'
-    // User proficiency (shown on hover) — distinct from the skill's intrinsic
-    // Bloom level (which sizes the node). Only earned skills have a proven
-    // proficiency: it defaults to "Remember" on first completion and climbs as
-    // VC evidence accumulates (confidence = the derived shrinkage score).
-    let proficiency: string | undefined
-    let confidence: number | undefined
-    if (status === 'earned') {
-      const st = skillStates.value[skill.id]
-      const lvl = st ? Math.max(0, Math.min(5, Math.round(st.level))) : 0
-      proficiency = BLOOM_ORDER[lvl] ?? 'remember'
-      confidence = st?.confidence ?? 0
-    }
-    return {
-      id: skill.id,
-      name: skill.name,
-      routeId: skill.id,
-      status,
-      prerequisites: prereqs,
-      bloom_level: skill.bloom_level,
-      proficiency,
-      confidence,
-    }
-  })
-})
-
-/**
- * Derive everything that depends on the learner's credentials: the earned
- * set, the available/locked split, and per-skill proficiency. Needs skills and
- * edges already loaded. Returns whether the earned set changed.
- */
-async function applyCredentials(creds: VerifiableCredential[], localDid: string | null): Promise<boolean> {
-  credentials.value = creds
-  const earned = earnedSkillIdsFromCredentials(creds, localDid)
-  const before = earnedSkillIds.value
-  const changed = earned.size !== before.size || [...earned].some(id => !before.has(id))
-  earnedSkillIds.value = earned
-  earnedCount.value = earned.size
-
-  // VC-derived proficiency states for the local subject (level + confidence).
-  const states = localDid ? (await listDerivedStates(localDid).catch(() => [])) ?? [] : []
-  const stateMap: Record<string, DerivedSkillState> = {}
-  for (const s of states) stateMap[s.skill_id] = s
-  skillStates.value = stateMap
-
-  let avail = 0
-  let lock = 0
-  for (const skill of skills.value) {
-    if (earned.has(skill.id)) continue
-    const prereqs = prereqMap.value.get(skill.id) ?? []
-    const allMet = prereqs.length === 0 || prereqs.every(p => earned.has(p))
-    if (allMet) {
-      avail++
-    } else {
-      lock++
-    }
-  }
-  availableCount.value = avail
-  lockedCount.value = lock
-  return changed
+const { t } = useI18n()
+const atlas = useSkillAtlas()
+const { model, isLoading, error } = atlas
+onMounted(() => { void atlas.ensureLoaded() })
+function fieldName(field: AtlasField): string {
+  return field.id === null ? t('skills.atlas.unassigned') : field.name ?? t('skills.atlas.unknownField', { id: field.id })
 }
-
-const REFRESH_MIN_INTERVAL_MS = 1500
-let refreshing = false
-let lastRefresh = 0
-
-/**
- * Re-read only the credentials (skills and edges do not change in a session)
- * and redraw the graph if the earned set moved. Throttled for navigation;
- * `force` skips the throttle for an explicit credential change.
- */
-async function refreshEarned(force = false) {
-  if (!loaded.value || loadError.value || refreshing) return
-  const now = Date.now()
-  if (!force && now - lastRefresh < REFRESH_MIN_INTERVAL_MS) return
-  refreshing = true
-  lastRefresh = now
-  try {
-    const [localDid, creds] = await Promise.all([
-      invoke<string | null>('get_local_did').catch(() => null),
-      invoke<VerifiableCredential[]>('list_credentials', { activeOnly: true }),
-    ])
-    if (await applyCredentials(creds, localDid)) {
-      await nextTick()
-      initGraph()
-    }
-  } catch (e) {
-    // A failed recount keeps the last good counts; the next trigger retries.
-    console.error('SidebarSkillGraph: failed to refresh earned skills:', e)
-  } finally {
-    refreshing = false
-  }
+function earned(field: AtlasField): readonly AtlasNode[] {
+  return model.value?.nodes.filter(node => node.fieldId === field.id && node.status === 'earned').slice(0, 2) ?? []
 }
-
-function onCredentialsChanged() {
-  void refreshEarned(true)
+function expand(field?: AtlasField, node?: AtlasNode): void {
+  if (field) atlas.updateView('modal', { focusedFieldId: field.id, unassignedFocused: field.id === null,
+    selectedSkillId: node?.skill.id ?? null, camera: null, inspectorCollapsed: false })
+  atlas.setModalOpen(true)
 }
-
-const stopAfterEach = router.afterEach(() => { void refreshEarned() })
-
-async function loadData() {
-  if (loaded.value) return
-
-  try {
-    // Local DID may be null when the vault is locked — in that case
-    // we still render the skill graph, just without earned-state
-    // colouring (every skill becomes available/locked by prereqs).
-    const [sk, edgeList, localDid, creds] = await Promise.all([
-      invoke<SkillInfo[]>('list_skills', {}),
-      invoke<SkillGraphEdge[]>('list_skill_graph_edges', {}),
-      invoke<string | null>('get_local_did').catch(() => null),
-      invoke<VerifiableCredential[]>('list_credentials', { activeOnly: true }).catch(() => []),
-    ])
-
-    skills.value = sk
-    edges.value = edgeList
-    totalCount.value = sk.length
-    await applyCredentials(creds, localDid)
-  } catch (e) {
-    console.error('SidebarSkillGraph: failed to load data:', e)
-    loadError.value = true
-  }
-
-  loaded.value = true
-  await nextTick()
-  initGraph()
-}
-
-onMounted(() => {
-  window.addEventListener(CREDENTIALS_CHANGED, onCredentialsChanged)
-  if (loaded.value && skills.value.length > 0) {
-    // Data already cached from a previous mount — re-init the canvas.
-    // Wait for the sidebar expand transition (300ms) to finish so
-    // clientWidth is the final expanded size, not the mid-transition value.
-    waitForStableSize(() => initGraph())
-    // The cache may predate a credential earned while the sidebar was closed.
-    void refreshEarned()
-  } else {
-    loadData()
-  }
-})
-
-/** Wait until the container has a stable, non-zero width before calling `fn`.
- *  Uses ResizeObserver to detect the end of the sidebar CSS transition. */
-function waitForStableSize(fn: () => void) {
-  const el = containerRef.value
-  if (!el) return
-  if (el.clientWidth > 0 && el.clientHeight > 0) {
-    // Already sized — but may be mid-transition. Use a one-shot
-    // ResizeObserver to catch the final size.
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const observer = new ResizeObserver(() => {
-      if (timer) clearTimeout(timer)
-      // Debounce: run fn 50ms after the last resize event (transition end).
-      timer = setTimeout(() => {
-        observer.disconnect()
-        fn()
-      }, 50)
-    })
-    observer.observe(el)
-    // Safety fallback if ResizeObserver never fires (already final size).
-    setTimeout(() => { observer.disconnect(); fn() }, 400)
-  } else {
-    // Container not yet sized — nextTick + small delay.
-    setTimeout(() => fn(), 350)
-  }
-}
-
-// Retry when vault is unlocked (initial load may fail pre-onboarding).
-// `immediate: true` handles the case where the sidebar mounts after
-// the vault is already unlocked (e.g. navigating from onboarding to
-// the main app layout — vaultUnlocked is already true, so a
-// non-immediate watcher would never fire).
-watch(vaultUnlocked, (unlocked) => {
-  if (unlocked && (!loaded.value || loadError.value || totalCount.value === 0)) {
-    // Small delay lets the DB + seed finish initialising after unlock
-    setTimeout(() => {
-      loaded.value = false
-      loadError.value = false
-      loadData()
-    }, 500)
-  }
-}, { immediate: true })
-
-// If data was already loaded (e.g. navigated away and back), re-init the canvas
-watch(loaded, (val) => {
-  if (val && containerRef.value && !graphInstance) {
-    nextTick(() => initGraph())
-  }
-})
-
-async function initGraph() {
-  const container = containerRef.value
-  if (!container || !skills.value.length) return
-
-  // Clean up existing instance
-  graphGeneration++
-  const generation = graphGeneration
-  if (graphInstance) {
-    graphInstance._destructor()
-    graphInstance = null
-  }
-
-  const nodes = miniGraphNodes.value
-
-  const links: SkillGraphLink[] = []
-  const nodeIds = new Set(skills.value.map(s => s.id))
-  for (const edge of edges.value) {
-    if (nodeIds.has(edge.skill_id) && nodeIds.has(edge.prerequisite_id)) {
-      links.push({ source: edge.prerequisite_id, target: edge.skill_id })
-    }
-  }
-
-  const width = container.clientWidth
-  const height = container.clientHeight
-
-  const graph = await createForceGraph(container)
-  if (generation !== graphGeneration || container !== containerRef.value) {
-    graph._destructor()
-    return
-  }
-  graph
-    .width(width)
-    .height(height)
-    .graphData({ nodes, links })
-    .nodeCanvasObject((node: Record<string, unknown>, ctx: CanvasRenderingContext2D) => {
-      const status = (node as { status?: string }).status ?? 'locked'
-      const isEarned = status === 'earned'
-      const isAvailable = status === 'available'
-      // Radius encodes Bloom level (bigger = higher); color still = status.
-      const r = bloomRadius((node as { bloom_level?: string }).bloom_level, 2, 0.45)
-      const x = node.x as number
-      const y = node.y as number
-
-      // Glow for earned nodes
-      if (isEarned) {
-        ctx.beginPath()
-        ctx.arc(x, y, r + 2, 0, 2 * Math.PI)
-        ctx.fillStyle = 'rgba(34, 197, 94, 0.2)'
-        ctx.fill()
-      }
-
-      // Glow for available nodes
-      if (isAvailable) {
-        ctx.beginPath()
-        ctx.arc(x, y, r + 1.5, 0, 2 * Math.PI)
-        ctx.fillStyle = 'rgba(234, 179, 8, 0.15)'
-        ctx.fill()
-      }
-
-      // Node circle: earned=green, available=yellow, locked=gray
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, 2 * Math.PI)
-      ctx.fillStyle = isEarned ? '#22c55e' : isAvailable ? '#eab308' : 'rgba(100, 116, 139, 0.4)'
-      ctx.fill()
-    })
-    .nodePointerAreaPaint((node: Record<string, unknown>, color: string, ctx: CanvasRenderingContext2D) => {
-      const r = bloomRadius((node as { bloom_level?: string }).bloom_level, 2, 0.45)
-      ctx.fillStyle = color
-      ctx.beginPath()
-      ctx.arc(node.x as number, node.y as number, r, 0, 2 * Math.PI)
-      ctx.fill()
-    })
-    .linkColor(() => 'rgba(148, 163, 184, 0.1)')
-    .linkWidth(0.5)
-    .backgroundColor('transparent')
-    .enableZoomInteraction(false)
-    .enablePanInteraction(false)
-    .enableNodeDrag(false)
-    .cooldownTicks(60)
-    .onEngineStop(() => {
-      graph.zoomToFit(0, 8)
-    })
-    .onNodeClick((node: Record<string, unknown>) => {
-      const routeId = String(node.routeId ?? node.id ?? '')
-      if (routeId) router.push(`/skills/${routeId}`)
-    })
-
-  // Tighter forces for compact sidebar layout
-  graph.d3Force('charge')?.strength(-12)
-  graph.d3Force('link')?.distance(15)
-
-  graphInstance = graph
-}
-
-onBeforeUnmount(() => {
-  window.removeEventListener(CREDENTIALS_CHANGED, onCredentialsChanged)
-  stopAfterEach()
-  graphGeneration++
-  if (graphInstance) {
-    graphInstance._destructor()
-    graphInstance = null
-  }
-})
 </script>
 
 <template>
-  <div v-if="loaded && totalCount > 0">
-    <div class="relative">
-      <div
-        ref="containerRef"
-        class="h-[180px] w-full cursor-pointer overflow-hidden rounded-lg"
-        style="background: color-mix(in srgb, var(--app-foreground) 3%, transparent)"
-        :title="$t('skills.graph.expandHint')"
-        @dblclick.stop="isModalOpen = true"
-      />
-
-      <button
-        :title="$t('skills.graph.expandTitle')"
-        class="absolute end-1.5 top-1.5 z-10 rounded-md p-1 text-muted-foreground backdrop-blur-sm transition-colors"
-        style="background: color-mix(in srgb, var(--app-muted) 88%, transparent)"
-        @click.stop="isModalOpen = true"
-      >
-        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-        </svg>
-      </button>
-    </div>
-
-    <!-- Legend -->
-    <div class="mt-2 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[10px]">
-      <span class="flex items-center gap-1 whitespace-nowrap" :title="$t('skills.graph.earnedTitle')">
-        <span class="inline-block h-2 w-2 rounded-full bg-success" />
-        <span class="text-muted-foreground">{{ $t('skills.graph.legendEarned', { count: earnedCount }) }}</span>
-      </span>
-      <span v-if="availableCount > 0" class="flex items-center gap-1 whitespace-nowrap" :title="$t('skills.graph.availableTip')">
-        <span class="inline-block h-2 w-2 rounded-full bg-warning" />
-        <span class="text-muted-foreground">{{ $t('skills.graph.legendAvailable', { count: availableCount }) }}</span>
-      </span>
-      <span class="flex items-center gap-1 whitespace-nowrap" :title="$t('skills.graph.lockedTip')">
-        <span class="inline-block h-1.5 w-1.5 rounded-full" style="background: rgba(100, 116, 139, 0.4)" />
-        <span class="text-muted-foreground">{{ $t('skills.graph.legendLocked', { count: lockedCount }) }}</span>
-      </span>
-    </div>
-
-    <!-- Summary link -->
-    <div class="mt-1 text-center">
-      <button class="text-[10px] text-muted-foreground transition-colors hover:text-primary" @click="router.push('/skills')">
-        {{ $t('skills.graph.skillsProgress', { earned: earnedCount, total: totalCount }) }}
-      </button>
-    </div>
-
-    <SkillGraphModal
-      :visible="isModalOpen"
-      :nodes="miniGraphNodes"
-      :earned-count="earnedCount"
-      :available-count="availableCount"
-      :locked-count="lockedCount"
-      :total-count="totalCount"
-      @close="isModalOpen = false"
-    />
-  </div>
-
-  <!-- Loading state -->
-  <div v-else-if="!loaded" class="flex items-center justify-center py-6">
-    <div class="spinner" />
-  </div>
-
-  <!-- Empty / error state -->
-  <div v-else class="sb-graph-empty">
-    <svg class="sb-graph-empty__icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
-    </svg>
-    <p v-if="loadError" class="sb-graph-empty__text">
-      {{ $t('skills.graph.vaultLocked') }}
-    </p>
-    <p v-else class="sb-graph-empty__text">
-      {{ $t('skills.graph.noSkillsLoaded') }}
-    </p>
-    <button
-      class="sb-graph-empty__retry"
-      @click="loaded = false; loadError = false; loadData()"
-    >
-      {{ $t('common.actions.retry') }}
-    </button>
-  </div>
+  <section class="sidebar-atlas skill-atlas-colors" :aria-label="t('skills.atlas.title')">
+    <template v-if="model">
+      <button class="expand" type="button" @click="expand()">{{ t('skills.graph.expandTitle') }} <span aria-hidden="true">↗</span></button>
+      <p>{{ t('skills.atlas.fieldCounts', model.counts) }}</p>
+      <div class="sidebar-fields">
+        <article v-for="(field, index) in model.fields" :key="field.id ?? 'unassigned'" :style="{ '--field': field.id === null ? 'var(--app-muted-foreground)' : `var(--atlas-field-${index % 8})` }">
+          <button class="field-name" type="button" @click="expand(field)">{{ fieldName(field) }}</button>
+          <p>{{ t('skills.atlas.fieldCounts', field) }}</p>
+          <button v-for="node in earned(field)" :key="node.skill.id" class="earned-skill" type="button" @click="expand(field, node)">
+            <span dir="auto">{{ node.skill.name }}</span>
+            <span><span :aria-label="t('skills.atlas.earned')">✓</span> {{ node.earnedBloom ? `${node.earnedBloom.rank + 1} ${t(`common.bloom.${node.earnedBloom.name}`)}` : t('skills.atlas.levelUnavailable') }}</span>
+          </button>
+          <p v-if="field.earned > 2">{{ t('skills.atlas.moreEarned', { count: field.earned - 2 }) }}</p>
+        </article>
+      </div>
+    </template>
+    <p v-else-if="isLoading" role="status">{{ t('skills.visibility.loading') }}</p>
+    <p v-else>{{ t('skills.graph.noSkillsLoaded') }}</p>
+    <div v-if="error" role="alert"><p>{{ error }}</p><button type="button" @click="atlas.refresh('retry')">{{ t('common.actions.retry') }}</button></div>
+  </section>
 </template>
 
 <style scoped>
-.sb-graph-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 1.25rem 0.75rem;
-  text-align: center;
-}
-
-.sb-graph-empty__icon {
-  width: 1.5rem;
-  height: 1.5rem;
-  color: var(--app-muted-foreground);
-  opacity: 0.4;
-}
-
-.sb-graph-empty__text {
-  font-size: 0.6875rem;
-  color: var(--app-muted-foreground);
-  line-height: 1.4;
-  max-width: 10rem;
-}
-
-.sb-graph-empty__retry {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  color: var(--app-primary);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
-  transition: background 0.15s;
-}
-
-.sb-graph-empty__retry:hover {
-  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
-}
+.sidebar-atlas { min-width: 0; color: var(--app-foreground); font-size: 12px; line-height: 1.5; }
+.sidebar-atlas button { text-align: start; min-height: 36px; width: 100%; border-radius: 6px; padding: 6px; overflow-wrap: anywhere; }
+.sidebar-atlas button:hover { background: var(--app-muted); }
+.sidebar-atlas p { color: var(--app-muted-foreground); font-size: 11px; margin: 4px 6px; }
+.expand { display: flex; justify-content: space-between; font-weight: 600; border: 1px solid var(--app-border); }
+.sidebar-fields { max-height: 280px; overflow-y: auto; margin-block-start: 8px; }
+.sidebar-fields article { border-inline-start: 3px solid var(--field); margin-block: 10px; padding-inline-start: 6px; }
+.field-name { font-weight: 600; }
+.earned-skill { display: flex; flex-direction: column; gap: 2px; }
+.earned-skill > span:last-child { color: var(--app-muted-foreground); }
 </style>

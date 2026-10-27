@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import { useGoals } from '@/composables/useGoals'
 import { AppBadge, EmptyState } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
@@ -146,7 +147,7 @@ const relationLabels: Record<string, string> = {
     <!-- Back button -->
     <button
       class="mb-6 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      @click="router.push('/skills')"
+      @click="useSkillAtlas().returnToAtlas(router)"
     >
       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -231,7 +232,7 @@ const relationLabels: Record<string, string> = {
         </div>
         <button
           class="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          @click="router.push('/skills')"
+          @click="useSkillAtlas().returnToAtlas(router)"
         >
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />

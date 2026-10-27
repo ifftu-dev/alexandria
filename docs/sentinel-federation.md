@@ -1,15 +1,11 @@
 # Sentinel Federation — Threat Model & Privacy Budget
 
-> **Status:** Option B's community prior library and runtime weights distribution were built, then deleted before launch; the bundled classifier ships only through app releases, and future governance is limited to yes/no proposals with verified outcome certificates. Option A remains design-phase. This document frames the decisions made (and remaining) so the privacy guarantees in [sentinel.md](sentinel.md) stay enforceable.
+Status: draft
+Updated: 2026-10-27
+
+> **Option B (federated adversarial priors) was built, then deleted before launch.** The community prior library, DAO-signed weights distribution, kill switch and version blocklist are gone; the bundled on-device classifier and its offline training kit remain, and a new classifier ships only in an app release ([sentinel-runbook.md](sentinel-runbook.md)). Future governance is limited to yes/no proposals with verified outcome certificates. **Option A is design-only.** This document records the threat model and decisions so the privacy guarantees in [sentinel.md](sentinel.md) stay enforceable.
 >
 > **Goal:** let Sentinel's AI models improve across the user base — keystroke patterns of legitimate humans become sharper, novel cheat techniques get learned once and spread — without any single user's behavioral data being recoverable from what we publish.
->
-> **What Option B built (all deleted except the bundled on-device classifier and its training kit):**
-> - Labeled adversarial-prior pipeline ([sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phases 1–7)
-> - DAO-signed ONNX classifier-weights distribution ([sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phase 8)
-> - Operator safety valves: kill switch, version blocklist, per-signal opt-out ([sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phase 9, [sentinel-runbook.md](sentinel-runbook.md))
-> - Three-layer content-addressed re-verification, resolver timeout, bytes size caps, mobile gate, SHA-pinned bundled model ([sentinel.md](sentinel.md) §Runtime Model Updates)
-> - On-device ONNX inference for the paste classifier ([sentinel.md](sentinel.md) §AI Models)
 >
 > **What hasn't shipped (Option A):** per-user gradient sharing, DP-SGD, secure aggregation, Cardano-stake-gated submissions — see §10. Also pending: real-world FPR measurement (synthetic-only holdout today).
 
@@ -21,7 +17,7 @@
 - **To get the guarantee we want, we need five things:** local differential privacy (DP-SGD with a documented ε budget), secure/trimmed aggregation, Sybil resistance tied to Cardano stake, poisoning defense, and a decision that the **face embedder is never federated** under any scheme.
 - **Two viable shapes exist:**
   - **Option A — Federated learning (per-user deltas, DP-noised, aggregated).** Higher accuracy, real research/engineering cost (months), meaningful residual risk. **Not shipped.**
-  - **Option B — Federated adversarial priors (DAO publishes labeled cheat patterns; users train privately against them).** Weaker in theory, *much* stronger privacy, ships in weeks, no per-user leakage surface. **Shipped.**
+  - **Option B — Federated adversarial priors (DAO publishes labeled cheat patterns; users train privately against them).** Weaker in theory, *much* stronger privacy, ships in weeks, no per-user leakage surface. **Built, then deleted before launch.**
 - **Outcome so far:** Option B's ratification pipeline was deleted before launch; the bundled classifier is the only model. A synthetic-only v1 model hits TPR=1.0 / FPR=0.0 on the synthetic holdout; real-world holdout data will move those numbers and is the trigger for revisiting Option A.
 
 ---
@@ -191,7 +187,9 @@ Central weights are published under a DAO-signed Iroh CID that's discoverable th
 
 ---
 
-## 8. Option B: Federated Adversarial Priors (strongly recommended starting point)
+## 8. Option B: Federated Adversarial Priors (deleted)
+
+Built and then deleted before launch; kept here as the design rationale. Nothing below runs today.
 
 Instead of federating user gradients, we federate *curated cheat examples*.
 
@@ -295,7 +293,7 @@ If Option A is revisited and user scale is small, two knobs are available withou
 1. Raise per-submission ε to 2.0, keep lifetime cap at 8 → 4 richer submissions per user per year. Faster convergence, same lifetime privacy.
 2. Raise lifetime cap to 16 at ε=1 → 16 submissions/year. More signal, roughly Apple FL's per-day budget territory — defensible but less conservative.
 
-These are *future* knobs. Option B, which we're shipping first, is indifferent to user count because it's not federated learning — it's curated labeled data consumed by each client locally.
+These are *future* knobs. Option B was indifferent to user count because it's not federated learning — it's curated labeled data consumed by each client locally.
 
 ---
 
@@ -318,25 +316,25 @@ Option A without any one of those is a mission regression disguised as a feature
 
 ---
 
-## 12. Implementation status (as of 2026-09-16)
+## 12. Implementation status
 
 | Capability | Status | Reference |
 |------------|--------|-----------|
-| Sentinel DAO scaffolding (migration 037) | 🗑 deleted | Command and dashboard card removed; the row migration 037 still inserts awaits the D03 schema reset |
-| `sentinel_priors` table (migration 038) | 🗑 deleted | Commands removed; the table is unused until the baseline schema squash |
-| Holdout refs (migration 039) | ✅ shipped | `commands/sentinel_holdout.rs` |
-| Per-snapshot AI score plumbing | ✅ shipped | `useSentinel.ts`, migration 044 |
+| Sentinel DAO scaffolding | 🗑 deleted | Command, dashboard card and table removed |
+| `sentinel_priors` table | 🗑 deleted | Commands and table removed |
+| Holdout refs (`sentinel_holdout_refs`) | ✅ shipped | `commands/sentinel_holdout.rs` |
+| Per-snapshot AI score plumbing | ✅ shipped | `useSentinel.ts`, `integrity_snapshots` |
 | Synthetic-data generator | ✅ shipped | `alexandria synth-sentinel` subcommand, `cli/src/synth/` |
 | Offline training kit | ✅ shipped | `tools/sentinel-train/{featurize,train,eval}.py` |
 | ONNX paste classifier (bundled v1) | ✅ shipped | `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB / 4741 bytes), embedded via `include_bytes!`, SHA-pinned |
 | Backend ML rewrite (tract + candle) | ✅ shipped | `sentinel::paste_classifier` (tract), `sentinel::keystroke_ae` + `sentinel::mouse_cnn` (candle). Frontend only buffers events. |
-| Per-user model weights in SQLite | ✅ shipped | Migration 047 added `sentinel_user_models`. Encrypted at rest via sqlcipher. Replaces legacy localStorage. |
+| Per-user model weights in SQLite | ✅ shipped | `sentinel_user_models`, encrypted at rest via SQLCipher. |
 | iOS + Android build verified | ✅ iOS / ⏳ Android | `cargo tauri ios build` produces signed `.ipa`. Android blocked by NDK toolchain in CI env (pre-existing). |
 | Runtime weights replacement | 🗑 deleted | No command accepts model bytes; tract parses only embedded artifacts |
-| DAO classifier-weights distribution (migration 045) | 🗑 deleted | Selection, re-verification and the prior gossip mirror removed |
+| DAO classifier-weights distribution | 🗑 deleted | Selection, re-verification and the prior gossip mirror removed |
 | Mobile gate retired | ✅ shipped | `pasteClassifierDisabled()` removed post-backend rewrite — pure-Rust ML runs everywhere Tauri does |
 | Tauri CSP — `'wasm-unsafe-eval'` retired | ✅ shipped | Removed when ML moved off the WebView. No WASM in `script-src`. |
-| Operator kill switch and version blocklist (migration 046) | 🗑 deleted | They guarded runtime replacement weights, which no longer exist |
+| Operator kill switch and version blocklist | 🗑 deleted | They guarded runtime replacement weights, which no longer exist |
 | Per-signal opt-out toggle | ✅ shipped | `sentinel_paste_classifier_enabled` localStorage flag |
 | Model runbook | ✅ shipped | `docs/sentinel-runbook.md` (retrain, roll back and ship the bundled model) |
 | Synthetic-data golden hash regression test | ✅ shipped | `golden_hashes_match_synth_v2` in `cli/src/synth/generators.rs` |
@@ -346,4 +344,4 @@ Option A without any one of those is a mission regression disguised as a feature
 | Option A: ε budget accounting | ❌ not started | Reset cadence locked at annual (decision 9), no implementation |
 | Option A: secure aggregation | ❌ not started | Trimmed mean / median-of-means design only, no code |
 
-The Option B path covers the immediate "improve the classifier without leaking user data" goal. Option A is the path forward if real-world holdout numbers show Option B isn't enough — re-opening that workstream requires re-validating §§5–7 first. Production incidents are handled with the default-off AI toggle, the per-signal toggle and an artifact rollback release — see [sentinel-runbook.md](sentinel-runbook.md).
+With Option B deleted, the classifier improves only through retrained bundled releases. Option A is the path forward if real-world holdout numbers show that isn't enough — re-opening that workstream requires re-validating §§5–7 first. Production incidents are handled with the default-off AI toggle, the per-signal toggle and an artifact rollback release — see [sentinel-runbook.md](sentinel-runbook.md).

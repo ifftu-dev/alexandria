@@ -1,5 +1,8 @@
 # Sentinel — Assessment and Interview Integrity
 
+Status: live
+Updated: 2026-10-27
+
 > On-device integrity system for Alexandria's learning, assessment, and interview surfaces. Biometric and behavioural data is processed on-device and not persisted — only derived scores (0-1) and anomaly flags are stored locally. The single exception is learner-consented **assessment appeal** evidence: on a *flagged assessment* session, and only after the learner is shown the flag and explicitly chooses to keep it, the flagged snapshots' evidence is retained on-device for 14 days so they have something to contest with. Interview-purpose sessions never enter this evidence-staging path. Declining, or not answering, persists nothing. Two paths reach a server, and the learner starts both: releasing evidence to contest an assessment flag (see [Review and adjudication](#review-and-adjudication)), and the summary of a [candidate integrity check](#candidate-integrity-check) they agreed to run for an organisation's interview — counts and a score, never evidence.
 
 ## Design Principles
@@ -134,7 +137,7 @@ Per-snapshot checks:
 33. Alexandria's AI chat or lesson tutor reached the backend while the attempt was open → `in_app_assistant_during_attempt` critical. Recorded by the backend, never by a client: the request is refused, and the flag is written into the session's committed snapshot chain once per session, carrying the session's current score so the average is unchanged.
 34. A connected external (MCP) assistant called while the attempt was open → `mcp_call_during_attempt` critical, recorded the same way.
 
-Flag severity is authoritative on the backend (`sentinel/snapshots.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
+Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
 Developer-tools detection is retired as both a score input and a misconduct rule.
 Window resizing does not generate a developer-tools flag. The backend rejects a
@@ -191,7 +194,7 @@ are stopped rather than leaving a hidden camera running.
 Standalone assessment submission freezes answers while monitoring is live, then
 persists a final snapshot and ends the session before grading. A failed final
 snapshot or session teardown prevents issuance and allows retry with the frozen
-answers. See [the assessment demo runbook](assessment-demo.md).
+answers. See [the assessment demo setup](demo/setup.md).
 
 ### Diagnostics transition
 
@@ -229,7 +232,7 @@ is never promoted to `suspended` mid-interview and Sentinel does not stop the
 room. The final integrity row remains review context; it does not gate the
 interview assistant or make a hiring decision.
 
-**Where it runs:** the Rust backend re-evaluates status on every `integrity_submit_snapshot` and once more at `integrity_end_session`. Severity counters are denormalized on `integrity_sessions.critical_count` / `warning_count` for O(1) evaluation. Per-snapshot `anomaly_flags` are persisted as JSON on `integrity_snapshots.anomaly_flags` (migration 036). Assessment status only promotes in severity mid-session (`active → flagged → suspended`); interview status promotes at most to `flagged` while live. A clean session finalizes as `completed` at end. Each snapshot returns the status it left behind as `session_status`. A suspended session refuses further snapshots, so once the app sees `suspended` it stops sending them, tells the learner (live indicator and assessment header), and at submit ends the session without a final snapshot; grading still runs.
+**Where it runs:** the Rust backend re-evaluates status on every `integrity_submit_snapshot` and once more at `integrity_end_session`. Severity counters are denormalized on `integrity_sessions.critical_count` / `warning_count` for O(1) evaluation. Per-snapshot `anomaly_flags` are persisted as JSON on `integrity_snapshots.anomaly_flags`. Assessment status only promotes in severity mid-session (`active → flagged → suspended`); interview status promotes at most to `flagged` while live. A clean session finalizes as `completed` at end. Each snapshot returns the status it left behind as `session_status`. A suspended session refuses further snapshots, so once the app sees `suspended` it stops sending them, tells the learner (live indicator and assessment header), and at submit ends the session without a final snapshot; grading still runs.
 
 ### Trust Factor Integration
 
@@ -237,8 +240,6 @@ The trust signal is the session itself. When a session ends `flagged` or `suspen
 - Critical violation: −0.20 per flag
 - Warning: −0.10 per flag
 - Info: no penalty
-
-> **Post-VC-first cutover (migration 040):** the legacy per-`evidence_records` `trust_factor` decay — and the SkillProof aggregator that read it — were retired along with the `evidence_records` / `skill_proofs` / `skill_assessments` tables. There is no per-evidence trust column to decay anymore; integrity feeds the credential decision via the session's status/score rather than by mutating an evidence row.
 
 ## AI Models (Advisory)
 
@@ -296,7 +297,7 @@ The trust signal is the session itself. When a session ends `flagged` or `suspen
 
 **Location**: `src-tauri/src/sentinel/paste_classifier.rs` (tract inference), `src-tauri/src/sentinel/features.rs` (12-dim feature extractor)
 
-**Architecture**: MLP 12 → 32 → 16 → 1 (sigmoid). Trained offline on synthetic adversarial data (see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phase 2). Per-sample normalization mean/std is **baked into the first linear layer** so the on-device forward pass takes raw 12-dim features without preprocessing.
+**Architecture**: MLP 12 → 32 → 16 → 1 (sigmoid). Trained offline on synthetic adversarial data (see [Synthetic training blobs](#synthetic-training-blobs)). Per-sample normalization mean/std is **baked into the first linear layer** so the on-device forward pass takes raw 12-dim features without preprocessing.
 
 **Input features** (windowed over the snapshot's keystroke buffer):
 
@@ -335,6 +336,8 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 
 ### 5. Gaze / Second-Device Detector
 
+Phase 1 is implemented: YuNet face detection at a fixed 640×640 input, geometric head-pose proxies, and an optional per-user candle calibration model. All of it is OSS and licence-clean, with no external gaze dataset. Phase 2 is deferred (see the end of this section).
+
 **Location**: `src-tauri/src/sentinel/face_detect.rs` (YuNet detection via tract), `src-tauri/src/sentinel/gaze.rs` (head-pose + calibration), `src-tauri/src/commands/sentinel_gaze.rs` (IPC).
 
 **Purpose**: catch the second-device cheat class — glancing down at a phone or sideways at a second monitor during an assessment. Honest scope: it flags off-screen *gaze*, so it catches look-away behaviour but not an earpiece + reader, nor a device propped directly beside the webcam. A strong add, not a gate on its own.
@@ -351,16 +354,16 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 
 **Storage**: calibration weights persist as a JSON blob in `sentinel_user_models` (`model_kind='gaze_calib'`), same convention as the keystroke AE / mouse CNN. Never broadcast over P2P. Reset by `sentinel_reset_user_models`.
 
-**Flags** (computed per snapshot window in `useSentinel`, severity authoritative in `sentinel/snapshots.rs::flag_severity`):
+**Flags** (computed per snapshot window in `useSentinel`, severity authoritative in `commands/integrity.rs::flag_severity`):
 - `gaze_wander` (warning) — off-screen ratio > 0.30
 - `device_glance` (critical) — ≥ 3 downward off-screen glances in the window (the phone-in-lap tell)
 - `gaze_occluded` (warning) — eyes hidden (no usable face geometry) for > 0.40 of ticks
 
-The per-window `gaze_offscreen_ratio` is persisted on `integrity_snapshots` (migration 060) for dashboard observability.
+The per-window `gaze_offscreen_ratio` is persisted on `integrity_snapshots` for dashboard observability.
 
 **Frontend**: `Player.vue`'s camera loop calls `sentinel.scoreGaze(video)` (fire-and-forget) alongside the existing LBP presence check. It downscales the frame to ≤224px and forwards RGBA over IPC; cadence is intended to be assurance-level dependent (faster in high-assurance mode). The 9-point calibration is a step in `SentinelTrainingWizard.vue`.
 
-**Phase 2 (deferred)**: precise point-of-regard via a MediaPipe iris model (Apache-2.0, needs a tflite→ONNX conversion); a gaze × keystroke-timing correlation signal (the high-confidence "copying" flag); face *recognition* via ArcFace (runtime-trivial on tract, but weights are license-gated — buy an InsightFace commercial license). See [sentinel-gaze.md](sentinel-gaze.md) for the full design.
+**Phase 2 (deferred)**: precise point-of-regard via a MediaPipe iris model (Apache-2.0, needs a tflite→ONNX conversion); a gaze × keystroke-timing correlation signal (the high-confidence "copying" flag); face *recognition* via ArcFace (runtime-trivial on tract, but weights are license-gated — buy an InsightFace commercial license).
 
 ### 6. Liveness / Presentation-Attack Detector
 
@@ -369,6 +372,22 @@ The per-window `gaze_offscreen_ratio` is persisted on `integrity_snapshots` (mig
 **Input**: the YuNet face box scaled 2.7× about its centre and slid back inside the frame (the upstream `CropImage` rule), bilinear-resized to 80×80, BGR channel order, raw 0..255 values (upstream's `ToTensor` does not divide by 255). **Output**: softmax over `[attack, real, attack]`; class 1 is real. It runs inside `sentinel_score_gaze` on the frame the gaze check already holds, so no extra frame crosses IPC and nothing is persisted.
 
 **Advisory by design**: one low read is lighting or a webcam artefact as often as an attack, so the frontend raises `spoof_suspected` only when more than half of at least three ticks in a snapshot window score below 0.5. Two parity tests pin it: the tract output against the PyTorch softmax, and the Rust preprocess against the upstream cv2 pipeline on a synthetic frame. On the upstream labelled samples with YuNet boxes, the real sample scores 0.9998 and both attack samples score fake.
+
+### Synthetic training blobs
+
+`alexandria synth-sentinel` (`cli/src/synth/`) generates the labelled keystroke data the paste classifier trains on, and the holdout it is gated against. Generation is deterministic: ChaCha20 seeded per label, and the same seed produces byte-identical output, pinned by Blake2b golden-hash tests. Training and holdout sets use disjoint seed ranges. One JSON blob is written per label and run (`cli/src/synth/blob.rs`, `schema_version` 1):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `schema_version` | int | Blob format version; bumped on breaking changes |
+| `model_kind` | string | `keystroke` |
+| `label` | string | `paste_macro`, `typing_bot_constant`, `typing_bot_jitter`, `llm_paste_edit`, `remote_control` or `human_baseline` |
+| `synth_seed` | int | Seed that produced the blob |
+| `synth_version` | string | Generator version (currently `v2`); bumped when distributions change |
+| `notes` | string | Free-form description |
+| `samples[]` | array | One typing sequence each: parallel arrays `digraphs` (string), `dwell_ms`, `flight_ms`, `speed_ratio` (float) |
+
+Field names are snake_case. `tools/sentinel-train/featurize.py` reads these blobs.
 
 ### Runtime Toggle
 
@@ -389,7 +408,7 @@ rate spikes.
 
 The paste classifier has one model source: `src-tauri/resources/sentinel/paste-v1.onnx`, embedded into the Rust binary at compile time and loaded once by the `sentinel::paste_classifier` `OnceLock`. `sentinel_paste_classifier_info` always reports `bundled`. A retrained model ships by replacing the artifact and its SHA-256 lockfile in an app release; see [sentinel-runbook.md](sentinel-runbook.md). The face detector (`yunet.onnx`) and the liveness model (`minifasnet-v2-80.onnx`) follow the same rule: three bundled artifacts, one ship path, each with a lockfile CI checks.
 
-The earlier community prior library and runtime weights replacement are deleted: Sentinel DAO proposals, approved-status ratification, placeholder signatures, the prior gossip mirror, and the kill switch and version blocklist that guarded replacement weights. Their tables stay in the schema until the baseline squash, and nothing reads or writes them. Inbound `/alexandria/sentinel-priors/1.0` messages are rejected before any database access until the topic is removed.
+The earlier community prior library and runtime weights replacement are deleted: Sentinel DAO proposals, approved-status ratification, placeholder signatures, the prior gossip mirror, and the kill switch and version blocklist that guarded replacement weights. Their tables are gone from the schema. Inbound `/alexandria/sentinel-priors/1.0` messages are rejected before any database access until the topic is removed.
 
 ## Integrity Assurance
 
@@ -415,20 +434,19 @@ Sentinel's flags say what the client saw; device attestation says the client was
 
 ### Deleted attestation paths
 
-The unverified anchor setter (`integrity_set_anchor`), which let any caller mark a session `anchored`, and the local committee co-sign path (`integrity_record_attestation`, `integrity_get_assurance`, the Sentinel DAO committee check and the unwired co-sign gossip handler) are deleted with the `legacy-integrity-attestation` feature. Issuance ignores the stored `assurance_level` and `anchor_ref` columns until the baseline schema squash removes them. An independent witness must return through verified committee outcome certificates.
+The unverified anchor setter (`integrity_set_anchor`), which let any caller mark a session `anchored`, and the local committee co-sign path (`integrity_record_attestation`, `integrity_get_assurance`, the Sentinel DAO committee check and the unwired co-sign gossip handler) are deleted with the `legacy-integrity-attestation` feature. Issuance ignores the stored `assurance_level` and `anchor_ref` columns. An independent witness must return through verified committee outcome certificates.
 
 ## Database Schema
 
 ```sql
-integrity_sessions       -- One per monitored session; assurance_level +
-                         --   commitment_root + anchor_ref (migration 061),
-                         --   purpose=assessment|interview (migration 083)
-  └── integrity_snapshots  -- Random-interval measurements, includes ai_paste_anomaly REAL (migration 044),
-                         --   gaze_offscreen_ratio REAL (migration 060), commitment_hash (migration 061)
-integrity_attestations   -- Committee co-signatures per session (migration 061)
+integrity_sessions       -- One per monitored session; assurance_level, commitment_root,
+                         --   anchor_ref, attestation_json, purpose=assessment|interview
+  └── integrity_snapshots  -- Random-interval measurements, incl. ai_paste_anomaly,
+                         --   gaze_offscreen_ratio, commitment_hash
+integrity_evidence, integrity_evidence_consent, integrity_evidence_release,
+integrity_flag_notice    -- Learner-consented appeal evidence and its release trail
 sentinel_user_models     -- Per-user candle weights: keystroke_ae, mouse_cnn, gaze_calib (JSON blobs)
-sentinel_priors, sentinel_kill_switch, sentinel_weights_blocklist
-                         -- Retired prior-library tables; nothing reads or writes them
+sentinel_holdout_refs    -- References to the encrypted holdout set
 ```
 
 Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
@@ -729,7 +747,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 2. **Raw mouse coordinates never transmitted**: Only deltas (dx, dy, dt) used for CNN features; absolute positions stay in the short-lived buffer.
 3. **Video frames never leave the device**: Face processing happens on a `<canvas>` element. Frames are forwarded to the Rust backend over in-process Tauri IPC for YuNet detection + gaze estimation and processed in memory. By default they are **never written to disk** — only derived values (944-float embedding, skin ratio, gaze yaw/pitch, off-screen ratio) are stored. The gaze calibration model encodes a statistical pose→screen mapping, not recoverable imagery.
 
-   **The one exception, and it requires the learner to ask for it.** When a snapshot is flagged, the frame that was being scored is held in memory rather than dropped. If — and only if — the learner is then shown the flag and chooses to preserve the evidence, those frames are written to the SQLCipher-encrypted profile database with a 14-day expiry (`integrity_evidence`, migration 078). Decline or ignore the prompt and nothing is written; the in-memory copy is discarded on that answer, on profile lock, and on process exit.
+   **The one exception, and it requires the learner to ask for it.** When a snapshot is flagged, the frame that was being scored is held in memory rather than dropped. If — and only if — the learner is then shown the flag and chooses to preserve the evidence, those frames are written to the SQLCipher-encrypted profile database with a 14-day expiry (`integrity_evidence`). Decline or ignore the prompt and nothing is written; the in-memory copy is discarded on that answer, on profile lock, and on process exit.
 
    This exists because [Review and adjudication](#review-and-adjudication) gives a learner the right to release evidence contesting a flag, and that right is nominal if nothing was kept. It is bounded to flagged sessions, to the flagged snapshots rather than the whole session, and to an absolute deadline enforced on unlock so evidence expires on time even if the app was closed throughout. The learner can delete it earlier at any point, and deleting it can never count against them — an adjudication rests on the scores, and absent evidence may not be held against a learner.
 

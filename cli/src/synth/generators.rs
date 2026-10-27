@@ -1,7 +1,7 @@
 //! Attack-class + human-baseline sample generators.
 //!
 //! Each `AttackLabel` corresponds to one cheat archetype documented in
-//! the plan (see docs/sentinel-adversarial-priors.md). Distributions
+//! docs/sentinel.md §Synthetic training blobs. Distributions
 //! are chosen so the classifier learns the structural difference
 //! between the class and `HumanBaseline`, not surface-level statistics
 //! a rule already covers:

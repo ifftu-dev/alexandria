@@ -1,5 +1,8 @@
 # Alexandria — Performance Audit
 
+Status: implemented
+Updated: 2026-10-27
+
 **Date**: 2026-02-24 (updated 2026-03-25)
 **Scope**: Full Rust backend (`src-tauri/src/`), CLI (`cli/`), frontend config, Cargo workspace
 **Files audited**: Every file in `commands/` (52), `db/` (6), `evidence/` (5), `p2p/` (35), `content_store/` (12), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts` (counts current as of this update; the original snapshot predates the VC-first migration, which restructured these directories)
@@ -144,7 +147,7 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 
 **Files**:
 - `commands/evidence.rs` -- `list_reputation` (no LIMIT) — the only list command remaining in this file after the VC migration removed `list_skill_proofs` and `list_evidence`
-- `enrollment.rs:20` -- `enrollment::list`, behind `list_enrollments` (no LIMIT)
+- `commands/enrollment.rs:28,35` -- `list_enrollments` (no LIMIT)
 - `commands/courses.rs:22` -- `list_courses` (no LIMIT)
 - ~~`commands/governance.rs` -- `list_daos`, `list_elections`, `list_proposals`~~ -- removed with the legacy governance surface
 - `commands/snapshot.rs:143` -- `list_snapshots` (no LIMIT)
@@ -159,7 +162,7 @@ None of these queries have `LIMIT` clauses. They return all matching rows.
 
 ### M-2: Missing index on `enrollments.status`
 
-**File**: `src-tauri/src/db/schema.rs` (table definition around line 152), `src-tauri/src/enrollment.rs:20` (`enrollment::list`)
+**File**: `src-tauri/src/db/schema.rs` (table definition around line 152), `commands/enrollment.rs:28`
 
 The `enrollments` table has `idx_enrollments_course` on `course_id` but no index on `status`. Queries like `WHERE status = 'active'` and `WHERE course_id = ?1 AND status = 'active'` do a full table scan on the `status` column.
 
@@ -198,7 +201,7 @@ performed for every evidence record aggregation.
 
 ### M-5: Sequential lock acquisitions in `update_progress`
 
-**File**: `src-tauri/src/enrollment.rs:208` (`enrollment::update_progress`; the line numbers below are from the original audit)
+**File**: `src-tauri/src/commands/enrollment.rs:295-310`
 
 Acquires `p2p_node` lock (line 295), then `keystore` lock (line 299), then `db` lock again (line 310) -- three sequential mutex acquisitions. The DB lock was already acquired and dropped earlier in the same function.
 

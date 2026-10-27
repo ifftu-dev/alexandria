@@ -1,22 +1,11 @@
 # Alexandria — Architecture
 
+Status: live
+Updated: 2026-10-27
+
 > Offline-first, trustless, multi-platform.
 
-> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** The
-> SkillProof pipeline described in §5–§7 (`skill_proofs`,
-> `evidence_records`, `skill_assessments`, the NFT wrapper, the
-> aggregator) has been retired. Credentials are now W3C Verifiable
-> Credentials, including offline learner self-claims and optional
-> confirmed Cardano completion witnesses. See
-> [`vc-migration.md`](./vc-migration.md) for what replaces what.
-> Reputation and exact course-version completion endorsement were rebuilt on
-> the VC-first model. The later credential-challenge experiment and its Cardano
-> escrow path have now also been retired: no challenge commands are
-> registered and no challenge transaction builder is compiled. Their
-> schema remains only as pre-launch legacy storage pending migration D03.
-
-**Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-10-27 (AI chat turn, run and access policy modules, one call manager over platform media adapters, commands depend down); 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and explicit endorsement workflow, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
+Credentials are W3C Verifiable Credentials ([ADR 0001](adr/0001-vc-first-credentials.md)). A completion credential is self-issued locally at claim time from the learner's persisted graded submissions; a Cardano completion witness is optional. Reputation is computed from verified credentials, and a course author may require exact course-version endorsements. Status changes are issuer-bound; there is no challenge or escrow path ([ADR 0003](adr/0003-credential-authority.md)). Cardano is used only for VC integrity anchoring, the optional completion witness and DAO governance.
 
 ---
 
@@ -24,12 +13,12 @@
 
 1. [Design Philosophy](#1-design-philosophy)
 2. [System Overview](#2-system-overview)
-3. [Identity & Wallet](#3-identity--wallet)
+3. [Per-Profile Identity & Wallet](#3-per-profile-identity--wallet)
 4. [Database](#4-database)
 5. [Content Storage (iroh)](#5-content-storage-iroh)
 6. [P2P Networking](#6-p2p-networking)
 7. [Cardano Integration](#7-cardano-integration)
-8. [Evidence Pipeline](#8-evidence-pipeline)
+8. [Credential Pipeline](#8-credential-pipeline)
 9. [Governance](#9-governance)
 10. [Frontend](#10-frontend)
 11. [IPC Boundary](#11-ipc-boundary)
@@ -207,11 +196,9 @@ calibration in localStorage has not been migrated to encrypted storage.
 
 Every profile is a **learner**; onboarding lets a person add **instructor**
 and/or **parent** on top, in any combination. The set lives in
-`local_identity.account_roles` (JSON array, migration 81; always contains
+`local_identity.account_roles` (JSON array; always contains
 `learner`), and `domain::identity::normalize_roles` is the one place it is
-validated — it re-inserts `learner` whatever a caller sends. The older
-single-valued `account_role` (migration 66) is still written as the first
-extra role for builds that predate the set; nothing new reads it. Roles shape
+validated — it re-inserts `learner` whatever a caller sends. Roles shape
 the navigation and tools and drive a visual accent on the shell (amber for
 instructor mode, teal when the parent role is present).
 
@@ -258,18 +245,16 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
 | Credentials | `credentials`, `credential_status_lists`, `key_registry` |
-| Reputation | `reputation_assertions`, `derived_skill_states`, `derived_skill_state_history`, `reputation_snapshots`; skill states and reputation rows record input fingerprints (migrations 093, 094) |
-| Completion persistence (local-only) | `completion_claims`, `completion_witness_requests`, `course_completion_endorsements`; enrollments and claims freeze exact course-document identity/policy (migrations 086, 091) |
+| Reputation | `reputation_assertions`, `derived_skill_states`, `derived_skill_state_history`, `reputation_snapshots`; skill states and reputation rows record input fingerprints |
+| Completion persistence (local-only) | `completion_claims`, `completion_witness_requests`, `course_completion_endorsements`; enrollments and claims freeze exact course-document identity/policy |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
-| Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
+| Governance | `governance_genesis_trust_anchors` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
-| Retired challenge experiment | `credential_challenges`, `credential_challenge_votes` (legacy tables; no active command or authority path) |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
-| Governance (on-chain) | `onchain_governance_queue` |
 | Settings | `app_settings` |
 
 ### Key Design Decisions
@@ -335,11 +320,11 @@ The executor has no read pool, and representative mobile measurements, lock
 latency, battery cost, backlog recovery, and end-to-end user-facing overload
 handling remain release acceptance work.
 
-### Shared migrations and issuer recognition
+### Shared migrations and scoring inputs
 
-The app and CLI use `db::run_migrations_on_connection`: applied `(version, name)` records must be a supported schema prefix, and each migration's DDL/data changes and tracking record commit together. A failed migration rolls back before retry; the CLI no longer maintains an independent runner. Both app and CLI connection-opening paths install `legacy_course_authority_did`, a deterministic, side-effect-free SQL function, after encryption-key configuration and before migrations. Migration 085 calls it when the historical schema is replayed; no schema object uses it after migration 094, and it confers no issuer trust.
+The app and CLI use `db::run_migrations_on_connection`: applied `(version, name)` records must be a supported schema prefix, and each migration's DDL/data changes and tracking record commit together. A failed migration rolls back before retry. Migration 1 is a baseline that replaced the earlier chain; a database from that chain is refused with an actionable message, not upgraded.
 
-Migration 085 once recognized reproducible legacy course-authority issuers and excluded their credentials through filtered views, triggers and a repair queue. Migration 094 retires all of it. Scoring reads `credentials` directly, re-verifies each input, and records a fingerprint of the credential, status-list, issuer-key, supersession and endorsement state behind every derived skill state and reputation row. Readers compare fingerprints before presenting a cached value, so a revoked, altered or removed input forces recomputation, and a failed recomputation rolls back without reinstating a stale score. Workload latency and memory budgets still require the planned device benchmarks.
+Scoring reads `credentials` directly, re-verifies each input, and records a fingerprint of the credential, status-list, issuer-key, supersession and endorsement state behind every derived skill state and reputation row. Readers compare fingerprints before presenting a cached value, so a revoked, altered or removed input forces recomputation, and a failed recomputation rolls back without reinstating a stale score. Workload latency and memory budgets still require the planned device benchmarks.
 
 ---
 
@@ -401,27 +386,7 @@ participant-controlled captions. Caption speech recognition is exposed only
 when the WebView supports the explicit `processLocally` control. Final text
 segments are sent over the encrypted iroh room gossip channel with the internal
 `ALXTR1` prefix; this is not a libp2p global gossip topic. Tutoring retains the
-caption list in memory and clears it when the room is left. Chat, captions and
-peer names derive their gossip topics from the room's topic id, which every
-participant shares.
-
-One call manager (`tutoring::CallManager<PlatformMedia>`, aliased
-`TutoringManager`) serves every platform and every call kind (tutoring,
-classroom, interview seat and candidate, interview assistant, plugin
-experience). It owns the room lifecycle, task admission, call kind, session
-records (through a `SessionRecords` seam), chat, transcript, presence, names,
-the frame bridge to the webview, diagnostics and audio levels, and emits
-through a `CallEvents` sink. What differs per device sits behind the
-`MediaDevices` seam in `tutoring/media/`: `desktop.rs` (nokhwa camera, xcap
-screen share, software H.264), `android.rs` (NDK Camera2 over the same ffmpeg
-pipeline, `ffmpeg.rs`, with no screen share), `ios.rs` (AVFoundation,
-VideoToolbox, AVAudioSession routes and interruptions, with main-thread
-dispatch in `main_thread.rs`), and `synthetic.rs` (generated frames and silent
-audio, for tests and targets with no adapter). Each adapter's `MediaProfile`
-carries its per-platform tuning: the rendition to watch (phones watch 720p),
-frame sizes, audio level interval, and start-of-call timeouts. `build.rs` sets
-a `tutoring_video` cfg per target when that target's video feature is on.
-Without it, every platform adapter still makes real audio-only calls.
+caption list in memory and clears it when the room is left.
 
 The interview assistant reuses that transport but persists a separate record in
 the active profile's SQLCipher database. A remote caption becomes an interview
@@ -595,7 +560,7 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 
 ### Transaction Types
 
-1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content. (The legacy SkillProof NFT and course-registration mints were retired in migration 040.)
+1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content.
 2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
 3. **Reputation Snapshot** — Local signed `DerivedCredential` over all currently eligible evidence; optional metadata-only VC-hash anchor uses the credential queue
 
@@ -604,12 +569,6 @@ The operator governance transaction queue (DAO creation, election finalization, 
 ---
 
 ## 8. Credential Pipeline
-
-> Post-VC-first cutover (migration 040): the legacy evidence →
-> aggregator → SkillProof-NFT pipeline (`evidence_records`,
-> `skill_proofs`, the `evidence/aggregator`, the on-chain NFT mint, and
-> the `/alexandria/evidence/1.0` broadcast) was retired. Credentials are
-> W3C Verifiable Credentials.
 
 ### Flow
 
@@ -640,7 +599,7 @@ on_credential_accepted → distribution-based reputation
     (median/p25/p75/variance per skill, from verified credentials)
 ```
 
-The completion command performs no Cardano I/O. Migration 086 atomically persists local claims, their reusable receipt, enrollment completion, and an optional witness intent. The same learner/course/root returns the original credential IDs on retry. Only a completion requested with Cardano configured queues an intent; later configuration alone does not enqueue earlier local-only claims. Frozen evidence survives restart, and changed evidence never inherits an earlier transaction's witness.
+The completion command performs no Cardano I/O. One transaction atomically persists local claims, their reusable receipt, enrollment completion, and an optional witness intent. The same learner/course/root returns the original credential IDs on retry. Only a completion requested with Cardano configured queues an intent; later configuration alone does not enqueue earlier local-only claims. Frozen evidence survives restart, and changed evidence never inherits an earlier transaction's witness.
 
 `cardano::completion_queue` uses the existing background worker's profile lease and unlocked wallet, verifies the saved wallet binding, and attempts at most one unsigned request per pass. Retry scheduling is durable (30-second increments, capped at five minutes, subject to the worker's cadence). Journal handoff removes signed requests from the dispatch index atomically. Receipt reconciliation and witnessed-VC issuance remain separate; backend locking cancels the audited worker pass before releasing its lease, rather than switching a profile underneath it. The UI queries indexed local witness status separately from local credential progress and clears private state on locking. See [Lifecycle ownership and cleanup limits](#lifecycle-ownership-and-cleanup-limits) for implemented cancellation and remaining deadline/native-device checks; this is not a measured device-latency guarantee.
 
@@ -652,18 +611,9 @@ The optional witness transaction is durably checkpointed before submission. A ti
 |--------|---------------|
 | `evidence/reputation` | Distribution-based reputation from verified credentials; rows are revalidated by input fingerprint before they are read |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
-| `evidence/completion` | Exact course-completion endorsement store: claim context, verified import, listing and threshold status |
-| `aggregation/store` | Derived skill state cache (`derived_skill_states`) and its dated history |
 
 Exact course-version endorsement policy and artifacts are handled by
-`evidence::completion` (the store, also read by the trust and scoring readers
-in `db`) behind the `commands::attestation` wrappers, outside the retired
-`skill_proof` aggregator. A credential's integrity hash is
-`domain::vc::integrity_hash_of`.
-
-The credential-challenge command module, evidence challenge module, challenge domain
-types, escrow transaction builders, recovery worker, validator source, and
-frontend surfaces have been removed. Credential revocation, suspension, and
+`commands::attestation`. Credential revocation, suspension, and
 reinstatement are issuer actions: the active profile must derive the same issuer
 DID named by both the credential and its status list. A subject, committee, or
 arbitrary peer cannot mutate another issuer's credential status.
@@ -767,16 +717,15 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 The frontend communicates with the Rust backend through the handlers registered
 in `tauri::generate_handler!`. The `commands/` directory also contains internal
-helpers, so source-file or attribute counts do not equal the command surface.
-The table below is a non-exhaustive
+helpers and platform-conditional tutoring variants, so source-file or attribute
+counts do not equal the command surface. The table below is a non-exhaustive
 sample of command modules; inspect `lib.rs` for the authoritative registration
 list.
 
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| ai_chat | 33 | `chat_prepare_message`, `chat_start_run`, `chat_cancel_run`, `chat_list_threads`, `chat_allow_action` |
-| tutoring | 17 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
+| tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
 | interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
 | taxonomy | 9 | `list_skills`, `list_subjects`, `list_skill_graph_edges`, `tag_element_skill` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
@@ -799,52 +748,13 @@ list.
 | chapters | 4 | `list_chapters`, `create_chapter`, `update_chapter`, `delete_chapter` |
 | catalog | 3 | `search_catalog`, `get_catalog_entry` |
 | p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
-| evidence | 1 | `list_reputation` (legacy read surface; `skill_proofs`/`evidence` listings retired in migration 040 — use `list_credentials`) |
+| evidence | 1 | `list_reputation` |
 | aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
 | presentation | 2 | `create_presentation`, `verify_presentation` |
-| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, and the `irl_*` review inbox. Legacy attestation ingest/status IPC is retired. |
+| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, and the `irl_*` review inbox |
 | health | 4 | `check_health`, `read_diag_log`, `frontend_log`, `release_secure_input` |
 
-Note: `commands/tutoring.rs` serves every platform through one call manager; platform differences sit in its media adapters (see [Live rooms, captions, and interview records](#live-rooms-captions-and-interview-records)). Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
-
-### Commands depend down
-
-A command should be a thin wrapper that parses arguments, takes the profile
-lease, and calls one function in a domain module. The chat, enrolment, course
-note, endorsement and derived skill state commands already work this way
-(`ai_chat::ops`, `crate::enrollment`, `crate::course_notes`,
-`evidence::completion`, `aggregation::store`). Dependencies point one way. No
-Rust file outside `src-tauri/src/commands` imports the commands layer, except
-`lib.rs`, the composition root that registers the handlers. The types `AppState`
-holds (`crate::studio::StudioRuntime`, `crate::ratelimit::IpcRateLimiter`) and
-shared helpers such as `crate::clock::now_rfc3339` also live outside the
-commands layer.
-`scripts/check-tauri-commands.mjs` enforces the rule in CI. It lexes Rust
-source, so comments and strings are ignored, and it fails on any
-`commands::`, `crate::commands`, `super::commands` or `self::commands` path,
-and on a grouped `crate::{…}`, `super::{…}` or `self::{…}` import that names
-`commands`. Imports between command files are still allowed. Command files
-share one database helper, `commands::with_conn`.
-
-### AI chat and model access
-
-The chat backend is split by concept, not by command:
-
-| Module | Owns |
-|--------|------|
-| `ai_chat::turn` | One message: `gather` (thread, attachments, memory, history, gates), `prepare` (render, assemble, token budget via `ai_chat::context`, store the snapshot), `begin` (rebuild and refuse anything stale), `complete` (the reply becomes the answer and its cards, in one transaction) |
-| `ai_chat::run` | Streaming a begun turn to one terminal state, behind three seams: `EventSink` (IPC channel), `StreamSource` (provider adapter), `RunStore` (executor under the profile lease); tests use a vector, a scripted answer and a direct connection |
-| `ai_chat::ops` | Everything else the learner does with chats: threads, attachments, practice, memory, saved notes |
-| `ai_chat::vocab` | Error codes and other vocabularies the webview shares, generated into `src/generated/chat-vocab.ts` |
-| `ai_access` | Who may use which model and when: age band and vendor floors, guardian approvals, the attempt gate (which refusals are also integrity flags), and which lesson a model may see |
-| `alexandria_ai::connection` | The one path from a saved connection and its credential to an adapter: `Connection::resolve()` checks and pins the endpoint, then `Resolved::connect(credential, limits)` requires a key for a remote endpoint and admits it |
-
-Chat, the lesson tutor, Studio runs and provider sign-in all reach a model
-through `alexandria_ai::connection` with the same limits. The Optional AI checks
-client is the one exception. `alexandria-decisions` must stay MIT/Apache, so it
-cannot use the AGPL adapters, and the app gives it a pinned HTTP client that
-shares only endpoint resolution. See the
-[AI chat spec](ai-chat-spec.md#26-implementation-record).
+Note: `tutoring` has platform-specific variants. Desktop and Android share the full manager (`tutoring/manager.rs`); iOS has its own AVFoundation/VideoToolbox manager (`tutoring/manager_mobile.rs`); only targets that are neither desktop, iOS, nor Android fall back to `commands/tutoring_stubs.rs`. Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
 
 ---
 
@@ -884,9 +794,7 @@ shares only endpoint resolution. See the
 VC-first credential model implemented in PRs 2–13 from the normative
 spec at [`docs/protocol-specification.md`](protocol-specification.md).
 The layer is local-first, signature-verifiable without
-Alexandria infrastructure (§20.4 survivability). The legacy
-skill-proof + NFT pipeline it replaced has been deleted (no
-`mint_skill_proof_nft` / `register_course_onchain` remain in the code).
+Alexandria infrastructure (§20.4 survivability).
 
 ### Six layers
 
@@ -933,7 +841,7 @@ status lists. `verify_bundle_offline_impl` re-loads the bundle
 through an in-memory `VerificationStore` adapter and runs the shared §13.2
 verification pipeline without opening a database. A bare status-bearing
 credential can prove its signature but remains pending without the referenced
-list; the bundle supplies that missing evidence. PR 12 plus remediation T02.
+list; the bundle supplies that missing evidence. PR 12.
 
 Imported and verified payloads are parsed before typed decoding. The parser
 enforces explicit structural limits and refuses duplicate keys, unsafe
@@ -983,13 +891,13 @@ this on every test run.
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
 | §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
-| §13 (verification algorithm + acceptance predicate) | PR 4–5 + T02 | Implemented with typed accept/pending/reject results and missing/unavailable store evidence |
+| §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented with typed accept/pending/reject results and missing/unavailable store evidence |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
 | §16 (derived skill state output) | PR 6 + PR 13 | Implemented + cached |
 | §17 (recruiter/consumer queries) | PR 13 | Cached lookups via `get_derived_skill_state` |
 | §18 (selective disclosure) | PR 11 | Redact-and-resign MVP; BBS+/zk follow-up |
-| §19 (NFT wrapper rules) | — | Legacy skill-proof NFT pipeline deleted (retired in migration 040); no VC-NFT wrapper yet |
+| §19 (NFT wrapper rules) | — | Not implemented; credentials are not minted as NFTs |
 | §20 (survivability) | PR 12 | Bundle export + offline verifier |
 | §21–§22 (interfaces + pseudocode) | PR 4–11 | Implemented |
 | §23 (security requirements) | PR 4–11 | Canonicalization, replay resistance, audit logging |

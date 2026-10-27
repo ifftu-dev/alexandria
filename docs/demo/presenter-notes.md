@@ -1,10 +1,16 @@
 # Alexandria demo — presenter notes
 
-**Open:** Alexandria, learner `demo_for_ashish`; trusted instructor `demo`; Cloud at <http://127.0.0.1:8787>.
-**Cloud:** `http://127.0.0.1:8787` in Alexandria → Settings → Developer → Alexandria Cloud address. Requests appear under Settings → Organisations. The demo organisation is **IFFTU**, verified by the DNS TXT record `_alexandria.alexandria.ifftu.dev`; Cloud → Settings → Organisation identity must say **Verified**, or Cloud refuses to contact candidates.
-**Development/test builds:** open **Settings → Developer → Test data**. On phones, tap **Developer** in the settings list; use the category selector and search to find resources. Choose resources → **Review selection → Seed these resources**, or use **Seed everything** for one reviewed run. Seeds apply only to the unlocked profile; repeat runs keep existing work. **Reset selected** or **Reset all seeds** shows affected records before removing local seeds, edits, and progress; confirm only after reviewing. Issued credentials and published discussions remain. New development profiles receive the required taxonomy/global plugins automatically, while optional content is opt-in. Standard release builds retain the temporary automatic demo rollout.
+Status: live
+Updated: 2026-10-27
 
-Courses appear under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**. Seeded discussion prompts and **Proposals** (one proposal-style draft per bundled subject field, with the field preselected) are local drafts: **Open draft**, edit, then publish with an accepted topic credential. There is no proposal, ballot or tally table to seed; governance on this branch is the pinned demo genesis only.
+One-page cue card. Preparation is in [setup](setup.md); the full click path and
+troubleshooting are in the [runbook](runbook.md).
+
+**Open:** Alexandria, learner profile `demo_learner`; trusted instructor profile `demo`; Cloud at <http://127.0.0.1:8787>.
+**Cloud:** `http://127.0.0.1:8787` in Alexandria → Settings → Developer → Alexandria Cloud address. Requests appear under Settings → Organisations. The demo organisation is **IFFTU**, verified by the DNS TXT record `_alexandria.alexandria.ifftu.dev`; Cloud → Settings → Organisation identity must say **Verified**, or Cloud refuses to contact candidates.
+**Test data (development builds):** Settings → Developer → Test data → **Seed everything**, or pick resources; see [setup](setup.md#development-test-data-picker).
+
+Courses appear under **Instructor → My courses** or **Courses**. To run a draft: **Review → Preview → Prepare and enroll → Continue learning**. Seeded discussion prompts and **Proposals** (one proposal-style draft per bundled subject field, with the field preselected) are local drafts: **Open draft**, edit, then publish with an accepted topic credential. There is no proposal, ballot or tally table to seed; governance is the pinned demo genesis only.
 
 **Content tour:** Discussions → pick a thread. Instructor → My courses → **Algorithm Essentials — Video Lab** or **Web Foundations — Video Lab** (four videos plus transcripts each). Classroom templates appear in the sidebar. All 15 clips are local. Hover a long sidebar name to pause just that item and reveal its full title.
 
@@ -18,7 +24,7 @@ Courses appear under **Instructor → My courses** or **Courses**. To run a draf
 
 ## Governance
 
-**Community:** show **Default network governance → Pinned for this profile**. On an existing profile, use **Accept this default trust anchor** once; new profiles receive it automatically. Expand **Verified founding trust facts** to show the signed document. Say: “This demo has seven founder key sets controlled by one operator.” Proposal creation, voting and certified outcomes are still unavailable. [Public genesis and verification](default-network-genesis.md).
+**Community:** show **Default network governance → Pinned for this profile**. On an existing profile, use **Accept this default trust anchor** once; new profiles receive it automatically. Expand **Verified founding trust facts** to show the signed document. Say: “This demo has seven founder key sets controlled by one operator.” Proposal creation, voting and certified outcomes are still unavailable. [Public genesis and verification](../default-network-genesis.md).
 
 ## Start with live Requirements
 
@@ -55,7 +61,7 @@ Say: “We review what the job requires before comparing anyone.” Coverage use
 
 **If needed:** idle means no assessment is running. Camera preview still works. Keep diagnostics off during assessments; avoid reloading an attempt because cooldowns apply. If sharing fails, retry the same preview promptly and refresh Cloud.
 
-[Setup and troubleshooting](assessment-demo.md)
+[Setup](setup.md) · [Troubleshooting](runbook.md#9-when-something-does-not-arrive)
 
 ## 3. Access, interview and offer
 
@@ -83,4 +89,4 @@ Say: "Node's standard library, JCS and Ed25519. No Alexandria code, no server." 
 **Cloud → Operations → Validity pilot → Create study → sign-off → reviewers → enrol → screen → score → export.**
 Say: "Random arms, separate reviewers, blind practical scoring, no identifiers in the export."
 
-Full operator sheet: [demo-runbook.md](demo-runbook.md).
+Full operator sheet: [runbook](runbook.md).

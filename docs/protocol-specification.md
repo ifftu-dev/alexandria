@@ -1,42 +1,22 @@
 # Alexandria Protocol Specification
 
-**Status:** Draft v0.2.0 (VC-first cutover, migration 040)
-**Category:** Standards Track
-**Created:** 2025
-**Updated:** 2026-09-15
-**Author:** Pratyush Pundir
+Status: live
+Updated: 2026-10-27
+Category: Standards Track
 
 ---
 
-> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** §4 and §5
-> as written describe the retired SkillProof + evidence_records
-> pipeline. That dual-pipeline framing is gone — §14 (Verifiable
-> Credentials) is now the only credential path. All §4/§5 references
-> to `skill_proofs`, `evidence_records`, `skill_assessments`, NFT
-> wrappers, and the aggregator should be read as historical context
-> only. See [`vc-migration.md`](./vc-migration.md) for what replaced
-> them and the forthcoming §4′/§5′ rewrite plan.
-
 ## Implementation Status
 
-Two credential pipelines coexisted in earlier drafts of this
-specification; the SkillProof pipeline has now been retired. What
-remains:
-
-- **Legacy path (§4 + §5)** — **retired and deleted** in migration
-  040. Historical reference only; the evidence aggregator and the
-  Cardano SkillProof NFT-mint command no longer exist in the codebase.
-- **VC-first path (§14)** — `did:key` identity + signed VCs +
-  status-list revocation + deterministic aggregation +
-  selective-disclosure presentations + offline survivability bundle.
-
-The §14 Verifiable Credentials Protocol is normative and defines the
-full credential lifecycle. The §4 reputation system remains active
-for backward compatibility with previously-issued skill proofs.
-
-For each section in this document, see the implementation-status
-table at `docs/architecture.md` §13 to determine which PR landed
-the corresponding feature.
+Credentials are W3C Verifiable Credentials (Data Model 2.0) secured by a
+`DataIntegrityProof` using the `eddsa-jcs-2022` cryptosuite, with revocation
+and suspension through Bitstring Status Lists (§14). §14 is the only credential
+path. Credential status is issuer-bound (§5.3). Cardano carries optional VC
+integrity anchors (§11.3), the completion witness (§5.1), stake-key
+registrations (§3.1) and batched username anchors (§6.5); the DAO validators
+are deployed, but no application path submits governance transactions (§10.5).
+Decision records: [`adr/0001-vc-first-credentials.md`](./adr/0001-vc-first-credentials.md)
+and [`adr/0003-credential-authority.md`](./adr/0003-credential-authority.md).
 
 ---
 
@@ -50,10 +30,9 @@ The following terms are used throughout this specification:
 - **Subject** (taxonomy) — A discrete area of study contained within a Subject Field (e.g. "Distributed Systems", "Linear Algebra"). Used in §4, §5, §8, §10.
 - **Subject** (credential) — In the §14 Verifiable Credentials Protocol, the entity about whom a claim is made, identified by a DID (see §14.4.1). Matches the W3C `credentialSubject` role; disambiguated from the taxonomy sense by surrounding context.
 - **Skill** — An atomic, assessable unit of competence within a Subject. Skills form a directed acyclic graph (DAG) with explicit prerequisite edges.
-- **SkillProof** — A verifiable, learner-owned credential attesting to demonstrated proficiency in a specific Skill at a specific Bloom's taxonomy level. Legacy artefact of §4; the §14 VC-first path replaces it with a signed `VerifiableCredential` (§14.7).
 - **VerifiableCredential** — A W3C-style signed credential issued under §14. Carries a claim about a subject, bound to an issuer DID, verifiable without Alexandria infrastructure.
 - **Issuer** — In §14, the authority that signs and originates a credential. Exactly one primary issuer per credential (§14.4.2).
-- **ReputationAssertion** — A computed, evidence-derived claim about the instructional, assessment, or authorship impact of an actor within a given scope. Legacy artefact of §4; the §14 aggregation pipeline (§14.14) produces a Derived Skill State instead.
+- **ReputationAssertion** — A computed, credential-derived score for an actor in a role, scoped to a skill and proficiency level (§4). Distinct from the §14.14 Derived Skill State, which aggregates a subject's evidence for one skill.
 - **DerivedSkillState** — The explainable output of the §14 trust aggregation pipeline: (rawScore Q, confidence C, trustScore T, level L, evidenceMass M, uniqueIssuerClusters U) for a (subject, skill) pair.
 - **DAO** — Decentralised Autonomous Organisation; a governance body responsible for decision-making within a defined scope.
 - **ProficiencyLevel** — An ordered enumeration of learner capability within a Skill, based on Bloom's Taxonomy: `remember`, `understand`, `apply`, `analyze`, `evaluate`, `create`.
@@ -66,7 +45,7 @@ For motivation, design rationale, and stakeholder context, see the companion doc
 
 ## 1. Scope
 
-This specification defines the data models, verifiable credentials, reputation mechanics, query interfaces, governance structures, decentralisation requirements, peer-to-peer protocol, evidence pipeline, assessment integrity, and threat mitigations for the Alexandria protocol. It is intended as a normative reference for implementors, contributors, and governance participants.
+This specification defines the data models, verifiable credentials, reputation mechanics, query interfaces, governance structures, decentralisation requirements, peer-to-peer protocol, course completion, assessment integrity, and threat mitigations for the Alexandria protocol. It is intended as a normative reference for implementors, contributors, and governance participants.
 
 ---
 
@@ -110,7 +89,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend through Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across domain-facing modules including profile, settings, classroom, governance, taxonomy, tutoring, interview, identity, credentials, sync, courses, attestation, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, P2P, aggregation, presentation, health, guardian, instructor, completion, pairing, assessment, goal templates, skill bootstrap, content governance, role assessment, Sentinel, updater, users, and username registry. The retired challenge and plugin-attestation ingest/status commands are absent from the handler list and are enforced by a source-level denylist test. The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`). Interview records are local application state rather than a normative Alexandria gossip protocol; see [`interview-assistant.md`](interview-assistant.md).
+The frontend communicates with the Rust backend through Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across domain-facing modules including profile, settings, classroom, governance, taxonomy, tutoring, interview, identity, credentials, sync, courses, attestation, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, P2P, aggregation, presentation, health, guardian, instructor, completion, pairing, assessment, goal templates, skill bootstrap, content governance, role assessment, Sentinel, updater, users, and username registry. CI (`scripts/check-tauri-commands.mjs`) fails if any command in `scripts/retired-tauri-commands.json` (credential challenge, escrow, plugin-attestation ingest/status, local DAO/election/proposal authority) is registered, invoked, or allowlisted. The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`). Interview records are local application state rather than a normative Alexandria gossip protocol; see [`interview-assistant.md`](interview-assistant.md).
 
 ---
 
@@ -158,7 +137,7 @@ Newly-created persistent entity IDs MUST be computed as `hex(blake2b_256(parts.j
 The VC layer follows a versioned variant: a credential's `id` is
 `urn:alexandria:vc:<hex>` where `<hex>` is `entity_id(["vc:v1", issuer_did, subject_did, claim_kind, blake2b(JCS(claim)), valid_from, status_list_id, status_list_index])` (see `domain::vc::id::deterministic_credential_id`). The status-list slot guarantees uniqueness across legitimate re-issuance of the same claim for the same subject.
 
-A handful of legacy entity types (presentation envelopes, PinBoard commitments) still allocate `urn:uuid:` ids; those are tracked as follow-up migrations and SHOULD migrate to deterministic ids before public-launch lock-in.
+Presentation envelopes and PinBoard commitments still allocate `urn:uuid:` ids; they SHOULD move to deterministic ids before public launch.
 
 ### 3.4 DID Identity for the VC Layer
 
@@ -168,19 +147,17 @@ For the DID identity model, key-rotation requirements, and historical-key resolu
 
 ## 4. Reputation System
 
-*§4 describes the legacy evidence-derived reputation system (assessment → skill_proof). The §14 Verifiable Credentials Protocol defines an independent aggregation pipeline (§14.14) that operates over signed VCs rather than `skill_proof` rows. Both pipelines coexist; consumers MAY query either.*
-
 ### 4.1 Purpose
 
-The Reputation System defines a verifiable, skill-scoped, evidence-derived mechanism for evaluating the instructional, assessment, or authorship impact of actors within the system. Reputation is not a credential, not a global score, and not platform-owned. It is a computed view derived exclusively from learner-owned SkillProofs and associated evidence.
+Reputation is a computed, skill-scoped view of an actor's record, derived from verified credentials (§14). It is not a credential, not a global score, and not platform-owned.
 
 ### 4.2 Design Principles
 
 The Reputation System MUST:
 
-- Be derived solely from verifiable SkillProofs.
+- Be derived solely from credentials that verify at computation time (§14.13).
 - Be scoped to a specific Skill and ProficiencyLevel.
-- Be role-specific (e.g. instructor vs assessor).
+- Be role-specific (e.g. instructor vs learner).
 - Be reproducible from disclosed evidence.
 - Avoid global or identity-wide scalar scores.
 
@@ -207,7 +184,7 @@ A conforming ReputationAssertion MUST contain the following fields:
 
 ```
 ReputationAssertion {
-    actor_address: string         // The actor being evaluated (Cardano stake address)
+    actor_address: string         // The actor being evaluated (subject or issuer DID)
     role: instructor | assessor | author | learner | mentor
     skill_id: string | null       // Skill scope (nullable for broad role assertions)
     proficiency_level: ProficiencyLevel | null
@@ -221,124 +198,65 @@ ReputationAssertion {
 }
 ```
 
-Stored in `reputation_assertions` with supporting evidence in `reputation_evidence`. Impact deltas stored in `reputation_impact_deltas` with FK to individual evidence records.
+Assertions are stored in `reputation_assertions`. Each row records its `computation_spec` and a fingerprint of the credentials it was computed from. Readers revalidate first: a row whose inputs were revoked, altered or removed is recomputed before it is presented, and a row whose verified sample becomes empty is marked excluded rather than rewritten with a zero score.
 
-Implementations MUST reject any ReputationAssertion where supporting evidence is empty or contains unverifiable references.
+### 4.5 Computation
 
-### 4.5 Instructor Impact Computation
+The reference engine (`evidence::reputation`, computation spec `v4-verified-vc`) runs after each credential is accepted into the local store and derives two row kinds from `credentials`:
 
-Implementations MUST compute instructor impact using the following model:
+| Role | Scope | Inputs | Score |
+|------|-------|--------|-------|
+| `learner` | (subject, skill, level) | Every skill-kind VC that verifies now and whose signed subject, skill and id match its row | Highest `SkillClaim.score` observed |
+| `instructor` | (issuer, skill, level) | Only credentials classified as verified issuer-signed: a distinct issuer's valid signature over someone else's claim | Mean of the scores that issuer awarded |
 
-```
-Impact(I, S, P) = Σ over learners L [
-    ΔConfidence(L, S, P) × Attribution(I, L, S)
-]
-```
+Self-asserted, self-witnessed, and course-endorsed self-claims contribute only to the learner row. Issuer inequality alone does not credit an instructor; the signature classification does.
 
-Where:
+### 4.6 Reputation Distribution Model
 
-- `ΔConfidence` = change in skill proof confidence attributable to instruction
-- `Attribution` = InstructionWeight / TotalInstructionWeight
+Reputation MUST be exposed as a distribution, not as a single scalar. A conforming view MUST include median impact, 25th/75th percentile impact, variance, and learner count, computed over the sampled scores backing the row: instructor rows over the scores they issued across distinct learners, learner rows over the scores they were awarded across distinct issuers. A sample-size confidence is derived from `learner_count` on read.
 
-Implementations MAY substitute alternative impact functions provided they satisfy the design principles defined in Section 4.2.
+### 4.7 Reputation Snapshots
 
-### 4.6 Evidence Weighting
+A reputation snapshot is a self-issued `DerivedCredential` (§14.6.5). Its signed payload freezes every score and the contributing eligible credentials (credential ID and integrity hash). Its integrity hash MAY be anchored through the ordinary credential-anchor queue (§11.3).
 
-Evidence weight MUST be computed as:
+### 4.8 Learner Ownership
 
-```
-EvidenceWeight = assessment.weight × difficulty × trust_factor
-```
-
-The `trust_factor` is derived from the Sentinel assessment integrity system. Confirmed violations lower `trust_factor` by 0.20 per violation (floor: 0.10). Implementations MUST NOT assign non-zero weight to evidence that lacks a verified assessment source.
-
-### 4.7 Reputation Distribution Model
-
-Reputation MUST be exposed as a distribution, not as a single scalar. A conforming view MUST include: median impact, 25th/75th percentile impact, learner count, and confidence interval.
-
-### 4.8 On-Chain Snapshots
-
-Reputation snapshots MAY be anchored on Cardano as CIP-68 soulbound tokens with CBOR-encoded inline datums (reference + user token pair).
-
-### 4.9 Learner Ownership
-
-Only learner-disclosed SkillProofs MAY be used in reputation computation. Platforms MUST compute reputation on behalf of actors but MUST NOT claim ownership of the resulting assertions.
+Reputation is computed from the credentials in the subject's own store. Platforms that compute reputation on behalf of actors MUST NOT claim ownership of the resulting assertions.
 
 ---
 
-## 5. Evidence Pipeline
-
-*The `evidence_records` / `skill_proof` aggregator described in this section was retired in migration 040. The verifiable-credentials path (§14) is now the only credential pipeline: each issuance event produces a signed VC (§14.7) whose lifecycle is governed by §14.11 and whose contribution to subject trust is computed by §14.14. §5 is retained for historical context.*
+## 5. Course Completion and Credential Status
 
 ### 5.1 Flow
 
 ```
-Assessment completion
+Graded element submissions (persisted, passing)
     |
     v
-Evidence record created (score, difficulty, trust_factor, bloom level)
+claim_course_completion
+    - rebuilds gradeable evidence from persisted passing submissions
+    - binds the enrollment's frozen course snapshot (§5.2)
+    - derives the completion Merkle root
+    |
+    +--> completion_claims row + learner self-claim VCs (§14.7)
+    |
+    +--> optional completion endorsements (§5.2)
+    |
+    +--> optional completion witness: when Blockfrost is configured, a mint
+         under the `completion` validator is queued; the observer records
+         each observed mint in `completion_observations`, and auto-issuance
+         signs a VC whose `witness` block carries the mint tx hash and
+         validator script hash
     |
     v
-Aggregation: weighted confidence per (skill, proficiency_level)
-    |
-    v
-Skill proof updated (if threshold met)
-    |
-    v
-Reputation impact computed (instructor attribution)
-    |
-    +---> Graded element submissions feed `claim_course_completion`,
-          which produces a W3C Verifiable Credential (§14). There is
-          no evidence-topic broadcast and no SkillProof NFT mint —
-          both were retired in migration 040.
+Reputation recomputed for the subject (§4.5)
 ```
 
-### 5.2 Evidence Records
+Assessment evidence stays on the device. What crosses the network is the signed VC, carried by the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols (§6.5).
 
-Evidence records bind assessments to verifiable outcomes:
+A grade from a plugin can become a credential only when the installed manifest bytes and the executed grader bytes exactly match a plugin bundled with the signed app. Any plugin may grade practice work; this restriction applies until a policy-backed community grader path exists.
 
-```
-EvidenceRecord {
-    skill_assessment_id: string
-    skill_id: string
-    proficiency_level: ProficiencyLevel
-    score: number
-    difficulty: number
-    trust_factor: number        // Derived from Sentinel integrity scoring
-    instructor_address: string | null
-    course_id: string | null
-    integrity_session_id: string | null
-    integrity_score: number | null
-    cid: string | null
-    signature: string | null
-}
-```
-
-IDs are deterministic: `hex(blake2b_256(parts.join("|")))`. Evidence is local-only — there is no `/alexandria/evidence/1.0` GossipSub topic (it was removed). The verifiable outcome that crosses the network is the W3C Verifiable Credential (§14), broadcast/fetched via the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols.
-
-### 5.3 Aggregation
-
-The aggregator computes a weighted confidence score:
-
-```
-confidence = Σ(score_pct × assessment_weight × assessment_difficulty)
-           / Σ(assessment_weight × assessment_difficulty)
-```
-
-### 5.4 Proficiency Thresholds
-
-The aggregator evaluates Bloom's taxonomy proficiency thresholds from lowest to highest, awarding the highest level for which the learner meets both the minimum evidence count and minimum confidence:
-
-| Level | Min Evidence | Min Confidence | Special Requirement |
-|-------|-------------|---------------|---------------------|
-| Remember | 1 | 0.60 | — |
-| Understand | 2 | 0.65 | — |
-| Apply | 2 | 0.70 | — |
-| Analyze | 3 | 0.75 | — |
-| Evaluate | 3 | 0.80 | — |
-| Create | 1 | 0.80 | Requires project-type evidence |
-
-### 5.5 Attestation
+### 5.2 Completion Endorsement
 
 Course-document format v2 can carry an author-signed `completion_policy`. The
 policy fixes its format version, the exact authorized attestor DIDs and
@@ -346,8 +264,9 @@ Ed25519 keys, a distinct-attestor threshold, and bounded evidence
 requirements. A completion endorsement signs canonical, domain-separated
 bytes that bind the network, learner DID, stable course ID, exact course
 document CID and format version, completion root, evidence identities and an
-optional chain-witness transaction hash. The shared I/O-free verifier rejects
-unlisted or duplicate attestors and any changed binding field.
+optional chain-witness transaction hash. The shared I/O-free verifier
+(`alexandria_verify::course`) rejects unlisted or duplicate attestors and any
+changed binding field.
 
 New course publications emit v2 documents whose signed payload uses canonical
 JSON and whose author DID must match the embedded signing key. Version 1
@@ -355,40 +274,41 @@ documents remain readable and retain their original signing bytes; they cannot
 carry a completion policy. No policy means the completion is a learner
 self-claim.
 
-Migration 091 freezes the verified course-document CID, published course version, and
-canonical completion policy on each new enrollment. Completion claims bind that
-snapshot, the learner, the root, evidence, network, and exact enrollment. The
-registered claim path reconstructs gradeable evidence from persisted passing
-submissions; the former caller-supplied witness command is retired.
+Each new enrollment freezes the verified course-document CID, published course
+version, and canonical completion policy on its `enrollments` row. Completion
+claims bind that snapshot, the learner, the root, evidence, network, and exact
+enrollment. Policies come only from that exact author-signed document; stored
+rows never create or widen authority.
 
 The application can export the canonical endorsement request, sign it with an
 authorized local instructor key, import an endorsement only after shared
-verification, and report a distinct-attestor threshold. An imported
-endorsement arrives as its exact JSON text. That text is parsed as strict
-bounded JSON before verification: 128 KiB, depth 8, 64 elements, 16 entries
-and 1024-byte strings, with no duplicate keys, unsafe numbers or trailing
-bytes. The verifier crate publishes exact-byte endorsement vectors, which the
-app import and an independent verifier check. Migration 091 drops
-migration 042's mutable per-course requirement and raw transaction-hash
-signature tables without rebinding historical rows. The course composer edits
-the policy for the next signed publication and blocks publication while policy
-changes are unsaved. The learner completion surface exports the exact request,
-imports one signed artifact at a time through the verifier, and reports the
-accepted threshold. The instructor surface parses the request and displays its
-network, learner, course CID/version, root, evidence, and optional witness
-before enabling local signing. This is an explicit manual exchange; it does not
-authenticate delivery or the person presenting the request. Authenticated
-addressed delivery and use of a satisfied threshold in privilege-bearing trust
-decisions remain implementation work.
+verification, and report a distinct-attestor threshold. Accepted endorsements
+are stored in `course_completion_endorsements`, one per (claim, attestor). An
+imported endorsement arrives as its exact JSON text. That text is parsed as
+strict bounded JSON before verification: 128 KiB, depth 8, 64 elements, 16
+entries and 1024-byte strings, with no duplicate keys, unsafe numbers or
+trailing bytes. The verifier crate publishes exact-byte endorsement vectors,
+which the app import and an independent verifier check. The course composer
+edits the policy for the next signed publication and blocks publication while
+policy changes are unsaved. The learner completion surface exports the exact
+request, imports one signed artifact at a time through the verifier, and
+reports the accepted threshold. The instructor surface parses the request and
+displays its network, learner, course CID/version, root, evidence, and optional
+witness before enabling local signing. This is an explicit manual exchange; it
+does not authenticate delivery or the person presenting the request;
+authenticated addressed delivery remains implementation work. Endorsements
+count toward a privilege only through a qualification policy's
+accepted-course-endorsement route, which requires at least
+`minimum_accepted_attestors` endorsers from that policy's accepted issuers
+(§14.14.4).
 
-### 5.6 Credential Status Authority
+### 5.3 Credential Status Authority
 
-The stake-based challenge experiment is retired. No peer or DAO committee can
-change a credential's status through a challenge. Revocation, suspension, and
-reinstatement require the active profile to derive the same issuer DID named by
-the credential and its status-list row. Revocation is permanent; suspension is
-reversible by that issuer. The old challenge tables remain as pre-launch legacy
-storage until cleanup migration D03 and MUST NOT be interpreted as authority.
+Credential status is issuer-bound. Revocation, suspension, and reinstatement
+require the active profile to derive the same issuer DID named by both the
+credential and its status-list row; no peer, committee, or DAO can change
+another issuer's credential status. Revocation is permanent; suspension is
+reversible by that issuer.
 
 ---
 
@@ -480,7 +400,7 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates (exam/curriculum/job-role) |
 | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
-Until domain handlers consume verified committee outcome certificates (§10.2.1), the current implementation still subscribes to and validates the taxonomy, governance, Sentinel prior, goal-template, and question-bank topics, but its handlers reject every inbound message on them before any database read or write, so no rows, sync-log entry, or UI event result. The earlier single-signer apply paths are deleted.
+Until domain handlers consume verified committee outcome certificates (§10.2.1), the current implementation still subscribes to and validates the taxonomy, governance, Sentinel prior, goal-template, and question-bank topics, but its handlers reject every inbound message on them before any database read or write, so no rows, sync-log entry, or UI event result.
 
 All 15 topics MUST be subscribed on node startup. In addition, six
 request-response protocols (libp2p `request-response` + CBOR codec)
@@ -565,6 +485,30 @@ never announced on any VC gossip topic, are excluded from the public
 travel exclusively over this sealed protocol. `guardian_links` and
 `guardian_activity_rows` are **not** in the device-sync `SYNCABLE_TABLES`.
 Handler + payloads: `p2p::guardian`; commands: `commands::guardian`.
+
+#### Discussion Events on the Opinions Topic
+
+The `discussion_version: 1` payload is carried inside the signed gossip
+envelope (§6.6). Its network-bound JCS payload has its own Ed25519 author signature,
+allowing another peer to relay the original event in a fresh outer envelope.
+Post/comment creation IDs bind author, network, topic, parent, nonce, timestamp,
+and content. Actions include post, comment, edit_post, edit_comment, delete,
+vote (-1/0/1), and report. The inner signature must resolve to `actor_did`.
+
+Creation and editing require topic-qualified, actor-subject credentials. Portable
+signed credential bytes and optional course policy/binding/endorsement evidence
+travel with the event and are independently verified by each receiving node.
+Missing dependencies remain invisible in a bounded pending queue. Votes use one
+row per item and DID, ordered by revision then event hash; identities are not
+proof of unique people. Edits are author-only; deletion is an absorbing tombstone
+and does not erase retained event history or other peers' copies. Reports are
+signed public signals, not automatic moderation decisions.
+
+The active profile relays batches of retained accepted events every 30 seconds.
+This provides eventual replay from connected retaining peers, not guaranteed
+centralized storage. Field-commentary `OpinionPayload` messages on the same
+topic (payloads without `discussion_version`) take a separate handler that
+requires a credential satisfying a pinned subject qualification policy (§14.14.4).
 
 ### 6.6 Message Envelope
 
@@ -674,13 +618,13 @@ Sync messages are encrypted with a key derived from the wallet signing key (AES-
 | `element_progress` | LWW | Learning progress per element |
 | `course_notes` | LWW | User's course notes |
 
-`SYNCABLE_TABLES` (`domain/sync.rs`) currently holds exactly these three tables, all Last-Writer-Wins. **No append-only tables ship.** The `evidence_records` and `skill_proof_evidence` tables that earlier drafts synced append-only, and the `skill_proofs` / `reputation_assertions` tables, were all dropped in migration 040 and no longer exist.
+`SYNCABLE_TABLES` (`domain/sync.rs`) currently holds exactly these three tables, all Last-Writer-Wins. No append-only table ships.
 
 ### 7.3 Merge Strategies
 
 **LWW (Last-Writer-Wins)**: Compare `updated_at` timestamps (ISO 8601 string comparison). Remote wins only if `remote.updated_at > local.updated_at` (strictly newer). Ties: local wins.
 
-**Append-Only Union**: Insert if primary key does not exist. Never update or delete existing records. The merge helper is implemented but currently unused — no table in `SYNCABLE_TABLES` uses this strategy since migration 040.
+**Append-Only Union**: Insert if primary key does not exist. Never update or delete existing records. The merge helper is implemented but unused: no table in `SYNCABLE_TABLES` uses this strategy.
 
 ### 7.4 Sync Message Protocol
 
@@ -706,18 +650,18 @@ Skills carry references to external taxonomies (ESCO, O*NET) to support interope
 
 ### 8.3 Taxonomy Governance
 
-Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and old proofs remain valid across taxonomy versions. Backward-compatible parsing is required. The implementation has no local ratification path: the caller-declared ratification commands are deleted, the bundled public taxonomy is authoritative, and inbound taxonomy gossip is rejected before any database access (§6.5).
+Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and existing credentials remain valid across taxonomy versions. Backward-compatible parsing is required. The implementation has no local ratification path: the bundled public taxonomy is authoritative, and inbound taxonomy gossip is rejected before any database access (§6.5).
 
 ### 8.4 Content Ratification (Goal Templates & Question Banks)
 
 Two further content types are DAO-ratified through the same committee-gated, versioned, gossip-propagated flow as taxonomy:
 
 - **Goal templates** — exam / curriculum / job-role → ideal-skill-graph maps (`goal_templates`, versioned in `goal_template_versions`), propagated on `/alexandria/goal-templates/1.0` under the `goal_template_change` governance category.
-- **Question banks** — assessment question banks (`question_banks`, versioned in `question_bank_versions`), propagated on `/alexandria/question-banks/1.0` under the `question_bank_change` category. Answer keys (`bank_questions.correct_indices`) are held locally and **never** published in the ratified document or over any command.
+- **Question banks** — assessment question banks (`question_banks`, whose items live in `assessment_items`), propagated on `/alexandria/question-banks/1.0` under the `question_bank_change` category. Answer keys and hidden test cases (`assessment_items.grader_private`) are held locally and **never** published in the ratified document or sent to a client.
 
 Both follow propose → signed-vote → resolve → publish (content CID) → peers fetch + apply, mirroring taxonomy ratification. Bundled templates and banks ship with the app, labelled `taxonomy_version = 'bundled'`, so day-one offline use works.
 
-**Implementation status**: the earlier flow accepted caller-supplied ratifiers and applied received version documents without a committee authority check, so it was not the approved five-of-seven committee model. It is deleted: there are no content proposal, ratification or apply commands, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). Bundled templates and banks are unaffected.
+**Implementation status**: there are no content proposal, ratification or apply commands, and inbound goal-template and question-bank version documents are rejected before any database access (§6.5). Bundled templates and banks are authoritative.
 
 ---
 
@@ -769,7 +713,7 @@ A conforming QueryResult MUST include: `subject_id`, `matched_skills`, and `expl
 
 ### 9.6 Anti-Patterns
 
-The following patterns are explicitly non-conforming: global rankings of individuals, hidden or opaque scoring mechanisms, and resume-style keyword inference in lieu of verified SkillProofs.
+The following patterns are explicitly non-conforming: global rankings of individuals, hidden or opaque scoring mechanisms, and resume-style keyword inference in lieu of verified credentials.
 
 ---
 
@@ -823,32 +767,15 @@ DAO membership is any actor who holds the relevant skill levels within the scope
 
 To participate in governance (open an election, nominate, accept a nomination, start/finalize voting, submit/approve/vote on proposals), an actor's stake address MUST be bound to its signing public key in the persistent `stake_pubkey_registry`. Peers verify this binding before accepting a gossiped governance action, and the local node refuses to produce one without it. The binding is established by a signed on-chain `stake_pubkey_registration` or a multisig-signed bootstrap snapshot.
 
-The lifecycle above describes the target governance rules. The application's local election and proposal actions are deleted, and inbound governance messages are rejected until verified committee certificates exist; see §10.6.
+The lifecycle above describes the target governance rules. The application has no local DAO, election, nomination, committee, or proposal actions and submits no governance transactions; inbound `/alexandria/governance/1.0` events are rejected before any database access until verified committee certificates exist (§6.5). The DAO validators in `cardano/governance/validators/` (`dao_registry`, `dao_minting`, `election`, `proposal`, `vote_minting`) are deployed as preprod reference scripts but are not an authority path.
 
-### 10.6 On-Chain Footprint (retired lean model)
-
-The retired **lean** model kept the live state machine in local SQLite; the full lifecycle — elections, nominations, and votes — propagated as **signed P2P gossip** on `/alexandria/governance/1.0`, and each node tallied the verified votes itself. **Votes were not on-chain transactions.**
-
-It wrote only these facts to Cardano, all **operator-signed** (the platform's `authorized_admin` key):
-
-- **DAO create** — mints the DAO state token to the `dao_registry` script (`dao_minting`).
-- **Election finalize** — publishes a finalized-election UTxO at the `election` script (plain output creation).
-- **Committee install** — spends the DAO state UTxO and recreates it with the new committee, referencing the finalized election (`dao_registry`).
-- **Proposal resolve** — a metadata anchor (label 1697) carrying the outcome, tally, and a Merkle root over the signed votes, so the off-chain tally is independently auditable.
-
-Eight retained Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion) are deployed as CIP-33 reference scripts on **preprod testnet** and verified, but the per-transition spend validators (election/proposal state machine, per-user reputation soulbound tokens) are **not on the lean live path**. The challenge escrow source and app builder were removed.
-
-**Upgrade path**: move the election/proposal state machine and per-user reputation tokens fully on-chain (the verified spend validators), trading higher cost + UTxO contention for trustless enforcement.
-
-**Current implementation status**: this lean local/operator model was not the approved five-of-seven committee model and is deleted from the application. Its DAO creation, election, nomination, committee, proposal and queue-status commands, the operator governance transaction queue, and its Cardano transaction builders no longer exist, and the app no longer lists DAOs, elections or proposals. Inbound `/alexandria/governance/1.0` events are rejected before any database access (§6.5). The description above is retained as the record of what the retained validators were built for; they are deployment artifacts, not a release authority path.
-
-### 10.7 Spec Stewardship
+### 10.6 Spec Stewardship
 
 The Alexandria specification SHOULD be governed by a neutral, public-interest body. The governing body MUST adhere to the following principles: open participation, transparent decision-making, and no proprietary extensions to core schemas.
 
-### 10.8 Spec Evolution and Compatibility
+### 10.7 Spec Evolution and Compatibility
 
-All changes to this specification MUST be versioned. Breaking changes MUST require a major version increment. Existing SkillProofs and ReputationAssertions MUST remain valid across version boundaries.
+All changes to this specification MUST be versioned. Breaking changes MUST require a major version increment. Existing credentials and ReputationAssertions MUST remain valid across version boundaries.
 
 Implementations MUST: support backward-compatible parsing of all prior schema versions, ignore unknown fields safely, and fail explicitly on incompatible versions.
 
@@ -870,15 +797,9 @@ Once published, content hashes are immutable. Content updates produce a new hash
 
 **Blockchain**: Cardano (Conway era) via pallas 0.35 and Blockfrost.
 
-Credential integrity is anchored via the W3C-VC integrity-anchoring path (§11.3.2), which timestamps a verifiable hash of the canonical VC without publishing credential content.
+Credential integrity is anchored via the W3C-VC integrity-anchoring path (§11.3.1), which timestamps a verifiable hash of the canonical VC without publishing credential content. A credential is never itself a token (the completion witness in §5.1 is a separate mint). Reputation snapshots (§4.7) are `DerivedCredential` VCs and use the same anchor.
 
-#### 11.3.1 NFT-based credentials (retired)
-
-The legacy SkillProof NFT path — minting CIP-25 credential metadata on-chain via a NativeScript policy — was **retired** in migration 040 (the `skill_proofs` tables and the `mint_skill_proof_nft` command were dropped). Credentials are now W3C Verifiable Credentials (§14); their on-chain footprint is the metadata-only integrity anchor described in §11.3.2.
-
-**Reputation Snapshots**: CIP-68 soulbound tokens with CBOR-encoded inline datums (reference + user token pair).
-
-#### 11.3.2 VC integrity anchoring
+#### 11.3.1 VC integrity anchoring
 
 The §14 Verifiable Credentials path anchors credential integrity on Cardano by submitting a metadata-only transaction (no minting, no output token) whose metadata label is `1697` (`ALEXANDRIA_ANCHOR_LABEL`). The metadata carries the canonical hash of the VC, the issuer DID, and the issuance timestamp, following the formula from §14.12.3:
 
@@ -886,7 +807,7 @@ The §14 Verifiable Credentials path anchors credential integrity on Cardano by 
 A(c) = (H(c), t_i, issuer_ref)
 ```
 
-where `H(c)` is `blake3` of the JCS-canonical bytes of the VC (§14.23.2). The full credential is NOT stored on-chain. Anchoring is an integrity-timestamping mechanism; it neither creates nor transfers a token and does not replace the signature-based verification defined in §14.13.
+where `H(c)` is `blake3` of the JCS-canonical bytes of the VC with `proofValue` emptied (§14.23.2). The full credential is NOT stored on-chain. Anchoring is an integrity-timestamping mechanism; it neither creates nor transfers a token and does not replace the signature-based verification defined in §14.13.
 
 ### 11.4 Decentralised Identity
 
@@ -894,7 +815,7 @@ The user's 24-word BIP-39 mnemonic IS their identity. Key derivation follows CIP
 
 ### 11.5 Selective Disclosure
 
-Learners MUST retain full control over which SkillProofs, credentials, and reputation data are disclosed to third parties. No query result SHALL include data from credentials or proofs that the learner has not explicitly chosen to disclose.
+Learners MUST retain full control over which credentials and reputation data are disclosed to third parties. No query result SHALL include data from credentials or proofs that the learner has not explicitly chosen to disclose.
 
 ---
 
@@ -936,7 +857,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 | `global_hotkeys` / `phantom_hotkeys` | Native (desktop) | int | advisory |
 | `camera_device_virtual` | Rule | bool | advisory |
 
-The weights are relative coefficients: the score divides the weighted sum by the coefficients actually present, so a missing optional signal contributes neither score nor denominator. Developer-tools detection is retired; a snapshot carrying `devtools_score` or a `devtools_detected` flag is rejected. Advisory signals raise flags but carry no score weight. Each signal's thresholds, the flag it raises, and that flag's severity are specified in [`docs/sentinel.md`](sentinel.md) (Signal Taxonomy, Flagging Logic); flag severity is authoritative on the issuing device, and an unknown flag counts as info.
+The weights are relative coefficients: the score divides the weighted sum by the coefficients actually present, so a missing optional signal contributes neither score nor denominator. Developer-tools detection is not a signal; a snapshot carrying `devtools_score` or a `devtools_detected` flag is rejected. Advisory signals raise flags but carry no score weight. Each signal's thresholds, the flag it raises, and that flag's severity are specified in [`docs/sentinel.md`](sentinel.md) (Signal Taxonomy, Flagging Logic); flag severity is authoritative on the issuing device, and an unknown flag counts as info.
 
 ### 12.4 ML Models
 
@@ -954,7 +875,7 @@ Three per-user models are trained on-device. The keystroke autoencoder and mouse
 
 ### 12.6 Trust Factor Propagation
 
-When a session ends `flagged` or `suspended`, the backend records the terminal status + integrity score on the `integrity_sessions` row — that is the trust signal credential issuance reads. A spec-pinned penalty (0.20/critical, 0.10/warning, floor 0.10) is computed for observability and logged. The legacy per-`skill_assessments` / `evidence_records` `trust_factor` decay — and the SkillProof aggregator that consumed it — were retired with those tables in migration 040; there is no per-evidence trust column to mutate anymore.
+When a session ends `flagged` or `suspended`, the backend records the terminal status + integrity score on the `integrity_sessions` row — that is the trust signal credential issuance reads. A trust penalty (0.20 per critical flag, 0.10 per warning) is computed for observability and logged; it is not stored. A bound session reaches the credential through the `integrity` attestation block (§14.9.5).
 
 ### 12.7 Privacy Guarantees
 
@@ -983,13 +904,13 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Instructors or assessors inflate scores to boost downstream reputation.
 
-**Mitigations**: Assessment definitions are independent of the instructor. Difficulty and assessment type weighting, Sentinel integrity state, variance, confidence penalties, exact bundled-grader byte binding, and issuer policy determine whether an outcome contributes trust or a privilege. The explicit subject/DAO accepted-issuer privilege gate is specified below but remains an implementation prerequisite (T03).
+**Mitigations**: Assessment definitions are independent of the instructor. Difficulty and assessment type weighting, Sentinel integrity state, variance, confidence penalties, exact bundled-grader byte binding, and issuer policy determine whether an outcome contributes trust or a privilege. Proficiency-derived privileges additionally require an accepted issuer under a pinned subject qualification policy (§14.14.4).
 
 ### 13.3 Sybil Attacks
 
 **Threat**: Creation of multiple fake identities to manipulate attribution or governance.
 
-**Mitigations**: Instructor reputation grows only via learner SkillProofs. Attribution bounded per learner-skill pair. IP colocation scoring in P2P layer (-10.0 weight above 3 peers threshold). Optional identity verification layers. Graph-based anomaly detection supported by data model.
+**Mitigations**: Instructor reputation grows only from verified issuer-signed credentials over other subjects' claims (§4.5); self-issued and self-witnessed claims credit no instructor. IP colocation scoring in P2P layer (-10.0 weight above 3 peers threshold). Optional identity verification layers. Graph-based anomaly detection supported by data model.
 
 ### 13.4 Message Forgery
 
@@ -1001,7 +922,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Unauthorized modification of the global skill graph.
 
-**Mitigations**: Highest topic weight (1.0) and strongest invalid penalty (-50.0) in peer scoring. Privileged-topic identity binding at the validation layer (§6.7). Until handlers consume verified committee outcome certificates, release builds reject every inbound taxonomy, governance, goal-template, and question-bank message before any database access (§6.5), so neither a single-signer taxonomy update nor a `CommitteeUpdated` event can change local state. The legacy domain-handler committee checks, and `CommitteeUpdated` replacement of the entire committee, remain only in debug builds that enable the corresponding legacy feature.
+**Mitigations**: Highest topic weight (1.0) and strongest invalid penalty (-50.0) in peer scoring. Privileged-topic identity binding at the validation layer (§6.7). Until handlers consume verified committee outcome certificates, every inbound taxonomy, governance, goal-template, and question-bank message is rejected before any database access (§6.5), so no single signer and no gossiped committee event can change local state.
 
 ### 13.6 Content Tampering
 
@@ -1019,7 +940,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Someone else taking assessments on behalf of the learner, or use of automated tools.
 
-**Mitigations**: Sentinel behavioral fingerprinting (keystroke, mouse, face). Client-side ML models for continuous identity verification. Trust factor propagation through evidence pipeline. DevTools detection heuristic.
+**Mitigations**: Sentinel behavioral fingerprinting (keystroke, mouse, face). Client-side ML models for continuous identity verification. Native environment signals (displays, overlays, watched processes, hotkeys). Integrity-gated issuance (§14.9.5) carries the session outcome inside the signed credential.
 
 ### 13.9 Key Theft
 
@@ -1096,7 +1017,7 @@ The protocol consists of six layers:
 3. **Status Layer** — Expiration, revocation, suspension, supersession (§14.11).
 4. **Anchoring Layer** — Optional public integrity anchors for timestamping and tamper evidence (§14.12.3).
 5. **Aggregation Layer** — Deterministic reputation and confidence computation across multiple credentials and attestations (§14.14).
-6. **Presentation Layer** — Wallet exports, recruiter APIs, selective disclosure, optional NFT wrappers (§14.18, §14.19).
+6. **Presentation Layer** — Wallet exports, recruiter APIs, selective disclosure (§14.18).
 
 ### 14.4 Core Entities
 
@@ -1355,7 +1276,7 @@ Each revocable credential MUST provide a resolvable status reference. A credenti
 The status reference is a Bitstring Status List entry: `statusListIndex` is a
 bit position in the issuer's list, counted from the most significant bit of
 each byte, and `statusListCredential` names the list. Lists are at least
-131,072 bits. The §20.4 bundle carries each list this node issues as a signed
+131,072 bits. The credential bundle (§14.20) carries each list this node issues as a signed
 `BitstringStatusListCredential`. Only the credential issuer may publish or
 apply a status change for that credential. The implementation checks that the caller-derived DID matches both
 the credential issuer and status-list issuer before changing the bitmap or
@@ -1380,7 +1301,7 @@ signature is the authorisation, so any party may relay an issuer's list and no
 party may forge one. A verifier that fetches a list MUST apply the same checks
 to what it receives before reading a bit; a list that fails them is not
 evidence about the credential. A credential whose reference is a `urn:` names a
-list that travels only in the §20.4 bundle. Both forms verify offline from a
+list that travels only in the credential bundle. Both forms verify offline from a
 bundle; only the URL form verifies from the credential alone.
 
 #### 14.11.3 Suspension
@@ -1469,7 +1390,7 @@ that identifies the missing status list; it MUST NOT accept the credential or
 label it revoked. An unavailable lookup and a confirmed missing list are
 distinct pending reasons.
 
-Both are why a §20.4 bundle carries the key registry and the status lists
+Both are why a credential bundle (§14.20) carries the key registry and the status lists
 alongside the credentials. A bundle is verifiable entirely offline. A bare
 credential can still have its signature and signed claims checked, but a
 status-bearing credential remains pending until its list is supplied. Neither
@@ -1620,9 +1541,12 @@ and may receive a low verifier-defined trust weight, but MUST NOT satisfy a
 proficiency-derived privilege such as field-opinion posting. A privilege check
 MUST require an accepted issuer (or another route explicitly named by that
 policy), the required skill and proficiency, and active status. This closes the
-self-issued-course/two-identity route to privileges. The founding-genesis
-schema can carry accepted issuer identifiers; runtime enforcement of this rule
-is the pending T03 remediation package.
+self-issued-course/two-identity route to privileges. Field-opinion posting
+enforces this through subject qualification policies
+(`alexandria_verify::qualification`): immutable documents identified by the
+SHA-256 digest of their canonical bytes, accepted only when the network profile
+pins that digest. A policy names its accepted issuers, minimum level, and
+routes (accepted issuer, accepted course endorsement).
 
 #### 14.14.5 Type Weight
 
@@ -1849,15 +1773,7 @@ signature) and, when the holder is also the issuer, `issuerState`.
 
 ### 14.19 NFT Wrapper Rules
 
-An NFT wrapper MAY exist purely as a presentation artifact. If an NFT wrapper is used:
-
-1. it MUST NOT be the canonical credential record
-2. it MUST reference the canonical credential hash or presentation artifact
-3. it MUST NOT cause a verifier to ignore subject binding
-4. transfer of the NFT MUST NOT imply transfer of achievement
-5. verifier logic MUST still validate the underlying credential or derived state
-
-NFTs may serve as display objects, but MUST NOT redefine trust semantics.
+No NFT wrapper is implemented; credentials are not minted as NFTs. A presentation wrapper, if one is ever added, MUST NOT be the canonical credential record, MUST reference the canonical credential hash, and MUST NOT let a verifier skip subject binding (§14.10) or validation of the underlying credential; transfer of a wrapper MUST NOT imply transfer of achievement.
 
 ### 14.20 Failure Mode: Alexandria Ceases to Exist
 
@@ -2122,18 +2038,18 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
-| Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance experiments, completion-witness minting, and legacy CIP-68 reputation snapshots |
+| Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), completion-witness minting, stake-key registration, username anchoring (label 1698) |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
 | Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only; opt-in on-device caption text over encrypted room gossip |
 | CLI | Rust, clap 4 | Developer tooling (`alexandria`) |
 | **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,status,verify}` | Data Integrity `eddsa-jcs-2022` proofs over RFC 8785 JCS, Bitstring Status List, §14.7 / §14.13 |
 | **Trust aggregation** | `aggregation::{mod,weights,level,independence,antigaming,config}` | §14.14 engine + §14.15 anti-gaming; reproduces the §14.26 worked example |
 | **VC P2P layer** | `p2p::{vc_did,vc_status,vc_fetch,presentation,pinboard,archive}` | Wire layer for §14.5, §14.11.2, §14.18, §14.12.2 |
-| **VC storage** | `commands::{credentials,presentation,pinning,aggregation}`, `db` migrations 22–30 | Issuance, verification, revocation, suspension, allowlist, presentation envelopes, PinBoard commitments |
+| **VC storage** | `commands::{credentials,presentation,pinning,aggregation}`; tables `credentials`, `credential_status_lists`, `key_registry`, `credential_allowlist`, `credential_anchors` | Issuance, verification, revocation, suspension, allowlist, presentation envelopes, PinBoard commitments |
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 94.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Migrations**: 27 — a baseline (migration 1) plus migrations 2–27, listed in `db::schema::MIGRATIONS`.
 
 | Domain | Tables |
 |--------|--------|
@@ -2141,19 +2057,17 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Taxonomy | `subject_fields`, `subjects`, `skills`, `skill_prerequisites`, `skill_relations`, `taxonomy_versions` |
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
-| Credentials | `credentials`, `credential_status_lists`, `key_registry` (the `skill_assessments`, `evidence_records`, `skill_proofs`, `skill_proof_evidence` tables were dropped in migration 040) |
-| Reputation | derived from `credentials`; persisted distribution metrics + `reputation_snapshots` (the `reputation_evidence` and `reputation_impact_deltas` tables were dropped in migration 040) |
+| Credentials | `credentials`, `credential_status_lists`, `key_registry`, `credential_anchors` |
+| Reputation | `reputation_assertions` (derived from `credentials`), `reputation_snapshots`, `reputation_snapshot_inputs` |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
-| Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
+| Governance | `governance_genesis_trust_anchors` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
-| Retired challenges | `credential_challenges`, `credential_challenge_votes` remain as legacy storage; the earlier evidence tables were dropped in migration 040 |
-| Completion endorsement | `completion_claims`, `course_completion_endorsements`; exact policy/CID snapshots are stored on `enrollments` |
+| Completion | `completion_claims`, `course_completion_endorsements`, `completion_observations`, `completion_witness_requests`; exact policy/CID snapshots are stored on `enrollments` |
 | Tutoring | `tutoring_sessions` |
 | Interviews | `interview_sessions`, `interview_participants`, `interview_criteria`, `interview_transcript_segments`, `interview_notes`, `interview_followups` (local-only; not a global gossip or device-sync domain) |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
-| Governance (on-chain) | `onchain_governance_queue` |
 | Settings | `app_settings` |
 
 Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`, singleton identity table with `CHECK (id = 1)`, content stored externally in iroh blobs.
@@ -2163,11 +2077,11 @@ Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`,
 The workspace has unit and integration coverage across `crypto`, `db`, `p2p`,
 `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and
 `content_store`, including `e2e_vc`, `guardian_e2e`, and
-`settings_sync_e2e`. At the T01 verification point, the full workspace run
-reported 1,733 passed and 15 ignored tests. Run the suite for the current count;
-the §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
+`settings_sync_e2e`. The §14.26 worked example is locked in by
+`tests/e2e_vc/aggregation.rs`.
 
-> **P2P stress suite:** the original ~1500-line stress suite (evidence gossip, skill-proof aggregation, multi-party attestation, and the challenge committee) was retired in the VC-first cutover. `p2p/stress.rs` is currently a stub tracking VC gossip and credential-sync replacements. It is **not** live coverage today.
+`p2p/stress.rs` is a stub: there is no live P2P stress coverage. VC gossip
+stress and credential-sync merge races are tracked there as follow-ups.
 
 ---
 
@@ -2183,9 +2097,7 @@ the §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 - **[did:key]** Longley, D., Zundel, B., Sporny, M., "The did:key Method v0.7", W3C CCG Draft — DID method used in §14.5.1. https://w3c-ccg.github.io/did-key-spec/
 - **[W3C BITSTRING-STATUS-LIST]** Sporny, M., Longley, D., et al., "Bitstring Status List v1.0", W3C Recommendation, May 2025 — revocation model in §14.11.2. https://www.w3.org/TR/vc-bitstring-status-list/
 - **[BIP-39]** Palatinus, M., Rusnak, P., Voisine, A., Bowe, S., "Mnemonic code for generating deterministic keys", Bitcoin Improvement Proposal 39, 2013. https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
-- **[CIP-25]** Cardano Improvement Proposal 25, "Media NFT Metadata Standard", 2021. https://cips.cardano.org/cip/CIP-0025
 - **[CIP-30]** Cardano Improvement Proposal 30, "Cardano dApp-Wallet Web Bridge", 2021. https://cips.cardano.org/cip/CIP-0030
-- **[CIP-68]** Cardano Improvement Proposal 68, "Datum Metadata Standard", 2022. https://cips.cardano.org/cip/CIP-0068
 - **[CIP-1852]** Cardano Improvement Proposal 1852, "HD Wallets for Cardano", 2019. https://cips.cardano.org/cip/CIP-1852
 - **[JSON Schema]** Wright, A., Andrews, H., Hutton, B., Dennis, G., "JSON Schema: A Media Type for Describing JSON Documents", Internet-Draft, 2020. https://json-schema.org/draft/2020-12/schema
 
@@ -2200,33 +2112,3 @@ the §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 - **[Tauri]** Tauri Contributors, "Tauri — Build desktop and mobile apps with web frontend". https://tauri.app
 - **[pallas]** TxPipe, "Pallas — Cardano primitives in Rust". https://github.com/txpipe/pallas
 - **[BBS+]** Decentralized Identity Foundation, "BBS+ Signatures v2023" — referenced from §14.18.3 for future zero-knowledge presentation compatibility. https://identity.foundation/bbs-signature/
-
----
-
-## Authors
-
-Pratyush Pundir for IFFTU
-GitHub: https://github.com/ifftu-dev
-Project: https://github.com/ifftu-dev/alexandria
-
-### Discussion events on the Opinions topic
-
-The `discussion_version: 1` payload is carried inside the existing signed gossip
-envelope. Its network-bound JCS payload has its own Ed25519 author signature,
-allowing another peer to relay the original event in a fresh outer envelope.
-Post/comment creation IDs bind author, network, topic, parent, nonce, timestamp,
-and content. Actions include post, comment, edit_post, edit_comment, delete,
-vote (-1/0/1), and report. The inner signature must resolve to `actor_did`.
-
-Creation and editing require topic-qualified, actor-subject credentials. Portable
-signed credential bytes and optional course policy/binding/endorsement evidence
-travel with the event and are independently verified by each receiving node.
-Missing dependencies remain invisible in a bounded pending queue. Votes use one
-row per item and DID, ordered by revision then event hash; identities are not
-proof of unique people. Edits are author-only; deletion is an absorbing tombstone
-and does not erase retained event history or other peers' copies. Reports are
-signed public signals, not automatic moderation decisions.
-
-The active profile relays batches of retained accepted events every 30 seconds.
-This provides eventual replay from connected retaining peers, not guaranteed
-centralized storage. Legacy OpinionPayload messages keep their existing path.

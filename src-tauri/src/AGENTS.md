@@ -1,114 +1,13 @@
-# alexandria/src-tauri/src/
+# alexandria/src-tauri/src/ — Rust backend
 
-**Generated:** 2026-09-15
+Workspace rules and the general Rust conventions are in the workspace `AGENTS.md`. This file holds the backend gotchas.
 
-## Standing Instructions
-
-- **Documentation review after code changes**: After completing any code changes, always assess whether README and other docs need updating. Ask the user for permission before modifying any documentation files.
-
-## Overview
-
-Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a network-bound per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), domain-oriented Tauri commands, a 27-migration SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Inspect the handler list and schema directly for command/table counts.
-
-## WHERE TO LOOK
-
-| Task | Location | Notes |
-|------|----------|-------|
-| Network identity | `network_profile.rs`, `../resources/networks/preprod.json` | Strict network/service/trust-root profile plus embedded-resource identity checks. Currently supplies DHT provider-record namespacing; remaining wire IDs await the coordinated app/relay/monitoring N01 slice. |
-| Profile lifecycle | `profile/` | ProfileManager, network-bound format-v2 `profiles_index.json` sidecar; the pre-profile single-vault layout is detected, reported and left untouched rather than migrated. Startup uses `ProfileManager::open_for_app`: an older index version or a profile from another network opens the manager blocked (empty index, `create` refused) instead of failing, and `move_incompatible_data_aside` moves it into `incompatible-profile-data-<timestamp>/` without deleting anything. Other open errors still fail |
-| Settings | `settings/` | Typed registry (`registry::keys`) + R/W store. Drives the unified per-profile `app_settings` table; `scope='sync'` rows propagate via cross-device sync (`p2p::sync::settings_outbound_snapshot` / `settings_apply_inbound`). See [`docs/settings.md`](../../docs/settings.md). |
-| Tauri commands | `commands/` | Domain-oriented IPC handlers. Keep new ones thin over a domain module; no module outside `commands/` except `lib.rs` may import it (see Conventions). `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
-| Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
-| P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), profile-fetch, username-reg (registry receipts), sync, stress. `sync.rs` also fans settings rows out/in. |
-| Database | `db/` | SQLite + 27 versioned migrations (one DB per profile). `db/bundled.rs` installs the labelled built-in taxonomy, goal templates and question banks on every profile open: bundled taxonomy rows are upserted by id (adding new skills and overwriting local edits to bundled names, descriptions and Bloom levels) and goal templates are replaced by id; standard release profile activation also installs eleven labelled, profile-owned course drafts, all bundled plugins, and three owned classroom templates through `commands/demo_courses.rs` and `commands/demo_resources.rs`; development builds instead offer the opt-in, profile-scoped picker in `commands/dev_seeds.rs`; no content seed creates personas, credentials or enrollments. Retired challenge/plugin-attestation tables remain legacy storage until D03 and grant no authority. |
-| Live calls | `tutoring/` | One `CallManager` for every platform; per-platform media behind the `MediaDevices` seam in `tutoring/media/` (desktop, iOS, Android, synthetic for tests). `build.rs` sets the `tutoring_video` cfg per target |
-| AI chat and access | `ai_chat/`, `ai_access.rs` | Chat turn (`turn.rs`), streaming run (`run.rs`), other chat operations (`ops.rs`), generated vocabularies (`vocab.rs`); `ai_access.rs` decides who may use which model and when. See [`docs/ai-chat-spec.md`](../../docs/ai-chat-spec.md) |
-| Cardano | `cardano/` | Pallas wallet/tx building; reference scripts deployed on preprod (UTxOs in `cardano/script_refs.rs`) |
-| Content storage | `content_store/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock; `ContentNode::shutdown` calls both `Router::shutdown` and `Store::shutdown` so the redb lock releases between profile switches. |
-| Cryptography | `crypto/` | Ed25519, Blake2b, per-profile keystore (Stronghold desktop / portable AES-256-GCM mobile) |
-| AppState lifecycle | `lib.rs` | `start_new_profile` initializes the bundled network governance anchor for creation/restoration; `start_active_profile` / `stop_active_profile` bring services up and down on switch without changing existing trust decisions |
-
-Credential revocation, suspension, and reinstatement are issuer-bound. The
-challenge/escrow command and builder paths are retired. Plugin credential
-issuance accepts exact bundled manifest and grader bytes only; the reserved
-plugin-attestation topic has no inbound persistence handler or authority.
-
-## CONVENTIONS (Rust)
-
-```rust
-// Domain structs
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Course { pub name: String, pub description: Option<String> }
-
-// Import order
-use std::sync::Arc;           // 1. std
-use rusqlite::params;          // 2. external
-use crate::domain::course::*;   // 3. crate-local
-
-// Tauri command signature
-#[tauri::command]
-pub async fn list_courses(
-    state: State<'_, AppState>,
-    status: Option<String>,
-) -> Result<Vec<Course>, String> {
-    let db = state.db.lock().unwrap();
-    // ... SQL
-    Ok(courses)
-}
-```
-
-- **Never** `.unwrap()` in command handlers — use `.map_err(...)?`
-- **Allowed**: `state.db.lock().unwrap()` (poisoned mutex = unrecoverable)
-- Platform gates: `#[cfg(desktop)]`, `#[cfg(target_os = "ios")]`, etc.
-- **Commands depend down, never sideways.** No Rust file outside `commands/`
-  imports the commands layer. The one exception is `lib.rs`, the composition
-  root. This covers `crate::commands`, `super::commands`, `self::commands`,
-  `commands::` and grouped imports. Put behaviour a command and something
-  else both need in a domain module (for example `ai_chat::ops`,
-  `crate::enrollment`, `evidence::completion`, `crate::clock`), and make the
-  command a wrapper that calls it. Command files share `commands::with_conn`.
-  `node scripts/check-tauri-commands.mjs` enforces this in CI.
-
-## TESTING
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_db() -> Database {
-        let db = Database::open_in_memory().expect("in-memory db");
-        db.run_migrations().expect("migrations");
-        db
-    }
-
-    #[test]
-    fn get_course_by_id_returns_course() {
-        let db = test_db();
-        let result = get_course_by_id(db.conn(), "course-1");
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn async_test() { /* tokio runtime */ }
-}
-```
-
-- Test helpers: `test_db()`, `setup_db()`, `setup_identity()`, `insert_course()`
-- `Database::open_in_memory()` for all DB tests
-- FK constraint order: `subject_fields → subjects → skills → ...`
-
-## COMPLEXITY HOTSPOTS
-
-Line counts drift with every PR; regenerate with `wc -l` before relying on them.
-
-| File | Lines | Risk |
-|------|-------|------|
-| `p2p/network.rs` | 3382 | Swarm behavior and protocol orchestration |
-| `ai_chat/turn.rs` | 1852 | Chat turn: what is sent, and what a reply becomes |
-| `db/schema.rs` | 1460 | 27 migrations |
-| `tutoring/manager.rs` | 2328 | Call manager for every platform |
-| `tutoring/media/ios.rs` | 1236 | iOS media adapter (AVFoundation, VideoToolbox, audio session) |
-| `evidence/reputation.rs` | 830 | Credential-backed reputation system |
-| `p2p/sync.rs` | 1498 | P2P sync protocol |
-| `p2p/stress.rs` | 11 | Stub (retired in VC-first cutover; placeholder) |
+- **One data set per profile**: each profile has its own vault, SQLCipher DB and iroh blob store under `<app_data>/profiles/<uuid>/`. `commands/profile.rs` owns the multi-user lifecycle; `commands/identity.rs` acts on the active profile only.
+- **Profile open never deletes**: `ProfileManager::open_for_app` opens blocked (empty index, `create` refused) on an older index version or another network's profile; `move_incompatible_data_aside` moves that data to `incompatible-profile-data-<timestamp>/`. The pre-profile single-vault layout is detected and reported, not migrated.
+- **Profile switch**: `lib.rs` `start_active_profile` / `stop_active_profile` bring services up and down without changing trust decisions. `ContentNode::set_data_dir` repoints the blob store on each unlock, and `ContentNode::shutdown` must call both `Router::shutdown` and `Store::shutdown` so the redb lock releases between switches.
+- **Network profile**: `network_profile.rs` validates `../resources/networks/preprod.json` and the embedded-resource digest; setup fails on either mismatch.
+- **Built-in data**: `db/bundled.rs` upserts the taxonomy, goal templates and question banks on every profile open, overwriting local edits to bundled rows. Release builds also install bundled course drafts, plugins and classroom templates (`commands/demo_courses.rs`, `commands/demo_resources.rs`); dev builds offer the opt-in picker in `commands/dev_seeds.rs`. No seed creates personas, credentials or enrollments.
+- **Settings**: `settings/registry.rs` keys drive the per-profile `app_settings` table; `scope='sync'` rows travel through `p2p::sync` (`settings_outbound_snapshot` / `settings_apply_inbound`).
+- **Retired authority**: challenge/escrow command and builder paths are gone, and leftover challenge/plugin-attestation tables grant nothing. Credential status changes are issuer-bound.
+- **Tests**: FK insert order is `subject_fields → subjects → skills → …`; per-module helpers (`test_db()`, `setup_identity()`, `insert_course()`) already exist, so reuse them.
+- **Cardano**: reference-script UTxOs deployed on preprod are recorded in `cardano/script_refs.rs`.
