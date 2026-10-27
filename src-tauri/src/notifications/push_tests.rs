@@ -93,11 +93,17 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
     server.await.unwrap();
     assert!(status.registered);
     assert_eq!(status.last_error, None);
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::USER_LANGUAGE,
+        "FR_ca".to_string(),
+    )
+    .unwrap();
     let received = serde_json::json!({"data": {
         "recipient": "11111111-1111-4111-8111-111111111111",
         "kind": "offer_sent", "id": "22222222-2222-4222-8222-222222222222",
         "eventId": "offer_sent:22222222-2222-4222-8222-222222222222",
-        "route": "/settings/organisations", "title": "New offer", "body": "An organisation sent you an offer."
+        "route": "/settings/organisations", "title": "Private provider name", "body": "did:key:private-provider-content"
     }});
     let recorded = receive(&state, admitted(&state), received)
         .await
@@ -108,6 +114,11 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
         Some("/settings/organisations")
     );
     assert_eq!(recorded.unread, 1);
+    assert_eq!(recorded.row.title, "Nouvelle offre");
+    assert_eq!(
+        recorded.row.body,
+        "Une organisation vous a envoyé une offre."
+    );
 }
 
 async fn request(socket: &mut tokio::net::TcpStream) -> (String, Value) {

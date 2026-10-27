@@ -438,6 +438,13 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					810906E92E76EE1410115641 = {
+						SystemCapabilities = {
+							com.apple.Push = { enabled = 1; };
+						};
+					};
+				};
 			};
 			buildConfigurationList = 8F3A52DA275936930FC0382A /* Build configuration list for PBXProject "alexandria-node" */;
 			compatibilityVersion = "Xcode 14.0";

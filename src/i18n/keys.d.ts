@@ -1957,6 +1957,8 @@ export type MessageKey =
   | 'notifications.kinds.classroom_join_requested.title'
   | 'notifications.kinds.credential_issued.body'
   | 'notifications.kinds.credential_issued.title'
+  | 'notifications.kinds.generic.body'
+  | 'notifications.kinds.generic.title'
   | 'notifications.kinds.guardian_request.body'
   | 'notifications.kinds.guardian_request.title'
   | 'notifications.kinds.interview_invited.body'

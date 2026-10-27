@@ -1,47 +1,78 @@
 {
-  "title": "Notifications",
-  "bell": "Notifications",
-  "bellUnread": "Notifications, {count} unread",
+  "title": "اطلاعات",
+  "bell": "اطلاعات",
+  "bellUnread": "اطلاعات، {count} غیر پڑھی ہوئی",
   "page": {
-    "markAllRead": "Mark all read",
-    "clear": "Clear",
-    "clearConfirm": "Remove every notification? This cannot be undone.",
-    "empty": "Nothing to show",
-    "emptyHint": "Interview invitations, offers, classroom calls and new credentials will appear here.",
-    "unreadLabel": "Unread",
-    "viaPush": "Push",
-    "open": "Open"
+    "markAllRead": "سب کو پڑھا ہوا نشان زد کریں",
+    "clear": "صاف کریں",
+    "clearConfirm": "تمام اطلاعات ہٹا دیں؟ یہ عمل واپس نہیں ہو سکتا۔",
+    "empty": "دکھانے کے لیے کچھ نہیں",
+    "emptyHint": "انٹرویو کی دعوتیں، پیشکشیں، کلاس کی کالیں اور نئی اسناد یہاں نظر آئیں گی۔",
+    "unreadLabel": "غیر پڑھی ہوئی",
+    "viaPush": "پش",
+    "open": "کھولیں"
   },
   "kinds": {
-    "interview_invited": { "title": "New interview invitation", "body": "An organisation invited you to interview. Open Alexandria to respond." },
-    "interview_room_opened": { "title": "Your interview room is open", "body": "The panel is waiting. Open Alexandria to join." },
-    "offer_sent": { "title": "New offer", "body": "An organisation sent you an offer." },
-    "access_requested": { "title": "Access request", "body": "An organisation is asking to see your credentials." },
-    "assessment_requested": { "title": "New assessment request", "body": "An organisation asked you to take an assessment." },
-    "classroom_call_started": { "title": "Classroom call started", "body": "A call started in one of your classrooms." },
-    "classroom_join_requested": { "title": "Join request", "body": "Somebody asked to join a classroom you moderate." },
-    "credential_issued": { "title": "Credential issued", "body": "A new credential was added to your wallet." },
-    "guardian_request": { "title": "Guardian request", "body": "There is a guardian link waiting for you." }
+    "interview_invited": {
+      "title": "انٹرویو کی نئی دعوت",
+      "body": "ایک ادارے نے آپ کو انٹرویو کی دعوت دی ہے۔ جواب دینے کے لیے Alexandria کھولیں۔"
+    },
+    "interview_room_opened": {
+      "title": "آپ کے انٹرویو کا کمرہ کھل گیا ہے",
+      "body": "انٹرویو پینل انتظار کر رہا ہے۔ شامل ہونے کے لیے Alexandria کھولیں۔"
+    },
+    "offer_sent": {
+      "title": "نئی پیشکش",
+      "body": "ایک ادارے نے آپ کو پیشکش بھیجی ہے۔"
+    },
+    "access_requested": {
+      "title": "رسائی کی درخواست",
+      "body": "ایک ادارہ آپ کی اسناد دیکھنا چاہتا ہے۔"
+    },
+    "assessment_requested": {
+      "title": "جانچ کی نئی درخواست",
+      "body": "ایک ادارے نے آپ سے جانچ میں حصہ لینے کو کہا ہے۔"
+    },
+    "classroom_call_started": {
+      "title": "کلاس کی کال شروع ہو گئی",
+      "body": "آپ کی ایک کلاس میں کال شروع ہو گئی ہے۔"
+    },
+    "classroom_join_requested": {
+      "title": "شمولیت کی درخواست",
+      "body": "کسی نے آپ کی زیر انتظام کلاس میں شامل ہونے کی درخواست کی ہے۔"
+    },
+    "credential_issued": {
+      "title": "سند جاری ہو گئی",
+      "body": "آپ کے والیٹ میں ایک نئی سند شامل کر دی گئی ہے۔"
+    },
+    "guardian_request": {
+      "title": "ایک سرپرست آپ کے اکاؤنٹ سے منسلک ہو گیا ہے",
+      "body": "اب ایک سرپرست اس اکاؤنٹ کی نگرانی کرتا ہے۔"
+    },
+    "generic": {
+      "title": "نئی سرگرمی",
+      "body": "تازہ معلومات دیکھنے کے لیے Alexandria کھولیں۔"
+    }
   },
   "settings": {
-    "title": "Notifications",
-    "description": "Badges in the app, banners from the system, and pushes to this device when the app is closed.",
-    "inApp": "Show notifications",
-    "inAppHint": "Badges, the inbox, and system banners for new credentials, classroom calls and requests from organisations.",
-    "push": "Push notifications on this device",
-    "pushHint": "Alexandria Cloud can wake this device when an organisation sends an invitation or opens your interview room. Pushes carry no names, only the kind of event.",
-    "pushUnsupported": "Push is available in the iOS and Android apps. On this computer, notifications arrive while Alexandria is running.",
-    "pushRegistered": "Registered with {origin}",
-    "pushNotRegistered": "Not registered",
-    "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
-    "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
-    "pushRegistrationPending": "Device registration is awaiting confirmation.",
-    "pushError": "Last attempt failed: {error}",
-    "register": "Register now",
-    "unregister": "Unregister",
-    "working": "Working…",
-    "permission": "Ask for permission",
-    "permissionGranted": "The system allows banners.",
-    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings."
+    "title": "اطلاعات",
+    "description": "ایپ میں بیج، سسٹم کے بینر اور ایپ بند ہونے پر اس آلے پر پش اطلاعات۔",
+    "inApp": "اطلاعات دکھائیں",
+    "inAppHint": "نئی اسناد، کلاس کی کالوں اور اداروں کی درخواستوں کے لیے بیج، ان باکس اور سسٹم کے بینر۔",
+    "push": "اس آلے پر پش اطلاعات",
+    "pushHint": "جب کوئی ادارہ دعوت بھیجتا ہے یا آپ کے انٹرویو کا کمرہ کھولتا ہے تو Alexandria Cloud اس آلے کو فعال کر سکتا ہے۔ پش میں نام نہیں ہوتے، صرف واقعے کی قسم ہوتی ہے۔",
+    "pushUnsupported": "پش iOS اور Android ایپس میں دستیاب ہے۔ اس کمپیوٹر پر Alexandria چلنے کے دوران اطلاعات آتی ہیں۔",
+    "pushRegistered": "{origin} پر رجسٹرڈ",
+    "pushNotRegistered": "رجسٹرڈ نہیں",
+    "pushNoCloud": "اس نیٹ ورک کے لیے Alexandria Cloud ترتیب نہیں دیا گیا، اس لیے رجسٹریشن دستیاب نہیں۔",
+    "pushCleanupPending": "دور کی رجسٹریشن ہٹانا زیر التوا ہے۔ پہلے سے قطار میں موجود بینر اب بھی آ سکتے ہیں۔",
+    "pushRegistrationPending": "آلے کی رجسٹریشن تصدیق کی منتظر ہے۔",
+    "pushError": "آخری کوشش ناکام ہوئی: {error}",
+    "register": "ابھی رجسٹر کریں",
+    "unregister": "رجسٹریشن ختم کریں",
+    "working": "کام جاری ہے…",
+    "permission": "اجازت مانگیں",
+    "permissionGranted": "سسٹم بینر کی اجازت دیتا ہے۔",
+    "permissionDenied": "سسٹم بینر روک رہا ہے۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔"
   }
 }

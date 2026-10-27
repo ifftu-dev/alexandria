@@ -1,47 +1,78 @@
 {
-  "title": "Notifications",
-  "bell": "Notifications",
-  "bellUnread": "Notifications, {count} unread",
+  "title": "বিজ্ঞপ্তি",
+  "bell": "বিজ্ঞপ্তি",
+  "bellUnread": "বিজ্ঞপ্তি, {count}টি অপঠিত",
   "page": {
-    "markAllRead": "Mark all read",
-    "clear": "Clear",
-    "clearConfirm": "Remove every notification? This cannot be undone.",
-    "empty": "Nothing to show",
-    "emptyHint": "Interview invitations, offers, classroom calls and new credentials will appear here.",
-    "unreadLabel": "Unread",
-    "viaPush": "Push",
-    "open": "Open"
+    "markAllRead": "সব পড়া হয়েছে হিসেবে চিহ্নিত করুন",
+    "clear": "মুছুন",
+    "clearConfirm": "সব বিজ্ঞপ্তি সরাবেন? এটি পূর্বাবস্থায় ফেরানো যাবে না।",
+    "empty": "দেখানোর মতো কিছু নেই",
+    "emptyHint": "সাক্ষাৎকারের আমন্ত্রণ, প্রস্তাব, শ্রেণিকক্ষের কল এবং নতুন সনদপত্র এখানে দেখা যাবে।",
+    "unreadLabel": "অপঠিত",
+    "viaPush": "পুশ",
+    "open": "খুলুন"
   },
   "kinds": {
-    "interview_invited": { "title": "New interview invitation", "body": "An organisation invited you to interview. Open Alexandria to respond." },
-    "interview_room_opened": { "title": "Your interview room is open", "body": "The panel is waiting. Open Alexandria to join." },
-    "offer_sent": { "title": "New offer", "body": "An organisation sent you an offer." },
-    "access_requested": { "title": "Access request", "body": "An organisation is asking to see your credentials." },
-    "assessment_requested": { "title": "New assessment request", "body": "An organisation asked you to take an assessment." },
-    "classroom_call_started": { "title": "Classroom call started", "body": "A call started in one of your classrooms." },
-    "classroom_join_requested": { "title": "Join request", "body": "Somebody asked to join a classroom you moderate." },
-    "credential_issued": { "title": "Credential issued", "body": "A new credential was added to your wallet." },
-    "guardian_request": { "title": "Guardian request", "body": "There is a guardian link waiting for you." }
+    "interview_invited": {
+      "title": "সাক্ষাৎকারের নতুন আমন্ত্রণ",
+      "body": "একটি সংস্থা আপনাকে সাক্ষাৎকারে আমন্ত্রণ জানিয়েছে। উত্তর দিতে Alexandria খুলুন।"
+    },
+    "interview_room_opened": {
+      "title": "আপনার সাক্ষাৎকারের কক্ষ খোলা হয়েছে",
+      "body": "সাক্ষাৎকার গ্রহণকারীরা অপেক্ষা করছেন। যোগ দিতে Alexandria খুলুন।"
+    },
+    "offer_sent": {
+      "title": "নতুন প্রস্তাব",
+      "body": "একটি সংস্থা আপনাকে একটি প্রস্তাব পাঠিয়েছে।"
+    },
+    "access_requested": {
+      "title": "প্রবেশাধিকারের অনুরোধ",
+      "body": "একটি সংস্থা আপনার সনদপত্র দেখতে চাইছে।"
+    },
+    "assessment_requested": {
+      "title": "মূল্যায়নের নতুন অনুরোধ",
+      "body": "একটি সংস্থা আপনাকে একটি মূল্যায়নে অংশ নিতে বলেছে।"
+    },
+    "classroom_call_started": {
+      "title": "শ্রেণিকক্ষের কল শুরু হয়েছে",
+      "body": "আপনার একটি শ্রেণিকক্ষে কল শুরু হয়েছে।"
+    },
+    "classroom_join_requested": {
+      "title": "যোগদানের অনুরোধ",
+      "body": "কেউ আপনার পরিচালিত শ্রেণিকক্ষে যোগ দিতে চেয়েছেন।"
+    },
+    "credential_issued": {
+      "title": "সনদপত্র দেওয়া হয়েছে",
+      "body": "আপনার ওয়ালেটে একটি নতুন সনদপত্র যোগ করা হয়েছে।"
+    },
+    "guardian_request": {
+      "title": "একজন অভিভাবক আপনার অ্যাকাউন্টের সঙ্গে যুক্ত হয়েছেন",
+      "body": "একজন অভিভাবক এখন এই অ্যাকাউন্টের তত্ত্বাবধান করছেন।"
+    },
+    "generic": {
+      "title": "নতুন কার্যকলাপ",
+      "body": "হালনাগাদ দেখতে Alexandria খুলুন।"
+    }
   },
   "settings": {
-    "title": "Notifications",
-    "description": "Badges in the app, banners from the system, and pushes to this device when the app is closed.",
-    "inApp": "Show notifications",
-    "inAppHint": "Badges, the inbox, and system banners for new credentials, classroom calls and requests from organisations.",
-    "push": "Push notifications on this device",
-    "pushHint": "Alexandria Cloud can wake this device when an organisation sends an invitation or opens your interview room. Pushes carry no names, only the kind of event.",
-    "pushUnsupported": "Push is available in the iOS and Android apps. On this computer, notifications arrive while Alexandria is running.",
-    "pushRegistered": "Registered with {origin}",
-    "pushNotRegistered": "Not registered",
-    "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
-    "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
-    "pushRegistrationPending": "Device registration is awaiting confirmation.",
-    "pushError": "Last attempt failed: {error}",
-    "register": "Register now",
-    "unregister": "Unregister",
-    "working": "Working…",
-    "permission": "Ask for permission",
-    "permissionGranted": "The system allows banners.",
-    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings."
+    "title": "বিজ্ঞপ্তি",
+    "description": "অ্যাপে ব্যাজ, সিস্টেমের ব্যানার এবং অ্যাপ বন্ধ থাকলে এই ডিভাইসে পুশ বিজ্ঞপ্তি।",
+    "inApp": "বিজ্ঞপ্তি দেখান",
+    "inAppHint": "নতুন সনদপত্র, শ্রেণিকক্ষের কল এবং সংস্থার অনুরোধের জন্য ব্যাজ, ইনবক্স ও সিস্টেমের ব্যানার।",
+    "push": "এই ডিভাইসে পুশ বিজ্ঞপ্তি",
+    "pushHint": "কোনও সংস্থা আমন্ত্রণ পাঠালে বা আপনার সাক্ষাৎকারের কক্ষ খুললে Alexandria Cloud এই ডিভাইসকে সক্রিয় করতে পারে। পুশে কোনও নাম থাকে না, শুধু ঘটনার ধরন থাকে।",
+    "pushUnsupported": "পুশ iOS এবং Android অ্যাপে পাওয়া যায়। এই কম্পিউটারে Alexandria চলাকালীন বিজ্ঞপ্তি আসে।",
+    "pushRegistered": "{origin}-এ নিবন্ধিত",
+    "pushNotRegistered": "নিবন্ধিত নয়",
+    "pushNoCloud": "এই নেটওয়ার্কের জন্য Alexandria Cloud কনফিগার করা নেই, তাই নিবন্ধন করা যাচ্ছে না।",
+    "pushCleanupPending": "দূরবর্তী নিবন্ধন মুছে ফেলা বাকি আছে। আগে থেকে সারিতে থাকা ব্যানার এখনও আসতে পারে।",
+    "pushRegistrationPending": "ডিভাইসের নিবন্ধন নিশ্চিত হওয়ার অপেক্ষায় আছে।",
+    "pushError": "শেষ চেষ্টা ব্যর্থ হয়েছে: {error}",
+    "register": "এখন নিবন্ধন করুন",
+    "unregister": "নিবন্ধন বাতিল করুন",
+    "working": "কাজ চলছে…",
+    "permission": "অনুমতি চান",
+    "permissionGranted": "সিস্টেম ব্যানার দেখানোর অনুমতি দেয়।",
+    "permissionDenied": "সিস্টেম ব্যানার আটকে দিচ্ছে। ডিভাইসের বিজ্ঞপ্তি সেটিংসে Alexandria-কে অনুমতি দিন।"
   }
 }

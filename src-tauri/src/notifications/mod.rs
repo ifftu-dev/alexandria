@@ -34,6 +34,7 @@
 //! whether the app or the phone's push service produced it.
 
 pub mod cloud_pull;
+mod copy;
 pub mod opens;
 pub mod push;
 pub(crate) mod recipients;
@@ -169,40 +170,19 @@ impl NewNotification {
     }
 }
 
-/// The generic copy for a Cloud-originated kind: title, body and the route a
-/// tap opens. `None` for a kind Cloud does not send.
-///
-/// Mirrors the table in Alexandria Cloud's push sender. The two are kept the
-/// same by hand; the point of generic copy is that it never needs a name.
+/// English generic copy and destination for a Cloud-originated kind.
+/// `None` for a kind Cloud does not send. Recording selects the profile locale
+/// from the shared webview catalogs; contract fixtures check Cloud agreement.
 pub fn cloud_copy(kind: &str, id: &str) -> Option<(&'static str, &'static str, String)> {
-    let (title, body, route) = match kind {
-        kind::INTERVIEW_INVITED => (
-            "New interview invitation",
-            "An organisation invited you to interview. Open Alexandria to respond.",
-            "/settings/organisations".to_string(),
-        ),
-        kind::INTERVIEW_ROOM_OPENED => (
-            "Your interview room is open",
-            "The panel is waiting. Open Alexandria to join.",
-            format!("/interview-room/{id}"),
-        ),
-        kind::OFFER_SENT => (
-            "New offer",
-            "An organisation sent you an offer.",
-            "/settings/organisations".to_string(),
-        ),
-        kind::ACCESS_REQUESTED => (
-            "Access request",
-            "An organisation is asking to see your credentials.",
-            "/settings/organisations".to_string(),
-        ),
-        kind::ASSESSMENT_REQUESTED => (
-            "New assessment request",
-            "An organisation asked you to take an assessment.",
-            "/settings/organisations".to_string(),
-        ),
+    let route = match kind {
+        kind::INTERVIEW_ROOM_OPENED => format!("/interview-room/{id}"),
+        kind::INTERVIEW_INVITED
+        | kind::OFFER_SENT
+        | kind::ACCESS_REQUESTED
+        | kind::ASSESSMENT_REQUESTED => "/settings/organisations".to_string(),
         _ => return None,
     };
+    let (title, body) = copy::localized("en", kind);
     Some((title, body, route))
 }
 
@@ -299,7 +279,8 @@ pub struct Recorded {
 }
 
 /// Record a notification unless the learner has switched notifications off or
-/// it repeats one already seen. Writes only; nothing is emitted. The producer
+/// it repeats one already seen. Selects generic copy in the profile language,
+/// ignoring producer/provider text. Writes only; nothing is emitted. The producer
 /// that holds the database inside a job uses this and announces afterwards.
 pub fn record_if_enabled(
     conn: &Connection,
@@ -309,7 +290,14 @@ pub fn record_if_enabled(
         return Ok(None);
     }
     let now = crate::commands::credentials::now_rfc3339();
-    let Some(row) = store::record(conn, new, &now)? else {
+    let locale = SettingsStore::get(conn, keys::USER_LANGUAGE);
+    let (title, body) = copy::localized(&locale, &new.kind);
+    let localized = NewNotification {
+        title: title.into(),
+        body: body.into(),
+        ..new.clone()
+    };
+    let Some(row) = store::record(conn, &localized, &now)? else {
         return Ok(None);
     };
     let unread = store::unread_count(conn)?;
@@ -493,6 +481,94 @@ fn route_of_action(performed: &tauri_plugin_notification::ActionPerformed) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_uses_profile_language_for_generic_banner_copy() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        SettingsStore::set(db.conn(), keys::USER_LANGUAGE, "fr".to_string()).unwrap();
+        let recorded = record_if_enabled(db.conn(), &for_issued_credential("credential"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.row.title, "Justificatif délivré");
+        assert_eq!(
+            recorded.row.body,
+            "Un nouveau justificatif a été ajouté à votre portefeuille."
+        );
+        assert_eq!(list(db.conn(), None, false).unwrap()[0], recorded.row);
+    }
+
+    #[test]
+    fn recorded_cloud_copy_matches_contract_with_locale_normalization_and_no_payload_text() {
+        let contract: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/i18n/__tests__/fixtures/notification-copy-contract.json"
+        ))
+        .unwrap();
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let mut cases: Vec<(String, String)> = contract["locales"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|locale| (locale.clone(), locale.clone()))
+            .collect();
+        cases.extend(
+            contract["normalization"]["examples"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(locale, expected)| (locale.clone(), expected.as_str().unwrap().into())),
+        );
+        for (locale, expected) in cases {
+            SettingsStore::set(db.conn(), keys::USER_LANGUAGE, locale.clone()).unwrap();
+            for (kind, copy) in contract["locales"][expected].as_object().unwrap() {
+                let new = NewNotification::new(
+                    kind,
+                    "Private person",
+                    "Private organisation did:key:secret",
+                )
+                .from_push();
+                let row = record_if_enabled(db.conn(), &new).unwrap().unwrap().row;
+                assert_eq!(
+                    row.title,
+                    copy["title"].as_str().unwrap(),
+                    "{locale}/{kind}"
+                );
+                assert_eq!(row.body, copy["body"].as_str().unwrap(), "{locale}/{kind}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_local_kind_records_generic_copy_and_unknown_kinds_fall_back_safely() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        SettingsStore::set(db.conn(), keys::USER_LANGUAGE, "fr".to_string()).unwrap();
+        for (kind, expected) in [
+            (
+                kind::CLASSROOM_CALL_STARTED,
+                "Un appel de classe a commencé",
+            ),
+            (kind::CLASSROOM_JOIN_REQUESTED, "Demande d’adhésion"),
+            (kind::CREDENTIAL_ISSUED, "Justificatif délivré"),
+            (
+                kind::GUARDIAN_REQUEST,
+                "Un responsable légal est lié à votre compte",
+            ),
+            (kind::GENERIC, "Nouvelle activité"),
+            ("future_kind", "New activity"),
+        ] {
+            let row = record_if_enabled(
+                db.conn(),
+                &NewNotification::new(kind, "Private person", "Private organisation"),
+            )
+            .unwrap()
+            .unwrap()
+            .row;
+            assert_eq!(row.title, expected);
+            assert!(!row.body.contains("Private"));
+        }
+    }
 
     #[test]
     fn disabled_recording_preserves_history_without_claiming_new_events() {

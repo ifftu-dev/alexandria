@@ -1,47 +1,78 @@
 {
-  "title": "Notifications",
-  "bell": "Notifications",
-  "bellUnread": "Notifications, {count} unread",
+  "title": "నోటిఫికేషన్లు",
+  "bell": "నోటిఫికేషన్లు",
+  "bellUnread": "నోటిఫికేషన్లు, {count} చదవనివి",
   "page": {
-    "markAllRead": "Mark all read",
-    "clear": "Clear",
-    "clearConfirm": "Remove every notification? This cannot be undone.",
-    "empty": "Nothing to show",
-    "emptyHint": "Interview invitations, offers, classroom calls and new credentials will appear here.",
-    "unreadLabel": "Unread",
-    "viaPush": "Push",
-    "open": "Open"
+    "markAllRead": "అన్నింటినీ చదివినట్లు గుర్తించండి",
+    "clear": "తొలగించండి",
+    "clearConfirm": "అన్ని నోటిఫికేషన్లను తొలగించాలా? దీన్ని రద్దు చేయలేరు.",
+    "empty": "చూపించడానికి ఏమీ లేదు",
+    "emptyHint": "ఇంటర్వ్యూ ఆహ్వానాలు, ఆఫర్లు, తరగతి కాల్‌లు మరియు కొత్త ధ్రువపత్రాలు ఇక్కడ కనిపిస్తాయి.",
+    "unreadLabel": "చదవనిది",
+    "viaPush": "పుష్",
+    "open": "తెరవండి"
   },
   "kinds": {
-    "interview_invited": { "title": "New interview invitation", "body": "An organisation invited you to interview. Open Alexandria to respond." },
-    "interview_room_opened": { "title": "Your interview room is open", "body": "The panel is waiting. Open Alexandria to join." },
-    "offer_sent": { "title": "New offer", "body": "An organisation sent you an offer." },
-    "access_requested": { "title": "Access request", "body": "An organisation is asking to see your credentials." },
-    "assessment_requested": { "title": "New assessment request", "body": "An organisation asked you to take an assessment." },
-    "classroom_call_started": { "title": "Classroom call started", "body": "A call started in one of your classrooms." },
-    "classroom_join_requested": { "title": "Join request", "body": "Somebody asked to join a classroom you moderate." },
-    "credential_issued": { "title": "Credential issued", "body": "A new credential was added to your wallet." },
-    "guardian_request": { "title": "Guardian request", "body": "There is a guardian link waiting for you." }
+    "interview_invited": {
+      "title": "కొత్త ఇంటర్వ్యూ ఆహ్వానం",
+      "body": "ఒక సంస్థ మిమ్మల్ని ఇంటర్వ్యూకు ఆహ్వానించింది. స్పందించడానికి Alexandria తెరవండి."
+    },
+    "interview_room_opened": {
+      "title": "మీ ఇంటర్వ్యూ గది తెరిచి ఉంది",
+      "body": "ఇంటర్వ్యూ బృందం వేచి ఉంది. చేరడానికి Alexandria తెరవండి."
+    },
+    "offer_sent": {
+      "title": "కొత్త ఆఫర్",
+      "body": "ఒక సంస్థ మీకు ఆఫర్ పంపింది."
+    },
+    "access_requested": {
+      "title": "ప్రాప్యత అభ్యర్థన",
+      "body": "ఒక సంస్థ మీ ధ్రువపత్రాలను చూడాలని కోరుతోంది."
+    },
+    "assessment_requested": {
+      "title": "కొత్త మూల్యాంకన అభ్యర్థన",
+      "body": "ఒక సంస్థ మిమ్మల్ని మూల్యాంకనంలో పాల్గొనమని కోరింది."
+    },
+    "classroom_call_started": {
+      "title": "తరగతి కాల్ ప్రారంభమైంది",
+      "body": "మీ తరగతుల్లో ఒకదానిలో కాల్ ప్రారంభమైంది."
+    },
+    "classroom_join_requested": {
+      "title": "చేరడానికి అభ్యర్థన",
+      "body": "మీరు నిర్వహించే తరగతిలో చేరాలని ఎవరో కోరారు."
+    },
+    "credential_issued": {
+      "title": "ధ్రువపత్రం జారీ అయింది",
+      "body": "మీ వాలెట్‌కు కొత్త ధ్రువపత్రం జోడించబడింది."
+    },
+    "guardian_request": {
+      "title": "ఒక సంరక్షకుడు మీ ఖాతాకు అనుసంధానమయ్యారు",
+      "body": "ఇప్పుడు ఒక సంరక్షకుడు ఈ ఖాతాను పర్యవేక్షిస్తున్నారు."
+    },
+    "generic": {
+      "title": "కొత్త కార్యకలాపం",
+      "body": "నవీకరణను చూడటానికి Alexandria తెరవండి."
+    }
   },
   "settings": {
-    "title": "Notifications",
-    "description": "Badges in the app, banners from the system, and pushes to this device when the app is closed.",
-    "inApp": "Show notifications",
-    "inAppHint": "Badges, the inbox, and system banners for new credentials, classroom calls and requests from organisations.",
-    "push": "Push notifications on this device",
-    "pushHint": "Alexandria Cloud can wake this device when an organisation sends an invitation or opens your interview room. Pushes carry no names, only the kind of event.",
-    "pushUnsupported": "Push is available in the iOS and Android apps. On this computer, notifications arrive while Alexandria is running.",
-    "pushRegistered": "Registered with {origin}",
-    "pushNotRegistered": "Not registered",
-    "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
-    "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
-    "pushRegistrationPending": "Device registration is awaiting confirmation.",
-    "pushError": "Last attempt failed: {error}",
-    "register": "Register now",
-    "unregister": "Unregister",
-    "working": "Working…",
-    "permission": "Ask for permission",
-    "permissionGranted": "The system allows banners.",
-    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings."
+    "title": "నోటిఫికేషన్లు",
+    "description": "యాప్‌లో బ్యాడ్జ్‌లు, సిస్టమ్ బ్యానర్లు మరియు యాప్ మూసి ఉన్నప్పుడు ఈ పరికరానికి పుష్ నోటిఫికేషన్లు.",
+    "inApp": "నోటిఫికేషన్లను చూపించండి",
+    "inAppHint": "కొత్త ధ్రువపత్రాలు, తరగతి కాల్‌లు మరియు సంస్థల అభ్యర్థనల కోసం బ్యాడ్జ్‌లు, ఇన్‌బాక్స్ మరియు సిస్టమ్ బ్యానర్లు.",
+    "push": "ఈ పరికరంలో పుష్ నోటిఫికేషన్లు",
+    "pushHint": "ఒక సంస్థ ఆహ్వానం పంపినప్పుడు లేదా మీ ఇంటర్వ్యూ గదిని తెరిచినప్పుడు Alexandria Cloud ఈ పరికరాన్ని మేల్కొలపగలదు. పుష్‌లలో పేర్లు ఉండవు, సంఘటన రకం మాత్రమే ఉంటుంది.",
+    "pushUnsupported": "పుష్ iOS మరియు Android యాప్‌లలో అందుబాటులో ఉంది. ఈ కంప్యూటర్‌లో Alexandria నడుస్తున్నప్పుడు నోటిఫికేషన్లు వస్తాయి.",
+    "pushRegistered": "{origin} వద్ద నమోదు అయింది",
+    "pushNotRegistered": "నమోదు కాలేదు",
+    "pushNoCloud": "ఈ నెట్‌వర్క్‌కు Alexandria Cloud కాన్ఫిగర్ చేయలేదు, కాబట్టి నమోదు అందుబాటులో లేదు.",
+    "pushCleanupPending": "రిమోట్ నమోదు తొలగింపు పెండింగ్‌లో ఉంది. ఇప్పటికే క్యూలో ఉన్న బ్యానర్లు ఇంకా రావచ్చు.",
+    "pushRegistrationPending": "పరికరం నమోదు నిర్ధారణ కోసం వేచి ఉంది.",
+    "pushError": "చివరి ప్రయత్నం విఫలమైంది: {error}",
+    "register": "ఇప్పుడే నమోదు చేయండి",
+    "unregister": "నమోదు రద్దు చేయండి",
+    "working": "పని జరుగుతోంది…",
+    "permission": "అనుమతి అడగండి",
+    "permissionGranted": "సిస్టమ్ బ్యానర్లను అనుమతిస్తుంది.",
+    "permissionDenied": "సిస్టమ్ బ్యానర్లను నిరోధిస్తోంది. పరికర నోటిఫికేషన్ సెట్టింగ్‌లలో Alexandria ను అనుమతించండి."
   }
 }

@@ -13,6 +13,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
@@ -55,14 +56,27 @@ class MobilePushPlugin(private val activity: android.app.Activity) : Plugin(acti
 
     @Command
     fun getToken(invoke: Invoke) {
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) {
-                invoke.reject("Failed to get the FCM token", task.exception)
-                return@addOnCompleteListener
+        try {
+            // Builds without google-services.json remain usable. Only the
+            // default app can supply Messaging; a named Firebase app is not
+            // evidence that this installation is configured for push.
+            if (FirebaseApp.getApps(activity).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) {
+                invoke.reject("Push unavailable: Firebase is not configured. Add google-services.json for this app and rebuild.")
+                return
             }
-            val result = JSObject()
-            result.put("token", task.result)
-            invoke.resolve(result)
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (!task.isSuccessful) {
+                    invoke.reject("Failed to get the FCM token. Check connectivity and Google Play services, then retry.", task.exception)
+                    return@addOnCompleteListener
+                }
+                val result = JSObject()
+                result.put("token", task.result)
+                invoke.resolve(result)
+            }
+        } catch (error: Exception) {
+            // SDK initialization/getInstance/token can fail synchronously,
+            // before there is a Task on which to install a failure listener.
+            invoke.reject("Push unavailable: check Firebase configuration and Google Play services, then retry.", error)
         }
     }
 

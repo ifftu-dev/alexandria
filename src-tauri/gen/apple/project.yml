@@ -27,6 +27,10 @@ targets:
   alexandria-node_iOS:
     type: application
     platform: iOS
+    attributes:
+      SystemCapabilities:
+        com.apple.Push:
+          enabled: 1
     sources:
       - path: Sources
       - path: Assets.xcassets

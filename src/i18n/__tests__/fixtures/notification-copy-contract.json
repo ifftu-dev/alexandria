@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "fallbackLocale": "en",
+  "normalization": {
+    "steps": [
+      "Trim surrounding whitespace (registration already trims and limits locale to 32 characters).",
+      "Lowercase ASCII letters.",
+      "Take the primary subtag before the first hyphen or underscore.",
+      "Match one of the nine locale keys; missing, empty or unsupported values use en."
+    ],
+    "examples": {
+      "fr-CA": "fr",
+      "FR_ca": "fr",
+      "zh-Hant-TW": "zh",
+      " hi_IN ": "hi",
+      "de-DE": "en",
+      "": "en"
+    },
+    "selection": "Use the device registration locale read for each delivery attempt, not the locale at event enqueue time. Completed registrations are not resent after locale or token updates."
+  },
+  "locales": {
+    "en": {
+      "interview_invited": {
+        "title": "New interview invitation",
+        "body": "An organisation invited you to interview. Open Alexandria to respond."
+      },
+      "interview_room_opened": {
+        "title": "Your interview room is open",
+        "body": "The panel is waiting. Open Alexandria to join."
+      },
+      "offer_sent": {
+        "title": "New offer",
+        "body": "An organisation sent you an offer."
+      },
+      "access_requested": {
+        "title": "Access request",
+        "body": "An organisation is asking to see your credentials."
+      },
+      "assessment_requested": {
+        "title": "New assessment request",
+        "body": "An organisation asked you to take an assessment."
+      }
+    },
+    "bn": {
+      "interview_invited": {
+        "title": "সাক্ষাৎকারের নতুন আমন্ত্রণ",
+        "body": "একটি সংস্থা আপনাকে সাক্ষাৎকারে আমন্ত্রণ জানিয়েছে। উত্তর দিতে Alexandria খুলুন।"
+      },
+      "interview_room_opened": {
+        "title": "আপনার সাক্ষাৎকারের কক্ষ খোলা হয়েছে",
+        "body": "সাক্ষাৎকার গ্রহণকারীরা অপেক্ষা করছেন। যোগ দিতে Alexandria খুলুন।"
+      },
+      "offer_sent": {
+        "title": "নতুন প্রস্তাব",
+        "body": "একটি সংস্থা আপনাকে একটি প্রস্তাব পাঠিয়েছে।"
+      },
+      "access_requested": {
+        "title": "প্রবেশাধিকারের অনুরোধ",
+        "body": "একটি সংস্থা আপনার সনদপত্র দেখতে চাইছে।"
+      },
+      "assessment_requested": {
+        "title": "মূল্যায়নের নতুন অনুরোধ",
+        "body": "একটি সংস্থা আপনাকে একটি মূল্যায়নে অংশ নিতে বলেছে।"
+      }
+    },
+    "fr": {
+      "interview_invited": {
+        "title": "Nouvelle invitation à un entretien",
+        "body": "Une organisation vous invite à un entretien. Ouvrez Alexandria pour répondre."
+      },
+      "interview_room_opened": {
+        "title": "Votre salle d’entretien est ouverte",
+        "body": "Le jury vous attend. Ouvrez Alexandria pour rejoindre l’entretien."
+      },
+      "offer_sent": {
+        "title": "Nouvelle offre",
+        "body": "Une organisation vous a envoyé une offre."
+      },
+      "access_requested": {
+        "title": "Demande d’accès",
+        "body": "Une organisation souhaite consulter vos justificatifs."
+      },
+      "assessment_requested": {
+        "title": "Nouvelle demande d’évaluation",
+        "body": "Une organisation vous demande de passer une évaluation."
+      }
+    },
+    "te": {
+      "interview_invited": {
+        "title": "కొత్త ఇంటర్వ్యూ ఆహ్వానం",
+        "body": "ఒక సంస్థ మిమ్మల్ని ఇంటర్వ్యూకు ఆహ్వానించింది. స్పందించడానికి Alexandria తెరవండి."
+      },
+      "interview_room_opened": {
+        "title": "మీ ఇంటర్వ్యూ గది తెరిచి ఉంది",
+        "body": "ఇంటర్వ్యూ బృందం వేచి ఉంది. చేరడానికి Alexandria తెరవండి."
+      },
+      "offer_sent": {
+        "title": "కొత్త ఆఫర్",
+        "body": "ఒక సంస్థ మీకు ఆఫర్ పంపింది."
+      },
+      "access_requested": {
+        "title": "ప్రాప్యత అభ్యర్థన",
+        "body": "ఒక సంస్థ మీ ధ్రువపత్రాలను చూడాలని కోరుతోంది."
+      },
+      "assessment_requested": {
+        "title": "కొత్త మూల్యాంకన అభ్యర్థన",
+        "body": "ఒక సంస్థ మిమ్మల్ని మూల్యాంకనంలో పాల్గొనమని కోరింది."
+      }
+    },
+    "es": {
+      "interview_invited": {
+        "title": "Nueva invitación a una entrevista",
+        "body": "Una organización te ha invitado a una entrevista. Abre Alexandria para responder."
+      },
+      "interview_room_opened": {
+        "title": "Tu sala de entrevista está abierta",
+        "body": "El panel te está esperando. Abre Alexandria para unirte."
+      },
+      "offer_sent": {
+        "title": "Nueva oferta",
+        "body": "Una organización te ha enviado una oferta."
+      },
+      "access_requested": {
+        "title": "Solicitud de acceso",
+        "body": "Una organización solicita ver tus credenciales."
+      },
+      "assessment_requested": {
+        "title": "Nueva solicitud de evaluación",
+        "body": "Una organización te ha pedido que realices una evaluación."
+      }
+    },
+    "ur": {
+      "interview_invited": {
+        "title": "انٹرویو کی نئی دعوت",
+        "body": "ایک ادارے نے آپ کو انٹرویو کی دعوت دی ہے۔ جواب دینے کے لیے Alexandria کھولیں۔"
+      },
+      "interview_room_opened": {
+        "title": "آپ کے انٹرویو کا کمرہ کھل گیا ہے",
+        "body": "انٹرویو پینل انتظار کر رہا ہے۔ شامل ہونے کے لیے Alexandria کھولیں۔"
+      },
+      "offer_sent": {
+        "title": "نئی پیشکش",
+        "body": "ایک ادارے نے آپ کو پیشکش بھیجی ہے۔"
+      },
+      "access_requested": {
+        "title": "رسائی کی درخواست",
+        "body": "ایک ادارہ آپ کی اسناد دیکھنا چاہتا ہے۔"
+      },
+      "assessment_requested": {
+        "title": "جانچ کی نئی درخواست",
+        "body": "ایک ادارے نے آپ سے جانچ میں حصہ لینے کو کہا ہے۔"
+      }
+    },
+    "zh": {
+      "interview_invited": {
+        "title": "新的面试邀请",
+        "body": "一个组织邀请您参加面试。打开 Alexandria 以回复。"
+      },
+      "interview_room_opened": {
+        "title": "您的面试室已开放",
+        "body": "面试小组正在等候。打开 Alexandria 以加入。"
+      },
+      "offer_sent": {
+        "title": "新的录用邀约",
+        "body": "一个组织向您发送了录用邀约。"
+      },
+      "access_requested": {
+        "title": "访问请求",
+        "body": "一个组织请求查看您的凭证。"
+      },
+      "assessment_requested": {
+        "title": "新的评估请求",
+        "body": "一个组织邀请您参加评估。"
+      }
+    },
+    "mr": {
+      "interview_invited": {
+        "title": "मुलाखतीचे नवीन आमंत्रण",
+        "body": "एका संस्थेने तुम्हाला मुलाखतीसाठी आमंत्रित केले आहे. प्रतिसाद देण्यासाठी Alexandria उघडा."
+      },
+      "interview_room_opened": {
+        "title": "तुमची मुलाखत खोली खुली आहे",
+        "body": "मुलाखत मंडळ वाट पाहत आहे. सहभागी होण्यासाठी Alexandria उघडा."
+      },
+      "offer_sent": {
+        "title": "नवीन ऑफर",
+        "body": "एका संस्थेने तुम्हाला ऑफर पाठवली आहे."
+      },
+      "access_requested": {
+        "title": "प्रवेशाची विनंती",
+        "body": "एक संस्था तुमची प्रमाणपत्रे पाहण्याची विनंती करत आहे."
+      },
+      "assessment_requested": {
+        "title": "मूल्यांकनाची नवीन विनंती",
+        "body": "एका संस्थेने तुम्हाला मूल्यांकनात सहभागी होण्याची विनंती केली आहे."
+      }
+    },
+    "hi": {
+      "interview_invited": {
+        "title": "साक्षात्कार का नया निमंत्रण",
+        "body": "एक संस्था ने आपको साक्षात्कार के लिए आमंत्रित किया है। जवाब देने के लिए Alexandria खोलें।"
+      },
+      "interview_room_opened": {
+        "title": "आपका साक्षात्कार कक्ष खुला है",
+        "body": "साक्षात्कार पैनल प्रतीक्षा कर रहा है। शामिल होने के लिए Alexandria खोलें।"
+      },
+      "offer_sent": {
+        "title": "नया ऑफ़र",
+        "body": "एक संस्था ने आपको ऑफ़र भेजा है।"
+      },
+      "access_requested": {
+        "title": "पहुँच का अनुरोध",
+        "body": "एक संस्था आपके प्रमाणपत्र देखना चाहती है।"
+      },
+      "assessment_requested": {
+        "title": "मूल्यांकन का नया अनुरोध",
+        "body": "एक संस्था ने आपसे मूल्यांकन में भाग लेने का अनुरोध किया है।"
+      }
+    }
+  }
+}
