@@ -137,7 +137,15 @@ together.
   `MessagingDelegate`. Firebase is configured from `GoogleService-Info.plist`
   in the app bundle and is simply off without it. The app sets
   `FirebaseAppDelegateProxyEnabled` to false so Firebase does not swizzle
-  the same methods. Minimum iOS raised to 15 (Firebase 13).
+  the same methods. Minimum iOS raised to 15 (Firebase 13). FCM token diagnostics
+  omit token material.
+- `android/src/main/java/app/tauri/mobilepush/MobilePushPlugin.kt`: forwards
+  native receipt/token/tap events to Rust, filters notification tap extras,
+  and reports unavailable Firebase configuration through the token command.
+- `android/build.gradle.kts` and `android/src/test/`: add a JVM regression
+  test for the real native token command with Firebase configuration absent.
+- Rust and Swift event handling retain recipient-bound tap data across native
+  startup until the application subscribes; the app owns recipient validation.
 
-Everything else is upstream's. Taking an upstream change means reapplying the
-list above by hand.
+Taking an upstream change requires reviewing and reapplying these modifications
+alongside the change notices in the modified source files.

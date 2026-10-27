@@ -131,7 +131,7 @@ pub async fn notifications_permission_request(
 pub async fn notifications_pending_open(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<notifications::opens::NotificationOpen>, String> {
-    notifications::opens::pending(&state)
+    notifications::opens::pending(&state).await
 }
 
 #[tauri::command]

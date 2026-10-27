@@ -43,10 +43,11 @@ struct Registration {
     pending: String,
     revision: i64,
     error: Option<String>,
+    put_body: Option<String>,
 }
 
 fn registrations(conn: &Connection) -> Result<Vec<Registration>, String> {
-    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error FROM push_registrations ORDER BY cloud_origin").map_err(|e| e.to_string())?;
+    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error, put_body FROM push_registrations ORDER BY cloud_origin").map_err(|e| e.to_string())?;
     let rows = statement
         .query_map([], |row| {
             Ok(Registration {
@@ -56,6 +57,7 @@ fn registrations(conn: &Connection) -> Result<Vec<Registration>, String> {
                 pending: row.get(3)?,
                 revision: row.get(4)?,
                 error: row.get(5)?,
+                put_body: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -135,6 +137,7 @@ async fn signed_send(
     method: reqwest::Method,
     path: &str,
     body: Option<Value>,
+    revision: i64,
 ) -> Result<reqwest::Response, String> {
     if !origin.starts_with("https://") && !is_loopback(origin) {
         return Err("Alexandria Cloud must be https".into());
@@ -152,6 +155,7 @@ async fn signed_send(
         .header("x-alexandria-timestamp", timestamp.to_string())
         .header("x-alexandria-nonce", n)
         .header("x-alexandria-proof", signature)
+        .header("x-alexandria-push-version", revision.to_string())
         .timeout(std::time::Duration::from_secs(15));
     if let Some(body) = body {
         request = request.json(&body);
@@ -165,6 +169,21 @@ async fn signed_send(
             "Cloud push request returned {}",
             response.status().as_u16()
         ));
+    }
+    // Only the versioned acknowledgement proves the mutation participated in
+    // Cloud's durable ordering. A legacy 2xx is not a deletion barrier.
+    if response
+        .headers()
+        .get("x-alexandria-push-protocol")
+        .and_then(|v| v.to_str().ok())
+        != Some("versioned-v1")
+        || response
+            .headers()
+            .get("x-alexandria-push-version")
+            .and_then(|v| v.to_str().ok())
+            != Some(revision.to_string().as_str())
+    {
+        return Err("Cloud did not acknowledge the push mutation version".into());
     }
     Ok(response)
 }
@@ -229,6 +248,7 @@ async fn reconcile_inner(
             reqwest::Method::DELETE,
             &format!("/api/push/devices/for/{}/{}", did.as_str(), row.device_id),
             None,
+            row.revision,
         )
         .await
         .and_then(|response| {
@@ -262,14 +282,29 @@ async fn reconcile_inner(
     let device_id = existing
         .map(|r| r.device_id.clone())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let revision = existing.map_or(1, |r| r.revision + 1);
+    let body = serde_json::json!({
+        "deviceId": device_id, "platform": "fcm", "token": token.trim(),
+        "appVersion": env!("CARGO_PKG_VERSION"), "locale": f.locale.trim().chars().take(32).collect::<String>()
+    });
+    let serialized = body.to_string();
+    let revision = match existing {
+        Some(row) if row.revision > 0 && row.put_body.as_deref() == Some(&serialized) => {
+            row.revision
+        }
+        Some(row) => row
+            .revision
+            .checked_add(1)
+            .filter(|v| *v < i64::MAX)
+            .ok_or("push mutation version exhausted")?,
+        None => 1,
+    };
     recipients::replace(state, &profile, &origin, None)?;
     let staged_origin = origin.clone();
     let staged_device = device_id.clone();
     let staged_token = token.clone();
     let network = recipients::network()?;
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.stage", move |db| {
-        db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id) VALUES (?1,?2,'fcm',?3,'','put',?4,?5) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, network_id=excluded.network_id", params![staged_origin, staged_device, staged_token, revision, network]).map(drop).map_err(|e| e.to_string())
+        db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id, put_body) VALUES (?1,?2,'fcm',?3,'','put',?4,?5,?6) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, network_id=excluded.network_id, put_body=excluded.put_body", params![staged_origin, staged_device, staged_token, revision, network, serialized]).map(drop).map_err(|e| e.to_string())
     }).await?;
     let (key, did) = issuer_key(state).await?;
     let result = async {
@@ -278,10 +313,8 @@ async fn reconcile_inner(
             &key,
             reqwest::Method::PUT,
             &format!("/api/push/devices/for/{}", did.as_str()),
-            Some(serde_json::json!({
-                "deviceId": device_id, "platform": "fcm", "token": token,
-                "appVersion": env!("CARGO_PKG_VERSION"), "locale": f.locale
-            })),
+            Some(body),
+            revision,
         )
         .await?;
         if response.status() != reqwest::StatusCode::OK {

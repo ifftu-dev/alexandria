@@ -1,3 +1,4 @@
+// Alexandria modification: Firebase messaging dependency and native command regression tests.
 plugins {
     id("com.android.library")
     kotlin("android")

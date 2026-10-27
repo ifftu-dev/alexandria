@@ -31,6 +31,7 @@ async fn active_named(directory: &std::path::Path, name: &str) -> std::sync::Arc
     let db = crate::db::Database::open_encrypted(&paths.db_path, &vault.derive_db_key()).unwrap();
     db.run_migrations().unwrap();
     *state.db.lock().unwrap() = Some(db);
+    super::super::opens::prepare(&paths, &vault).unwrap();
     *state.keystore.lock().await = Some(vault);
     *state.active.write().unwrap() = Some(crate::ActiveProfile {
         id: paths.id.clone(),
@@ -71,7 +72,7 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
         assert!(request.starts_with("PUT /api/push/devices/for/did:key:"));
         assert!(request.contains("x-alexandria-proof:"));
         let body = r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#;
-        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        versioned_response(&mut socket, 200, body, wire_version(&request)).await;
     });
     let unavailable = register_with_token(&state, admitted(&state), async {
         Err("Native token unavailable".into())
@@ -150,8 +151,8 @@ async fn request(socket: &mut tokio::net::TcpStream) -> (String, Value) {
     }
 }
 
-async fn respond(socket: &mut tokio::net::TcpStream, code: u16, body: &str) {
-    socket.write_all(format!("HTTP/1.1 {code} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+async fn respond(socket: &mut tokio::net::TcpStream, code: u16, body: &str, header: &str) {
+    versioned_response(socket, code, body, wire_version(header)).await;
 }
 
 #[tokio::test]
@@ -168,12 +169,13 @@ async fn offline_opt_out_survives_restart_and_rotation_until_original_device_is_
     .unwrap();
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
-        let (_, body) = request(&mut socket).await;
+        let (header, body) = request(&mut socket).await;
         let device = body["deviceId"].as_str().unwrap().to_string();
         respond(
             &mut socket,
             200,
             r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+            &header,
         )
         .await;
         let mut proofs = Vec::new();
@@ -193,7 +195,7 @@ async fn offline_opt_out_survives_restart_and_rotation_until_original_device_is_
                     .unwrap()
                     .to_string(),
             );
-            respond(&mut socket, code, "").await;
+            respond(&mut socket, code, "", &header).await;
         }
         assert_ne!(
             proofs[0], proofs[1],
@@ -250,13 +252,14 @@ async fn shared_token_receipt_and_held_tap_wait_for_matching_profile_across_rest
             "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         ] {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let (_, body) = request(&mut socket).await;
+            let (header, body) = request(&mut socket).await;
             assert_eq!(body["token"], "shared-token");
             devices.push(body["deviceId"].clone());
             respond(
                 &mut socket,
                 200,
                 &serde_json::json!({"recipient":recipient}).to_string(),
+                &header,
             )
             .await;
         }
@@ -294,7 +297,7 @@ async fn shared_token_receipt_and_held_tap_wait_for_matching_profile_across_rest
     let tap = tapped(&b, payload.clone()).unwrap().unwrap();
     assert_eq!(tap.profile_id, a_id);
     assert_eq!(
-        super::super::opens::pending(&b).unwrap().unwrap().id,
+        super::super::opens::pending(&b).await.unwrap().unwrap().id,
         tap.id
     );
     assert!(super::super::opens::consume(&b, &admitted(&b), &tap.id).is_err());
@@ -302,7 +305,11 @@ async fn shared_token_receipt_and_held_tap_wait_for_matching_profile_across_rest
     drop(b);
     let locked = crate::profile::lifecycle_tests::state_in(directory.path());
     assert_eq!(
-        super::super::opens::pending(&locked).unwrap().unwrap().id,
+        super::super::opens::pending(&locked)
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
         tap.id
     );
     drop(locked);
@@ -312,7 +319,7 @@ async fn shared_token_receipt_and_held_tap_wait_for_matching_profile_across_rest
         .unwrap()
         .is_some());
     super::super::opens::consume(&a, &admitted(&a), &tap.id).unwrap();
-    assert!(super::super::opens::pending(&a).unwrap().is_none());
+    assert!(super::super::opens::pending(&a).await.unwrap().is_none());
     assert!(
         tapped(&a, payload).unwrap().is_none(),
         "duplicate native callback must not reopen a consumed intent"
@@ -361,6 +368,7 @@ async fn locking_while_native_token_is_pending_does_not_wait_or_register_in_a_ne
         crate::crypto::keystore::Keystore::open(&paths.vault_dir, "test-password-123").unwrap();
     let db = crate::db::Database::open_encrypted(&paths.db_path, &vault.derive_db_key()).unwrap();
     *state.db.lock().unwrap() = Some(db);
+    super::super::opens::prepare(&paths, &vault).unwrap();
     *state.keystore.lock().await = Some(vault);
     *state.active.write().unwrap() = Some(crate::ActiveProfile {
         id: paths.id.clone(),
@@ -392,13 +400,14 @@ async fn a_put_response_after_preference_changes_cannot_publish_a_recipient() {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
-        request(&mut socket).await;
+        let (header, _) = request(&mut socket).await;
         sent_tx.send(()).unwrap();
         reply_rx.await.unwrap();
         respond(
             &mut socket,
             200,
             r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+            &header,
         )
         .await;
     });
@@ -459,7 +468,7 @@ async fn interrupted_put_is_cleaned_at_original_origin_after_restart_and_origin_
             .next()
             .unwrap()
             .contains(&format!("/{device} HTTP/1.1")));
-        respond(&mut cleanup, 204, "").await;
+        respond(&mut cleanup, 204, "", &header).await;
     });
     let task_state = state.clone();
     let task = tokio::spawn(async move {
@@ -541,9 +550,9 @@ async fn legacy_response_and_rotated_bindings_fail_closed_and_wire_routes_are_ex
             ),
         ] {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let (_, request) = request(&mut socket).await;
+            let (header, request) = request(&mut socket).await;
             devices.push(request["deviceId"].clone());
-            respond(&mut socket, code, body).await;
+            respond(&mut socket, code, body, &header).await;
         }
         assert!(
             devices.windows(2).all(|pair| pair[0] == pair[1]),
@@ -690,7 +699,12 @@ async fn local_banner_tap_survives_lock_and_rejects_legacy_profileless_extras() 
     let intent = tapped(&locked, payload.clone()).unwrap().unwrap();
     assert_eq!(intent.profile_id, profile);
     assert_eq!(intent.recipient, None);
-    assert_eq!(super::super::opens::pending(&locked).unwrap(), Some(intent));
+    let held = super::super::opens::pending(&locked)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held.id, intent.id);
+    assert!(held.route.is_empty());
     let mut legacy = payload;
     legacy["data"]["__EXTRA__"]
         .as_object_mut()
@@ -703,12 +717,10 @@ async fn local_banner_tap_survives_lock_and_rejects_legacy_profileless_extras() 
 async fn locked_pending_open_ipc_peeks_without_consuming_and_requires_session_for_ack() {
     use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets};
     let directory = tempfile::tempdir().unwrap();
-    let state = crate::profile::lifecycle_tests::state_in(directory.path());
-    let profile = state
-        .profile_manager
-        .create("Locked", crate::profile::Avatar::default())
-        .unwrap();
-    let intent = tapped(
+    let state = active(directory.path()).await;
+    let profile = state.profile_manager.paths_for(&state.active_id().unwrap());
+    state.stop_active_profile().await.unwrap();
+    let mut intent = tapped(
         &state,
         serde_json::json!({"local": true, "data": {"__EXTRA__": {
             "profileId": profile.id.as_str(), "networkId": recipients::network().unwrap(),
@@ -717,6 +729,7 @@ async fn locked_pending_open_ipc_peeks_without_consuming_and_requires_session_fo
     )
     .unwrap()
     .unwrap();
+    intent.route.clear();
     let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
     let app = mock_builder()
         .manage(state)
@@ -793,12 +806,13 @@ async fn a_native_token_result_cannot_overwrite_a_newer_rotation_in_the_same_ses
     started_rx.await.unwrap();
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
-        let (_, body) = request(&mut socket).await;
+        let (header, body) = request(&mut socket).await;
         assert_eq!(body["token"], "new-token");
         respond(
             &mut socket,
             200,
             r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+            &header,
         )
         .await;
         listener
@@ -856,7 +870,7 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
             } else {
                 serde_json::json!([])
             };
-            respond(&mut socket, 200, &body.to_string()).await;
+            respond(&mut socket, 200, &body.to_string(), &header).await;
         }
     });
     reconcile(
@@ -950,4 +964,316 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
         )
     );
     server.abort();
+}
+
+#[tokio::test]
+async fn held_activity_is_opaque_on_disk_and_opens_only_after_matching_unlock() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let profile = state.active_id().unwrap().to_string();
+    let route =
+        "/interview-room/22222222-2222-4222-8222-222222222222?cloud=https%3A%2F%2Fprivate.example";
+    let payload = serde_json::json!({"local": true, "data": {"__EXTRA__": {
+        "profileId": profile, "networkId": recipients::network().unwrap(),
+        "notificationId": "11111111-1111-4111-8111-111111111111", "route": route
+    }}});
+    let intent = tapped(&state, payload.clone()).unwrap().unwrap();
+    let bytes = std::fs::read(directory.path().join("notification_open.json")).unwrap();
+    let disk = String::from_utf8_lossy(&bytes);
+    assert!(
+        !disk.contains("22222222-2222-4222-8222-222222222222"),
+        "destination must be protected at rest"
+    );
+    assert!(
+        !disk.contains("11111111-1111-4111-8111-111111111111"),
+        "event identity must be opaque at rest"
+    );
+    assert!(!disk.contains("private.example"));
+    state.stop_active_profile().await.unwrap();
+    drop(state);
+    let locked = crate::profile::lifecycle_tests::state_in(directory.path());
+    let held = super::super::opens::pending(&locked)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held.profile_id, profile);
+    assert!(
+        held.route.is_empty(),
+        "locked IPC exposes only routing metadata"
+    );
+    drop(locked);
+    let state = active(directory.path()).await;
+    assert_eq!(
+        super::super::opens::pending(&state)
+            .await
+            .unwrap()
+            .unwrap()
+            .route,
+        route
+    );
+    super::super::opens::consume(&state, &admitted(&state), &intent.id).unwrap();
+    assert!(tapped(&state, payload).unwrap().is_none());
+    let disk = std::fs::read_to_string(directory.path().join("notification_open.json")).unwrap();
+    assert!(!disk.contains("11111111-1111-4111-8111-111111111111"));
+}
+
+fn wire_version(header: &str) -> i64 {
+    header
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(key, _)| key.eq_ignore_ascii_case("x-alexandria-push-version"))
+        .and_then(|(_, value)| value.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+async fn versioned_response(
+    socket: &mut tokio::net::TcpStream,
+    code: u16,
+    body: &str,
+    version: i64,
+) {
+    socket.write_all(format!("HTTP/1.1 {code} Test\r\nx-alexandria-push-version: {version}\r\nx-alexandria-push-protocol: versioned-v1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+}
+
+#[tokio::test]
+async fn deletion_ack_fences_a_put_that_executes_later_and_reenable_uses_fresh_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let (sent_tx, sent_rx) = tokio::sync::oneshot::channel();
+    let (execute_tx, execute_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut delayed_put, _) = listener.accept().await.unwrap();
+        let (put, body) = request(&mut delayed_put).await;
+        let device = body["deviceId"].clone();
+        sent_tx.send(()).unwrap();
+        // The original PUT has arrived but has NOT executed. The DELETE
+        // commits first against an absent registration and returns its barrier.
+        let (mut delete, _) = listener.accept().await.unwrap();
+        let (delete_header, _) = request(&mut delete).await;
+        let revoked_version = wire_version(&delete_header);
+        versioned_response(&mut delete, 204, "", revoked_version).await;
+        execute_rx.await.unwrap(); // caller has observed successful opt-out
+        let resurrected = wire_version(&put) >= revoked_version;
+        let (mut reenable, _) = listener.accept().await.unwrap();
+        let (next, next_body) = request(&mut reenable).await;
+        versioned_response(
+            &mut reenable,
+            200,
+            r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+            wire_version(&next),
+        )
+        .await;
+        (
+            wire_version(&put),
+            revoked_version,
+            resurrected,
+            device,
+            wire_version(&next),
+            next_body["deviceId"].clone(),
+        )
+    });
+    let task_state = state.clone();
+    let put = tokio::spawn(async move {
+        reconcile(
+            &task_state,
+            admitted(&task_state),
+            Some("old-token".into()),
+            None,
+        )
+        .await
+    });
+    sent_rx.await.unwrap();
+    let cleanup = state.clone();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        state
+            .profile_operations
+            .lock(async move { cleanup.stop_active_profile().await }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(put.await.unwrap().is_err());
+    drop(state);
+    let state = active(directory.path()).await;
+    let off = reconcile(&state, admitted(&state), None, Some(false))
+        .await
+        .unwrap();
+    assert!(!off.enabled && !off.pending_cleanup);
+    execute_tx.send(()).unwrap();
+    let on = reconcile(
+        &state,
+        admitted(&state),
+        Some("new-token".into()),
+        Some(true),
+    )
+    .await
+    .unwrap();
+    assert!(on.registered);
+    let (put_version, delete_version, resurrected, old_device, next_version, new_device) =
+        server.await.unwrap();
+    assert_eq!(put_version, 1);
+    assert_eq!(delete_version, 2);
+    assert!(
+        !resurrected,
+        "a delayed PUT must not undo acknowledged opt-out"
+    );
+    assert_ne!(old_device, new_device);
+    assert_eq!(next_version, 1);
+}
+
+#[tokio::test]
+async fn unchanged_pending_put_retries_the_same_version_and_body_after_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        for code in [503, 200, 200] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, body) = request(&mut socket).await;
+            let version = wire_version(&header);
+            requests.push((version, body));
+            versioned_response(
+                &mut socket,
+                code,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                version,
+            )
+            .await;
+        }
+        requests
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token-A".into()), None)
+            .await
+            .unwrap()
+            .pending_registration
+    );
+    state.stop_active_profile().await.unwrap();
+    drop(state);
+    let state = active(directory.path()).await;
+    assert!(
+        reconcile(&state, admitted(&state), Some("token-A".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    assert!(
+        reconcile(&state, admitted(&state), Some("token-B".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    let requests = server.await.unwrap();
+    assert_eq!(
+        requests[0], requests[1],
+        "an unchanged retry must reuse its persisted mutation version and payload"
+    );
+    assert_eq!(requests[2].0, 2);
+    assert_eq!(requests[2].1["token"], "token-B");
+    assert_eq!(requests[0].1["deviceId"], requests[2].1["deviceId"]);
+}
+
+#[tokio::test]
+async fn unversioned_or_mismatched_delete_ack_keeps_cleanup_identity_across_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let (put, body) = request(&mut socket).await;
+        versioned_response(
+            &mut socket,
+            200,
+            r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+            wire_version(&put),
+        )
+        .await;
+        let mut deletions = Vec::new();
+        for response in 0..3 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            deletions.push((
+                header.lines().next().unwrap().to_string(),
+                wire_version(&header),
+            ));
+            if response == 0 {
+                socket.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            } else {
+                versioned_response(
+                    &mut socket,
+                    204,
+                    "",
+                    if response == 1 {
+                        999
+                    } else {
+                        wire_version(&header)
+                    },
+                )
+                .await;
+            }
+        }
+        (body["deviceId"].as_str().unwrap().to_string(), deletions)
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    let off = reconcile(&state, admitted(&state), None, Some(false))
+        .await
+        .unwrap();
+    assert!(!off.enabled && off.pending_cleanup);
+    state.stop_active_profile().await.unwrap();
+    drop(state);
+    let state = active(directory.path()).await;
+    let retry = reconcile(&state, admitted(&state), Some("rotated-token".into()), None)
+        .await
+        .unwrap();
+    assert!(!retry.enabled && retry.pending_cleanup);
+    let clean = reconcile(&state, admitted(&state), None, None)
+        .await
+        .unwrap();
+    assert!(!clean.enabled && !clean.pending_cleanup);
+    let (device, deletions) = server.await.unwrap();
+    assert!(deletions
+        .iter()
+        .all(|(path, version)| path.contains(&device) && *version == 2));
+}
+
+#[tokio::test]
+async fn locked_startup_removes_incompatible_plaintext_prototype_activity() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = crate::profile::lifecycle_tests::state_in(directory.path());
+    let path = directory.path().join("notification_open.json");
+    std::fs::write(&path, r#"{"pending":null,"consumed":["recipient:interview_room_opened:private-interview:opening"]}"#).unwrap();
+    assert!(super::super::opens::pending(&state)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(
+        !path.exists(),
+        "unversioned plaintext prototype activity must not remain on disk"
+    );
 }

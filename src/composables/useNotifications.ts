@@ -23,6 +23,8 @@ const pushStatus = ref<PushStatus | null>(null)
 let opensInitialized = false
 let initialized = false
 let generation = 0
+let snapshotRequest = 0
+let inboxRevision = 0
 let unlisteners: UnlistenFn[] = []
 let retryTimer: ReturnType<typeof setInterval> | null = null
 let onResume: (() => void) | null = null
@@ -51,17 +53,25 @@ async function openRoute(route: string | null | undefined): Promise<void> {
 
 async function load(): Promise<void> {
   const current = currentAction()
+  const request = ++snapshotRequest
   loading.value = true
   try {
-    const [rows, count] = await Promise.all([
-      invoke<AppNotification[]>('notifications_list', { limit: 100, unreadOnly: false }),
-      invoke<number>('notifications_unread_count'),
-    ])
-    if (!current()) return
-    items.value = rows
-    unread.value = count
+    while (current() && request === snapshotRequest) {
+      const revision = inboxRevision
+      const [rows, count] = await Promise.all([
+        invoke<AppNotification[]>('notifications_list', { limit: 100, unreadOnly: false }),
+        invoke<number>('notifications_unread_count'),
+      ])
+      if (!current() || request !== snapshotRequest) return
+      // An event committed after either read: take a fresh snapshot before
+      // replacing the live state. A newer load owns its own reconciliation.
+      if (revision !== inboxRevision) continue
+      items.value = rows
+      unread.value = count
+      return
+    }
   } finally {
-    if (current()) loading.value = false
+    if (current() && request === snapshotRequest) loading.value = false
   }
 }
 
@@ -165,13 +175,11 @@ async function init(): Promise<void> {
     document.addEventListener('visibilitychange', onResume)
   }
 
-  await load().catch((e) => console.warn('[notifications] load failed:', e))
-  if (gen !== generation) return
-
   try {
     const releases = await Promise.all([
       listen<{ session: string; row: AppNotification }>('notifications:new', (event) => {
         if (gen !== generation || session !== getProfileSessionToken() || event.payload.session !== session) return
+        inboxRevision++
         const row = event.payload.row
         if (!items.value.some((n) => n.id === row.id)) {
           items.value.unshift(row)
@@ -180,6 +188,7 @@ async function init(): Promise<void> {
       }),
       listen<{ session: string; unread: number }>('notifications:changed', (event) => {
         if (gen !== generation || session !== getProfileSessionToken() || event.payload.session !== session) return
+        inboxRevision++
         unread.value = event.payload.unread
         // Another window or the backend changed rows; resync the list.
         void load().catch(() => {})
@@ -193,9 +202,10 @@ async function init(): Promise<void> {
     unlisteners = releases
   } catch {
     // Outside a Tauri webview (browser dev) — the inbox is static.
-    return
   }
 
+  if (gen !== generation || session !== getProfileSessionToken()) return
+  await load().catch((e) => console.warn('[notifications] load failed:', e))
 }
 
 /** Process-lifetime listener: taps must reach the picker while the vault is locked. */

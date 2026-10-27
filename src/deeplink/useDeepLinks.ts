@@ -40,7 +40,15 @@ async function replay(): Promise<void> {
   const intent = notification
   const session = getProfileSessionToken()
   navigating = (async () => {
-    if (!await navigate(target)) return
+    let destination = target
+    if (intent && !intent.route) {
+      const resolved = await useLocalApi().invoke<NotificationOpen | null>('notifications_pending_open')
+      if (session !== getProfileSessionToken() || pending !== target || !resolved
+        || resolved.id !== intent.id || resolved.profileId !== intent.profileId
+        || !resolved.route.startsWith('/') || resolved.route.startsWith('//')) return
+      destination = { kind: 'route', path: resolved.route }
+    }
+    if (!await navigate(destination)) return
     if (session !== getProfileSessionToken()) return
     destinationSession = session
     if (intent) {
@@ -56,7 +64,7 @@ async function replay(): Promise<void> {
 }
 
 async function openNotification(intent: NotificationOpen): Promise<void> {
-  if (!intent.id || !intent.profileId || !intent.route?.startsWith('/') || intent.route.startsWith('//')) return
+  if (!intent.id || !intent.profileId || (intent.route !== '' && (!intent.route?.startsWith('/') || intent.route.startsWith('//')))) return
   if (consumed.has(intent.id) || notification?.id === intent.id) return
   ensureReplay()
   pending = { kind: 'route', path: intent.route }

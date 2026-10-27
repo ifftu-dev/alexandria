@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+// Alexandria modification: retain launch actions until the native Rust subscriber attaches.
 package app.tauri.notification
 
 import android.Manifest
@@ -78,6 +79,7 @@ class RemoveActiveArgs {
   ]
 )
 class NotificationPlugin(private val activity: Activity): Plugin(activity) {
+  private var pendingAction: JSObject? = null
   private var webView: WebView? = null
   private lateinit var manager: TauriNotificationManager
   private lateinit var notificationManager: NotificationManager
@@ -122,14 +124,33 @@ class NotificationPlugin(private val activity: Activity): Plugin(activity) {
     onIntent(intent)
   }
 
+  @Synchronized
   fun onIntent(intent: Intent) {
     if (Intent.ACTION_MAIN != intent.action) {
       return
     }
     val dataJson = manager.handleNotificationActionPerformed(intent, notificationStorage)
     if (dataJson != null) {
-      trigger("actionPerformed", dataJson)
+      // load() runs before Rust installs on_action. Keep the latest tap,
+      // with the complete local notification extras, until that subscriber.
+      pendingAction = dataJson
+      replayAction()
+
     }
+  }
+
+  private fun replayAction() {
+    if (!hasListener("actionPerformed")) return
+    val action = pendingAction ?: return
+    pendingAction = null
+    trigger("actionPerformed", action)
+  }
+
+  @Command
+  @Synchronized
+  override fun registerListener(invoke: Invoke) {
+    super.registerListener(invoke)
+    replayAction()
   }
 
   @Command

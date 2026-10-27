@@ -167,3 +167,68 @@ it('changes desired push state through one durable registration command', async 
   expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('push_set_enabled', { enabled: false })
   expect(notifications.pushStatus.value).toEqual(result)
 })
+
+
+it('loads activity committed while the inbox listeners are being installed', async () => {
+  const notifications = await fresh()
+  const row = { id: 'during-unlock', readAt: null }
+  let committed = false
+  mocks.listen.mockImplementation(async () => {
+    committed = true
+    return () => {}
+  })
+  mocks.invoke.mockImplementation(async command => {
+    if (command === 'notifications_list') return committed ? [row] : []
+    if (command === 'notifications_unread_count') return committed ? 1 : 0
+    return null
+  })
+  await notifications.init()
+  expect(notifications.items.value).toEqual([row])
+  expect(notifications.unread.value).toBe(1)
+  notifications.teardown()
+})
+
+it('keeps an event received while an older initial snapshot is in flight', async () => {
+  const notifications = await fresh()
+  const handlers = new Map<string, (event: { payload: unknown }) => void>()
+  mocks.listen.mockImplementation(async (event, callback) => { handlers.set(event, callback); return () => {} })
+  let finishRows!: (rows: unknown) => void
+  const oldRows = new Promise(resolve => { finishRows = resolve })
+  let first = true
+  const row = { id: 'after-snapshot', readAt: null }
+  mocks.invoke.mockImplementation(async command => {
+    if (command === 'notifications_list') {
+      if (first) { first = false; return oldRows }
+      return [row]
+    }
+    return first ? 0 : 1
+  })
+  const starting = notifications.init()
+  await vi.waitFor(() => expect(first).toBe(false))
+  handlers.get('notifications:new')!({ payload: { session: null, row } })
+  finishRows([])
+  await starting
+  expect(notifications.items.value).toEqual([row])
+  expect(notifications.unread.value).toBe(1)
+  notifications.teardown()
+})
+
+it('does not publish a delayed inbox snapshot into a newly unlocked session', async () => {
+  const notifications = await fresh()
+  const session = await import('../profileSession')
+  session.setProfileSessionToken('A')
+  let finish!: (rows: unknown) => void
+  const delayed = new Promise(resolve => { finish = resolve })
+  mocks.invoke.mockImplementation(async command => command === 'notifications_list' ? delayed : 9)
+  const starting = notifications.init()
+  await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('notifications_list', expect.anything()))
+  notifications.teardown()
+  session.setProfileSessionToken('B')
+  mocks.invoke.mockImplementation(async command => command === 'notifications_list' ? [{ id: 'B', readAt: null }] : 1)
+  await notifications.init()
+  finish([{ id: 'private-A' }])
+  await starting
+  expect(notifications.items.value).toEqual([{ id: 'B', readAt: null }])
+  expect(notifications.unread.value).toBe(1)
+  notifications.teardown()
+})

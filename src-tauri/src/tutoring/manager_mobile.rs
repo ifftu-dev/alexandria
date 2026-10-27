@@ -2243,32 +2243,15 @@ impl TutoringManager {
                 .as_mut()
                 .filter(|s| s.session_id == room_session_id)
                 .ok_or("the connected panel room has changed")?;
-            let ticket: RoomTicket = publication
-                .ticket
-                .parse()
-                .map_err(|_| "invalid room ticket")?;
-            if !self.tasks.is_open()
-                || session.handle.is_closed()
-                || endpoint.is_closed()
-                || ticket.topic_id != session.handle.ticket().topic_id
-            {
-                return Err("the panel room is not connected".into());
-            }
-            if session
-                .panel_presence
-                .as_ref()
-                .is_some_and(|task| !task.is_finished())
-            {
-                return Err("this panel runtime already has a presence".into());
-            }
-            let handle = session.handle.clone();
-            let disconnected = async move {
-                tokio::select! { _ = handle.closed() => {}, _ = endpoint.closed() => {} }
-            };
-            let (task, receive) =
-                super::panel_presence::start(&self.tasks, lease, disconnected, link, publication);
-            session.panel_presence = Some(task);
-            receive
+            super::panel_presence::attach(
+                &self.tasks,
+                &session.handle,
+                &mut session.panel_presence,
+                endpoint,
+                lease,
+                link,
+                publication,
+            )?
         };
         receive
             .await

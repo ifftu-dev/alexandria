@@ -76,7 +76,7 @@ private class MessagingHandler: NSObject, MessagingDelegate {
 
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken, !token.isEmpty else { return }
-        NSLog("[mobile-push] FCM token: %@...", String(token.prefix(12)))
+        NSLog("[mobile-push] FCM registration token received")
         emit("token-received", ["token": token])
     }
 }
@@ -327,8 +327,8 @@ func getDeviceTokenDirect(_ buffer: UnsafeMutablePointer<CChar>, _ bufferLen: In
         return -2
     }
 
-    if let error = fetcher.error {
-        NSLog("[mobile-push] Token error: %@", error)
+    if fetcher.error != nil {
+        NSLog("[mobile-push] Token request failed")
         return -1
     }
 
@@ -376,7 +376,7 @@ public class MobilePushPlugin: Plugin {
         Messaging.messaging().apnsToken = token
         Messaging.messaging().token { fcmToken, error in
             if let error = error {
-                NSLog("[mobile-push] FCM token error: %@", error.localizedDescription)
+                NSLog("[mobile-push] FCM token request failed")
                 activeTokenFetcher?.reject(error.localizedDescription)
                 return
             }
@@ -389,7 +389,7 @@ public class MobilePushPlugin: Plugin {
     }
 
     public func handleTokenError(_ error: Error) {
-        NSLog("[mobile-push] handleTokenError: %@", error.localizedDescription)
+        NSLog("[mobile-push] Token callback failed")
     }
 }
 

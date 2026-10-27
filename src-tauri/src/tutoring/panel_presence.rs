@@ -38,6 +38,38 @@ impl Drop for WithdrawOnDrop {
     }
 }
 
+pub(super) fn attach(
+    tasks: &Arc<SessionTasks>,
+    handle: &live::rooms::RoomHandle,
+    presence: &mut Option<TaskHandle>,
+    endpoint: iroh::Endpoint,
+    lease: ProfileLease,
+    link: PanelLink,
+    publication: Publication,
+) -> Result<oneshot::Receiver<Result<Value, String>>, String> {
+    let ticket: live::rooms::RoomTicket = publication
+        .ticket
+        .parse()
+        .map_err(|_| "invalid room ticket")?;
+    if !tasks.is_open()
+        || handle.is_closed()
+        || endpoint.is_closed()
+        || ticket.topic_id != handle.ticket().topic_id
+    {
+        return Err("the panel room is not connected".into());
+    }
+    if presence.as_ref().is_some_and(|task| !task.is_finished()) {
+        return Err("this panel runtime already has a presence".into());
+    }
+    let handle = handle.clone();
+    let disconnected = async move {
+        tokio::select! { _ = handle.closed() => {}, _ = endpoint.closed() => {} }
+    };
+    let (task, receive) = start(tasks, lease, disconnected, link, publication);
+    *presence = Some(task);
+    Ok(receive)
+}
+
 pub(super) fn start(
     tasks: &Arc<SessionTasks>,
     lease: ProfileLease,

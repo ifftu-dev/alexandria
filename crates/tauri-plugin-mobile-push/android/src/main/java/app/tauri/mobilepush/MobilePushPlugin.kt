@@ -1,3 +1,4 @@
+// Alexandria modification: recipient-bound native event bridge and safe Firebase availability/error handling.
 package app.tauri.mobilepush
 
 import android.Manifest

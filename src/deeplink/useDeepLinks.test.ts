@@ -122,3 +122,35 @@ it('does not navigate after a panel link resolves in an obsolete profile session
   await opening
   expect(mocks.push).not.toHaveBeenCalled()
 })
+
+it('resolves an opaque cold tap only after its matching profile unlocks', async () => {
+  const links = await fresh()
+  const tap = { id: 'opaque-tap', profileId: 'A', networkId: 'network', recipient: null, route: '' }
+  await links.openNotification(tap)
+  mocks.profile.value = 'B'
+  mocks.unlocked.value = true
+  for (const cb of mocks.readyCallbacks) await cb()
+  expect(mocks.invoke).not.toHaveBeenCalled()
+  mocks.profile.value = 'A'
+  mocks.invoke.mockResolvedValueOnce({ ...tap, route: '/credentials/secret' })
+  for (const cb of mocks.readyCallbacks) await cb()
+  expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/credentials/secret')
+  expect(mocks.invoke).toHaveBeenCalledWith('notifications_consume_open', { id: 'opaque-tap' })
+})
+
+it('does not navigate a decrypted tap returned after the profile session changes', async () => {
+  const links = await fresh()
+  const sessions = await import('@/composables/profileSession')
+  sessions.setProfileSessionToken('A')
+  mocks.unlocked.value = true
+  mocks.profile.value = 'A'
+  let finish!: (value: unknown) => void
+  mocks.invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const tap = { id: 'opaque', profileId: 'A', networkId: 'network', recipient: null, route: '' }
+  const opening = links.openNotification(tap)
+  await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('notifications_pending_open'))
+  sessions.setProfileSessionToken('B')
+  finish({ ...tap, route: '/credentials/private-A' })
+  await opening
+  expect(mocks.push).not.toHaveBeenCalled()
+})

@@ -906,9 +906,9 @@ jobs:
             "CFLAGS_aarch64-linux-android=${ANDROID_AARCH64_CFLAGS}" \
             npx tauri android build ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --target aarch64 --config src-tauri/tauri.android.conf.json
 
-      - name: Test native push command without Firebase configuration
+      - name: Test native push availability and cold notification actions
         working-directory: alexandria/src-tauri/gen/android
-        run: ./gradlew :tauri-plugin-mobile-push:testDebugUnitTest --console=plain
+        run: ./gradlew :tauri-plugin-mobile-push:testDebugUnitTest :tauri-plugin-notification:testDebugUnitTest --console=plain
 
       - name: Upload Android validation artifacts
         if: inputs.mode == 'validate'

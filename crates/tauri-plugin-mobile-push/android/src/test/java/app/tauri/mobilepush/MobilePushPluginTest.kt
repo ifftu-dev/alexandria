@@ -1,3 +1,4 @@
+// Alexandria addition: actual native command regression without Firebase configuration.
 package app.tauri.mobilepush
 
 import android.app.Activity

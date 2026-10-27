@@ -113,6 +113,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // network's Cloud. See `crate::notifications`.
     (28, "notifications", MIGRATION_028_NOTIFICATIONS),
     (29, "notification_recipient_lifecycle", include_str!("notification_recipient_lifecycle.sql")),
+    (30, "notification_mutation_body", include_str!("notification_mutation_body.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
