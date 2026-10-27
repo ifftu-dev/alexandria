@@ -3,6 +3,7 @@
 Triage: ready-for-agent
 Repos: alexandria
 Part of: alexandria/docs/skill-graph-atlas-spec.md
+Assignee: atlas-model-state
 
 ## Work
 
@@ -20,4 +21,4 @@ Use TDD at the approved graph-adapter and shared-state seams. Verify subject iso
 
 ## Notes
 
-- 2026-10-27: Created; test-seam approval pending.
+- 2026-10-27: Created; all parent-spec test seams approved by the user. Claimed for isolated implementation.

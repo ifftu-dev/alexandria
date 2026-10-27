@@ -28,9 +28,9 @@ Tracker: local Markdown; close tickets with `Triage: done` and a dated note. No 
 - [02 — Interactive subject atlas and inspector](skill-graph-atlas/02-explorer.md): blocked by 01.
 - [03 — Personal surfaces and end-to-end verification](skill-graph-atlas/03-personal-surfaces.md): blocked by 01 and 02.
 
-## Proposed public test boundaries
+## Approved public test boundaries
 
-Await the user's explicit seam approval before writing tests, as required by the invoked TDD skill.
+The user approved all three public test boundaries and review base `d894a10b` on 2026-10-27. This approval applies to implementer and fix agents; do not ask again for these seams. The user also authorized temporarily rebinding this T3 project to the app repository for isolated ticket worktrees, restoring the original parent workspace after cleanup.
 
 - **Graph adapter API:** active credential-to-earned-Bloom mapping, Ready state, counts, field metadata, stable presentation, and preservation of prerequisite references. Does not test canvas/SVG pixels or backend credential verification.
 - **Mounted graph component API:** user-visible search/select/inspect/open/reset interactions and reduced-motion behavior. Tests public props/events/rendered controls, not private renderer internals.
