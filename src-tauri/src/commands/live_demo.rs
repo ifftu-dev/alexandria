@@ -28,13 +28,13 @@ use serde_json::{json, Value};
 
 use crate::clock::now_rfc3339;
 use crate::commands::credentials::{
-    export_bundle_signed_impl, mark_status_lists_published, pending_status_lists,
-    push_status_lists, revoke_credential_impl, verify_bundle_offline_impl,
+    export_bundle_signed_impl, revoke_credential_impl, verify_bundle_offline_impl,
 };
 use crate::commands::hiring::{
     sign_interview_response, sign_offer_response, InterviewInvite, Offer,
 };
 use crate::commands::talent_index::{get_talent_index_preview_impl, set_talent_index_consent_impl};
+use crate::credentials::status_list;
 use crate::crypto::did::{derive_did_key, Did};
 use crate::db::Database;
 use crate::domain::talent_index::{sign_record, TalentIndexConsent};
@@ -229,14 +229,14 @@ fn credential(db: &Database, id: &str) -> VerifiableCredential {
 /// Push whatever is pending, as the app does after issue, revoke and grading.
 /// Issuing into an existing list changes no bit, so nothing may be pending.
 async fn publish_lists(db: &Database, key: &SigningKey, did: &Did) {
-    let pending = pending_status_lists(db.conn(), did).unwrap();
+    let pending = status_list::pending(db.conn(), did).unwrap();
     if pending.is_empty() {
         return;
     }
-    let (accepted, errors) = push_status_lists(&pending, key, did, &now_rfc3339()).await;
+    let (accepted, errors) = status_list::push(&pending, key, did, &now_rfc3339()).await;
     assert!(errors.is_empty(), "{errors:?}");
-    mark_status_lists_published(db.conn(), &accepted).unwrap();
-    assert!(pending_status_lists(db.conn(), did).unwrap().is_empty());
+    status_list::mark_published(db.conn(), &accepted).unwrap();
+    assert!(status_list::pending(db.conn(), did).unwrap().is_empty());
 }
 
 /// Run the stdlib verifier on a bare credential; returns (exit code, stdout).
@@ -287,7 +287,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     // what makes the status host resolve to Cloud.
     SettingsStore::set(db.conn(), keys::CLOUD_ORIGIN, base.to_string()).unwrap();
     assert_eq!(
-        crate::commands::credentials::status_list_host(db.conn()).as_deref(),
+        status_list::host(db.conn()).as_deref(),
         Some(base.trim_end_matches('/'))
     );
 
@@ -306,7 +306,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     let reference = first.credential_status.clone().expect("status reference");
     assert_eq!(reference.status_list_credential, list_url);
     assert_eq!(
-        pending_status_lists(db.conn(), &did).unwrap().len(),
+        status_list::pending(db.conn(), &did).unwrap().len(),
         1,
         "a new list is pending"
     );
@@ -651,7 +651,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     // ── 8. Revoke: the hosted list flips, the verifier sees it ────────
     revoke_credential_impl(db.conn(), &did, &first_id, "live rehearsal", &now_rfc3339()).unwrap();
     assert_eq!(
-        pending_status_lists(db.conn(), &did).unwrap().len(),
+        status_list::pending(db.conn(), &did).unwrap().len(),
         1,
         "revocation leaves the list pending"
     );

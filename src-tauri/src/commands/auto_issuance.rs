@@ -22,15 +22,13 @@ use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::cardano::completion::{self, CompletionObservation};
+use crate::credentials::status_list;
 use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::domain::vc::context::W3C_VC_V2;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
     integrity_hash_of, Claim, CredentialStatus, CustomClaim, Proof, VerifiableCredential, Witness,
 };
-
-const STATUS_LIST_BITS: usize = alexandria_verify::vc::status::MIN_BITS;
-const STATUS_LIST_TYPE: &str = "BitstringStatusListEntry";
 
 /// Outcome of a single auto-issuance pipeline run.
 #[derive(Debug, Default)]
@@ -111,8 +109,8 @@ fn issue_new_observation(
     learner_did: &Did,
     obs: &CompletionObservation,
 ) -> Result<String, String> {
-    let list_id = ensure_status_list(conn, learner_did)?;
-    let index = allocate_status_index(conn, &list_id)?;
+    let list_id = status_list::ensure(conn, learner_did)?;
+    let index = status_list::allocate(conn, &list_id)?;
 
     let now = crate::clock::now_rfc3339();
 
@@ -162,7 +160,7 @@ fn issue_new_observation(
         credential_subject: claim.into_subject(learner_did.clone()),
         credential_status: Some(CredentialStatus {
             id: format!("{list_id}#{index}"),
-            type_: STATUS_LIST_TYPE.into(),
+            type_: status_list::ENTRY_TYPE.into(),
             status_purpose: "revocation".into(),
             status_list_index: index.to_string(),
             status_list_credential: list_id.clone(),
@@ -220,25 +218,6 @@ fn issue_new_observation(
     }
 
     Ok(credential_id)
-}
-
-// ----- helpers (mirror commands::credentials internals) -----
-
-use super::credentials::ensure_status_list;
-
-fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String> {
-    let next: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(status_list_index), -1) + 1 FROM credentials \
-             WHERE status_list_id = ?1",
-            params![list_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if next >= STATUS_LIST_BITS as i64 {
-        return Err(format!("status list {list_id} is full"));
-    }
-    Ok(next)
 }
 
 /// Find the credential id that was issued for a given observation

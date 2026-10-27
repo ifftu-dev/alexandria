@@ -11,6 +11,7 @@ pub mod cloud;
 pub mod commands;
 pub mod content_store;
 pub mod course_notes;
+pub mod credentials;
 pub mod crypto;
 pub mod db;
 pub mod diag;
@@ -1079,13 +1080,14 @@ pub fn run() {
                                 // commands that do so publish inline, and this
                                 // pass catches the rest and any push that failed.
                                 if let Some(w) = wallet.as_ref() {
-                                    let signing_key =
-                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
+                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
+                                        &w.signing_key.to_bytes(),
+                                    );
                                     let issuer = crypto::did::derive_did_key(&signing_key);
                                     let pending = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => commands::credentials::pending_status_lists(
+                                            Ok(Some(db)) => credentials::status_list::pending(
                                                 db.conn(),
                                                 &issuer,
                                             )
@@ -1095,7 +1097,7 @@ pub fn run() {
                                     };
                                     if !pending.is_empty() {
                                         let now = crate::clock::now_rfc3339();
-                                        let (accepted, errors) = commands::credentials::push_status_lists(
+                                        let (accepted, errors) = credentials::status_list::push(
                                             &pending,
                                             &signing_key,
                                             &issuer,
@@ -1108,13 +1110,18 @@ pub fn run() {
                                         if !accepted.is_empty() {
                                             let guard = db_for_queue.lock();
                                             if let Ok(Some(db)) = guard.as_deref() {
-                                                if let Err(e) = commands::credentials::mark_status_lists_published(
-                                                    db.conn(),
-                                                    &accepted,
-                                                ) {
+                                                if let Err(e) =
+                                                    credentials::status_list::mark_published(
+                                                        db.conn(),
+                                                        &accepted,
+                                                    )
+                                                {
                                                     log::warn!("status list publication: {e}");
                                                 } else {
-                                                    log::info!("status lists: published {}", accepted.len());
+                                                    log::info!(
+                                                        "status lists: published {}",
+                                                        accepted.len()
+                                                    );
                                                 }
                                             }
                                         }
@@ -1127,8 +1134,9 @@ pub fn run() {
                                 // recorded after. Unchanged records are skipped,
                                 // so most passes send nothing.
                                 if let Some(w) = wallet.as_ref() {
-                                    let signing_key =
-                                        ed25519_dalek::SigningKey::from_bytes(&w.signing_key.to_bytes());
+                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
+                                        &w.signing_key.to_bytes(),
+                                    );
                                     let did = crypto::did::derive_did_key(&signing_key);
                                     let now = crate::clock::now_rfc3339();
                                     let now_unix = chrono::Utc::now().timestamp();
@@ -1275,9 +1283,7 @@ pub fn run() {
                 #[cfg(grader)]
                 grader_runtime,
                 last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
-                ipc_limiter: Arc::new(std::sync::Mutex::new(
-                    ratelimit::IpcRateLimiter::new(),
-                )),
+                ipc_limiter: Arc::new(std::sync::Mutex::new(ratelimit::IpcRateLimiter::new())),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 db,
                 db_executor,
