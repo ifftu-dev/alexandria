@@ -1,47 +1,78 @@
 {
   "title": "Notifications",
   "bell": "Notifications",
-  "bellUnread": "Notifications, {count} unread",
+  "bellUnread": "Notifications, {count} non lues",
   "page": {
-    "markAllRead": "Mark all read",
-    "clear": "Clear",
-    "clearConfirm": "Remove every notification? This cannot be undone.",
-    "empty": "Nothing to show",
-    "emptyHint": "Interview invitations, offers, classroom calls and new credentials will appear here.",
-    "unreadLabel": "Unread",
-    "viaPush": "Push",
-    "open": "Open"
+    "markAllRead": "Tout marquer comme lu",
+    "clear": "Effacer",
+    "clearConfirm": "Supprimer toutes les notifications ? Cette action est irréversible.",
+    "empty": "Rien à afficher",
+    "emptyHint": "Les invitations à des entretiens, les offres, les appels de classe et les nouveaux justificatifs apparaîtront ici.",
+    "unreadLabel": "Non lue",
+    "viaPush": "Notification push",
+    "open": "Ouvrir"
   },
   "kinds": {
-    "interview_invited": { "title": "New interview invitation", "body": "An organisation invited you to interview. Open Alexandria to respond." },
-    "interview_room_opened": { "title": "Your interview room is open", "body": "The panel is waiting. Open Alexandria to join." },
-    "offer_sent": { "title": "New offer", "body": "An organisation sent you an offer." },
-    "access_requested": { "title": "Access request", "body": "An organisation is asking to see your credentials." },
-    "assessment_requested": { "title": "New assessment request", "body": "An organisation asked you to take an assessment." },
-    "classroom_call_started": { "title": "Classroom call started", "body": "A call started in one of your classrooms." },
-    "classroom_join_requested": { "title": "Join request", "body": "Somebody asked to join a classroom you moderate." },
-    "credential_issued": { "title": "Credential issued", "body": "A new credential was added to your wallet." },
-    "guardian_request": { "title": "Guardian request", "body": "There is a guardian link waiting for you." }
+    "interview_invited": {
+      "title": "Nouvelle invitation à un entretien",
+      "body": "Une organisation vous invite à un entretien. Ouvrez Alexandria pour répondre."
+    },
+    "interview_room_opened": {
+      "title": "Votre salle d’entretien est ouverte",
+      "body": "Le jury vous attend. Ouvrez Alexandria pour rejoindre l’entretien."
+    },
+    "offer_sent": {
+      "title": "Nouvelle offre",
+      "body": "Une organisation vous a envoyé une offre."
+    },
+    "access_requested": {
+      "title": "Demande d’accès",
+      "body": "Une organisation souhaite consulter vos justificatifs."
+    },
+    "assessment_requested": {
+      "title": "Nouvelle demande d’évaluation",
+      "body": "Une organisation vous demande de passer une évaluation."
+    },
+    "classroom_call_started": {
+      "title": "Un appel de classe a commencé",
+      "body": "Un appel a commencé dans une de vos classes."
+    },
+    "classroom_join_requested": {
+      "title": "Demande d’adhésion",
+      "body": "Une personne souhaite rejoindre une classe que vous modérez."
+    },
+    "credential_issued": {
+      "title": "Justificatif délivré",
+      "body": "Un nouveau justificatif a été ajouté à votre portefeuille."
+    },
+    "guardian_request": {
+      "title": "Un responsable légal est lié à votre compte",
+      "body": "Un responsable légal supervise désormais ce compte."
+    },
+    "generic": {
+      "title": "Nouvelle activité",
+      "body": "Ouvrez Alexandria pour consulter la mise à jour."
+    }
   },
   "settings": {
     "title": "Notifications",
-    "description": "Badges in the app, banners from the system, and pushes to this device when the app is closed.",
-    "inApp": "Show notifications",
-    "inAppHint": "Badges, the inbox, and system banners for new credentials, classroom calls and requests from organisations.",
-    "push": "Push notifications on this device",
-    "pushHint": "Alexandria Cloud can wake this device when an organisation sends an invitation or opens your interview room. Pushes carry no names, only the kind of event.",
-    "pushUnsupported": "Push is available in the iOS and Android apps. On this computer, notifications arrive while Alexandria is running.",
-    "pushRegistered": "Registered with {origin}",
-    "pushNotRegistered": "Not registered",
-    "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
-    "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
-    "pushRegistrationPending": "Device registration is awaiting confirmation.",
-    "pushError": "Last attempt failed: {error}",
-    "register": "Register now",
-    "unregister": "Unregister",
-    "working": "Working…",
-    "permission": "Ask for permission",
-    "permissionGranted": "The system allows banners.",
-    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings."
+    "description": "Des badges dans l’application, des bannières du système et des notifications push sur cet appareil lorsque l’application est fermée.",
+    "inApp": "Afficher les notifications",
+    "inAppHint": "Badges, boîte de réception et bannières du système pour les nouveaux justificatifs, les appels de classe et les demandes des organisations.",
+    "push": "Notifications push sur cet appareil",
+    "pushHint": "Alexandria Cloud peut réveiller cet appareil lorsqu’une organisation envoie une invitation ou ouvre votre salle d’entretien. Les notifications push ne contiennent aucun nom, seulement le type d’événement.",
+    "pushUnsupported": "Les notifications push sont disponibles dans les applications iOS et Android. Sur cet ordinateur, les notifications arrivent tant qu’Alexandria est en cours d’exécution.",
+    "pushRegistered": "Enregistré auprès de {origin}",
+    "pushNotRegistered": "Non enregistré",
+    "pushNoCloud": "Aucun service Alexandria Cloud n’est configuré pour ce réseau ; l’enregistrement est donc indisponible.",
+    "pushCleanupPending": "La suppression à distance est en attente. Des bannières déjà mises en attente peuvent encore arriver.",
+    "pushRegistrationPending": "L’enregistrement de l’appareil attend une confirmation.",
+    "pushError": "La dernière tentative a échoué : {error}",
+    "register": "Enregistrer maintenant",
+    "unregister": "Désenregistrer",
+    "working": "Opération en cours…",
+    "permission": "Demander l’autorisation",
+    "permissionGranted": "Le système autorise les bannières.",
+    "permissionDenied": "Le système bloque les bannières. Autorisez Alexandria dans les réglages de notification de l’appareil."
   }
 }

@@ -13,15 +13,46 @@
     "open": "Open"
   },
   "kinds": {
-    "interview_invited": { "title": "New interview invitation", "body": "An organisation invited you to interview. Open Alexandria to respond." },
-    "interview_room_opened": { "title": "Your interview room is open", "body": "The panel is waiting. Open Alexandria to join." },
-    "offer_sent": { "title": "New offer", "body": "An organisation sent you an offer." },
-    "access_requested": { "title": "Access request", "body": "An organisation is asking to see your credentials." },
-    "assessment_requested": { "title": "New assessment request", "body": "An organisation asked you to take an assessment." },
-    "classroom_call_started": { "title": "Classroom call started", "body": "A call started in one of your classrooms." },
-    "classroom_join_requested": { "title": "Join request", "body": "Somebody asked to join a classroom you moderate." },
-    "credential_issued": { "title": "Credential issued", "body": "A new credential was added to your wallet." },
-    "guardian_request": { "title": "Guardian request", "body": "There is a guardian link waiting for you." }
+    "interview_invited": {
+      "title": "New interview invitation",
+      "body": "An organisation invited you to interview. Open Alexandria to respond."
+    },
+    "interview_room_opened": {
+      "title": "Your interview room is open",
+      "body": "The panel is waiting. Open Alexandria to join."
+    },
+    "offer_sent": {
+      "title": "New offer",
+      "body": "An organisation sent you an offer."
+    },
+    "access_requested": {
+      "title": "Access request",
+      "body": "An organisation is asking to see your credentials."
+    },
+    "assessment_requested": {
+      "title": "New assessment request",
+      "body": "An organisation asked you to take an assessment."
+    },
+    "classroom_call_started": {
+      "title": "Classroom call started",
+      "body": "A call started in one of your classrooms."
+    },
+    "classroom_join_requested": {
+      "title": "Join request",
+      "body": "Somebody asked to join a classroom you moderate."
+    },
+    "credential_issued": {
+      "title": "Credential issued",
+      "body": "A new credential was added to your wallet."
+    },
+    "guardian_request": {
+      "title": "A guardian linked to your account",
+      "body": "A guardian now has oversight of this account."
+    },
+    "generic": {
+      "title": "New activity",
+      "body": "Open Alexandria to view the update."
+    }
   },
   "settings": {
     "title": "Notifications",

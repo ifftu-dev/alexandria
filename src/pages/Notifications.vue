@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The inbox. Rows come from `useNotifications`, newest first; a tap marks the
 // row read and follows its route. Titles and bodies are rendered from the
-// kind's localized copy when the catalog has it, else as the backend stored
-// them (which is the Cloud's generic English for a push).
+// kind’s generic localized copy, with English fallback. Stored or provider
+// text is never used as a fallback for an unknown kind.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -30,12 +30,12 @@ onMounted(async () => {
 
 function titleOf(n: AppNotification): string {
   const key = `notifications.kinds.${n.kind}.title`
-  return te(key) ? t(key) : n.title
+  return te(key) || te(key, 'en') ? t(key) : t('notifications.kinds.generic.title')
 }
 
 function bodyOf(n: AppNotification): string {
   const key = `notifications.kinds.${n.kind}.body`
-  return te(key) ? t(key) : n.body
+  return te(key) || te(key, 'en') ? t(key) : t('notifications.kinds.generic.body')
 }
 
 const formatter = computed(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }))

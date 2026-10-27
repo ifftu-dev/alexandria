@@ -12,6 +12,10 @@ android {
         consumerProguardFiles("proguard-rules.pro")
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -32,5 +36,9 @@ android {
 
 dependencies {
     compileOnly(project(":tauri-android"))
+    testImplementation(project(":tauri-android"))
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")
+    testImplementation("org.robolectric:robolectric:4.14.1")
     implementation("com.google.firebase:firebase-messaging:23.4.1")
 }
