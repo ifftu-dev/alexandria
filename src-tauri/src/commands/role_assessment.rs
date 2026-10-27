@@ -13,13 +13,12 @@
 
 use crate::credentials::Issuer;
 use crate::profile::scope::ProfileState as State;
-use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::now_rfc3339;
 use crate::credentials::{self, IssuancePolicy, IssueCredentialRequest};
-use crate::crypto::did::{derive_did_key, Did};
+use crate::crypto::did::Did;
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, RoleClaim, VerifiableCredential};
@@ -334,11 +333,9 @@ fn map_role_assessment(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleAssessment
 /// required assurance level. Reuses the P0 issuance pipeline, so the
 /// resulting VC carries the integrity attestation and is refused if the
 /// session doesn't satisfy the role's bounds.
-#[allow(clippy::too_many_arguments)]
 pub fn issue_role_credential_impl(
     conn: &Connection,
-    issuer_key: &SigningKey,
-    issuer_did: &Did,
+    signer: &Issuer,
     role_assessment_id: &str,
     subject: &Did,
     integrity_session_id: &str,
@@ -363,7 +360,7 @@ pub fn issue_role_credential_impl(
     // owner's, so the owner acts as the org. If the org carries a DID the
     // caller cannot sign for, issuance is refused rather than silently
     // falling back to a personal signature.
-    let signer_did = derive_did_key(issuer_key);
+    let signer_did = signer.did();
     let org_did = match org.did.as_deref() {
         Some(did) if did == signer_did.0 => did.to_string(),
         Some(did) => {
@@ -413,18 +410,13 @@ pub fn issue_role_credential_impl(
         integrity_session_id: Some(integrity_session_id.to_string()),
         integrity_policy: Some(policy),
     };
-    // `issuer_did` is retained in the signature for API compatibility but the
-    // credential is issued under the org's DID, which is the signer's own
-    // (checked above), so the issuer is built from the key.
-    let _ = issuer_did;
-    debug_assert_eq!(org_issuer, signer_did);
-    credentials::issue(conn, &Issuer::from_key(issuer_key.clone()), &req, now)
+    // The org's DID is the signer's own (checked above), so the signer issues.
+    credentials::issue(conn, signer, &req, now)
 }
 
 fn issue_role_credential_transactional(
     conn: &Connection,
-    issuer_key: &SigningKey,
-    issuer_did: &Did,
+    signer: &Issuer,
     role_assessment_id: &str,
     subject: &Did,
     integrity_session_id: &str,
@@ -433,8 +425,7 @@ fn issue_role_credential_transactional(
     crate::db::with_transaction(conn, || {
         issue_role_credential_impl(
             conn,
-            issuer_key,
-            issuer_did,
+            signer,
             role_assessment_id,
             subject,
             integrity_session_id,
@@ -576,7 +567,7 @@ pub async fn issue_role_credential(
     subject: String,
     integrity_session_id: String,
 ) -> Result<VerifiableCredential, String> {
-    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let signer = Issuer::from_keystore(&state.keystore).await?;
     let now = now_rfc3339();
     state
         .db_executor
@@ -587,8 +578,7 @@ pub async fn issue_role_credential(
             move |db| {
                 issue_role_credential_transactional(
                     db.conn(),
-                    &signing_key,
-                    &issuer_did,
+                    &signer,
                     &role_assessment_id,
                     &Did(subject),
                     &integrity_session_id,
@@ -604,6 +594,7 @@ mod tests {
     use super::*;
     use crate::crypto::did::derive_did_key;
     use crate::db::Database;
+    use ed25519_dalek::SigningKey;
 
     const NOW: &str = "2026-04-13T00:00:00Z";
 
@@ -775,7 +766,7 @@ mod tests {
 
     #[test]
     fn issue_role_credential_passes_gate_and_embeds_role() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         let conn = db.conn();
         let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
         let ra = create_role_assessment_impl(
@@ -798,8 +789,15 @@ mod tests {
         .unwrap();
         seed_session(conn, "sess_ok", "completed", 0.9, 0);
 
-        let vc = issue_role_credential_impl(conn, &key, &issuer, &ra.id, &subject, "sess_ok", NOW)
-            .unwrap();
+        let vc = issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &ra.id,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap();
         assert!(vc.type_.contains(&"RoleCredential".to_string()));
         let role = RoleClaim::extract(&vc.credential_subject).expect("role claim");
         assert_eq!(role.role, "SRE L4");
@@ -810,7 +808,7 @@ mod tests {
 
     #[test]
     fn issue_role_credential_blocked_by_failing_session() {
-        let (db, key, issuer, subject) = setup();
+        let (db, key, _, subject) = setup();
         let conn = db.conn();
         let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
         let ra = create_role_assessment_impl(
@@ -832,9 +830,15 @@ mod tests {
         )
         .unwrap();
         seed_session(conn, "sess_bad", "suspended", 0.3, 2);
-        let err =
-            issue_role_credential_impl(conn, &key, &issuer, &ra.id, &subject, "sess_bad", NOW)
-                .unwrap_err();
+        let err = issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &ra.id,
+            &subject,
+            "sess_bad",
+            NOW,
+        )
+        .unwrap_err();
         assert!(err.contains("issuance policy"), "got: {err}");
     }
 
@@ -868,8 +872,15 @@ mod tests {
         let (db, key, owner, subject) = setup();
         let conn = db.conn();
         let ra = ready_to_issue(conn, Some(&owner.0)); // org DID == owner DID
-        let vc =
-            issue_role_credential_impl(conn, &key, &owner, &ra, &subject, "sess_ok", NOW).unwrap();
+        let vc = issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &ra,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap();
         assert_eq!(vc.issuer, owner, "issued under the org's DID");
         assert_ne!(
             vc.issuer.0, subject.0,
@@ -882,7 +893,15 @@ mod tests {
         let (db, key, owner, subject) = setup();
         let conn = db.conn();
         let ra = ready_to_issue(conn, None);
-        issue_role_credential_impl(conn, &key, &owner, &ra, &subject, "sess_ok", NOW).unwrap();
+        issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &ra,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap();
 
         // The org now carries a stable DID for every future issuance.
         let org_id: String = conn
@@ -898,7 +917,7 @@ mod tests {
 
     #[test]
     fn failed_credential_insert_rolls_back_org_did_adoption() {
-        let (db, key, owner, subject) = setup();
+        let (db, key, _, subject) = setup();
         let conn = db.conn();
         let role_assessment_id = ready_to_issue(conn, None);
         conn.execute_batch(
@@ -909,8 +928,7 @@ mod tests {
 
         let error = issue_role_credential_transactional(
             conn,
-            &key,
-            &owner,
+            &Issuer::from_key(key.clone()),
             &role_assessment_id,
             &subject,
             "sess_ok",
@@ -939,8 +957,7 @@ mod tests {
             .unwrap();
         issue_role_credential_transactional(
             conn,
-            &key,
-            &owner,
+            &Issuer::from_key(key.clone()),
             &role_assessment_id,
             &subject,
             "sess_ok",
@@ -953,12 +970,19 @@ mod tests {
     fn issuance_is_refused_when_the_caller_does_not_hold_the_org_key() {
         // The org's DID belongs to someone else; this caller cannot sign as it
         // and must be refused rather than silently signing personally.
-        let (db, key, owner, subject) = setup();
+        let (db, key, _, subject) = setup();
         let conn = db.conn();
         let other_org_did = derive_did_key(&SigningKey::from_bytes(&[9u8; 32])).0;
         let ra = ready_to_issue(conn, Some(&other_org_did));
-        let err = issue_role_credential_impl(conn, &key, &owner, &ra, &subject, "sess_ok", NOW)
-            .unwrap_err();
+        let err = issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &ra,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap_err();
         assert!(
             err.contains("cannot issue as organization"),
             "unexpected: {err}"
@@ -972,8 +996,15 @@ mod tests {
         let (db, key, owner, _subject) = setup();
         let conn = db.conn();
         let ra = ready_to_issue(conn, Some(&owner.0));
-        let err = issue_role_credential_impl(conn, &key, &owner, &ra, &owner, "sess_ok", NOW)
-            .unwrap_err();
+        let err = issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &ra,
+            &owner,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap_err();
         assert!(err.contains("to itself"), "unexpected: {err}");
     }
 

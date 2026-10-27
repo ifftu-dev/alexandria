@@ -342,8 +342,7 @@ fn run_issue(
 
     let vc = app_lib::commands::role_assessment::issue_role_credential_impl(
         &signer.conn,
-        signer.issuer.key(),
-        signer.issuer.did(),
+        &signer.issuer,
         id,
         &subject_did,
         session,

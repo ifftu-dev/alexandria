@@ -1430,8 +1430,7 @@ impl App {
 
         let vc = app_lib::commands::role_assessment::issue_role_credential_impl(
             &signer.conn,
-            signer.issuer.key(),
-            signer.issuer.did(),
+            &signer.issuer,
             assessment_id,
             &subject_did,
             session,
