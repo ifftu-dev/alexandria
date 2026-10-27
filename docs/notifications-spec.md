@@ -3,7 +3,7 @@
 Triage: ready-for-agent
 Repos: alexandria, alexandria-cloud
 
-Status: Implementation in progress; complete and harden the existing work before release.
+Status: Implementation and local review complete; external device/provider release acceptance remains open.
 Date: 2026-10-26
 
 ## Problem Statement
@@ -127,3 +127,9 @@ This spec captures the implemented direction and the remaining acceptance requir
 - Verified during the 2026-10-26 status review: 39 focused frontend tests, 14 app Rust notification tests, six Cloud push unit tests, strict Vue/TypeScript checking, and Rust formatting in both repositories passed. These results describe the pre-integration worktree, not a future integrated implementation.
 - Cloud database integration tests were not run because their database environment was not configured in the review shell. Full workspace tests, Clippy, native builds, and real-device delivery remain unverified. Both deployment-specific Firebase app configuration files were absent from the inspected app checkout; deployed Cloud/Firebase configuration was not inspected.
 - Recommended execution order: preserve the existing work; integrate main and reconcile migrations; close recipient, preference, and recovery gaps; finish localization and native configuration; run the agreed behavioral and device checks. Completion requires evidence for the acceptance behavior, not just a successful compile or an updated status label.
+
+### 2026-10-27 — integrated implementation; release validation remains open
+
+Tickets 01–05 are complete. Independent app and Cloud standards/spec reviews are clear after fixes and separate mergers. App workspace and frontend suites, real PostgreSQL Cloud tests, pinned-toolchain checks, Android APK/AAB and iOS simulator builds passed; final tap-handoff regressions also passed. [Ticket06](notifications/06-integration-review-and-release-validation.md) records exact evidence, exceptions and remaining acceptance.
+
+Release requires configured Firebase/APNs/Cloud delivery, matching Apple signing/provisioning, connected iOS/Android devices and supported-desktop presentation/tap checks. All Cloud registration writers must enforce the durable `versioned-v1` barrier before app opt-out acknowledgement is reliable; old direct-writing binaries cannot safely coexist. Incompatible prelaunch plaintext held-tap sidecars are discarded, while profile inbox/read/deduplication data is retained. No deployment or production delivery claim is made. This spec remains open until the external checks are evidenced.

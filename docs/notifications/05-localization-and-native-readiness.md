@@ -17,7 +17,7 @@ Read the parent spec and applicable AGENTS instructions. Use the TDD skill at th
 
 ## App implementation evidence
 
-Status: App portion implemented and validated; parent merger owns combined closure after integrating this app portion. Cloud localization has merged.
+Status: App and Cloud implementation merged and validated; external release acceptance remains with ticket06.
 
 - Eight non-English notification catalogs are translated, including pending cleanup and registration. All ten app kinds use generic copy; completed guardian links are described as completed. Native recording and webview rendering share the catalogs and use English fallback. The five Cloud kinds match the versioned localization contract for all nine languages, including normalized locale variants. Translations are machine-drafted, not native-speaker-certified.
 - Android token acquisition without a default Firebase app now rejects with actionable configuration guidance instead of throwing. The real native command regression test runs in mobile CI. Existing recipient isolation, cold taps, iOS fallback and foreground presentation are retained.
