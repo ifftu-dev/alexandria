@@ -1075,12 +1075,14 @@ pub fn run() {
                                     }
                                 }
 
+                                // One issuer for the passes below that sign.
+                                let issuer = wallet.as_ref().map(credentials::Issuer::from_wallet);
+
                                 // Status lists a host has not yet seen. Every
                                 // issuance site creates or changes a list; the
                                 // commands that do so publish inline, and this
                                 // pass catches the rest and any push that failed.
-                                if let Some(w) = wallet.as_ref() {
-                                    let issuer = credentials::Issuer::from_wallet(w);
+                                if let Some(issuer) = issuer.as_ref() {
                                     let pending = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
@@ -1095,7 +1097,7 @@ pub fn run() {
                                     if !pending.is_empty() {
                                         let now = crate::clock::now_rfc3339();
                                         let (accepted, errors) =
-                                            credentials::status_list::push(&pending, &issuer, &now)
+                                            credentials::status_list::push(&pending, issuer, &now)
                                                 .await;
                                         if !errors.is_empty() {
                                             log::debug!("status list publication: {errors:?}");
@@ -1126,11 +1128,8 @@ pub fn run() {
                                 // against the database, sent without holding it,
                                 // recorded after. Unchanged records are skipped,
                                 // so most passes send nothing.
-                                if let Some(w) = wallet.as_ref() {
-                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
-                                        &w.signing_key.to_bytes(),
-                                    );
-                                    let did = crypto::did::derive_did_key(&signing_key);
+                                if let Some(issuer) = issuer.as_ref() {
+                                    let (signing_key, did) = (issuer.key(), issuer.did());
                                     let now = crate::clock::now_rfc3339();
                                     let now_unix = chrono::Utc::now().timestamp();
                                     let plan = {
@@ -1139,14 +1138,14 @@ pub fn run() {
                                             Ok(Some(db)) => {
                                                 let grants = commands::organisations::plan_sync(
                                                     db.conn(),
-                                                    &signing_key,
+                                                    signing_key,
                                                     did.as_str(),
                                                     now_unix,
                                                     &now,
                                                 );
                                                 let listing = commands::organisations::plan_listing(
                                                     db.conn(),
-                                                    &signing_key,
+                                                    signing_key,
                                                     did.as_str(),
                                                     now_unix,
                                                     &now,
