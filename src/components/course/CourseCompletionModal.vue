@@ -9,10 +9,12 @@ import { computed, watch, ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useMotion } from '@/composables/useMotion'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
 const { t } = useI18n()
+const { reduced } = useMotion()
 const router = useRouter()
 const {
   isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId,
@@ -90,17 +92,18 @@ function rand(min: number, max: number) {
 }
 
 function spawnConfetti() {
-  const n = 70
+  if (reduced.value || document.hidden) return
+  const n = 28
   const out: Piece[] = []
   for (let i = 0; i < n; i++) {
     const angle = rand(0, Math.PI * 2)
-    const dist = rand(120, 340)
+    const dist = rand(80, 180)
     out.push({
       tx: `${Math.cos(angle) * dist}px`,
       ty: `${Math.sin(angle) * dist - rand(40, 140)}px`,
-      rot: `${rand(-720, 720)}deg`,
-      delay: `${rand(0, 120)}ms`,
-      dur: `${rand(900, 1700)}ms`,
+      rot: `${rand(-180, 180)}deg`,
+      delay: `${rand(0, 60)}ms`,
+      dur: `${rand(420, 580)}ms`,
       color: COLORS[i % COLORS.length] as string,
       left: `${rand(44, 56)}%`,
       size: `${rand(6, 11)}px`,
@@ -109,6 +112,12 @@ function spawnConfetti() {
   pieces.value = out
 }
 
+let confettiTimer: ReturnType<typeof setTimeout> | undefined
+function clearConfetti() {
+  pieces.value = []
+  if (confettiTimer !== undefined) clearTimeout(confettiTimer)
+}
+watch(reduced, value => { if (value) clearConfetti() })
 watch(isOpen, (open) => {
   if (open) {
     endorsementImportJson.value = ''
@@ -116,10 +125,13 @@ watch(isOpen, (open) => {
     document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', onKey)
     spawnConfetti()
+    confettiTimer = setTimeout(clearConfetti, 650)
+    document.addEventListener('visibilitychange', clearConfetti)
   } else {
     document.body.style.overflow = ''
     document.removeEventListener('keydown', onKey)
-    pieces.value = []
+    clearConfetti()
+    document.removeEventListener('visibilitychange', clearConfetti)
   }
 })
 
@@ -147,6 +159,8 @@ function onKey(e: KeyboardEvent) {
 }
 
 onBeforeUnmount(() => {
+  clearConfetti()
+  document.removeEventListener('visibilitychange', clearConfetti)
   document.body.style.overflow = ''
   document.removeEventListener('keydown', onKey)
 })
@@ -580,7 +594,7 @@ function continueToDashboard() {
   inset: 0;
   border-radius: 9999px;
   border: 2px solid rgba(52, 211, 153, 0.5);
-  animation: ring-pulse 1.8s ease-out infinite;
+  animation: ring-pulse 650ms ease-out both;
 }
 .emblem-glow {
   position: absolute;
@@ -588,7 +602,7 @@ function continueToDashboard() {
   border-radius: 9999px;
   background: radial-gradient(circle, rgba(52, 211, 153, 0.45), transparent 65%);
   filter: blur(6px);
-  animation: glow-breathe 2.4s ease-in-out infinite;
+  animation: glow-breathe 650ms ease-in-out both;
 }
 .emblem-shine {
   position: absolute;
@@ -606,7 +620,7 @@ function continueToDashboard() {
   height: 220%;
   background: linear-gradient(75deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   transform: rotate(8deg);
-  animation: shine 2.6s ease-in-out 0.6s infinite;
+  animation: shine 500ms ease-out 100ms both;
 }
 
 .eyebrow {
@@ -889,7 +903,7 @@ function continueToDashboard() {
   display: flex;
   gap: 0.5rem;
   margin-top: 1.25rem;
-  animation: fade-up 0.5s ease 0.48s both;
+  animation: fade-up 200ms ease both;
 }
 .btn {
   flex: 1;

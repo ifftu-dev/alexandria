@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import '@/assets/css/skill-atlas.css'
+import { useMotion } from '@/composables/useMotion'
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BLOOM_ORDER } from '@/utils/bloom'
@@ -12,14 +13,12 @@ const props = defineProps<{ model: AtlasModel; view: AtlasViewState; feedback?: 
 const emit = defineEmits<{ 'update:view': [view: AtlasViewState]; 'open-skill': [id: string]; 'learn-skill': [id: string]; 'feedback-consumed': [revision: number] }>()
 const { t } = useI18n()
 const id = useId()
-const systemReducedMotion = ref(false)
+const { reduced: systemReducedMotion } = useMotion()
 const motionReduced = computed(() => props.reducedMotion === true || systemReducedMotion.value)
 const highlightedIds = ref<readonly string[]>([])
 const feedbackRevision = ref<number | null>(null)
 let seenFeedbackRevision = props.feedback?.revision ?? -1
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
-let motionQuery: MediaQueryList | undefined
-function motionChanged(): void { systemReducedMotion.value = motionQuery?.matches ?? false }
 function finishFeedback(): void {
   if (feedbackTimer !== undefined) clearTimeout(feedbackTimer)
   feedbackTimer = undefined
@@ -37,19 +36,15 @@ watch(() => props.feedback, feedback => {
   if (document.visibilityState === 'hidden') { emit('feedback-consumed', feedback.revision); return }
   highlightedIds.value = [...new Set([...feedback.earnedIds, ...feedback.improvedIds])]
   feedbackRevision.value = feedback.revision
-  feedbackTimer = setTimeout(finishFeedback, 1500)
+  feedbackTimer = setTimeout(finishFeedback, 650)
 })
 onMounted(() => {
   // A remount is navigation, never a new achievement. The shared owner also expires feedback.
   if (props.feedback) emit('feedback-consumed', props.feedback.revision)
-  motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)')
-  motionChanged()
-  motionQuery?.addEventListener('change', motionChanged)
   document.addEventListener('visibilitychange', visibilityChanged)
 })
 onBeforeUnmount(() => {
   finishFeedback()
-  motionQuery?.removeEventListener('change', motionChanged)
   document.removeEventListener('visibilitychange', visibilityChanged)
 })
 const layout = computed(() => atlasLayout(props.model))

@@ -29,7 +29,7 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
     transformCallback: () => 1,
     invoke: async (command: string) => {
       if (command === 'list_goal_templates') return templates
-      if (command === 'list_profiles') return []
+      if (command === 'list_profiles') return new URLSearchParams(location.search).get('existing') === '1' ? [{ id: 'motion-test', display_name: 'Test learner', avatar: { kind: 'emoji', value: '🌱' }, color: '#6366f1', last_unlocked_at: null }] : []
       if (command === 'personhood_lab_status') return disabledLab
       if (command === 'plugin:event|listen') return 1
       if (command === 'plugin:biometry|status') return { isAvailable: false }
@@ -53,7 +53,12 @@ if (isAppLocale(requestedLocale)) {
   document.documentElement.dir = directionOf(requestedLocale)
 }
 const screen = params.get('screen')
-if (screen === 'personal-atlas') {
+if (screen === 'motion') {
+  const { default: MotionFixture } = await import('./MotionFixture.vue')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: MotionFixture }] })
+  await router.push('/')
+  createApp(MotionFixture).use(i18n).use(router).mount('#app')
+} else if (screen === 'personal-atlas') {
   const { atlasBackend } = await import('./atlasBackend')
   const backend = atlasBackend(params.get('scenario') === 'stress')
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })

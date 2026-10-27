@@ -12,7 +12,8 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useMode } from '@/composables/useMode'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { useSettings, useSetting } from '@/composables/useSettings'
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { animateMotion } from '@/composables/useMotion'
 import { useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -26,6 +27,16 @@ const isImmersiveRoute = computed(() => route.name === 'learn' || route.name ===
 // full-height player up, leaving an empty band above the tab bar — so skip it
 // here and let the footer clear the tab bar itself.
 const isPlayerRoute = computed(() => route.name === 'learn')
+const routeContent = ref<HTMLElement | null>(null)
+let cancelRouteMotion = () => {}
+watch(() => route.path, () => {
+  cancelRouteMotion()
+  // Persistent media and assessment surfaces own their state and presentation.
+  if (!isImmersiveRoute.value && routeContent.value) {
+    cancelRouteMotion = animateMotion(routeContent.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 200)
+  }
+}, { flush: 'post' })
+onUnmounted(() => cancelRouteMotion())
 
 // Sidebar collapsed state lives in the per-profile settings store
 // (`ui.sidebar_collapsed`, scope=sync) so it propagates to the
@@ -122,7 +133,7 @@ function toggleSidebar() {
 
       <!-- Content area -->
       <main class="flex-1 min-w-0 min-h-0" :class="[isImmersiveRoute ? 'overflow-hidden' : 'overflow-y-auto', { 'mobile-content-padding': !isPlayerRoute }]">
-        <div :class="isImmersiveRoute ? 'h-full min-h-0 flex flex-col' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
+        <div ref="routeContent" :class="isImmersiveRoute ? 'h-full min-h-0 flex flex-col' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
           <slot />
         </div>
       </main>

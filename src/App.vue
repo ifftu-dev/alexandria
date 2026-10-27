@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { isTauri } from '@tauri-apps/api/core'
+import AppOpening from '@/components/auth/AppOpening.vue'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useLocalApi } from '@/composables/useLocalApi'
 import SkillAtlasHost from '@/components/skills/SkillAtlasHost.vue'
@@ -206,12 +208,12 @@ onMounted(async () => {
       // this covers the initial one, which resolves before initialize().
       const account = await refreshAccountStatus()
       if (account?.activation_state === 'pending_guardian' && route.name !== 'guardian-gate') {
-        router.replace('/guardian-gate')
+        await router.replace('/guardian-gate')
       }
     }
   } catch {
     if (route.name !== 'onboarding' && route.name !== 'profiles') {
-      router.replace('/profiles')
+      await router.replace('/profiles')
     }
   }
 
@@ -223,7 +225,7 @@ onMounted(async () => {
   void useDeepLinks().init()
 
   // Show the window now that the frontend is rendered and themed
-  getCurrentWebviewWindow().show()
+  if (isTauri()) void getCurrentWebviewWindow().show().catch(() => {})
 
   // Silent, fail-closed check for a signed update — reveals the banner only
   // when one is genuinely available. Desktop Tauri only; inert elsewhere.
@@ -240,6 +242,7 @@ onUnmounted(() => {
 
 <template>
   <SkillAtlasHost />
+  <AppOpening :ready="ready || showLockScreen" />
   <div v-if="showLockScreen" class="flex items-center justify-center h-full bg-background safe-area-top" role="status" aria-live="polite">
     <div class="text-center max-w-sm p-6">
       <template v-if="lockState === 'failed'">
@@ -254,9 +257,9 @@ onUnmounted(() => {
       </template>
     </div>
   </div>
-  <div v-else-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top">
+  <div v-else-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top" role="status">
     <div class="text-center">
-      <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <div class="w-24 h-24 mx-auto mb-4" aria-hidden="true" />
       <p class="text-sm text-muted-foreground">{{ $t('common.app.initializing') }}</p>
     </div>
   </div>

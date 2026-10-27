@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MotionSettings from '@/components/ui/MotionSettings.vue'
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
@@ -81,7 +82,7 @@ const SECTIONS = computed<SectionMeta[]>(() => [
   { id: 'security', label: t('settings.nav.sections.security.label'), desc: t('settings.nav.sections.security.desc'),
     keywords: ['recovery phrase', 'mnemonic', 'export', 'seed', 'lock wallet', 'vault', 'biometric', 'touch id', 'face id', 'password'] },
   { id: 'personalization', label: t('settings.nav.sections.personalization.label'), desc: t('settings.nav.sections.personalization.desc'),
-    keywords: ['language', 'locale', 'translation', 'idioma', 'langue', 'भाषा', 'theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
+    keywords: ['language', 'locale', 'translation', 'idioma', 'langue', 'भाषा', 'motion', 'animation', 'reduced', 'theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
   { id: 'system', label: t('settings.nav.sections.system.label'), desc: t('settings.nav.sections.system.desc'),
     keywords: ['storage', 'disk', 'quota', 'cache', 'free space', 'evict', 'network', 'p2p', 'node', 'peers'] },
   { id: 'plugins', label: t('settings.nav.sections.plugins.label'), desc: t('settings.nav.sections.plugins.desc'),
@@ -771,6 +772,7 @@ function onSectionClick(id: SettingsSectionId) {
 
                 <!-- ──────────── Personalization ──────────── -->
                 <template v-else-if="activeSection === 'personalization'">
+                  <MotionSettings />
                   <div>
                     <h4 class="settings-group-title">{{ t('common.language.label') }}</h4>
                     <LanguageSelector />

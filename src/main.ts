@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { i18n } from './i18n'
+import { initMotion } from './composables/useMotion'
 import { initLocale } from './composables/useLocale'
 import './assets/fonts.css'
 // Non-Latin script fonts (self-hosted via @fontsource; each @font-face is
@@ -21,6 +22,7 @@ import './assets/css/main.css'
 
 // Apply the last-known language + text direction before first render, awaiting
 // the cached locale's messages so setup-time t() calls resolve correctly.
+initMotion()
 await initLocale()
 
 const app = createApp(App)

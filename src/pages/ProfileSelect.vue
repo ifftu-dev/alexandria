@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import Starfield from '@/components/auth/Starfield.vue'
+import BrandMark from '@/components/auth/BrandMark.vue'
 import AddProfileTile from '@/components/profile/AddProfileTile.vue'
 import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
 import ProfileTile from '@/components/profile/ProfileTile.vue'
@@ -34,26 +35,11 @@ const selectedHasCredential = ref(false)
 const biometricLoading = ref(false)
 const biometricEnabled = computed(() => biometricAvailable.value && selectedHasCredential.value)
 
-// Status messages shown while the unlock IPC runs. The backend doesn't
-// emit progress events yet, so we cycle through expected stages on a
-// timer — gives the user a sense of motion instead of a frozen spinner.
-const UNLOCK_STAGES: { at: number; msg: string }[] = [
-  { at: 0, msg: t('onboarding.profileSelect.stageDecrypting') },
-  { at: 1200, msg: t('onboarding.profileSelect.stageLoadingProfile') },
-  { at: 2500, msg: t('onboarding.profileSelect.stageOpeningData') },
-  { at: 4500, msg: t('onboarding.profileSelect.stageStartingApp') },
-  { at: 7000, msg: t('onboarding.profileSelect.stageAlmostThere') },
-]
-let unlockStageTimers: number[] = []
+// The backend does not publish unlock progress. Never infer stages from elapsed time.
 function startUnlockStages() {
-  clearUnlockStages()
-  unlockStageTimers = UNLOCK_STAGES.map((s) =>
-    window.setTimeout(() => { unlockStatus.value = s.msg }, s.at),
-  )
+  unlockStatus.value = t('onboarding.profileSelect.stageDecrypting')
 }
 function clearUnlockStages() {
-  for (const id of unlockStageTimers) window.clearTimeout(id)
-  unlockStageTimers = []
   unlockStatus.value = ''
 }
 
@@ -88,9 +74,8 @@ function onSelect(id: string) {
   error.value = null
   selectedHasCredential.value = false
   // Focus is handled by the watcher below — the password panel is gated
-  // behind a <Transition mode="out-in">, so nextTick alone fires before
-  // the new DOM is mounted. Watch the ref instead and focus when it
-  // becomes available.
+  // mounted conditionally. Watch the ref so keyboard focus follows the
+  // available form, independently of decorative transitions.
 
   // Check this profile's biometric credential, then auto-offer it.
   // Best-effort: a cancel or a vault rejection silently drops to password.
@@ -224,18 +209,19 @@ function onKeydown(event: KeyboardEvent) {
 
     <div class="w-full max-w-3xl relative z-10">
       <header class="text-center mb-12">
+        <div class="w-12 h-12 mx-auto mb-5" data-launch-target><BrandMark /></div>
         <h1 class="text-3xl font-semibold text-foreground">{{ $t('onboarding.profileSelect.heading') }}</h1>
         <p class="text-muted-foreground mt-2">
           {{ $t('onboarding.profileSelect.subtitle') }}
         </p>
       </header>
 
-      <Transition name="fade" mode="out-in">
+      <Transition name="fade" @before-leave="(el: Element) => el.setAttribute('inert', '')">
         <!-- Picker grid -->
         <div
           v-if="!selectedProfile"
           key="grid"
-          class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 justify-items-center"
+          class="flex flex-wrap gap-4 justify-center"
         >
           <ProfileTile
             v-for="profile in profiles"
@@ -333,10 +319,8 @@ function onKeydown(event: KeyboardEvent) {
 </template>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 180ms ease, transform 180ms ease;
-}
+.fade-enter-active { transition: opacity var(--transition-base), transform var(--transition-base); }
+.fade-leave-active { position: absolute; width: 100%; transition: opacity var(--transition-fast); pointer-events: none; }
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
