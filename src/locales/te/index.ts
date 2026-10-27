@@ -21,5 +21,6 @@ import dashboard from './dashboard.json'
 import omni from './omni.json'
 import update from './update.json'
 import notifications from './notifications.json'
+import chat from './chat.json'
 
-export default { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, organisations, goals, sentinel, nav, dashboard, omni, update, notifications }
+export default { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, organisations, goals, sentinel, nav, dashboard, omni, update, chat }

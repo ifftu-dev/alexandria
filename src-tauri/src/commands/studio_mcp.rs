@@ -1,8 +1,12 @@
 use std::sync::atomic::Ordering;
 
 use crate::profile::scope::ProfileState as State;
-use alexandria_studio::{grants::StudioGrant, Error as StudioError};
+use alexandria_studio::{
+    grants::{Activity, StudioGrant},
+    Error as StudioError,
+};
 use serde::Serialize;
+use std::collections::HashMap;
 
 use super::studio::with_db;
 use crate::AppState;
@@ -11,6 +15,8 @@ use crate::AppState;
 pub struct StudioAssistantAccess {
     pub available: bool,
     pub grants: Vec<StudioGrant>,
+    /// What each assistant read, newest first, by grant id.
+    pub activity: HashMap<String, Vec<Activity>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,9 +40,15 @@ pub async fn studio_assistant_access(
         if let Ok(dir) = alexandria_studio::broker::private_directory(&state.app_data_dir) {
             alexandria_studio::broker::prune_connections(&dir, &grants, now);
         }
+        let list = grants.list(now);
+        let activity = list
+            .iter()
+            .map(|g| (g.id.clone(), grants.activity(&g.id)))
+            .collect();
         Ok(StudioAssistantAccess {
             available: state.studio.broker_available.load(Ordering::SeqCst),
-            grants: grants.list(now),
+            grants: list,
+            activity,
         })
     })
 }
@@ -137,6 +149,12 @@ impl alexandria_studio::broker::BrokerHost for AppBroker {
         f: &mut dyn FnMut(&rusqlite::Connection) -> alexandria_studio::Result<serde_json::Value>,
     ) -> Result<serde_json::Value, String> {
         with_db(self.state(), |db| f(db))
+    }
+
+    fn report_attempt_flag(&self, db: &rusqlite::Connection, flag: &str) {
+        if let Err(error) = super::integrity::record_backend_flag(db, flag) {
+            log::warn!("assistant broker: could not record {flag}: {error}");
+        }
     }
 
     fn fetch_content(&self, blob: &str) -> alexandria_studio::broker::ContentFuture<'_> {

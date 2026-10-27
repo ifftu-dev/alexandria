@@ -148,7 +148,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # Domain IPC handlers (frontend ↔ backend), including interviews and profile lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite schema (94 migrations + bundled built-in data) — one encrypted DB per profile
+│       ├── db/       # SQLite schema (27 migrations + bundled built-in data) — one encrypted DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine; legacy evidence/challenge pipeline retired
@@ -213,8 +213,13 @@ For the local assessment-to-credential and Cloud candidate walkthrough, see [the
 ### Prerequisites
 
 - **Rust 1.91+** with `cargo` (iroh 1.0 sets the MSRV; see `rust-version` in `src-tauri/Cargo.toml`)
-- **Node.js 22+** with `npm`
+- **Node.js 24.22.1** with `npm` (see [`.nvmrc`](.nvmrc)); supported alternatives are 22.23.4+ within 22.x, 24.22.1+ within 24.x, and 26.12.1+ within 26.x.
 - **Tauri CLI**: `cargo install tauri-cli`
+
+If you use nvm, run `nvm install` and `nvm use` from the repository root.
+[`package.json`](package.json) declares the supported Node versions, and
+[`.npmrc`](.npmrc) makes `npm install` and `npm ci` reject versions outside that
+range. These minimum versions include the CVE-2026-111497 Brotli decoder fix.
 
 For fresh desktop builds with full audio-video live tutoring:
 
@@ -261,7 +266,7 @@ npm install
 cargo tauri dev
 ```
 
-The app launches a native window backed by a local webview. First launch generates the SQLite database, runs migrations, installs the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
+The app launches a native window backed by a local webview. First launch generates the SQLite database. Every profile open runs migrations, installs or refreshes the bundled taxonomy, goal templates and question banks, and starts the iroh content store. This temporary demo build installs the usable demo courses, bundled assessments/plugins and classroom templates for each profile. It does not fabricate credentials or enrollments. New and mnemonic-restored profiles also pin the bundled default-network demo genesis; existing profiles retain their trust decisions. See the [demo runbook](docs/assessment-demo.md).
 
 ### Building for iOS
 

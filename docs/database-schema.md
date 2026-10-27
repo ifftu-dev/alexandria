@@ -7,8 +7,8 @@
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 17 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 111 tables, 114 indexes, 1 view, 3 triggers.
+**Schema**: 27 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 126 tables, 126 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -38,6 +38,16 @@ and requires a database's history to be an exact prefix of this list:
 15. `organisation_access`
 16. `interview_panel_link`
 17. `interview_integrity_reports`
+18. `call_kinds`
+19. `ai_chat`
+20. `ai_chat_practice`
+21. `learning_memory`
+22. `ai_connection_approvals`
+23. `ai_chat_search`
+24. `ai_chat_goal_bindings`
+25. `ai_chat_artifacts`
+26. `course_notes_body`
+27. `ai_chat_actions`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -135,7 +145,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `activation_state` TEXT NOT NULL default `'active'`
 - `account_roles` TEXT NOT NULL default `'["learner"]'`
 
-### Guardianship (3)
+### Guardianship (4)
 
 #### `guardian_activity_rows`
 
@@ -144,6 +154,18 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `entity_id` TEXT PK
 - `payload_json` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL
+
+#### `guardian_ai_requests`
+
+- `id` TEXT PK
+- `link_id` TEXT PK → `guardian_links.id`
+- `connection_name` TEXT NOT NULL
+- `endpoint` TEXT NOT NULL
+- `model` TEXT NOT NULL
+- `status` TEXT NOT NULL
+- `received_at` TEXT NOT NULL
+- `decided_at` TEXT
+- `delivered` INTEGER NOT NULL default `0`
 
 #### `guardian_links`
 
@@ -276,6 +298,9 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `video_timestamp_seconds` INTEGER
 - `created_at` TEXT NOT NULL default `datetime('now')`
 - `updated_at` TEXT NOT NULL default `datetime('now')`
+- `body` TEXT
+- `origin` TEXT
+- `deleted_at` TEXT
 
 #### `courses`
 
@@ -1241,6 +1266,8 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `ended_at` TEXT
 - `room_id` TEXT
 - `last_occupied_at` INTEGER
+- `kind` TEXT NOT NULL default `'tutoring'`
+- `context_id` TEXT
 
 ### Genesis trust (1)
 
@@ -1417,6 +1444,153 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `messages` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 
+### AI chat (14)
+
+#### `ai_connection_approvals`
+
+- `id` TEXT PK
+- `connection_id` TEXT NOT NULL
+- `connection_name` TEXT NOT NULL
+- `endpoint` TEXT NOT NULL
+- `model` TEXT NOT NULL
+- `status` TEXT NOT NULL
+- `decided_by_link` TEXT
+- `requested_at` TEXT NOT NULL
+- `decided_at` TEXT
+
+#### `chat_artifacts`
+
+- `id` TEXT PK
+- `kind` TEXT NOT NULL
+- `status` TEXT NOT NULL
+- `title` TEXT NOT NULL
+- `body_json` TEXT NOT NULL
+- `sources_json` TEXT NOT NULL default `'[]'`
+- `thread_id` TEXT → `chat_threads.id`
+- `message_id` TEXT → `chat_messages.id`
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+#### `chat_bindings`
+
+- `id` TEXT PK
+- `thread_id` TEXT NOT NULL → `chat_threads.id`
+- `kind` TEXT NOT NULL
+- `course_id` TEXT NOT NULL
+- `element_id` TEXT NOT NULL
+- `label` TEXT NOT NULL
+- `created_at` TEXT NOT NULL
+
+#### `chat_drafts`
+
+- `scope` TEXT PK
+- `text` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+#### `chat_excerpts`
+
+- `hash` TEXT PK
+- `text` TEXT NOT NULL
+
+#### `chat_message_search`
+
+- `message_id` ANY
+- `content` ANY
+
+#### `chat_messages`
+
+- `id` TEXT PK
+- `thread_id` TEXT NOT NULL → `chat_threads.id`
+- `position` INTEGER NOT NULL
+- `role` TEXT NOT NULL
+- `reply_to` TEXT → `chat_messages.id`
+- `version` INTEGER NOT NULL default `1`
+- `content` TEXT NOT NULL default `''`
+- `status` TEXT NOT NULL
+- `error` TEXT
+- `connection_id` TEXT
+- `connection_name` TEXT
+- `model_id` TEXT
+- `location` TEXT
+- `input_tokens` INTEGER
+- `output_tokens` INTEGER
+- `sources_json` TEXT NOT NULL default `'[]'`
+- `created_at` TEXT NOT NULL
+- `completed_at` TEXT
+
+#### `chat_practice_attempts`
+
+- `id` TEXT PK
+- `item_id` TEXT NOT NULL → `chat_practice_items.id`
+- `answer` TEXT NOT NULL
+- `correct` INTEGER NOT NULL
+- `assisted` INTEGER NOT NULL
+- `created_at` TEXT NOT NULL
+
+#### `chat_practice_items`
+
+- `id` TEXT PK
+- `thread_id` TEXT NOT NULL → `chat_threads.id`
+- `message_id` TEXT NOT NULL → `chat_messages.id`
+- `question_json` TEXT NOT NULL
+- `hints_used` INTEGER NOT NULL default `0`
+- `revealed` INTEGER NOT NULL default `0`
+- `solved` INTEGER NOT NULL default `0`
+- `solved_independently` INTEGER NOT NULL default `0`
+- `created_at` TEXT NOT NULL
+
+#### `chat_runs`
+
+- `id` TEXT PK
+- `thread_id` TEXT NOT NULL → `chat_threads.id`
+- `client_request_id` TEXT NOT NULL
+- `user_message_id` TEXT NOT NULL → `chat_messages.id`
+- `assistant_message_id` TEXT NOT NULL → `chat_messages.id`
+- `snapshot_id` TEXT NOT NULL → `chat_snapshots.id`
+- `state` TEXT NOT NULL
+- `started_at` TEXT NOT NULL
+- `finished_at` TEXT
+
+#### `chat_snapshot_excerpts`
+
+- `snapshot_id` TEXT PK → `chat_snapshots.id`
+- `hash` TEXT PK → `chat_excerpts.hash`
+
+#### `chat_snapshots`
+
+- `id` TEXT PK
+- `thread_id` TEXT NOT NULL → `chat_threads.id`
+- `digest` TEXT NOT NULL
+- `manifest_json` TEXT NOT NULL
+- `created_at` TEXT NOT NULL
+- `expires_at` TEXT NOT NULL
+- `consumed_at` TEXT
+
+#### `chat_threads`
+
+- `id` TEXT PK
+- `title` TEXT NOT NULL default `''`
+- `mode` TEXT NOT NULL default `'ask'`
+- `connection_id` TEXT
+- `model_id` TEXT
+- `revision` INTEGER NOT NULL default `1`
+- `reviewed_scope` TEXT
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+#### `learning_memory`
+
+- `id` TEXT PK
+- `kind` TEXT NOT NULL
+- `content` TEXT NOT NULL
+- `status` TEXT NOT NULL
+- `active` INTEGER NOT NULL default `1`
+- `thread_id` TEXT → `chat_threads.id`
+- `source_message_id` TEXT → `chat_messages.id`
+- `revision` INTEGER NOT NULL default `1`
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
 ---
 
 ## View and triggers
@@ -1428,7 +1602,7 @@ CREATE VIEW current_reputation_assertions AS
 SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
 ```
 
-Triggers: `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
+Triggers: `chat_message_search_delete`, `chat_message_search_insert`, `chat_message_search_update`, `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
 
 ---
 
@@ -1446,6 +1620,21 @@ erDiagram
     chain_submissions ||--o{ chain_submission_members : network
     chain_submissions ||--o{ chain_submission_members : operation_kind
     chain_submissions ||--o{ chain_submission_members : operation_id
+    chat_messages ||--o{ chat_artifacts : message_id
+    chat_threads ||--o{ chat_artifacts : thread_id
+    chat_threads ||--o{ chat_bindings : thread_id
+    chat_messages ||--o{ chat_messages : reply_to
+    chat_threads ||--o{ chat_messages : thread_id
+    chat_practice_items ||--o{ chat_practice_attempts : item_id
+    chat_messages ||--o{ chat_practice_items : message_id
+    chat_threads ||--o{ chat_practice_items : thread_id
+    chat_snapshots ||--o{ chat_runs : snapshot_id
+    chat_messages ||--o{ chat_runs : assistant_message_id
+    chat_messages ||--o{ chat_runs : user_message_id
+    chat_threads ||--o{ chat_runs : thread_id
+    chat_excerpts ||--o{ chat_snapshot_excerpts : hash
+    chat_snapshots ||--o{ chat_snapshot_excerpts : snapshot_id
+    chat_threads ||--o{ chat_snapshots : thread_id
     classroom_channels ||--o{ classroom_calls : channel_id
     classrooms ||--o{ classroom_calls : classroom_id
     classrooms ||--o{ classroom_channels : classroom_id
@@ -1478,6 +1667,7 @@ erDiagram
     course_elements ||--o{ element_submissions : element_id
     courses ||--o{ enrollments : course_id
     guardian_links ||--o{ guardian_activity_rows : link_id
+    guardian_links ||--o{ guardian_ai_requests : link_id
     integrity_snapshots ||--o{ integrity_evidence : snapshot_id
     integrity_sessions ||--o{ integrity_evidence : session_id
     integrity_sessions ||--o{ integrity_evidence_consent : session_id
@@ -1494,6 +1684,8 @@ erDiagram
     role_assessments ||--o{ interview_sessions : role_assessment_id
     interview_participants ||--o{ interview_transcript_segments : participant_id
     interview_sessions ||--o{ interview_transcript_segments : session_id
+    chat_messages ||--o{ learning_memory : source_message_id
+    chat_threads ||--o{ learning_memory : thread_id
     subject_fields ||--o{ opinions : subject_field_id
     plugin_installed ||--o{ plugin_dependencies : dependency_cid
     plugin_installed ||--o{ plugin_dependencies : plugin_cid

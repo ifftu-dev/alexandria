@@ -232,6 +232,14 @@
       "obscuredTouch": {
         "description": "Un toucher est passé à travers une superposition",
         "trigger": "Un appui a été reçu alors qu'une autre fenêtre recouvrait l'évaluation (Android)"
+      },
+      "inAppAssistantDuringAttempt": {
+        "description": "Le chat IA ou le tuteur d'Alexandria a été utilisé pendant la tentative",
+        "trigger": "Une demande de chat ou de tuteur est arrivée dans Alexandria pendant que la tentative était ouverte"
+      },
+      "mcpCallDuringAttempt": {
+        "description": "Un assistant externe connecté a demandé des données pendant la tentative",
+        "trigger": "Un assistant ayant accès à ce profil a fait une demande pendant que la tentative était ouverte"
       }
     }
   },
@@ -492,6 +500,7 @@
     "rowInferLatency": "temps de réponse",
     "valActive": "actif",
     "valIdle": "inactif",
+    "valSuspended": "suspendu",
     "valYes": "oui",
     "valNo": "non",
     "valNa": "s.o.",

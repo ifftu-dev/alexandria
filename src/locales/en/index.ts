@@ -22,8 +22,9 @@ import omni from './omni.json'
 import update from './update.json'
 import interviews from './interviews.json'
 import notifications from './notifications.json'
+import chat from './chat.json'
 
-const messages = { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, organisations, goals, sentinel, nav, dashboard, omni, update, interviews, notifications }
+const messages = { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, tutoring, classrooms, instructor, guardian, plugins, profile, organisations, goals, sentinel, nav, dashboard, omni, update, interviews, chat, notifications }
 
 // The English catalog is the canonical shape all other locales conform to.
 export type LocaleMessages = typeof messages

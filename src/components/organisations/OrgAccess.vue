@@ -202,7 +202,7 @@ onUnmounted(() => { generation++ })
         <h2 class="text-base font-semibold text-foreground">{{ t('organisations.access.title') }}</h2>
         <p class="mt-1 text-sm text-muted-foreground">{{ t('organisations.access.note') }}</p>
       </div>
-      <AppButton variant="outline" size="sm" :disabled="syncing" @click="syncNow">
+      <AppButton variant="outline" size="sm" class="shrink-0 whitespace-nowrap" :disabled="syncing" @click="syncNow">
         {{ syncing ? t('organisations.access.syncing') : t('organisations.access.syncNow') }}
       </AppButton>
     </header>

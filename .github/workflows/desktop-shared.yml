@@ -81,7 +81,7 @@ jobs:
         if: inputs.mode == 'release' && inputs.sign_updater == true
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
 
       - name: Validate updater signing key
         if: inputs.mode == 'release' && inputs.sign_updater == true
@@ -169,7 +169,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
@@ -468,7 +468,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
@@ -652,7 +652,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
@@ -814,7 +814,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
@@ -960,6 +960,16 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ inputs.mode == 'validate' && inputs.dev_seeding && '--features dev-seeding' || '' }} --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
           includeUpdaterJson: false
+
+      - name: Smoke-test packaged Windows startup
+        working-directory: alexandria
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem 'target/release/bundle/nsis/*-setup.exe')
+          if ($installers.Count -ne 1) {
+            throw "Expected one Windows installer, found $($installers.Count)"
+          }
+          ./scripts/ci/smoke-windows-startup.ps1 -InstallerPath $installers[0].FullName
 
       - name: Rename Windows release assets
         if: inputs.mode == 'release'

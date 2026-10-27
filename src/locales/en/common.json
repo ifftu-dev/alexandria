@@ -143,5 +143,8 @@
     "analyze": "Analyze",
     "evaluate": "Evaluate",
     "create": "Create"
+  },
+  "aiTerms": {
+    "geminiNotice": "Google's Gemini API terms are for users 18 or older and don't allow it in apps that people under 18 are likely to use. Alexandria is used by learners of all ages, so check that your use fits Google's terms. Learners under 18 can't use it here."
   }
 }

@@ -393,6 +393,31 @@ mod tests {
     }
 
     #[test]
+    fn a_leadership_goal_finds_leadership_skills() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        crate::db::bundled::install_bundled_data(db.conn()).unwrap();
+        let found = parse_jd_text(
+            db.conn(),
+            "Lead a team of engineers: run one-on-ones, give feedback, and hire well.",
+        )
+        .unwrap();
+        let ids: Vec<&str> = found
+            .suggestions
+            .iter()
+            .map(|s| s.skill_id.as_str())
+            .collect();
+        for skill in [
+            "skill_delegation",
+            "skill_one_on_ones",
+            "skill_giving_feedback",
+            "skill_hiring_interviews",
+        ] {
+            assert!(ids.contains(&skill), "{skill} missing from {ids:?}");
+        }
+    }
+
+    #[test]
     fn fresh_development_profile_can_choose_and_resolve_goals_without_seeding() {
         let db = crate::db::Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();

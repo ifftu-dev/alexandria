@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let network = profile["network_id"].as_str().ok_or("missing network_id")?;
     let snapshot = TaxonomySnapshot::from_reference(
         network,
-        "bundled-v1",
+        "bundled-v2",
         &std::fs::read_to_string(&args[2])?,
     )?;
     println!("{}", serde_json::to_string_pretty(&snapshot)?);

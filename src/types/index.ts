@@ -739,6 +739,8 @@ export type FlagType =
   | 'screen_share_running'
   | 'phantom_hotkey'
   | 'phantom_hotkey_repeated'
+  | 'in_app_assistant_during_attempt'
+  | 'mcp_call_during_attempt'
   | 'foreign_accessibility_service'
   | 'debug_bridge_enabled'
   | 'obscured_touch'
@@ -1134,6 +1136,15 @@ export type PeerInfo = string
 
 // ---- Tutoring ----
 
+/** What a call is for; see src/utils/callKinds.ts. */
+export type CallKind =
+  | 'tutoring'
+  | 'classroom'
+  | 'interview_panel'
+  | 'interview_candidate'
+  | 'interview_assistant'
+  | 'plugin'
+
 export interface TutoringSessionInfo {
   id: string
   title: string
@@ -1141,6 +1152,9 @@ export interface TutoringSessionInfo {
   status: 'active' | 'ended' | 'cancelled'
   created_at: string
   ended_at: string | null
+  kind: CallKind
+  /** The classroom, interview or plugin element the call belongs to. */
+  context_id: string | null
 }
 
 export interface TutoringPeer {
@@ -1158,6 +1172,8 @@ export interface TutoringSessionStatus {
   video_enabled: boolean
   audio_enabled: boolean
   screen_sharing: boolean
+  /** The camera peers see, by the system's name for it; null when the camera is off or the screen is shared. */
+  camera_name?: string | null
   started_at: number
 }
 
@@ -2270,7 +2286,7 @@ export interface CourseCompletionBinding {
 export interface StudioSource { id: string; title: string; text: string; selected: boolean }
 export interface TutorPolicy { enabled: boolean; guidance: 'socratic' | 'balanced' | 'direct'; initial_prompt: string }
 export interface CourseStudio { audience: string; prerequisites: string; outcome: string; initial_prompt: string; sources: StudioSource[]; tutor: TutorPolicy }
-export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean }
+export interface StudioConnection { id: string; name: string; endpoint: string; model: string; location: 'local' | 'private_network' | 'cloud' | 'external'; capability: 'text'; enabled: boolean; has_key: boolean; context_tokens?: number | null; protocol?: 'compatible' | 'anthropic' | 'responses'; auth?: 'api_key' | 'chatgpt_plan' }
 export interface StudioRole { role: string; connection_id: string | null; initial_prompt: string }
 export interface StudioSettings { roles: StudioRole[] }
 export interface StudioStep { id: string; role: string; connection_id: string | null; initial_prompt: string }
@@ -2281,6 +2297,49 @@ export interface StudioRun { id: string; course_id: string; element_id: string; 
 export interface TutorMessage { role: 'learner' | 'tutor'; text: string; created_at: string }
 export interface TutorThread { id: string; course_id: string; element_id: string; connection_id: string; messages: TutorMessage[] }
 export interface TutorReply { thread: TutorThread; provider_location: 'local' | 'cloud' }
+// ─── Global AI chat (src-tauri/src/commands/ai_chat.rs) ─────────────────
+export type ChatLocation = 'device' | 'private_network' | 'remote'
+export type ChatMessageStatus = 'complete' | 'streaming' | 'interrupted' | 'failed' | 'cancelled'
+/** A thread found by local search. `snippet` marks matches with U+0002 and U+0003. */
+export interface ChatSearchHit { thread: ChatThread; message_id: string | null; snippet: string | null }
+export interface ChatThread { id: string; title: string; mode: 'ask' | 'learn' | 'practice'; connection_id: string | null; model_id: string | null; revision: number; reviewed_scope: string | null; created_at: string; updated_at: string }
+export interface ChatSourceRef { id: string; kind: 'lesson' | 'goal'; label: string; course_id: string; element_id: string }
+export interface ChatMessage { id: string; thread_id: string; position: number; role: 'user' | 'assistant'; reply_to: string | null; version: number; content: string; status: ChatMessageStatus; error: string | null; connection_id: string | null; connection_name: string | null; model_id: string | null; location: ChatLocation | null; input_tokens: number | null; output_tokens: number | null; sources: ChatSourceRef[]; created_at: string; completed_at: string | null }
+export interface ChatBinding { id: string; thread_id: string; kind: 'lesson' | 'goal'; course_id: string; element_id: string; label: string; created_at: string }
+export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
+export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
+export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; requested_at: string; decided_at: string | null }
+export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; received_at: string; decided_at: string | null; delivered: boolean }
+export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'; content: string; status: 'proposed' | 'approved'; active: boolean; thread_id: string | null; source_message_id: string | null; revision: number; created_at: string; updated_at: string }
+export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; artifacts: ChatArtifact[]; active_run_id: string | null }
+export type ChatArtifactBody =
+  | { kind: 'note'; text: string }
+  | { kind: 'flashcards'; cards: { front: string; back: string }[] }
+  | { kind: 'goal'; text: string; goal_id?: string }
+  | { kind: 'goal_change'; goal_id: string; rename?: string; add: { id: string; name: string }[]; remove: { id: string; name: string }[]; text: string }
+  | { kind: 'course_note'; course_id: string; element_id: string; lesson: string; text: string }
+  | { kind: 'enroll'; course_id: string; goal_id: string; text: string }
+/** Something a chat asked to save or change. A proposal waits for the learner to allow or decline it; once allowed, notes and flashcards are `saved` (and outlive their chat) and everything else is `added` where it belongs; a declined one stays as a record. */
+export interface ChatArtifact { id: string; status: 'proposed' | 'saved' | 'added' | 'declined'; title: string; body: ChatArtifactBody; sources: ChatSourceRef[]; thread_id: string | null; message_id: string | null; created_at: string; updated_at: string }
+/** A learner's note on a course, at a lesson when it has one. */
+export interface CourseNote { id: string; course_id: string; element_id: string | null; element_title: string | null; title: string | null; body: string; origin: 'chat' | null; created_at: string; updated_at: string }
+export interface ChatStatus { assessment_active: boolean }
+export interface ChatDestination { connection_id: string; connection_name: string; location: ChatLocation; host: string; model_id: string }
+export interface ChatReviewItem { kind: 'instructions' | 'message' | 'history' | 'lesson' | 'goal' | 'memory'; label: string; tokens: number; required: boolean; included: boolean; binding_id: string | null; memory_id: string | null; truncated: boolean }
+export interface ChatPreparedMessage { prepare_id: string; digest: string; expires_at: string; destination: ChatDestination; items: ChatReviewItem[]; omitted_turns: number; estimated_input_tokens: number; budget_tokens: number; output_reserve_tokens: number; estimate_kind: 'conservative'; requires_review: boolean; fits: boolean }
+export interface ChatStartedRun { run_id: string; thread_id: string; user_message: ChatMessage; assistant_message: ChatMessage; existing: boolean }
+export type ChatEvent = { run_id: string; thread_id: string; seq: number } & (
+  | { kind: 'run_started' }
+  | { kind: 'text_delta'; text: string }
+  | { kind: 'usage_updated'; input_tokens: number | null; output_tokens: number | null }
+  | { kind: 'run_completed'; finish: string }
+  | { kind: 'run_failed'; error: string; partial: boolean }
+  | { kind: 'run_cancelled'; error: string | null }
+)
+/** Something the current page offers to attach. Offering attaches nothing. */
+/** Something a page offers to chat. A goal offer leaves `course_id` empty and carries the goal id in `element_id`, as its attachment does. */
+export interface ChatOffer { kind: 'lesson' | 'goal'; course_id: string; element_id: string; label: string }
+
 export interface LessonFeedback { id: string; course_id: string; element_id: string; element_title: string; rating: number; comment: string; created_at: string }
 
 export interface StudioAssistantGrant {
@@ -2289,9 +2348,11 @@ export interface StudioAssistantGrant {
   scopes: string[]
   expires_at: number
 }
+export interface StudioAssistantActivity { at: number; tool: string; detail: string; outcome: string }
 export interface StudioAssistantAccess {
   available: boolean
   grants: StudioAssistantGrant[]
+  activity: Record<string, StudioAssistantActivity[]>
 }
 export interface StudioAssistantConnection {
   grant: StudioAssistantGrant
@@ -2601,6 +2662,13 @@ export interface SeedResult {
   id: string
   status: 'added' | 'kept' | 'failed' | 'removed'
   error: string | null
+}
+export interface SeedProgress {
+  id: string
+  title: string
+  completed: number
+  total: number
+  phase: 'installing' | 'compiling' | 'completed'
 }
 export interface SeedDraft {
   id: string

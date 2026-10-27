@@ -54,9 +54,11 @@ pub struct Keystore {
     vault_dir: PathBuf,
     /// Decrypted mnemonic — held in memory while unlocked.
     mnemonic: Option<Zeroizing<String>>,
-    /// Salt bytes — kept for re-encryption on save.
-    salt: Vec<u8>,
-    /// Password — kept for re-encryption on save.
+    /// Argon2id(password, salt), computed once when the vault is created or
+    /// opened. It is the vault key and the root every subkey is expanded
+    /// from, so unlocking runs the memory-hard KDF once, not once per key.
+    master: Zeroizing<[u8; 32]>,
+    /// Password — kept for `check_password`.
     password: Zeroizing<String>,
 }
 
@@ -89,13 +91,14 @@ impl Keystore {
 
         let salt = generate_salt();
         write_salt_with_hmac(vault_dir, &salt, password)?;
+        let master = derive_key(password, &salt)?;
 
         log::info!("portable keystore created");
 
         Ok(Self {
             vault_dir: vault_dir.to_path_buf(),
             mnemonic: None,
-            salt: salt.to_vec(),
+            master,
             password: Zeroizing::new(password.to_string()),
         })
     }
@@ -111,7 +114,7 @@ impl Keystore {
 
         let salt = read_and_verify_salt(vault_dir, password)?;
 
-        let key = derive_key(password, &salt)?;
+        let master = derive_key(password, &salt)?;
         let ciphertext = std::fs::read(&vault_file)?;
 
         if ciphertext.len() < NONCE_LEN {
@@ -119,7 +122,7 @@ impl Keystore {
         }
 
         let nonce = Nonce::from_slice(&ciphertext[..NONCE_LEN]);
-        let cipher = Aes256Gcm::new_from_slice(&key)
+        let cipher = Aes256Gcm::new_from_slice(master.as_slice())
             .map_err(|e| KeystoreError::Crypto(format!("cipher init: {e}")))?;
 
         let plaintext = cipher
@@ -134,7 +137,7 @@ impl Keystore {
         Ok(Self {
             vault_dir: vault_dir.to_path_buf(),
             mnemonic: Some(Zeroizing::new(mnemonic)),
-            salt,
+            master,
             password: Zeroizing::new(password.to_string()),
         })
     }
@@ -162,8 +165,7 @@ impl Keystore {
             .as_ref()
             .ok_or(KeystoreError::MnemonicNotFound)?;
 
-        let key = derive_key(&self.password, &self.salt)?;
-        let cipher = Aes256Gcm::new_from_slice(&key)
+        let cipher = Aes256Gcm::new_from_slice(self.master.as_slice())
             .map_err(|e| KeystoreError::Crypto(format!("cipher init: {e}")))?;
 
         let nonce_bytes = generate_nonce();
@@ -206,6 +208,7 @@ impl Keystore {
     pub(crate) fn clear_secrets(&mut self) -> Result<(), KeystoreError> {
         self.mnemonic = None;
         self.password.zeroize();
+        self.master.zeroize();
         Ok(())
     }
 
@@ -216,58 +219,47 @@ impl Keystore {
 
     /// Derive a 32-byte database encryption key.
     pub fn derive_db_key(&self) -> [u8; 32] {
-        derive_subkey(&self.password, &self.salt, b"alexandria-db-key")
+        derive_subkey(&self.master, b"alexandria-db-key")
     }
 
     /// Derive a 32-byte key for iroh node secret encryption.
     pub fn derive_node_key(&self) -> [u8; 32] {
-        derive_subkey(&self.password, &self.salt, b"alexandria-iroh-node-key")
+        derive_subkey(&self.master, b"alexandria-iroh-node-key")
     }
 
     /// Derive a 32-byte key for content blob encryption.
     pub fn derive_content_key(&self) -> [u8; 32] {
-        derive_subkey(&self.password, &self.salt, b"alexandria-content-key")
+        derive_subkey(&self.master, b"alexandria-content-key")
     }
 }
 
-/// Derive a 32-byte AES key from password + salt using Argon2id.
+/// Derive the 32-byte master key from password + salt using Argon2id.
 ///
 /// Same parameters as the desktop Stronghold keystore: 64 MB memory,
-/// 3 iterations, 4 lanes.
-fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], KeystoreError> {
+/// 3 iterations, 4 lanes. The result is the vault's AES key.
+fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, KeystoreError> {
     let params = argon2::Params::new(64 * 1024, 3, 4, Some(32))
         .map_err(|e| KeystoreError::Crypto(format!("Argon2 params: {e}")))?;
 
     let argon2 = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
-    let mut key = [0u8; 32];
+    let mut key = Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .hash_password_into(password.as_bytes(), salt, key.as_mut_slice())
         .map_err(|e| KeystoreError::Crypto(format!("Argon2 hash: {e}")))?;
 
     Ok(key)
 }
 
-/// Derive a purpose-specific 32-byte subkey from password + salt.
-///
-/// Same logic as the desktop keystore: Argon2id → HKDF-SHA256.
-fn derive_subkey(password: &str, salt: &[u8], info: &[u8]) -> [u8; 32] {
+/// Expand a purpose-specific 32-byte subkey from the master key with
+/// HKDF-SHA256 (same construction as the desktop keystore).
+fn derive_subkey(master: &[u8; 32], info: &[u8]) -> [u8; 32] {
     use hkdf::Hkdf;
     use sha2::Sha256;
 
-    let params = argon2::Params::new(64 * 1024, 3, 4, Some(32)).expect("valid argon2 params");
-    let argon2_inst =
-        argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
-    let mut master = [0u8; 32];
-    argon2_inst
-        .hash_password_into(password.as_bytes(), salt, &mut master)
-        .expect("argon2 hash");
-
-    let hk = Hkdf::<Sha256>::new(None, &master);
+    let hk = Hkdf::<Sha256>::new(None, master);
     let mut subkey = [0u8; 32];
     hk.expand(info, &mut subkey).expect("hkdf expand");
-
-    master.iter_mut().for_each(|b| *b = 0);
     subkey
 }
 
@@ -364,8 +356,54 @@ mod tests {
             .expect("store mnemonic");
         keystore.clear_secrets().expect("clear secrets");
         assert!(keystore.password.is_empty());
+        assert_eq!(*keystore.master, [0u8; 32], "the master key is wiped too");
         assert!(keystore.retrieve_mnemonic().is_err());
         keystore.clear_secrets().expect("repeat cleanup");
+    }
+
+    /// Subkeys are expanded from one cached Argon2id result. They must stay
+    /// exactly what re-running Argon2id per key produced before, or every
+    /// existing database, node key, and content blob would stop opening.
+    #[test]
+    fn subkeys_match_a_fresh_argon2_run_and_survive_reopening() {
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        let directory = tempfile::TempDir::new().expect("temporary vault");
+        let mut created = Keystore::create(directory.path(), "testpassword").expect("create vault");
+        created
+            .store_mnemonic("test mnemonic")
+            .expect("store mnemonic");
+        let keys = (
+            created.derive_db_key(),
+            created.derive_node_key(),
+            created.derive_content_key(),
+        );
+
+        let salt = read_and_verify_salt(directory.path(), "testpassword").expect("salt");
+        let params = argon2::Params::new(64 * 1024, 3, 4, Some(32)).unwrap();
+        let mut master = [0u8; 32];
+        argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+            .hash_password_into(b"testpassword", &salt, &mut master)
+            .unwrap();
+        let expand = |info: &[u8]| {
+            let mut out = [0u8; 32];
+            Hkdf::<Sha256>::new(None, &master)
+                .expand(info, &mut out)
+                .unwrap();
+            out
+        };
+        assert_eq!(keys.0, expand(b"alexandria-db-key"));
+        assert_eq!(keys.1, expand(b"alexandria-iroh-node-key"));
+        assert_eq!(keys.2, expand(b"alexandria-content-key"));
+        assert_ne!(keys.0, keys.1);
+
+        drop(created);
+        let reopened = Keystore::open(directory.path(), "testpassword").expect("reopen");
+        assert_eq!(reopened.derive_db_key(), keys.0);
+        assert_eq!(reopened.derive_node_key(), keys.1);
+        assert_eq!(reopened.derive_content_key(), keys.2);
+        assert_eq!(reopened.retrieve_mnemonic().unwrap(), "test mnemonic");
     }
 
     fn temp_vault_dir() -> PathBuf {

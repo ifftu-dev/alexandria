@@ -1,0 +1,163 @@
+import { expect, test } from '@playwright/test'
+import { PNG } from 'pngjs'
+
+function luminance(rgb: number[]): number {
+  const linear = rgb.map((value) => {
+    const channel = value / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  return (linear[0] ?? 0) * 0.2126 + (linear[1] ?? 0) * 0.7152 + (linear[2] ?? 0) * 0.0722
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`${theme} form controls stay legible when the OS uses the opposite theme`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme === 'dark' ? 'light' : 'dark' })
+    await page.goto(`/tests/desktop-ui/?theme=${theme}`)
+    const select = page.getByRole('combobox')
+    await expect(select).toBeVisible()
+    await expect(select).toHaveValue('')
+    await expect(page.getByRole('button', { name: 'Set as goal' })).toBeDisabled()
+    await expect(select.getByRole('option')).toHaveText(['Software engineer'])
+    const foreground = await select.evaluate((element) => getComputedStyle(element).color)
+    const pixels = PNG.sync.read(await select.screenshot())
+    const offset = (Math.floor(pixels.height / 2) * pixels.width + Math.floor(pixels.width * 0.75)) * 4
+    const background = [pixels.data[offset] ?? 0, pixels.data[offset + 1] ?? 0, pixels.data[offset + 2] ?? 0]
+    const text = (foreground.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+    const light = Math.max(luminance(text), luminance(background))
+    const dark = Math.min(luminance(text), luminance(background))
+    expect((light + 0.05) / (dark + 0.05)).toBeGreaterThanOrEqual(4.5)
+    await select.selectOption('software-engineer')
+    await expect(select).toHaveValue('software-engineer')
+    await select.focus()
+    await page.keyboard.press('Tab')
+    await expect(page.getByRole('button', { name: 'Set as goal' })).toBeFocused()
+    await expect(page.getByLabel('Invalid name')).toHaveAccessibleDescription('Enter a display name')
+    const progress = page.getByRole('progressbar', { name: 'Sample download' })
+    const accent = await progress.evaluate((element) => getComputedStyle(element).getPropertyValue('--app-primary'))
+    const expected = (accent.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+    const bar = PNG.sync.read(await progress.screenshot())
+    const filled = (Math.floor(bar.height / 2) * bar.width + Math.floor(bar.width / 4)) * 4
+    for (let channel = 0; channel < 3; channel++) {
+      expect(Math.abs((bar.data[filled + channel] ?? 0) - (expected[channel] ?? 0))).toBeLessThanOrEqual(2)
+    }
+  })
+}
+
+test('goal picker fits a narrow tiled desktop window', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 510 })
+  await page.goto('/tests/desktop-ui/?theme=dark')
+  await expect(page.getByRole('combobox')).toBeVisible()
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
+  expect(overflow).toBe(false)
+})
+
+test('Home add-goal action opens goal selection and closes back to Goals', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 560 })
+  await page.goto('/tests/desktop-ui/?screen=home&theme=dark')
+  await page.getByRole('button', { name: /Add a goal/ }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('combobox')).toBeVisible()
+  await dialog.getByRole('combobox').selectOption('software-engineer')
+  await expect(dialog.getByRole('button', { name: 'Set as goal' })).toBeEnabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(page.getByTestId('add-goal-empty')).toBeVisible()
+  const headerAction = page.getByTestId('add-goal')
+  await expect(headerAction).toBeInViewport()
+  expect(await headerAction.evaluate((button) => button.scrollWidth <= button.clientWidth)).toBe(true)
+})
+
+test('a long dialog fits a short window and keeps its actions reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 600 })
+  await page.goto('/tests/desktop-ui/?theme=dark')
+  await page.getByRole('button', { name: 'Open long dialog' }).focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Long settings dialog' })
+  await expect(dialog).toBeVisible()
+  const bounds = await dialog.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds?.y).toBeGreaterThanOrEqual(0)
+  expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(600)
+  await expect(dialog.getByRole('button', { name: 'Save settings' })).toBeInViewport()
+  await expect(page.getByLabel('Dialog display name')).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(dialog.getByRole('button', { name: 'Save settings' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open long dialog' })).toBeFocused()
+  await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden')
+})
+
+test('Escape closes only the top dialog and preserves the outer scroll lock', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/')
+  await page.getByRole('button', { name: 'Open long dialog' }).click()
+  await page.getByRole('button', { name: 'Open nested dialog' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Nested dialog', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Nested dialog', exact: true })).not.toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Long settings dialog' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open nested dialog' })).toBeFocused()
+  await expect(page.locator('body')).toHaveCSS('overflow', 'hidden')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden')
+})
+
+test('a dialog covers compact navigation and its backdrop dismisses it', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 600 })
+  await page.goto('/tests/desktop-ui/')
+  await page.getByRole('button', { name: 'Open long dialog' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Long settings dialog' })
+  await expect(dialog).toBeVisible()
+  const navigationCovered = await page.getByRole('navigation').evaluate((nav) => {
+    const bounds = nav.getBoundingClientRect()
+    const top = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    return Boolean(top?.closest('[data-backdrop]'))
+  })
+  expect(navigationCovered).toBe(true)
+  await dialog.getByText('Setting 1:', { exact: false }).click()
+  await expect(dialog).toBeVisible()
+  await page.locator('[data-backdrop]').click({ position: { x: 4, y: 4 } })
+  await expect(dialog).not.toBeVisible()
+})
+
+test('onboarding keeps keyboard focus visible on buttons with decorative shadows', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=onboarding')
+  const create = page.getByRole('button', { name: 'Create account', exact: true })
+  await create.focus()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Shift+Tab')
+  await expect(create).toBeFocused()
+  await expect(create).toHaveCSS('outline-style', 'solid')
+  await expect(create).toHaveCSS('outline-width', '2px')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'What brings you here?' })).toBeVisible()
+  await page.setViewportSize({ width: 700, height: 510 })
+  const next = page.getByRole('button', { name: 'Continue', exact: true })
+  await next.focus()
+  await expect(next).toBeInViewport()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('combobox', { name: 'Day', exact: true })).toBeVisible()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`${theme} dashboard hero text contrasts with its entire gradient`, async ({ page }) => {
+    await page.goto(`/tests/desktop-ui/?screen=home&theme=${theme}`)
+    const hero = page.locator('.home-hero')
+    await expect(hero).toBeVisible()
+    const pixels = PNG.sync.read(await hero.screenshot())
+    for (const fraction of [0.1, 0.5, 0.9]) {
+      const offset = (10 * pixels.width + Math.floor(pixels.width * fraction)) * 4
+      const background = [pixels.data[offset] ?? 0, pixels.data[offset + 1] ?? 0, pixels.data[offset + 2] ?? 0]
+      expect((1.05) / (luminance(background) + 0.05)).toBeGreaterThanOrEqual(4.5)
+    }
+    await expect(hero.locator('.home-hero-title')).toHaveCSS('color', 'rgb(255, 255, 255)')
+  })
+}

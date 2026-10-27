@@ -57,10 +57,12 @@ pub struct Keystore {
     stronghold: Stronghold,
     snapshot_path: SnapshotPath,
     vault_dir: PathBuf,
-    /// The salt bytes — kept in memory so we can re-derive the key for saves.
-    salt: Vec<u8>,
-    /// The password — kept in memory for the session so we can commit.
+    /// Argon2id(password, salt), computed once when the vault is created or
+    /// opened. It is the snapshot key and the root every subkey is expanded
+    /// from, so unlocking runs the memory-hard KDF once, not once per key.
     /// Cleared on lock().
+    master: Zeroizing<[u8; 32]>,
+    /// The password — kept for `check_password`. Cleared on lock().
     password: Zeroizing<String>,
 }
 
@@ -98,7 +100,8 @@ impl Keystore {
         write_salt_with_hmac(vault_dir, &salt, password)?;
 
         // Derive encryption key from password + salt
-        let key_provider = derive_key(password, &salt)?;
+        let master = derive_key(password, &salt)?;
+        let key_provider = key_provider(&master)?;
 
         // Create Stronghold and client
         let stronghold = Stronghold::default();
@@ -119,7 +122,7 @@ impl Keystore {
             stronghold,
             snapshot_path,
             vault_dir: vault_dir.to_path_buf(),
-            salt: salt.to_vec(),
+            master,
             password: Zeroizing::new(password.to_string()),
         })
     }
@@ -138,7 +141,8 @@ impl Keystore {
         let salt = read_and_verify_salt(vault_dir, password)?;
 
         // Derive key
-        let key_provider = derive_key(password, &salt)?;
+        let master = derive_key(password, &salt)?;
+        let key_provider = key_provider(&master)?;
 
         // Load snapshot
         let stronghold = Stronghold::default();
@@ -168,7 +172,7 @@ impl Keystore {
             stronghold,
             snapshot_path,
             vault_dir: vault_dir.to_path_buf(),
-            salt,
+            master,
             password: Zeroizing::new(password.to_string()),
         })
     }
@@ -228,10 +232,10 @@ impl Keystore {
 
     /// Save the current vault state to disk.
     ///
-    /// Re-derives the key from the stored password + salt each time,
-    /// since `KeyProvider` is not `Clone`.
+    /// Builds a fresh `KeyProvider` from the master key each time, since
+    /// `KeyProvider` is not `Clone`.
     fn save(&self) -> Result<(), KeystoreError> {
-        let key_provider = derive_key(&self.password, &self.salt)?;
+        let key_provider = key_provider(&self.master)?;
         self.stronghold
             .commit_with_keyprovider(&self.snapshot_path, &key_provider)
             .map_err(|e| KeystoreError::Stronghold(format!("{e:?}")))?;
@@ -266,6 +270,7 @@ impl Keystore {
         // Zeroize first: a failed Stronghold clear leaves this keystore in
         // shared state, and it must not keep the password alive there.
         self.password.zeroize();
+        self.master.zeroize();
         self.stronghold
             .clear()
             .map_err(|e| KeystoreError::Stronghold(format!("{e:?}")))
@@ -278,31 +283,29 @@ impl Keystore {
 
     /// Derive a 32-byte database encryption key.
     ///
-    /// Uses HKDF-SHA256 with the Argon2id master key material
-    /// (password + salt) to produce a purpose-specific subkey.
+    /// Uses HKDF-SHA256 over the Argon2id master key to produce a
+    /// purpose-specific subkey.
     pub fn derive_db_key(&self) -> [u8; 32] {
-        derive_subkey(&self.password, &self.salt, b"alexandria-db-key")
+        derive_subkey(&self.master, b"alexandria-db-key")
     }
 
     /// Derive a 32-byte key for iroh node secret encryption.
     pub fn derive_node_key(&self) -> [u8; 32] {
-        derive_subkey(&self.password, &self.salt, b"alexandria-iroh-node-key")
+        derive_subkey(&self.master, b"alexandria-iroh-node-key")
     }
 
     /// Derive a 32-byte key for content blob encryption.
     pub fn derive_content_key(&self) -> [u8; 32] {
-        derive_subkey(&self.password, &self.salt, b"alexandria-content-key")
+        derive_subkey(&self.master, b"alexandria-content-key")
     }
 }
 
-/// Derive a 32-byte encryption key from password + salt using Argon2id.
+/// Derive the 32-byte master key from password + salt using Argon2id.
 ///
 /// Argon2id is a memory-hard KDF that resists GPU/ASIC brute-force attacks.
-/// Parameters: 64 MB memory, 3 iterations, 4 lanes — balances security
-/// against ~200ms derivation time on modern hardware.
-///
-/// The 32-byte output matches Stronghold's snapshot encryption key size.
-fn derive_key(password: &str, salt: &[u8]) -> Result<KeyProvider, KeystoreError> {
+/// Parameters: 64 MB memory, 3 iterations, 4 lanes. The 32-byte output is
+/// Stronghold's snapshot key and the input to every subkey.
+fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, KeystoreError> {
     let params = argon2::Params::new(
         64 * 1024, // m_cost: 64 MB memory
         3,         // t_cost: 3 iterations
@@ -313,41 +316,29 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<KeyProvider, KeystoreError>
 
     let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
-    let mut key = Zeroizing::new(vec![0u8; 32]);
+    let mut key = Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .hash_password_into(password.as_bytes(), salt, key.as_mut_slice())
         .map_err(|e| KeystoreError::Memory(format!("Argon2 hash failed: {e}")))?;
-
-    KeyProvider::try_from(key).map_err(|e| KeystoreError::Memory(format!("{e:?}")))
+    Ok(key)
 }
 
-/// Derive a purpose-specific 32-byte subkey from password + salt.
-///
-/// 1. Argon2id(password, salt) → 32-byte master key material
-/// 2. HKDF-SHA256(ikm=master, info=purpose) → 32-byte subkey
-///
-/// This allows deriving multiple independent keys (DB, node, content)
-/// from a single password without re-running Argon2id each time.
-fn derive_subkey(password: &str, salt: &[u8], info: &[u8]) -> [u8; 32] {
+/// A Stronghold key provider for the master key.
+fn key_provider(master: &[u8; 32]) -> Result<KeyProvider, KeystoreError> {
+    KeyProvider::try_from(Zeroizing::new(master.to_vec()))
+        .map_err(|e| KeystoreError::Memory(format!("{e:?}")))
+}
+
+/// Expand a purpose-specific 32-byte subkey from the master key with
+/// HKDF-SHA256, so several independent keys (DB, node, content) come from
+/// one Argon2id run.
+fn derive_subkey(master: &[u8; 32], info: &[u8]) -> [u8; 32] {
     use hkdf::Hkdf;
     use sha2::Sha256;
 
-    // Step 1: Argon2id master key
-    let params = argon2::Params::new(64 * 1024, 3, 4, Some(32)).expect("valid argon2 params");
-    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
-    let mut master = [0u8; 32];
-    argon2
-        .hash_password_into(password.as_bytes(), salt, &mut master)
-        .expect("argon2 hash");
-
-    // Step 2: HKDF-SHA256 expand
-    let hk = Hkdf::<Sha256>::new(None, &master);
+    let hk = Hkdf::<Sha256>::new(None, master);
     let mut subkey = [0u8; 32];
     hk.expand(info, &mut subkey).expect("hkdf expand");
-
-    // Clear master key material
-    master.iter_mut().for_each(|b| *b = 0);
-
     subkey
 }
 
@@ -438,8 +429,54 @@ mod tests {
             .expect("store mnemonic");
         keystore.clear_secrets().expect("clear secrets");
         assert!(keystore.password.is_empty());
+        assert_eq!(*keystore.master, [0u8; 32], "the master key is wiped too");
         assert!(keystore.retrieve_mnemonic().is_err());
         keystore.clear_secrets().expect("repeat cleanup");
+    }
+
+    /// Subkeys are expanded from one cached Argon2id result. They must stay
+    /// exactly what re-running Argon2id per key produced before, or every
+    /// existing database, node key, and content blob would stop opening.
+    #[test]
+    fn subkeys_match_a_fresh_argon2_run_and_survive_reopening() {
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        let directory = tempfile::TempDir::new().expect("temporary vault");
+        let created = Keystore::create(directory.path(), "testpassword").expect("create vault");
+        created
+            .store_mnemonic("test mnemonic")
+            .expect("store mnemonic");
+        let keys = (
+            created.derive_db_key(),
+            created.derive_node_key(),
+            created.derive_content_key(),
+        );
+
+        let salt = read_and_verify_salt(directory.path(), "testpassword").expect("salt");
+        let params = argon2::Params::new(64 * 1024, 3, 4, Some(32)).unwrap();
+        let mut master = [0u8; 32];
+        argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+            .hash_password_into(b"testpassword", &salt, &mut master)
+            .unwrap();
+        let expand = |info: &[u8]| {
+            let mut out = [0u8; 32];
+            Hkdf::<Sha256>::new(None, &master)
+                .expand(info, &mut out)
+                .unwrap();
+            out
+        };
+        assert_eq!(keys.0, expand(b"alexandria-db-key"));
+        assert_eq!(keys.1, expand(b"alexandria-iroh-node-key"));
+        assert_eq!(keys.2, expand(b"alexandria-content-key"));
+        assert_ne!(keys.0, keys.1);
+
+        drop(created);
+        let reopened = Keystore::open(directory.path(), "testpassword").expect("reopen");
+        assert_eq!(reopened.derive_db_key(), keys.0);
+        assert_eq!(reopened.derive_node_key(), keys.1);
+        assert_eq!(reopened.derive_content_key(), keys.2);
+        assert_eq!(reopened.retrieve_mnemonic().unwrap(), "test mnemonic");
     }
 
     fn temp_vault_dir() -> PathBuf {

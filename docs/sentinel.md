@@ -131,6 +131,8 @@ Per-snapshot checks:
 30. ≥ 1 phantom hotkey in the window (desktop) → `phantom_hotkey` warning
 31. ≥ 3 phantom hotkeys in the window (desktop) → `phantom_hotkey_repeated` critical
 32. More than half of ≥ 3 liveness ticks in the window scored as a possible spoof → `spoof_suspected` warning
+33. Alexandria's AI chat or lesson tutor reached the backend while the attempt was open → `in_app_assistant_during_attempt` critical. Recorded by the backend, never by a client: the request is refused, and the flag is written into the session's committed snapshot chain once per session, carrying the session's current score so the average is unchanged.
+34. A connected external (MCP) assistant called while the attempt was open → `mcp_call_during_attempt` critical, recorded the same way.
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
@@ -169,6 +171,17 @@ drives the session's face/gaze checks; stopping or closing releases that camera
 opt-in. Outside an assessment, scores show unavailable and the panel explains
 that monitoring is idle. Preview-only frames do not enter the assessment evidence
 staging buffer. Profile lock closes the panel and stops capture.
+
+The native-check rows (Android environment, overlays, processes, hotkeys) show
+— until the session's first snapshot. After it, a check that returned nothing
+shows n/a rather than a clean zero: the probe failed, or the platform does not
+provide it. The Android environment report runs only on Android, the process
+scan only on desktop, and the overlay scan and hotkey monitor only on macOS,
+Windows, and Linux with an X11 display. Each reading names the probe that
+produced it (for example `cgwindow`, `nsworkspace`, `x11`). Hotkeys show —
+until the hotkey monitor has replied, and only assessment sessions ask it. A
+session the backend has suspended shows as suspended rather than active.
+Starting a session clears the previous session's readings.
 
 On macOS, trusted main-frame capture uses the normal WebKit/OS permission prompt.
 Plugin frames still require the host's recorded media grants. Capture and

@@ -56,7 +56,10 @@
     "textOnly": "You can still join — this session will use text chat only.",
     "checking": "Checking…",
     "starting": "Starting…",
-    "joining": "Joining…"
+    "joining": "Joining…",
+    "automatic": "Automatic",
+    "audioNextJoin": "Microphone and speaker changes apply the next time you join.",
+    "devices": "Devices"
   },
   "qr": {
     "scanTitle": "Scan QR invite",
@@ -138,10 +141,10 @@
     "applying": "Applying…"
   },
   "leave": {
-    "title": "Leave Session?",
+    "title": "Leave the call?",
     "desc": "Your camera and microphone will stop. Other people will see you leave.",
     "stay": "Stay",
-    "confirm": "Leave Session"
+    "confirm": "Leave call"
   },
   "ticketFallback": {
     "title": "Invite",
@@ -174,7 +177,8 @@
     "description": "Alexandria will transcribe this device's microphone only when the WebView guarantees on-device processing, then share final text segments and your room display name with current peers. Tutoring does not persist these captions.",
     "unavailable": "On-device speech recognition is not available in this WebView, so captions cannot be enabled without risking audio leaving the device.",
     "cancel": "Cancel",
-    "enable": "Enable and share text"
+    "enable": "Enable and share text",
+    "descriptionInterview": "Alexandria will transcribe this device's microphone only when the WebView guarantees on-device processing, then share final text segments and your room display name with the people in this interview. In an interview, the panel's device keeps these captions as the interview transcript."
   },
   "interviewRoom": {
     "eyebrow": "Interview in Alexandria",

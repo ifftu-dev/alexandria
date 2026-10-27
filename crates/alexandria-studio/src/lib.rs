@@ -1,6 +1,7 @@
 #[cfg(unix)]
 pub mod broker;
 pub mod credentials;
+pub mod gate;
 pub mod grants;
 pub mod jd_parser;
 pub mod learning;
@@ -19,6 +20,8 @@ pub enum Error {
     Locked,
     #[error("conflict: this draft changed; reload before saving")]
     Conflict,
+    #[error("assessment_active: AI assistance is paused while an assessment is in progress")]
+    AssessmentActive,
     #[error("invalid_input: {0}")]
     Invalid(String),
     #[error("unavailable: {0}")]

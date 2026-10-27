@@ -224,8 +224,8 @@ async fn learners_read_published_content_without_answers_or_drafts() {
         [
             "text",
             "text",
-            "questions",
-            "questions",
+            "withheld",
+            "withheld",
             "withheld",
             "video_chapters",
             "text"
@@ -259,20 +259,15 @@ async fn learners_read_published_content_without_answers_or_drafts() {
     assert_eq!(blob["structuredContent"]["text"], "Blob lesson body");
     let (_, gone) = call(&learner, "read_lesson", learn("pub", "gone")).await;
     assert_eq!(gone["structuredContent"]["status"], "unavailable");
+    // Quizzes are graded like assessments in the player: an assistant gets
+    // the reason, never the questions.
     let (_, quiz) = call(&learner, "read_lesson", learn("pub", "quiz")).await;
-    assert_eq!(
-        quiz["structuredContent"]["questions"][0]["prompt"],
-        "Pick one"
-    );
-    assert_eq!(
-        quiz["structuredContent"]["questions"][0]["options"],
-        json!(["a", "b"])
-    );
+    assert_eq!(quiz["structuredContent"]["status"], "withheld");
+    assert_eq!(quiz["structuredContent"]["questions"], json!([]));
+    assert!(!quiz.to_string().contains("Pick one"));
     let (_, mcq) = call(&learner, "read_lesson", learn("pub", "mcq")).await;
-    assert_eq!(
-        mcq["structuredContent"]["questions"][0]["options"],
-        json!(["x", "y"])
-    );
+    assert_eq!(mcq["structuredContent"]["status"], "withheld");
+    assert_eq!(mcq["structuredContent"]["questions"], json!([]));
     let (_, exam) = call(&learner, "read_lesson", learn("pub", "final")).await;
     assert_eq!(exam["structuredContent"]["status"], "withheld");
     let (_, video) = call(&learner, "read_lesson", learn("pub", "vid")).await;
@@ -371,11 +366,20 @@ async fn learners_read_their_own_graph_progress_and_goals() {
                  ('p2','e1','g2','in_progress',NULL);"#,
         )
         .unwrap();
-    let (_, learner_file) = a.grant("Learner", &["learning:read"]);
+    let (_, learner_file) = a.grant("Learner", &["learning:read", "learning:private_skills"]);
+    let (_, public_file) = a.grant("Public only", &["learning:read"]);
     let (_, drafts_file) = a.grant("Drafts", &["drafts:read"]);
     let (learner, drafter) = (client(&learner_file).await, client(&drafts_file).await);
 
-    // The owner's own view keeps private skills, flagged as such.
+    // Without the opt-in, private skills stay on the device.
+    let public_only = client(&public_file).await;
+    let (error, graph) = call(&public_only, "get_skill_graph", json!({})).await;
+    assert!(!error, "{graph}");
+    assert_eq!(graph["structuredContent"]["includes_private"], false);
+    assert!(!graph.to_string().contains("\"b\""));
+    public_only.cancel().await.unwrap();
+
+    // With it, the owner's own view keeps private skills, flagged as such.
     let (error, graph) = call(&learner, "get_skill_graph", json!({})).await;
     assert!(!error, "{graph}");
     let graph = &graph["structuredContent"];
@@ -510,7 +514,7 @@ async fn credential_summaries_never_carry_the_signed_document() {
                   '{"proof":"SECRET SIGNED DOCUMENT"}','hash-3',0,'2026-02-03');"#,
         )
         .unwrap();
-    let (_, credentials_file) = a.grant("Credentials", &["credentials:read"]);
+    let (_, credentials_file) = a.grant("Credentials", &["credentials:read", "credentials:verify"]);
     let (_, learning_file) = a.grant("Learning", &["learning:read"]);
     let (holder, learner) = (
         client(&credentials_file).await,
@@ -871,5 +875,61 @@ async fn restart_malformed_frames_and_capacity_fail_cleanly() {
     assert!(raw_read(socket, &token)
         .await
         .starts_with("permission_denied"));
+    assistant.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn assistant_access_pauses_while_an_assessment_is_in_progress() {
+    let a = Profile::new("A");
+    let _server = a.serve();
+    let (grant_id, file) = a.grant("Reader", &["drafts:read"]);
+    let assistant = client(&file).await;
+    let (error, before) = call(&assistant, "read_lesson_draft", lesson()).await;
+    assert!(!error);
+
+    // An attempt (or interview check) holds a live integrity session.
+    a.db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO integrity_sessions(id, status, purpose) VALUES ('attempt', 'active', 'assessment')",
+            [],
+        )
+        .unwrap();
+    let (error, body) = call(&assistant, "read_lesson_draft", lesson()).await;
+    assert!(error, "assistant must not read during an assessment");
+    assert!(body.to_string().contains("assessment_active"));
+    assert!(!body.to_string().contains("Profile A lesson"));
+
+    // A token that does not authorize learns nothing about assessment state.
+    let proposal = json!({
+        "course_id": "course",
+        "element_id": "lesson",
+        "fingerprint": before["structuredContent"]["fingerprint"],
+        "text": "Rewrite",
+        "request_id": "request-1"
+    });
+    let (error, denied) = call(&assistant, "propose_lesson_draft", proposal).await;
+    assert!(error);
+    assert!(denied.to_string().contains("permission_denied"));
+    assert!(!denied.to_string().contains("assessment_active"));
+
+    a.db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE integrity_sessions SET ended_at = datetime('now'), status = 'completed'",
+            [],
+        )
+        .unwrap();
+    let (error, body) = call(&assistant, "read_lesson_draft", lesson()).await;
+    assert!(!error);
+    assert_eq!(body["structuredContent"]["text"], "Profile A lesson");
+
+    // The learner can see what the assistant read and what it was refused.
+    let log = a.grants.lock().unwrap().activity(&grant_id);
+    let outcomes: Vec<&str> = log.iter().map(|e| e.outcome.as_str()).collect();
+    assert_eq!(outcomes, ["returned", "assessment_active", "returned"]);
+    assert!(log
+        .iter()
+        .all(|e| e.tool == "read_lesson_draft" && e.detail == "course/lesson"));
     assistant.cancel().await.unwrap();
 }

@@ -211,6 +211,15 @@ const router = createRouter({
       component: () => import('@/pages/tutoring/Session.vue'),
       meta: { layout: 'app' },
     },
+    // The candidate's side of an interview held in Alexandria. Same call
+    // screen as tutoring, but an interview: no invite to share, and leaving
+    // returns to the interview's waiting room.
+    {
+      path: '/interview-call/:id',
+      name: 'interview-call',
+      component: () => import('@/pages/tutoring/Session.vue'),
+      meta: { layout: 'app' },
+    },
 
     // Structured interviews — reuses the live tutoring media transport.
     {

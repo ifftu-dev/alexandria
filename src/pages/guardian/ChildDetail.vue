@@ -8,6 +8,7 @@ import { useI18n } from 'vue-i18n'
 import { useGuardian, childAge } from '@/composables/useGuardian'
 import { AppBadge, AppButton, AppTabs, EmptyState } from '@/components/ui'
 import type { GuardianLinkInfo } from '@/types'
+import GuardianAiRequests from '@/components/guardian/GuardianAiRequests.vue'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -211,6 +212,9 @@ function pct(v: number | null): string {
           <p class="mt-1 text-2xl font-bold text-foreground">{{ totals.classrooms }}</p>
         </div>
       </div>
+
+      <!-- Remote AI model requests -->
+      <GuardianAiRequests :link-id="linkId" />
 
       <!-- Recent activity -->
       <div class="rounded-xl border border-border bg-card p-5">

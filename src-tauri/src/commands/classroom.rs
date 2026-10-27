@@ -1372,9 +1372,15 @@ pub async fn classroom_start_call(
     let w = get_wallet(&state).await?;
     let authorized_classroom_id = classroom_id.clone();
     let actor_address = w.stake_address.clone();
-    classroom_db(&state, "classroom.start-call.authorize", move |db| {
+    let classroom_name = classroom_db(&state, "classroom.start-call.authorize", move |db| {
         let _ = require_classroom_member(db, &authorized_classroom_id, &actor_address)?;
-        Ok(())
+        db.conn()
+            .query_row(
+                "SELECT name FROM classrooms WHERE id = ?1",
+                params![authorized_classroom_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|e| e.to_string())
     })
     .await?;
 
@@ -1387,7 +1393,7 @@ pub async fn classroom_start_call(
     let live = content_node.live().await.ok_or("live not available")?;
 
     let call_id = uuid::Uuid::new_v4().to_string();
-    let title = format!("{} — Voice Call", classroom_id);
+    let title = format!("{classroom_name} call");
     let name = display_name.unwrap_or_else(|| w.stake_address.clone());
 
     let devices = crate::tutoring::manager::DeviceSelection {
@@ -1437,6 +1443,14 @@ pub async fn classroom_start_call(
             ],
         )
         .map_err(|e| e.to_string())?;
+        crate::tutoring::call_kind::record_session(
+            &tx,
+            &persisted_call_id,
+            &persisted_title,
+            &persisted_ticket,
+            crate::tutoring::call_kind::CallKind::Classroom,
+            Some(&persisted_classroom_id),
+        )?;
         let call = tx
             .query_row(
                 "SELECT id, classroom_id, channel_id, title, ticket, started_by, status, started_at, ended_at \
@@ -1500,19 +1514,23 @@ pub async fn classroom_join_call(
     let w = get_wallet(&state).await?;
     let requested_call_id = call_id.clone();
     let actor_address = w.stake_address.clone();
-    let ticket = classroom_db(&state, "classroom.join-call.authorize", move |db| {
-        let (classroom_id, ticket): (String, Option<String>) = db
-            .conn()
-            .query_row(
-                "SELECT classroom_id, ticket FROM classroom_calls WHERE id = ?1 AND status = 'active'",
-                params![requested_call_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|_| "call not found or already ended".to_string())?;
-        let _ = require_classroom_member(db, &classroom_id, &actor_address)?;
-        ticket.ok_or_else(|| "call has no ticket".to_string())
-    })
-    .await?;
+    let (classroom_id, classroom_name, ticket) =
+        classroom_db(&state, "classroom.join-call.authorize", move |db| {
+            let (classroom_id, classroom_name, ticket): (String, String, Option<String>) = db
+                .conn()
+                .query_row(
+                    "SELECT c.classroom_id, r.name, c.ticket FROM classroom_calls c
+                     JOIN classrooms r ON r.id = c.classroom_id
+                     WHERE c.id = ?1 AND c.status = 'active'",
+                    params![requested_call_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(|_| "call not found or already ended".to_string())?;
+            let _ = require_classroom_member(db, &classroom_id, &actor_address)?;
+            let ticket = ticket.ok_or_else(|| "call has no ticket".to_string())?;
+            Ok((classroom_id, classroom_name, ticket))
+        })
+        .await?;
 
     let content_node = &state.content_node;
     let endpoint = content_node
@@ -1529,15 +1547,33 @@ pub async fn classroom_join_call(
         speaker_device_id: speaker_id,
     };
 
-    let title = format!("Voice Call ({})", call_id);
+    let title = format!("{classroom_name} call");
     state
         .tutoring
         .join_room(
-            call_id, title, name, &ticket, &endpoint, gossip, live, app, devices,
+            call_id.clone(),
+            title.clone(),
+            name,
+            &ticket,
+            &endpoint,
+            gossip,
+            live,
+            app,
+            devices,
         )
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    classroom_db(&state, "classroom.join-call.record", move |db| {
+        crate::tutoring::call_kind::record_session(
+            db.conn(),
+            &call_id,
+            &title,
+            &ticket,
+            crate::tutoring::call_kind::CallKind::Classroom,
+            Some(&classroom_id),
+        )
+    })
+    .await
 }
 
 /// End a classroom call (started_by or moderator/owner).
@@ -1574,6 +1610,11 @@ pub async fn classroom_end_call(call_id: String, state: State<'_, AppState>) -> 
                 params![persisted_call_id],
             )
             .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
+            params![persisted_call_id],
+        )
+        .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(classroom_id)
     })

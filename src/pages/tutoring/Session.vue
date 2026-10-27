@@ -7,9 +7,14 @@ import { useInterviewCheck } from '@/composables/useInterviewCheck'
 import { useSentinel } from '@/composables/useSentinel'
 import { useLocalSpeechRecognition } from '@/composables/useLocalSpeechRecognition'
 import { usePlatform } from '@/composables/usePlatform'
-import { LiveDiagnosticsModal } from '@/components/live'
+import { LiveDiagnosticsModal, VideoGrid } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
+import type { SentinelFrame } from '@/utils/sentinel/frame'
+import { openCameraPreview } from '@/utils/callCamera'
+import { callHome, sharesInvites } from '@/utils/callKinds'
+import { useCallDevices } from '@/composables/useCallDevices'
+import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -41,7 +46,12 @@ const {
   listDevices,
   setAudioDevices,
   getDiagnostics,
+  setCamera,
+  mediaBusy,
 } = useTutoringRoom()
+const callDevices = useCallDevices()
+const deviceChoice = callDevices.choice
+const showCallDevices = ref(false)
 
 const { isMobilePlatform, isIOS } = usePlatform()
 const speech = useLocalSpeechRecognition()
@@ -112,11 +122,22 @@ watch(() => lastError.value, () => {
 
 const isActive = computed(() => sessionStatus.value?.session_id === sessionId.value)
 const sessionRecord = computed(() => sessions.value.find(s => s.id === sessionId.value))
+// What this call is for. An interview or classroom call shows on this
+// screen too, but offers no invite and leads back to its own home.
+const callKind = computed(() => sessionRecord.value?.kind ?? (route.name === 'interview-call' ? 'interview_candidate' : 'tutoring'))
+const offersInvites = computed(() => sharesInvites(callKind.value))
+const isInterviewCall = computed(() => callKind.value.startsWith('interview_'))
+const homeRoute = computed(() => callHome(
+  sessionRecord.value ?? { id: sessionId.value, kind: callKind.value },
+  typeof route.query.cloud === 'string' ? route.query.cloud : null,
+))
 const sessionEnded = computed(() => sessionRecord.value?.status === 'ended')
 const sessionTitle = computed(() => isActive.value ? sessionStatus.value?.session_title ?? '' : sessionRecord.value?.title ?? t('tutoring.header.title'))
 const joining = ref(false)
 async function rejoin() {
-  if (!sessionRecord.value?.ticket || sessionEnded.value) return
+  // Only open tutoring rejoins from here; other kinds rejoin from their own
+  // screen, which runs their consent and checks first.
+  if (!sessionRecord.value?.ticket || sessionEnded.value || callKind.value !== 'tutoring') return
   joining.value = true
   try { const joined = await joinRoom(sessionRecord.value.ticket, sessionRecord.value.title); await router.replace(`/tutoring/${joined.id}`) } catch { /* useTutoringRoom exposes the error in lastError. */ } finally { joining.value = false }
 }
@@ -154,29 +175,26 @@ async function attachSelfStream() {
 }
 
 async function startSelfPreview() {
-  // A mobile camera permits only one client, so the webview must not open the
-  // device when the Rust side already holds it to publish to peers — there,
-  // getUserMedia returns a blank stream and the Rust JPEG bridge
-  // (selfVideoSrc) is the correct source.
-  //
-  // That is true on iOS, where manager_mobile drives an AVCaptureSession. It is
-  // NOT true on Android: the capture backend is nokhwa, which ships bindings
-  // for macOS, Windows and Linux only, so nothing claims the camera there and
-  // gating Android out left it with no camera path at all. Let the webview open
-  // it until an Android Camera2 backend exists, at which point this should go
-  // back to gating both platforms.
+  // On iOS the call itself holds the camera and hands the webview JPEG frames
+  // (selfVideoSrc); opening it here would get a blank stream. Elsewhere the
+  // webview opens the same camera the call publishes, by the name the call
+  // reports, so the self view shows what everyone else sees. No name (the
+  // camera did not open, or Android's Camera2 source) leaves the JPEG frames.
   if (isIOS) return
   if (selfStream.value) return
+  const cameraName = cameraNameNow.value
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-      audio: false,
-    })
+    const stream = await openCameraPreview(cameraName)
+    if (!stream) return
+    if (selfStream.value || cameraNameNow.value !== cameraName) {
+      for (const track of stream.getTracks()) track.stop()
+      return
+    }
     selfStream.value = stream
     if (checkRunning.value) sentinel.reportCameraDevice(stream.getVideoTracks?.()[0]?.label ?? null)
     await attachSelfStream()
   } catch (e) {
-    console.warn('[tutoring] getUserMedia for self-preview failed:', e)
+    console.warn('[tutoring] self-preview camera failed to open:', e)
   }
 }
 
@@ -193,14 +211,16 @@ function stopSelfPreview() {
 // Sync with session video state. Only run the native preview when the
 // camera track is on AND we're not screen-sharing (screen share reuses the
 // Rust JPEG bridge).
+// The camera the self view should show: the published one, while the
+// camera is on and the screen is not being shared.
+const cameraNameNow = computed(() =>
+  isActive.value && videoEnabled.value && !screenSharing.value ? (sessionStatus.value?.camera_name ?? null) : null,
+)
 watch(
-  [videoEnabled, screenSharing, isActive],
-  ([video, screen, active]) => {
-    if (active && video && !screen) {
-      startSelfPreview()
-    } else {
-      stopSelfPreview()
-    }
+  cameraNameNow,
+  (camera) => {
+    stopSelfPreview()
+    if (camera) void startSelfPreview()
   },
   { immediate: true },
 )
@@ -208,23 +228,43 @@ watch(
 // With the camera allowed for the integrity check, Sentinel looks at the same
 // self-preview the candidate sees: face presence every 3s, gaze every 1.5s.
 // Frames are scored in memory; nothing is kept or sent.
+//
+// On iOS that preview is not a webview stream — the call holds the camera
+// and hands the webview JPEG frames — so the check decodes the latest one.
+const nativeSelfFrames = computed(() => !selfStreamActive.value && videoEnabled.value && !screenSharing.value && selfVideoSrc.value !== null)
+const checkCameraLive = computed(() => selfStreamActive.value || nativeSelfFrames.value)
 let checkFaceTimer: ReturnType<typeof setInterval> | null = null
 let checkGazeTimer: ReturnType<typeof setInterval> | null = null
+let faceInFlight = false
 let gazeInFlight = false
-function checkVideo(): HTMLVideoElement | null {
-  return selfVideoElDesktop.value ?? selfVideoElMobile.value
+async function checkFrame(): Promise<SentinelFrame | null> {
+  if (selfStreamActive.value) return selfVideoElDesktop.value ?? selfVideoElMobile.value
+  const src = nativeSelfFrames.value ? selfVideoSrc.value : null
+  if (!src) return null
+  const still = new Image()
+  still.src = src
+  try {
+    await still.decode()
+  } catch {
+    return null
+  }
+  return still
 }
 function startCheckCamera() {
   if (checkFaceTimer || checkGazeTimer) return
   checkFaceTimer = setInterval(() => {
-    const video = checkVideo()
-    if (video) sentinel.verifyFace(video)
+    if (faceInFlight) return
+    faceInFlight = true
+    void checkFrame()
+      .then((frame) => { if (frame && checkFaceTimer) sentinel.verifyFace(frame) })
+      .finally(() => { faceInFlight = false })
   }, 3000)
   checkGazeTimer = setInterval(() => {
-    const video = checkVideo()
-    if (!video || gazeInFlight) return
+    if (gazeInFlight) return
     gazeInFlight = true
-    sentinel.scoreGaze(video).finally(() => { gazeInFlight = false })
+    void checkFrame()
+      .then((frame) => (frame && checkGazeTimer ? sentinel.scoreGaze(frame) : null))
+      .finally(() => { gazeInFlight = false })
   }, 1500)
 }
 function stopCheckCamera() {
@@ -232,10 +272,11 @@ function stopCheckCamera() {
   if (checkGazeTimer) clearInterval(checkGazeTimer)
   checkFaceTimer = null
   checkGazeTimer = null
+  faceInFlight = false
   gazeInFlight = false
 }
 watch(
-  [checkRunning, () => sentinel.cameraOptedIn.value, selfStreamActive],
+  [checkRunning, () => sentinel.cameraOptedIn.value, checkCameraLive],
   ([running, camera, live]) => {
     if (running && camera && live) startCheckCamera()
     else stopCheckCamera()
@@ -331,7 +372,7 @@ async function handleLeave() {
     const hadCheck = checkRunning.value
     await leaveRoom()
     if (await finishCheck()) return
-    if (!hadCheck) router.push('/tutoring')
+    if (!hadCheck) router.push(homeRoute.value)
   } catch {
     // error handled in composable
   }
@@ -379,6 +420,11 @@ async function applyAudioDevices() {
   } finally {
     applyingAudioDevices.value = false
   }
+}
+
+async function openCallDevices() {
+  await callDevices.refresh().catch(() => undefined)
+  showCallDevices.value = true
 }
 
 async function handleToggleScreenShare() {
@@ -460,7 +506,7 @@ function peerInitials(nodeId: string): string {
       <div class="flex items-center gap-2 sm:gap-3 min-w-0">
         <button
           class="flex items-center gap-1 rounded-lg px-1.5 py-1 sm:px-2 sm:py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          @click="router.push('/tutoring')"
+          @click="router.push(homeRoute)"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -534,10 +580,18 @@ function peerInitials(nodeId: string): string {
           </svg>
           <span class="hidden sm:inline">{{ $t('tutoring.session.audioLabel') }}</span>
         </button>
+        <button
+          v-if="isActive && !isMobilePlatform"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+          data-testid="call-devices"
+          @click="openCallDevices"
+        >
+          <span>{{ $t('tutoring.device.devices') }}</span>
+        </button>
 
         <!-- Copy ticket -->
         <button
-          v-if="isActive && sessionStatus?.ticket"
+          v-if="isActive && sessionStatus?.ticket && offersInvites"
           class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="copyTicket"
           :title="ticketCopied ? $t('common.actions.copied') : $t('tutoring.session.copyInviteTitle')"
@@ -553,7 +607,7 @@ function peerInitials(nodeId: string): string {
 
         <!-- Show QR invite -->
         <button
-          v-if="isActive && sessionStatus?.ticket"
+          v-if="isActive && sessionStatus?.ticket && offersInvites"
           class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="showQrInvite = true"
           :title="$t('tutoring.session.qrTitle')"
@@ -613,181 +667,183 @@ function peerInitials(nodeId: string): string {
     <!-- Main content area with optional chat sidebar -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Video / Audio area -->
-      <div class="flex-1 flex flex-col" :class="showChat ? 'border-e border-border' : ''">
-        <div v-if="isActive" class="flex-1 overflow-auto p-4">
-          <div v-if="latestCaption" class="sticky top-0 z-10 mx-auto mb-3 max-w-3xl rounded-xl bg-black/75 px-4 py-2 text-center text-sm text-white shadow-lg backdrop-blur-sm">
+      <div class="flex min-h-0 flex-1 flex-col" :class="showChat ? 'border-e border-border' : ''">
+        <div v-if="isActive" class="flex min-h-0 flex-1 flex-col p-4">
+          <div v-if="latestCaption" class="mx-auto mb-3 w-full max-w-3xl shrink-0 rounded-xl bg-black/75 px-4 py-2 text-center text-sm text-white shadow-lg backdrop-blur-sm">
             <span class="me-2 text-xs font-semibold text-white/70">{{ latestCaption.sender === 'self' ? $t('tutoring.session.you') : (latestCaption.sender_name || peerDisplayName(latestCaption.sender)) }}</span>
             {{ latestCaption.text }}
           </div>
-          <div class="mx-auto max-w-6xl space-y-4">
+          <!-- Every participant, this device included, gets an equal tile sized
+               to fill the stage (VideoGrid). -->
+          <div class="flex min-h-0 w-full flex-1 flex-col gap-4">
 
             <!-- ═══ MOBILE: Video + audio UI ═══ -->
             <template v-if="isMobilePlatform">
-              <!-- Self video / camera preview -->
-              <div class="relative mx-auto w-full aspect-[3/4] max-h-[50vh] overflow-hidden rounded-2xl border border-border bg-card">
-                <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
-                <video
-                  v-if="selfStreamActive"
-                  ref="selfVideoElMobile"
-                  autoplay
-                  muted
-                  playsinline
-                  class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
-                />
-                <!-- JPEG bridge fallback (screen share self-view) -->
-                <img
-                  v-else-if="selfVideoSrc"
-                  :src="selfVideoSrc"
-                  class="absolute inset-0 h-full w-full object-cover"
-                  :alt="$t('tutoring.session.selfPreviewAlt')"
-                />
-                <!-- Fallback: audio-only circular indicator -->
-                <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4">
-                  <div class="relative">
-                    <div
-                      class="flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors"
-                      :class="videoEnabled ? 'border-primary/40 bg-primary/5' : audioEnabled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'"
-                    >
-                      <svg v-if="videoEnabled" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                      <svg v-else-if="audioEnabled" class="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                      </svg>
-                      <svg v-else class="h-8 w-8 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659m12.182 12.182L2.909 5.909M1.5 4.5l1.409 1.409" />
-                      </svg>
-                    </div>
-                    <!-- VU ring on fallback -->
-                    <svg
-                      v-if="audioEnabled && micLevel > 0.02"
-                      class="absolute inset-0 h-20 w-20 -rotate-90 pointer-events-none"
-                      viewBox="0 0 80 80"
-                    >
-                      <circle
-                        cx="40" cy="40" r="38"
-                        fill="none"
-                        :stroke="micLevel > 0.8 ? '#f97316' : '#22c55e'"
-                        stroke-width="3"
-                        :stroke-dasharray="`${micLevel * 238.8} 238.8`"
-                        stroke-linecap="round"
-                        class="transition-[stroke-dasharray,stroke] duration-75"
-                      />
-                    </svg>
-                  </div>
-                  <div class="text-center">
-                    <p class="text-sm font-medium text-foreground">{{ $t('tutoring.session.you') }}</p>
-                    <p class="text-xs text-muted-foreground">
-                      {{ videoEnabled ? $t('tutoring.session.startingCamera') : $t('tutoring.session.cameraOff') }}
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Status overlay -->
-                <div class="absolute bottom-3 start-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
-                  <span class="relative flex h-2 w-2" v-if="videoEnabled">
-                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-                    <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
-                  </span>
-                  <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
-                  <span class="text-xs font-medium text-white">{{ $t('tutoring.session.you') }}</span>
-                </div>
-
-                <!-- Audio indicator overlay -->
-                <div class="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
-                  <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                  </svg>
-                  <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                    <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                  </svg>
-                  <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
-                    <div
-                      v-for="i in 5"
-                      :key="i"
-                      class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
-                      :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
-                      :class="[
-                        micLevel >= (i * 0.18)
-                          ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
-                          : 'bg-white/20',
-                      ]"
-                    />
-                  </div>
-                  <span v-else class="text-[0.6rem] font-medium text-white">{{ $t('tutoring.session.muted') }}</span>
-                </div>
-              </div>
-
-              <!-- Mobile peer grid (video + audio) -->
-              <div v-if="peers.length > 0" class="space-y-3">
-                <div
-                  v-for="peer in peers"
-                  :key="peer.node_id"
-                  class="relative overflow-hidden rounded-xl border border-border bg-card"
-                  :class="videoFrames[peer.node_id] ? 'aspect-video' : ''"
-                >
-                  <!-- Rendered video frame from Rust bridge -->
-                  <img
-                    v-if="videoFrames[peer.node_id]"
-                    :src="videoFrames[peer.node_id]"
-                    class="absolute inset-0 h-full w-full object-cover"
-                    :alt="$t('tutoring.session.peerVideoAlt', { name: peerDisplayName(peer.node_id) })"
+              <VideoGrid v-slot="{ tileStyle }" class="min-h-0 flex-1" :count="peers.length + 1">
+                <!-- Self video / camera preview -->
+                <div class="relative shrink-0 overflow-hidden rounded-2xl border border-border bg-card" :style="tileStyle">
+                  <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
+                  <video
+                    v-if="selfStreamActive"
+                    ref="selfVideoElMobile"
+                    autoplay
+                    muted
+                    playsinline
+                    class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
                   />
-                  <!-- Audio-only peer card (no video frames) -->
-                  <div v-else class="flex items-center gap-3 p-4">
-                    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-bold text-foreground shrink-0">
-                      {{ peerInitials(peer.node_id) }}
-                    </div>
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground truncate">
-                        {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
-                      </p>
-                      <div class="flex items-center gap-1.5 mt-0.5">
-                        <span
-                          class="h-1.5 w-1.5 rounded-full shrink-0"
-                          :class="peer.connected ? 'bg-success' : 'bg-warning'"
-                        />
-                        <span class="text-xs text-muted-foreground">
-                          {{ peer.connected ? $t('common.status.connected') : $t('common.status.connecting') }}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <!-- Peer status overlay (shown over video) -->
-                  <div v-if="videoFrames[peer.node_id]" class="absolute bottom-2 start-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
-                    <span
-                      class="h-1.5 w-1.5 rounded-full"
-                      :class="peer.connected ? 'bg-success' : 'bg-warning'"
-                    />
-                    <span class="text-[0.6rem] font-medium text-white">
-                      {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
-                    </span>
-                  </div>
-                  <!-- Speaker VU indicator -->
-                  <div v-if="peers.length === 1 && outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 end-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute end-4 top-1/2 -translate-y-1/2'">
-                    <svg class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-                    </svg>
-                    <div class="flex items-end gap-[2px] h-4">
+                  <!-- JPEG bridge fallback (screen share self-view) -->
+                  <img
+                    v-else-if="selfVideoSrc"
+                    :src="selfVideoSrc"
+                    class="absolute inset-0 h-full w-full object-cover"
+                    :alt="$t('tutoring.session.selfPreviewAlt')"
+                  />
+                  <!-- Fallback: audio-only circular indicator -->
+                  <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                    <div class="relative">
                       <div
-                        v-for="i in 4"
+                        class="flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors"
+                        :class="videoEnabled ? 'border-primary/40 bg-primary/5' : audioEnabled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'"
+                      >
+                        <svg v-if="videoEnabled" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <svg v-else-if="audioEnabled" class="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                        </svg>
+                        <svg v-else class="h-8 w-8 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659m12.182 12.182L2.909 5.909M1.5 4.5l1.409 1.409" />
+                        </svg>
+                      </div>
+                      <!-- VU ring on fallback -->
+                      <svg
+                        v-if="audioEnabled && micLevel > 0.02"
+                        class="absolute inset-0 h-20 w-20 -rotate-90 pointer-events-none"
+                        viewBox="0 0 80 80"
+                      >
+                        <circle
+                          cx="40" cy="40" r="38"
+                          fill="none"
+                          :stroke="micLevel > 0.8 ? '#f97316' : '#22c55e'"
+                          stroke-width="3"
+                          :stroke-dasharray="`${micLevel * 238.8} 238.8`"
+                          stroke-linecap="round"
+                          class="transition-[stroke-dasharray,stroke] duration-75"
+                        />
+                      </svg>
+                    </div>
+                    <div class="text-center">
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.session.you') }}</p>
+                      <p class="text-xs text-muted-foreground">
+                        {{ videoEnabled ? $t('tutoring.session.startingCamera') : $t('tutoring.session.cameraOff') }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <!-- Status overlay -->
+                  <div class="absolute bottom-3 start-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                    <span class="relative flex h-2 w-2" v-if="videoEnabled">
+                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+                      <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
+                    </span>
+                    <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
+                    <span class="text-xs font-medium text-white">{{ $t('tutoring.session.you') }}</span>
+                  </div>
+
+                  <!-- Audio indicator overlay -->
+                  <div class="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
+                    <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    </svg>
+                    <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                      <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                    <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
+                      <div
+                        v-for="i in 5"
                         :key="i"
                         class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
-                        :style="{ height: outputLevel >= (i * 0.2) ? `${3 + i * 2}px` : '2px' }"
+                        :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
                         :class="[
-                          outputLevel >= (i * 0.2)
-                            ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
-                            : 'bg-muted-foreground/20',
+                          micLevel >= (i * 0.18)
+                            ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
+                            : 'bg-white/20',
                         ]"
                       />
                     </div>
+                    <span v-else class="text-[0.6rem] font-medium text-white">{{ $t('tutoring.session.muted') }}</span>
                   </div>
                 </div>
-              </div>
+
+                <!-- Participants (video + audio) -->
+                  <div
+                    v-for="peer in peers"
+                    :key="peer.node_id"
+                    class="relative shrink-0 overflow-hidden rounded-xl border border-border bg-card"
+                    :style="tileStyle"
+                  >
+                    <!-- Rendered video frame from Rust bridge -->
+                    <img
+                      v-if="videoFrames[peer.node_id]"
+                      :src="videoFrames[peer.node_id]"
+                      class="absolute inset-0 h-full w-full object-cover"
+                      :alt="$t('tutoring.session.peerVideoAlt', { name: peerDisplayName(peer.node_id) })"
+                    />
+                    <!-- Audio-only peer card (no video frames) -->
+                    <div v-else class="absolute inset-0 flex items-center justify-center gap-3 p-4">
+                      <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-bold text-foreground shrink-0">
+                        {{ peerInitials(peer.node_id) }}
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium text-foreground truncate">
+                          {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
+                        </p>
+                        <div class="flex items-center gap-1.5 mt-0.5">
+                          <span
+                            class="h-1.5 w-1.5 rounded-full shrink-0"
+                            :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                          />
+                          <span class="text-xs text-muted-foreground">
+                            {{ peer.connected ? $t('common.status.connected') : $t('common.status.connecting') }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Peer status overlay (shown over video) -->
+                    <div v-if="videoFrames[peer.node_id]" class="absolute bottom-2 start-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
+                      <span
+                        class="h-1.5 w-1.5 rounded-full"
+                        :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                      />
+                      <span class="text-[0.6rem] font-medium text-white">
+                        {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
+                      </span>
+                    </div>
+                    <!-- Speaker VU indicator -->
+                    <div v-if="peers.length === 1 && outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 end-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute end-4 top-1/2 -translate-y-1/2'">
+                      <svg class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                      </svg>
+                      <div class="flex items-end gap-[2px] h-4">
+                        <div
+                          v-for="i in 4"
+                          :key="i"
+                          class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                          :style="{ height: outputLevel >= (i * 0.2) ? `${3 + i * 2}px` : '2px' }"
+                          :class="[
+                            outputLevel >= (i * 0.2)
+                              ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
+                              : 'bg-muted-foreground/20',
+                          ]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+              </VideoGrid>
 
               <!-- No peers yet (mobile) -->
-              <div v-else class="rounded-xl border border-dashed border-border/60 bg-muted/10 p-8 text-center">
+              <div v-if="peers.length === 0" class="shrink-0 rounded-xl border border-dashed border-border/60 bg-muted/10 p-4 text-center">
                 <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                 </svg>
@@ -798,135 +854,133 @@ function peerInitials(nodeId: string): string {
 
             <!-- ═══ DESKTOP: Full video + audio UI ═══ -->
             <template v-else>
-              <!-- Self video / camera status -->
-              <div
-                class="relative mx-auto aspect-video w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-[max-width]"
-                :class="peers.length > 0 && !screenSharing ? 'max-w-sm' : 'max-w-4xl'"
-              >
-                <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
-                <video
-                  v-if="selfStreamActive"
-                  ref="selfVideoElDesktop"
-                  autoplay
-                  muted
-                  playsinline
-                  class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
-                />
-                <!-- JPEG bridge fallback (screen share self-view) -->
-                <img
-                  v-else-if="selfVideoSrc"
-                  :src="selfVideoSrc"
-                  class="absolute inset-0 h-full w-full object-cover"
-                  :alt="$t('tutoring.session.selfPreviewAlt')"
-                />
-                <!-- Fallback placeholder when no video frames -->
-                <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <svg class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
-                    <path v-if="!screenSharing" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    <path v-else stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m9-15V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9V5.25" />
-                  </svg>
-                  <div class="text-center">
-                    <p class="text-sm font-medium">
-                      {{ screenSharing ? $t('tutoring.session.screenSharingActive') : videoEnabled ? $t('tutoring.session.startingCamera') : $t('tutoring.session.cameraOff') }}
-                    </p>
-                    <p class="text-xs opacity-70">
-                      {{ screenSharing ? $t('tutoring.session.screenShareDesc') : videoEnabled ? $t('tutoring.session.waitingFrame') : $t('tutoring.session.enableCameraHint') }}
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Status overlay -->
-                <div class="absolute bottom-3 start-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
-                  <span class="relative flex h-2 w-2" v-if="videoEnabled || screenSharing">
-                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-                    <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
-                  </span>
-                  <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
-                  <span class="text-xs font-medium text-white">{{ $t('tutoring.session.you') }}</span>
-                </div>
-
-                <!-- Audio indicator with VU meter -->
-                <div class="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
-                  <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                  </svg>
-                  <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                    <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                  </svg>
-                  <!-- VU meter bars -->
-                  <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
-                    <div
-                      v-for="i in 5"
-                      :key="i"
-                      class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
-                      :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
-                      :class="[
-                        micLevel >= (i * 0.18)
-                          ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
-                          : 'bg-white/20',
-                      ]"
-                    />
-                  </div>
-                  <span v-else class="text-[0.6rem] font-medium text-white">{{ $t('tutoring.session.muted') }}</span>
-                </div>
-              </div>
-
-              <!-- Peer video grid -->
-              <div v-if="peers.length > 0" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div
-                  v-for="peer in peers"
-                  :key="peer.node_id"
-                  class="relative aspect-video overflow-hidden rounded-xl border border-border bg-card"
-                >
-                  <!-- Rendered video frame from Rust bridge -->
-                  <img
-                    v-if="videoFrames[peer.node_id]"
-                    :src="videoFrames[peer.node_id]"
-                    class="absolute inset-0 h-full w-full object-cover"
-                    :alt="$t('tutoring.session.peerVideoAlt', { name: peerDisplayName(peer.node_id) })"
+              <VideoGrid v-slot="{ tileStyle }" class="min-h-0 flex-1" :count="peers.length + 1">
+                <!-- Self video / camera status -->
+                <div class="relative shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm" :style="tileStyle">
+                  <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
+                  <video
+                    v-if="selfStreamActive"
+                    ref="selfVideoElDesktop"
+                    autoplay
+                    muted
+                    playsinline
+                    class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
                   />
-                  <!-- Placeholder when no video -->
-                  <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-xl font-bold">
-                      {{ peerInitials(peer.node_id) }}
-                    </div>
-                    <span class="text-xs opacity-60">{{ peerDisplayName(peer.node_id) }}</span>
-                  </div>
-                  <!-- Peer status overlay -->
-                  <div class="absolute bottom-2 start-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
-                    <span
-                      class="h-1.5 w-1.5 rounded-full"
-                      :class="peer.connected ? 'bg-success' : 'bg-warning'"
-                    />
-                    <span class="text-[0.6rem] font-medium text-white">
-                      {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
-                    </span>
-                  </div>
-                  <!-- Speaker VU indicator on peer card -->
-                  <div v-if="peers.length === 1 && outputLevel > 0.05" class="absolute bottom-2 end-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
-                    <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                  <!-- JPEG bridge fallback (screen share self-view) -->
+                  <img
+                    v-else-if="selfVideoSrc"
+                    :src="selfVideoSrc"
+                    class="absolute inset-0 h-full w-full object-cover"
+                    :alt="$t('tutoring.session.selfPreviewAlt')"
+                  />
+                  <!-- Fallback placeholder when no video frames -->
+                  <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                    <svg class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+                      <path v-if="!screenSharing" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      <path v-else stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m9-15V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9V5.25" />
                     </svg>
-                    <div class="flex items-end gap-[2px] h-3">
+                    <div class="text-center">
+                      <p class="text-sm font-medium">
+                        {{ screenSharing ? $t('tutoring.session.screenSharingActive') : videoEnabled ? $t('tutoring.session.startingCamera') : $t('tutoring.session.cameraOff') }}
+                      </p>
+                      <p class="text-xs opacity-70">
+                        {{ screenSharing ? $t('tutoring.session.screenShareDesc') : videoEnabled ? $t('tutoring.session.waitingFrame') : $t('tutoring.session.enableCameraHint') }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <!-- Status overlay -->
+                  <div class="absolute bottom-3 start-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                    <span class="relative flex h-2 w-2" v-if="videoEnabled || screenSharing">
+                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+                      <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
+                    </span>
+                    <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
+                    <span class="text-xs font-medium text-white">{{ $t('tutoring.session.you') }}</span>
+                  </div>
+
+                  <!-- Audio indicator with VU meter -->
+                  <div class="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
+                    <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    </svg>
+                    <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                      <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                    <!-- VU meter bars -->
+                    <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
                       <div
-                        v-for="i in 4"
+                        v-for="i in 5"
                         :key="i"
-                        class="w-[2px] rounded-[1px] transition-[height,background-color] duration-75"
-                        :style="{ height: outputLevel >= (i * 0.2) ? `${2 + i * 1.5}px` : '2px' }"
+                        class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                        :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
                         :class="[
-                          outputLevel >= (i * 0.2)
-                            ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
+                          micLevel >= (i * 0.18)
+                            ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
                             : 'bg-white/20',
                         ]"
                       />
                     </div>
+                    <span v-else class="text-[0.6rem] font-medium text-white">{{ $t('tutoring.session.muted') }}</span>
                   </div>
                 </div>
-              </div>
+
+                <!-- Participants -->
+                  <div
+                    v-for="peer in peers"
+                    :key="peer.node_id"
+                    class="relative shrink-0 overflow-hidden rounded-xl border border-border bg-card"
+                    :style="tileStyle"
+                  >
+                    <!-- Rendered video frame from Rust bridge -->
+                    <img
+                      v-if="videoFrames[peer.node_id]"
+                      :src="videoFrames[peer.node_id]"
+                      class="absolute inset-0 h-full w-full object-cover"
+                      :alt="$t('tutoring.session.peerVideoAlt', { name: peerDisplayName(peer.node_id) })"
+                    />
+                    <!-- Placeholder when no video -->
+                    <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                      <div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-xl font-bold">
+                        {{ peerInitials(peer.node_id) }}
+                      </div>
+                      <span class="text-xs opacity-60">{{ peerDisplayName(peer.node_id) }}</span>
+                    </div>
+                    <!-- Peer status overlay -->
+                    <div class="absolute bottom-2 start-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
+                      <span
+                        class="h-1.5 w-1.5 rounded-full"
+                        :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                      />
+                      <span class="text-[0.6rem] font-medium text-white">
+                        {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
+                      </span>
+                    </div>
+                    <!-- Speaker VU indicator on peer card -->
+                    <div v-if="peers.length === 1 && outputLevel > 0.05" class="absolute bottom-2 end-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+                      <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                      </svg>
+                      <div class="flex items-end gap-[2px] h-3">
+                        <div
+                          v-for="i in 4"
+                          :key="i"
+                          class="w-[2px] rounded-[1px] transition-[height,background-color] duration-75"
+                          :style="{ height: outputLevel >= (i * 0.2) ? `${2 + i * 1.5}px` : '2px' }"
+                          :class="[
+                            outputLevel >= (i * 0.2)
+                              ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
+                              : 'bg-white/20',
+                          ]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+              </VideoGrid>
 
               <!-- No peers yet -->
-              <div v-else class="rounded-xl border border-dashed border-border/60 bg-muted/10 p-8 text-center">
+              <div v-if="peers.length === 0" class="shrink-0 rounded-xl border border-dashed border-border/60 bg-muted/10 p-4 text-center">
                 <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                 </svg>
@@ -947,12 +1001,12 @@ function peerInitials(nodeId: string): string {
             </div>
             <h3 class="text-sm font-medium text-foreground">{{ $t(sessionEnded ? 'tutoring.session.ended' : 'tutoring.session.notJoinedTitle') }}</h3>
             <p class="mt-1 text-xs text-muted-foreground">{{ $t(sessionEnded ? 'tutoring.session.endedDescription' : 'tutoring.session.notJoinedDescription') }}</p>
-            <button v-if="sessionRecord?.ticket && !sessionEnded" :disabled="joining" class="mt-5 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50" @click="rejoin">{{ $t(joining ? 'tutoring.device.joining' : 'tutoring.join.join') }}</button>
+            <button v-if="sessionRecord?.ticket && !sessionEnded && callKind === 'tutoring'" :disabled="joining" class="mt-5 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50" @click="rejoin">{{ $t(joining ? 'tutoring.device.joining' : 'tutoring.join.join') }}</button>
             <button
               class="mt-4 mx-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              @click="router.push('/tutoring')"
+              @click="router.push(homeRoute)"
             >
-              {{ $t('tutoring.session.backToLobby') }}
+              {{ callKind === 'tutoring' ? $t('tutoring.session.backToLobby') : $t('common.actions.back') }}
             </button>
           </div>
         </div>
@@ -967,6 +1021,7 @@ function peerInitials(nodeId: string): string {
                 ? 'border-border bg-muted text-foreground hover:bg-muted/80'
                 : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
               :title="audioEnabled ? $t('tutoring.controls.muteMic') : $t('tutoring.controls.unmuteMic')"
+              :disabled="mediaBusy"
               @click="handleToggleAudio"
             >
               <svg v-if="audioEnabled" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1002,6 +1057,7 @@ function peerInitials(nodeId: string): string {
               ? 'border-border bg-muted text-foreground hover:bg-muted/80'
               : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
             :title="videoEnabled ? $t('tutoring.controls.cameraOff') : $t('tutoring.controls.cameraOn')"
+            :disabled="mediaBusy"
             @click="handleToggleVideo"
           >
             <svg v-if="videoEnabled && !screenSharing" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1020,6 +1076,7 @@ function peerInitials(nodeId: string): string {
               ? 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/20'
               : 'border-border bg-muted text-foreground hover:bg-muted/80'"
             :title="screenSharing ? $t('tutoring.controls.stopShare') : $t('tutoring.controls.share')"
+            :disabled="mediaBusy"
             @click="handleToggleScreenShare"
           >
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1187,6 +1244,31 @@ function peerInitials(nodeId: string): string {
     </div>
 
     <Teleport to="body">
+      <div
+        v-if="showCallDevices"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        @click.self="showCallDevices = false"
+      >
+        <div class="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+          <h2 class="mb-4 text-lg font-semibold text-foreground">{{ $t('tutoring.device.devices') }}</h2>
+          <CallDevicePicker
+            in-call
+            :model-value="deviceChoice"
+            :devices="callDevices.devices.value"
+            :disabled="mediaBusy"
+            @update:model-value="value => Object.assign(deviceChoice, value)"
+            @camera-change="camera => setCamera(camera).catch(() => undefined)"
+          />
+          <div class="mt-5 flex justify-end">
+            <button class="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted" @click="showCallDevices = false">
+              {{ $t('tutoring.session.dismiss') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
       <Transition
         enter-active-class="transition-all duration-200"
         enter-from-class="opacity-0"
@@ -1347,7 +1429,7 @@ function peerInitials(nodeId: string): string {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
-        <div v-if="showQrInvite && sessionStatus?.ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showQrInvite = false">
+        <div v-if="showQrInvite && sessionStatus?.ticket && offersInvites" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showQrInvite = false">
           <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
             <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.qrInvite.title') }}</h2>
             <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.qrInvite.desc') }}</p>
@@ -1384,7 +1466,7 @@ function peerInitials(nodeId: string): string {
       <div v-if="showCaptionConsent" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" @click.self="showCaptionConsent = false">
         <div class="card w-full max-w-md p-6">
           <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.captions.title') }}</h2>
-          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ $t('tutoring.captions.description') }}</p>
+          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ isInterviewCall ? $t('tutoring.captions.descriptionInterview') : $t('tutoring.captions.description') }}</p>
           <p v-if="!speech.locallyAvailable.value" class="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">{{ $t('tutoring.captions.unavailable') }}</p>
           <p v-if="speech.error.value" class="mt-2 text-xs text-destructive">{{ speech.error.value }}</p>
           <div class="mt-6 flex justify-end gap-2">

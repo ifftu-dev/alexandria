@@ -18,6 +18,8 @@
  * (a vector of floats with no visual meaning) is stored in localStorage.
  */
 
+import { frameSize, type SentinelFrame } from './frame'
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -227,8 +229,8 @@ export class FaceEmbedder {
     return { canvas: this.canvas, ctx: this.ctx }
   }
 
-  embed(video: HTMLVideoElement): FaceEmbedding | null {
-    if (!video || video.readyState < 2) return null
+  embed(video: SentinelFrame): FaceEmbedding | null {
+    if (!video || !frameSize(video)) return null
 
     const { ctx } = this.ensureCanvas()
     ctx.drawImage(video, 0, 0, FRAME_WIDTH, FRAME_HEIGHT)
@@ -309,7 +311,7 @@ export class FaceEmbedder {
     return histogram
   }
 
-  enroll(video: HTMLVideoElement): boolean {
+  enroll(video: SentinelFrame): boolean {
     const embedding = this.embed(video)
     if (!embedding || !embedding.faceDetected) return false
 
@@ -333,7 +335,7 @@ export class FaceEmbedder {
     return true
   }
 
-  verify(video: HTMLVideoElement): {
+  verify(video: SentinelFrame): {
     similarity: number
     isMatch: boolean
     faceDetected: boolean

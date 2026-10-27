@@ -1,5 +1,8 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
+import { isMobilePlatform } from './usePlatform'
 import { useSetting, useSettings } from './useSettings'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -32,6 +35,12 @@ function applyTheme(t: Theme) {
   document.documentElement.classList.toggle('dark', isDark)
   // Clear any inline background-color set by the startup flash-prevention script.
   document.documentElement.style.removeProperty('background-color')
+  if (isTauri() && !isMobilePlatform) {
+    // Keep native decorations in sync; null restores OS-driven appearance.
+    void getCurrentWindow().setTheme(t === 'system' ? null : t).catch((error: unknown) => {
+      console.warn('Failed to update native window theme', error)
+    })
+  }
 }
 
 /**

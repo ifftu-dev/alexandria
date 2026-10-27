@@ -6,6 +6,7 @@ import CandidateRoom from './CandidateRoom.vue'
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   joinRoom: vi.fn(),
+  listDevices: vi.fn(),
   push: vi.fn(),
   begin: vi.fn(),
   abandon: vi.fn(),
@@ -15,7 +16,9 @@ const mocks = vi.hoisted(() => ({
 const unsent = ref<{ interviewId: string; cloud: string; sessionId: string } | null>(null)
 const sendError = ref<string | null>(null)
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
-vi.mock('@/composables/useTutoringRoom', () => ({ useTutoringRoom: () => ({ joinRoom: mocks.joinRoom }) }))
+vi.mock('@/composables/useTutoringRoom', () => ({
+  useTutoringRoom: () => ({ joinRoom: mocks.joinRoom, listDevices: mocks.listDevices }),
+}))
 vi.mock('@/composables/useInterviewCheck', () => ({
   useInterviewCheck: () => ({
     unsent, sendError, begin: mocks.begin, abandon: mocks.abandon, send: mocks.send, sent: mocks.sent,
@@ -34,6 +37,14 @@ beforeEach(() => {
   vi.useFakeTimers()
   mocks.invoke.mockReset()
   mocks.joinRoom.mockReset().mockResolvedValue({ id: 'room-7' })
+  mocks.listDevices.mockReset().mockResolvedValue({
+    audio_inputs: [{ id: 'mic-1', name: 'Built-in Microphone', is_default: true }],
+    audio_outputs: [],
+    cameras: [{ index: 'Index(0)', name: 'MacBook Pro Camera' }, { index: 'Index(1)', name: 'iPhone Camera' }],
+    selected_audio_input: null,
+    selected_audio_output: null,
+  })
+  localStorage.clear()
   mocks.push.mockReset()
   mocks.begin.mockReset().mockResolvedValue(undefined)
   mocks.abandon.mockReset().mockResolvedValue(undefined)
@@ -62,8 +73,8 @@ describe('CandidateRoom', () => {
 
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
     expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc')
-    expect(mocks.push).toHaveBeenCalledWith('/tutoring/room-7')
+    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, null, null, null, { kind: 'interview_candidate', contextId: 'int-1' })
+    expect(mocks.push).toHaveBeenCalledWith(`/interview-call/room-7?cloud=${encodeURIComponent('http://127.0.0.1:8787')}`)
 
     // No more asking once the room is known.
     const asked = mocks.invoke.mock.calls.length
@@ -97,7 +108,7 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
     expect(mocks.begin).toHaveBeenCalledWith({ interviewId: 'int-1', cloud: 'http://127.0.0.1:8787', camera: true })
     expect(mocks.begin.mock.invocationCallOrder[0]!).toBeLessThan(mocks.joinRoom.mock.invocationCallOrder[0]!)
-    expect(mocks.push).toHaveBeenCalledWith('/tutoring/room-7')
+    expect(mocks.push).toHaveBeenCalledWith(`/interview-call/room-7?cloud=${encodeURIComponent('http://127.0.0.1:8787')}`)
   })
 
   it('joins without the check when the candidate says no', async () => {
@@ -106,7 +117,7 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=check-skip]').setValue(true)
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
     expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc')
+    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, null, null, null, { kind: 'interview_candidate', contextId: 'int-1' })
   })
 
   it('stops the check if the room cannot be joined', async () => {
@@ -152,5 +163,14 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=integrity-retry]').trigger('click'); await flushPromises()
     expect(mocks.send).toHaveBeenCalled()
     expect(mocks.sent).toHaveBeenCalledTimes(2)
+  })
+  it('joins with the camera and microphone the candidate picked', async () => {
+    mocks.invoke.mockResolvedValue({ ticket: 'ticket-abc', openedAt: '2026-10-12T10:00:00Z' })
+    const wrapper = mountRoom(); await flushPromises()
+    await wrapper.get('[data-testid=device-camera]').setValue('Index(1)')
+    await wrapper.get('[data-testid=device-mic]').setValue('mic-1')
+    await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
+    expect(mocks.joinRoom).toHaveBeenCalledWith('ticket-abc', undefined, undefined, 'Index(1)', 'mic-1', null, { kind: 'interview_candidate', contextId: 'int-1' })
+    expect(JSON.parse(localStorage.getItem('alexandria.call-devices') ?? '{}')).toEqual({ camera: 'Index(1)', mic: 'mic-1', speaker: null })
   })
 })

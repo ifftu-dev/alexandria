@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { Channel } from '@tauri-apps/api/core'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles } from '@/composables/useProfiles'
 import { AppButton } from '@/components/ui'
-import type { SeedCatalog, SeedResource, SeedResult, SeedResetPlan } from '@/types'
+import type { SeedCatalog, SeedResource, SeedResult, SeedResetPlan, SeedProgress } from '@/types'
 
 const { invoke } = useLocalApi()
 const { profiles, activeProfileId } = useProfiles()
@@ -17,6 +18,7 @@ const results = ref<SeedResult[]>([])
 const resetReview = ref<SeedResetPlan | null>(null)
 const resetConfirmed = ref(false)
 const busy = ref(false)
+const progress = ref<SeedProgress | null>(null)
 const error = ref('')
 const scrollArea = ref<HTMLElement | null>(null)
 const reviewHeading = ref<HTMLElement | null>(null)
@@ -52,12 +54,18 @@ async function prepare(everything = false) {
 }
 async function run() {
   busy.value = true; error.value = ''
+  progress.value = null
+  const profileId = activeProfileId.value
+  const onProgress = new Channel<SeedProgress>()
+  onProgress.onmessage = update => {
+    if (activeProfileId.value === profileId) progress.value = update
+  }
   try {
-    results.value = await invoke<SeedResult[]>('dev_seed_run', { selected: selected.value })
+    results.value = await invoke<SeedResult[]>('dev_seed_run', { selected: selected.value, onProgress })
     review.value = null
     await load()
   } catch (e) { error.value = String(e) }
-  finally { busy.value = false }
+  finally { busy.value = false; progress.value = null }
 }
 async function prepareReset(everything = false) {
   busy.value = true; error.value = ''; results.value = []; review.value = null; resetConfirmed.value = false
@@ -179,6 +187,12 @@ async function reset() {
     </div>
 
     <footer class="seed-footer">
+      <div v-if="progress" role="status" aria-live="polite" class="mb-3 space-y-2 text-sm">
+        <p>{{ progress.completed }} of {{ progress.total }} resources completed</p>
+        <progress class="h-2 w-full" :value="progress.completed" :max="progress.total" aria-label="Seeding progress" />
+        <p>{{ progress.phase === 'compiling' ? 'Preparing grader' : progress.phase === 'completed' ? 'Finished' : 'Installing' }}: {{ progress.title }}</p>
+        <p v-if="progress.phase === 'compiling'" class="text-xs text-muted-foreground">First-time setup can take a few minutes. You can use the app while it finishes.</p>
+      </div>
       <template v-if="review">
         <AppButton class="w-full" :loading="busy" @click="run">Seed these resources</AppButton>
         <AppButton variant="ghost" class="w-full" :disabled="busy" @click="review = null">Back to selection</AppButton>

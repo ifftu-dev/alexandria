@@ -115,7 +115,11 @@ pub(crate) fn flag_severity(flag: &str) -> Severity {
         | "obscured_touch"
         | "hidden_overlay"
         | "cheat_tool_process"
-        | "phantom_hotkey_repeated" => Severity::Critical,
+        | "phantom_hotkey_repeated"
+        // Recorded by the backend, never sent by a client: an AI feature
+        // or an external assistant was used while the attempt was open.
+        | "in_app_assistant_during_attempt"
+        | "mcp_call_during_attempt" => Severity::Critical,
         "behavior_shift"
         | "paste_detected"
         | "multiple_faces"
@@ -193,6 +197,9 @@ pub async fn integrity_start_session(
     if !matches!(purpose.as_str(), "assessment" | "interview") {
         return Err(format!("invalid integrity session purpose: {purpose}"));
     }
+    // An assessment or interview check is starting: stop any chat answer that
+    // is still generating. The chat commands also refuse while it runs.
+    state.ai_chat.cancel_all();
     let session_id = entity_id(&[seed, &chrono::Utc::now().to_rfc3339()]);
     let persisted_session_id = session_id.clone();
     state
@@ -403,6 +410,55 @@ pub async fn integrity_submit_snapshot(
             .stage_last_frame(&staging_session_id, &snapshot.id);
     }
     Ok(snapshot)
+}
+
+/// Flags every live integrity session with `flag`, through the same
+/// committed snapshot chain a client's snapshots use, so the flag is counted,
+/// escalates the session, and is tamper-evident like any other. The snapshot
+/// carries the session's current score, leaving its average unchanged. A
+/// session is flagged at most once per flag, so a polling assistant cannot
+/// flood it. Returns how many sessions were flagged.
+pub(crate) fn record_backend_flag(
+    conn: &rusqlite::Connection,
+    flag: &str,
+) -> Result<usize, String> {
+    let sessions = alexandria_studio::gate::live_session_ids(conn).map_err(|e| e.to_string())?;
+    let needle = format!("%\"{flag}\"%");
+    let mut flagged = 0;
+    for session_id in sessions {
+        let (already, score): (bool, Option<f64>) = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM integrity_snapshots WHERE session_id = ?1 AND anomaly_flags LIKE ?2),
+                        (SELECT integrity_score FROM integrity_sessions WHERE id = ?1)",
+                params![session_id, needle],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        if already {
+            continue;
+        }
+        let request = SubmitSnapshotRequest {
+            session_id,
+            element_id: "alexandria".into(),
+            integrity_score: score.unwrap_or(1.0).clamp(0.0, 1.0),
+            consistency_score: 1.0,
+            typing_score: None,
+            mouse_score: None,
+            human_score: None,
+            tab_score: None,
+            paste_score: None,
+            devtools_score: None,
+            camera_score: None,
+            ai_paste_anomaly: None,
+            gaze_offscreen_ratio: None,
+            anomaly_flags: vec![flag.to_string()],
+        };
+        // A session that stopped accepting snapshots is already final.
+        if persist_snapshot(conn, &request).is_ok() {
+            flagged += 1;
+        }
+    }
+    Ok(flagged)
 }
 
 fn persist_snapshot(
@@ -1290,5 +1346,49 @@ mod tests {
         assert!((trust_penalty(1, 0) - 0.20).abs() < 1e-9);
         assert!((trust_penalty(0, 1) - 0.10).abs() < 1e-9);
         assert!((trust_penalty(2, 3) - (0.40 + 0.30)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ai_use_during_an_attempt_is_flagged_once_in_the_committed_chain() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        assert_eq!(
+            record_backend_flag(conn, "mcp_call_during_attempt").unwrap(),
+            0
+        );
+        conn.execute(
+            "INSERT INTO integrity_sessions (id, status, integrity_score) VALUES ('live', 'active', 0.8)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            record_backend_flag(conn, "mcp_call_during_attempt").unwrap(),
+            1
+        );
+        assert_eq!(
+            record_backend_flag(conn, "mcp_call_during_attempt").unwrap(),
+            0,
+            "once per session"
+        );
+        assert_eq!(
+            record_backend_flag(conn, "in_app_assistant_during_attempt").unwrap(),
+            1
+        );
+        let (critical, score, root): (i64, f64, Option<String>) = conn
+            .query_row(
+                "SELECT critical_count, integrity_score, commitment_root FROM integrity_sessions WHERE id = 'live'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(critical, 2);
+        assert!((score - 0.8).abs() < 1e-9, "the average is unchanged");
+        assert!(root.is_some(), "the flags are folded into the chain");
+        assert_eq!(flag_severity("mcp_call_during_attempt"), Severity::Critical);
+        assert_eq!(
+            flag_severity("in_app_assistant_during_attempt"),
+            Severity::Critical
+        );
     }
 }

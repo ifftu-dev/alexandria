@@ -115,19 +115,18 @@ def main():
             elements = result.get("structuredContent", {}).get("chapters", [{}])[0].get("elements", [])
             kinds = {e["element_id"]: e["content"] for e in elements}
             check(not error and kinds.get("lesson-beta") == "text"
-                  and kinds.get("quiz-beta") == "questions"
+                  and kinds.get("quiz-beta") == "withheld"
                   and kinds.get("exam-beta") == "withheld",
-                  f"get_course marks the assessment withheld ({kinds})")
+                  f"get_course marks the quiz and the assessment withheld ({kinds})")
 
             error, result = server.tool(
                 "read_lesson", {"course_id": "course-beta", "element_id": "quiz-beta"})
             body = json.dumps(result)
-            question = result.get("structuredContent", {}).get("questions", [{}])[0]
-            check(not error and question.get("prompt") == "What does beta rest on?"
-                  and question.get("options") == ["alpha", "gamma"],
-                  "read_lesson returns the quiz question")
-            check("ANSWERS LEAKED" not in body and "correct" not in body,
-                  "the answer and explanation stay behind")
+            check(not error and result.get("structuredContent", {}).get("status") == "withheld"
+                  and result.get("structuredContent", {}).get("questions") == [],
+                  "read_lesson withholds the quiz, which is graded like an assessment")
+            check("What does beta rest on?" not in body and "ANSWERS LEAKED" not in body,
+                  "neither the question nor its answer is shared")
 
             error, result = server.tool(
                 "read_lesson", {"course_id": "course-beta", "element_id": "exam-beta"})

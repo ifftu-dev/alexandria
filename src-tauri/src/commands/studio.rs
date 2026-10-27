@@ -10,7 +10,9 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 pub struct StudioRuntime {
-    pub decisions: Mutex<Option<(u64, i64, alexandria_decisions::Client)>>,
+    /// The Optional AI checks client: profile epoch, settings revision, when
+    /// its addresses were pinned, and the client.
+    pub decisions: Mutex<Option<(u64, i64, std::time::Instant, alexandria_decisions::Client)>>,
     pub grants: Mutex<alexandria_studio::grants::Grants>,
     pub broker_available: AtomicBool,
     pub broker_gate: tokio::sync::RwLock<()>,
@@ -109,6 +111,33 @@ pub async fn studio_get_tutor_thread(
     })
 }
 
+/// The tutor is not mounted during assessments, so a tutor request that
+/// arrives during one is refused and recorded as an integrity flag.
+fn tutor_gate(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
+    let gated = alexandria_studio::gate::require_no_assessment(db);
+    if matches!(gated, Err(StudioError::AssessmentActive)) {
+        if let Err(error) =
+            super::integrity::record_backend_flag(db, "in_app_assistant_during_attempt")
+        {
+            log::warn!("tutor: could not record an integrity flag: {error}");
+        }
+    }
+    gated
+}
+
+/// The age rules chat applies, for the tutor and Studio runs: no remote
+/// models under 13, no 18+ vendors for minors, and a guardian's approval
+/// for other remote models.
+fn age_checked(
+    db: &rusqlite::Connection,
+    connection: &alexandria_studio::model::StudioConnection,
+) -> alexandria_studio::Result<()> {
+    super::ai_chat::age_gate(db, connection).map_err(|error| {
+        let message = error.split_once(": ").map_or(error.as_str(), |(_, m)| m);
+        StudioError::Unavailable(message.to_string())
+    })
+}
+
 #[tauri::command]
 pub async fn studio_ask_tutor(
     state: State<'_, AppState>,
@@ -123,7 +152,10 @@ pub async fn studio_ask_tutor(
     }
     let epoch = state.studio.epoch.load(Ordering::SeqCst);
     let context = with_db(&state, |db| {
-        store::tutor_context(db, &course_id, &element_id, &connection_id)
+        tutor_gate(db)?;
+        let context = store::tutor_context(db, &course_id, &element_id, &connection_id)?;
+        age_checked(db, &context.connection)?;
+        Ok(context)
     })?;
     let expected_messages = context.thread.messages.len();
     let lesson = if let Some(inline) = &context.lesson_inline {
@@ -163,9 +195,16 @@ pub async fn studio_ask_tutor(
         "learner_question": question,
     }))
     .map_err(|error| error.to_string())?;
+    let secret = crate::ai_auth::credential::bearer_for(
+        &state.db_executor,
+        &state.profile_lease(),
+        &context.connection,
+        context.secret.clone(),
+    )
+    .await?;
     let answer = alexandria_studio::provider::complete(
         &context.connection,
-        context.secret.as_deref(),
+        secret.as_deref(),
         &system,
         &request,
     )
@@ -179,6 +218,8 @@ pub async fn studio_ask_tutor(
         if state.studio.epoch.load(Ordering::SeqCst) != epoch {
             return Err(StudioError::Locked);
         }
+        // An attempt that started while the answer was generating discards it.
+        tutor_gate(db)?;
         store::save_tutor_exchange(db, context.thread, expected_messages, &question, &answer)
     })?;
     Ok(TutorReply {
@@ -387,8 +428,10 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
             let Some(index) = run.value.steps.iter().position(|s| s.output.is_none()) else {
                 return Ok(None);
             };
+            alexandria_studio::gate::require_no_assessment(db)?;
             let step = run.value.steps[index].clone();
             let current = store::connection(db, &step.connection.id)?.value;
+            age_checked(db, &current)?;
             if !current.enabled
                 || current.endpoint != step.connection.endpoint
                 || current.model != step.connection.model
@@ -417,6 +460,30 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                 break;
             }
         };
+        let connection_id = step.connection.id.clone();
+        let key = match crate::ai_auth::credential::bearer(
+            &crate::ai_auth::chatgpt::Endpoints::default(),
+            &step.connection,
+            key,
+            || {
+                let loaded = with_db(&state, |db| store::secret(db, &connection_id));
+                async move { loaded }
+            },
+            |next| {
+                let saved = with_db(&state, |db| {
+                    store::replace_secret(db, &connection_id, &next)
+                });
+                async move { saved }
+            },
+        )
+        .await
+        {
+            Ok(key) => key,
+            Err(error) => {
+                fail_run(&state, &id, epoch, error);
+                break;
+            }
+        };
         let output = alexandria_studio::provider::complete(
             &step.connection,
             key.as_deref(),
@@ -430,6 +497,7 @@ async fn execute_run(app: tauri::AppHandle, id: String, epoch: u64, worker_revis
                     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
                         return Err(StudioError::Locked);
                     }
+                    alexandria_studio::gate::require_no_assessment(db)?;
                     let current = store::run(db, &id)?;
                     if current.revision != run.revision || current.value.status != "running" {
                         return Err(StudioError::Conflict);

@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "摄像头已关闭——在此获得的技能可信度将降低。"
+  },
+  "notes": {
+    "title": "你的笔记",
+    "thisLesson": "这节课",
+    "otherLessons": "其他课",
+    "untitled": "笔记",
+    "fromChat": "从聊天中保存",
+    "openLesson": "打开这节课",
+    "delete": "删除",
+    "deleteTitle": "要删除这条笔记吗？",
+    "deleteBody": "它会从你所有设备上的这门课程中删除。",
+    "deleteFailed": "无法删除这条笔记。请重试。"
   }
 }

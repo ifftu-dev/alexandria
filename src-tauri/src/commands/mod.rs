@@ -8,6 +8,7 @@ pub mod chapters;
 pub mod classroom;
 pub mod cli_install;
 pub mod completion;
+pub mod course_notes;
 pub mod courses;
 pub mod credentials;
 pub mod demo_courses;
@@ -78,6 +79,8 @@ pub use tutoring_mobile as tutoring;
 #[cfg(not(any(desktop, target_os = "ios", target_os = "android")))]
 pub mod tutoring_stubs;
 
+pub mod ai_chat;
+pub mod ai_signin;
 pub mod studio;
 
 pub mod studio_mcp;

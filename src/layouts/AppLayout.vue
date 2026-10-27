@@ -4,6 +4,7 @@ import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
+import GlobalChatHost from '@/components/chat/GlobalChatHost.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
 import CourseCompletionModal from '@/components/course/CourseCompletionModal.vue'
 import UnreviewedLocaleBanner from '@/components/i18n/UnreviewedLocaleBanner.vue'
@@ -18,7 +19,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 // Players, settings, classrooms, and sessions own their internal layout.
 // Let these views reach the content edges and manage their own scrolling.
 const route = useRoute()
-const isImmersiveRoute = computed(() => route.name === 'learn' || route.name === 'settings' || route.name === 'classroom' || route.name === 'tutoring-session')
+const isImmersiveRoute = computed(() => route.name === 'learn' || route.name === 'settings' || route.name === 'classroom' || route.name === 'tutoring-session' || route.name === 'interview-call')
 // The player is full-bleed *and* owns a pinned prev/next footer that must sit
 // directly on top of the mobile tab bar. The shell's mobile-content-padding
 // (tab-bar clearance for scrolling pages) would instead float the whole
@@ -125,6 +126,10 @@ function toggleSidebar() {
           <slot />
         </div>
       </main>
+
+      <!-- Global chat: mounted once beside the routed page, so a thread and
+           its draft survive navigation. Unmounted during assessments. -->
+      <GlobalChatHost />
     </div>
 
     <AppBottomBar />

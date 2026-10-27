@@ -113,22 +113,30 @@ pub(crate) async fn fetch_descriptor(domain: &str) -> Result<OrgDescriptor, Stri
 ///
 /// The system resolver first; where there is no readable system
 /// configuration (Android has no resolv.conf) a public one stands in.
+///
+/// iOS goes straight to the public one. Its SystemConfiguration symbols are
+/// link stubs that return NULL (see `build.rs`), and hickory's Apple reader
+/// panics on them instead of failing, which kills the calling command.
 async fn txt_records(name: &str) -> Result<Vec<String>, String> {
     use hickory_resolver::config::{ResolverConfig, CLOUDFLARE};
     use hickory_resolver::net::runtime::TokioRuntimeProvider;
     use hickory_resolver::proto::rr::RData;
     use hickory_resolver::TokioResolver;
 
+    let public = || {
+        TokioResolver::builder_with_config(
+            ResolverConfig::udp_and_tcp(&CLOUDFLARE),
+            TokioRuntimeProvider::default(),
+        )
+        .build()
+    };
+    #[cfg(target_os = "ios")]
+    let resolver = public();
+    #[cfg(not(target_os = "ios"))]
     let resolver = TokioResolver::builder_tokio()
         .and_then(|builder| builder.build())
-        .or_else(|_| {
-            TokioResolver::builder_with_config(
-                ResolverConfig::udp_and_tcp(&CLOUDFLARE),
-                TokioRuntimeProvider::default(),
-            )
-            .build()
-        })
-        .map_err(|e| format!("could not set up DNS: {e}"))?;
+        .or_else(|_| public());
+    let resolver = resolver.map_err(|e| format!("could not set up DNS: {e}"))?;
     match resolver.txt_lookup(format!("{name}.")).await {
         Ok(found) => Ok(found
             .answers()

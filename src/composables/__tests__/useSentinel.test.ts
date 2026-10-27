@@ -592,6 +592,27 @@ describe('Hidden overlay signal', () => {
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
     expect(snapshotFlags()).toEqual([[]])
+    // The dev view can tell "no scan here" from "scanned, nothing found".
+    expect(service.debug.overlaySource).toBe('')
+    expect(service.debug.androidEnvSource).toBe('')
+    await service.stop()
+  })
+
+  it('a new session does not show the previous session\'s readings', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    withScan({
+      suspicious: [{ pid: 42, owner: 'Cluely', title: null, width: 800, height: 300, on_screen: true, reason: 'capture_excluded' }],
+      allowlisted: 0, scanned: 12, source: 'cgwindow',
+    })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(service.debug.overlaySource).toBe('cgwindow')
+    await service.stop()
+    await service.start('enrollment')
+    expect(service.debug.lastSnapshotAt).toBe(0)
+    expect(service.debug.overlaySource).toBe('')
+    expect(service.debug.overlaySuspicious).toEqual([])
     await service.stop()
   })
 })

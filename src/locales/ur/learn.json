@@ -125,5 +125,17 @@
     "tutorApiKey": "API key",
     "tutorKeyPrivacy": "Cloud keys stay in this profile's encrypted local database and are never published with the course.",
     "reducedConfidenceNoCamera": "کیمرہ بند ہے — یہاں حاصل کردہ مہارتوں کا اعتماد کم ہوگا۔"
+  },
+  "notes": {
+    "title": "آپ کے نوٹس",
+    "thisLesson": "یہ سبق",
+    "otherLessons": "دیگر اسباق",
+    "untitled": "نوٹ",
+    "fromChat": "چیٹ سے محفوظ کیا گیا",
+    "openLesson": "سبق کھولیں",
+    "delete": "حذف کریں",
+    "deleteTitle": "یہ نوٹ حذف کریں؟",
+    "deleteBody": "یہ آپ کی تمام ڈیوائسز پر اس کورس سے ہٹا دیا جاتا ہے۔",
+    "deleteFailed": "یہ نوٹ حذف نہیں ہو سکا۔ دوبارہ کوشش کریں۔"
   }
 }

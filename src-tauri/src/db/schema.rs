@@ -83,11 +83,56 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // The candidate's own copy of each integrity result they sent an
     // organisation: what they signed, and where it went.
     (17, "interview_integrity_reports", MIGRATION_017_INTERVIEW_INTEGRITY),
+    // What each call is for (tutoring, classroom, interview seat or
+    // candidate, assistant, plugin) and the thing it belongs to.
+    (18, "call_kinds", MIGRATION_018_CALL_KINDS),
+    // Global AI chat: threads, messages, runs, explicit attachments, prepared
+    // request snapshots with content-addressed excerpts, and drafts. Queried by
+    // `crate::ai_chat::store`, which includes the same file.
+    (19, "ai_chat", include_str!("ai_chat.sql")),
+    // Chat practice: validated questions and the learner's attempts, checked
+    // locally. Practice never writes progress, credentials, or assessments.
+    (20, "ai_chat_practice", include_str!("ai_chat_practice.sql")),
+    // Learning memory: learner-approved preferences and observations.
+    (21, "learning_memory", include_str!("ai_chat_memory.sql")),
+    // Guardian approval of remote model connections for learners under 18,
+    // carried over the sealed guardian link.
+    (22, "ai_connection_approvals", include_str!("ai_connection_approvals.sql")),
+    // Local full-text search over complete chat messages.
+    (23, "ai_chat_search", include_str!("ai_chat_search.sql")),
+    // Goals as chat attachments.
+    (24, "ai_chat_goal_bindings", include_str!("ai_chat_goal_bindings.sql")),
+    // Notes and flashcards made from chat.
+    (25, "ai_chat_artifacts", include_str!("ai_chat_artifacts.sql")),
+    // Course notes keep their text; deletes leave a synced tombstone.
+    (26, "course_notes_body", include_str!("course_notes_body.sql")),
+    // Chat may propose course notes and enrollments; declined proposals stay.
+    (27, "ai_chat_actions", include_str!("ai_chat_actions.sql")),
     // What the app has told the learner about, with what it has already
     // decided not to repeat, and this device's push registration with the
     // network's Cloud. See `crate::notifications`.
-    (18, "notifications", MIGRATION_018_NOTIFICATIONS),
+    (28, "notifications", MIGRATION_028_NOTIFICATIONS),
 ];
+
+pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
+ALTER TABLE tutoring_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'tutoring'
+    CHECK (kind IN ('tutoring', 'classroom', 'interview_panel', 'interview_candidate', 'interview_assistant', 'plugin'));
+ALTER TABLE tutoring_sessions ADD COLUMN context_id TEXT;
+CREATE INDEX idx_tutoring_sessions_kind ON tutoring_sessions(kind, created_at);
+-- Calls made before kinds existed: interview rooms are known through the
+-- interview that recorded them (a Cloud link marks a panel seat), and
+-- classroom calls through their call id. A candidate's old rows cannot be
+-- told apart and stay tutoring.
+UPDATE tutoring_sessions
+   SET kind = CASE WHEN s.cloud_interview_id IS NOT NULL THEN 'interview_panel' ELSE 'interview_assistant' END,
+       context_id = s.id
+  FROM interview_sessions AS s
+ WHERE s.tutoring_session_id = tutoring_sessions.id;
+UPDATE tutoring_sessions
+   SET kind = 'classroom',
+       context_id = (SELECT c.classroom_id FROM classroom_calls AS c WHERE c.id = tutoring_sessions.id)
+ WHERE id IN (SELECT id FROM classroom_calls);
+"#;
 
 const MIGRATION_005_ASSESSMENT: &str = r#"
 ALTER TABLE assessment_attempts ADD COLUMN submitted_answers_json TEXT CHECK (submitted_answers_json IS NULL OR json_valid(submitted_answers_json));
@@ -109,7 +154,7 @@ ALTER TABLE assessment_attempts
 CREATE INDEX idx_assessment_attempts_role ON assessment_attempts(role_assessment_id);
 "#;
 
-const MIGRATION_018_NOTIFICATIONS: &str = r#"
+const MIGRATION_028_NOTIFICATIONS: &str = r#"
 CREATE TABLE notifications (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,

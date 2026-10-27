@@ -52,5 +52,19 @@
     "noClassroomsTitle": "Aucune salle de classe",
     "noClassroomsDescription": "Les salles de classe que votre enfant rejoint apparaissent ici.",
     "roleJoined": "{role} · a rejoint le {date}"
+  },
+  "aiRequests": {
+    "title": "Demandes de modèles d'IA",
+    "intro": "Demandes d'envoi de messages de chat à un fournisseur d'IA sur Internet. En accepter une permet à cet apprenant d'utiliser ce fournisseur à cette adresse ; tu peux retirer ton accord à tout moment. Les modèles sur l'appareil ou le réseau de l'apprenant n'ont jamais besoin d'accord.",
+    "none": "Aucune demande.",
+    "approve": "Accepter",
+    "decline": "Refuser",
+    "withdraw": "Retirer l'accord",
+    "notDelivered": "parviendra à l'apprenant à la prochaine synchronisation",
+    "status": {
+      "pending": "En attente de ta réponse",
+      "approved": "Accepté",
+      "declined": "Refusé"
+    }
   }
 }

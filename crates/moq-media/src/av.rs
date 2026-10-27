@@ -1,4 +1,5 @@
 // Copyright 2025 N0, INC
+// Modified by Pratyush Pundir <pratyush@alexandria.ifftu.dev> — see crates/VENDORING.md
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -195,6 +196,14 @@ pub trait VideoDecoder: Send + 'static {
     fn pop_frame(&mut self) -> Result<Option<DecodedFrame>>;
     fn push_packet(&mut self, packet: moq_mux::container::Frame) -> Result<()>;
     fn set_viewport(&mut self, w: u32, h: u32);
+
+    /// Drop decoded frames nobody will see. The decode loop calls this
+    /// instead of [`Self::pop_frame`] while newer packets are already waiting,
+    /// so a decoder that converts on pop can skip that work for stale frames.
+    fn discard_frames(&mut self) -> Result<()> {
+        while self.pop_frame()?.is_some() {}
+        Ok(())
+    }
 }
 
 #[cfg(any(feature = "video", feature = "video-ios"))]
@@ -241,6 +250,22 @@ pub enum VideoPreset {
 impl VideoPreset {
     pub fn all() -> [VideoPreset; 4] {
         [Self::P180, Self::P360, Self::P720, Self::P1080]
+    }
+
+    /// The presets a source `source_height` pixels tall can fill without
+    /// upscaling, or the smallest one for a tinier source. Offering a
+    /// rendition above the source makes the encoder upscale and every viewer
+    /// decode pixels that carry nothing.
+    pub fn up_to(source_height: u32) -> Vec<VideoPreset> {
+        let fitting: Vec<_> = Self::all()
+            .into_iter()
+            .filter(|preset| preset.height() <= source_height)
+            .collect();
+        if fitting.is_empty() {
+            vec![Self::P180]
+        } else {
+            fitting
+        }
     }
 
     pub fn dimensions(&self) -> (u32, u32) {
@@ -293,4 +318,19 @@ pub struct PlaybackConfig {
     #[cfg(any(feature = "video", feature = "video-ios"))]
     pub decode_config: DecodeConfig,
     pub quality: Quality,
+}
+
+#[cfg(all(test, any(feature = "video", feature = "video-ios")))]
+mod tests {
+    use super::VideoPreset;
+
+    #[test]
+    fn presets_stop_at_the_source_height() {
+        use VideoPreset::*;
+        assert_eq!(VideoPreset::up_to(720), vec![P180, P360, P720]);
+        assert_eq!(VideoPreset::up_to(1080), vec![P180, P360, P720, P1080]);
+        assert_eq!(VideoPreset::up_to(2160), vec![P180, P360, P720, P1080]);
+        assert_eq!(VideoPreset::up_to(480), vec![P180, P360]);
+        assert_eq!(VideoPreset::up_to(120), vec![P180]);
+    }
 }

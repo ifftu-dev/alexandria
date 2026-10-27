@@ -975,6 +975,9 @@ function onSectionClick(id: SettingsSectionId) {
                 <template v-else-if="activeSection === 'developer' && developerEnabled"><CloudOriginField class="mt-5" /><DeveloperSeedsPanel /></template>
           <template v-else-if="activeSection === 'advanced'">
                   <PersonhoodLabPanel />
+                  <!-- Release builds have no Developer section; the Cloud address
+                       lives here instead, where Organisations points. -->
+                  <CloudOriginField v-if="!developerEnabled" />
                   <AdvancedSettingsPanel />
                 </template>
               </div>

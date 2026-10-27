@@ -1,5 +1,5 @@
 // Copyright 2025 N0, INC
-// Modified by Alexandria Pvt. Ltd. — see crates/VENDORING.md
+// Modified by Pratyush Pundir <pratyush@alexandria.ifftu.dev> — see crates/VENDORING.md
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -312,6 +312,7 @@ pub struct CameraCapturer {
     pub(crate) mjpg_decoder: MjpgDecoder,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    name: String,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -324,7 +325,8 @@ impl CameraCapturer {
     /// Create a camera capturer targeting a specific camera by index.
     ///
     /// If `index` is `None`, falls back to the `IROH_LIVE_CAMERA` env var,
-    /// then to the last camera reported by nokhwa (typically the primary one).
+    /// then tries every camera nokhwa reports, real devices before virtual
+    /// ones, until one opens.
     pub fn with_index(index: Option<CameraIndex>) -> Result<Self> {
         info!("Initializing camera capturer (nokhwa)");
         nokhwa_initialize(|granted| {
@@ -337,34 +339,66 @@ impl CameraCapturer {
         }
         info!("Available cameras: {cameras:?}");
 
-        let camera_index = match index {
-            Some(idx) => idx,
+        let candidates = match index {
+            Some(idx) => vec![idx],
             None => match std::env::var("IROH_LIVE_CAMERA").ok() {
-                None => {
-                    // Order of cameras in nokhwa is reversed from usual order (primary camera is last).
-                    let first_camera = cameras.last().unwrap();
-                    info!(": {}", first_camera.human_name());
-                    first_camera.index().clone()
-                }
-                Some(camera_name) => match u32::from_str(&camera_name).ok() {
+                None => camera_preference(&cameras),
+                Some(camera_name) => vec![match u32::from_str(&camera_name).ok() {
                     Some(num) => CameraIndex::Index(num),
                     None => CameraIndex::String(camera_name),
-                },
+                }],
             },
         };
-        let mut camera = nokhwa::Camera::new(
-            camera_index,
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestResolution),
-        )?;
-        info!("Using camera: {}", camera.info().human_name());
-        let available_formats = camera.compatible_camera_formats()?;
-        debug!("Available formats: {available_formats:?}",);
-        if let Some(format) = Self::select_format(available_formats, Resolution::new(1920, 1080))
-            && let Err(err) = camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
-                RequestedFormatType::Exact(format),
-            ))
-        {
-            warn!(?format, "Failed to change camera format: {err:#}");
+        let mut last_err = None;
+        for camera_index in candidates {
+            match Self::open(camera_index.clone()) {
+                Ok(capturer) => return Ok(capturer),
+                Err(err) => {
+                    warn!(?camera_index, "camera would not open: {err:#}");
+                    last_err = Some(err);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("No cameras available")))
+    }
+
+    fn open(camera_index: CameraIndex) -> Result<Self> {
+        // 720p: what a call tile needs. 1080p doubled every per-frame cost on
+        // both ends (conversion, encode, the receiver's decode) for detail
+        // no tile shows. Ask for it when opening: that request is matched
+        // against the device's own format list, whereas nokhwa's
+        // `compatible_camera_formats` comes back empty on macOS (its
+        // AVFoundation backend filters formats with `!=` fourcc), which left
+        // the camera at 1080p (16 Oct).
+        let mut camera = match nokhwa::Camera::new(
+            camera_index.clone(),
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestResolution(
+                CALL_RESOLUTION,
+            )),
+        ) {
+            Ok(camera) => camera,
+            Err(err) => {
+                debug!("camera has no {CALL_RESOLUTION} format ({err}), opening its highest");
+                nokhwa::Camera::new(
+                    camera_index,
+                    RequestedFormat::new::<RgbFormat>(
+                        RequestedFormatType::AbsoluteHighestResolution,
+                    ),
+                )?
+            }
+        };
+        let name = camera.info().human_name();
+        info!("Using camera: {name}");
+        if camera.resolution() != CALL_RESOLUTION {
+            let available_formats = camera.compatible_camera_formats()?;
+            debug!("Available formats: {available_formats:?}",);
+            if let Some(format) = Self::select_format(available_formats, CALL_RESOLUTION)
+                && let Err(err) = camera.set_camera_requset(RequestedFormat::new::<RgbFormat>(
+                    RequestedFormatType::Exact(format),
+                ))
+            {
+                warn!(?format, "Failed to change camera format: {err:#}");
+            }
         }
         info!("Using format: {}", camera.camera_format());
         let resolution = camera.resolution();
@@ -373,7 +407,14 @@ impl CameraCapturer {
             mjpg_decoder: MjpgDecoder::new()?,
             width: resolution.width(),
             height: resolution.height(),
+            name,
         })
+    }
+
+    /// The camera's name as the system reports it, e.g. "MacBook Pro Camera".
+    /// The same label a webview gives the device, so a preview can open it.
+    pub fn device_name(&self) -> &str {
+        &self.name
     }
 
     /// List available cameras. Returns a vec of (index, human_name) pairs.
@@ -403,6 +444,58 @@ impl CameraCapturer {
             .or_else(|| formats.last())
             .cloned()
     }
+}
+
+/// The capture size a call asks a camera for.
+#[cfg(not(target_os = "android"))]
+const CALL_RESOLUTION: Resolution = Resolution {
+    width_x: 1280,
+    height_y: 720,
+};
+
+/// Names of virtual cameras, as products label them (lowercase). Matches the
+/// app's own list in `src/utils/sentinel/virtual-camera.ts`.
+#[cfg(not(target_os = "android"))]
+const VIRTUAL_CAMERA_MARKERS: &[&str] = &[
+    "obs virtual",
+    "manycam",
+    "snap camera",
+    "xsplit",
+    "camo",
+    "v4l2loopback",
+    "virtual cam",
+];
+
+/// The cameras to try, best first, when nobody picked one: the computer's own
+/// camera, then other real cameras, then a nearby iPhone or iPad offered
+/// through Continuity Camera, then virtual cameras.
+///
+/// nokhwa lists the primary camera last, so the list is reversed first, but
+/// macOS lists a Continuity iPhone after the built-in camera and it ended up
+/// first: the call silently took over the phone's camera, including a phone
+/// that was itself in the call. Virtual cameras (OBS, Camo…) often deliver
+/// pixel formats nokhwa cannot open, so they go last.
+#[cfg(not(target_os = "android"))]
+fn camera_preference(cameras: &[nokhwa::utils::CameraInfo]) -> Vec<CameraIndex> {
+    let rank = |camera: &nokhwa::utils::CameraInfo| {
+        let name = camera.human_name().to_lowercase();
+        let description = camera.description().to_lowercase();
+        if VIRTUAL_CAMERA_MARKERS.iter().any(|m| name.contains(m)) {
+            3
+        } else if ["iphone", "ipad"]
+            .iter()
+            .any(|m| name.contains(m) || description.contains(m))
+        {
+            2
+        } else if description.contains("builtin") {
+            0
+        } else {
+            1
+        }
+    };
+    let mut ordered: Vec<_> = cameras.iter().rev().collect();
+    ordered.sort_by_key(|c| rank(c));
+    ordered.into_iter().map(|c| c.index().clone()).collect()
 }
 
 #[cfg(not(target_os = "android"))]
@@ -463,5 +556,65 @@ mod tests {
     fn screen_capturer_is_send_without_moving_native_handles() {
         fn assert_send<T: Send>() {}
         assert_send::<ScreenCapturer>();
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod camera_preference_tests {
+    use super::camera_preference;
+    use nokhwa::utils::{CameraIndex, CameraInfo};
+
+    fn camera(index: u32, name: &str, description: &str) -> CameraInfo {
+        CameraInfo::new(name, description, "", CameraIndex::Index(index))
+    }
+
+    #[test]
+    fn the_computers_own_camera_beats_a_continuity_iphone_and_obs() {
+        // As macOS listed them on the MacBook that took over the iPhone.
+        let cameras = [
+            camera(
+                0,
+                "MacBook Pro Camera",
+                "Apple Inc.: MacBook Pro Camera - AVCaptureDeviceTypeBuiltInWideAngleCamera",
+            ),
+            camera(
+                1,
+                "OBS Virtual Camera",
+                "OBS Project: OBS Camera Extension - AVCaptureDeviceTypeExternal",
+            ),
+            camera(
+                2,
+                "Pratyush’s iPhone Camera",
+                ": iPhone18,3 - AVCaptureDeviceTypeExternal",
+            ),
+        ];
+        assert_eq!(
+            camera_preference(&cameras),
+            vec![
+                CameraIndex::Index(0),
+                CameraIndex::Index(2),
+                CameraIndex::Index(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_plugged_in_webcam_comes_before_a_continuity_iphone() {
+        let cameras = [
+            camera(
+                0,
+                "Logitech BRIO",
+                "Logitech: BRIO - AVCaptureDeviceTypeExternal",
+            ),
+            camera(
+                1,
+                "Desk iPad Camera",
+                ": iPad16,3 - AVCaptureDeviceTypeExternal",
+            ),
+        ];
+        assert_eq!(
+            camera_preference(&cameras),
+            vec![CameraIndex::Index(0), CameraIndex::Index(1)]
+        );
     }
 }

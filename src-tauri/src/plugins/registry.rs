@@ -108,17 +108,47 @@ fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
     // fallback for any future target that cannot run Pulley, where there is no
     // runtime to precompile for.
     #[cfg(grader)]
-    match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
+    persist_precompiled_grader(
+        dest_dir,
+        grader_bytes,
+        &crate::plugins::wasm_runtime::precompile_grader(grader_bytes),
+    );
+    #[cfg(not(grader))]
+    let _ = (dest_dir, grader_bytes);
+}
+
+pub(crate) struct PreparedGrader {
+    source_cid: String,
+    compiled: Result<Vec<u8>, String>,
+}
+
+pub(crate) fn prepare_grader(grader_bytes: &[u8]) -> PreparedGrader {
+    #[cfg(grader)]
+    let compiled = crate::plugins::wasm_runtime::precompile_grader(grader_bytes);
+    #[cfg(not(grader))]
+    let compiled = Err("Grader runtime is unavailable on this platform".into());
+    PreparedGrader {
+        source_cid: blake3::hash(grader_bytes).to_hex().to_string(),
+        compiled,
+    }
+}
+
+fn persist_precompiled_grader(
+    dest_dir: &Path,
+    grader_bytes: &[u8],
+    compiled: &Result<Vec<u8>, String>,
+) {
+    match compiled {
         Ok(cwasm) => {
             let cwasm_path = dest_dir.join(grader_cwasm_filename());
-            if let Err(e) = fs::write(&cwasm_path, &cwasm) {
+            if let Err(e) = fs::write(&cwasm_path, cwasm) {
                 log::warn!("failed to write precompiled grader: {e}");
                 // A half-written or absent artifact must not be left where the
                 // loader will `deserialize` it.
                 purge_precompiled_graders(dest_dir);
             } else if let Err(e) = fs::write(
                 cwasm_digest_path(&cwasm_path),
-                cwasm_digest_record(blake3::hash(grader_bytes).to_hex().as_str(), &cwasm),
+                cwasm_digest_record(blake3::hash(grader_bytes).to_hex().as_str(), cwasm),
             ) {
                 // Without the digest the loader will refuse the artifact and
                 // JIT instead, which is slow but correct. Remove it anyway so
@@ -135,8 +165,22 @@ fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
             purge_precompiled_graders(dest_dir);
         }
     }
-    #[cfg(not(grader))]
-    let _ = (dest_dir, grader_bytes);
+}
+
+fn write_builtin_grader(
+    dest_dir: &Path,
+    grader_bytes: &[u8],
+    prepared: Option<&PreparedGrader>,
+) -> Result<(), String> {
+    if let Some(prepared) = prepared {
+        if prepared.source_cid != blake3::hash(grader_bytes).to_hex().as_str() {
+            return Err("Prepared grader does not match the bundled source".into());
+        }
+        persist_precompiled_grader(dest_dir, grader_bytes, &prepared.compiled);
+    } else {
+        write_precompiled_grader(dest_dir, grader_bytes);
+    }
+    Ok(())
 }
 
 /// Filename suffix for the digest recorded beside a `.cwasm`.
@@ -600,6 +644,15 @@ pub fn install_builtin(
     plugins_dir: &Path,
     bundle: &BuiltinBundle<'_>,
 ) -> Result<InstalledPlugin, String> {
+    install_builtin_prepared(db, plugins_dir, bundle, None)
+}
+
+pub(crate) fn install_builtin_prepared(
+    db: &Database,
+    plugins_dir: &Path,
+    bundle: &BuiltinBundle<'_>,
+    prepared: Option<&PreparedGrader>,
+) -> Result<InstalledPlugin, String> {
     let manifest = manifest::parse_and_validate(bundle.manifest_json)?;
     let plugin_cid = verifier::compute_plugin_cid(bundle.manifest_json);
 
@@ -608,7 +661,7 @@ pub fn install_builtin(
         // stable across edits to ui/*.js / *.html / README, so the early
         // return would leave stale files on disk. Refresh the embedded
         // bytes every startup for builtins — they're authoritative.
-        refresh_builtin_files(plugins_dir, &plugin_cid, bundle)?;
+        refresh_builtin_files(plugins_dir, &plugin_cid, bundle, prepared)?;
         resolve_and_record_dependencies(db, &plugin_cid, &manifest.dependencies)?;
         return Ok(existing);
     }
@@ -641,7 +694,7 @@ pub fn install_builtin(
         }
         fs::write(dest_dir.join(GRADER_FILENAME), grader_bytes)
             .map_err(|e| format!("failed to write builtin grader: {e}"))?;
-        write_precompiled_grader(&dest_dir, grader_bytes);
+        write_builtin_grader(&dest_dir, grader_bytes, prepared)?;
     }
 
     for (rel_path, bytes) in bundle.ui_files {
@@ -713,6 +766,7 @@ fn refresh_builtin_files(
     plugins_dir: &Path,
     plugin_cid: &str,
     bundle: &BuiltinBundle<'_>,
+    prepared: Option<&PreparedGrader>,
 ) -> Result<(), String> {
     let dest_dir = plugins_dir.join(plugin_cid);
     if !dest_dir.exists() {
@@ -731,7 +785,7 @@ fn refresh_builtin_files(
         // every startup. A wasmtime-version-stale artifact is caught + rebuilt
         // lazily at grade time instead.
         if !dest_dir.join(grader_cwasm_filename()).exists() {
-            write_precompiled_grader(&dest_dir, grader_bytes);
+            write_builtin_grader(&dest_dir, grader_bytes, prepared)?;
         }
     }
 
@@ -1609,6 +1663,62 @@ mod tests {
                 .to_string_lossy(),
             format!("{}{}", grader_cwasm_filename(), CWASM_DIGEST_SUFFIX)
         );
+    }
+
+    #[test]
+    #[cfg(grader)]
+    fn prepared_grader_installs_with_source_bound_artifact() {
+        let db = test_db();
+        let dir = TempDir::new().unwrap();
+        let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+            .iter()
+            .find(|bundle| bundle.slug == "mcq")
+            .unwrap();
+        let wasm = bundle.grader_wasm.unwrap();
+        let prepared = prepare_grader(wasm);
+        let expected = prepared.compiled.as_ref().unwrap().clone();
+        let installed = install_builtin_prepared(&db, dir.path(), bundle, Some(&prepared)).unwrap();
+        let cwasm = Path::new(&installed.install_path).join(grader_cwasm_filename());
+        assert_eq!(fs::read(&cwasm).unwrap(), expected);
+        assert_eq!(
+            fs::read_to_string(cwasm_digest_path(&cwasm)).unwrap(),
+            cwasm_digest_record(&prepared.source_cid, &expected)
+        );
+        assert!(get_installed(&db, &installed.plugin_cid).unwrap().is_some());
+    }
+
+    #[test]
+    fn failed_preparation_does_not_retry_compilation_during_install() {
+        let db = test_db();
+        let dir = TempDir::new().unwrap();
+        let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+            .iter()
+            .find(|bundle| bundle.slug == "mcq")
+            .unwrap();
+        let prepared = PreparedGrader {
+            source_cid: blake3::hash(bundle.grader_wasm.unwrap())
+                .to_hex()
+                .to_string(),
+            compiled: Err("test compilation failure".into()),
+        };
+        let installed = install_builtin_prepared(&db, dir.path(), bundle, Some(&prepared)).unwrap();
+        assert!(!Path::new(&installed.install_path)
+            .join(grader_cwasm_filename())
+            .exists());
+        assert!(Path::new(&installed.install_path)
+            .join(GRADER_FILENAME)
+            .exists());
+    }
+
+    #[test]
+    fn prepared_artifact_cannot_be_written_for_a_different_source() {
+        let dir = TempDir::new().unwrap();
+        let prepared = PreparedGrader {
+            source_cid: blake3::hash(b"original").to_hex().to_string(),
+            compiled: Ok(b"compiled original".to_vec()),
+        };
+        assert!(write_builtin_grader(dir.path(), b"different", Some(&prepared)).is_err());
+        assert!(!dir.path().join(grader_cwasm_filename()).exists());
     }
 
     /// `plugin_cid` is BLAKE3 of manifest.json alone. A manifest that pins its

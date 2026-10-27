@@ -19,6 +19,8 @@ import { useOmniSearch } from '@/composables/useOmniSearch'
 import { useKeyboardShortcuts, formatCombo } from '@/composables/useKeyboardShortcuts'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 import { useNotifications } from '@/composables/useNotifications'
+import { useChat } from '@/composables/useChat'
+import { useChatAvailability } from '@/composables/useChatAvailability'
 
 defineProps<{ sidebarCollapsed: boolean }>()
 const emit = defineEmits<{ toggleSidebar: [] }>()
@@ -41,6 +43,8 @@ const bellLabel = computed(() =>
     ? t('notifications.bellUnread', { count: unreadNotifications.value })
     : t('notifications.bell'),
 )
+const chat = useChat()
+const { restricted: chatRestricted } = useChatAvailability()
 
 function openOmniSearch() {
   omniSearch.open()
@@ -320,6 +324,24 @@ const avatarEmoji = computed(() => {
           {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}
         </span>
       </button>
+      <!-- Global chat. Disabled, not hidden, during assessments so the
+           learner can see where it went. Narrow windows use a floating button. -->
+      <div class="hidden md:flex">
+      <button
+        class="topbar-icon-btn"
+        :class="{ 'topbar-icon-btn--active': chat.panelOpen.value && !chatRestricted, 'topbar-icon-btn--disabled': chatRestricted }"
+        :disabled="chatRestricted"
+        :aria-pressed="chat.panelOpen.value && !chatRestricted"
+        :aria-label="chatRestricted ? t('chat.paused') : t('chat.panel.title')"
+        :title="chatRestricted ? t('chat.paused') : `${t('chat.panel.shortcut')} ${shortcuts['toggle-chat'] ? formatCombo(shortcuts['toggle-chat'].keys) : ''}`"
+        @click="chat.toggle()"
+      >
+        <svg class="h-[1.125rem] w-[1.125rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+          <path d="M4 5h16v11H8l-4 4z" />
+          <path stroke-linecap="round" d="M8 10h8M8 13h5" />
+        </svg>
+      </button>
+      </div>
 
       <!-- Theme toggle dropdown -->
       <div ref="themeMenuRef" class="theme-toggle relative">
@@ -571,6 +593,11 @@ const avatarEmoji = computed(() => {
   line-height: 1rem;
   text-align: center;
   pointer-events: none;
+}
+
+.topbar-icon-btn.topbar-icon-btn--active {
+  color: var(--app-primary);
+  background: color-mix(in srgb, var(--app-primary) 12%, transparent);
 }
 
 .topbar-icon-btn {

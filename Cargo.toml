@@ -8,6 +8,7 @@ members = [
     "crates/alexandria-decisions",
     "crates/alexandria-personhood",
     "crates/alexandria-studio",
+    "crates/alexandria-ai",
     "crates/alexandria-mcp",
     "crates/iroh-moq",
     "crates/moq-media",
@@ -27,6 +28,50 @@ exclude = ["plugins"]
 # Without opt-level = 3, scrypt is 10-30x slower in debug builds,
 # making vault unlock/create painfully slow during development.
 [profile.dev.package.scrypt]
+opt-level = 3
+
+# Unlocking derives the vault key with Argon2id (64 MB, 3 passes), which
+# runs on BLAKE2b. Unoptimised, one derivation takes seconds on a phone.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+# Call video reaches the webview as JPEG frames encoded by `image`. Unoptimised,
+# the encoder keeps a phone's CPU pinned and the self view drops to a few
+# frames a second, so development builds would misreport how calls behave.
+[profile.dev.package.image]
+opt-level = 3
+
+# The rest of each video frame's per-pixel work: camera format conversion
+# (nokhwa), frame handling in the media crate, and the base64 that carries
+# webview frames. Unoptimised, a 30 fps camera falls behind and calls lag.
+[profile.dev.package.nokhwa]
+opt-level = 3
+
+[profile.dev.package.nokhwa-core]
+opt-level = 3
+
+[profile.dev.package.nokhwa-bindings-macos]
+opt-level = 3
+
+[profile.dev.package.moq-media]
+opt-level = 3
+
+[profile.dev.package.base64]
+opt-level = 3
+
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+
+[profile.dev.package.wasmparser]
 opt-level = 3
 
 [profile.release]

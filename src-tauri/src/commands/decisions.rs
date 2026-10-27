@@ -152,8 +152,8 @@ fn clear_shadow(db: &rusqlite::Connection) -> alexandria_studio::Result<()> {
     Ok(())
 }
 
-fn prepare(state: &AppState, task: Task) -> Result<(Client, i64), String> {
-    with_db(state, |db| {
+async fn prepare(state: &AppState, task: Task) -> Result<(Client, i64), String> {
+    let plan = with_db(state, |db| {
         prune_shadow(db, chrono::Utc::now().timestamp())?;
         let doc = settings(db)?;
         if !doc.value.tasks.contains(&task)
@@ -176,23 +176,82 @@ fn prepare(state: &AppState, task: Task) -> Result<(Client, i64), String> {
             ));
         }
         let epoch = state.studio.epoch.load(Ordering::SeqCst);
-        let mut cache = state.studio.decisions.lock().map_err(|_| Error::Locked)?;
-        if let Some((saved_epoch, revision, client)) = cache.as_ref() {
-            if *saved_epoch == epoch && *revision == doc.revision {
-                return Ok((client.clone(), doc.revision));
+        let cache = state.studio.decisions.lock().map_err(|_| Error::Locked)?;
+        if let Some((saved_epoch, revision, pinned_at, client)) = cache.as_ref() {
+            if *saved_epoch == epoch
+                && *revision == doc.revision
+                && pinned_at.elapsed() < PIN_LIFETIME
+            {
+                return Ok(Plan::Cached(client.clone(), doc.revision));
             }
         }
-        let client = Client::new(Config {
-            mode: doc.value.mode,
-            cloud_allowed: true,
-            assist_approved: approved,
-            api_key: store::secret(db, "jev")?.unwrap_or_default(),
-            ..Default::default()
+        Ok(Plan::Build {
+            config: Config {
+                mode: doc.value.mode,
+                cloud_allowed: true,
+                assist_approved: approved,
+                api_key: store::secret(db, "jev")?.unwrap_or_default(),
+                ..Default::default()
+            },
+            epoch,
+            revision: doc.revision,
         })
-        .map_err(|e| Error::Unavailable(e.to_string()))?;
-        *cache = Some((epoch, doc.revision, client.clone()));
-        Ok((client, doc.revision))
-    })
+    })?;
+    let (config, epoch, revision) = match plan {
+        Plan::Cached(client, revision) => return Ok((client, revision)),
+        Plan::Build {
+            config,
+            epoch,
+            revision,
+        } => (config, epoch, revision),
+    };
+    // The shared endpoint policy: every resolved address must be public and
+    // requests are pinned to them, so a rebinding name cannot send the key
+    // or learner context elsewhere.
+    let http = pinned_http(&config.endpoint).await?;
+    let client = Client::with_http(config, http).map_err(|e| e.to_string())?;
+    let mut cache = state
+        .studio
+        .decisions
+        .lock()
+        .map_err(|_| Error::Locked.to_string())?;
+    if state.studio.epoch.load(Ordering::SeqCst) != epoch {
+        return Err(Error::Locked.to_string());
+    }
+    *cache = Some((epoch, revision, Instant::now(), client.clone()));
+    Ok((client, revision))
+}
+
+/// How long the Optional AI checks client keeps the addresses it resolved.
+/// Rebuilding picks up a provider that moved.
+const PIN_LIFETIME: std::time::Duration = std::time::Duration::from_secs(600);
+
+enum Plan {
+    Cached(Client, i64),
+    Build {
+        config: Config,
+        epoch: u64,
+        revision: i64,
+    },
+}
+
+async fn pinned_http(raw: &str) -> Result<reqwest::Client, String> {
+    let host = url::Url::parse(raw)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default();
+    // A loopback endpoint is only ever a local test server.
+    let location = if matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]") {
+        alexandria_ai::Location::Device
+    } else {
+        alexandria_ai::Location::Remote
+    };
+    let endpoint = alexandria_ai::endpoint::resolve(raw, location)
+        .await
+        .map_err(|e| format!("Decision provider is unavailable: {e}"))?;
+    endpoint
+        .http_client(Some(std::time::Duration::from_secs(5)))
+        .map_err(|e| format!("Decision provider is unavailable: {e}"))
 }
 
 fn current(state: &State<'_, AppState>, revision: i64) -> Result<(), String> {
@@ -205,16 +264,6 @@ fn current(state: &State<'_, AppState>, revision: i64) -> Result<(), String> {
         }
         Ok(())
     })
-}
-
-fn taxonomy() -> Result<TaxonomySnapshot, String> {
-    let profile = crate::network_profile::embedded_preprod().map_err(|e| e.to_string())?;
-    TaxonomySnapshot::from_reference(
-        &profile.network_id,
-        "bundled-v1",
-        include_str!("../../../bootstrap/public_taxonomy.json"),
-    )
-    .map_err(|e| e.to_string())
 }
 
 fn check_local_taxonomy(
@@ -257,8 +306,8 @@ pub async fn decision_learning_review(
     ) {
         return Err("Invalid learning task".into());
     }
-    let (client, revision) = prepare(&state, task)?;
-    let snapshot = taxonomy()?;
+    let (client, revision) = prepare(&state, task).await?;
+    let snapshot = crate::db::bundled::taxonomy_snapshot()?;
     let candidates = learning::shortlist(&source, &snapshot);
     let request =
         learning::request(&source, &snapshot, &candidates, task).map_err(|e| e.to_string())?;
@@ -334,7 +383,7 @@ pub async fn decision_content_review(
     revision: i64,
     draft: String,
 ) -> Result<BTreeMap<String, Judgment>, String> {
-    let (client, settings_revision) = prepare(&state, Task::StudioReview)?;
+    let (client, settings_revision) = prepare(&state, Task::StudioReview).await?;
     let course = with_db(&state, |db| store::course(db, &course_id))?;
     if course.revision != revision {
         return Err("Course changed; reload the draft".into());
@@ -380,7 +429,7 @@ pub async fn decision_search(
     query: String,
     candidates: Vec<SearchCandidate>,
 ) -> Result<BTreeMap<String, Judgment>, String> {
-    let (client, revision) = prepare(&state, Task::Search)?;
+    let (client, revision) = prepare(&state, Task::Search).await?;
     if candidates.is_empty() || candidates.len() > 80 {
         return Err("Invalid search candidate count".into());
     }
@@ -420,7 +469,7 @@ pub async fn decision_tutor_review(
     element_id: String,
     connection_id: String,
 ) -> Result<BTreeMap<String, Judgment>, String> {
-    let (client, revision) = prepare(&state, Task::Tutor)?;
+    let (client, revision) = prepare(&state, Task::Tutor).await?;
     let context = with_db(&state, |db| {
         store::tutor_context(db, &course_id, &element_id, &connection_id)
     })?;
@@ -563,5 +612,36 @@ mod tests {
             Err(Error::Conflict)
         ));
         assert_eq!(count(conn), 0);
+    }
+}
+
+#[cfg(test)]
+mod endpoint_policy_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_checks_client_follows_the_shared_endpoint_policy() {
+        // The bundled provider and a local test server pass.
+        assert!(pinned_http("http://127.0.0.1:9/v1/systemone").await.is_ok());
+        // Plain HTTP, private addresses, and credentials in the URL do not.
+        for refused in [
+            "http://api.example.com/v1/systemone",
+            "https://10.0.0.8/v1/systemone",
+            "https://192.168.1.2/v1/systemone",
+            "https://user:pass@api.example.com/v1",
+            "https://169.254.169.254/latest",
+        ] {
+            assert!(pinned_http(refused).await.is_err(), "{refused}");
+        }
+        assert!(Client::with_http(
+            Config {
+                endpoint: "http://127.0.0.1:9/v1/systemone".into(),
+                ..Default::default()
+            },
+            pinned_http("http://127.0.0.1:9/v1/systemone")
+                .await
+                .unwrap(),
+        )
+        .is_ok());
     }
 }

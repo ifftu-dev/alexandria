@@ -9,7 +9,7 @@ import type { DeviceCheckResult, DeviceList } from '@/types'
 const { t } = useI18n()
 const router = useRouter()
 const {
-  sessions,
+  tutoringSessions: sessions,
   lastError,
   loading,
   refreshSessions,

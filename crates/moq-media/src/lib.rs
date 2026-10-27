@@ -1,5 +1,5 @@
 // Copyright 2025 N0, INC
-// Modified by Alexandria Pvt. Ltd. — see crates/VENDORING.md
+// Modified by Pratyush Pundir <pratyush@alexandria.ifftu.dev> — see crates/VENDORING.md
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,8 @@ pub mod capture;
 #[cfg(feature = "video")]
 pub mod ffmpeg;
 pub mod opus;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub mod preview;
 pub mod publish;
 pub mod subscribe;
 mod util;

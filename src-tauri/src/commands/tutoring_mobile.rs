@@ -8,6 +8,7 @@
 //! Screen share remains unavailable on mobile.
 
 use crate::profile::scope::ProfileState as State;
+use crate::tutoring::call_kind::CallKind;
 use live::media::audio::AudioBackend;
 use rusqlite::params;
 use serde::Serialize;
@@ -35,6 +36,10 @@ pub struct TutoringSessionInfo {
     pub status: String,
     pub created_at: String,
     pub ended_at: Option<String>,
+    /// What the call is for; see [`CallKind`].
+    pub kind: CallKind,
+    /// The classroom, interview or plugin element the call belongs to.
+    pub context_id: Option<String>,
 }
 
 /// Info about an available audio device.
@@ -64,15 +69,19 @@ pub struct DeviceList {
 
 /// Create a new tutoring room (host, audio-only).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn tutoring_create_room(
     title: String,
     display_name: Option<String>,
     _camera_id: Option<String>,
     mic_id: Option<String>,
     speaker_id: Option<String>,
+    kind: Option<String>,
+    context_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    let kind = CallKind::parse(kind.as_deref())?;
     let content_node = &state.content_node;
 
     let endpoint = content_node
@@ -108,6 +117,7 @@ pub async fn tutoring_create_room(
     let persisted_session_id = session_id.clone();
     let persisted_title = title.clone();
     let persisted_ticket = ticket.clone();
+    let persisted_context = context_id.clone();
     state
         .db_executor
         .execute(
@@ -115,13 +125,19 @@ pub async fn tutoring_create_room(
             state.profile_lease(),
             "tutoring.create.persist-session",
             move |db| {
-                db.conn()
-                    .execute(
-                        "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
-                        params![persisted_session_id, persisted_title, persisted_ticket],
-                    )
-                    .map_err(|e| e.to_string())?;
-                crate::tutoring::presence::register(db.conn(), &persisted_session_id, &persisted_ticket)?;
+                crate::tutoring::call_kind::record_session(
+                    db.conn(),
+                    &persisted_session_id,
+                    &persisted_title,
+                    &persisted_ticket,
+                    kind,
+                    persisted_context.as_deref(),
+                )?;
+                crate::tutoring::presence::register(
+                    db.conn(),
+                    &persisted_session_id,
+                    &persisted_ticket,
+                )?;
                 Ok(())
             },
         )
@@ -134,6 +150,8 @@ pub async fn tutoring_create_room(
         status: "active".into(),
         created_at: chrono::Utc::now().to_rfc3339(),
         ended_at: None,
+        kind,
+        context_id,
     })
 }
 
@@ -150,9 +168,22 @@ pub async fn tutoring_join_room(
     _camera_id: Option<String>,
     mic_id: Option<String>,
     speaker_id: Option<String>,
+    kind: Option<String>,
+    context_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    let kind = CallKind::parse(kind.as_deref())?;
+    let join_ticket = ticket.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "tutoring.join.check-kind",
+            move |db| crate::tutoring::call_kind::check_join_kind(db.conn(), &join_ticket, kind),
+        )
+        .await?;
     crate::tutoring::presence::check_join(&state, &ticket).await?;
     let content_node = &state.content_node;
 
@@ -191,6 +222,7 @@ pub async fn tutoring_join_room(
     let persisted_session_id = session_id.clone();
     let persisted_title = title.clone();
     let persisted_ticket = resolved_ticket.clone();
+    let persisted_context = context_id.clone();
     state
         .db_executor
         .execute(
@@ -198,13 +230,19 @@ pub async fn tutoring_join_room(
             state.profile_lease(),
             "tutoring.join.persist-session",
             move |db| {
-                db.conn()
-                    .execute(
-                        "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
-                        params![persisted_session_id, persisted_title, persisted_ticket],
-                    )
-                    .map_err(|e| e.to_string())?;
-                crate::tutoring::presence::register(db.conn(), &persisted_session_id, &persisted_ticket)?;
+                crate::tutoring::call_kind::record_session(
+                    db.conn(),
+                    &persisted_session_id,
+                    &persisted_title,
+                    &persisted_ticket,
+                    kind,
+                    persisted_context.as_deref(),
+                )?;
+                crate::tutoring::presence::register(
+                    db.conn(),
+                    &persisted_session_id,
+                    &persisted_ticket,
+                )?;
                 Ok(())
             },
         )
@@ -217,6 +255,8 @@ pub async fn tutoring_join_room(
         status: "active".into(),
         created_at: chrono::Utc::now().to_rfc3339(),
         ended_at: None,
+        kind,
+        context_id,
     })
 }
 
@@ -268,6 +308,15 @@ pub async fn tutoring_toggle_audio(
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     state.tutoring.toggle_audio(enable).await
+}
+
+/// Mobile calls use the device's front camera; there is no other to pick.
+#[tauri::command]
+pub async fn tutoring_set_camera(
+    camera_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.tutoring.set_camera(camera_id).await
 }
 
 #[tauri::command]
@@ -342,7 +391,7 @@ pub async fn tutoring_list_sessions(
                 let mut stmt = db
                     .conn()
                     .prepare(
-                        "SELECT id, title, ticket, status, created_at, ended_at
+                        "SELECT id, title, ticket, status, created_at, ended_at, kind, context_id
                          FROM tutoring_sessions
                          ORDER BY created_at DESC
                          LIMIT 50",
@@ -358,6 +407,9 @@ pub async fn tutoring_list_sessions(
                             status: row.get(3)?,
                             created_at: row.get(4)?,
                             ended_at: row.get(5)?,
+                            kind: CallKind::parse(row.get::<_, Option<String>>(6)?.as_deref())
+                                .unwrap_or(CallKind::Tutoring),
+                            context_id: row.get(7)?,
                         })
                     })
                     .map_err(|e| e.to_string())?

@@ -1,4 +1,5 @@
 // Copyright 2025 N0, INC
+// Modified by Pratyush Pundir <pratyush@alexandria.ifftu.dev> — see crates/VENDORING.md
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -455,8 +456,12 @@ impl SharedVideoSource {
             let shutdown = shutdown.clone();
             let running = running.clone();
             move || {
+                const STATS_WINDOW: u32 = 300;
                 let frame_time = Duration::from_secs_f32(1. / 30.);
                 let start = Instant::now();
+                let mut window_started = Instant::now();
+                let mut delivered: u32 = 0;
+                let mut reading = Duration::ZERO;
                 for i in 0.. {
                     if shutdown.is_cancelled() {
                         break;
@@ -475,12 +480,26 @@ impl SharedVideoSource {
                         }
                     }
 
+                    let read_started = Instant::now();
                     match source.pop_frame() {
                         Ok(Some(frame)) => {
+                            reading += read_started.elapsed();
+                            delivered += 1;
                             let _ = tx.send(Some(frame));
                         }
                         Ok(None) => {}
                         Err(_) => break,
+                    }
+                    if delivered == STATS_WINDOW {
+                        info!(
+                            "video source {}: {:.1} fps, {:.1} ms a frame to read",
+                            source.name(),
+                            f64::from(delivered) / window_started.elapsed().as_secs_f64(),
+                            reading.as_secs_f64() * 1000.0 / f64::from(delivered),
+                        );
+                        delivered = 0;
+                        reading = Duration::ZERO;
+                        window_started = Instant::now();
                     }
                     let expected = frame_time * i;
                     let actual = start.elapsed();
@@ -534,11 +553,27 @@ impl VideoSource for SharedVideoSource {
         Ok(())
     }
 
+    /// The newest camera frame, if this consumer hasn't had it yet.
+    ///
+    /// Consumers poll on their own clock. Handing out the latest frame on
+    /// every poll made a 30 Hz encoder repeat some camera frames and skip
+    /// others whenever the two clocks drifted, which reads as jerky motion.
     fn pop_frame(&mut self) -> anyhow::Result<Option<crate::av::VideoFrame>> {
-        let frame = self.frames_rx.borrow_and_update().clone();
-        Ok(frame)
+        if !self.frames_rx.has_changed().unwrap_or(false) {
+            return Ok(None);
+        }
+        Ok(self.frames_rx.borrow_and_update().clone())
     }
 }
+
+/// How often a video consumer checks its source for a new frame: well under
+/// a frame at 30 fps, so frames are taken as they arrive.
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub(crate) const SOURCE_POLL_INTERVAL: Duration = Duration::from_millis(4);
+
+/// How long a video source may go without a frame before the encoder says so.
+#[cfg(any(feature = "video", feature = "video-ios"))]
+const SOURCE_IDLE_WARNING: Duration = Duration::from_secs(2);
 
 pub struct EncoderThread {
     _thread_handle: std::thread::JoinHandle<()>,
@@ -569,13 +604,11 @@ impl EncoderThread {
                     dst_config = ?encoder.config(),
                     "video encoder thread start"
                 );
-                let framerate = encoder.config().framerate.unwrap_or(30.0);
-                let interval = Duration::from_secs_f64(1. / framerate);
                 let mut enc_frame_count: u64 = 0;
                 let mut enc_pkt_count: u64 = 0;
-                let mut null_frame_count: u64 = 0;
+                let mut last_frame_at = Instant::now();
+                let mut warned_idle = false;
                 loop {
-                    let start = Instant::now();
                     if shutdown.is_cancelled() {
                         debug!("stop video encoder: cancelled");
                         break;
@@ -589,6 +622,8 @@ impl EncoderThread {
                     };
                     if let Some(frame) = frame {
                         enc_frame_count += 1;
+                        last_frame_at = Instant::now();
+                        warned_idle = false;
                         if let Err(err) = encoder.push_frame(frame) {
                             warn!("video encoder failed: {err:#}");
                             break;
@@ -606,17 +641,16 @@ impl EncoderThread {
                             }
                         }
                     } else {
-                        null_frame_count += 1;
-                        if null_frame_count == 1
-                            || null_frame_count == 30
-                            || null_frame_count.is_multiple_of(300)
-                        {
+                        if !warned_idle && last_frame_at.elapsed() > SOURCE_IDLE_WARNING {
                             warn!(
-                                "videoenc: source returned None ({null_frame_count} times, {enc_frame_count} frames so far)"
+                                "videoenc: no new source frame for {SOURCE_IDLE_WARNING:?} ({enc_frame_count} frames so far)"
                             );
+                            warned_idle = true;
                         }
+                        // Encode each frame as soon as it exists rather than
+                        // on a clock of our own.
+                        std::thread::sleep(SOURCE_POLL_INTERVAL);
                     }
-                    std::thread::sleep(interval.saturating_sub(start.elapsed()));
                 }
                 let _ = producer.finish();
                 if let Err(err) = source.stop() {
@@ -743,5 +777,67 @@ impl EncoderThread {
 impl Drop for EncoderThread {
     fn drop(&mut self) {
         self.shutdown.cancel();
+    }
+}
+
+#[cfg(all(test, any(feature = "video", feature = "video-ios")))]
+mod shared_source_tests {
+    use std::time::{Duration, Instant};
+
+    use tokio_util::sync::CancellationToken;
+
+    use super::SharedVideoSource;
+    use crate::av::{PixelFormat, VideoFormat, VideoFrame, VideoSource};
+
+    /// A camera that blocks for each frame, like nokhwa's, numbering them.
+    struct CountingCamera {
+        next: u8,
+    }
+
+    impl VideoSource for CountingCamera {
+        fn name(&self) -> &str {
+            "counting"
+        }
+        fn format(&self) -> VideoFormat {
+            VideoFormat {
+                pixel_format: PixelFormat::Rgba,
+                dimensions: [1, 1],
+            }
+        }
+        fn pop_frame(&mut self) -> anyhow::Result<Option<VideoFrame>> {
+            std::thread::sleep(Duration::from_millis(5));
+            self.next = self.next.wrapping_add(1);
+            Ok(Some(VideoFrame {
+                format: self.format(),
+                raw: vec![self.next, 0, 0, 255].into(),
+            }))
+        }
+        fn start(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn stop(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_consumer_never_gets_the_same_frame_twice() {
+        let shutdown = CancellationToken::new();
+        let mut shared = SharedVideoSource::new(CountingCamera { next: 0 }, shutdown.clone());
+        shared.start().unwrap();
+        let mut seen = Vec::new();
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline {
+            if let Some(frame) = shared.pop_frame().unwrap() {
+                seen.push(frame.raw[0]);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        shutdown.cancel();
+        assert!(seen.len() > 5, "frames arrived: {seen:?}");
+        assert!(
+            seen.windows(2).all(|w| w[0] != w[1]),
+            "a frame was handed out twice: {seen:?}"
+        );
     }
 }

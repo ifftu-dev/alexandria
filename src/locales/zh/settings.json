@@ -114,7 +114,10 @@
     "shortcutsHint": "点击某个快捷键的按键绑定以录制新的绑定。按 Esc 取消。",
     "pressKeys": "按下按键…",
     "resetToDefault": "恢复默认",
-    "reset": "重置"
+    "reset": "重置",
+    "shortcutNames": {
+      "toggle-chat": "打开或关闭聊天"
+    }
   },
   "storage": {
     "title": "存储",
@@ -260,7 +263,6 @@
     "unavailable": "Local assistant access is unavailable. It currently requires Alexandria running on macOS or Linux.",
     "name": "Assistant name",
     "permissions": "Permissions",
-    "learningScope": "Read published courses: the catalog, course outlines, lesson text, video chapters, and quiz questions without answers. Lessons not stored on this device may be fetched from peers. Assessments are never shared.",
     "draftsScope": "Allow reading your course titles, text lessons, instructor instructions and selected source notes.",
     "credentialsScope": "Read your credentials: issuer, skill, dates and revocation status. The signed credential documents themselves are never shared.",
     "proposeScope": "Also allow submitting lesson proposals for my review.",
@@ -275,6 +277,21 @@
     "scopePropose": "Propose drafts",
     "expiresAt": "Expires {time}",
     "revoke": "Revoke access",
-    "none": "No active assistant grants."
+    "none": "No active assistant grants.",
+    "learningContent": "读取已发布的课程：课程目录、课程大纲、课程文本和视频章节。每小时最多可从其他节点获取 20 节未存储在这台设备上的课程。测验和测评永远不会被分享。",
+    "privateSkillsScope": "包括你在技能图谱中设为私密的技能。默认关闭。",
+    "verifyScope": "验证别人向你出示的证书。这会记录该出示已被查看，因此不能被接受两次。",
+    "scopePrivateSkills": "私密技能",
+    "scopeVerify": "验证出示",
+    "disclosureTitle": "它读取的内容会离开 Alexandria",
+    "disclosureBody": "助手可以读取你在下方允许的所有内容，而不必每次都询问你，并且通常会将其发送给它自己的 AI 提供方。Alexandria 无法控制之后会发生什么。",
+    "pauses": "测评或面试检查进行时，访问会自动暂停；此个人资料锁定时，访问会结束。",
+    "activity": "活动（{count}）",
+    "activityEmpty": "还没有读取任何内容。",
+    "outcomeReturned": "已返回",
+    "outcomeWithheld": "已保留",
+    "outcomeUnavailable": "不可用",
+    "outcomePaused": "已暂停：测评进行中",
+    "outcomeRefused": "已拒绝"
   }
 }

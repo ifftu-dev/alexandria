@@ -455,12 +455,31 @@ pub fn save_connection(
     doc: &StudioDocument<StudioConnection>,
     key: Option<&str>,
 ) -> Result<StudioDocument<StudioConnection>> {
-    crate::provider::validate_connection(&doc.value)?;
+    let url = crate::provider::validate_connection(&doc.value)?;
     if doc.id != doc.value.id {
         return Err(Error::Invalid("Connection identifier mismatch".into()));
     }
+    if doc.value.auth == crate::model::ConnectionAuth::ChatgptPlan {
+        // Created only by the sign-in flow; editing keeps its credentials.
+        let existing = connection(conn, &doc.id)
+            .map_err(|_| Error::Invalid("Sign in with ChatGPT to add this connection".into()))?;
+        if existing.value.auth != crate::model::ConnectionAuth::ChatgptPlan || key.is_some() {
+            return Err(Error::Invalid(
+                "A ChatGPT sign-in cannot be changed into an API key connection or back".into(),
+            ));
+        }
+    } else if let Ok(existing) = connection(conn, &doc.id) {
+        if existing.value.auth == crate::model::ConnectionAuth::ChatgptPlan {
+            return Err(Error::Invalid(
+                "A ChatGPT sign-in cannot be changed into an API key connection or back".into(),
+            ));
+        }
+    }
     if let Some(key) = key {
         bounded(key, 4096, "API key")?;
+        // Consumer sign-in tokens are never stored, not just never sent.
+        alexandria_ai::terms::check_credential(&url, key, false)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
     }
     let tx = conn.unchecked_transaction()?;
     if let Some(key) = key {
@@ -471,6 +490,53 @@ pub fn save_connection(
     let saved = put(&tx, "connection", &doc.id, doc.revision, &value)?;
     tx.commit()?;
     Ok(saved)
+}
+
+/// Saves a connection created by a provider sign-in, with the credential the
+/// provider issued. The host runs the sign-in; nothing else calls this.
+pub fn save_signed_in_connection(
+    conn: &Connection,
+    doc: &StudioDocument<StudioConnection>,
+    credential: &str,
+) -> Result<StudioDocument<StudioConnection>> {
+    crate::provider::validate_connection(&doc.value)?;
+    if doc.id != doc.value.id || credential.is_empty() {
+        return Err(Error::Invalid("Connection identifier mismatch".into()));
+    }
+    bounded(credential, 32_768, "Sign-in credential")?;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("INSERT INTO studio_secrets(connection_id,secret) VALUES (?1,?2) ON CONFLICT(connection_id) DO UPDATE SET secret=excluded.secret",params![doc.id,credential])?;
+    let mut value = doc.value.clone();
+    value.has_key = true;
+    let saved = put(&tx, "connection", &doc.id, doc.revision, &value)?;
+    tx.commit()?;
+    Ok(saved)
+}
+
+/// Removes a connection and its secret. Chats and workflows that named it
+/// report it as missing the next time they are used.
+pub fn delete_connection(conn: &Connection, id: &str) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM studio_secrets WHERE connection_id=?1", [id])?;
+    let removed = tx.execute(
+        "DELETE FROM studio_documents WHERE kind='connection' AND id=?1",
+        [id],
+    )?;
+    if removed == 0 {
+        return Err(Error::Unavailable("Model connection not found".into()));
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Replaces a signed-in connection's credential after a token refresh.
+pub fn replace_secret(conn: &Connection, id: &str, credential: &str) -> Result<()> {
+    bounded(credential, 32_768, "Sign-in credential")?;
+    conn.execute(
+        "UPDATE studio_secrets SET secret = ?2 WHERE connection_id = ?1",
+        params![id, credential],
+    )?;
+    Ok(())
 }
 
 pub fn secret(conn: &Connection, id: &str) -> Result<Option<String>> {
@@ -783,6 +849,6 @@ pub fn propose_draft(
     if fingerprint(&target)? != expected {
         return Err(Error::Conflict);
     }
-    let run=StudioRun{id:id.clone(),course_id:course_id.into(),element_id:element_id.into(),workflow_name:format!("Proposal from {client_name}"),workflow_revision:0,target_fingerprint:expected.into(),original_content:target.content,context:target.title,status:"review".into(),steps:vec![StudioRunStep{role:"draft".into(),connection:StudioConnection{id:"external-assistant".into(),name:client_name.into(),endpoint:String::new(),model:"External assistant".into(),location:"external".into(),capability:"text".into(),enabled:false,has_key:false},effective_prompt:"Provided by the external assistant; its prompt history is not available to Alexandria.".into(),output:Some(text.into())}],error:None,created_at:chrono::Utc::now().to_rfc3339(),applied_fingerprint:None};
+    let run=StudioRun{id:id.clone(),course_id:course_id.into(),element_id:element_id.into(),workflow_name:format!("Proposal from {client_name}"),workflow_revision:0,target_fingerprint:expected.into(),original_content:target.content,context:target.title,status:"review".into(),steps:vec![StudioRunStep{role:"draft".into(),connection:StudioConnection{id:"external-assistant".into(),name:client_name.into(),endpoint:String::new(),model:"External assistant".into(),location:"external".into(),capability:"text".into(),enabled:false,has_key:false,context_tokens:None,protocol:Default::default(),auth:Default::default()},effective_prompt:"Provided by the external assistant; its prompt history is not available to Alexandria.".into(),output:Some(text.into())}],error:None,created_at:chrono::Utc::now().to_rfc3339(),applied_fingerprint:None};
     put(conn, "run", &id, 0, &run)
 }

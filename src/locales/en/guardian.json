@@ -52,5 +52,19 @@
     "noClassroomsTitle": "No classrooms",
     "noClassroomsDescription": "Classrooms your child joins appear here.",
     "roleJoined": "{role} · joined {date}"
+  },
+  "aiRequests": {
+    "title": "AI model requests",
+    "intro": "Requests to send chat messages to an AI provider on the internet. Approving one lets this learner use that provider at that address; you can withdraw it at any time. Models on the learner's own device or network never need approval.",
+    "none": "No requests.",
+    "approve": "Approve",
+    "decline": "Decline",
+    "withdraw": "Withdraw approval",
+    "notDelivered": "reaches the learner at the next sync",
+    "status": {
+      "pending": "Waiting for you",
+      "approved": "Approved",
+      "declined": "Not approved"
+    }
   }
 }

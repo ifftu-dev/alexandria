@@ -108,6 +108,9 @@ keys/
 src-tauri/binaries/
 src-tauri/macos-frameworks/
 
+# Built by scripts/demo/ax.sh from axtool.swift on first run.
+scripts/demo/axtool
+
 # python bytecode from cardano/governance/deploy_*.py
 __pycache__/
 
@@ -126,3 +129,5 @@ src-tauri/gen/android/app/google-services.json
 # Firebase configuration for push on iOS, downloaded per project from the
 # Firebase console; the Android counterpart is the google-services.json above.
 src-tauri/gen/apple/alexandria-node_iOS/GoogleService-Info.plist
+playwright-report/
+test-results/

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
 import { useAuth } from '@/composables/useAuth'
+import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import type { ClassroomChannel, ClassroomMember } from '@/types'
@@ -128,7 +129,9 @@ const {
   createChannel,
   startCall,
   joinCall,
+  endCall,
 } = useClassroom()
+const tutoring = useTutoringRoom()
 
 const { walletInfo } = useAuth()
 
@@ -238,6 +241,27 @@ async function handleJoinCall() {
   await joinCall(activeCall.value.id)
 }
 
+// Ending closes the call for every member, so only its starter, an owner or
+// a moderator may do it; anyone can simply leave from the call window.
+const canEndCall = computed(() => {
+  const call = activeCall.value
+  const me = walletInfo.value?.stake_address
+  if (!call || !me) return false
+  const role = currentClassroom.value?.my_role
+  return call.started_by === me || role === 'owner' || role === 'moderator'
+})
+
+async function handleEndCall() {
+  const call = activeCall.value
+  if (!call) return
+  try {
+    await endCall(call.id)
+    if (tutoring.sessionStatus.value?.session_id === call.id) await tutoring.leaveRoom()
+  } catch {
+    // The classroom composable keeps the error for the page.
+  }
+}
+
 // Auto-select first channel when channels load
 watch(channels, (chans) => {
   const [firstChannel] = chans
@@ -315,6 +339,9 @@ onBeforeUnmount(() => {
         <div class="text-xs text-success font-medium mb-1">🎙 {{ $t('classrooms.call.active') }}</div>
         <AppButton variant="primary" size="xs" class="w-full" @click="handleJoinCall">
           {{ $t('classrooms.call.join') }}
+        </AppButton>
+        <AppButton v-if="canEndCall" variant="outline" size="xs" class="mt-1 w-full" data-testid="classroom-end-call" @click="handleEndCall">
+          {{ $t('classrooms.call.end') }}
         </AppButton>
       </div>
 
@@ -497,6 +524,9 @@ onBeforeUnmount(() => {
                 <div class="text-xs text-success font-medium mb-1">🎙 {{ $t('classrooms.call.active') }}</div>
                 <AppButton variant="primary" size="xs" class="w-full" @click="handleJoinCall(); showChannelDrawer = false">
                   {{ $t('classrooms.call.join') }}
+                </AppButton>
+                <AppButton v-if="canEndCall" variant="outline" size="xs" class="mt-1 w-full" @click="handleEndCall(); showChannelDrawer = false">
+                  {{ $t('classrooms.call.end') }}
                 </AppButton>
               </div>
 

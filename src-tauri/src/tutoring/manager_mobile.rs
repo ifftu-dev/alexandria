@@ -20,14 +20,11 @@
 //! Phase 3: Full audio+video P2P tutoring on iOS.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use bytes::Bytes;
-use image::ImageEncoder;
 use iroh::{Endpoint, EndpointId};
 use iroh_gossip::net::Gossip;
 use live::media::audio::{AudioBackend, InputStream, OutputStream};
@@ -134,6 +131,32 @@ where
     {
         Ok(result) => result,
         Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// How long the front camera may take to open mid-call.
+const CAMERA_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Open the front camera and build its renditions with no lock held.
+///
+/// AVCaptureSession has to be set up on the main thread, so opening is a
+/// synchronous dispatch to it. Done on a runtime worker under the call's
+/// lock, it blocked every other call command for as long as the camera took.
+/// Here it runs on a blocking thread with a timeout; on timeout the thread is
+/// abandoned and whatever it opens later is dropped.
+async fn open_front_camera() -> Result<VideoRenditions, String> {
+    let open = tokio::task::spawn_blocking(|| {
+        run_on_main_thread(IosCameraSource::front)
+            .map(|camera| VideoRenditions::new::<VtEncoder>(camera, MOBILE_VIDEO_PRESETS))
+            .map_err(|e| format!("camera unavailable: {e}"))
+    });
+    match tokio::time::timeout(CAMERA_OPEN_TIMEOUT, open).await {
+        Ok(Ok(opened)) => opened,
+        Ok(Err(join)) => Err(format!("the camera failed to open: {join}")),
+        Err(_) => Err(format!(
+            "the camera did not open within {}s",
+            CAMERA_OPEN_TIMEOUT.as_secs()
+        )),
     }
 }
 
@@ -250,6 +273,11 @@ const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
 
 /// Mobile video presets — use lower resolutions to save battery/bandwidth.
 const MOBILE_VIDEO_PRESETS: [VideoPreset; 2] = [VideoPreset::P360, VideoPreset::P720];
+
+/// The rendition a phone watches: 720p at most. Its tiles are never larger
+/// than the 960px remote viewport, and decoding plus copying out 1080p frames
+/// fell behind the sender (15 Oct).
+const PHONE_VIDEO_QUALITY: live::media::av::Quality = live::media::av::Quality::High;
 
 const IOS_AUDIO_OUTPUT_AUTO_ID: &str = "ios:auto";
 const IOS_AUDIO_OUTPUT_SPEAKER_ID: &str = "ios:speaker";
@@ -404,6 +432,9 @@ pub struct SessionStatus {
     pub video_enabled: bool,
     pub audio_enabled: bool,
     pub screen_sharing: bool,
+    /// Always `None` here: the call's own capture is the only camera path,
+    /// so there is no webview preview to match against it.
+    pub camera_name: Option<String>,
     /// Session start time (millis since Unix epoch).
     pub started_at: u64,
 }
@@ -1693,7 +1724,7 @@ impl TutoringManager {
         crate::diag::log(&format!(
             "  [{short_id}] video repair: subscribing (VtDecoder, quality=High)..."
         ));
-        match catalog.select_video_rendition(live::media::av::Quality::Highest) {
+        match catalog.select_video_rendition(PHONE_VIDEO_QUALITY) {
             Ok(selected) => {
                 crate::diag::log(&format!(
                     "  [{short_id}] video repair: selected rendition {selected}"
@@ -1708,7 +1739,7 @@ impl TutoringManager {
 
         match broadcast.watch_with::<VtDecoder>(
             &live::media::av::DecodeConfig::default(),
-            live::media::av::Quality::Highest,
+            PHONE_VIDEO_QUALITY,
         ) {
             Ok(video_track) => {
                 log::info!("tutoring: watching video from {short_id}:{name}");
@@ -2202,12 +2233,25 @@ impl TutoringManager {
         self.stop_room(false).await
     }
 
+    /// Leave the room without letting a stuck media task hold leaving hostage.
+    ///
+    /// The session leaves the lock first, so every other call command keeps
+    /// answering. Cleanup then gets a few seconds; a task that cannot be
+    /// aborted (one blocked in native code, which only yields at its next
+    /// await) finishes in the background. Starting another room is still
+    /// refused until it does, because [`SessionTasks::open`] waits for an
+    /// empty registry: no second camera opens on top of the first.
     async fn stop_room(&self, require_active: bool) -> Result<(), String> {
-        let mut inner = self.inner.lock().await;
-        if require_active && inner.is_none() {
-            return Err("not in a tutoring session".into());
-        }
-        if let Some(session) = inner.as_ref() {
+        crate::diag::log("leave: waiting for the session lock");
+        let session = {
+            let mut inner = self.inner.lock().await;
+            if require_active && inner.is_none() {
+                return Err("not in a tutoring session".into());
+            }
+            inner.take()
+        };
+        crate::diag::log("leave: session taken, stopping media");
+        if let Some(session) = session.as_ref() {
             if let Some(preview) = &session.self_preview_task {
                 preview.abort();
             }
@@ -2215,8 +2259,23 @@ impl TutoringManager {
                 task.abort();
             }
         }
-        self.tasks.shutdown().await;
-        *inner = None;
+        // Stop admitting work and abort what can be aborted now, so nothing
+        // new starts even if the cleanup below has to finish later.
+        self.tasks.close();
+        let tasks = self.tasks.clone();
+        let mut cleanup = tokio::spawn(async move {
+            tasks.shutdown().await;
+            drop(session);
+        });
+        if tokio::time::timeout(Duration::from_secs(3), &mut cleanup)
+            .await
+            .is_err()
+        {
+            log::warn!("tutoring: media cleanup still running 3s after leaving; finishing in the background");
+            crate::diag::log("leave: media cleanup still running after 3s, continuing");
+        } else {
+            crate::diag::log("leave: media stopped");
+        }
         set_idle_timer_disabled(false);
         Ok(())
     }
@@ -2304,62 +2363,87 @@ impl TutoringManager {
         Ok(())
     }
 
+    /// Mobile uses the device's front camera; there is no other to switch to.
+    pub async fn set_camera(
+        &self,
+        _camera_index: Option<String>,
+    ) -> Result<Option<String>, String> {
+        Err("switching cameras is not available on this device".into())
+    }
+
     /// Toggle local camera on/off.
+    ///
+    /// Turning it on opens the camera with the call's lock released (see
+    /// [`open_front_camera`]) and swaps it in only if the session is still the
+    /// same one and the camera is still off.
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
         let tasks = self.tasks.clone();
+        if enable {
+            let session_id = {
+                let inner = self.inner.lock().await;
+                let session = inner
+                    .as_ref()
+                    .filter(|_| self.tasks.is_open())
+                    .ok_or("not in a tutoring session")?;
+                if session.video_enabled {
+                    return Ok(true);
+                }
+                session.session_id.clone()
+            };
+
+            let renditions = open_front_camera().await?;
+
+            let mut inner = self.inner.lock().await;
+            let session = inner
+                .as_mut()
+                .filter(|session| self.tasks.is_open() && session.session_id == session_id)
+                .ok_or("the call ended while the camera was opening")?;
+            if session.video_enabled {
+                // Another change turned the camera on meanwhile; keep that one.
+                return Ok(true);
+            }
+            if let Some(task) = session.self_preview_task.take() {
+                task.abort();
+            }
+            session
+                .broadcast
+                .set_video(Some(renditions))
+                .map_err(|e| format!("failed to enable video: {e}"))?;
+            session.video_enabled = true;
+            let app_handle = session.app_handle.clone();
+            session.self_preview_task =
+                Self::start_self_preview(tasks.clone(), &mut session.broadcast, app_handle);
+            log::info!("tutoring: camera enabled");
+            return Ok(true);
+        }
+
         let mut inner = self.inner.lock().await;
         let session = inner
             .as_mut()
             .filter(|_| self.tasks.is_open())
             .ok_or("not in a tutoring session")?;
 
-        if enable == session.video_enabled {
-            return Ok(session.video_enabled);
+        if !session.video_enabled {
+            return Ok(false);
         }
 
         if let Some(task) = session.self_preview_task.take() {
             task.abort();
         }
 
-        if enable {
-            // Try to create camera and video renditions.
-            // Dispatch to main thread — AVCaptureSession requires it on iOS.
-            let camera_result = run_on_main_thread(IosCameraSource::front);
-            match camera_result {
-                Ok(camera) => {
-                    let renditions =
-                        VideoRenditions::new::<VtEncoder>(camera, MOBILE_VIDEO_PRESETS);
-                    session
-                        .broadcast
-                        .set_video(Some(renditions))
-                        .map_err(|e| format!("failed to enable video: {e}"))?;
-                    session.video_enabled = true;
-                    session.self_preview_task = Self::start_self_preview(
-                        tasks.clone(),
-                        &mut session.broadcast,
-                        session.app_handle.clone(),
-                    );
-                    log::info!("tutoring: camera enabled");
-                }
-                Err(e) => {
-                    return Err(format!("camera unavailable: {e}"));
-                }
-            }
-        } else {
-            session
-                .broadcast
-                .set_video(None)
-                .map_err(|e| format!("failed to disable video: {e}"))?;
-            session.video_enabled = false;
-            // Notify frontend that self-video ended
-            let _ = session.app_handle.emit(
-                "tutoring:peer-video-ended",
-                PeerVideoEndedEvent {
-                    node_id: "self".into(),
-                },
-            );
-            log::info!("tutoring: camera disabled");
-        }
+        session
+            .broadcast
+            .set_video(None)
+            .map_err(|e| format!("failed to disable video: {e}"))?;
+        session.video_enabled = false;
+        // Notify frontend that self-video ended
+        let _ = session.app_handle.emit(
+            "tutoring:peer-video-ended",
+            PeerVideoEndedEvent {
+                node_id: "self".into(),
+            },
+        );
+        log::info!("tutoring: camera disabled");
 
         Ok(session.video_enabled)
     }
@@ -2461,6 +2545,7 @@ impl TutoringManager {
             video_enabled: session.video_enabled,
             audio_enabled: session.audio_enabled,
             screen_sharing: false, // No screen sharing on mobile
+            camera_name: None,
             started_at: session.started_at,
         })
     }
@@ -2698,33 +2783,44 @@ impl TutoringManager {
                     log::info!("tutoring: app returning to foreground, waiting 1s for connections to stabilize");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     log::info!("tutoring: restarting camera after foreground return");
+                    // Read under the lock, open the camera without it, then
+                    // swap it in only if it is still off (see open_front_camera).
+                    let camera_off = manager_inner
+                        .lock()
+                        .await
+                        .as_ref()
+                        .map(|session| !session.video_enabled);
+                    let Some(camera_off) = camera_off else {
+                        break;
+                    };
+                    let reopened = if camera_off {
+                        Some(open_front_camera().await)
+                    } else {
+                        None
+                    };
                     let should_continue = {
                         let mut guard = manager_inner.lock().await;
                         if let Some(session) = guard.as_mut() {
-                            if !session.video_enabled {
-                                let camera_result = run_on_main_thread(IosCameraSource::front);
-                                match camera_result {
-                                    Ok(camera) => {
-                                        let renditions = VideoRenditions::new::<VtEncoder>(
-                                            camera,
-                                            MOBILE_VIDEO_PRESETS,
+                            match reopened {
+                                Some(Ok(renditions)) if !session.video_enabled => {
+                                    if session.broadcast.set_video(Some(renditions)).is_ok() {
+                                        session.video_enabled = true;
+                                        let app_handle = session.app_handle.clone();
+                                        let preview = Self::start_self_preview(
+                                            tasks.clone(),
+                                            &mut session.broadcast,
+                                            app_handle,
                                         );
-                                        if session.broadcast.set_video(Some(renditions)).is_ok() {
-                                            session.video_enabled = true;
-                                            let preview = Self::start_self_preview(tasks.clone(),
-                                                &mut session.broadcast,
-                                                session.app_handle.clone(),
-                                            );
-                                            session.self_preview_task = preview;
-                                            log::info!("tutoring: camera restarted (foreground)");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log::warn!(
-                                            "tutoring: failed to restart camera after unlock: {e}"
-                                        );
+                                        session.self_preview_task = preview;
+                                        log::info!("tutoring: camera restarted (foreground)");
                                     }
                                 }
+                                Some(Err(e)) => {
+                                    log::warn!(
+                                        "tutoring: failed to restart camera after unlock: {e}"
+                                    );
+                                }
+                                _ => {}
                             }
                             session._subscribed_video_keys.clear();
                             true
@@ -3227,17 +3323,28 @@ impl TutoringManager {
     ) -> TaskHandle {
         let (mut frames, handle) = watch.split();
         let is_self_preview = node_id == "self";
+        // The decoder scales each frame to fit this box before the JPEG step,
+        // which is the costly part: a 720x1280 self view encoded several
+        // times a second held a core at 100% (iOS killed the app for it). The
+        // self view only fills a phone-sized tile, so 360x640 is plenty; a
+        // remote camera fits 960x960 whichever way up it is held.
         let viewport = if is_self_preview {
-            (720, 1280)
+            (360, 640)
         } else {
-            (1280, 720)
+            (960, 960)
         };
         let jpeg_quality = if is_self_preview { 75 } else { 70 };
+        // The encoder scales again only if a frame still arrives larger.
+        let max_size = viewport;
         let frame_interval = if is_self_preview {
-            Duration::from_millis(55)
+            Duration::from_millis(42)
         } else {
-            Duration::from_millis(95)
+            Duration::from_millis(50)
         };
+        // Frames arrive on the camera's own clock; a gate exactly one
+        // interval wide drops every other one whenever they arrive a hair
+        // early.
+        let gate = frame_interval.saturating_sub(Duration::from_millis(8));
         handle.set_viewport(viewport.0, viewport.1);
 
         tasks.clone().spawn(async move {
@@ -3290,40 +3397,26 @@ impl TutoringManager {
                             ));
                         }
                         let now = std::time::Instant::now();
-                        if now.duration_since(last_emit) < frame_interval {
+                        if now.duration_since(last_emit) < gate {
                             continue;
                         }
                         last_emit = now;
 
-                        let img = frame.img();
-                        let (width, height) = img.dimensions();
-
-                        let rgb_data: Vec<u8> = img
-                            .as_raw()
-                            .chunks_exact(4)
-                            .flat_map(|px| [px[0], px[1], px[2]])
-                            .collect();
-
-                        let mut jpeg_buf = Vec::with_capacity((width * height) as usize / 4);
-                        let mut cursor = Cursor::new(&mut jpeg_buf);
-                        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-                            &mut cursor,
-                            jpeg_quality,
-                        );
-                        match encoder.write_image(
-                            &rgb_data,
-                            width,
-                            height,
-                            image::ExtendedColorType::Rgb8,
-                        ) {
-                            Ok(()) => {}
-                            Err(e) => {
+                        // Scaling and encoding run on a blocking thread, not
+                        // on the async workers the call's networking shares.
+                        let img = frame.img().clone();
+                        let encoded = tokio::task::spawn_blocking(move || {
+                            super::preview_jpeg::encode(img, max_size, jpeg_quality)
+                        })
+                        .await;
+                        let (jpeg_b64, width, height) = match encoded {
+                            Ok(Ok(frame)) => frame,
+                            Ok(Err(e)) => {
                                 log::warn!("tutoring: JPEG encode failed for {node_id}: {e}");
                                 continue;
                             }
-                        }
-
-                        let jpeg_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
+                            Err(_) => continue,
+                        };
 
                         let _ = app_handle.emit(
                             "tutoring:video-frame",

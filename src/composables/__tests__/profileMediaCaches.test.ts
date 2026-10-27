@@ -54,6 +54,8 @@ const session: TutoringSessionInfo = {
   status: 'active',
   created_at: '2026-09-14T00:00:00Z',
   ended_at: null,
+  kind: 'tutoring',
+  context_id: null,
 }
 
 beforeEach(() => {

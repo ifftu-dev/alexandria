@@ -232,6 +232,14 @@
       "obscuredTouch": {
         "description": "एक स्पर्श ओव्हरलेमधून आला",
         "trigger": "मूल्यमापनावर दुसरी विंडो असताना टॅप पोहोचला (Android)"
+      },
+      "inAppAssistantDuringAttempt": {
+        "description": "प्रयत्नादरम्यान Alexandria चे AI चॅट किंवा ट्यूटर वापरले गेले",
+        "trigger": "प्रयत्न उघडा असताना चॅट किंवा ट्यूटरची विनंती Alexandria पर्यंत पोहोचली"
+      },
+      "mcpCallDuringAttempt": {
+        "description": "जोडलेल्या बाह्य सहाय्यकाने प्रयत्नादरम्यान डेटा मागितला",
+        "trigger": "या प्रोफाइलचा प्रवेश असलेल्या सहाय्यकाने प्रयत्न उघडा असताना विनंती केली"
       }
     }
   },
@@ -492,6 +500,7 @@
     "rowInferLatency": "प्रतिसाद वेळ",
     "valActive": "सक्रिय",
     "valIdle": "निष्क्रिय",
+    "valSuspended": "निलंबित",
     "valYes": "होय",
     "valNo": "नाही",
     "valNa": "n/a",

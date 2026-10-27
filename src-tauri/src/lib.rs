@@ -1,4 +1,6 @@
 pub mod aggregation;
+pub mod ai_auth;
+pub mod ai_chat;
 pub mod assessment;
 pub mod av_permissions;
 pub mod cardano;
@@ -74,6 +76,8 @@ pub struct ActiveProfile {
 /// workers is a separate responsiveness concern to measure and address.
 pub struct AppState {
     pub studio: Arc<commands::studio::StudioRuntime>,
+    /// Live chat generations, so they can be stopped and recovered.
+    pub ai_chat: Arc<ai_chat::ChatRuntime>,
     // ─── per-device singletons ──────────────────────────────────────
     pub app_data_dir: PathBuf,
     pub profile_manager: Arc<ProfileManager>,
@@ -349,6 +353,9 @@ impl AppState {
             let _guard = self.db.lock().map_err(|_| "storage_error".to_string())?;
             self.studio.invalidate();
         }
+        // Chat answers hold the profile lease and stop when it closes; asking
+        // them first lets each record itself as cancelled.
+        self.ai_chat.cancel_all();
         #[cfg(all(desktop, unix))]
         commands::studio_mcp::remove_connection_files(&self.app_data_dir);
         // Revoke active-profile access immediately, but retain the path needed
@@ -708,9 +715,7 @@ pub fn run() {
         }
     });
 
-    // Native menus (and their events) exist only on desktop — tauri has
-    // no `menu` module on iOS. Gate the whole block so the mobile build
-    // keeps a valid builder type.
+    // Single-instance handling is desktop-only.
     #[cfg(desktop)]
     let builder = builder
         // Single-instance MUST be the first plugin registered. With the
@@ -723,32 +728,34 @@ pub fn run() {
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
-        }))
-        .menu(|handle| {
-            // Diagnostics are entered explicitly in-app and are deliberately
-            // absent from the normal release menu.
-            let menu = tauri::menu::Menu::default(handle)?;
+        }));
 
-            // Drop the empty Help submenu on macOS.
-            //
-            // Tauri's default menu builds a Help submenu whose only item —
-            // About — is `#[cfg(not(target_os = "macos"))]`, because macOS puts
-            // About in the app menu. So on macOS it renders an empty menu whose
-            // sole effect is that AppKit attaches its search field to it and
-            // claims Cmd+Shift+/ system-wide. That is the chord for Cmd+?,
-            // which the in-app keyboard shortcut sheet is bound to, and the OS
-            // wins before the webview ever sees the key.
-            //
-            // Removing a menu with nothing in it costs no functionality and
-            // hands the chord back to the app. Non-macOS keeps Help, where it
-            // holds a real About item.
-            #[cfg(target_os = "macos")]
-            if let Some(help) = menu.get(tauri::menu::HELP_SUBMENU_ID) {
-                menu.remove(&help)?;
-            }
+    // macOS uses the system menu bar. Windows and Linux use the in-app
+    // navigation without adding a native menu strip to the window.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(|handle| {
+        // Diagnostics are entered explicitly in-app and are deliberately
+        // absent from the normal release menu.
+        let menu = tauri::menu::Menu::default(handle)?;
 
-            Ok(menu)
-        });
+        // Drop the empty Help submenu on macOS.
+        //
+        // Tauri's default menu builds a Help submenu whose only item —
+        // About — is `#[cfg(not(target_os = "macos"))]`, because macOS puts
+        // About in the app menu. So on macOS it renders an empty menu whose
+        // sole effect is that AppKit attaches its search field to it and
+        // claims Cmd+Shift+/ system-wide. That is the chord for Cmd+?,
+        // which the in-app keyboard shortcut sheet is bound to, and the OS
+        // wins before the webview ever sees the key.
+        //
+        // Removing a menu with nothing in it costs no functionality and
+        // hands the chord back to the app.
+        if let Some(help) = menu.get(tauri::menu::HELP_SUBMENU_ID) {
+            menu.remove(&help)?;
+        }
+
+        Ok(menu)
+    });
 
     builder
         .setup(|app| {
@@ -1323,6 +1330,7 @@ pub fn run() {
 
             let app_state = AppState {
                 studio: Arc::new(commands::studio::StudioRuntime::default()),
+                ai_chat: Arc::new(ai_chat::ChatRuntime::default()),
                 app_data_dir: app_dir.clone(),
                 profile_manager,
                 active,
@@ -1624,6 +1632,50 @@ pub fn run() {
             commands::decisions::decision_content_review,
             commands::decisions::decision_search,
             commands::decisions::decision_tutor_review,
+            commands::ai_chat::chat_status,
+            commands::ai_chat::chat_list_threads,
+            commands::ai_chat::chat_search_threads,
+            commands::ai_chat::chat_create_thread,
+            commands::ai_chat::chat_get_thread,
+            commands::ai_chat::chat_rename_thread,
+            commands::ai_chat::chat_set_thread_model,
+            commands::ai_chat::chat_delete_thread,
+            commands::ai_chat::chat_attach_lesson,
+            commands::ai_chat::chat_attach_goal,
+            commands::ai_chat::chat_detach,
+            commands::ai_chat::chat_get_draft,
+            commands::ai_chat::chat_save_draft,
+            commands::ai_chat::chat_list_models,
+            commands::ai_chat::chat_prepare_message,
+            commands::ai_chat::chat_start_run,
+            commands::ai_chat::chat_cancel_run,
+            commands::ai_chat::chat_set_thread_mode,
+            commands::ai_chat::chat_practice_attempt,
+            commands::ai_chat::chat_practice_hint,
+            commands::ai_chat::chat_practice_reveal,
+            commands::ai_chat::chat_list_memory,
+            commands::ai_chat::chat_add_memory,
+            commands::ai_chat::chat_approve_memory,
+            commands::ai_chat::chat_update_memory,
+            commands::ai_chat::chat_forget_memory,
+            commands::ai_chat::chat_save_note,
+            commands::ai_chat::chat_allow_action,
+            commands::ai_chat::chat_decline_action,
+            commands::ai_signin::ai_signin,
+            commands::ai_signin::ai_signin_cancel,
+            commands::ai_signin::ai_signin_code_start,
+            commands::ai_signin::ai_signin_code_finish,
+            commands::ai_signin::ai_disconnect,
+            commands::ai_signin::ai_open_provider_page,
+            commands::course_notes::chat_save_course_note,
+            commands::course_notes::course_notes_list,
+            commands::course_notes::course_note_delete,
+            commands::ai_chat::chat_delete_artifact,
+            commands::ai_chat::chat_list_artifacts,
+            commands::ai_chat::chat_request_guardian_approval,
+            commands::ai_chat::chat_list_guardian_approvals,
+            commands::guardian::guardian_list_ai_requests,
+            commands::guardian::guardian_decide_ai_request,
             commands::studio::studio_get_course,
             commands::studio::studio_save_course,
             commands::studio::studio_get_tutor_policy,
@@ -1854,6 +1906,7 @@ pub fn run() {
             commands::tutoring::tutoring_toggle_video,
             commands::tutoring::tutoring_toggle_audio,
             commands::tutoring::tutoring_set_audio_devices,
+            commands::tutoring::tutoring_set_camera,
             commands::tutoring::tutoring_toggle_screen_share,
             commands::tutoring::tutoring_send_chat,
             commands::tutoring::tutoring_send_transcript,
