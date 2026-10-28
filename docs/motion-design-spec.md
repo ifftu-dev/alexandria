@@ -140,27 +140,65 @@ under the same audit IDs and release configuration. Android packaging uses
 preserved, successfully compiled release libraries for both versions, skipping
 the redundant Gradle Rust rebuild. Baseline apps have not been installed.
 
-Physical OnePlus CPH2447 audit: Android 16, WebView 155.0.8059.43,
-1080×2412 at 480 dpi, configured 120 Hz with adaptive refresh not yet measured.
-The final isolated release APK installed over wireless debugging. Before
-capture the phone was unplugged at 63% battery, 29.4 °C battery temperature and
-thermal status 0; device streaming and the automation helper were active.
-A 29.91-second Perfetto sample on the settled fresh-onboarding screen recorded
-0.020612 CPU seconds for the app and 0.008061 for its verified WebView renderer:
-0.028673 combined, about 0.096% of one core. Neither process produced an
-app-owned FrameTimeline frame, and Perfetto reported no nonzero error stats.
-App RSS stayed between 299.10 and 299.23 MB; renderer RSS stayed at 221.43 MB.
-RSS can include shared pages and is not an additive physical-memory total.
-This single System-mode idle sample does not measure GPU utilization or
-establish startup, interaction, Off-mode or baseline performance. Repeated
-launch and interaction capture paused when the phone returned to its lock
-screen; subsequent accessibility commands timed out.
+Physical OnePlus CPH2447 comparison, completed for fresh onboarding: Android 16,
+WebView 155.0.8059.43, 1080×2412 at 480 dpi. The phone was unplugged, initially
+38% battery at 28 °C and thermal status 0. Its three OS animation scales stayed
+at the user's existing 0.5 values. Device streaming and the snapshot helper
+were active throughout. Interaction traces reported an 8.33 ms vsync period.
+Both versions used the isolated release audit package; the final build and
+System preference were restored afterward. The regular app remained untouched.
+
+Each variant completed ten fresh-process launches and ten welcome/roles/back
+round trips. OS filesystem caches were warm; runs were ordered System, Off,
+then baseline, not randomized. Perfetto startup measures the first native
+activity frame, **not usable WebView controls**.
+
+| Physical Android measure | System | Off | Baseline `827a687d` |
+| --- | ---: | ---: | ---: |
+| Native first-frame median / nearest-rank p95 (ms) | 156 / 169 | 154 / 163 | 154 / 182 |
+| Host control-observation median / p95 (ms) | 2372 / 2798 | 1867 / 2799 | 1900 / 2816 |
+| Settled idle sample (seconds) | 29.92 | 29.91 | 30.00 |
+| App + verified renderer CPU seconds while idle | 0.170 | 0.155 | 30.128 |
+| Idle CPU as percentage of one core | 0.57% | 0.52% | 100.43% |
+| App-owned idle frames | 0 | 0 | 1798 |
+| Running web animations after settling | 0 | 0 | 13 |
+
+Host observation includes wireless and automation overhead and cannot establish
+response latency or a startup regression. All idle samples confirmed the app
+visible before and after capture. App RSS stayed around 295–301 MB and renderer
+RSS around 236–242 MB; these include shared pages and are not additive physical
+memory. Supplemental 30-second GPU-counter samples had device-wide median
+busy/total ratios of 0%, 0% and 15.2%, respectively. The final samples included
+brief peaks up to 10.1% and 7.8%; these counters include streaming, composition
+and other apps and do not establish exclusive app GPU cost.
+
+During round trips, app frame-work p95 was 12.77 ms / 13.10 ms / 8.26 ms.
+[FrameTimeline durations](https://perfetto.dev/docs/data-sources/frametimeline)
+include GPU/post work and are not input-to-present latency. System had 16
+app-deadline misses among 620 frames; Off had none among 20 and baseline none
+among 4096. The differing animation/frame counts prevent a simple rate
+comparison. System's within-transition presentation-gap p95 was 8.31 ms, with
+a 24.93 ms maximum. A diagnostic input-dispatch-to-next-app-frame proxy had
+p95 44.74 / 43.83 / 29.48 ms, but does not identify the intended UI update;
+baseline's continuous animation especially invalidates a direct response
+comparison. The semantic input-latency acceptance boundary remains open.
+
+Explicit Reduced mode was verified on the physical WebView, including a
+welcome/roles round trip. Background/resume delivered hidden/visible events
+without a new opening sequence. Native OS Reduce Motion was not changed.
+Preference setup used the public storage key through audit WebView debugging;
+this does not test the authenticated Settings control. Off was verified after
+every measured restart. An earlier mislabeled Off run lost a pending storage
+write on immediate process termination and was excluded, as was a truncated
+ring-buffer launch trace. Accepted sequences stream to disk and retain ten
+startups. Full-sort analysis resolves idle event-order warnings; the sequence
+configuration's missing periodic-flush warning concerns parser memory use.
 
 Native acceptance remains open. Returning-profile unlock, authenticated
 atlas/completion journeys, first-paint theme handoffs and other physical targets
-remain unverified. The iPhone audit app was confirmed running, but Instruments
-attachment failed by PID and timed out waiting for the device to boot when
-attaching by app name; it subsequently listed the phone offline again. No
-usable iOS trace or Windows/Linux physical-device result is claimed. Mobile
-System/Off/baseline comparisons and repeated sequences remain outstanding.
+remain unverified. The disposable-profile password request timed out, leaving
+signed-in checks pending. The iPhone audit app was confirmed running, but
+Instruments attachment failed by PID and timed out by app name; it remains
+offline to Instruments over the user's requested wireless-only connection.
+No usable iOS trace or Windows/Linux physical-device result is claimed.
 Build, signing and installation checks do not satisfy performance acceptance.
