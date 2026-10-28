@@ -197,14 +197,44 @@ configuration's missing periodic-flush warning concerns parser memory use.
 Native acceptance remains open. Returning-profile unlock, authenticated
 atlas/completion journeys, first-paint theme handoffs and other physical targets
 remain unverified. The disposable-profile password request timed out, leaving
-signed-in checks pending. On the wireless iPhone retry, opening Xcode exposed
-its required system-component installation prompt. After installation and
-opening Apple's Device Hub, Instruments listed the phone online. Command-line
-attachment still rejected the confirmed audit PID/name, but the Instruments
-GUI successfully attached to the audit app. A saved 15.44-second Activity
-Monitor connection-test trace identifies the physical iPhone 17 and contains
-ten audit-process sample rows. The app was behind a call screen, so this is
-connection evidence only, not foreground idle or motion-performance evidence.
-Foreground iOS System/Off/baseline measurements and Windows/Linux physical-device
-results remain outstanding.
+signed-in checks pending. Windows/Linux physical-device results remain outstanding.
 Build, signing and installation checks do not satisfy performance acceptance.
+
+### Physical iPhone follow-up — partial
+
+Installing Xcode's required system components and opening Device Hub restored
+wireless Instruments access. GUI attachment works; CLI attachment by confirmed
+PID/name still fails. The original 15.44-second capture remains connection
+evidence only because a call screen covered the app. Subsequent foreground
+captures identify an iPhone 17, iOS 27.2 (24B119), with Instruments 27.0
+(27A266a). Device Hub streaming remained active. The phone was charging during
+the session; these are not unplugged power measurements.
+
+The final build completed ten welcome/roles/back round trips. Its initial
+49.73-second foreground idle capture stayed thermally Nominal; the main
+process accumulated 7.77 ms of CPU between the first and last sample and used
+16.24–16.42 MiB physical footprint. These figures exclude WebKit/GPU processes.
+Motion was left at its default; System has not yet been independently verified.
+
+The 342-second interaction trace includes substantial idle/automation gaps.
+It contains 237 app-update-correlated frames, no Hitches rows, and a rendering
+pipeline lifetime p95 of 33.45 ms with a 150.43 ms maximum. The longest frame
+has a 3.46 ms app update, then about 131 ms before its recorded render stage;
+its GPU stage is 2.34 ms. The delay's cause remains unresolved. Pipeline
+lifetimes are not input latency, and empty Hitches rows do not establish a pass.
+Thermal state changed from Nominal to Fair during this recording.
+
+Baseline `827a687d` also completed ten round trips. A 38.53-second baseline
+idle capture recorded 2,265 app updates while thermally Fair. After restoring
+the final audit build, a 39.95-second idle repeat with the same Activity
+Monitor/Thermal/Hitches instruments recorded zero app updates. This supports
+settling behavior. Baseline interactions and the final idle repeat were
+thermally Serious, so timing/power regression comparisons are not accepted;
+further load testing stopped. The ordinary app was untouched.
+
+A separate CLI all-process App Launch probe completed and exported native
+lifecycle stages for one audit launch, with sampling-period and overlapping
+library warnings. It is diagnostic evidence, not ten-launch acceptance or a
+usable-controls measurement. iOS still needs verified System/Off comparisons,
+repeated startup captures, thermal-controlled interaction measurements,
+WebKit-inclusive resource attribution and semantic input-to-present latency.
