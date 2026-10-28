@@ -197,8 +197,14 @@ configuration's missing periodic-flush warning concerns parser memory use.
 Native acceptance remains open. Returning-profile unlock, authenticated
 atlas/completion journeys, first-paint theme handoffs and other physical targets
 remain unverified. The disposable-profile password request timed out, leaving
-signed-in checks pending. The iPhone audit app was confirmed running, but
-Instruments attachment failed by PID and timed out by app name; it remains
-offline to Instruments over the user's requested wireless-only connection.
-No usable iOS trace or Windows/Linux physical-device result is claimed.
+signed-in checks pending. On the wireless iPhone retry, opening Xcode exposed
+its required system-component installation prompt. After installation and
+opening Apple's Device Hub, Instruments listed the phone online. Command-line
+attachment still rejected the confirmed audit PID/name, but the Instruments
+GUI successfully attached to the audit app. A saved 15.44-second Activity
+Monitor connection-test trace identifies the physical iPhone 17 and contains
+ten audit-process sample rows. The app was behind a call screen, so this is
+connection evidence only, not foreground idle or motion-performance evidence.
+Foreground iOS System/Off/baseline measurements and Windows/Linux physical-device
+results remain outstanding.
 Build, signing and installation checks do not satisfy performance acceptance.
