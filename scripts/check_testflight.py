@@ -74,6 +74,10 @@ def main():
             print(f'Apple API temporarily unavailable (HTTP {error.code})', flush=True)
             time.sleep(30)
             continue
+        except (TimeoutError, urllib.error.URLError):
+            print('Apple API temporarily unreachable; retrying within processing deadline', flush=True)
+            time.sleep(30)
+            continue
         build = matching_build(response, version, number)
         state = build['attributes']['processingState'] if build else 'AWAITING_BUILD'
         print(f'Apple processing: {state}', flush=True)
