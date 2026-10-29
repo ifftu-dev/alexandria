@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alexandria motion study</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--foreground,#202330);background:transparent;font-size:14px;line-height:1.5}button,select,input{font:inherit}button,select{touch-action:manipulation}button{cursor:pointer}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #9c95ff;outline-offset:4px}button:disabled{cursor:default}.study-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}.study-tools .caption{margin-right:auto;color:var(--muted-foreground,#687080);font-size:12px}.study-tools button,.study-tools select{border:1px solid var(--border,#c6c8d0);background:var(--card,#f8f8fa);color:var(--foreground,#202330);padding:8px 12px;border-radius:8px}.study-tools label{display:flex;align-items:center;gap:7px;font-size:12px;min-height:40px}.study-tools input{accent-color:#756ced}.product{--p-bg:#111827;--p-card:#1b2434;--p-text:#f3f4fb;--p-muted:#b1b9cc;--p-line:#354055;--p-brand:#a29cff;--p-solid:#8b85f9;--p-on:#12152c;--p-soft:#282945;--p-success:#99d7bd;--p-track:#343f54;background:var(--p-bg);color:var(--p-text);border:1px solid var(--p-line);border-radius:var(--radius,16px);padding:24px;position:relative;overflow:hidden;isolation:isolate}.product[data-theme="light"]{--p-bg:#f7f6f3;--p-card:#fff;--p-text:#171923;--p-muted:#566173;--p-line:#d8dae1;--p-brand:#5044cb;--p-solid:#4f46e5;--p-on:#fff;--p-soft:#eeebff;--p-success:#216747;--p-track:#e6e3f2}.app-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:30px}.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.02em}.mark{width:32px;height:32px;border-radius:8px}.demo-label{font-size:11px;color:var(--p-muted)}.app-body{max-width:540px;margin:auto}.eyebrow{text-transform:uppercase;letter-spacing:.11em;font-size:11px;color:var(--p-brand);margin:0 0 8px;font-weight:600}h1{font-size:30px;letter-spacing:-.035em;font-weight:500;line-height:1.2;margin:0 0 10px;font-family:Georgia,serif}.intro{color:var(--p-muted);margin:0 0 24px}.tabs{position:relative;display:inline-grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--p-line);margin-bottom:22px;min-width:224px}.tab{border:0;color:var(--p-muted);background:transparent;padding:10px 18px;position:relative;font-size:13px}.tab[aria-selected="true"]{color:var(--p-text)}.indicator{position:absolute;width:50%;height:2px;background:var(--p-brand);bottom:-1px;left:0;transition:transform 180ms cubic-bezier(.2,.8,.2,1)}.card{padding:24px;background:var(--p-card);border:1px solid var(--p-line);border-radius:14px;position:relative}.card h2{font-size:20px;line-height:1.3;letter-spacing:-.02em;margin:8px 0;font-weight:600}.card p{color:var(--p-muted);margin:0}.meta{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:var(--p-muted)}.lesson-mark{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--p-soft);color:var(--p-brand);font-size:18px;font-family:Georgia,serif;font-style:italic}.meter{height:5px;background:var(--p-track);border-radius:3px;overflow:hidden;margin:20px 0 8px}.fill{height:5px;transform-origin:left;transform:scaleX(.5);background:var(--p-brand);transition:transform 360ms cubic-bezier(.2,.8,.2,1)}.progress-label{color:var(--p-muted);font-size:12px;margin-bottom:22px;display:flex;justify-content:space-between;gap:8px}.primary{border:0;background:var(--p-solid);color:var(--p-on);border-radius:9px;padding:12px 18px;font-weight:600;min-width:180px;min-height:45px;transition:transform 120ms cubic-bezier(.2,.8,.2,1),background-color 160ms}.primary:active:not(:disabled){transform:scale(.98)}.primary:disabled{opacity:.85}.card-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.small-reset{background:none;border:0;color:var(--p-muted);padding:10px;text-decoration:underline;font-size:12px}.outcome{display:flex;align-items:center;gap:12px;min-height:74px;padding:16px 0 0}.outcome .seal{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;color:var(--p-muted);border:1px solid var(--p-line);flex:none}.outcome p{font-size:13px;margin:0}.outcome small{color:var(--p-muted);font-size:11px}.outcome.done .seal{background:var(--p-soft);color:var(--p-success);border-color:transparent}.outcome.done.pulse .seal{animation:seal-in 420ms cubic-bezier(.2,.8,.2,1)}.outcome.done.pulse{animation:result-in 240ms ease-out}.lesson-list{padding:0;margin:0;list-style:none}.lesson-list li{display:flex;gap:12px;align-items:center;padding:15px 0;border-bottom:1px solid var(--p-line)}.lesson-list li:last-child{border:0}.lesson-list span{color:var(--p-brand);width:20px}.lesson-list small{display:block;color:var(--p-muted);font-size:12px}.panel[hidden]{display:none}.panel.reveal{animation:panel-in 160ms ease-out}.study-note{margin:12px 0 0;color:var(--muted-foreground,#687080);font-size:12px}
+.boot{position:absolute;inset:0;z-index:5;overflow:hidden;background:var(--p-bg);padding:24px;pointer-events:none}
+.boot[hidden]{display:none}
+.boot-atmosphere{position:absolute;left:50%;top:43%;width:300px;height:300px;margin:-150px;border-radius:50%;background:radial-gradient(circle,rgba(119,100,255,.24),rgba(119,100,255,.06) 42%,transparent 70%);opacity:0}
+.boot-orbit{position:absolute;left:50%;top:43%;width:236px;height:236px;margin:-118px;border:1px solid var(--p-brand);border-radius:50%;opacity:0}
+.boot-logo{position:absolute;left:calc(50% - 88px);top:calc(43% - 88px);width:176px;height:176px;transform-origin:center}
+.boot-logo svg{width:100%;height:100%;overflow:visible}
+.boot-tile{opacity:0;transform-box:fill-box;transform-origin:center}
+.boot-echo{opacity:0}
+.boot.poster .boot-tile,.boot.poster .boot-type,.boot.poster .boot-atmosphere{opacity:1}
+.boot.poster .boot-echo{opacity:.16}
+.boot.poster .boot-outline,.boot.poster .boot-branch{stroke-dashoffset:0}
+.boot.poster #boot-ink{stroke:#fff}
+.boot-outline,.boot-branch{stroke-dasharray:1;stroke-dashoffset:1}
+.boot-point{opacity:0;fill:var(--p-brand)}
+.boot-ray{opacity:0;stroke:var(--p-brand);stroke-width:3;fill:none}
+.boot-type{position:absolute;top:calc(43% + 108px);left:24px;right:24px;text-align:center;opacity:0}
+.boot-name{font-size:34px;font-weight:500;letter-spacing:-.045em;line-height:1.2}
+.boot-subtitle{font-size:12px;color:var(--p-muted);margin-top:9px;letter-spacing:.035em}
+.boot-skip{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);border:1px solid var(--p-line);background:var(--p-card);color:var(--p-muted);padding:8px 14px;border-radius:8px;font-size:12px;pointer-events:auto}
+.product.is-booting #small-mark{opacity:0}
+.product.is-booting .boot{pointer-events:auto}
+.launch-state{font-size:12px;color:var(--muted-foreground,#687080);margin:8px 0 0;min-height:18px}.reduced .product *, .reduced .product *::after{animation:none!important;transition:none!important}.reduced .primary:active{transform:none!important}@keyframes mark-in{from{opacity:.15;transform:scale(.98)}to{opacity:1;transform:scale(1)}}@keyframes panel-in{from{opacity:0}to{opacity:1}}@keyframes result-in{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@keyframes seal-in{0%{transform:scale(.92)}65%{transform:scale(1.04)}100%{transform:scale(1)}}@media(prefers-reduced-motion:reduce){.product *,.product *::after{animation:none!important;transition:none!important}.primary:active{transform:none!important}}@media(max-width:480px){.product{padding:18px}.card{padding:18px}.app-top{margin-bottom:26px}.demo-label{max-width:90px;text-align:right}.study-tools .caption{width:100%;margin:0}.study-tools{gap:9px}h1{font-size:26px}.primary{width:100%}.card-bottom{gap:0}.small-reset{margin:6px auto 0}.app-body{max-width:none}.outcome{align-items:flex-start}.study-tools button{min-height:44px}}
+</style>
+</head>
+<body>
+<div id="alexandria-motion-study">
+  <div class="study-tools">
+    <span class="caption">Opening v2 · connected knowledge</span>
+    <button type="button" id="replay">Play new opening</button>
+    <label>Speed <select id="speed"><option value="1">Actual</option><option value="2.5">Slow motion</option></select></label>
+    <label>Appearance <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label><input type="checkbox" id="reduce"> Reduced motion</label>
+  </div>
+  <div class="product" data-theme="dark" id="product">
+    <div class="app-content" id="content">
+      <div class="app-top"><div class="brand"><img class="mark" id="small-mark" alt="" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJiZyIgeDE9IjE0MCIgeTE9IjExNiIgeDI9IjkwNCIgeTI9IjkyMCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM1QjdDRkYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIwLjUyIiBzdG9wLWNvbG9yPSIjMzI0NkQzIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE2MUU3MyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxyYWRpYWxHcmFkaWVudCBpZD0iZ2xvdyIgY3g9IjAiIGN5PSIwIiByPSIxIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgZ3JhZGllbnRUcmFuc2Zvcm09InRyYW5zbGF0ZSgzMjQgMjMyKSByb3RhdGUoNDIuNykgc2NhbGUoNTY2IDYzMCkiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNBNUI0RkYiIHN0b3Atb3BhY2l0eT0iMC43MiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNBNUI0RkYiIHN0b3Atb3BhY2l0eT0iMCIvPgogICAgPC9yYWRpYWxHcmFkaWVudD4KICAgIDxmaWx0ZXIgaWQ9InNoYWRvdyIgeD0iMTE2IiB5PSIxMjYiIHdpZHRoPSI3OTIiIGhlaWdodD0iNzk2IiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiI+CiAgICAgIDxmZURyb3BTaGFkb3cgZHg9IjAiIGR5PSIyNCIgc3RkRGV2aWF0aW9uPSIyOCIgZmxvb2QtY29sb3I9IiMwNjA5MUYiIGZsb29kLW9wYWNpdHk9IjAuMjgiLz4KICAgIDwvZmlsdGVyPgogIDwvZGVmcz4KCiAgPHJlY3Qgd2lkdGg9IjEwMjQiIGhlaWdodD0iMTAyNCIgcng9IjIzNiIgZmlsbD0idXJsKCNiZykiLz4KICA8cmVjdCB3aWR0aD0iMTAyNCIgaGVpZ2h0PSIxMDI0IiByeD0iMjM2IiBmaWxsPSJ1cmwoI2dsb3cpIi8+CgogIDxnIG9wYWNpdHk9IjAuMTYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0RERTRGRiIgc3Ryb2tlLXdpZHRoPSIxOCI+CiAgICA8cGF0aCBkPSJNMTg0IDI2MEw1MTIgOTZsMzI4IDE2NHY1MDRMNTEyIDkyOCAxODQgNzY0VjI2MFoiLz4KICAgIDxwYXRoIGQ9Ik0yNjAgMzE0TDUxMiAxODhsMjUyIDEyNnYzOTZMNTEyIDgzNiAyNjAgNzEwVjMxNFoiLz4KICA8L2c+CgogIDxnIGZpbHRlcj0idXJsKCNzaGFkb3cpIiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+CiAgICA8cGF0aCBkPSJNNTEyIDIwNCAyODAgMzIwdjMxMmwyMzIgMTE2IDIzMi0xMTZWMzIwTDUxMiAyMDRaIiBzdHJva2Utd2lkdGg9IjM4Ii8+CiAgICA8cGF0aCBkPSJNNTEyIDMyMnYyMjAiIHN0cm9rZS13aWR0aD0iMzQiIG9wYWNpdHk9IjAuOTYiLz4KICAgIDxwYXRoIGQ9Im0zNjYgMzkyIDE0NiA3OCAxNDYtNzgiIHN0cm9rZS13aWR0aD0iMzQiIG9wYWNpdHk9IjAuOTYiLz4KICAgIDxwYXRoIGQ9Ik01MTIgMjA0djExOCIgc3Ryb2tlLXdpZHRoPSIyOCIgb3BhY2l0eT0iMC44MiIvPgogIDwvZz4KPC9zdmc+Cg==">Alexandria</div><span class="demo-label">Illustrative course</span></div>
+      <main class="app-body">
+        <p class="eyebrow">A little further, every day</p>
+        <h1>Keep your momentum.</h1>
+        <p class="intro">Small, considered responses. Space to concentrate.</p>
+        <div class="tabs" role="tablist" aria-label="Course view">
+          <button type="button" class="tab" id="overview-tab" role="tab" aria-selected="true" aria-controls="overview" tabindex="0">Overview</button>
+          <button type="button" class="tab" id="lessons-tab" role="tab" aria-selected="false" aria-controls="lessons" tabindex="-1">Lessons</button>
+          <div class="indicator" aria-hidden="true" id="indicator"></div>
+        </div>
+        <section class="panel" id="overview" role="tabpanel" aria-labelledby="overview-tab">
+          <div class="card">
+            <div class="meta"><span class="lesson-mark" aria-hidden="true">ƒ</span><span>Lesson 3 of 4</span></div>
+            <h2>Functions and composition</h2>
+            <p>Turn small ideas into something useful.</p>
+            <div class="meter" role="progressbar" aria-label="Course completion" aria-valuemin="0" aria-valuemax="4" aria-valuenow="2" id="meter"><div class="fill" id="fill"></div></div>
+            <div class="progress-label"><span id="progress-text">2 of 4 lessons completed</span><span id="progress-number">50%</span></div>
+            <div class="card-bottom"><button type="button" class="primary" id="complete">Complete lesson</button><button type="button" class="small-reset" id="reset">Reset example</button></div>
+          </div>
+        </section>
+        <section class="panel" id="lessons" role="tabpanel" aria-labelledby="lessons-tab" hidden>
+          <div class="card"><p class="eyebrow">Course outline</p><ul class="lesson-list"><li><span aria-hidden="true">✓</span><div>Inputs and outputs<small>Completed</small></div></li><li><span aria-hidden="true">✓</span><div>Pure functions<small>Completed</small></div></li><li><span id="lesson-check" aria-hidden="true">3</span><div>Functions and composition<small id="lesson-status">In progress</small></div></li><li><span aria-hidden="true">4</span><div>Build a small project<small>Ready to explore</small></div></li></ul></div>
+        </section>
+        <div class="outcome" id="outcome" role="status" aria-live="polite"><div class="seal" aria-hidden="true" id="seal">·</div><div><p id="result">Your next step is ready.</p><small id="detail">Try the lesson action or switch views.</small></div></div>
+      </main>
+    </div>
+    <div class="boot" id="boot" hidden>
+      <div class="boot-atmosphere" id="boot-atmosphere" aria-hidden="true"></div>
+      <div class="boot-orbit" id="boot-orbit" aria-hidden="true"></div>
+      <div class="boot-logo" id="boot-logo" aria-hidden="true">
+        <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="opening-bg" x1="140" y1="116" x2="904" y2="920" gradientUnits="userSpaceOnUse"><stop stop-color="#5B7CFF"/><stop offset=".52" stop-color="#3246D3"/><stop offset="1" stop-color="#161E73"/></linearGradient><radialGradient id="opening-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(324 232) rotate(42.7) scale(566 630)"><stop stop-color="#A5B4FF" stop-opacity=".72"/><stop offset="1" stop-color="#A5B4FF" stop-opacity="0"/></radialGradient></defs>
+          <g id="boot-rays" aria-hidden="true"></g>
+          <g class="boot-tile" id="boot-tile"><rect width="1024" height="1024" rx="236" fill="url(#opening-bg)"/><rect width="1024" height="1024" rx="236" fill="url(#opening-glow)"/></g>
+          <g class="boot-echo" id="boot-echo" fill="none" stroke="#DDE4FF" stroke-width="18"><path d="M184 260L512 96l328 164v504L512 928 184 764V260Z"/><path d="M260 314L512 188l252 126v396L512 836 260 710V314Z"/></g>
+          <g id="boot-ink" fill="none" stroke="var(--p-brand)" stroke-linecap="round" stroke-linejoin="round">
+            <path class="boot-outline" id="boot-outline" pathLength="1" d="M512 204 280 320v312l232 116 232-116V320L512 204Z" stroke-width="38"/>
+            <path class="boot-branch" id="boot-spine" pathLength="1" d="M512 322v220" stroke-width="34" opacity=".96"/>
+            <path class="boot-branch" id="boot-arms" pathLength="1" d="m366 392 146 78 146-78" stroke-width="34" opacity=".96"/>
+            <path class="boot-branch" id="boot-crown" pathLength="1" d="M512 204v118" stroke-width="28" opacity=".82"/>
+          </g>
+          <g id="boot-points"></g>
+        </svg>
+      </div>
+      <div class="boot-type" id="boot-type"><div class="boot-name">Alexandria</div><div class="boot-subtitle">Ideas connect. Possibilities unfold.</div></div>
+      <button type="button" class="boot-skip" id="boot-skip">Skip opening</button>
+    </div>
+  </div>
+  <p class="launch-state" role="status" aria-live="polite" id="launch-state">Connect → form → arrive. Play at actual speed, or slow it down to inspect the movement.</p>
+  <p class="study-note">A 1.2-second choreography study, not a minimum startup wait. Tap the opening or press Escape to skip. No replay on resume.</p>
+</div>
+<script>
+(()=>{
+  const root=document.getElementById('alexandria-motion-study');
+  const el=id=>root.querySelector('#'+id);
+  const os=matchMedia('(prefers-reduced-motion: reduce)');
+  let bootTimers=[],bootAnimations=[],resultTimer=null,generation=0,done=false,requestedReduced=false;
+  const reduced=()=>os.matches||requestedReduced;
+  function endBoot(){
+    bootTimers.forEach(clearTimeout);bootTimers=[];
+    bootAnimations.forEach(animation=>animation.cancel());bootAnimations=[];
+    el('boot').hidden=true;el('boot').classList.remove('poster');el('product').classList.remove('is-booting');el('content').inert=false;
+    if(document.activeElement===el('boot-skip'))el('replay').focus();
+  }
+  const ns='http://www.w3.org/2000/svg';
+  const vertices=[[512,204,-210,-370],[280,320,-410,-100],[280,632,-340,260],[512,748,170,360],[744,632,390,180],[744,320,330,-260]];
+  vertices.forEach(([x,y,dx,dy],i)=>{
+    const point=document.createElementNS(ns,'circle');point.setAttribute('cx',x);point.setAttribute('cy',y);point.setAttribute('r',i%2?13:18);point.classList.add('boot-point');point.id='boot-point-'+i;el('boot-points').append(point);
+    const ray=document.createElementNS(ns,'line');ray.setAttribute('x1',x+dx);ray.setAttribute('y1',y+dy);ray.setAttribute('x2',x);ray.setAttribute('y2',y);ray.classList.add('boot-ray');ray.id='boot-ray-'+i;el('boot-rays').append(ray);
+  });
+  function startOpening(){
+    endBoot();
+    if(reduced()){el('launch-state').textContent='Reduced motion: the finished interface appears immediately.';return;}
+    const pace=Number(el('speed').value);
+    const ease='cubic-bezier(.22,.8,.18,1)';
+    const animate=(node,frames,duration,delay=0,easing=ease)=>{
+      const a=node.animate(frames,{duration:duration*pace,delay:delay*pace,easing,fill:'both'});bootAnimations.push(a);return a;
+    };
+    el('boot').hidden=false;el('product').classList.add('is-booting');el('content').inert=true;
+    el('launch-state').textContent=pace===1?'Connecting ideas → forming the mark → arriving in the app.':'Slow-motion inspection: the same 1.2-second sequence at 0.4× speed.';
+    const source=el('boot-logo').getBoundingClientRect(),target=el('small-mark').getBoundingClientRect();
+    const dx=target.x+target.width/2-source.x-source.width/2,dy=target.y+target.height/2-source.y-source.height/2;
+    const scale=target.width/source.width;
+    animate(el('content'),[{opacity:0},{opacity:0,offset:.62},{opacity:1}],1200,0,'linear');
+    animate(el('boot-atmosphere'),[{opacity:0,transform:'scale(.55)'},{opacity:1,transform:'scale(1)',offset:.55},{opacity:0,transform:'scale(1.3)'}],1000);
+    animate(el('boot-orbit'),[{opacity:0,transform:'scale(.4)'},{opacity:.18,offset:.25},{opacity:0,transform:'scale(1.4)'}],650,240);
+    vertices.forEach(([x,y,dx,dy],i)=>{
+      animate(el('boot-point-'+i),[{opacity:0,transform:`translate(${dx}px,${dy}px)`},{opacity:1,offset:.12},{opacity:1,transform:'translate(0px,0px)',offset:.75},{opacity:0,transform:'translate(0px,0px)'}],570,i*22,'linear');
+      animate(el('boot-ray-'+i),[{opacity:0},{opacity:.18,offset:.2},{opacity:0}],470,i*22,'linear');
+    });
+    animate(el('boot-outline'),[{strokeDashoffset:'1'},{strokeDashoffset:'0'}],470,130);
+    animate(el('boot-crown'),[{strokeDashoffset:'1'},{strokeDashoffset:'0'}],210,250);
+    animate(el('boot-spine'),[{strokeDashoffset:'1'},{strokeDashoffset:'0'}],280,330);
+    animate(el('boot-arms'),[{strokeDashoffset:'1'},{strokeDashoffset:'0'}],310,380);
+    animate(el('boot-tile'),[{opacity:0,transform:'scale(.6) rotate(-9deg)'},{opacity:1,transform:'scale(1) rotate(0deg)'}],350,430);
+    animate(el('boot-ink'),[{stroke:getComputedStyle(el('product')).getPropertyValue('--p-brand').trim()},{stroke:'#ffffff'}],260,450);
+    animate(el('boot-echo'),[{opacity:0},{opacity:.16}],240,530);
+    animate(el('boot-type'),[{opacity:0,transform:'translateY(12px)'},{opacity:1,transform:'translateY(0)',offset:.4},{opacity:1,offset:.66},{opacity:0,transform:'translateY(-5px)'}],610,330,'linear');
+    animate(el('boot-logo'),[{transform:'translate(0px,0px) scale(1)'},{transform:`translate(${dx}px,${dy}px) scale(${scale})`}],440,760);
+    animate(el('boot'),[{backgroundColor:getComputedStyle(el('product')).getPropertyValue('--p-bg').trim()},{backgroundColor:'transparent'}],290,790);
+    animate(el('boot-skip'),[{opacity:1},{opacity:0}],120,760);
+    animate(el('content').querySelector('.app-body'),[{transform:'translateY(10px)'},{transform:'translateY(0)'}],330,870);
+    bootTimers.push(setTimeout(()=>{endBoot();el('launch-state').textContent='Arrived. The assembled mark becomes the app’s header icon.';},1200*pace));
+  }
+  function policy(){root.classList.toggle('reduced',reduced());if(reduced()){endBoot();el('outcome').classList.remove('pulse');root.querySelectorAll('.reveal').forEach(panel=>panel.classList.remove('reveal'));}el('reduce').disabled=os.matches;el('reduce').checked=reduced();}
+  policy();os.addEventListener('change',policy);el('reduce').addEventListener('change',()=>{requestedReduced=el('reduce').checked;policy();});
+  el('theme').addEventListener('change',()=>{endBoot();el('product').dataset.theme=el('theme').value;});
+  el('replay').addEventListener('click',startOpening);
+  el('speed').addEventListener('change',endBoot);
+  function skipOpening(){if(el('boot').hidden)return;endBoot();el('launch-state').textContent='Opening skipped. The interface is ready.';}
+  el('boot').addEventListener('pointerdown',skipOpening);
+  el('boot-skip').addEventListener('click',skipOpening);
+  document.addEventListener('keydown',event=>{if(!el('boot').hidden&&event.key==='Escape'){event.preventDefault();skipOpening();}});
+  let stageWidth=el('product').offsetWidth,stageHeight=el('product').offsetHeight;
+  const stageObserver=new ResizeObserver(()=>{const w=el('product').offsetWidth,h=el('product').offsetHeight;if(w!==stageWidth||h!==stageHeight){stageWidth=w;stageHeight=h;if(!el('boot').classList.contains('poster'))endBoot();}});
+  stageObserver.observe(el('product'));
+  root.querySelectorAll('.panel').forEach(panel=>panel.addEventListener('animationend',()=>panel.classList.remove('reveal')));
+  const tabs=[el('overview-tab'),el('lessons-tab')];
+  function select(index){tabs.forEach((tab,i)=>{tab.setAttribute('aria-selected',String(i===index));tab.tabIndex=i===index?0:-1;const panel=el(tab.getAttribute('aria-controls'));panel.hidden=i!==index;panel.classList.remove('reveal');if(i===index&&!reduced()){void panel.offsetWidth;panel.classList.add('reveal');}});el('indicator').style.transform='translateX('+index*100+'%)';}
+  tabs.forEach((tab,i)=>{tab.addEventListener('click',()=>select(i));tab.addEventListener('keydown',event=>{let index;if(event.key==='ArrowRight')index=(i+1)%2;else if(event.key==='ArrowLeft')index=(i+1)%2;else if(event.key==='Home')index=0;else if(event.key==='End')index=1;else return;event.preventDefault();select(index);tabs[index].focus();});});
+  function reset(){generation++;clearTimeout(resultTimer);done=false;el('complete').disabled=false;el('complete').removeAttribute('aria-busy');el('complete').textContent='Complete lesson';el('fill').style.transform='scaleX(.5)';el('meter').setAttribute('aria-valuenow','2');el('progress-text').textContent='2 of 4 lessons completed';el('progress-number').textContent='50%';el('outcome').className='outcome';el('seal').textContent='·';el('result').textContent='Your next step is ready.';el('detail').textContent='Try the lesson action or switch views.';el('lesson-check').textContent='3';el('lesson-status').textContent='In progress';}
+  el('reset').addEventListener('click',reset);
+  el('complete').addEventListener('click',()=>{if(done)return;const run=++generation;el('complete').disabled=true;el('complete').setAttribute('aria-busy','true');el('complete').textContent='Saving progress…';el('result').textContent='Saving lesson progress…';el('detail').textContent='Simulated asynchronous result.';resultTimer=setTimeout(()=>{if(run!==generation)return;done=true;el('complete').removeAttribute('aria-busy');el('complete').textContent='Lesson completed';el('fill').style.transform='scaleX(.75)';el('meter').setAttribute('aria-valuenow','3');el('progress-text').textContent='3 of 4 lessons completed';el('progress-number').textContent='75%';el('outcome').className='outcome done'+(reduced()?'':' pulse');el('seal').textContent='✓';el('result').textContent='One step further.';el('detail').textContent='Lesson completed. Your progress is saved in this example.';el('lesson-check').textContent='✓';el('lesson-status').textContent='Completed';},350);});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)endBoot();});
+  window.addEventListener('pagehide',()=>{endBoot();clearTimeout(resultTimer);});
+  if(!reduced()){el('boot').hidden=false;el('boot').classList.add('poster');el('product').classList.add('is-booting');el('content').inert=true;el('launch-state').textContent='Play the opening to see the mark assemble and move into the app header.';}
+})();
+</script>
+</body>
+</html>

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useDeepLinks } from '@/deeplink/useDeepLinks'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
+import { useDeepLinks } from '@/deeplink/useDeepLinks'
 import { useProfiles } from '@/composables/useProfiles'
 import {
   biometricCredentialExists,

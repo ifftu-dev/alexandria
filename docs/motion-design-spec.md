@@ -238,3 +238,7 @@ library warnings. It is diagnostic evidence, not ten-launch acceptance or a
 usable-controls measurement. iOS still needs verified System/Off comparisons,
 repeated startup captures, thermal-controlled interaction measurements,
 WebKit-inclusive resource attribution and semantic input-to-present latency.
+
+## Release decision after stopping physical testing
+
+On 2026-10-29, physical profiling and inspector diagnosis were stopped at the product owner’s request so the latest work could be consolidated and released. The partial measurements above remain evidence with their stated limitations. Native performance acceptance remains unverified; release preparation does not turn incomplete captures into a pass. Temporary inspector access was restored to Off and the standalone inspector probe was removed from the iPhone.

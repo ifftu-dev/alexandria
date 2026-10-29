@@ -16,6 +16,9 @@ import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
+import { useDeepLinks } from '@/deeplink/useDeepLinks'
+import { getProfileSessionToken } from '@/composables/profileSession'
+import { useNotifications } from '@/composables/useNotifications'
 import AppOpening from '@/components/auth/AppOpening.vue'
 import SkillAtlasHost from '@/components/skills/SkillAtlasHost.vue'
 import AppLayout from '@/layouts/AppLayout.vue'
@@ -27,11 +30,6 @@ import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.
 import InstallCliDialog from '@/components/developer/InstallCliDialog.vue'
 import DiagnosticsControls from '@/components/developer/DiagnosticsControls.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
-import { useDeepLinks } from '@/deeplink/useDeepLinks'
-import { getProfileSessionToken } from '@/composables/profileSession'
-import { useNotifications } from '@/composables/useNotifications'
-
-
 
 const { invoke } = useLocalApi()
 
