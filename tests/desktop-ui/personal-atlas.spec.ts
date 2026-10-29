@@ -194,3 +194,31 @@ for (const theme of ['light', 'dark']) {
     expect(errors).toEqual([])
   })
 }
+
+test('review: overview keyboard activation keeps focus in the atlas', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas')
+  await page.getByRole('button', { name: 'My Graph', exact: true }).click()
+  const atlas = page.locator('.fixture-page .atlas')
+  const field = atlas.getByRole('button', { name: 'Explore Computer Science', exact: true })
+  await field.focus()
+  await field.press('Enter')
+  await expect(atlas.locator('.atlas-map')).toBeFocused()
+})
+
+test('review: only the foreground atlas announces credential updates', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas')
+  await page.getByRole('button', { name: 'My Graph', exact: true }).click()
+  await page.locator('.fixture-sidebar').getByRole('button', { name: /Expand skill map/ }).click()
+  await page.getByRole('button', { name: 'Simulate level update' }).evaluate((button: HTMLButtonElement) => button.click())
+  await expect(page.getByRole('dialog').locator('.atlas-feedback')).toContainText('Big-O')
+  await expect(page.locator('.fixture-page .atlas-feedback')).toBeEmpty()
+})
+
+test('review: Browse Goal saves a goal instead of opening course discovery', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas')
+  await page.getByRole('button', { name: 'Browse Skills', exact: true }).click()
+  const goal = page.getByTitle('Set Big-O Analysis as a goal', { exact: true })
+  await goal.click()
+  await expect(page.locator('output')).toHaveText('/goals')
+  await expect(page.locator('.fixture-page')).toContainText('Big-O')
+})

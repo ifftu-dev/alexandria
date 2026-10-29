@@ -65,10 +65,9 @@ beforeEach(() => {
 afterEach(() => { mocks.locked?.(); vi.useRealTimers() })
 
 describe('durable completion witness display', () => {
-  it('finishes local claims while a witness without a transaction remains pending', async () => {
+  it('shows resolved local claims immediately while a witness remains pending', async () => {
     const service = await fresh()
     await service.open(payload)
-    await vi.advanceTimersByTimeAsync(600)
     expect(service.mintStage.value).toBe('issued')
     expect(service.progressPct.value).toBe(100)
     expect(service.witnessStatus.value).toBe('pending')

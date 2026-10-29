@@ -308,5 +308,12 @@
     "outcomeUnavailable": "Unavailable",
     "outcomePaused": "Paused: assessment in progress",
     "outcomeRefused": "Refused"
+  },
+  "motion": {
+    "title": "Motion",
+    "system": "System",
+    "reduced": "Reduced",
+    "off": "Off",
+    "hint": "Saved on this device. System follows your accessibility preference."
   }
 }

@@ -18,15 +18,16 @@ withDefaults(defineProps<Props>(), {
 
 <template>
   <button
-    class="btn"
+    class="btn relative"
     :class="[
       `btn-${variant}`,
       size !== 'md' ? `btn-${size}` : '',
       icon ? 'btn-icon' : '',
     ]"
     :disabled="disabled || loading"
+    :aria-busy="loading || undefined"
   >
-    <span v-if="loading" class="spinner" style="width: 1em; height: 1em; border-width: 1.5px;" />
-    <slot v-else />
+    <span v-if="loading" aria-hidden="true" class="spinner absolute" :style="{ width: '1em', height: '1em', borderWidth: '1.5px' }" />
+    <span class="inline-flex items-center justify-center gap-2" :class="{ 'opacity-0': loading }"><slot /></span>
   </button>
 </template>

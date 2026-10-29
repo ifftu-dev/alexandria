@@ -56,7 +56,8 @@ export function initTheme() {
   if (initialized) return
   initialized = true
 
-  const stored = localStorage.getItem(PRE_UNLOCK_CACHE_KEY) as Theme | null
+  let stored: string | null = null
+  try { stored = localStorage.getItem(PRE_UNLOCK_CACHE_KEY) } catch { /* Use the OS theme if storage is unavailable. */ }
   if (stored === 'light' || stored === 'dark' || stored === 'system') {
     applyTheme(stored)
   } else {
@@ -110,11 +111,12 @@ export function useTheme() {
   watch(
     setting.ref,
     (val) => {
+      if (val === null) return
       const t: Theme =
         val === 'light' || val === 'dark' || val === 'system' ? val : 'system'
       // Refresh the pre-unlock cache so the *next* launch paints
       // the same theme this profile is currently using.
-      localStorage.setItem(PRE_UNLOCK_CACHE_KEY, t)
+      try { localStorage.setItem(PRE_UNLOCK_CACHE_KEY, t) } catch { /* Theme changes remain usable without storage. */ }
       applyTheme(t)
     },
     { immediate: true },

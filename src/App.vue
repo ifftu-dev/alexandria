@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { isTauri } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useLocalApi } from '@/composables/useLocalApi'
-import SkillAtlasHost from '@/components/skills/SkillAtlasHost.vue'
-import AppLayout from '@/layouts/AppLayout.vue'
-import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
@@ -13,6 +11,15 @@ import { initLocaleFromSettings } from '@/composables/useLocale'
 import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings, useSentinel } from '@/composables/useSentinel'
+import { initUpdateCheck } from '@/composables/useAppUpdate'
+import { clearSettingsCache, useSettings } from '@/composables/useSettings'
+import { isMac } from '@/composables/usePlatform'
+import { useSentinelView } from '@/composables/useSentinelView'
+import { useDiagnostics } from '@/composables/useDiagnostics'
+import AppOpening from '@/components/auth/AppOpening.vue'
+import SkillAtlasHost from '@/components/skills/SkillAtlasHost.vue'
+import AppLayout from '@/layouts/AppLayout.vue'
+import BlankLayout from '@/layouts/BlankLayout.vue'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
 import EvidenceConsentModal from '@/components/integrity/EvidenceConsentModal.vue'
 import FlaggedRunNotice from '@/components/integrity/FlaggedRunNotice.vue'
@@ -20,16 +27,11 @@ import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.
 import InstallCliDialog from '@/components/developer/InstallCliDialog.vue'
 import DiagnosticsControls from '@/components/developer/DiagnosticsControls.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
-import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
 import { getProfileSessionToken } from '@/composables/profileSession'
 import { useNotifications } from '@/composables/useNotifications'
 
 
-import { clearSettingsCache, useSettings } from '@/composables/useSettings'
-import { isMac } from '@/composables/usePlatform'
-import { useSentinelView } from '@/composables/useSentinelView'
-import { useDiagnostics } from '@/composables/useDiagnostics'
 
 const { invoke } = useLocalApi()
 
@@ -227,7 +229,7 @@ onMounted(async () => {
       // this covers the initial one, which resolves before initialize().
       const account = await refreshAccountStatus()
       if (account?.activation_state === 'pending_guardian' && route.name !== 'guardian-gate') {
-        router.replace('/guardian-gate')
+        await router.replace('/guardian-gate')
       }
       // Warm start with a profile already unlocked: onProfileReady did not
       // fire, so bring the inbox up here.
@@ -235,7 +237,7 @@ onMounted(async () => {
     }
   } catch {
     if (route.name !== 'onboarding' && route.name !== 'profiles') {
-      router.replace('/profiles')
+      await router.replace('/profiles')
     }
   }
 
@@ -248,7 +250,7 @@ onMounted(async () => {
   void notifications.initOpens()
 
   // Show the window now that the frontend is rendered and themed
-  getCurrentWebviewWindow().show()
+  if (isTauri()) void getCurrentWebviewWindow().show().catch(() => {})
 
   // Silent, fail-closed check for a signed update — reveals the banner only
   // when one is genuinely available. Desktop Tauri only; inert elsewhere.
@@ -265,6 +267,7 @@ onUnmounted(() => {
 
 <template>
   <SkillAtlasHost />
+  <AppOpening :ready="ready || showLockScreen" />
   <div v-if="showLockScreen" class="flex items-center justify-center h-full bg-background safe-area-top" role="status" aria-live="polite">
     <div class="text-center max-w-sm p-6">
       <template v-if="lockState === 'failed'">
@@ -279,9 +282,9 @@ onUnmounted(() => {
       </template>
     </div>
   </div>
-  <div v-else-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top">
+  <div v-else-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top" role="status">
     <div class="text-center">
-      <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <div class="w-24 h-24 mx-auto mb-4" aria-hidden="true" />
       <p class="text-sm text-muted-foreground">{{ $t('common.app.initializing') }}</p>
     </div>
   </div>

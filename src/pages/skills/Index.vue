@@ -2,6 +2,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { getProfileSessionToken } from '@/composables/profileSession'
+import { useSettings } from '@/composables/useSettings'
+import { useGoals } from '@/composables/useGoals'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles } from '@/composables/useProfiles'
 import { useSkillAtlas, type AtlasTab } from '@/composables/useSkillAtlas'
@@ -18,7 +21,10 @@ const { t } = useI18n()
 const router = useRouter()
 const { learnSkill, openSkill, actionError } = useSkillAtlasActions('page')
 const atlas = useSkillAtlas()
-const { model, pageView, feedback, error } = atlas
+const { addGoal } = useGoals()
+const pendingGoal = ref<string | null>(null)
+const goalError = ref<string | null>(null)
+const { model, pageView, error } = atlas
 const profiles = useProfiles()
 const loading = computed(() => atlas.isLoading.value)
 const subjects = ref<SubjectInfo[]>([])
@@ -39,6 +45,8 @@ onMounted(() => { void atlas.ensureLoaded() })
 watch([profiles.activeProfileId, profiles.isLockBlocked], async ([profile, blocked], _old, onCleanup) => {
   let stale = false
   onCleanup(() => { stale = true })
+  pendingGoal.value = null
+  goalError.value = null
   subjects.value = []
   search.value = ''
   selectedField.value = selectedSubject.value = null
@@ -96,7 +104,20 @@ function goToSkill(id: string) {
   router.push(`/skills/${id}`)
 }
 
-function goalSkill(skill: SkillInfo) { void learnSkill(skill.id) }
+async function goalSkill(skill: SkillInfo) {
+  const session = getProfileSessionToken()
+  if (!session || pendingGoal.value) return
+  pendingGoal.value = skill.id
+  goalError.value = null
+  try {
+    await useSettings().initialize()
+    if (session !== getProfileSessionToken()) return
+    await addGoal({ label: skill.name, goalSkillIds: [skill.id] })
+    if (session === getProfileSessionToken()) await router.push('/goals')
+  } catch (cause) {
+    if (session === getProfileSessionToken()) goalError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally { if (session === getProfileSessionToken()) pendingGoal.value = null }
+}
 </script>
 
 <template>
@@ -153,6 +174,7 @@ function goalSkill(skill: SkillInfo) { void learnSkill(skill.id) }
         </div>
       </div>
       <p v-if="actionError" role="alert">{{ actionError }}</p>
+      <p v-if="goalError" role="alert" class="mb-4">{{ goalError }}</p>
       <div v-if="error" role="alert" class="mb-4"><p>{{ error }}</p><button type="button" @click="atlas.refresh('retry')">{{ $t('common.actions.retry') }}</button></div>
 
       <!-- Tabs -->
@@ -296,6 +318,8 @@ function goalSkill(skill: SkillInfo) { void learnSkill(skill.id) }
 
                   <button
                     class="goal-btn shrink-0"
+                    :disabled="pendingGoal !== null"
+                    :aria-busy="pendingGoal === skill.id || undefined"
                     :title="$t('skills.browse.goalTitle', { name: skill.name })"
                     @click.stop="goalSkill(skill)"
                   >
@@ -310,7 +334,7 @@ function goalSkill(skill: SkillInfo) { void learnSkill(skill.id) }
 
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'" class="space-y-6">
-        <SkillAtlasExplorer v-if="model" :model="model" :view="pageView" :feedback="feedback"
+        <SkillAtlasExplorer v-if="model" :model="model" :view="pageView" :feedback="atlas.feedbackFor('page')"
           @update:view="atlas.updateView('page', $event)" @open-skill="openSkill" @learn-skill="learnSkill"
           @feedback-consumed="atlas.acknowledgeFeedback" />
         <GraphVisibilityEditor />

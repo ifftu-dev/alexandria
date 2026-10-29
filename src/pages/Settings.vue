@@ -20,7 +20,7 @@ import {
   getBiometricStatus,
   storeVaultPasswordForBiometric,
 } from '@/composables/useBiometricVault'
-import type { SettingsSectionId } from '@/composables/useSettingsModal'
+import MotionSettings from '@/components/ui/MotionSettings.vue'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import DeveloperSeedsPanel from '@/components/settings/DeveloperSeedsPanel.vue'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
@@ -35,6 +35,7 @@ import CloudOriginField from '@/components/settings/CloudOriginField.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
+import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import type { Identity, SeedCatalog } from '@/types'
 
 const { t } = useI18n()
@@ -82,7 +83,7 @@ const SECTIONS = computed<SectionMeta[]>(() => [
   { id: 'security', label: t('settings.nav.sections.security.label'), desc: t('settings.nav.sections.security.desc'),
     keywords: ['recovery phrase', 'mnemonic', 'export', 'seed', 'lock wallet', 'vault', 'biometric', 'touch id', 'face id', 'password'] },
   { id: 'personalization', label: t('settings.nav.sections.personalization.label'), desc: t('settings.nav.sections.personalization.desc'),
-    keywords: ['language', 'locale', 'translation', 'idioma', 'langue', 'भाषा', 'theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
+    keywords: ['language', 'locale', 'translation', 'idioma', 'langue', 'भाषा', 'motion', 'animation', 'reduced', 'theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
   { id: 'system', label: t('settings.nav.sections.system.label'), desc: t('settings.nav.sections.system.desc'),
     keywords: ['storage', 'disk', 'quota', 'cache', 'free space', 'evict', 'network', 'p2p', 'node', 'peers'] },
   { id: 'plugins', label: t('settings.nav.sections.plugins.label'), desc: t('settings.nav.sections.plugins.desc'),
@@ -772,6 +773,7 @@ function onSectionClick(id: SettingsSectionId) {
 
                 <!-- ──────────── Personalization ──────────── -->
                 <template v-else-if="activeSection === 'personalization'">
+                  <MotionSettings />
                   <div>
                     <h4 class="settings-group-title">{{ t('common.language.label') }}</h4>
                     <LanguageSelector />

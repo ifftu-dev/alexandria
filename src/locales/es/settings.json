@@ -293,5 +293,12 @@
     "outcomeUnavailable": "No disponible",
     "outcomePaused": "En pausa: evaluación en curso",
     "outcomeRefused": "Rechazado"
+  },
+  "motion": {
+    "title": "Movimiento",
+    "system": "Sistema",
+    "reduced": "Reducido",
+    "off": "Desactivado",
+    "hint": "Se guarda en este dispositivo. Sistema sigue tu preferencia de accesibilidad."
   }
 }

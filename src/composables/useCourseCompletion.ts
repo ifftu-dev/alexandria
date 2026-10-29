@@ -91,17 +91,13 @@ const progressPct = ref(0)
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
-let revealTimers: ReturnType<typeof setTimeout>[] = []
 let generation = 0
 
-const REVEAL_INTERVAL_MS = 450
 function stopTimers() {
   if (pollTimer) clearTimeout(pollTimer)
   if (tickTimer) clearInterval(tickTimer)
-  for (const timer of revealTimers) clearTimeout(timer)
   pollTimer = null
   tickTimer = null
-  revealTimers = []
 }
 
 onProfileLocked(() => {
@@ -223,7 +219,7 @@ export function useCourseCompletion() {
       }
 
       progressPct.value = Math.round(localFrac * 100)
-      etaMs.value = items.value.filter((x) => x.status !== 'minted').length * REVEAL_INTERVAL_MS
+      etaMs.value = 0
     }, 100)
   }
 
@@ -254,21 +250,6 @@ export function useCourseCompletion() {
       })
     }
     return out
-  }
-
-  /** Flip each item to "minted" on a stagger; resolve the overall stage. */
-  function revealBatch() {
-    items.value.forEach((_, i) => {
-      const t = setTimeout(() => {
-        const it = items.value[i]
-        if (it) it.status = 'minted'
-        const allMinted = items.value.every((x) => x.status === 'minted')
-        if (allMinted && mintStage.value === 'minting') {
-          mintStage.value = 'issued'
-        }
-      }, REVEAL_INTERVAL_MS * (i + 1))
-      revealTimers.push(t)
-    })
   }
 
   async function open(p: CompletionPayload) {
@@ -344,7 +325,11 @@ export function useCourseCompletion() {
       mintStage.value = 'unavailable'
       stopTicker()
     } else {
-      revealBatch()
+      for (const item of items.value) item.status = 'minted'
+      mintStage.value = 'issued'
+      progressPct.value = 100
+      etaMs.value = 0
+      stopTicker()
     }
   }
 

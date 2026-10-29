@@ -580,7 +580,7 @@ const classroomPreviews = computed(() =>
   inset: 0;
   border-radius: 50%;
   background: inherit;
-  animation: sb-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  animation: sb-ping 600ms cubic-bezier(0, 0, 0.2, 1) both;
 }
 
 .sb-status-ended {

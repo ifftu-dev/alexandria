@@ -29,32 +29,19 @@ function onBackdropClick(e: MouseEvent) {
 
 <template>
   <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
+    <Transition name="modal-surface"
+      @before-leave="(el: Element) => el.setAttribute('inert', '')"
+      @before-enter="(el: Element) => el.removeAttribute('inert')">
       <div
         v-if="open"
         data-backdrop
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
         @click="onBackdropClick"
       >
-        <Transition
-          enter-active-class="transition duration-200 ease-out"
-          enter-from-class="opacity-0 scale-95"
-          enter-to-class="opacity-100 scale-100"
-          leave-active-class="transition duration-150 ease-in"
-          leave-from-class="opacity-100 scale-100"
-          leave-to-class="opacity-0 scale-95"
-        >
           <div
             v-if="open"
             ref="dialog"
-            class="card p-6 w-full flex flex-col max-h-[calc(100dvh-2rem)]"
+            class="modal-surface-card card p-6 w-full flex flex-col max-h-[calc(100dvh-2rem)]"
             :style="{ maxWidth }"
             role="dialog"
             aria-modal="true"
@@ -86,8 +73,17 @@ function onBackdropClick(e: MouseEvent) {
               <slot name="footer" />
             </div>
           </div>
-        </Transition>
       </div>
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.modal-surface-enter-active { transition: opacity var(--transition-base); }
+.modal-surface-leave-active { transition: opacity var(--transition-fast); pointer-events: none; }
+.modal-surface-enter-active .modal-surface-card,
+.modal-surface-leave-active .modal-surface-card { transition: transform var(--transition-base); }
+.modal-surface-enter-from, .modal-surface-leave-to { opacity: 0; }
+.modal-surface-enter-from .modal-surface-card { transform: translateY(10px) scale(0.98); }
+.modal-surface-leave-to .modal-surface-card { transform: translateY(4px) scale(0.99); }
+</style>
