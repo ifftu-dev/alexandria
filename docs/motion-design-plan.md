@@ -1,8 +1,8 @@
 # Alexandria motion and visual polish plan
 
-Status: superseded by [the implemented motion specification](motion-design-spec.md); retained as design history.  
-Prepared: 2026-10-27. Source audit: `420fcca9`.  
-Companion: [primary-source research and inspiration](motion-design-research.md).  
+Status: superseded by [the implemented motion specification](motion-design-spec.md); retained as design history.
+Prepared: 2026-10-27. Source audit: `420fcca9`.
+Companion: [primary-source research and inspiration](motion-design-research.md).
 Interactive studies: [motion and opening](motion-design-preview.html) and [fresh-install / existing-profile entry flows](onboarding-motion-preview.html). These show illustrative states, not a working app or approved redesign.
 
 ## Outcome and design direction

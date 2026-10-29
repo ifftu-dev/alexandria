@@ -2,8 +2,8 @@
 
 Status: reference research supporting the motion specification.
 
-**Researched:** 2026-10-27  
-**Scope:** Alexandria's Vue 3.5 + Tailwind 4 interface in Tauri 2 on Windows, macOS, Linux, Android, and iOS; launch, everyday interactions, and the personal skill atlas. Research only; no application changes.  
+**Researched:** 2026-10-27
+**Scope:** Alexandria's Vue 3.5 + Tailwind 4 interface in Tauri 2 on Windows, macOS, Linux, Android, and iOS; launch, everyday interactions, and the personal skill atlas. Research only; no application changes.
 **Method:** Primary platform/design documentation, standards, library documentation/source, and first-party product accounts. **Documented** identifies source guidance; **local observation** identifies inspected code; **proposal** identifies an Alexandria design decision requiring validation. Product examples are inspiration, not evidence that animation improves learning outcomes. Native applications, source videos, and Alexandria's running UI were not visually or physically tested in this research.
 
 ## Recommended direction

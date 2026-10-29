@@ -2,7 +2,7 @@
 
 Status: historical research snapshot; recommendations reflect the inspection date.
 
-**Researched:** 2026-10-25  
+**Researched:** 2026-10-25
 **Scope:** CVE identity, upstream fixes, exploit evidence, and recommendations for
 all five current mark3 repositories plus the IFFTU website. Recommendations only;
 no implementation or deployment changes. Local findings below were supplied by
