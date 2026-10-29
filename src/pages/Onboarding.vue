@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { listen } from '@tauri-apps/api/event'
+import { useI18n } from 'vue-i18n'
 import { useProfiles } from '@/composables/useProfiles'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
-import { listen } from '@tauri-apps/api/event'
-import type { UnlistenFn } from '@tauri-apps/api/event'
+import { animateMotion } from '@/composables/useMotion'
+import { useGoals } from '@/composables/useGoals'
+import { isMac } from '@/composables/usePlatform'
+import { useLocale } from '@/composables/useLocale'
 import Starfield from '@/components/auth/Starfield.vue'
+import BrandMark from '@/components/auth/BrandMark.vue'
 import LocaleDropdown from '@/components/settings/LocaleDropdown.vue'
 import PersonhoodLabPanel from '@/components/settings/PersonhoodLabPanel.vue'
 import { BirthdateInput } from '@/components/ui'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
-import { useGoals } from '@/composables/useGoals'
-import { isMac } from '@/composables/usePlatform'
-import { useLocale } from '@/composables/useLocale'
-import { useI18n } from 'vue-i18n'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { AccountRole } from '@/types'
 
 const { t } = useI18n()
@@ -83,6 +85,16 @@ type Mode = 'create' | 'import'
 
 const mode = ref<Mode>('create')
 const step = ref<Step>('welcome')
+const stepContent = ref<HTMLElement | null>(null)
+let cancelStepMotion = () => {}
+watch(step, () => {
+  cancelStepMotion()
+  if (!stepContent.value) return
+  cancelStepMotion = animateMotion(stepContent.value, [{ opacity: 0.5, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 240)
+  stepContent.value.focus({ preventScroll: true })
+  stepContent.value.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+}, { flush: 'post' })
+onUnmounted(() => cancelStepMotion())
 
 // ── Roles & birthdate ───────────────────────────────────────────
 // Everybody is a learner. Instructor and parent are added on top, in any
@@ -500,7 +512,7 @@ function enterApp() {
           </div>
         </aside>
 
-        <div class="onb-content">
+        <div ref="stepContent" class="onb-content" tabindex="-1">
           <div class="onb-kick">{{ $t('onboarding.stepOf', { current: activeStepIndex + 1, total: wizardSteps.length }) }}</div>
 
       <!-- ============================================ -->
@@ -515,15 +527,8 @@ function enterApp() {
           <LocaleDropdown />
         </div>
 
-        <!-- Alexandria logo -->
-        <div class="relative w-16 h-16 mx-auto mb-6">
-          <div class="absolute inset-0 rounded-full bg-primary/8 animate-ping anim-3s" />
-          <div class="relative w-16 h-16 flex items-center justify-center">
-            <svg class="w-12 h-12 text-primary" viewBox="0 0 32 32" fill="none">
-              <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
-              <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
-            </svg>
-          </div>
+        <div class="w-16 h-16 mx-auto mb-6" data-launch-target>
+          <BrandMark />
         </div>
 
         <h1 class="text-3xl font-bold mb-1 text-foreground">Alexandria</h1>

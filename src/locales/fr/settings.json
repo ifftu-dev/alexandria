@@ -293,5 +293,12 @@
     "outcomeUnavailable": "Indisponible",
     "outcomePaused": "En pause : évaluation en cours",
     "outcomeRefused": "Refusé"
+  },
+  "motion": {
+    "title": "Animations",
+    "system": "Système",
+    "reduced": "Réduites",
+    "off": "Désactivées",
+    "hint": "Enregistré sur cet appareil. Système suit votre préférence d’accessibilité."
   }
 }

@@ -1,25 +1,24 @@
 <script setup lang="ts">
 import '@/assets/css/skill-atlas.css'
-import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BLOOM_ORDER } from '@/utils/bloom'
 import { atlasLayout, NODE_HEIGHT, NODE_WIDTH } from './atlasLayout'
-import type { AtlasField, AtlasModel, AtlasNode, BloomRank } from '@/utils/skillAtlas'
+import { useMotion } from '@/composables/useMotion'
+import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
+import type { AtlasField, AtlasModel, AtlasNode, BloomRank } from '@/utils/skillAtlas'
 import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
 const props = defineProps<{ model: AtlasModel; view: AtlasViewState; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>()
 const emit = defineEmits<{ 'update:view': [view: AtlasViewState]; 'open-skill': [id: string]; 'learn-skill': [id: string]; 'feedback-consumed': [revision: number] }>()
 const { t } = useI18n()
 const id = useId()
-const systemReducedMotion = ref(false)
+const { reduced: systemReducedMotion } = useMotion()
 const motionReduced = computed(() => props.reducedMotion === true || systemReducedMotion.value)
 const highlightedIds = ref<readonly string[]>([])
 const feedbackRevision = ref<number | null>(null)
 let seenFeedbackRevision = props.feedback?.revision ?? -1
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
-let motionQuery: MediaQueryList | undefined
-function motionChanged(): void { systemReducedMotion.value = motionQuery?.matches ?? false }
 function finishFeedback(): void {
   if (feedbackTimer !== undefined) clearTimeout(feedbackTimer)
   feedbackTimer = undefined
@@ -37,19 +36,15 @@ watch(() => props.feedback, feedback => {
   if (document.visibilityState === 'hidden') { emit('feedback-consumed', feedback.revision); return }
   highlightedIds.value = [...new Set([...feedback.earnedIds, ...feedback.improvedIds])]
   feedbackRevision.value = feedback.revision
-  feedbackTimer = setTimeout(finishFeedback, 1500)
+  feedbackTimer = setTimeout(finishFeedback, 650)
 })
 onMounted(() => {
   // A remount is navigation, never a new achievement. The shared owner also expires feedback.
   if (props.feedback) emit('feedback-consumed', props.feedback.revision)
-  motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)')
-  motionChanged()
-  motionQuery?.addEventListener('change', motionChanged)
   document.addEventListener('visibilitychange', visibilityChanged)
 })
 onBeforeUnmount(() => {
   finishFeedback()
-  motionQuery?.removeEventListener('change', motionChanged)
   document.removeEventListener('visibilitychange', visibilityChanged)
 })
 const layout = computed(() => atlasLayout(props.model))
@@ -116,18 +111,26 @@ function status(node: AtlasNode): string {
 }
 function color(fieldId: string | null): string { if (fieldId === null) return 'var(--app-muted-foreground)'; return `var(--atlas-field-${layout.value.regions.find(region => region.field.id === fieldId)?.color ?? 0})` }
 function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
+function preserveOverviewFocus(): void {
+  if (!viewport.value?.querySelector('.atlas-overview')?.contains(document.activeElement)) return
+  void nextTick(() => {
+    if (document.activeElement === document.body) viewport.value?.querySelector<SVGSVGElement>('.atlas-map')?.focus({ preventScroll: true })
+  })
+}
 function select(skillId: string): void {
   const node = nodesById.value.get(skillId)
   const point = layout.value.positions.get(skillId)
   if (!node || !point) return
   update({ selectedSkillId: skillId, focusedFieldId: node.fieldId, unassignedFocused: node.fieldId === null,
     inspectorCollapsed: false, camera: { x: point.x + NODE_WIDTH / 2, y: point.y + NODE_HEIGHT / 2, zoom: camera.value.zoom } })
+  preserveOverviewFocus()
 }
 function focus(field: AtlasField): void {
   const region = layout.value.regions.find(item => item.field.id === field.id)
   if (!region) return
   update({ focusedFieldId: field.id, unassignedFocused: field.id === null,
     camera: { x: region.x + (width.value < 600 ? 144 : 400), y: region.y + 290, zoom: 1 } })
+  preserveOverviewFocus()
 }
 function dimmed(node: AtlasNode): boolean {
   if (node.skill.id === props.view.selectedSkillId) return false

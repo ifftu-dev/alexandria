@@ -61,12 +61,19 @@ test('Urdu RTL retains full earned meaning on narrow screens', async ({ page }, 
   await page.screenshot({ path: testInfo.outputPath('mobile-rtl.png'), fullPage: true })
 })
 
-test('new evidence has no running animation with system reduced motion', async ({ page }) => {
+test('new evidence has no visible-duration animation with system reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=dark')
   await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
   await page.getByRole('button', { name: 'Simulate evidence update', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'New evidence highlighted' })).toBeVisible()
-  expect(await page.getByRole('region', { name: 'Skill atlas' }).evaluate(element => element.getAnimations({ subtree: true }).length)).toBe(0)
+  // Reduced motion retains 0.01ms CSS transitions for lifecycle events. A
+  // browser may expose them until its next frame; reject visible-duration
+  // motion immediately instead of racing that frame or waiting out a defect.
+  expect(await page.getByRole('region', { name: 'Skill atlas' }).evaluate(element =>
+    element.getAnimations({ subtree: true }).filter(animation =>
+      Number(animation.effect?.getComputedTiming().duration) > 0.01,
+    ).length,
+  )).toBe(0)
   await expect(page.getByRole('status').filter({ hasText: 'New evidence highlighted' })).toHaveCount(0)
 })

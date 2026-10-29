@@ -293,5 +293,12 @@
     "outcomeUnavailable": "不可用",
     "outcomePaused": "已暂停：测评进行中",
     "outcomeRefused": "已拒绝"
+  },
+  "motion": {
+    "title": "动态效果",
+    "system": "跟随系统",
+    "reduced": "减少",
+    "off": "关闭",
+    "hint": "保存在此设备上。跟随系统会采用你的辅助功能偏好。"
   }
 }

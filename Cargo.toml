@@ -104,9 +104,9 @@ ffmpeg-next = { path = "patches/ffmpeg-next" }
 tauri-plugin-notification = { path = "patches/tauri-plugin-notification" }
 # swift-rs 1.0.8 promotes Xcode 27's internalized @_cdecl exports back to global,
 # but only in each package's own object member. Its own Swift runtime is vendored
-# into every archive as SwiftRs.o, so retain_object/release_object/string_from_bytes
+# into every archive as SwiftRs.o, so retain_object/release_object/string_from_bytes/data_from_bytes
 # stay internal everywhere and no iOS link can resolve them. Our patch promotes
-# those three as weak globals, which coalesce across archives.
+# those four as weak globals, which coalesce across archives.
 # It also strips the vendored Tauri.o/SwiftRs.o copies from every plugin archive
 # but Tauri's own: with -ObjC (Firebase, via the mobile-push plugin) the linker
 # force-loads every Objective-C member, and the copies would collide.

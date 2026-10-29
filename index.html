@@ -9,7 +9,14 @@
     <script>
       // Apply theme class + background before anything renders
       ;(function () {
-        var t = localStorage.getItem('alexandria-theme') || 'dark'
+        var t = 'system'
+        var motion = 'system'
+        try {
+          t = localStorage.getItem('alexandria-theme-pre-unlock') || 'system'
+          motion = localStorage.getItem('alexandria-motion') || 'system'
+        } catch (_) {}
+        document.documentElement.dataset.motion = motion === 'off' ? 'off'
+          : motion === 'reduced' || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduced' : 'full'
         var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
         if (dark) {
           document.documentElement.classList.add('dark')

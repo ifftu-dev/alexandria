@@ -1,7 +1,7 @@
 # Draft issue — swift-rs
 
 Status: draft
-Updated: 2026-08-28
+Updated: 2026-10-28
 
 Not yet filed upstream.
 
@@ -11,7 +11,7 @@ Not yet filed upstream.
 
 ---
 
-**Title:** Xcode 27: the globalize step skips `SwiftRs.o`, so `retain_object` / `release_object` / `string_from_bytes` are undefined for every consumer
+**Title:** Xcode 27: the globalize step skips `SwiftRs.o`, so `retain_object` / `release_object` / `string_from_bytes` / `data_from_bytes` are undefined for every consumer
 
 **Body:**
 
@@ -26,12 +26,13 @@ Undefined symbols for architecture arm64:
       swift_rs::swift::release_object in libswift_rs-….rlib
   "_retain_object", referenced from: …
   "_string_from_bytes", referenced from: …
+  "_data_from_bytes", referenced from: …
 ```
 
 ### Cause
 
 SwiftPM statically vendors this crate's Swift runtime into *every* package
-archive as a `SwiftRs.o` member. The Rust side unconditionally references three
+archive as a `SwiftRs.o` member. The Rust side references four
 of its `@_cdecl` exports. `globalize_cdecl_symbols` only promotes symbols from
 the member whose name matches the package:
 
@@ -43,7 +44,7 @@ if !in_own_member || kind != "t" || !name.starts_with('_') { continue; }
 
 So in each archive — `libTauri.a`, `libtauri-plugin-dialog.a`, and so on —
 `Tauri.o`'s exports are promoted and `SwiftRs.o`'s are not. Every archive
-carries the three symbols, all of them local, and nothing in the whole link
+carries the four symbols, all of them local, and nothing in the whole link
 defines them.
 
 The own-member guard exists for a real reason (promoting dependency members in
@@ -52,14 +53,14 @@ atom files with duplicate names"), so the fix is not to drop it.
 
 ### Fix
 
-Promote those three from `SwiftRs.o` in every archive **as weak** definitions.
+Promote those four from `SwiftRs.o` in every archive **as weak** definitions.
 Weak symbols coalesce instead of colliding, which is exactly the "one of these
 identical copies wins" semantics the situation needs:
 
 ```rust
 const SWIFT_RS_RUNTIME_MEMBER: &str = "swiftrs";
 const SWIFT_RS_RUNTIME_EXPORTS: &[&str] =
-    &["_retain_object", "_release_object", "_string_from_bytes"];
+    &["_retain_object", "_release_object", "_string_from_bytes", "_data_from_bytes"];
 …
 // in the nm loop, alongside in_own_member:
 in_runtime_member = norm(module) == SWIFT_RS_RUNTIME_MEMBER;
@@ -81,6 +82,7 @@ After which `nm -m` shows:
 weak private external _release_object
 weak private external _retain_object
 weak private external _string_from_bytes
+weak private external _data_from_bytes
 ```
 
 in each archive, and the link succeeds.
@@ -101,5 +103,5 @@ in each archive, and the link succeeds.
 - Tauri 2.x iOS app (any of the Swift-backed plugins is enough), swift-rs
   1.0.8, Xcode 27 beta, `rustup component add llvm-tools` done
 - `cargo build --target aarch64-apple-ios --release`
-- Link fails with the three undefined symbols above; `nm libTauri.a` shows
+- Link fails with the four undefined symbols above; `nm libTauri.a` shows
   them as `t` in `SwiftRs.o` while `Tauri.o`'s exports are `T`.
