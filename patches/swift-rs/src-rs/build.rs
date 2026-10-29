@@ -545,13 +545,15 @@ fn xcode27_products_dir(
 /// - only plain C names not starting with '_' (compiler helpers like
 ///   ___swift_closure_destructor repeat)
 /// - only names unique within the archive
+///
 /// Violating any of these crashes Xcode 27's ld with "malformed atom files with
 /// duplicate names" (AtomSymbolTable.cpp:242) — and -ld_classic is removed.
 ///
 /// The own-member guard has one exception. SwiftPM statically vendors this
 /// crate's own Swift runtime (`SwiftRs.o`) into *every* package archive, and
-/// the Rust side of swift-rs unconditionally references three of its @_cdecl
-/// exports — `retain_object`, `release_object`, `string_from_bytes`. Leaving
+/// the Rust side of swift-rs references four of its @_cdecl
+/// exports — `retain_object`, `release_object`, `string_from_bytes`, and
+/// `data_from_bytes`. Leaving
 /// those internal in every archive means nothing in the whole link defines
 /// them, so any consumer with a Swift package fails with "Undefined symbols".
 /// Promoting them in one archive would work only by accident of which package
@@ -560,8 +562,12 @@ fn xcode27_products_dir(
 /// the "one of these identical copies wins" semantics this needs.
 /// @_cdecl exports of this crate's Swift runtime, vendored into every archive.
 const SWIFT_RS_RUNTIME_MEMBER: &str = "swiftrs";
-const SWIFT_RS_RUNTIME_EXPORTS: &[&str] =
-    &["_retain_object", "_release_object", "_string_from_bytes"];
+const SWIFT_RS_RUNTIME_EXPORTS: &[&str] = &[
+    "_retain_object",
+    "_release_object",
+    "_string_from_bytes",
+    "_data_from_bytes",
+];
 
 fn globalize_cdecl_symbols(archive: &std::path::Path, package_name: &str) {
     if !archive.exists() {
@@ -667,4 +673,52 @@ fn rustup_llvm_objcopy() -> Option<std::path::PathBuf> {
         .join(&host)
         .join("bin/llvm-objcopy");
     p.exists().then_some(p)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod runtime_export_tests {
+    use super::*;
+
+    #[test]
+    fn globalizes_data_bridge_as_weak_runtime_export() {
+        assert!(rustup_llvm_objcopy().is_some(), "install rustup llvm-tools");
+        let dir = std::env::temp_dir().join(format!("swift-rs-exports-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("runtime.c");
+        let object = dir.join("SwiftRs.o");
+        let archive = dir.join("libConsumer.a");
+        std::fs::write(
+            &source,
+            "__attribute__((used)) static void data_from_bytes(void) {}\n",
+        )
+        .unwrap();
+        assert!(Command::new("xcrun")
+            .args(["clang", "-c"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&object)
+            .status()
+            .unwrap()
+            .success());
+        assert!(Command::new("ar")
+            .arg("crs")
+            .arg(&archive)
+            .arg(&object)
+            .status()
+            .unwrap()
+            .success());
+        globalize_cdecl_symbols(&archive, "Consumer");
+        let result = Command::new("nm").arg("-m").arg(&archive).output().unwrap();
+        let symbols = String::from_utf8_lossy(&result.stdout).into_owned();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.status.success());
+        assert!(
+            symbols
+                .lines()
+                .any(|line| line.ends_with("_data_from_bytes")
+                    && line.contains("weak")
+                    && line.contains("external")),
+            "data bridge must be a weak external symbol: {symbols}"
+        );
+    }
 }
