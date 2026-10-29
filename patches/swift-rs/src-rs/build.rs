@@ -402,47 +402,97 @@ impl SwiftLinker {
 /// The package whose archive keeps the shared Swift modules; see
 /// `drop_shared_modules`.
 const SHARED_MODULE_PACKAGE: &str = "Tauri";
-/// The members SwiftPM vendors into every dependent archive.
-const SHARED_MODULE_MEMBERS: &[&str] = &["Tauri.o", "SwiftRs.o"];
+/// The modules SwiftPM vendors into every dependent archive.
+const SHARED_MODULES: &[&str] = &["Tauri", "SwiftRs"];
 
-/// Removes the vendored copies of the shared modules from a plugin archive,
-/// so that `-ObjC` in the final link finds exactly one definition of each.
-/// A missing archive or member is nothing to do; a failing `ar` is reported
-/// and left for the linker to explain.
+/// Keep the shared Swift modules in Tauri's archive only. SwiftPM can emit
+/// either whole-module members (Xcode 27) or per-source members (Xcode 26).
+/// Discover the latter from each shared module's build directory, rather than
+/// hardcoding source filenames that may also belong to a plugin.
 fn drop_shared_modules(archive: &std::path::Path) {
+    use std::collections::BTreeSet;
     use std::process::Command;
 
     if !archive.exists() {
         return;
     }
-    let Ok(listing) = Command::new("ar").arg("-t").arg(archive).output() else {
-        return;
-    };
+    let listing = Command::new("ar")
+        .arg("-t")
+        .arg(archive)
+        .output()
+        .expect("could not list Swift archive members");
+    assert!(
+        listing.status.success(),
+        "could not list {}",
+        archive.display()
+    );
     let listing = String::from_utf8_lossy(&listing.stdout);
-    let present: Vec<&str> = SHARED_MODULE_MEMBERS
-        .iter()
-        .copied()
-        .filter(|member| listing.lines().any(|line| line.trim() == *member))
+    let mut shared_members = BTreeSet::new();
+    for module in SHARED_MODULES {
+        shared_members.insert(format!("{module}.o"));
+        let build_dir = archive
+            .parent()
+            .expect("Swift archive has no parent directory")
+            .join(format!("{module}.build"));
+        let entries = match std::fs::read_dir(&build_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("could not read {}: {error}", build_dir.display()),
+        };
+        for entry in entries {
+            let entry = entry.expect("could not read Swift module build entry");
+            if entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "o")
+            {
+                shared_members.insert(
+                    entry
+                        .file_name()
+                        .into_string()
+                        .expect("Swift object filename is not UTF-8"),
+                );
+            }
+        }
+    }
+    let present: Vec<_> = shared_members
+        .into_iter()
+        .filter(|member| {
+            let count = listing.lines().filter(|line| line.trim() == member).count();
+            // ar deletes by basename. Never delete a plugin's own object when a
+            // shared module happens to use the same source filename.
+            assert!(
+                count <= 1,
+                "ambiguous shared member {member} in {}",
+                archive.display()
+            );
+            count == 1
+        })
         .collect();
     if present.is_empty() {
         return;
     }
-    let dropped = Command::new("ar")
-        .arg("-d")
-        .arg(archive)
-        .args(&present)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !dropped {
-        println!(
-            "cargo:warning=swift-rs: could not drop {present:?} from {}",
-            archive.display()
-        );
-        return;
-    }
-    // `ar -d` leaves the symbol table stale.
-    let _ = Command::new("ranlib").arg(archive).status();
+    assert!(
+        Command::new("ar")
+            .arg("-d")
+            .arg(archive)
+            .args(&present)
+            .status()
+            .expect("could not remove shared Swift archive members")
+            .success(),
+        "could not remove shared modules from {}",
+        archive.display()
+    );
+    // ar -d leaves the symbol table stale.
+    assert!(
+        Command::new("ranlib")
+            .arg(archive)
+            .status()
+            .expect("could not rebuild Swift archive index")
+            .success(),
+        "could not index {}",
+        archive.display()
+    );
 }
 
 fn link_clang_rt(rust_target: &RustTarget) {
@@ -679,6 +729,100 @@ fn rustup_llvm_objcopy() -> Option<std::path::PathBuf> {
 mod runtime_export_tests {
     use super::*;
 
+    // Model SwiftPM's per-source archive layout without needing an older Xcode.
+    // Force-loading both archives exercises the same duplicate-symbol link as
+    // Firebase's -ObjC, while the plugin symbol proves its own code survives.
+    #[test]
+    fn per_source_shared_members_link_once_across_plugins() {
+        shared_members_link_once(false);
+    }
+
+    #[test]
+    fn whole_module_shared_members_link_once_across_plugins() {
+        shared_members_link_once(true);
+    }
+
+    fn shared_members_link_once(whole_module: bool) {
+        let dir = std::env::temp_dir().join(format!(
+            "swift-rs-shared-{whole_module}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("SwiftRs.build")).unwrap();
+        std::fs::create_dir_all(dir.join("Tauri.build")).unwrap();
+        let objects = [
+            (
+                if whole_module {
+                    "SwiftRs.o"
+                } else {
+                    "SwiftRs.build/lib.swift.o"
+                },
+                "int shared_runtime(void) { return 1; }",
+            ),
+            (
+                if whole_module {
+                    "Tauri.o"
+                } else {
+                    "Tauri.build/Plugin.swift.o"
+                },
+                "int tauri_entry(void) { return 2; }",
+            ),
+            ("Consumer.swift.o", "int consumer_entry(void) { return 3; }"),
+        ];
+        for (name, code) in objects {
+            let source = dir.join("fixture.c");
+            std::fs::write(&source, code).unwrap();
+            assert!(Command::new("xcrun")
+                .args(["clang", "-c"])
+                .env_remove("IPHONEOS_DEPLOYMENT_TARGET")
+                .arg(&source)
+                .arg("-o")
+                .arg(dir.join(name))
+                .status()
+                .unwrap()
+                .success());
+        }
+        let shared = dir.join("libTauri.a");
+        let plugin = dir.join("libConsumer.a");
+        for archive in [&shared, &plugin] {
+            let mut command = Command::new("ar");
+            command
+                .arg("crs")
+                .arg(archive)
+                .arg(dir.join(objects[0].0))
+                .arg(dir.join(objects[1].0));
+            if archive == &plugin {
+                command.arg(dir.join(objects[2].0));
+            }
+            assert!(command.status().unwrap().success());
+        }
+        drop_shared_modules(&plugin);
+        let main = dir.join("main.c");
+        std::fs::write(&main, "int shared_runtime(void); int tauri_entry(void); int consumer_entry(void); int main(void) { return shared_runtime() + tauri_entry() + consumer_entry() != 6; }").unwrap();
+        let result = Command::new("xcrun")
+            .arg("clang")
+            .env_remove("IPHONEOS_DEPLOYMENT_TARGET")
+            .arg(&main)
+            .arg("-Xlinker")
+            .arg("-force_load")
+            .arg("-Xlinker")
+            .arg(&shared)
+            .arg("-Xlinker")
+            .arg("-force_load")
+            .arg("-Xlinker")
+            .arg(&plugin)
+            .arg("-o")
+            .arg(dir.join("linked"))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(Command::new(dir.join("linked")).status().unwrap().success());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn globalizes_data_bridge_as_weak_runtime_export() {
         assert!(rustup_llvm_objcopy().is_some(), "install rustup llvm-tools");
@@ -694,6 +838,7 @@ mod runtime_export_tests {
         .unwrap();
         assert!(Command::new("xcrun")
             .args(["clang", "-c"])
+            .env_remove("IPHONEOS_DEPLOYMENT_TARGET")
             .arg(&source)
             .arg("-o")
             .arg(&object)

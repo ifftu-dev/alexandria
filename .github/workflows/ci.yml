@@ -424,6 +424,13 @@ jobs:
           # nothing makes the next run start cold.
           cache-on-failure: true
 
+      - name: Test shared Swift archive linking
+        if: matrix.label == 'iOS'
+        working-directory: alexandria
+        run: |
+          rustup component add llvm-tools
+          scripts/test-swift-runtime.sh
+
       # Scoped to -p alexandria-node deliberately. A bare `cargo check` at the
       # workspace root also checks vendored members like patches/ffmpeg-sys-next,
       # whose build script needs a cross-compile pkg-config sysroot we have no
