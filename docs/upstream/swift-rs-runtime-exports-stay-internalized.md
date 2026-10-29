@@ -1,7 +1,7 @@
 # Draft issue — swift-rs
 
 Status: draft
-Updated: 2026-10-28
+Updated: 2026-10-29
 
 Not yet filed upstream.
 
@@ -105,3 +105,29 @@ in each archive, and the link succeeds.
 - `cargo build --target aarch64-apple-ios --release`
 - Link fails with the four undefined symbols above; `nm libTauri.a` shows
   them as `t` in `SwiftRs.o` while `Tauri.o`'s exports are `T`.
+
+### Related release-link failure: duplicate shared modules
+
+The 0.9.1-alpha iOS release failed under Xcode 26.3 with 323 duplicate
+SwiftRs/Tauri symbols. Firebase's required `-ObjC` link flag exposed copies
+of shared Swift modules embedded in each plugin archive. Existing cleanup
+recognized the whole-module `Tauri.o` and `SwiftRs.o` members used by the
+working local Xcode 27 build, but missed the native SwiftPM per-source layout,
+including `Plugin.swift.o` and `lib.swift.o`.
+
+The corrected `drop_shared_modules` also discovers object names from
+`Tauri.build` and `SwiftRs.build` beside each archive. Only Tauri's archive
+retains the shared modules. Cleanup rebuilds the archive index and rejects
+ambiguous duplicate basenames before deleting anything, so a plugin's own
+object cannot be accidentally removed. Archive-tool failures now stop the
+build immediately.
+
+On macOS, run `rustup component add llvm-tools`, then
+[`scripts/test-swift-runtime.sh`](../../scripts/test-swift-runtime.sh).
+The regression tests force-load shared and consumer archives, verify that both
+layouts link without duplicate symbols, and execute the retained consumer
+code. The per-source test failed before the fix and passes afterward; the
+runtime export regression also passes. A real native SwiftPM fixture confirmed
+the per-source layout and cleanup, and a full local Xcode 27 iOS release archive
+succeeded. The iOS CI job now runs these linker tests on Xcode 26.3; a successful
+Xcode 26.3 release archive remains the final validation boundary.
