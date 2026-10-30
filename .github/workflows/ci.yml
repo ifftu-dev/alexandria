@@ -431,6 +431,11 @@ jobs:
           rustup component add llvm-tools
           scripts/test-swift-runtime.sh
 
+      - name: Test native reachability with iOS compatibility shims
+        if: matrix.label == 'iOS'
+        working-directory: alexandria
+        run: python3 -m unittest discover -s scripts -p test_ios_system_configuration.py
+
       # Scoped to -p alexandria-node deliberately. A bare `cargo check` at the
       # workspace root also checks vendored members like patches/ffmpeg-sys-next,
       # whose build script needs a cross-compile pkg-config sysroot we have no

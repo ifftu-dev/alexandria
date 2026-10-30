@@ -1,7 +1,7 @@
 # Building for iOS and Android
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-10-30
 
 Device requirements and the shared prerequisites are in
 [building](building.md#system-requirements). For a quicker loop with a device
@@ -50,6 +50,24 @@ Clean before rebuilding to avoid "Directory not empty" errors:
 ```bash
 rm -rf src-tauri/gen/apple/build
 ```
+
+### Native launch regression check
+
+The iOS compatibility shim in
+[`src-tauri/ios/sc_dynamic_store_stubs.c`](../src-tauri/ios/sc_dynamic_store_stubs.c)
+must not override Apple's `SCNetworkReachability` APIs. Returning `NULL` from
+their constructors caused Firebase's GoogleDataTransport startup timer to
+crash in `SCNetworkReachabilitySetCallback`, before a profile was selected.
+
+On a Mac, run the same native regression check as the iOS CI job:
+
+```bash
+python3 -m unittest discover -s scripts -p test_ios_system_configuration.py
+```
+
+The test links the actual shim with Apple's frameworks and exercises
+reachability creation and callback registration. It catches the symbol
+override; a signed build still needs launch verification on a physical iPhone.
 
 ## Android
 
