@@ -1,4 +1,4 @@
-import { computed, readonly, ref, watch } from 'vue'
+import { computed, markRaw, readonly, ref, shallowRef, watch } from 'vue'
 import type { Router } from 'vue-router'
 
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
@@ -16,7 +16,8 @@ export function isAtlasTab(value: unknown): value is AtlasTab {
   return ATLAS_TABS.some((tab) => tab === value)
 }
 export type AtlasPhase = 'idle' | 'loading' | 'ready' | 'error'
-export type AtlasRefreshReason = 'navigation' | 'credentials' | 'retry'
+/** `surface`: an atlas came on screen. It reuses a snapshot loaded moments ago. */
+export type AtlasRefreshReason = 'surface' | 'credentials' | 'retry'
 
 export type { AtlasCamera, AtlasViewState } from '@/utils/skillAtlasView'
 export interface AtlasFeedback {
@@ -25,7 +26,8 @@ export interface AtlasFeedback {
   improvedIds: readonly string[]
 }
 
-const model = ref<AtlasModel | null>(null)
+// Each load replaces the whole snapshot, so it is never made deeply reactive.
+const model = shallowRef<AtlasModel | null>(null)
 const phase = ref<AtlasPhase>('idle')
 const error = ref<string | null>(null)
 const refreshing = ref(false)
@@ -56,7 +58,9 @@ let feedbackRevision = 0
 let baselineEstablished = false
 let inFlight: Promise<void> | null = null
 let queuedForced = false
-let lastNavigationAt = -Infinity
+let lastLoadAt = -Infinity
+/** A surface coming on screen within this long of a load reuses that snapshot. */
+const SURFACE_REFRESH_INTERVAL_MS = 1500
 let installedBridges = 0
 const routerBridges = new Map<Router, { owners: number; remove: () => void }>()
 const activeSurfaces = new Map<symbol, AtlasSurface>()
@@ -73,6 +77,7 @@ export function activateSurface(surface: AtlasSurface): () => void {
   const token = Symbol(surface)
   clearFeedback()
   activeSurfaces.set(token, surface)
+  void refresh('surface')
   return () => {
     activeSurfaces.delete(token)
     if (activeSurfaces.size === 0 || feedbackSurface.value === surface) clearFeedback()
@@ -88,7 +93,7 @@ function clearProfileState(): void {
   generation++
   skillReturn = null
   inFlight = null
-  lastNavigationAt = -Infinity
+  lastLoadAt = -Infinity
   model.value = null
   phase.value = 'idle'
   error.value = null
@@ -107,6 +112,7 @@ async function load(): Promise<void> {
   const profileId = profiles.activeProfileId.value
   if (!profileId || profiles.isLockBlocked.value) return
   const ticket = generation
+  lastLoadAt = Date.now()
   const hadModel = model.value !== null
   refreshing.value = hadModel
   if (!hadModel) phase.value = 'loading'
@@ -128,7 +134,7 @@ async function load(): Promise<void> {
     clearFeedback()
     if (baselineEstablished && model.value && activeSurfaces.size > 0 && !useCourseCompletion().isOpen.value && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       for (const node of nextModel.nodes) {
-        const previous = model.value.nodes.find((item) => item.skill.id === node.skill.id)
+        const previous = model.value.nodeById.get(node.skill.id)
         if (node.status === 'earned' && previous?.status !== 'earned') newlyEarned.push(node.skill.id)
         if (node.earnedBloom && previous?.earnedBloom && node.earnedBloom.rank > previous.earnedBloom.rank) improvedIds.push(node.skill.id)
       }
@@ -138,7 +144,7 @@ async function load(): Promise<void> {
         feedbackTimer = setTimeout(clearFeedback, 3000)
       }
     }
-    model.value = nextModel
+    model.value = markRaw(nextModel)
     baselineEstablished = true
     phase.value = 'ready'
     error.value = null
@@ -152,13 +158,9 @@ async function load(): Promise<void> {
 }
 
 async function refresh(reason: AtlasRefreshReason): Promise<void> {
-  if (reason === 'navigation') {
-    const now = Date.now()
-    if (now - lastNavigationAt < 1500) return
-    lastNavigationAt = now
-  }
+  if (reason === 'surface' && Date.now() - lastLoadAt < SURFACE_REFRESH_INTERVAL_MS) return
   if (inFlight) {
-    if (reason !== 'navigation') queuedForced = true
+    if (reason !== 'surface') queuedForced = true
     await inFlight
     return
   }
@@ -221,6 +223,12 @@ watch([profiles.activeProfileId, profiles.isLockBlocked, () => profiles.activeId
 onProfileReady(() => { void ensureLoaded() })
 onProfileLocked(clearProfileState)
 
+/**
+ * Keeps the shared snapshot current: it refreshes on credential events, and
+ * when an atlas surface comes on screen or the window returns with one
+ * showing. Route changes never refresh it; the router is watched only to
+ * restore an atlas after Open skill.
+ */
 export function installSkillAtlasRefresh(router: Router): () => void {
   installedBridges++
   if (installedBridges === 1 && typeof window !== 'undefined') {
@@ -243,7 +251,6 @@ export function installSkillAtlasRefresh(router: Router): () => void {
           else skillsTab.value = 'graph'
         }
       }
-      void refresh('navigation')
     })
     bridge = { owners: 0, remove: () => { removeHistory(); removeNavigation(); if (skillReturn?.router === router) skillReturn = null } }
     routerBridges.set(router, bridge)
@@ -269,6 +276,7 @@ export function installSkillAtlasRefresh(router: Router): () => void {
 
 function visibilityChanged(): void {
   if (document.visibilityState === 'hidden') clearFeedback()
+  else if (activeSurfaces.size > 0) void refresh('surface')
 }
 
 function credentialsChanged(): void { void refresh('credentials') }

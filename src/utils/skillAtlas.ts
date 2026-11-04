@@ -43,6 +43,10 @@ export interface AtlasModel {
   fields: readonly AtlasField[]
   edges: readonly SkillGraphEdge[]
   counts: { total: number; earned: number; ready: number }
+  /** Built once per load; key order matches `nodes`. */
+  nodeById: ReadonlyMap<string, AtlasNode>
+  /** Unassigned skills sit under `null`. */
+  fieldById: ReadonlyMap<string | null, AtlasField>
 }
 
 export interface BuildSkillAtlasInput {
@@ -156,5 +160,7 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
   return {
     nodes, fields, edges: [...input.edges],
     counts: { total: nodes.length, earned, ready: nodes.length - earned },
+    nodeById: new Map(nodes.map((node) => [node.skill.id, node])),
+    fieldById: new Map(fields.map((field) => [field.id, field])),
   }
 }

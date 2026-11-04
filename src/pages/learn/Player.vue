@@ -11,6 +11,7 @@ import CourseNotesSection from '@/components/course/CourseNotesSection.vue'
 import { useChatOffer, useChatRestriction } from '@/composables/useChatOffers'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
+import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { getProfileSessionToken } from '@/composables/profileSession'
 import type {
   Chapter,
@@ -115,6 +116,7 @@ async function claimCredential() {
     claimTxHash.value = result.tx_hash
     completionReceipt.value = result
     claimCredentialIds.value = result.credential_ids ?? []
+    if (claimCredentialIds.value.length) announceCredentialsChanged()
     return result
   } catch (e) {
     claimError.value = String(e)

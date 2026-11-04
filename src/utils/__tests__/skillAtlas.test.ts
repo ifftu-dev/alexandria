@@ -96,6 +96,15 @@ describe('buildSkillAtlas', () => {
     expect(atlas.fields.map(f => [f.id, f.slot])).toEqual([['b_field', 4], ['a_field', 7], [null, null]])
   })
 
+  it('looks up every node and field by ID, including unassigned skills', () => {
+    const atlas = buildSkillAtlas({ skills: [skill('a'), skill('b', { subject_field_id: 'other', subject_field_name: 'Other' }), skill('c', { subject_field_id: null })],
+      edges: [], subjectDid: 'did:me', activeCredentials: [credential('b', 2)] })
+    expect(atlas.nodeById.get('b')).toMatchObject({ skill: { id: 'b' }, status: 'earned', fieldId: 'other' })
+    expect(atlas.nodeById.get('missing')).toBeUndefined()
+    expect(atlas.fieldById.get('other')).toMatchObject({ name: 'Other', nodeIds: ['b'], earned: 1 })
+    expect(atlas.fieldById.get(null)).toMatchObject({ id: null, nodeIds: ['c'] })
+    expect([...atlas.nodeById.keys()]).toEqual(['a', 'b', 'c'])
+  })
   it('accepts only the six Bloom ranks from outside values', () => {
     expect([0, 1, 2, 3, 4, 5].every(isBloomRank)).toBe(true)
     expect([-1, 6, 1.5, NaN, '3', null, undefined].some(isBloomRank)).toBe(false)

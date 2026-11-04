@@ -11,7 +11,9 @@ const atlas = useSkillAtlas()
 const { model, isLoading, error } = atlas
 onMounted(() => { void atlas.ensureLoaded() })
 function earned(field: AtlasField): readonly AtlasNode[] {
-  return model.value?.nodes.filter(node => node.fieldId === field.id && node.status === 'earned').slice(0, 2) ?? []
+  const index = model.value?.nodeById
+  if (!index) return []
+  return field.nodeIds.flatMap(id => { const node = index.get(id); return node?.status === 'earned' ? [node] : [] }).slice(0, 2)
 }
 function expand(field?: AtlasField, node?: AtlasNode): void {
   if (field) atlas.updateView('modal', { focusedFieldId: field.id, unassignedFocused: field.id === null,
