@@ -25,7 +25,9 @@
     "updateSkillsIntro": "Want to add or change any skills you already have?",
     "updateSkillsSelfMade": "These are recorded as self-made claims unless we already have on-platform evidence for them.",
     "skillsClaimed": "Added {count} skill | Added {count} skills",
-    "done": "Done"
+    "done": "Done",
+    "goalAdded": "“{label}”已加入你的目标。",
+    "goalRemoved": "已从你的目标中移除“{label}”。"
   },
   "picker": {
     "jobRole": "职位角色",

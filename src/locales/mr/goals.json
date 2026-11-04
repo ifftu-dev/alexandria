@@ -25,7 +25,9 @@
     "updateSkillsIntro": "Want to add or change any skills you already have?",
     "updateSkillsSelfMade": "These are recorded as self-made claims unless we already have on-platform evidence for them.",
     "skillsClaimed": "Added {count} skill | Added {count} skills",
-    "done": "Done"
+    "done": "Done",
+    "goalAdded": "“{label}” आता तुमच्या ध्येयांपैकी एक आहे.",
+    "goalRemoved": "“{label}” तुमच्या ध्येयांमधून काढले."
   },
   "picker": {
     "jobRole": "नोकरीची भूमिका",

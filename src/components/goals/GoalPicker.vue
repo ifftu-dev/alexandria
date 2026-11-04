@@ -9,9 +9,9 @@ import { onProfileLocked } from '@/composables/useProfiles'
 import { useGoals } from '@/composables/useGoals'
 import LearningDecisionReview from '@/components/LearningDecisionReview.vue'
 import { AppButton, AppInput, AppBadge } from '@/components/ui'
-import type { GoalTemplate, SkillSuggestion } from '@/types'
+import type { Goal, GoalTemplate, SkillSuggestion } from '@/types'
 
-const emit = defineEmits<{ (e: 'added'): void }>()
+const emit = defineEmits<{ added: [goal: Goal] }>()
 
 const { t } = useI18n()
 const { listGoalTemplates, resolveGoal, addGoal } = useGoals()
@@ -89,7 +89,7 @@ async function addTemplateGoal() {
         ? { kind: 'curriculum', board: tpl.board ?? '', grade: tpl.grade ?? '' }
         : { kind: tab.value as 'exam' | 'job_role', key: tpl.key },
     )
-    await addGoal({
+    const goal = await addGoal({
       label: res.label,
       goalSkillIds: res.goal_skill_ids,
       kind: tab.value as Exclude<Tab, 'jd' | 'learning_goal'>,
@@ -97,7 +97,7 @@ async function addTemplateGoal() {
       resolutionProvenance: res.resolution_provenance,
       taxonomyVersion: res.taxonomy_version,
     })
-    emit('added')
+    emit('added', goal)
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -143,7 +143,7 @@ async function addJdGoal() {
   if (!ids.length) return
   busy.value = true
   try {
-    await addGoal({
+    const goal = await addGoal({
       label: jdLabel.value || jdText.value.trim().slice(0, 160),
       goalSkillIds: ids,
       kind: tab.value === 'learning_goal' ? 'learning_goal' : 'jd',
@@ -153,7 +153,7 @@ async function addJdGoal() {
     suggestions.value = []
     jdText.value = ''
     jdUrl.value = ''
-    emit('added')
+    emit('added', goal)
   } finally {
     busy.value = false
   }

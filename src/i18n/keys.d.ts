@@ -1055,6 +1055,8 @@ export type MessageKey =
   | 'goals.index.emptyDescription'
   | 'goals.index.emptyTitle'
   | 'goals.index.findSomeone'
+  | 'goals.index.goalAdded'
+  | 'goals.index.goalRemoved'
   | 'goals.index.hidePath'
   | 'goals.index.nextStep'
   | 'goals.index.perGoal'

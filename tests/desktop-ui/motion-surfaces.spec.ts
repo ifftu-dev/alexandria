@@ -137,18 +137,23 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
 
 /**
  * Start `act`, and once an element matching `selector` with `text` arrives,
- * report (two frames later) the motion running inside `scope`.
+ * report (two frames later) the motion running inside `scope`, or on the
+ * arriving element itself when no scope is given.
  */
-async function motionOnArrival(page: Page, act: () => Promise<void>, selector: string, text: string, scope: string): Promise<number> {
+async function motionOnArrival(page: Page, act: () => Promise<void>, selector: string, text: string, scope = ''): Promise<number> {
   const arrival = page.evaluate(([selector, text, scope]) => new Promise<number>(resolve => {
-    const arrived = () => [...document.querySelectorAll(selector)].some(el => el.textContent?.includes(text))
-    const report = () => requestAnimationFrame(() => requestAnimationFrame(() => {
-      const root = document.querySelector(scope)
-      const animations = root ? root.getAnimations({ subtree: true }) : []
+    const find = () => [...document.querySelectorAll(selector)].find(el => el.textContent?.includes(text))
+    const report = (arrived: Element) => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const root = scope ? document.querySelector(scope) : arrived
+      const animations = root ? root.getAnimations({ subtree: Boolean(scope) }) : []
       resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1).length)
     }))
-    if (arrived()) return report()
-    const observer = new MutationObserver(() => { if (arrived()) { observer.disconnect(); report() } })
+    const now = find()
+    if (now) return report(now)
+    const observer = new MutationObserver(() => {
+      const arrived = find()
+      if (arrived) { observer.disconnect(); report(arrived) }
+    })
     observer.observe(document.body, { subtree: true, childList: true, characterData: true })
   }), [selector, text, scope] as const)
   await act()
@@ -176,7 +181,7 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
     await expect(search).toBeVisible()
     await expect(search.getByRole('textbox')).toBeFocused()
 
-    const entry = await motionOnArrival(page, () => search.getByRole('textbox').fill('Sort'), '[role="dialog"] button', 'Sorting algorithms', '[role="dialog"]')
+    const entry = await motionOnArrival(page, () => search.getByRole('textbox').fill('Sort'), '[role="dialog"] button', 'Sorting algorithms')
     expectMotion(entry, mode)
     await expect(search.getByRole('button', { name: /Sorting algorithms/ })).toHaveCSS('opacity', '1')
 
@@ -186,5 +191,56 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     })).toBe(true)
     await expect(search).toHaveCount(0)
+  })
+}
+
+for (const mode of ['System', 'Reduced', 'Off'] as const) {
+  test(`catalog and Home cards enter, leave and move under the motion setting (${mode})`, async ({ page }) => {
+    await open(page, '/goals')
+    await setMode(page, mode)
+    const sidebar = page.locator('aside')
+    const entry = await motionOnArrival(page, () => sidebar.getByRole('button', { name: 'Home', exact: true }).click(), 'main a', 'Sorting algorithms')
+    expectMotion(entry, mode)
+    const continueCard = page.getByRole('link', { name: /Sorting algorithms/ }).first()
+    await expect(continueCard).toHaveCSS('opacity', '1')
+    await expect(page.getByRole('button', { name: /Algorithms foundations/ })).toHaveCSS('opacity', '1')
+
+    await page.goto('/tests/desktop-ui/?screen=motion-surfaces&path=/courses')
+    await setMode(page, mode)
+    const grid = page.locator('main [data-catalog-grid]')
+    await expect(grid.getByRole('link')).toHaveCount(3)
+    expectMotion(await motionAfter(page.getByRole('button', { name: /Tutorials/ }), grid), mode)
+    await expect(grid.getByRole('link')).toHaveCount(1)
+    await expect(grid.getByRole('link', { name: /Recursion in ten minutes/ })).toHaveCSS('opacity', '1')
+    expectMotion(await motionAfter(page.getByRole('button', { name: /All/ }), grid), mode)
+    await expect(grid.getByRole('link')).toHaveCount(3)
+  })
+}
+
+for (const mode of ['System', 'Reduced', 'Off'] as const) {
+  test(`goal cards enter, and adding or removing a goal confirms itself (${mode})`, async ({ page }) => {
+    await open(page)
+    await setMode(page, mode)
+    const entry = await motionOnArrival(page, () => page.locator('aside').getByRole('button', { name: 'Goals', exact: true }).click(), '[data-goal-card]', 'Algorithms foundations')
+    expectMotion(entry, mode)
+    const cards = page.locator('[data-goal-card]')
+    await expect(cards).toHaveCount(2)
+
+    const algorithms = cards.filter({ hasText: 'Algorithms foundations' })
+    const remove = algorithms.getByRole('button', { name: 'Remove' })
+    await expect(remove).toHaveCSS('opacity', '1')
+    expectMotion(await motionAfter(remove, page.locator('[data-goal-grid]')), mode)
+    await expect(page.getByRole('status').filter({ hasText: 'Removed “Algorithms foundations” from your goals.' })).toBeVisible()
+    await expect(cards).toHaveCount(1)
+    await expect(cards.filter({ hasText: 'Recursive thinking' })).toHaveCSS('opacity', '1')
+
+    await page.getByTestId('add-goal').click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByRole('combobox').selectOption('data-engineer')
+    await dialog.getByRole('button', { name: 'Set as goal' }).click()
+    await expect(dialog.getByRole('status').filter({ hasText: '“Data engineer” is now one of your goals.' })).toBeVisible()
+    await dialog.getByTestId('add-goal-done').click()
+    await expect(cards).toHaveCount(2)
+    await expect(cards.filter({ hasText: 'Data engineer' })).toHaveCSS('opacity', '1')
   })
 }

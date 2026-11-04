@@ -12,6 +12,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 import { useGoals } from '@/composables/useGoals'
 import { useAccountStatus } from '@/composables/useAccountStatus'
+import { holdLeavingPlace } from '@/composables/useMotion'
 import { StatusBadge, AppButton, InfoTip, AppModal } from '@/components/ui'
 import { bloomFill } from '@/utils/bloom'
 import { sanitizeSvg } from '@/utils/sanitize'
@@ -406,7 +407,13 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div class="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
+      <TransitionGroup
+        name="motion-list"
+        tag="div"
+        appear
+        class="relative -mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0"
+        @before-leave="holdLeavingPlace"
+      >
         <!-- goal cards -->
         <button
           v-for="t in goals"
@@ -441,14 +448,14 @@ onMounted(async () => {
         </button>
 
         <!-- add goal -->
-        <button class="goal-card goal-card--add pressable" @click="router.push({ path: '/goals', query: { add: '1' } })">
+        <button key="add-goal" class="goal-card goal-card--add pressable" @click="router.push({ path: '/goals', query: { add: '1' } })">
           <span class="text-2xl leading-none text-muted-foreground">+</span>
           <span class="text-sm font-medium text-muted-foreground">{{ $t('dashboard.home.goals.add') }}</span>
         </button>
 
         <!-- trailing gap: WebKit drops a scroll container's right padding -->
-        <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
-      </div>
+        <div key="trailing-gap" class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
+      </TransitionGroup>
     </section>
 
     <!-- ═══ Skill graph summary (collapsible) ═══ -->
@@ -530,7 +537,13 @@ onMounted(async () => {
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-foreground">{{ $t('dashboard.home.continue') }}</h2>
         </div>
-        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
+        <TransitionGroup
+          name="motion-list"
+          tag="div"
+          appear
+          class="relative -mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0"
+          @before-leave="holdLeavingPlace"
+        >
           <router-link
             v-for="enrollment in enrollments"
             :key="enrollment.id"
@@ -579,8 +592,8 @@ onMounted(async () => {
           </router-link>
 
           <!-- trailing gap: WebKit drops a scroll container's right padding -->
-          <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
-        </div>
+          <div key="trailing-gap" class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
+        </TransitionGroup>
       </section>
 
       <!-- Quick Tutorials -->
@@ -597,7 +610,13 @@ onMounted(async () => {
             {{ $t('dashboard.home.tutorials.count', { count: tutorials.length }, tutorials.length) }}
           </span>
         </div>
-        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin scroll-pl-4 sm:mx-0 sm:px-0 sm:scroll-pl-0">
+        <TransitionGroup
+          name="motion-list"
+          tag="div"
+          appear
+          class="relative -mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin scroll-pl-4 sm:mx-0 sm:px-0 sm:scroll-pl-0"
+          @before-leave="holdLeavingPlace"
+        >
           <router-link
             v-for="tut in tutorials"
             :key="tut.id"
@@ -640,8 +659,8 @@ onMounted(async () => {
           </router-link>
 
           <!-- trailing gap: WebKit drops a scroll container's right padding -->
-          <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
-        </div>
+          <div key="trailing-gap" class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
+        </TransitionGroup>
       </section>
 
       <!-- Courses -->
@@ -676,13 +695,20 @@ onMounted(async () => {
         </div>
 
         <!-- Course grid (gap-6, 4 columns) -->
-        <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <TransitionGroup
+          v-else
+          name="motion-list"
+          tag="div"
+          appear
+          class="relative grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          @before-leave="holdLeavingPlace"
+        >
           <CourseCard
             v-for="course in (recommendedCourses.length > 0 ? recommendedCourses : courses.filter(c => c.kind !== 'tutorial'))"
             :key="course.id"
             :course="course"
           />
-        </div>
+        </TransitionGroup>
       </section>
     </template>
 

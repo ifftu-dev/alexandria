@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { holdLeavingPlace } from '@/composables/useMotion'
 import { AppButton } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type { Course, SkillDetail } from '@/types'
@@ -104,6 +105,7 @@ onMounted(async () => {
         v-for="opt in (['all', 'course', 'tutorial'] as const)"
         :key="opt"
         type="button"
+        :aria-pressed="kindFilter === opt"
         :class="[
           'pressable text-xs font-medium px-3 py-1.5 rounded-full',
           kindFilter === opt
@@ -173,12 +175,20 @@ onMounted(async () => {
     </div>
 
     <!-- Course grid (gap-6, 4 columns max) -->
-    <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <TransitionGroup
+      v-else
+      name="motion-list"
+      tag="div"
+      appear
+      class="relative grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      data-catalog-grid
+      @before-leave="holdLeavingPlace"
+    >
       <CourseCard
         v-for="course in filteredCourses"
         :key="course.id"
         :course="course"
       />
-    </div>
+    </TransitionGroup>
   </div>
 </template>

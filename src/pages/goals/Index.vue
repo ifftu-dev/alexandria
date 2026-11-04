@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
 import { useAssessment } from '@/composables/useAssessment'
+import { holdLeavingPlace } from '@/composables/useMotion'
 import { AppButton, AppModal, EmptyState, AppSpinner } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
@@ -14,6 +16,7 @@ import type { LearningPath, Goal, GoalAssessmentStep } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const { goals, removeGoal, pathFor, combinedPath } = useGoals()
 const { planGoal } = useAssessment()
 
@@ -30,6 +33,9 @@ function assessMap(steps: GoalAssessmentStep[]): Record<string, GoalAssessmentSt
 }
 
 const loading = ref(true)
+// The spinner covers only the first load; later refreshes keep the cards on
+// screen so a removal or an addition shows as the list changing.
+const loaded = ref(false)
 const paths = ref<Record<string, LearningPath>>({})
 const combined = ref<LearningPath | null>(null)
 // Per-skill assessability, keyed the same way as `paths`. `combinedAssess`
@@ -78,6 +84,7 @@ async function loadAll() {
     combinedAssess.value = combinedPlan ? assessMap(combinedPlan.steps) : {}
   } finally {
     loading.value = false
+    loaded.value = true
   }
 }
 
@@ -100,8 +107,13 @@ function nextStep(p: LearningPath | undefined): string | null {
   return p?.steps.find((s) => s.status === 'available')?.name ?? null
 }
 
-async function onRemove(t: Goal) {
-  await removeGoal(t.id)
+// One confirmation line per change: removals here, additions in the dialog.
+const removedNotice = ref('')
+const addedNotice = ref('')
+
+async function onRemove(goal: Goal) {
+  await removeGoal(goal.id)
+  removedNotice.value = t('goals.index.goalRemoved', { label: goal.label })
   await loadAll()
 }
 
@@ -116,13 +128,16 @@ const skillsClaimed = ref(0)
 function openAddGoal() {
   addStep.value = 'goal'
   skillsClaimed.value = 0
+  addedNotice.value = ''
+  removedNotice.value = ''
   showAddGoal.value = true
 }
 
-async function onGoalAdded() {
-  // A goal was set — refresh paths, then ask about skills.
-  await loadAll()
+async function onGoalAdded(goal: Goal) {
+  // A goal was set: confirm it, ask about skills, and refresh paths behind.
+  addedNotice.value = t('goals.index.goalAdded', { label: goal.label })
   addStep.value = 'skills'
+  await loadAll()
 }
 
 function onSkillsClaimed(n: number) {
@@ -162,7 +177,11 @@ const dash = computed(() => 2 * Math.PI * 20)
       </div>
     </div>
 
-    <div v-if="loading" class="flex justify-center py-16">
+    <p role="status" class="text-sm text-muted-foreground" :class="removedNotice ? '-mt-2 mb-4' : 'sr-only'">
+      <Transition name="motion-fade"><span v-if="removedNotice">{{ removedNotice }}</span></Transition>
+    </p>
+
+    <div v-if="loading && !loaded" class="flex justify-center py-16">
       <AppSpinner size="lg" :label="$t('goals.index.chartingPaths')" />
     </div>
 
@@ -194,8 +213,16 @@ const dash = computed(() => 2 * Math.PI * 20)
     <!-- Per-goal cards -->
     <!-- items-start: grid rows default to stretch, which would inflate every
          card in a row to match an expanded sibling's height. -->
-    <div v-else class="grid items-start gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      <div v-for="t in goals" :key="t.id" class="card flex flex-col p-5">
+    <TransitionGroup
+      v-else
+      name="motion-list"
+      tag="div"
+      appear
+      class="relative grid items-start gap-5 sm:grid-cols-2 xl:grid-cols-3"
+      data-goal-grid
+      @before-leave="holdLeavingPlace"
+    >
+      <div v-for="t in goals" :key="t.id" class="card flex flex-col p-5" data-goal-card>
         <div class="flex items-start gap-4">
           <!-- progress ring -->
           <svg width="52" height="52" viewBox="0 0 52 52" class="shrink-0">
@@ -241,7 +268,7 @@ const dash = computed(() => 2 * Math.PI * 20)
           <LearningPathView :path="paths[t.id]!" :assess="assess[t.id]" />
         </div>
       </div>
-    </div>
+    </TransitionGroup>
 
     <!-- Add-a-goal modal — same flow as onboarding -->
     <AppModal
@@ -258,6 +285,7 @@ const dash = computed(() => 2 * Math.PI * 20)
 
       <!-- Step 2: optionally add/change skills (self-made claims) -->
       <div v-else>
+        <p role="status" class="mb-3 text-sm font-medium text-success">{{ addedNotice }}</p>
         <p class="mb-1 text-sm text-muted-foreground">{{ $t('goals.index.updateSkillsIntro') }}</p>
         <p class="mb-4 text-xs text-muted-foreground/80">{{ $t('goals.index.updateSkillsSelfMade') }}</p>
         <SkillBootstrapPanel @claimed="onSkillsClaimed" />

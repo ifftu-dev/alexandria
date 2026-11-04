@@ -25,7 +25,9 @@
     "updateSkillsIntro": "Want to add or change any skills you already have?",
     "updateSkillsSelfMade": "These are recorded as self-made claims unless we already have on-platform evidence for them.",
     "skillsClaimed": "Added {count} skill | Added {count} skills",
-    "done": "Done"
+    "done": "Done",
+    "goalAdded": "“{label}” এখন আপনার লক্ষ্যগুলোর একটি।",
+    "goalRemoved": "“{label}” আপনার লক্ষ্যগুলো থেকে সরানো হয়েছে।"
   },
   "picker": {
     "jobRole": "চাকরির ভূমিকা",

@@ -25,7 +25,9 @@
     "updateSkillsIntro": "Want to add or change any skills you already have?",
     "updateSkillsSelfMade": "These are recorded as self-made claims unless we already have on-platform evidence for them.",
     "skillsClaimed": "Added {count} skill | Added {count} skills",
-    "done": "Done"
+    "done": "Done",
+    "goalAdded": "“{label}” अब आपके लक्ष्यों में से एक है।",
+    "goalRemoved": "“{label}” को आपके लक्ष्यों से हटा दिया गया।"
   },
   "picker": {
     "jobRole": "नौकरी की भूमिका",

@@ -115,6 +115,20 @@ export function animateMotion(element: Element, frames: Keyframe[], duration: Mo
   return () => { animation.cancel(); cleanup() }
 }
 
+/**
+ * `@before-leave` for a `motion-list` TransitionGroup on a position: relative
+ * list: holds a leaving item where it stood, out of flow, so the rest move into
+ * place while it fades. Reduced and Off remove it at once, untouched.
+ */
+export function holdLeavingPlace(element: Element): void {
+  if (mode.value !== 'full' || !(element instanceof HTMLElement)) return
+  const { offsetTop, offsetLeft, offsetWidth, offsetHeight } = element
+  Object.assign(element.style, {
+    position: 'absolute', margin: '0',
+    top: `${offsetTop}px`, left: `${offsetLeft}px`, width: `${offsetWidth}px`, height: `${offsetHeight}px`,
+  })
+}
+
 if (import.meta.hot) import.meta.hot.dispose(() => {
   cancelMotion()
   stopSetting?.()
