@@ -337,6 +337,9 @@ function formatDate(value: string) {
               </button>
             </div>
           </div>
+        <!-- New messages rise in at the live edge (full motion only). Keyed by
+             thread, so opening another chat shows its history at once. -->
+        <TransitionGroup :key="chat.thread.value?.id ?? 'new'" name="motion-rise">
         <template v-for="user in users" :key="user.id">
           <ChatMessageItem :message="user" :data-message-id="user.id" />
           <ChatMessageItem
@@ -361,6 +364,7 @@ function formatDate(value: string) {
             :latest="practiceFor(shown(user)!.id)!.id === latestPracticeId"
           />
         </template>
+        </TransitionGroup>
         </div>
       </div>
 

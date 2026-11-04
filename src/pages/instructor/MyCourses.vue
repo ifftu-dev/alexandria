@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles } from '@/composables/useProfiles'
+import { holdLeavingPlace } from '@/composables/useMotion'
 import { AppButton, EmptyState, StatusBadge } from '@/components/ui'
 import type { Course } from '@/types'
 
@@ -90,11 +91,18 @@ onMounted(async () => {
       :description="$t('instructor.myCourses.emptyDesc')"
     />
 
-    <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <TransitionGroup
+      v-else
+      name="motion-list"
+      tag="div"
+      appear
+      class="relative grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      @before-leave="holdLeavingPlace"
+    >
       <button
         v-for="course in mine"
         :key="course.id"
-        class="rounded-xl border border-border bg-card p-5 text-start transition-colors hover:border-primary/50"
+        class="pressable rounded-xl border border-border bg-card p-5 text-start hover:border-primary/50 [--press-scale:0.985]"
         @click="router.push(`/instructor/composer/${course.id}`)"
       >
         <div class="mb-2 flex items-center gap-2">
@@ -109,6 +117,6 @@ onMounted(async () => {
         </p>
         <p class="mt-2 text-xs text-muted-foreground">{{ $t('instructor.myCourses.updated', { date: course.updated_at.slice(0, 10) }) }}</p>
       </button>
-    </div>
+    </TransitionGroup>
   </div>
 </template>

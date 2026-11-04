@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -7,6 +7,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useProfiles } from '@/composables/useProfiles'
 import { useP2P } from '@/composables/useP2P'
 import { useTheme } from '@/composables/useTheme'
+import { animateMotion } from '@/composables/useMotion'
 import {
   shortcutName,
   useKeyboardShortcuts,
@@ -154,12 +155,20 @@ const showingSection = computed(() => typeof route.params.section === 'string' &
 const contentScroll = ref<HTMLElement | null>(null)
 const sectionHeading = ref<HTMLElement | null>(null)
 const navigationHeading = ref<HTMLElement | null>(null)
+// The new section settles in where the old one stood; focus and scroll
+// never wait for it.
+let cancelSectionMotion = () => {}
 watch(() => route.params.section, async () => {
   await nextTick()
   contentScroll.value?.scrollTo?.({ top: 0 })
   if (showingSection.value) sectionHeading.value?.focus({ preventScroll: true })
   else navigationHeading.value?.focus({ preventScroll: true })
+  cancelSectionMotion()
+  if (showingSection.value && contentScroll.value) {
+    cancelSectionMotion = animateMotion(contentScroll.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
+  }
 })
+onBeforeUnmount(() => cancelSectionMotion())
 
 // ---- Profile ----
 const displayName = ref('')
@@ -537,7 +546,7 @@ function onSectionClick(id: SettingsSectionId) {
                 <button
                   v-for="s in filteredSections"
                   :key="s.id"
-                  class="settings-nav-item"
+                  class="settings-nav-item pressable selectable"
                   :class="{ 'settings-nav-item--active': activeSection === s.id && showingSection }"
                   :aria-current="activeSection === s.id && showingSection ? 'page' : undefined"
                   @click="onSectionClick(s.id)"
@@ -575,7 +584,7 @@ function onSectionClick(id: SettingsSectionId) {
                 </h3>
               </header>
 
-              <div ref="contentScroll" class="settings-body min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6 space-y-7" :class="{ 'settings-body--developer': activeSection === 'developer' && developerEnabled }">
+              <div ref="contentScroll" data-settings-body class="settings-body min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6 space-y-7" :class="{ 'settings-body--developer': activeSection === 'developer' && developerEnabled }">
                 <!-- ──────────── Account & Identity ──────────── -->
                 <template v-if="activeSection === 'account'">
                   <div>
@@ -616,16 +625,18 @@ function onSectionClick(id: SettingsSectionId) {
                         <label class="label text-xs text-muted-foreground">{{ $t('settings.profile.visibilityLabel') }}</label>
                         <div class="flex gap-2">
                           <button
-                            class="vis-option"
+                            class="vis-option pressable"
                             :class="{ 'vis-option--active': profileVisibility === 'public' }"
+                            :aria-pressed="profileVisibility === 'public'"
                             @click="profileVisibility = 'public'"
                           >
                             🌐 {{ $t('settings.profile.public') }}
                             <span class="vis-desc">{{ $t('settings.profile.publicDesc') }}</span>
                           </button>
                           <button
-                            class="vis-option"
+                            class="vis-option pressable"
                             :class="{ 'vis-option--active': profileVisibility === 'private' }"
+                            :aria-pressed="profileVisibility === 'private'"
                             @click="profileVisibility = 'private'"
                           >
                             🔒 {{ $t('settings.profile.private') }}
@@ -654,7 +665,7 @@ function onSectionClick(id: SettingsSectionId) {
                         <div class="settings-row-stack">
                           <div class="flex items-center justify-between">
                             <p class="text-xs text-muted-foreground">{{ $t('settings.account.stakeAddress') }}</p>
-                            <button class="settings-copy-btn" @click="copyText(identity.stake_address)">{{ $t('common.actions.copy') }}</button>
+                            <button class="settings-copy-btn pressable" @click="copyText(identity.stake_address)">{{ $t('common.actions.copy') }}</button>
                           </div>
                           <code class="settings-code">{{ identity.stake_address }}</code>
                         </div>
@@ -662,7 +673,7 @@ function onSectionClick(id: SettingsSectionId) {
                         <div class="settings-row-stack">
                           <div class="flex items-center justify-between">
                             <p class="text-xs text-muted-foreground">{{ $t('settings.account.paymentAddress') }}</p>
-                            <button class="settings-copy-btn" @click="copyText(identity.payment_address)">{{ $t('common.actions.copy') }}</button>
+                            <button class="settings-copy-btn pressable" @click="copyText(identity.payment_address)">{{ $t('common.actions.copy') }}</button>
                           </div>
                           <code class="settings-code">{{ identity.payment_address }}</code>
                         </div>
@@ -672,7 +683,7 @@ function onSectionClick(id: SettingsSectionId) {
                             <p class="text-xs text-muted-foreground">{{ $t('settings.account.deviceId') }}</p>
                             <button
                               v-if="p2pStatus?.peer_id"
-                              class="settings-copy-btn"
+                              class="settings-copy-btn pressable"
                               @click="copyText(p2pStatus.peer_id)"
                             >
                               {{ $t('common.actions.copy') }}
@@ -685,7 +696,7 @@ function onSectionClick(id: SettingsSectionId) {
                         <div v-if="identity.profile_hash" class="settings-row-stack">
                           <div class="flex items-center justify-between">
                             <p class="text-xs text-muted-foreground">{{ $t('settings.account.profileFingerprint') }}</p>
-                            <button class="settings-copy-btn" @click="copyText(identity.profile_hash)">{{ $t('common.actions.copy') }}</button>
+                            <button class="settings-copy-btn pressable" @click="copyText(identity.profile_hash)">{{ $t('common.actions.copy') }}</button>
                           </div>
                           <code class="settings-code">{{ identity.profile_hash }}</code>
                         </div>
@@ -785,8 +796,9 @@ function onSectionClick(id: SettingsSectionId) {
                       <button
                         v-for="opt in (['light', 'dark', 'system'] as const)"
                         :key="opt"
-                        class="theme-card"
+                        class="theme-card pressable"
                         :class="{ 'theme-card--active': theme === opt }"
+                        :aria-pressed="theme === opt"
                         @click="setTheme(opt)"
                       >
                         <span class="theme-card-swatch" :class="`theme-card-swatch--${opt}`" aria-hidden="true" />
@@ -1081,17 +1093,21 @@ function onSectionClick(id: SettingsSectionId) {
   background: transparent;
   border: none;
   cursor: pointer;
-  text-align: left;
-  transition: background 0.15s, color 0.15s;
+  text-align: start;
   flex-shrink: 0;
+  --selection-background: color-mix(in srgb, var(--app-primary) 10%, transparent);
 }
+
+/* The item's content holds no controls of its own. WebKit drops :active (and
+   with it the press feedback) when the press lands on a clipped, truncated
+   descendant, so presses land on the item itself. */
+.settings-nav-item > * { pointer-events: none; }
 
 .settings-nav-item:hover {
   background: color-mix(in srgb, var(--app-muted) 50%, transparent);
 }
 
 .settings-nav-item--active {
-  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
   color: var(--app-primary);
 }
 
@@ -1143,7 +1159,6 @@ function onSectionClick(id: SettingsSectionId) {
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
 }
 
 .settings-copy-btn:hover {
@@ -1163,7 +1178,6 @@ function onSectionClick(id: SettingsSectionId) {
   background: var(--app-background);
   color: var(--app-foreground);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
 }
 
 .theme-card:hover {
@@ -1207,8 +1221,7 @@ function onSectionClick(id: SettingsSectionId) {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--app-foreground);
-  text-align: left;
-  transition: border-color 0.15s, background 0.15s;
+  text-align: start;
 }
 .vis-option--active {
   border-color: var(--app-primary);

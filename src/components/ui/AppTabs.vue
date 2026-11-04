@@ -19,8 +19,10 @@ defineEmits<{ 'update:modelValue': [key: string] }>()
     <button
       v-for="tab in tabs"
       :key="tab.key"
-      class="tab"
+      type="button"
+      class="tab pressable"
       :class="{ 'tab-active': modelValue === tab.key }"
+      :aria-pressed="modelValue === tab.key"
       @click="$emit('update:modelValue', tab.key)"
     >
       {{ tab.label }}

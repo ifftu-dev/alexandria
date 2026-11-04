@@ -43,16 +43,18 @@ const ChannelList = defineComponent({
             {
               key: ch.id,
               onClick: () => emit('select', ch.id),
+              'aria-current': props.activeChannelId === ch.id ? 'true' : undefined,
               class: [
-                'w-full flex items-center gap-2 px-3 py-2 rounded-lg my-1 text-sm transition-colors text-start',
+                'pressable selectable w-full flex items-center gap-2 px-3 py-2 rounded-lg my-1 text-sm text-start [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)]',
                 props.activeChannelId === ch.id
-                  ? 'bg-primary/10 text-primary font-medium'
+                  ? 'text-primary font-medium'
                   : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
               ],
             },
             [
               h('span', { class: 'text-muted-foreground/60 text-xs' }, '#'),
-              h('span', { class: 'truncate' }, ch.name),
+              // WebKit drops :active when a press lands on a clipped descendant.
+              h('span', { class: 'truncate pointer-events-none' }, ch.name),
               ch.channel_type === 'announcement'
                 ? h('span', { class: 'ms-auto text-xs text-warning', title: t('classrooms.channels.announcementBadge') }, '📢')
                 : null,
@@ -413,9 +415,13 @@ onBeforeUnmount(() => {
             {{ $t('classrooms.messages.loadMore') }}
           </button>
 
+          <!-- New messages rise in (full motion only); a channel's history,
+               and another channel, show at once. Sending never waits. -->
+          <TransitionGroup :key="activeChannelId ?? ''" name="motion-rise">
           <div
             v-for="msg in channelMessages"
             :key="msg.id"
+            data-classroom-message
             class="flex gap-3 group hover:bg-muted/50 rounded px-2 py-1 -mx-2"
           >
             <!-- Avatar -->
@@ -446,6 +452,7 @@ onBeforeUnmount(() => {
               </svg>
             </button>
           </div>
+          </TransitionGroup>
         </template>
       </div>
 

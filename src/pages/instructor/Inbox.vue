@@ -5,6 +5,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { holdLeavingPlace } from '@/composables/useMotion'
 import { AppButton, AppTabs, AppTextarea, EmptyState } from '@/components/ui'
 import type {
   CourseCompletionBinding,
@@ -229,11 +230,11 @@ async function copySignedEndorsement() {
       :description="$t('instructor.inbox.emptyDesc')"
     />
 
-    <div v-else class="space-y-2">
+    <TransitionGroup v-else name="motion-list" tag="div" appear class="relative space-y-2" @before-leave="holdLeavingPlace">
       <button
         v-for="item in visible"
         :key="`${item.kind}-${item.id}`"
-        class="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-start transition-colors hover:border-primary/50"
+        class="pressable flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-start hover:border-primary/50 [--press-scale:0.99] [&>*]:pointer-events-none"
         @click="open(item)"
       >
         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -247,6 +248,6 @@ async function copySignedEndorsement() {
         </span>
         <span class="shrink-0 text-xs text-muted-foreground">{{ item.created_at.slice(0, 16) }}</span>
       </button>
-    </div>
+    </TransitionGroup>
   </div>
 </template>

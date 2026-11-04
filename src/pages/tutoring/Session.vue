@@ -560,7 +560,7 @@ function peerInitials(nodeId: string): string {
         <!-- Diagnostics button -->
         <button
           v-if="isActive"
-          class="flex items-center gap-1 rounded-lg border border-border px-1.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          class="flex items-center gap-1 rounded-lg border border-border px-1.5 py-1.5 text-xs text-muted-foreground pressable hover:bg-muted hover:text-foreground"
           @click="handleShowDiagnostics"
           :title="$t('tutoring.session.diagnosticsTitle')"
         >
@@ -571,7 +571,7 @@ function peerInitials(nodeId: string): string {
 
         <button
           v-if="isActive && isIOS"
-          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground pressable hover:bg-muted"
           @click="openAudioDevices"
           :title="$t('tutoring.session.audioDevicesTitle')"
         >
@@ -582,7 +582,7 @@ function peerInitials(nodeId: string): string {
         </button>
         <button
           v-if="isActive && !isMobilePlatform"
-          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground pressable hover:bg-muted"
           data-testid="call-devices"
           @click="openCallDevices"
         >
@@ -592,7 +592,7 @@ function peerInitials(nodeId: string): string {
         <!-- Copy ticket -->
         <button
           v-if="isActive && sessionStatus?.ticket && offersInvites"
-          class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground pressable hover:bg-muted"
           @click="copyTicket"
           :title="ticketCopied ? $t('common.actions.copied') : $t('tutoring.session.copyInviteTitle')"
         >
@@ -608,7 +608,7 @@ function peerInitials(nodeId: string): string {
         <!-- Show QR invite -->
         <button
           v-if="isActive && sessionStatus?.ticket && offersInvites"
-          class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground pressable hover:bg-muted"
           @click="showQrInvite = true"
           :title="$t('tutoring.session.qrTitle')"
         >
@@ -622,7 +622,7 @@ function peerInitials(nodeId: string): string {
         <!-- Chat toggle -->
         <button
           v-if="isActive"
-          class="relative flex items-center gap-1 sm:gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium transition-colors"
+          class="relative flex items-center gap-1 sm:gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium pressable"
           :class="showChat ? 'bg-primary text-primary-foreground border-primary' : 'text-foreground hover:bg-muted'"
           @click="showChat = !showChat"
         >
@@ -641,7 +641,7 @@ function peerInitials(nodeId: string): string {
 
         <button
           v-if="isActive"
-          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs font-medium transition-colors"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs font-medium pressable"
           :class="sharedCaptionsEnabled ? 'border-primary bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'"
           :title="sharedCaptionsEnabled ? $t('tutoring.captions.stopTitle') : $t('tutoring.captions.startTitle')"
           @click="requestCaptions"
@@ -653,7 +653,7 @@ function peerInitials(nodeId: string): string {
         <!-- Leave -->
         <button
           v-if="isActive"
-          class="flex items-center gap-1 sm:gap-1.5 rounded-lg bg-destructive px-2.5 sm:px-3 py-1.5 text-xs font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+          class="flex items-center gap-1 sm:gap-1.5 rounded-lg bg-destructive px-2.5 sm:px-3 py-1.5 text-xs font-medium text-destructive-foreground pressable hover:bg-destructive/90"
           @click="showLeaveConfirm = true"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1016,7 +1016,7 @@ function peerInitials(nodeId: string): string {
           <!-- Mic toggle with VU meter ring -->
           <div class="relative">
             <button
-              class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
+              class="flex h-11 w-11 items-center justify-center rounded-full border pressable"
               :class="audioEnabled
                 ? 'border-border bg-muted text-foreground hover:bg-muted/80'
                 : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
@@ -1052,7 +1052,7 @@ function peerInitials(nodeId: string): string {
 
           <!-- Camera toggle (all platforms) -->
           <button
-            class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
+            class="flex h-11 w-11 items-center justify-center rounded-full border pressable"
             :class="videoEnabled && !screenSharing
               ? 'border-border bg-muted text-foreground hover:bg-muted/80'
               : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
@@ -1071,7 +1071,7 @@ function peerInitials(nodeId: string): string {
           <!-- Screen share toggle (desktop only) -->
           <button
             v-if="!isMobilePlatform"
-            class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
+            class="flex h-11 w-11 items-center justify-center rounded-full border pressable"
             :class="screenSharing
               ? 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/20'
               : 'border-border bg-muted text-foreground hover:bg-muted/80'"
@@ -1116,7 +1116,7 @@ function peerInitials(nodeId: string): string {
 
           <!-- Leave button (large, destructive) -->
           <button
-            class="flex h-11 items-center gap-2 rounded-full bg-destructive px-5 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+            class="flex h-11 items-center gap-2 rounded-full bg-destructive px-5 text-sm font-medium text-destructive-foreground pressable hover:bg-destructive/90"
             @click="showLeaveConfirm = true"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1157,7 +1157,7 @@ function peerInitials(nodeId: string): string {
           <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
             <h3 class="text-sm font-semibold text-foreground">{{ $t('tutoring.chat.title') }}</h3>
             <button
-              class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground pressable"
               @click="showChat = false"
             >
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1176,9 +1176,12 @@ function peerInitials(nodeId: string): string {
               <p class="text-[0.65rem] text-muted-foreground/60 mt-0.5">{{ $t('tutoring.chat.p2pHint') }}</p>
             </div>
 
+            <!-- A new message rises in (full motion only); input and scroll never wait. -->
+            <TransitionGroup name="motion-rise">
             <div
               v-for="(msg, i) in chatMessages"
               :key="i"
+              data-call-message
               class="group"
             >
               <div
@@ -1198,6 +1201,7 @@ function peerInitials(nodeId: string): string {
                 <p class="text-xs text-foreground/90 whitespace-pre-wrap break-words">{{ msg.text }}</p>
               </div>
             </div>
+            </TransitionGroup>
           </div>
 
           <!-- Chat input -->
@@ -1212,7 +1216,7 @@ function peerInitials(nodeId: string): string {
                 @keydown.enter="handleSendChat"
               />
               <button
-                class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground pressable hover:bg-primary/90 disabled:opacity-40"
                 :disabled="!chatInput.trim()"
                 @click="handleSendChat"
               >

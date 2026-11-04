@@ -5,7 +5,7 @@
 // tutorials — one implicit chapter), the selected element's editor on
 // the right. Draft ↔ publish lifecycle wraps the existing
 // `publish_course` pipeline.
-import { computed, ref, toRaw, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, toRaw, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -14,6 +14,7 @@ import OutlinePanel from '@/components/composer/OutlinePanel.vue'
 import ElementEditorHost from '@/components/composer/ElementEditorHost.vue'
 import StudioRunPanel from '@/components/composer/StudioRunPanel.vue'
 import { useStudio } from '@/composables/useStudio'
+import { animateMotion } from '@/composables/useMotion'
 import type { CourseStudio, LessonFeedback, StudioDocument, StudioRun, TutorPolicy } from '@/types'
 import type {
   Chapter,
@@ -60,6 +61,15 @@ const stages = computed(() => [
   { id: 'review', label: t('instructor.studio.review'), done: course.value?.status === 'published', status: t(course.value?.status === 'published' ? 'instructor.studio.published' : 'instructor.studio.awaitingReview') },
 ])
 const stageIndex = computed(() => stages.value.findIndex(item => item.id === stage.value))
+// The next stage settles in where the last one stood; saving and the switch
+// itself never wait for it.
+const stageContent = ref<HTMLElement | null>(null)
+let cancelStageMotion = () => {}
+watch(stage, () => {
+  cancelStageMotion()
+  if (stageContent.value) cancelStageMotion = animateMotion(stageContent.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
+}, { flush: 'post' })
+onBeforeUnmount(() => cancelStageMotion())
 async function saveStudio() {
   if (!courseStudio.value || !studioDirty.value) return true
   savingStudio.value = true; error.value = ''
@@ -484,14 +494,14 @@ async function deleteCourse() {
       <nav :aria-label="t('instructor.studio.creationStages')" class="border-b border-border">
         <ol class="grid grid-cols-4 divide-x divide-border">
           <li v-for="(item, index) in stages" :key="item.id" class="min-w-0">
-            <button type="button" class="flex min-h-20 w-full flex-col items-center justify-center gap-2 px-1 py-3 text-center sm:flex-row sm:justify-start sm:px-4 sm:text-start" :class="stage === item.id ? 'bg-primary/10 text-primary shadow-[inset_0_-3px_0_var(--app-primary)]' : 'hover:bg-muted/40 text-muted-foreground'" :aria-current="stage === item.id ? 'step' : undefined" aria-controls="course-stage-content" :disabled="savingStudio" @click="switchStage(item.id)">
+            <button type="button" class="pressable selectable flex min-h-20 w-full flex-col items-center justify-center gap-2 px-1 py-3 text-center sm:flex-row sm:justify-start sm:px-4 sm:text-start [--press-scale:0.985] [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)] [--selection-shadow:inset_0_-3px_0_var(--app-primary)]" :class="stage === item.id ? 'text-primary' : 'hover:bg-muted/40 text-muted-foreground'" :aria-current="stage === item.id ? 'step' : undefined" aria-controls="course-stage-content" :disabled="savingStudio" @click="switchStage(item.id)">
               <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold" :class="stage === item.id ? 'bg-primary text-primary-foreground' : item.done ? 'bg-success/10 text-success' : 'border border-border'">{{ item.done ? '✓' : index + 1 }}</span>
               <span class="min-w-0"><strong class="block text-[11px] sm:text-sm">{{ item.label }}</strong><small class="mt-1 hidden text-xs font-normal text-muted-foreground sm:block">{{ item.status }}</small></span>
             </button>
           </li>
         </ol>
       </nav>
-      <div id="course-stage-content" role="region" :aria-label="stages[stageIndex]?.label" class="space-y-5 p-4 sm:p-6">
+      <div id="course-stage-content" ref="stageContent" role="region" :aria-label="stages[stageIndex]?.label" class="space-y-5 p-4 sm:p-6">
       <form v-if="stage === 'brief' && courseStudio" class="max-w-3xl space-y-5" @submit.prevent="saveStudio">
         <header><h2 class="text-xl font-semibold">{{ t('instructor.studio.briefHeading') }}</h2><p class="mt-2 text-sm text-muted-foreground">{{ t('instructor.studio.briefHelp') }}</p></header>
         <AppInput v-model="courseStudio.value.audience" :label="t('instructor.studio.audience')" :maxlength="4000" />

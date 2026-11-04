@@ -2,10 +2,11 @@
 // One child's mirrored activity: courses & progress, submissions,
 // classrooms — everything their device has pushed over the sealed
 // guardian link.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useGuardian, childAge } from '@/composables/useGuardian'
+import { animateMotion } from '@/composables/useMotion'
 import { AppBadge, AppButton, AppTabs, EmptyState } from '@/components/ui'
 import type { GuardianLinkInfo } from '@/types'
 import GuardianAiRequests from '@/components/guardian/GuardianAiRequests.vue'
@@ -73,6 +74,16 @@ const tabs = computed(() => [
   { key: 'submissions', label: t('guardian.detail.tabSubmissions') },
   { key: 'classrooms', label: t('guardian.detail.tabClassrooms') },
 ])
+
+// The chosen tab's content settles in where the last one stood. The tab
+// itself changes at once; nothing waits for the motion.
+const panel = ref<HTMLElement | null>(null)
+let cancelPanelMotion = () => {}
+watch(activeTab, () => {
+  cancelPanelMotion()
+  if (panel.value) cancelPanelMotion = animateMotion(panel.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
+}, { flush: 'post' })
+onBeforeUnmount(() => cancelPanelMotion())
 
 const courseTitle = (courseId: string) =>
   courses.value.find(c => c.id === courseId)?.title ?? `${courseId.slice(0, 12)}…`
@@ -180,6 +191,7 @@ function pct(v: number | null): string {
 
     <AppTabs v-model="activeTab" :tabs="tabs" />
 
+    <div ref="panel" data-guardian-panel class="space-y-6">
     <div v-if="loading" class="space-y-2">
       <div v-for="i in 4" :key="i" class="h-14 animate-pulse rounded-lg bg-muted-foreground/8" />
     </div>
@@ -320,5 +332,6 @@ function pct(v: number | null): string {
         </div>
       </div>
     </template>
+    </div>
   </div>
 </template>

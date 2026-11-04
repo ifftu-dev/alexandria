@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import { useDragReorder } from './useDragReorder'
+import { holdLeavingPlace } from '@/composables/useMotion'
 import type { Chapter, CreateChapterRequest, CreateElementRequest, Element } from '@/types'
 
 const props = defineProps<{
@@ -135,6 +136,9 @@ function typeLabel(type: string): string {
 
 <template>
   <div class="space-y-3">
+    <!-- Chapters and elements arrive, leave and move into a new order as one
+         motion-list (full motion only); drops and adds never wait for it. -->
+    <TransitionGroup name="motion-list" tag="div" class="relative space-y-3" @before-leave="holdLeavingPlace">
     <div
       v-for="(chapter, chIdx) in chapters"
       :key="chapter.id"
@@ -165,14 +169,17 @@ function typeLabel(type: string): string {
 
       <!-- Elements -->
       <div class="p-1.5 space-y-0.5">
+        <TransitionGroup name="motion-list" tag="div" class="relative space-y-0.5" @before-leave="holdLeavingPlace">
         <button
           v-for="el in elements[chapter.id] ?? []"
           :key="el.id"
-          class="w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm transition-colors cursor-grab"
+          data-outline-element
+          class="pressable selectable w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm cursor-grab [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)] [&>*]:pointer-events-none"
           :class="[
-            selectedElementId === el.id ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/40',
+            selectedElementId === el.id ? 'text-primary' : 'text-foreground hover:bg-muted/40',
             { 'opacity-50': dragFor(chapter.id).draggingId.value === el.id },
           ]"
+          :aria-current="selectedElementId === el.id ? 'true' : undefined"
           draggable="true"
           @click="emit('select', el)"
           @dragstart="dragFor(chapter.id).onDragStart(el.id, $event)"
@@ -185,6 +192,7 @@ function typeLabel(type: string): string {
             {{ typeLabel(el.element_type) }}
           </span>
         </button>
+        </TransitionGroup>
 
         <!-- Add element -->
         <div v-if="addingToChapter === chapter.id" class="rounded-md border border-dashed border-border p-2 space-y-2">
@@ -214,6 +222,7 @@ function typeLabel(type: string): string {
         </button>
       </div>
     </div>
+    </TransitionGroup>
 
     <!-- Add chapter (course mode only) -->
     <template v-if="!flat">

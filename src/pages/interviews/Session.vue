@@ -803,10 +803,12 @@ function formatTime(ms: number) {
     <AppModal :open="showChat" :title="$t('interviews.session.chatTitle')" max-width="28rem" @close="showChat = false">
       <div class="max-h-80 space-y-2 overflow-y-auto">
         <p v-if="tutoring.chatMessages.value.length === 0" class="py-8 text-center text-sm text-muted-foreground">{{ $t('interviews.session.chatEmpty') }}</p>
-        <div v-for="(message, index) in tutoring.chatMessages.value" :key="index" class="rounded-lg bg-muted p-3">
-          <p class="text-xs font-semibold text-primary">{{ message.sender_name || (message.sender === 'self' ? 'You' : message.sender.slice(0, 8)) }}</p>
-          <p class="mt-1 text-sm text-foreground">{{ message.text }}</p>
-        </div>
+        <TransitionGroup name="motion-rise">
+          <div v-for="(message, index) in tutoring.chatMessages.value" :key="index" data-call-message class="rounded-lg bg-muted p-3">
+            <p class="text-xs font-semibold text-primary">{{ message.sender_name || (message.sender === 'self' ? 'You' : message.sender.slice(0, 8)) }}</p>
+            <p class="mt-1 text-sm text-foreground">{{ message.text }}</p>
+          </div>
+        </TransitionGroup>
       </div>
       <form class="mt-4 flex gap-2" @submit.prevent="sendChat"><input v-model="chatInput" class="input flex-1" :placeholder="$t('interviews.session.chatPlaceholder')" /><AppButton type="submit" size="sm" :disabled="!chatInput.trim()">{{ $t('interviews.common.send') }}</AppButton></form>
     </AppModal>
