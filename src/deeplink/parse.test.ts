@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDeepLink } from './parse'
+import { isInAppPath, parseDeepLink } from './parse'
 
 describe('parseDeepLink', () => {
   describe('interview panel', () => {
@@ -126,6 +126,26 @@ describe('parseDeepLink', () => {
     })
     it('rejects a missing route param', () => {
       expect(parseDeepLink('alexandria://open')).toBeNull()
+    })
+    it('rejects a backslash route a browser would read as another origin', () => {
+      expect(parseDeepLink('alexandria://open?route=%2F%5Cevil.com%2Fx')).toBeNull()
+    })
+  })
+
+  describe('isInAppPath', () => {
+    it('accepts same-document absolute paths', () => {
+      for (const path of ['/', '/skills/rust', '/credentials/1?tab=proof#top', '/guardian?accept=a%2Fb']) {
+        expect(isInAppPath(path), path).toBe(true)
+      }
+    })
+    it('rejects anything that could leave the app or is not a path', () => {
+      for (const path of [
+        '', null, undefined, 'skills', ' /skills', '//evil.example/x', '/\\evil.example', '\\/evil.example',
+        '/\tevil', '/\n/evil.example', 'javascript:alert(1)', '/javascript:alert(1)\u0000',
+        'https://evil.example', 'alexandria://open?route=/x',
+      ]) {
+        expect(isInAppPath(path), JSON.stringify(path)).toBe(false)
+      }
     })
   })
 

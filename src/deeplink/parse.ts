@@ -30,6 +30,30 @@ export type DeepLinkTarget =
    *  router's registered routes before navigating (defense in depth). */
   | { kind: 'route'; path: string }
 
+// Resolves relative paths in `isInAppPath`; never fetched or shown.
+const PATH_BASE = 'http://in-app.invalid'
+
+/**
+ * Is this a same-document absolute path: one leading slash, then nothing a
+ * URL parser could read as another origin? Rejects protocol-relative `//host`,
+ * backslashes (`/\host` is `//host` to a browser), control characters and
+ * whitespace (parsers strip tabs and newlines, so `/\t/host` would become
+ * `//host`), and every scheme. The one check for every in-app route a link,
+ * notification or caller hands over; the router still has to know the path.
+ */
+export function isInAppPath(path: string | null | undefined): path is string {
+  if (!path || path[0] !== '/' || path[1] === '/') return false
+  for (let i = 0; i < path.length; i++) {
+    const code = path.charCodeAt(i)
+    if (code <= 0x20 || code === 0x7f || code === 0x5c) return false
+  }
+  try {
+    return new URL(path, PATH_BASE).origin === PATH_BASE
+  } catch {
+    return false
+  }
+}
+
 /**
  * Parse a raw deep-link URL into a canonical {@link DeepLinkTarget}, or null
  * if it is not a recognized Alexandria link.
@@ -95,10 +119,9 @@ export function parseDeepLink(raw: string): DeepLinkTarget | null {
     case 'open': {
       // alexandria://open?route=/any/in-app/path  (generic fallback)
       const route = url.searchParams.get('route')
-      // Must be a same-document absolute path. Reject protocol-relative
-      // (`//host`) and anything not starting with a single slash so this can
-      // never become an open redirect to an external origin.
-      if (!route || !route.startsWith('/') || route.startsWith('//')) return null
+      // Must be a same-document absolute path, so this can never become an
+      // open redirect to an external origin.
+      if (!isInAppPath(route)) return null
       return { kind: 'route', path: route }
     }
     default:

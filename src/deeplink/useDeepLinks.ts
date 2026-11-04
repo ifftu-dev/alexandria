@@ -16,7 +16,7 @@ import { isNavigationFailure, NavigationFailureType, type RouteLocationRaw } fro
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import router from '@/router'
 import { useProfiles, onProfileReady } from '@/composables/useProfiles'
-import { parseDeepLink, type DeepLinkTarget } from './parse'
+import { isInAppPath, parseDeepLink, type DeepLinkTarget } from './parse'
 
 let initialized = false
 let replayRegistered = false
@@ -45,7 +45,7 @@ async function replay(): Promise<void> {
       const resolved = await useLocalApi().invoke<NotificationOpen | null>('notifications_pending_open')
       if (session !== getProfileSessionToken() || pending !== target || !resolved
         || resolved.id !== intent.id || resolved.profile_id !== intent.profile_id
-        || !resolved.route.startsWith('/') || resolved.route.startsWith('//')) return
+        || !isInAppPath(resolved.route)) return
       destination = { kind: 'route', path: resolved.route }
     }
     if (!await navigate(destination)) return
@@ -64,7 +64,7 @@ async function replay(): Promise<void> {
 }
 
 async function openNotification(intent: NotificationOpen): Promise<void> {
-  if (!intent.id || !intent.profile_id || (intent.route !== '' && (!intent.route?.startsWith('/') || intent.route.startsWith('//')))) return
+  if (!intent.id || !intent.profile_id || (intent.route !== '' && !isInAppPath(intent.route))) return
   if (consumed.has(intent.id) || notification?.id === intent.id) return
   ensureReplay()
   pending = { kind: 'route', path: intent.route }
@@ -157,7 +157,7 @@ async function openTarget(target: DeepLinkTarget): Promise<void> {
  * absolute, same-document, and known to the router (checked at navigation).
  */
 async function openPath(path: string | null | undefined): Promise<void> {
-  if (!path || !path.startsWith('/') || path.startsWith('//')) return
+  if (!isInAppPath(path)) return
   await openTarget({ kind: 'route', path })
 }
 

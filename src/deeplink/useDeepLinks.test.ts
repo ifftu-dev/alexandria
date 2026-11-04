@@ -73,6 +73,9 @@ describe('openPath', () => {
     const links = await fresh()
     mocks.unlocked.value = true
     await links.openPath('//evil.example/x')
+    await links.openPath('/\\evil.example/x')
+    await links.openPath('/\t/evil.example/x')
+    await links.openPath('javascript:alert(1)')
     await links.openPath('skills')
     await links.openPath('')
     expect(mocks.push).not.toHaveBeenCalled()
@@ -92,6 +95,17 @@ describe('openLink', () => {
 })
 
 describe('recipient-bound notification taps', () => {
+  it('refuses a tap or a held open whose route could leave the app', async () => {
+    const links = await fresh()
+    mocks.unlocked.value = true
+    mocks.profile.value = 'A'
+    await links.openNotification({ id: 'bad', profile_id: 'A', network_id: 'network', recipient: null, route: '/\\evil.example' })
+    mocks.invoke.mockResolvedValueOnce({ id: 'held', profile_id: 'A', network_id: 'network', recipient: null, route: '/\\evil.example' })
+    await links.openNotification({ id: 'held', profile_id: 'A', network_id: 'network', recipient: null, route: '' })
+    expect(mocks.invoke).toHaveBeenCalledWith('notifications_pending_open')
+    expect(mocks.push).not.toHaveBeenCalled()
+  })
+
   it('holds A through B unlock, then routes A once despite event and drain delivery', async () => {
     const links = await fresh()
     const tap = { id: 'tap-1', profile_id: 'A', network_id: 'network', recipient: 'binding-A', route: '/settings/organisations' }
