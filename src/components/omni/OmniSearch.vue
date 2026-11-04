@@ -103,27 +103,13 @@ watch(isOpen, async (val) => {
 
 <template>
   <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-150 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-100 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
+    <Transition name="motion-fade">
       <div
         v-if="isOpen"
         class="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[15vh]"
         @click.self="close"
       >
-        <Transition
-          enter-active-class="transition duration-150 ease-out"
-          enter-from-class="opacity-0 translate-y-[-8px]"
-          enter-to-class="opacity-100 translate-y-0"
-          leave-active-class="transition duration-100 ease-in"
-          leave-from-class="opacity-100 translate-y-0"
-          leave-to-class="opacity-0 translate-y-[-8px]"
-        >
+        <Transition name="motion-pop" appear>
           <div
             v-if="isOpen"
             class="card overflow-hidden w-full max-w-[40rem] shadow-lg"
@@ -188,34 +174,72 @@ watch(isOpen, async (val) => {
                   <p class="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {{ group.label }}
                   </p>
+                  <TransitionGroup name="motion-rise" appear>
+                    <button
+                      v-for="item in group.items"
+                      :key="item.id"
+                      type="button"
+                      :data-omni-selected="flatIndexFor(item.type, item.id) === selectedIndex"
+                      class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
+                      :class="
+                        flatIndexFor(item.type, item.id) === selectedIndex
+                          ? 'bg-primary/10 text-foreground'
+                          : 'hover:bg-muted/40 text-foreground'
+                      "
+                      @click="onClickItem(flatIndexFor(item.type, item.id))"
+                      @mousemove="selectedIndex = flatIndexFor(item.type, item.id)"
+                    >
+                      <span v-if="item.icon" class="text-base flex-shrink-0">{{ item.icon }}</span>
+                      <span
+                        v-else
+                        class="w-4 h-4 flex-shrink-0 text-muted-foreground"
+                      >
+                        <!-- Domain icon -->
+                        <svg v-if="item.type === 'skill'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        <svg v-else-if="item.type === 'course' || item.type === 'catalog'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                        <svg v-else-if="item.type === 'classroom'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a3 3 0 015.356-1.857M17 10.5a4 4 0 10-8 0 4 4 0 008 0z" />
+                        </svg>
+                      </span>
+                      <span class="flex-1 min-w-0">
+                        <span class="block text-sm truncate">{{ item.title }}</span>
+                        <span
+                          v-if="item.subtitle"
+                          class="block text-xs text-muted-foreground truncate"
+                        >
+                          {{ item.subtitle }}
+                        </span>
+                      </span>
+                    </button>
+                  </TransitionGroup>
+                </div>
+              </template>
+
+              <!-- Ungrouped recents when query is empty -->
+              <template v-else>
+                <TransitionGroup name="motion-rise" appear>
                   <button
-                    v-for="item in group.items"
+                    v-for="(item, index) in visibleItems"
                     :key="item.id"
                     type="button"
-                    :data-omni-selected="flatIndexFor(item.type, item.id) === selectedIndex"
+                    :data-omni-selected="index === selectedIndex"
                     class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
                     :class="
-                      flatIndexFor(item.type, item.id) === selectedIndex
+                      index === selectedIndex
                         ? 'bg-primary/10 text-foreground'
                         : 'hover:bg-muted/40 text-foreground'
                     "
-                    @click="onClickItem(flatIndexFor(item.type, item.id))"
-                    @mousemove="selectedIndex = flatIndexFor(item.type, item.id)"
+                    @click="onClickItem(index)"
+                    @mousemove="selectedIndex = index"
                   >
                     <span v-if="item.icon" class="text-base flex-shrink-0">{{ item.icon }}</span>
-                    <span
-                      v-else
-                      class="w-4 h-4 flex-shrink-0 text-muted-foreground"
-                    >
-                      <!-- Domain icon -->
-                      <svg v-if="item.type === 'skill'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                      </svg>
-                      <svg v-else-if="item.type === 'course' || item.type === 'catalog'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                      <svg v-else-if="item.type === 'classroom'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a3 3 0 015.356-1.857M17 10.5a4 4 0 10-8 0 4 4 0 008 0z" />
+                    <span v-else class="w-4 h-4 text-muted-foreground flex-shrink-0">
+                      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     </span>
                     <span class="flex-1 min-w-0">
@@ -228,41 +252,7 @@ watch(isOpen, async (val) => {
                       </span>
                     </span>
                   </button>
-                </div>
-              </template>
-
-              <!-- Ungrouped recents when query is empty -->
-              <template v-else>
-                <button
-                  v-for="(item, index) in visibleItems"
-                  :key="item.id"
-                  type="button"
-                  :data-omni-selected="index === selectedIndex"
-                  class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
-                  :class="
-                    index === selectedIndex
-                      ? 'bg-primary/10 text-foreground'
-                      : 'hover:bg-muted/40 text-foreground'
-                  "
-                  @click="onClickItem(index)"
-                  @mousemove="selectedIndex = index"
-                >
-                  <span v-if="item.icon" class="text-base flex-shrink-0">{{ item.icon }}</span>
-                  <span v-else class="w-4 h-4 text-muted-foreground flex-shrink-0">
-                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </span>
-                  <span class="flex-1 min-w-0">
-                    <span class="block text-sm truncate">{{ item.title }}</span>
-                    <span
-                      v-if="item.subtitle"
-                      class="block text-xs text-muted-foreground truncate"
-                    >
-                      {{ item.subtitle }}
-                    </span>
-                  </span>
-                </button>
+                </TransitionGroup>
               </template>
             </div>
 

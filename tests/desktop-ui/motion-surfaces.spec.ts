@@ -134,3 +134,57 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
     if (mode !== 'System') expect(await indicator(tutoring)).toBe('1')
   })
 }
+
+/**
+ * Start `act`, and once an element matching `selector` with `text` arrives,
+ * report (two frames later) the motion running inside `scope`.
+ */
+async function motionOnArrival(page: Page, act: () => Promise<void>, selector: string, text: string, scope: string): Promise<number> {
+  const arrival = page.evaluate(([selector, text, scope]) => new Promise<number>(resolve => {
+    const arrived = () => [...document.querySelectorAll(selector)].some(el => el.textContent?.includes(text))
+    const report = () => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const root = document.querySelector(scope)
+      const animations = root ? root.getAnimations({ subtree: true }) : []
+      resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1).length)
+    }))
+    if (arrived()) return report()
+    const observer = new MutationObserver(() => { if (arrived()) { observer.disconnect(); report() } })
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true })
+  }), [selector, text, scope] as const)
+  await act()
+  return arrival
+}
+
+/** Whether a pointer at the centre of `target` reaches it, one frame after `act` runs in the page. */
+async function reachableAfter(actor: Locator, target: Locator, act: (el: Element) => void): Promise<boolean> {
+  const handle = await target.elementHandle()
+  return actor.evaluate((el, [target, source]) => new Promise<boolean>(resolve => {
+    new Function('el', `(${source})(el)`)(el)
+    requestAnimationFrame(() => {
+      const box = target!.getBoundingClientRect()
+      resolve(target!.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)))
+    })
+  }), [handle, act.toString()] as const)
+}
+
+for (const mode of ['System', 'Reduced', 'Off'] as const) {
+  test(`search opens, brings results in and closes under the motion setting (${mode})`, async ({ page }) => {
+    await open(page)
+    await setMode(page, mode)
+    expectMotion(await motionAfter(page.getByRole('button', { name: 'Open search' })), mode)
+    const search = page.getByRole('dialog', { name: 'Search' })
+    await expect(search).toBeVisible()
+    await expect(search.getByRole('textbox')).toBeFocused()
+
+    const entry = await motionOnArrival(page, () => search.getByRole('textbox').fill('Sort'), '[role="dialog"] button', 'Sorting algorithms', '[role="dialog"]')
+    expectMotion(entry, mode)
+    await expect(search.getByRole('button', { name: /Sorting algorithms/ })).toHaveCSS('opacity', '1')
+
+    // Closing never holds the page: the next pointer lands at once.
+    const goals = page.locator('aside').getByRole('button', { name: 'Goals', exact: true })
+    expect(await reachableAfter(search.getByRole('textbox'), goals, input => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })).toBe(true)
+    await expect(search).toHaveCount(0)
+  })
+}
