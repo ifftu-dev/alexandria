@@ -586,8 +586,8 @@ const avatarEmoji = computed(() => {
   height: 1rem;
   padding: 0 0.25rem;
   border-radius: 9999px;
-  background: var(--app-error, #dc2626);
-  color: #fff;
+  background: var(--app-error);
+  color: var(--app-error-foreground);
   font-size: 0.6rem;
   font-weight: 700;
   line-height: 1rem;

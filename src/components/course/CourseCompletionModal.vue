@@ -472,8 +472,8 @@ function continueToDashboard() {
   max-width: 28rem;
   padding: 2rem 1.75rem 1.5rem;
   border-radius: 1.25rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.2));
-  background: var(--app-card, #0b1220);
+  border: 1px solid var(--app-border);
+  background: var(--app-card);
   box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02);
   text-align: center;
   max-height: calc(100vh - 2rem);
@@ -491,16 +491,16 @@ function continueToDashboard() {
   height: 44px;
   margin: -1rem -0.75rem -1.75rem auto;
   border-radius: 0.75rem;
-  background: var(--app-card, #0b1220);
-  color: var(--app-muted-foreground, #94a3b8);
+  background: var(--app-card);
+  color: var(--app-muted-foreground);
 }
-.celebrate-close:hover { color: var(--app-foreground, #e2e8f0); }
-.celebrate-close:focus-visible { outline: 2px solid var(--app-primary, #818cf8); outline-offset: 2px; }
+.celebrate-close:hover { color: var(--app-foreground); }
+.celebrate-close:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 2px; }
 
 .endorsement {
   margin-top: 1rem;
   padding: 0.8rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.2));
+  border: 1px solid var(--app-border);
   border-radius: 0.75rem;
   background: rgba(148, 163, 184, 0.06);
 }
@@ -513,12 +513,12 @@ function continueToDashboard() {
 .endorsement-title {
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .endorsement-note,
 .endorsement-label {
   font-size: 0.68rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .endorsement-label {
   display: block;
@@ -528,12 +528,12 @@ function continueToDashboard() {
 }
 .endorsement-refresh,
 .endorsement-button {
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--app-border);
   border-radius: 0.45rem;
   padding: 0.3rem 0.55rem;
   font-size: 0.68rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .endorsement-button {
   width: 100%;
@@ -553,9 +553,9 @@ function continueToDashboard() {
   text-align: left;
 }
 .endorsement-warning,
-.endorsement-error { color: var(--app-error, #f87171); }
+.endorsement-error { color: var(--app-error); }
 .endorsement-message,
-.endorsement-status { color: var(--app-success, #34d399); }
+.endorsement-status { color: var(--app-success); }
 .endorsement-warning ul { margin: 0.25rem 0 0; padding-left: 1rem; }
 .endorsement-facts {
   margin-top: 0.65rem;
@@ -566,25 +566,25 @@ function continueToDashboard() {
 .endorsement-facts div { min-width: 0; }
 .endorsement-facts dt {
   font-size: 0.62rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .endorsement-facts dd {
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.65rem;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .endorsement-json {
   display: block;
   width: 100%;
   resize: vertical;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--app-border);
   border-radius: 0.45rem;
-  background: var(--app-background, #020617);
+  background: var(--app-background);
   padding: 0.45rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.62rem;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 
 /* Emblem */
@@ -653,12 +653,12 @@ function continueToDashboard() {
   font-size: 1.5rem;
   font-weight: 800;
   margin: 0.15rem 0 0.1rem;
-  color: var(--app-foreground, #f8fafc);
+  color: var(--app-foreground);
   animation: fade-up 0.5s ease 0.22s both;
 }
 .course-name {
   font-size: 0.95rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
   margin: 0;
   animation: fade-up 0.5s ease 0.28s both;
 }
@@ -682,14 +682,14 @@ function continueToDashboard() {
 .chip-more {
   background: rgba(148, 163, 184, 0.12);
   border-color: rgba(148, 163, 184, 0.3);
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 
 .mint {
   margin-top: 1.25rem;
   padding: 0.75rem 0.85rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.18));
+  border: 1px solid var(--app-border);
   background: rgba(148, 163, 184, 0.06);
   text-align: left;
   animation: fade-up 0.5s ease 0.4s both;
@@ -715,11 +715,11 @@ function continueToDashboard() {
   margin-bottom: 0.3rem;
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .mint-meter span:first-child {
   font-weight: 700;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .mint-bar {
   height: 6px;
@@ -774,7 +774,7 @@ function continueToDashboard() {
   min-width: 0;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -782,7 +782,7 @@ function continueToDashboard() {
 .mint-item-kind {
   flex: none;
   font-size: 0.65rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .mint-status {
   flex: none;
@@ -792,7 +792,7 @@ function continueToDashboard() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
   background: rgba(148, 163, 184, 0.15);
 }
 .mint-status.done {
@@ -802,11 +802,11 @@ function continueToDashboard() {
 .mint-label {
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .mint-note {
   font-size: 0.72rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .mint-tx {
   display: inline-block;
@@ -833,7 +833,7 @@ function continueToDashboard() {
   padding: 0.55rem 0.6rem;
   border-radius: 0.55rem;
   background: rgba(148, 163, 184, 0.08);
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.18));
+  border: 1px solid var(--app-border);
 }
 .unmet-head {
   display: flex;
@@ -844,7 +844,7 @@ function continueToDashboard() {
 .unmet-title {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -862,18 +862,18 @@ function continueToDashboard() {
 }
 .unmet-badge.is-none {
   background: rgba(148, 163, 184, 0.18);
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .unmet-scores {
   display: flex;
   justify-content: space-between;
   margin-top: 0.3rem;
   font-size: 0.68rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 .unmet-scores strong {
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .unmet-bar {
   position: relative;
@@ -900,14 +900,14 @@ function continueToDashboard() {
   margin: 0.7rem 0 0.25rem;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .unmet-why {
   margin: 0;
   padding-left: 1rem;
   font-size: 0.7rem;
   line-height: 1.45;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .unmet-cta {
   margin: 0.55rem 0 0;
@@ -928,9 +928,9 @@ function continueToDashboard() {
   font-weight: 600;
   padding: 0.55rem 0.75rem;
   border-radius: 0.6rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--app-border);
   background: transparent;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
   cursor: pointer;
   transition: background-color var(--duration-fast) ease, transform var(--duration-fast) ease;
 }

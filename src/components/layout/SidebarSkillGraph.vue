@@ -3,7 +3,6 @@ import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
-import '@/assets/css/skill-atlas.css'
 
 const { t } = useI18n()
 const atlas = useSkillAtlas()
@@ -23,7 +22,7 @@ function expand(field?: AtlasField, node?: AtlasNode): void {
 </script>
 
 <template>
-  <section class="sidebar-atlas skill-atlas-colors" :aria-label="t('skills.atlas.title')">
+  <section class="sidebar-atlas" :aria-label="t('skills.atlas.title')">
     <template v-if="model">
       <button class="expand" type="button" @click="expand()">{{ t('skills.graph.expandTitle') }} <span aria-hidden="true">↗</span></button>
       <p>{{ t('skills.atlas.fieldCounts', model.counts) }}</p>

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import '@/assets/css/skill-atlas.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, NODE_HEIGHT, NODE_WIDTH } from './atlasLayout'
@@ -228,7 +227,7 @@ function setBloom(event: Event): void {
 </script>
 
 <template>
-  <section class="atlas skill-atlas-colors" :class="{ 'motion-reduced': motionReduced }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
+  <section class="atlas" :class="{ 'motion-reduced': motionReduced }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
     <header class="atlas-heading">
       <div><p class="atlas-eyebrow">{{ t('skills.atlas.title') }}</p><h2>{{ t('skills.atlas.fieldCounts', model.counts) }}</h2></div>
       <button type="button" @click="reset">{{ t('skills.atlas.reset') }}</button>
