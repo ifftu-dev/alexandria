@@ -918,6 +918,9 @@ pub fn run() {
                         };
                         let guardian_lease = lease.clone();
                         let chain_lease = lease.clone();
+                        // What this pass records is announced to this
+                        // session only; a switch in between drops it.
+                        let session = lease.session_id().to_owned();
                         // This pass contains cancellation-safe provider/P2P
                         // awaits and synchronous local transactions, not detached
                         // blocking jobs. Stop on lock before releasing its lease;
@@ -1089,7 +1092,11 @@ pub fn run() {
                                     // Each new credential is something to tell
                                     // the learner about.
                                     for recorded in issued_notifications {
-                                        notifications::announce(&app_for_notifications, &recorded);
+                                        notifications::announce(
+                                            &app_for_notifications,
+                                            &session,
+                                            &recorded,
+                                        );
                                     }
                                 }
 
@@ -1288,6 +1295,7 @@ pub fn run() {
                                                     };
                                                     if let Err(e) = notifications::deliver(
                                                         &app_for_notifications,
+                                                        &session,
                                                         db.conn(),
                                                         &notification,
                                                     ) {

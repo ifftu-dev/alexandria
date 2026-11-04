@@ -2515,8 +2515,8 @@ async fn swarm_event_loop(
                                         let peer_id = peer.to_string();
                                         let events = event_tx.clone();
                                         inbound_requests.spawn(async move {
-                                            let response = job_db
-                                                .run("p2p.guardian", move |database| {
+                                            let (response, session) = job_db
+                                                .run_in_session("p2p.guardian", move |database| {
                                                     Ok(super::guardian::handle_guardian_request(
                                                         database.conn(),
                                                         &peer_id,
@@ -2525,10 +2525,10 @@ async fn swarm_event_loop(
                                                 })
                                                 .await
                                                 .unwrap_or_else(|error| {
-                                                    GuardianResponse::Error(inbound::refusal_text(&error))
+                                                    (GuardianResponse::Error(inbound::refusal_text(&error)), String::new())
                                                 });
                                             if let GuardianResponse::Linked { notification, .. } = &response {
-                                                let _ = events.send(P2pEvent::GuardianLinked { notification: notification.clone() }).await;
+                                                let _ = events.send(P2pEvent::GuardianLinked { session, notification: notification.clone() }).await;
                                             }
                                             InboundCompletion::Guardian(channel, response)
                                         });

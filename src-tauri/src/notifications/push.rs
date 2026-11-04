@@ -618,9 +618,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
         tauri::async_runtime::spawn(async move {
             let state = app.state::<AppState>();
             if let Ok(Some(recorded)) = receive(&state, lease.clone(), payload).await {
-                if lease.is_current() {
-                    super::announce(&app, &recorded);
-                }
+                super::announce(&app, lease.session_id(), &recorded);
             }
         });
     });

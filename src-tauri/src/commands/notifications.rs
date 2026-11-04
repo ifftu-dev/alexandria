@@ -46,11 +46,12 @@ pub async fn notifications_mark_read(
     state: State<'_, AppState>,
     ids: Vec<String>,
 ) -> Result<(), String> {
+    let lease = state.profile_lease();
     let unread = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "notifications.mark_read",
             move |db| {
                 let now = crate::clock::now_rfc3339();
@@ -59,7 +60,7 @@ pub async fn notifications_mark_read(
             },
         )
         .await?;
-    notifications::emit_changed(&app, unread);
+    notifications::emit_changed(&app, lease.session_id(), unread);
     Ok(())
 }
 
@@ -68,11 +69,12 @@ pub async fn notifications_mark_all_read(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let lease = state.profile_lease();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "notifications.mark_all_read",
             |db| {
                 let now = crate::clock::now_rfc3339();
@@ -80,7 +82,7 @@ pub async fn notifications_mark_all_read(
             },
         )
         .await?;
-    notifications::emit_changed(&app, 0);
+    notifications::emit_changed(&app, lease.session_id(), 0);
     Ok(())
 }
 
@@ -88,16 +90,17 @@ pub async fn notifications_mark_all_read(
 /// next background pass does not bring them all back.
 #[tauri::command]
 pub async fn notifications_clear(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let lease = state.profile_lease();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "notifications.clear",
             |db| notifications::clear(db.conn()).map(drop),
         )
         .await?;
-    notifications::emit_changed(&app, 0);
+    notifications::emit_changed(&app, lease.session_id(), 0);
     Ok(())
 }
 
@@ -213,17 +216,18 @@ pub async fn notifications_emit_test(
         .route("/notifications"),
     }
     .payload(serde_json::json!({ "id": id, "test": true }));
+    let lease = state.profile_lease();
     let recorded = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "notifications.emit_test",
             move |db| notifications::record_if_enabled(db.conn(), &notification),
         )
         .await?
         .ok_or("notifications are switched off for this profile")?;
-    notifications::announce(&app, &recorded);
+    notifications::announce(&app, lease.session_id(), &recorded);
     Ok(recorded.row)
 }
 

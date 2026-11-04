@@ -153,10 +153,28 @@ impl InboundDatabase {
         T: Send + 'static,
         F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
     {
+        self.run_in_session(label, operation)
+            .await
+            .map(|(value, _)| value)
+    }
+
+    /// [`run`](Self::run), also naming the profile session the job ran under,
+    /// so whatever it produced is announced to that profile and no other.
+    pub(crate) async fn run_in_session<T, F>(
+        &self,
+        label: &'static str,
+        operation: F,
+    ) -> Result<(T, String), String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
+    {
         let lease = self.lease()?;
+        let session = lease.session_id().to_owned();
         self.executor
             .execute(DatabaseWorkload::Background, lease, label, operation)
             .await
+            .map(|value| (value, session))
     }
 }
 
@@ -241,13 +259,14 @@ pub(crate) enum InboundUiEvent {
 }
 
 impl InboundUiEvent {
-    pub(crate) fn emit<R: tauri::Runtime>(self, app: &tauri::AppHandle<R>) {
+    /// Emit under `session`, the profile session the producing job ran in.
+    pub(crate) fn emit<R: tauri::Runtime>(self, app: &tauri::AppHandle<R>, session: &str) {
         use tauri::Emitter;
         let result = match self {
             Self::ClassroomMessage(event) => app.emit(classroom_manager::MESSAGE_EVENT, event),
             Self::ClassroomMeta(event, recorded) => {
                 if let Some(recorded) = recorded {
-                    crate::notifications::announce(app, &recorded);
+                    crate::notifications::announce(app, session, &recorded);
                 }
                 app.emit(classroom_manager::META_EVENT, event)
             }
@@ -321,13 +340,14 @@ impl GossipIngest {
 
 /// Create the bounded gossip queue and the dispatcher that drains it. The
 /// dispatcher applies one message at a time and calls `emit` only after the
-/// message's job has returned from the database thread.
+/// message's job has returned from the database thread, with the profile
+/// session that job ran under.
 pub(crate) fn gossip_ingest<E>(
     database: InboundDatabase,
     mut emit: E,
 ) -> (GossipIngest, impl Future<Output = ()> + Send + 'static)
 where
-    E: FnMut(InboundUiEvent) + Send + 'static,
+    E: FnMut(InboundUiEvent, &str) + Send + 'static,
 {
     let (queue, mut receiver) =
         mpsc::channel::<(String, SignedGossipMessage)>(GOSSIP_QUEUE_CAPACITY);
@@ -341,8 +361,8 @@ where
                     dispatcher_counters
                         .completed
                         .fetch_add(1, Ordering::Relaxed);
-                    if let Some(event) = event {
-                        emit(event);
+                    if let Some((event, session)) = event {
+                        emit(event, &session);
                     }
                 }
                 // Best-effort delivery: never retry or wait for capacity.
@@ -375,14 +395,15 @@ async fn apply_gossip(
     database: &InboundDatabase,
     topic: &str,
     message: SignedGossipMessage,
-) -> Result<Option<InboundUiEvent>, String> {
+) -> Result<Option<(InboundUiEvent, String)>, String> {
     let Some(work) = GossipWork::decode(topic, &message) else {
         return Ok(None);
     };
     let label = work.label();
-    database
-        .run(label, move |db| Ok(work.apply(db, &message)))
-        .await
+    let (event, session) = database
+        .run_in_session(label, move |db| Ok(work.apply(db, &message)))
+        .await?;
+    Ok(event.map(|event| (event, session)))
 }
 
 enum GossipWork {
@@ -619,7 +640,7 @@ mod tests {
             let (operations, session) = active_operations().await;
             let inbound =
                 InboundDatabase::pinned(DatabaseExecutor::new(shared.clone()), operations, session);
-            let (mut ingest, dispatcher) = gossip_ingest(inbound, |_| {});
+            let (mut ingest, dispatcher) = gossip_ingest(inbound, |_, _| {});
             let counters = ingest.counters();
             let dispatcher = tokio::spawn(dispatcher);
             let topic = crate::classroom::types::classroom_meta_topic("class");
@@ -728,7 +749,7 @@ mod tests {
             .await
             .expect("runtime remained responsive while inbound SQL was blocked");
         // Queuing gossip behind the blocked job returns without waiting.
-        let (mut ingest, _dispatcher) = gossip_ingest(inbound.clone(), |_| {});
+        let (mut ingest, _dispatcher) = gossip_ingest(inbound.clone(), |_, _| {});
         let (_, message) = catalog_message("cid-responsive");
         assert!(ingest.offer(TOPIC_CATALOG.into(), message));
 
@@ -746,7 +767,7 @@ mod tests {
         let executor = DatabaseExecutor::new(Arc::clone(&shared));
         let inbound =
             InboundDatabase::pinned(executor.clone(), operations.clone(), session.clone());
-        let (mut ingest, dispatcher) = gossip_ingest(inbound.clone(), |_| {});
+        let (mut ingest, dispatcher) = gossip_ingest(inbound.clone(), |_, _| {});
         let counters = ingest.counters();
         let dispatcher = tokio::spawn(dispatcher);
 
@@ -820,7 +841,7 @@ mod tests {
         assert_eq!(overflow, Err(DATABASE_BUSY.to_string()));
 
         // Gossip on a busy lane is dropped and the dispatcher moves on.
-        let (mut ingest, dispatcher) = gossip_ingest(inbound.clone(), |_| {});
+        let (mut ingest, dispatcher) = gossip_ingest(inbound.clone(), |_, _| {});
         let counters = ingest.counters();
         let dispatcher = tokio::spawn(dispatcher);
         let (dropped_id, dropped) = catalog_message("cid-overloaded");
@@ -848,7 +869,7 @@ mod tests {
 
         // Internal buffering is bounded: a stalled dispatcher never makes the
         // swarm side wait, and bounded job sets refuse instead of growing.
-        let (mut stalled, _not_polled) = gossip_ingest(inbound.clone(), |_| {});
+        let (mut stalled, _not_polled) = gossip_ingest(inbound.clone(), |_, _| {});
         let stalled_counters = stalled.counters();
         for index in 0..GOSSIP_QUEUE_CAPACITY {
             let (_, message) = catalog_message(&format!("cid-queued-{index}"));

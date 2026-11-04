@@ -304,48 +304,83 @@ pub fn record_if_enabled(
     Ok(Some(Recorded { row, unread }))
 }
 
+/// What goes out for one recorded notification: the session the webview
+/// checks and the profile the OS banner is tagged with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Announcement {
+    pub session: String,
+    pub profile_id: crate::profile::ProfileId,
+}
+
+/// The announcement for a notification recorded under `session`, the
+/// session of the lease its producer ran with. `None` once that session is no
+/// longer current: a lock or profile switch came in between, and the row
+/// stays in its own profile's store unannounced. The profile is read while
+/// the session is held current, so a banner is never tagged with the profile
+/// that took over.
+pub fn announcement(state: &crate::AppState, session: &str) -> Option<Announcement> {
+    let lease = state.profile_operations.admit(session).ok()?;
+    let profile_id = lease
+        .with_current(|| {
+            state
+                .active_id()
+                .ok_or_else(|| "no active profile".to_string())
+        })
+        .ok()?;
+    Some(Announcement {
+        session: session.to_owned(),
+        profile_id,
+    })
+}
+
 /// Tell the webview, and the OS when nobody is looking at the app.
-pub fn announce<R: Runtime>(app: &AppHandle<R>, recorded: &Recorded) {
-    let Some(session) = app
-        .try_state::<crate::AppState>()
-        .and_then(|s| s.profile_operations.session())
-    else {
+pub fn announce<R: Runtime>(app: &AppHandle<R>, session: &str, recorded: &Recorded) {
+    let Some(state) = app.try_state::<crate::AppState>() else {
+        return;
+    };
+    let Some(announcement) = announcement(&state, session) else {
         return;
     };
     if let Err(error) = app.emit(
         EVENT_NEW,
-        serde_json::json!({ "session": session, "row": &recorded.row }),
+        serde_json::json!({ "session": announcement.session, "row": &recorded.row }),
     ) {
         log::debug!("notifications: emit failed: {error}");
     }
-    emit_changed(app, recorded.unread);
+    emit_unread(app, &announcement.session, recorded.unread);
     if should_interrupt(app, &recorded.row) {
-        os_banner(app, &recorded.row);
+        os_banner(app, &announcement, &recorded.row);
     }
 }
 
 /// Record and announce in one step, for producers that hold the connection
-/// outside an executor job.
+/// outside an executor job. `session` is the lease the producer runs under.
 pub fn deliver<R: Runtime>(
     app: &AppHandle<R>,
+    session: &str,
     conn: &Connection,
     new: &NewNotification,
 ) -> Result<Option<Recorded>, String> {
     let recorded = record_if_enabled(conn, new)?;
     if let Some(recorded) = &recorded {
-        announce(app, recorded);
+        announce(app, session, recorded);
     }
     Ok(recorded)
 }
 
-/// Emit the unread count, after anything that changes it.
-pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, unread: u32) {
-    let Some(session) = app
+/// Emit the unread count after anything that changes it, under `session`,
+/// the session of the lease that changed it. Dropped once that session is no
+/// longer current, so the next profile's badge is never overwritten.
+pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, session: &str, unread: u32) {
+    let current = app
         .try_state::<crate::AppState>()
-        .and_then(|s| s.profile_operations.session())
-    else {
-        return;
-    };
+        .is_some_and(|state| state.profile_operations.admit(session).is_ok());
+    if current {
+        emit_unread(app, session, unread);
+    }
+}
+
+fn emit_unread<R: Runtime>(app: &AppHandle<R>, session: &str, unread: u32) {
     let _ = app.emit(
         EVENT_CHANGED,
         serde_json::json!({ "session": session, "unread": unread }),
@@ -377,23 +412,20 @@ fn should_interrupt<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) -> bo
     !focused
 }
 
-fn os_banner<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) {
-    let Some(state) = app.try_state::<crate::AppState>() else {
-        return;
-    };
-    let Some(profile) = state.active_id() else {
+fn os_banner<R: Runtime>(app: &AppHandle<R>, announcement: &Announcement, row: &NotificationRow) {
+    // Absent only where no notification plugin is installed (test apps).
+    let Some(notification) = app.try_state::<tauri_plugin_notification::Notification<R>>() else {
         return;
     };
     let Ok(network) = recipients::network() else {
         return;
     };
-    let mut builder = app
-        .notification()
+    let mut builder = notification
         .builder()
         .title(&row.title)
         .body(&row.body)
         .extra("notificationId", &row.id)
-        .extra("profileId", profile.as_str())
+        .extra("profileId", announcement.profile_id.as_str())
         .extra("networkId", network);
     if let Some(route) = &row.route {
         // Keep the locally discovered/registered origin even if the learner
@@ -481,6 +513,139 @@ fn route_of_action(performed: &tauri_plugin_notification::ActionPerformed) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type Heard = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+
+    /// A test app over an unlocked "Learner" profile, and every
+    /// `notifications:new` / `notifications:changed` payload it emits.
+    async fn listening_app(
+        directory: &std::path::Path,
+    ) -> (tauri::App<tauri::test::MockRuntime>, Heard) {
+        use tauri::Listener;
+        let state = push::boundary_tests::active(directory).await;
+        let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+        let app = tauri::test::mock_builder()
+            .manage(state)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let heard = Heard::default();
+        for event in [EVENT_NEW, EVENT_CHANGED] {
+            let heard = heard.clone();
+            app.listen_any(event, move |event| {
+                let payload = serde_json::from_str(event.payload()).unwrap();
+                heard.lock().unwrap().push(payload);
+            });
+        }
+        (app, heard)
+    }
+
+    async fn in_profile<T: Send + 'static>(
+        state: &crate::AppState,
+        job: impl FnOnce(&crate::db::Database) -> Result<T, String> + Send + 'static,
+    ) -> T {
+        let lease = state
+            .profile_operations
+            .admit(&state.profile_operations.session().unwrap())
+            .unwrap();
+        state
+            .db_executor
+            .execute(
+                crate::db::executor::DatabaseWorkload::Background,
+                lease,
+                "test.notifications",
+                job,
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_profile_switch_before_announcing_drops_the_event_and_banner_and_keeps_the_row_home()
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, heard) = listening_app(directory.path()).await;
+        let state = app.state::<crate::AppState>();
+        let home = state.active_id().unwrap();
+        let session = state.profile_operations.session().unwrap();
+        let recorded = in_profile(&state, |db| {
+            record_if_enabled(db.conn(), &for_issued_credential("c1"))
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            announcement(&state, &session),
+            Some(Announcement {
+                session: session.clone(),
+                profile_id: home.clone(),
+            }),
+            "while the recording profile is current, banners are tagged with it"
+        );
+        announce(app.handle(), &session, &recorded);
+        assert_eq!(
+            std::mem::take(&mut *heard.lock().unwrap()),
+            vec![
+                serde_json::json!({ "session": session, "row": recorded.row }),
+                serde_json::json!({ "session": session, "unread": 1 }),
+            ]
+        );
+
+        push::boundary_tests::switch_to(&state, "B").await;
+        assert_ne!(state.active_id().unwrap(), home);
+        assert_eq!(
+            announcement(&state, &session),
+            None,
+            "no banner may be built for the profile that took over"
+        );
+        announce(app.handle(), &session, &recorded);
+        assert!(
+            heard.lock().unwrap().is_empty(),
+            "{:?}",
+            heard.lock().unwrap()
+        );
+        assert!(in_profile(&state, |db| list(db.conn(), None, false))
+            .await
+            .is_empty());
+
+        push::boundary_tests::switch_to(&state, "Learner").await;
+        assert_eq!(
+            in_profile(&state, |db| list(db.conn(), None, false)).await,
+            vec![recorded.row]
+        );
+    }
+
+    #[tokio::test]
+    async fn count_updates_carry_the_acting_session_and_never_the_next_profiles() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, heard) = listening_app(directory.path()).await;
+        let state = app.state::<crate::AppState>();
+        let acting = state.profile_operations.session().unwrap();
+        in_profile(&state, |db| {
+            record_if_enabled(db.conn(), &for_issued_credential("c1"))
+        })
+        .await
+        .unwrap();
+        let unread = in_profile(&state, |db| {
+            mark_all_read(db.conn(), "2026-11-04T00:00:00Z")?;
+            unread_count(db.conn())
+        })
+        .await;
+        emit_changed(app.handle(), &acting, unread);
+        assert_eq!(
+            std::mem::take(&mut *heard.lock().unwrap()),
+            vec![serde_json::json!({ "session": acting, "unread": 0 })]
+        );
+
+        // Cleared, then a switch lands before the count update goes out.
+        in_profile(&state, |db| clear(db.conn())).await;
+        push::boundary_tests::switch_to(&state, "B").await;
+        let next = state.profile_operations.session().unwrap();
+        emit_changed(app.handle(), &acting, 0);
+        let heard = heard.lock().unwrap();
+        assert!(
+            heard.iter().all(|event| event["session"] != next.as_str()),
+            "the next profile's badge must not be overwritten: {heard:?}"
+        );
+    }
 
     #[test]
     fn recording_uses_profile_language_for_generic_banner_copy() {

@@ -7,6 +7,23 @@ pub(crate) async fn active(directory: &std::path::Path) -> std::sync::Arc<AppSta
 
 async fn active_named(directory: &std::path::Path, name: &str) -> std::sync::Arc<AppState> {
     let state = crate::profile::lifecycle_tests::state_in(directory);
+    open_named(&state, name).await;
+    state
+}
+
+/// Lock the active profile and unlock the one called `name` (created on first
+/// use) in the same app state, as a profile switch does.
+pub(crate) async fn switch_to(state: &AppState, name: &str) {
+    state
+        .profile_operations
+        .lock(async { Ok(()) })
+        .await
+        .unwrap();
+    state.stop_active_profile().await.unwrap();
+    open_named(state, name).await;
+}
+
+async fn open_named(state: &AppState, name: &str) {
     let paths = match state
         .profile_manager
         .list()
@@ -44,7 +61,6 @@ async fn active_named(directory: &std::path::Path, name: &str) -> std::sync::Arc
         .activate(async { Ok(()) }, async { Ok(()) })
         .await
         .unwrap();
-    state
 }
 
 fn admitted(state: &AppState) -> crate::profile::scope::ProfileLease {
