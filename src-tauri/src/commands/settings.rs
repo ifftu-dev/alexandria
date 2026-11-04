@@ -9,7 +9,8 @@ use tauri::{AppHandle, Emitter};
 
 use crate::db::executor::DatabaseWorkload;
 use crate::notifications;
-use crate::profile::scope::{ProfileLease, ProfileState as State};
+use crate::profile::scope::ProfileLease;
+use crate::profile::scope::ProfileState as State;
 use crate::settings::{registry::SettingEntry, store::SettingsError, SettingsStore};
 use crate::AppState;
 
