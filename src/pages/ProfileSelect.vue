@@ -16,6 +16,7 @@ import AddProfileTile from '@/components/profile/AddProfileTile.vue'
 import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
 import ProfileTile from '@/components/profile/ProfileTile.vue'
 import { AppButton, AppInput } from '@/components/ui'
+import { useSlowNotice } from '@/composables/useSlowNotice'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -38,7 +39,9 @@ const selectedHasCredential = ref(false)
 const biometricLoading = ref(false)
 const biometricEnabled = computed(() => biometricAvailable.value && selectedHasCredential.value)
 
-// The backend does not publish unlock progress. Never infer stages from elapsed time.
+// The backend does not publish unlock progress. Never infer stages from elapsed time;
+// a slow unlock only adds "still unlocking" beside the one honest stage.
+const slowUnlock = useSlowNotice(() => unlocking.value)
 function startUnlockStages() {
   unlockStatus.value = t('onboarding.profileSelect.stageDecrypting')
 }
@@ -295,6 +298,9 @@ function onKeydown(event: KeyboardEvent) {
                 <span>{{ unlockStatus }}</span>
               </div>
             </Transition>
+            <p v-if="unlocking && slowUnlock" class="text-xs text-muted-foreground">
+              {{ $t('onboarding.profileSelect.stillUnlocking') }}
+            </p>
             <div class="flex items-center gap-2">
               <AppButton
                 type="button"

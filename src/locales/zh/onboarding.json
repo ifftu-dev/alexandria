@@ -165,7 +165,8 @@
     "biometricNotSetup": "尚未设置生物识别解锁。请先用密码解锁一次以启用它。",
     "biometricUnavailable": "此版本中生物识别解锁不可用（权限 -34018）。请使用已签名的版本。",
     "biometricFailed": "生物识别解锁失败：{error}",
-    "biometricMismatch": "生物识别密码与此档案不匹配。请输入你的密码。"
+    "biometricMismatch": "生物识别密码与此档案不匹配。请输入你的密码。",
+    "stillUnlocking": "仍在解锁。部分设备需要稍长时间。"
   },
   "guardianGate": {
     "heading": "需要一位监护人来激活你的账户",

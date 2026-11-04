@@ -165,7 +165,8 @@
     "biometricNotSetup": "El desbloqueo biométrico aún no está configurado. Desbloquea una vez con tu contraseña para activarlo.",
     "biometricUnavailable": "El desbloqueo biométrico no está disponible en esta compilación (permiso -34018). Usa una compilación firmada.",
     "biometricFailed": "El desbloqueo biométrico falló: {error}",
-    "biometricMismatch": "La contraseña biométrica no coincidió con este perfil. Introduce tu contraseña."
+    "biometricMismatch": "La contraseña biométrica no coincidió con este perfil. Introduce tu contraseña.",
+    "stillUnlocking": "Todavía se está desbloqueando. Algunos dispositivos tardan un poco más."
   },
   "guardianGate": {
     "heading": "Un tutor debe activar tu cuenta",

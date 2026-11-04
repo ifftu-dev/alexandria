@@ -20,6 +20,7 @@ import { useDeepLinks } from '@/deeplink/useDeepLinks'
 import { getProfileSessionToken } from '@/composables/profileSession'
 import { useNotifications } from '@/composables/useNotifications'
 import AppOpening from '@/components/auth/AppOpening.vue'
+import AppStartupStatus from '@/components/auth/AppStartupStatus.vue'
 import SkillAtlasHost from '@/components/skills/SkillAtlasHost.vue'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
@@ -280,12 +281,7 @@ onUnmounted(() => {
       </template>
     </div>
   </div>
-  <div v-else-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top" role="status">
-    <div class="text-center">
-      <div class="w-24 h-24 mx-auto mb-4" aria-hidden="true" />
-      <p class="text-sm text-muted-foreground">{{ $t('common.app.initializing') }}</p>
-    </div>
-  </div>
+  <AppStartupStatus v-else-if="!ready" />
   <component v-else :is="layout">
     <router-view />
   </component>

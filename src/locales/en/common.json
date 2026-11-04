@@ -4,7 +4,8 @@
     "lockFailed": "Cleanup could not finish. Your private content is hidden. Retry to finish locking before unlocking a profile.",
     "name": "Alexandria",
     "initializing": "Initializing…",
-    "tagline": "I am, because we all are"
+    "tagline": "I am, because we all are",
+    "takingLonger": "Taking longer than expected"
   },
   "actions": {
     "save": "Save",
