@@ -183,6 +183,14 @@
     "fieldConnections": "منسلک شعبے",
     "overviewHint": "مہارتوں اور تعلقات کو دریافت کرنے کے لیے شعبہ منتخب کریں۔",
     "moreEarned": "مزید {count} حاصل شدہ مہارتیں",
-    "clearSearch": "تلاش صاف کریں"
+    "clearSearch": "تلاش صاف کریں",
+    "noPrerequisites": "کوئی پیشگی مہارت نہیں",
+    "nameEarned": "{name}، حاصل شدہ، بلوم سطح {level}",
+    "nameEarnedNoLevel": "{name}، حاصل شدہ، حاصل شدہ سطح دستیاب نہیں",
+    "nameReady": "{name}، ابھی حاصل نہیں ہوئی، تیار، سیکھنے کے نتیجے کی بلوم سطح {level}",
+    "nameReadyNoLevel": "{name}، ابھی حاصل نہیں ہوئی، تیار",
+    "focusShowingPrerequisites": "{skill} کی پیشگی مہارتیں دکھائی جا رہی ہیں · {depth}",
+    "focusShowingDependents": "{skill} پر منحصر مہارتیں دکھائی جا رہی ہیں · {depth}",
+    "clearFocus": "توجہ ہٹائیں"
   }
 }

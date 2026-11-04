@@ -47,7 +47,8 @@ it('keeps browse filters separate and restores graph selection, camera and contr
   expect(wrapper!.text()).toContain('Visibility & teaching')
   expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(104)
   await wrapper!.get('input[type="search"]').setValue('Big-O')
-  await click('Big-O Analysis · 2 Understand')
+  // The sidebar names its earned preview the same way, so pick from the page's list.
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[aria-label="Full-label skill list"]')!)
   await click('Zoom in')
   await click('Focus dependents')
   const saved = structuredClone(JSON.parse(JSON.stringify(atlas.pageView.value)))
@@ -74,7 +75,7 @@ it('returns to the expanded context once, releases scroll locks and does not reo
   input.value = 'Big-O'
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await flushPromises()
-  await click('Big-O Analysis · 2 Understand', dialog)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', dialog)
   await click('Zoom in', dialog)
   const saved = JSON.parse(JSON.stringify(atlas.modalView.value))
   expect(document.body.style.overflow).toBe('hidden')
@@ -100,7 +101,7 @@ it('offers a course and enrollment for an already earned skill from the modal', 
   sessionStorage.setItem('courses-kind-filter', 'tutorial')
   atlas.setModalOpen(true)
   await flushPromises()
-  await click('Big-O Analysis · 2 Understand', document.querySelector('[role="dialog"]')!)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[role="dialog"]')!)
   await click('Find learning opportunities', document.querySelector('[role="dialog"]')!)
   expect(wrapper!.text()).toContain('Learning for Big-O Analysis')
   const courses = wrapper!.findAll('a.cc-grid')
@@ -119,7 +120,7 @@ it('offers a course and enrollment for an already earned skill from the modal', 
 it('keeps Ready learning accessible, updates the skill filter on route reuse and explains an empty result', async () => {
   const { router, backend } = await setup()
   await click('My Graph')
-  await click('Sorting Algorithms · Ready')
+  await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
   await click('Find learning opportunities')
   expect(wrapper!.text()).toContain('Learning for Sorting Algorithms')
   expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Practising sorting algorithms')])
@@ -141,7 +142,7 @@ it('keeps the modal open with an actionable error when learning navigation fails
   atlas.setModalOpen(true)
   await flushPromises()
   const dialog = document.querySelector('[role="dialog"]')!
-  await click('Big-O Analysis · 2 Understand', dialog)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', dialog)
   router.onError(() => {})
   const removeGuard = router.beforeEach(to => {
     if (to.path === '/courses') throw new Error('Could not open courses')
@@ -160,7 +161,7 @@ it('clears modal returns on lock and tears down the app refresh owner without le
   document.body.style.overflow = 'clip'
   atlas.setModalOpen(true)
   await flushPromises()
-  await click('Big-O Analysis · 2 Understand', document.querySelector('[role="dialog"]')!)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[role="dialog"]')!)
   await click('Open skill', document.querySelector('[role="dialog"]')!)
   await profiles.lockProfile()
   backend.state.earned = false

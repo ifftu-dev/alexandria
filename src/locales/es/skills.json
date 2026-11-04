@@ -183,6 +183,14 @@
     "fieldConnections": "Campos conectados",
     "overviewHint": "Elige un campo para explorar sus habilidades y conexiones.",
     "moreEarned": "{count} habilidades adquiridas más",
-    "clearSearch": "Borrar búsqueda"
+    "clearSearch": "Borrar búsqueda",
+    "noPrerequisites": "Sin requisitos previos",
+    "nameEarned": "{name}, adquirida, nivel de Bloom {level}",
+    "nameEarnedNoLevel": "{name}, adquirida, nivel adquirido no disponible",
+    "nameReady": "{name}, aún no adquirida, Lista, nivel de Bloom del resultado de aprendizaje {level}",
+    "nameReadyNoLevel": "{name}, aún no adquirida, Lista",
+    "focusShowingPrerequisites": "Mostrando los requisitos previos de {skill} · {depth}",
+    "focusShowingDependents": "Mostrando las dependientes de {skill} · {depth}",
+    "clearFocus": "Quitar el enfoque"
   }
 }

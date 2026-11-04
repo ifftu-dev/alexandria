@@ -183,6 +183,14 @@
     "fieldConnections": "जोडलेली क्षेत्रे",
     "overviewHint": "कौशल्ये आणि संबंध पाहण्यासाठी क्षेत्र निवडा.",
     "moreEarned": "आणखी {count} मिळवलेली कौशल्ये",
-    "clearSearch": "शोध साफ करा"
+    "clearSearch": "शोध साफ करा",
+    "noPrerequisites": "पूर्वावश्यक कौशल्ये नाहीत",
+    "nameEarned": "{name}, मिळवलेले, ब्लूम पातळी {level}",
+    "nameEarnedNoLevel": "{name}, मिळवलेले, मिळवलेली पातळी उपलब्ध नाही",
+    "nameReady": "{name}, अजून मिळवलेले नाही, तयार, शिक्षण परिणामाची ब्लूम पातळी {level}",
+    "nameReadyNoLevel": "{name}, अजून मिळवलेले नाही, तयार",
+    "focusShowingPrerequisites": "{skill} ची पूर्वावश्यक कौशल्ये दाखवत आहे · {depth}",
+    "focusShowingDependents": "{skill} वर अवलंबित कौशल्ये दाखवत आहे · {depth}",
+    "clearFocus": "लक्ष काढा"
   }
 }

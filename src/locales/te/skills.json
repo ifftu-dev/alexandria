@@ -183,6 +183,14 @@
     "fieldConnections": "అనుసంధానిత రంగాలు",
     "overviewHint": "నైపుణ్యాలు, సంబంధాలను అన్వేషించడానికి రంగాన్ని ఎంచుకోండి.",
     "moreEarned": "మరో {count} సంపాదించిన నైపుణ్యాలు",
-    "clearSearch": "శోధనను తొలగించండి"
+    "clearSearch": "శోధనను తొలగించండి",
+    "noPrerequisites": "ముందస్తు నైపుణ్యాలు లేవు",
+    "nameEarned": "{name}, సంపాదించినది, బ్లూమ్ స్థాయి {level}",
+    "nameEarnedNoLevel": "{name}, సంపాదించినది, సంపాదించిన స్థాయి అందుబాటులో లేదు",
+    "nameReady": "{name}, ఇంకా సంపాదించలేదు, సిద్ధం, అభ్యాస ఫలితపు బ్లూమ్ స్థాయి {level}",
+    "nameReadyNoLevel": "{name}, ఇంకా సంపాదించలేదు, సిద్ధం",
+    "focusShowingPrerequisites": "{skill} ముందస్తు నైపుణ్యాలు చూపబడుతున్నాయి · {depth}",
+    "focusShowingDependents": "{skill} పై ఆధారిత నైపుణ్యాలు చూపబడుతున్నాయి · {depth}",
+    "clearFocus": "దృష్టిని తీసివేయండి"
   }
 }

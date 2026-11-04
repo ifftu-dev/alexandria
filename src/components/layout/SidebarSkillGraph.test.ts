@@ -28,6 +28,9 @@ it('shows fields and current earned levels; refreshes on evidence and navigation
   expect(wrapper.text()).toContain('Computer Science')
   expect(wrapper.text()).toContain('Big-O Analysis')
   expect(wrapper.text()).toContain('2 Understand')
+  const earned = wrapper.get('button[aria-label="Big-O Analysis, earned, Bloom level 2 Understand"]')
+  expect(earned.findAll('[aria-hidden="true"]').map(item => item.text())).toContain('✓')
+  expect(earned.find('[aria-label="Earned"]').exists()).toBe(false)
   expect(wrapper.text()).toContain('Ready')
   expect(wrapper.text()).not.toContain('Locked')
   const before = backend.state.reads

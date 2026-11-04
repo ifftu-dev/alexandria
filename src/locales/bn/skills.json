@@ -183,6 +183,14 @@
     "fieldConnections": "সংযুক্ত ক্ষেত্র",
     "overviewHint": "দক্ষতা ও সম্পর্ক দেখতে একটি ক্ষেত্র বেছে নিন।",
     "moreEarned": "আরও {count} অর্জিত দক্ষতা",
-    "clearSearch": "অনুসন্ধান মুছুন"
+    "clearSearch": "অনুসন্ধান মুছুন",
+    "noPrerequisites": "কোনো পূর্বশর্ত নেই",
+    "nameEarned": "{name}, অর্জিত, ব্লুম স্তর {level}",
+    "nameEarnedNoLevel": "{name}, অর্জিত, অর্জিত স্তর উপলব্ধ নেই",
+    "nameReady": "{name}, এখনও অর্জিত নয়, প্রস্তুত, শেখার ফলাফলের ব্লুম স্তর {level}",
+    "nameReadyNoLevel": "{name}, এখনও অর্জিত নয়, প্রস্তুত",
+    "focusShowingPrerequisites": "{skill}-এর পূর্বশর্ত দেখানো হচ্ছে · {depth}",
+    "focusShowingDependents": "{skill}-এর উপর নির্ভরশীল দক্ষতা দেখানো হচ্ছে · {depth}",
+    "clearFocus": "মনোযোগ সরান"
   }
 }

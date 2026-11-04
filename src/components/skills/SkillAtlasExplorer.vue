@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, NODE_HEIGHT, NODE_WIDTH } from './atlasLayout'
+import { createAtlasPresenter } from './atlasPresentation'
 import { motionDuration, useMotion } from '@/composables/useMotion'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
@@ -11,6 +12,7 @@ import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 const props = defineProps<{ model: AtlasModel; view: AtlasViewState; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>()
 const emit = defineEmits<{ 'update:view': [view: AtlasViewState]; 'open-skill': [id: string]; 'learn-skill': [id: string]; 'feedback-consumed': [revision: number] }>()
 const { t } = useI18n()
+const present = createAtlasPresenter(t)
 const id = useId()
 const { reduced: systemReducedMotion } = useMotion()
 const motionReduced = computed(() => props.reducedMotion === true || systemReducedMotion.value)
@@ -94,6 +96,14 @@ const neighborhoodIds = computed(() => {
   }
   return ids
 })
+// The map dims everything outside an active focus, so the map always says which one.
+const focusSummary = computed(() => {
+  if (!selected.value || props.view.neighborhood === 'none') return ''
+  return t(props.view.neighborhood === 'prerequisites' ? 'skills.atlas.focusShowingPrerequisites' : 'skills.atlas.focusShowingDependents', {
+    skill: selected.value.skill.name,
+    depth: t(props.view.neighborhoodDepth === 2 ? 'skills.atlas.twoSteps' : 'skills.atlas.oneStep'),
+  })
+})
 const matches = computed(() => {
   const query = props.view.query.trim().toLocaleLowerCase()
   return props.model.nodes.filter(node => !query || `${node.skill.name} ${node.skill.description ?? ''} ${node.skill.subject_name ?? ''} ${fieldName(node.fieldId)}`.toLocaleLowerCase().includes(query))
@@ -102,13 +112,9 @@ const bloomMatches = computed(() => matches.value.filter(bloomMatch))
 function bloomMatch(node: AtlasNode): boolean { return props.view.bloomEmphasis !== null && node.earnedBloom?.rank === props.view.bloomEmphasis }
 const matchIds = computed(() => new Set(matches.value.map(node => node.skill.id)))
 function fieldName(fieldId: string | null): string {
-  if (fieldId === null) return t('skills.atlas.unassigned')
-  return props.model.fields.find(field => field.id === fieldId)?.name ?? t('skills.atlas.unknownField', { id: fieldId })
+  return present.fieldName(props.model.fields.find(field => field.id === fieldId) ?? { id: fieldId, name: null })
 }
-function status(node: AtlasNode): string {
-  if (node.status === 'ready') return t('skills.atlas.ready')
-  return node.earnedBloom ? `${node.earnedBloom.rank + 1} ${t(`common.bloom.${node.earnedBloom.name}`)}` : t('skills.atlas.levelUnavailable')
-}
+const status = present.evidence
 function color(fieldId: string | null): string { if (fieldId === null) return 'var(--app-muted-foreground)'; return `var(--atlas-field-${layout.value.regions.find(region => region.field.id === fieldId)?.color ?? 0})` }
 function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
 function preserveOverviewFocus(): void {
@@ -235,13 +241,13 @@ function setBloom(event: Event): void {
     <div class="atlas-toolbar">
       <label class="atlas-search"><span>{{ t('skills.atlas.search') }}</span><input type="search" :value="view.query" @input="update({ query: ($event.target as HTMLInputElement).value })"></label>
       <button v-if="view.query" type="button" @click="update({ query: '' })">{{ t('skills.atlas.clearSearch') }}</button>
-      <label><span>{{ t('skills.atlas.bloomLegend') }}</span><select :value="view.bloomEmphasis ?? ''" @change="setBloom"><option value="">{{ t('skills.atlas.allBloom') }}</option><option v-for="(level, rank) in BLOOM_ORDER" :key="level" :value="rank">{{ rank + 1 }} {{ t(`common.bloom.${level}`) }}</option></select></label>
+      <label><span>{{ t('skills.atlas.bloomLegend') }}</span><select :value="view.bloomEmphasis ?? ''" @change="setBloom"><option value="">{{ t('skills.atlas.allBloom') }}</option><option v-for="(level, rank) in BLOOM_ORDER" :key="level" :value="rank">{{ present.bloomLabel(level) }}</option></select></label>
     </div>
     <p class="atlas-legend">{{ t('skills.atlas.legend') }}</p>
     <p role="status" class="atlas-feedback" aria-live="polite"><template v-if="highlightedIds.length">{{ t('skills.atlas.updated') }}: {{ highlightedIds.slice(0, 3).map(skillId => nodesById.get(skillId)?.skill.name).filter(Boolean).join(', ') }}{{ highlightedIds.length > 3 ? '…' : '' }}</template></p>
     <div class="atlas-workspace">
       <div class="atlas-main">
-        <p v-if="view.bloomEmphasis !== null" class="bloom-summary" role="status">{{ t('skills.atlas.bloomSummary', { level: `${view.bloomEmphasis + 1} ${t(`common.bloom.${BLOOM_ORDER[view.bloomEmphasis]}`)}`, count: bloomMatches.length }) }}</p>
+        <p v-if="view.bloomEmphasis !== null" class="bloom-summary" role="status">{{ t('skills.atlas.bloomSummary', { level: present.bloomLabel(BLOOM_ORDER[view.bloomEmphasis]), count: bloomMatches.length }) }}</p>
         <nav class="atlas-fields" :aria-label="t('skills.atlas.overview')">
           <button type="button" :aria-pressed="overview" @click="update({ focusedFieldId: null, unassignedFocused: false, camera: null, neighborhood: 'none' })">{{ t('skills.atlas.overview') }}</button>
           <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }}</button>
@@ -253,7 +259,7 @@ function setBloom(event: Event): void {
               <button class="field-title" type="button" :aria-label="t('skills.atlas.focusField', { field: fieldName(region.field.id) })" @click="focus(region.field)"><span>{{ fieldName(region.field.id) }}</span><span aria-hidden="true">↗</span></button>
               <p>{{ t('skills.atlas.fieldCounts', { ...region.field }) }}</p>
               <div class="field-progress" aria-hidden="true"><span :style="{ width: `${region.field.earned / region.field.total * 100}%` }" /></div>
-              <button v-for="node in earnedPreview(region.field)" :key="node.skill.id" class="field-earned" :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :aria-label="`${node.skill.name} · ${status(node)}`" @click="select(node.skill.id)"><span class="skill-name" dir="auto">{{ node.skill.name }}</span><span><span aria-hidden="true">✓ </span>{{ status(node) }}</span></button>
+              <button v-for="node in earnedPreview(region.field)" :key="node.skill.id" class="field-earned" :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :aria-label="present.accessibleName(node)" @click="select(node.skill.id)"><span class="skill-name" dir="auto">{{ node.skill.name }}</span><span><span aria-hidden="true">✓ </span>{{ status(node) }}</span></button>
               <p v-if="region.field.earned > 2" class="atlas-muted">{{ t('skills.atlas.moreEarned', { count: region.field.earned - 2 }) }}</p>
               <div v-if="connections(region.field).length" class="field-connections"><span>{{ t('skills.atlas.fieldConnections') }}</span><button v-for="other in connections(region.field)" :key="other.id === null ? 'unassigned' : `field:${other.id}`" type="button" @click="focus(other)">{{ fieldName(other.id) }} <span aria-hidden="true">↗</span></button></div>
             </article>
@@ -269,6 +275,10 @@ function setBloom(event: Event): void {
               <button type="button" :aria-label="t('skills.atlas.panDown')" @click="pan(0, 180)">↓</button>
               <button type="button" :aria-label="t('skills.atlas.panRight')" @click="pan(180, 0)">→</button>
             </div>
+            <div class="map-focus" :class="{ 'is-active': focusSummary }">
+              <p role="status">{{ focusSummary }}</p>
+              <button v-if="focusSummary" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.clearFocus') }}</button>
+            </div>
             <svg class="atlas-map" :viewBox="viewBox" :height="height" tabindex="0" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="`${id}-map-help`" @keydown="keyPan" :class="{ dragging }" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
               <defs><marker :id="`${id}-arrow`" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke" /></marker></defs>
               <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
@@ -277,8 +287,8 @@ function setBloom(event: Event): void {
               </g>
               <path v-for="edge in edges" :key="edge.index" :d="edge.path" class="map-edge" :class="{ 'map-edge-active': edge.active }" :marker-end="`url(#${id}-arrow)`"><title>{{ edge.label }}</title></path>
               <foreignObject v-for="node in visibleNodes" :key="node.skill.id" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
-                <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :aria-label="`${node.skill.name} · ${status(node)}`" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
-                  <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" :aria-label="t('skills.atlas.earned')">✓</span><span v-else aria-hidden="true">○</span><span>{{ status(node) }}</span></span>
+                <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
+                  <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else aria-hidden="true">○</span><span>{{ status(node) }}</span></span>
                 </button>
               </foreignObject>
             </svg>
@@ -287,7 +297,7 @@ function setBloom(event: Event): void {
         </div>
         <details class="atlas-list" open>
           <summary>{{ t('skills.atlas.list') }} <span>{{ t('skills.atlas.results', { count: matches.length }) }}</span></summary>
-          <ul :aria-label="t('skills.atlas.list')"><li v-for="node in matches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="`${node.skill.name} · ${status(node)}`" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" :aria-label="t('skills.atlas.earned')">✓ </span>{{ status(node) }}</span></button></li></ul>
+          <ul :aria-label="t('skills.atlas.list')"><li v-for="node in matches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span>{{ status(node) }}</span></button></li></ul>
           <p v-if="!matches.length">{{ t('skills.atlas.noResults') }}</p>
         </details>
       </div>
@@ -301,7 +311,8 @@ function setBloom(event: Event): void {
             <p dir="auto">{{ selected.skill.description }}</p>
             <dl><template v-if="selected.status === 'earned'"><dt>{{ t('skills.atlas.currentBloom') }}</dt><dd>{{ status(selected) }}</dd></template><dt>{{ t('skills.atlas.intrinsicBloom') }}</dt><dd>{{ selected.intrinsicBloom ? t(`common.bloom.${selected.intrinsicBloom}`) : t('skills.atlas.unavailable') }}</dd></dl>
             <div class="inspector-actions"><button class="atlas-primary" type="button" :aria-label="t('skills.atlas.open')" @click="emit('open-skill', selected.skill.id)">{{ t('skills.atlas.open') }} <span aria-hidden="true">↗</span></button><button type="button" @click="emit('learn-skill', selected.skill.id)">{{ t('skills.atlas.learn') }}</button></div>
-            <p v-if="selected.prerequisitesSatisfied" class="atlas-muted">{{ t('skills.atlas.satisfied') }}</p>
+            <p v-if="!selected.prerequisites.length && selected.skill.prerequisite_count === 0" class="atlas-muted">{{ t('skills.atlas.noPrerequisites') }}</p>
+            <p v-else-if="selected.prerequisitesSatisfied" class="atlas-muted">{{ t('skills.atlas.satisfied') }}</p>
             <p v-else-if="selected.prerequisites.some(relation => !relation.loaded) || selected.prerequisites.length < selected.skill.prerequisite_count" class="atlas-muted">{{ t('skills.atlas.incomplete') }}</p>
             <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="update({ neighborhoodDepth: Number(($event.target as HTMLSelectElement).value) === 2 ? 2 : 1 })"><option :value="1">{{ t('skills.atlas.oneStep') }}</option><option :value="2">{{ t('skills.atlas.twoSteps') }}</option></select></label></div>
             <section v-for="direction in (['prerequisites', 'dependents'] as const)" :key="direction" class="inspector-relations">
@@ -360,6 +371,10 @@ function setBloom(event: Event): void {
 .map-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-block-end: 1px solid var(--app-border); }
 .map-tools span { font-size: 12px; margin-inline: 6px; }
 .map-tools button { min-width: 44px; text-align: center; }
+/* Stays rendered while empty so its live region announces the next focus. */
+.map-focus.is-active { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 14px; border-block-end: 1px solid var(--app-border); border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); font-size: 13px; }
+.map-focus p { min-width: 0; overflow-wrap: anywhere; }
+.map-focus button { font-size: 12px; }
 .atlas-map { touch-action: pan-y pinch-zoom; cursor: grab; user-select: none; display: block; width: 100%; overflow: hidden; background-image: radial-gradient(var(--app-border) .7px, transparent .7px); background-size: 18px 18px; }
 .map-region { fill: color-mix(in srgb, var(--field) 5%, var(--app-background)); stroke: color-mix(in srgb, var(--field) 40%, var(--app-border)); stroke-width: 1; }
 .region-heading { display: flex; flex-direction: column; gap: 4px; color: var(--field); }

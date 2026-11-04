@@ -183,6 +183,14 @@
     "fieldConnections": "关联领域",
     "overviewHint": "选择领域以探索其中的技能和关联。",
     "moreEarned": "另有 {count} 项已获得的技能",
-    "clearSearch": "清除搜索"
+    "clearSearch": "清除搜索",
+    "noPrerequisites": "无先修技能",
+    "nameEarned": "{name}，已获得，布卢姆等级 {level}",
+    "nameEarnedNoLevel": "{name}，已获得，已获得的等级不可用",
+    "nameReady": "{name}，尚未获得，就绪，学习目标的布卢姆等级 {level}",
+    "nameReadyNoLevel": "{name}，尚未获得，就绪",
+    "focusShowingPrerequisites": "正在显示 {skill} 的先修技能 · {depth}",
+    "focusShowingDependents": "正在显示 {skill} 的后续技能 · {depth}",
+    "clearFocus": "取消聚焦"
   }
 }

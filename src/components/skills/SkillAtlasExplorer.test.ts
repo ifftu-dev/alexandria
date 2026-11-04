@@ -27,6 +27,9 @@ const model = buildSkillAtlas({
   activeCredentials: [credential('a', 3), credential('c', 'invalid')], subjectDid: 'did:me',
 })
 const initialView = (): AtlasViewState => ({ selectedSkillId: null, focusedFieldId: null, unassignedFocused: false, query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false })
+const BRIDGES = 'Bridges, not yet earned, Ready, learning-outcome Bloom level 6 Create'
+const ALGEBRA = 'Algebra, earned, Bloom level 4 Analyze'
+const CRAFT = 'Craft, earned, earned level unavailable'
 const mounted: VueWrapper[] = []
 function setup(view = initialView(), reducedMotion = false, feedback: { revision: number; earnedIds: string[]; improvedIds: string[] } | null = null) {
   const wrapper = mount(SkillAtlasExplorer, {
@@ -46,7 +49,7 @@ afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers(
 describe('personal atlas explorer public interactions', () => {
   it('selects a Ready skill despite unmet prerequisites and only opens or learns on explicit action', async () => {
     const wrapper = setup()
-    await button(wrapper, 'Bridges · Ready').trigger('click')
+    await button(wrapper, BRIDGES).trigger('click')
     expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Bridges')
     expect(wrapper.text()).toContain('Unloaded foundation')
     expect(wrapper.emitted('open-skill')).toBeUndefined()
@@ -57,17 +60,56 @@ describe('personal atlas explorer public interactions', () => {
   })
   it('shows credential Bloom separately from intrinsic Bloom, preserves malformed earned status, and offers further learning', async () => {
     const wrapper = setup()
-    await button(wrapper, 'Algebra · 4 Analyze').trigger('click')
+    await button(wrapper, ALGEBRA).trigger('click')
     const inspector = wrapper.get('[aria-label="Skill inspector"]')
     expect(inspector.text()).toContain('Current earned Bloom4 Analyze')
     expect(inspector.text()).toContain('Learning-outcome BloomCreate')
     expect(inspector.text()).toContain('Earned')
     await button(wrapper, 'Find learning opportunities').trigger('click')
     expect(wrapper.emitted('learn-skill')).toEqual([['a']])
-    await button(wrapper, 'Craft · Earned level unavailable').trigger('click')
+    await button(wrapper, CRAFT).trigger('click')
     expect(inspector.text()).toContain('Earned level unavailable')
     expect(inspector.text()).not.toContain('Remember')
     expect(inspector.text()).toContain('Unassigned')
+  })
+
+  it('names every skill by earned state and Bloom level in previews, the list and the map, with a decorative checkmark', async () => {
+    const wrapper = setup()
+    const names = (selector: string) => wrapper.findAll(selector).map(item => item.attributes('aria-label'))
+    expect(names('.field-earned')).toEqual(expect.arrayContaining([ALGEBRA, CRAFT]))
+    expect(names('.atlas-list li button')).toEqual([ALGEBRA, BRIDGES, CRAFT])
+    await button(wrapper, 'Explore Engineering').trigger('click')
+    expect(names('.map-node')).toContain(BRIDGES)
+    await button(wrapper, 'Mathematics').trigger('click')
+    expect(names('.map-node')).toContain(ALGEBRA)
+    const checks = wrapper.findAll('span').filter(item => item.element.childNodes.length === 1 && item.text().startsWith('✓'))
+    expect(checks.length).toBeGreaterThan(0)
+    expect(checks.every(item => item.attributes('aria-hidden') === 'true' && item.attributes('aria-label') === undefined)).toBe(true)
+  })
+
+  it('keeps a relationship focus visible on the map with the inspector collapsed, and clears it from there', async () => {
+    const wrapper = setup()
+    const indicator = () => wrapper.findAll('[role="status"]').find(item => item.text().startsWith('Showing'))
+    await button(wrapper, BRIDGES).trigger('click')
+    expect(indicator()).toBeUndefined()
+    await button(wrapper, 'Focus prerequisites').trigger('click')
+    await button(wrapper, 'Collapse inspector').trigger('click')
+    expect(indicator()?.isVisible()).toBe(true)
+    expect(indicator()?.text()).toContain('Showing prerequisites of Bridges · 1 step')
+    await wrapper.setProps({ view: { ...wrapper.props('view'), neighborhood: 'dependents', neighborhoodDepth: 2 } })
+    expect(indicator()?.text()).toContain('Showing dependents of Bridges · 2 steps')
+    await button(wrapper, 'Clear focus').trigger('click')
+    expect(wrapper.props('view')).toMatchObject({ neighborhood: 'none', selectedSkillId: 'b', inspectorCollapsed: true })
+    expect(indicator()).toBeUndefined()
+    expect(wrapper.findAll('.map-node.is-dimmed')).toHaveLength(0)
+  })
+
+  it('says a skill with no prerequisites has none instead of claiming prerequisite evidence', async () => {
+    const wrapper = setup()
+    await button(wrapper, ALGEBRA).trigger('click')
+    const inspector = wrapper.get('[aria-label="Skill inspector"]')
+    expect(inspector.text()).toContain('No prerequisites')
+    expect(inspector.text()).not.toContain('Prerequisite evidence available')
   })
 
   it('emphasizes earned Bloom in overview previews and the full-label list without removing Ready or prerequisite context', async () => {
@@ -83,7 +125,7 @@ describe('personal atlas explorer public interactions', () => {
     expect(wrapper.text()).toContain('Emphasizing 6 Create · Matches in the list: 0.')
     expect(wrapper.findAll('.is-bloom-match')).toHaveLength(0)
     expect(wrapper.text()).toContain('2 earned · 1 Ready · 3 loaded skills')
-    await button(wrapper, 'Bridges · Ready').trigger('click')
+    await button(wrapper, BRIDGES).trigger('click')
     expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Unloaded foundation')
     expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Algebra')
     await button(wrapper, 'Find learning opportunities').trigger('click')
@@ -113,7 +155,7 @@ describe('personal atlas explorer public interactions', () => {
   it('searches across fields, retains cross-field context, and reverses prerequisite focus without losing selection', async () => {
     const wrapper = setup()
     await wrapper.get('input[type="search"]').setValue('bridg')
-    await button(wrapper, 'Bridges · Ready').trigger('click')
+    await button(wrapper, BRIDGES).trigger('click')
     await button(wrapper, 'Focus prerequisites').trigger('click')
     expect(wrapper.props('view')).toMatchObject({ query: 'bridg', selectedSkillId: 'b', neighborhood: 'prerequisites' })
     expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Mathematics')
@@ -127,7 +169,7 @@ describe('personal atlas explorer public interactions', () => {
   it('restores view props across remount and resets all exploration controls through the public event', async () => {
     const wrapper = setup()
     await button(wrapper, 'Explore Engineering').trigger('click')
-    await button(wrapper, 'Bridges · Ready').trigger('click')
+    await button(wrapper, BRIDGES).trigger('click')
     await button(wrapper, 'Zoom in').trigger('click')
     await button(wrapper, 'Move map right').trigger('click')
     await wrapper.get('select').setValue('3')
@@ -173,7 +215,7 @@ describe('personal atlas explorer public interactions', () => {
 
   it('moves the map with arrow keys and exits relationship focus with Escape without routing', async () => {
     const wrapper = setup()
-    await button(wrapper, 'Bridges · Ready').trigger('click')
+    await button(wrapper, BRIDGES).trigger('click')
     await button(wrapper, 'Focus prerequisites').trigger('click')
     const before = wrapper.props('view').camera
     await wrapper.get('[role="group"][aria-label="Skill map"]').trigger('keydown', { key: 'ArrowRight' })

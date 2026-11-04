@@ -183,6 +183,14 @@
     "fieldConnections": "Connected fields",
     "overviewHint": "Choose a field to explore its skills and connections.",
     "moreEarned": "{count} more earned skills",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "noPrerequisites": "No prerequisites",
+    "nameEarned": "{name}, earned, Bloom level {level}",
+    "nameEarnedNoLevel": "{name}, earned, earned level unavailable",
+    "nameReady": "{name}, not yet earned, Ready, learning-outcome Bloom level {level}",
+    "nameReadyNoLevel": "{name}, not yet earned, Ready",
+    "focusShowingPrerequisites": "Showing prerequisites of {skill} · {depth}",
+    "focusShowingDependents": "Showing dependents of {skill} · {depth}",
+    "clearFocus": "Clear focus"
   }
 }

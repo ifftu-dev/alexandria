@@ -183,6 +183,14 @@
     "fieldConnections": "जुड़े हुए क्षेत्र",
     "overviewHint": "कौशल और संबंध देखने के लिए क्षेत्र चुनें।",
     "moreEarned": "{count} और अर्जित कौशल",
-    "clearSearch": "खोज साफ़ करें"
+    "clearSearch": "खोज साफ़ करें",
+    "noPrerequisites": "कोई पूर्वापेक्षा नहीं",
+    "nameEarned": "{name}, अर्जित, ब्लूम स्तर {level}",
+    "nameEarnedNoLevel": "{name}, अर्जित, अर्जित स्तर उपलब्ध नहीं",
+    "nameReady": "{name}, अभी अर्जित नहीं, तैयार, सीखने के परिणाम का ब्लूम स्तर {level}",
+    "nameReadyNoLevel": "{name}, अभी अर्जित नहीं, तैयार",
+    "focusShowingPrerequisites": "{skill} की पूर्वापेक्षाएँ दिखाई जा रही हैं · {depth}",
+    "focusShowingDependents": "{skill} पर निर्भर कौशल दिखाए जा रहे हैं · {depth}",
+    "clearFocus": "ध्यान हटाएँ"
   }
 }

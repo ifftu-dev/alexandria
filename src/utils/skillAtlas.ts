@@ -117,7 +117,9 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
       intrinsicBloom: bloomLevel(skill.bloom_level),
       prerequisites,
       dependents,
-      prerequisitesSatisfied: prerequisites.length >= skill.prerequisite_count && prerequisites.every((relation) => relation.earned),
+      // Satisfied means at least one prerequisite, every one known and earned.
+      prerequisitesSatisfied: prerequisites.length > 0 && prerequisites.length >= skill.prerequisite_count &&
+        prerequisites.every((relation) => relation.earned),
     }
   })
 

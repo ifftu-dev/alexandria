@@ -183,6 +183,14 @@
     "fieldConnections": "Domaines liés",
     "overviewHint": "Choisissez un domaine pour explorer ses compétences et ses liens.",
     "moreEarned": "{count} autres compétences acquises",
-    "clearSearch": "Effacer la recherche"
+    "clearSearch": "Effacer la recherche",
+    "noPrerequisites": "Aucun prérequis",
+    "nameEarned": "{name}, acquise, niveau de Bloom {level}",
+    "nameEarnedNoLevel": "{name}, acquise, niveau acquis indisponible",
+    "nameReady": "{name}, pas encore acquise, Prête, niveau de Bloom de l’objectif d’apprentissage {level}",
+    "nameReadyNoLevel": "{name}, pas encore acquise, Prête",
+    "focusShowingPrerequisites": "Prérequis de {skill} affichés · {depth}",
+    "focusShowingDependents": "Dépendantes de {skill} affichées · {depth}",
+    "clearFocus": "Retirer le centrage"
   }
 }

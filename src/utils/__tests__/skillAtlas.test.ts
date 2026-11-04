@@ -71,8 +71,9 @@ describe('buildSkillAtlas', () => {
       { skillId: 'outside', name: 'Outside', loaded: false, earned: true },
     ])
     expect(atlas.nodes[1]?.dependents).toEqual([{ skillId: 'a', name: 'a', loaded: true, earned: false }])
+    // Satisfied needs at least one prerequisite, all earned: b has none, c's one is not loaded.
     expect(atlas.nodes.map(n => [n.status, n.prerequisitesSatisfied])).toEqual([
-      ['ready', true], ['earned', true], ['ready', false],
+      ['ready', true], ['earned', false], ['ready', false],
     ])
   })
 
