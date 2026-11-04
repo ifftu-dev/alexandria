@@ -96,8 +96,8 @@ const sizeMap = {
 
 /* Reduced and Off: the shared progress rule (main.css) slows or stops the
    rotation; the sweeping arc becomes a fixed gap. */
-:global(:root[data-motion='reduced']) .app-spinner__arc,
-:global(:root[data-motion='off']) .app-spinner__arc {
+:root[data-motion='reduced'] .app-spinner__arc,
+:root[data-motion='off'] .app-spinner__arc {
   animation: none;
   stroke-dasharray: 30 60;
 }

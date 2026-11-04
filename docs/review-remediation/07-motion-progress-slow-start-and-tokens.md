@@ -55,3 +55,7 @@ Deviations:
 - jsdom does not apply `main.css`'s cascade, so the Vitests check the marker and the text. The rotation itself (slow in Reduced, still in Off) is proven in the desktop UI test.
 - Mapping to the nearest token changed some durations slightly: the opening mark 680 → 650 ms, the onboarding step 240 → 200 ms, completion card-pop 500 → 650 ms, shine 500 → 320 ms, progress width 450 → 320 ms.
 - Skeleton `animate-pulse` placeholders and the onboarding hero rings are not progress indicators, so they stay frozen under Reduced.
+
+## Notes
+
+- 2026-11-04: The spinner's Reduced and Off rule leaked onto the whole document. In scoped CSS, `:global(:root[data-motion='reduced']) .app-spinner__arc` compiles to a bare `:root[data-motion='reduced']`, dropping the arc, so `stroke-dasharray: 30 60` was inherited and every stroked SVG icon turned dashed in Reduced and Off. The selector is now `:root[data-motion='reduced'] .app-spinner__arc`, which compiles to `.app-spinner__arc[data-v-…]` under `:root[...]`. The new AppSpinner Vitest compiles the style and was red (bare `:root[...]`), now green. The desktop UI progress test now checks that the spinner's track keeps a solid stroke and the arc keeps its fixed gap. It was red in Chromium (track `30px, 60px`), now green. No other component mixes `:global(...)` with a scoped descendant.

@@ -72,11 +72,19 @@ test('progress indicators keep turning slowly in Reduced and stand still beside 
     expect(await style(target)).toEqual(expect.objectContaining({ duration: '3s', iterations: 'infinite', running: true }))
   }
   await expect(pending).toHaveAttribute('aria-busy', 'true')
+  // The fixed gap belongs to the spinner arc alone: an ordinary stroked
+  // shape (here the spinner's own track) keeps a solid stroke.
+  const track = specimens.locator('[role="status"] .app-spinner__track')
+  const arc = specimens.locator('[role="status"] .app-spinner__arc')
+  await expect(track).toHaveCSS('stroke-dasharray', 'none')
+  await expect(arc).toHaveCSS('stroke-dasharray', '30px, 60px')
 
   await page.getByRole('button', { name: 'Off', exact: true }).click()
   for (const target of [spinner, buttonSpinner]) {
     expect(await style(target)).toEqual(expect.objectContaining({ name: 'none', running: false }))
   }
+  await expect(track).toHaveCSS('stroke-dasharray', 'none')
+  await expect(arc).toHaveCSS('stroke-dasharray', '30px, 60px')
   await expect(specimens.getByRole('status')).toHaveText('Saving draft')
   await expect(pending.getByText('Save draft')).toHaveCSS('opacity', '1')
   await page.getByRole('button', { name: 'System', exact: true }).click()
