@@ -88,4 +88,11 @@ describe('buildSkillAtlas', () => {
     expect(refreshed.fields.map(f => [f.id, f.name, f.nodeIds])).toEqual(initial.fields.map(f => [f.id, f.name, f.nodeIds]))
     expect(initial.nodes[1]?.intrinsicBloom).toBeNull()
   })
+
+  it('places fields by their atlas slot and gives an unplaced field the slot after every placed one', () => {
+    const skills = [skill('a', { subject_field_id: 'a_field' }), skill('b', { subject_field_id: 'b_field' }), skill('c', { subject_field_id: null })]
+    const atlas = buildSkillAtlas({ skills, edges: [], subjectDid: 'did:me', activeCredentials: [],
+      subjectFields: [{ id: 'b_field', name: 'B', atlas_slot: 4 }, { id: 'unloaded', name: 'U', atlas_slot: 6 }] })
+    expect(atlas.fields.map(f => [f.id, f.slot])).toEqual([['b_field', 4], ['a_field', 7], [null, null]])
+  })
 })

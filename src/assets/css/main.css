@@ -64,7 +64,8 @@
   --mode-instructor-accent: rgb(180, 83, 9);
   --mode-guardian-accent: rgb(13, 148, 136);
 
-  /* Skill atlas fields: eight slots, each readable as text on cards. */
+  /* Skill atlas fields: eight colours, each readable as text on cards. A field
+     takes the colour of its atlas slot modulo eight (see atlasPresentation.ts). */
   --atlas-field-0: #5561be;
   --atlas-field-1: #ad5b23;
   --atlas-field-2: #26776d;

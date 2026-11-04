@@ -12,7 +12,7 @@ const skill: SkillInfo = {
   prerequisite_count: 0, dependent_count: 0, created_at: null,
 }
 const field: SubjectFieldInfo = {
-  id: 'field', name: 'Field', description: null, icon_emoji: null, subject_count: 1, skill_count: 1, created_at: null,
+  id: 'field', name: 'Field', description: null, icon_emoji: null, atlas_slot: 0, subject_count: 1, skill_count: 1, created_at: null,
 }
 const identity: Identity = {
   stake_address: 'stake-a', payment_address: 'payment-a', username: null, display_name: 'A',

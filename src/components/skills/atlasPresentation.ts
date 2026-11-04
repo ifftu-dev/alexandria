@@ -2,6 +2,20 @@ import type { MessageKey } from '@/i18n/keys'
 import { BLOOM_ORDER, type BloomLevel } from '@/utils/bloom'
 import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
 
+/**
+ * Distinct field colours, `--atlas-field-0` to `--atlas-field-7` in
+ * `main.css`, light and dark. A field's colour is its atlas slot modulo this
+ * size: slots past the palette wrap around and share a colour. The palette
+ * holds at least as many colours as there are bundled fields (a test pins
+ * this), so bundling a field beyond it means adding a colour first.
+ */
+export const ATLAS_PALETTE_SIZE = 8
+
+export function atlasFieldColor(field: Pick<AtlasField, 'id' | 'slot'>): string {
+  if (field.id === null || field.slot === null) return 'var(--app-muted-foreground)'
+  return `var(--atlas-field-${field.slot % ATLAS_PALETTE_SIZE})`
+}
+
 /** The `t` of `useI18n()`, narrowed to what atlas labels need. */
 export type AtlasTranslate = (key: MessageKey, named?: Record<string, unknown>) => string
 

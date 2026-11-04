@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { createAtlasPresenter } from '@/components/skills/atlasPresentation'
+import { atlasFieldColor, createAtlasPresenter } from '@/components/skills/atlasPresentation'
 import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
 
@@ -26,7 +26,7 @@ function expand(field?: AtlasField, node?: AtlasNode): void {
       <button class="expand" type="button" @click="expand()">{{ t('skills.graph.expandTitle') }} <span aria-hidden="true">↗</span></button>
       <p>{{ t('skills.atlas.fieldCounts', model.counts) }}</p>
       <div class="sidebar-fields">
-        <article v-for="(field, index) in model.fields" :key="field.id ?? 'unassigned'" :style="{ '--field': field.id === null ? 'var(--app-muted-foreground)' : `var(--atlas-field-${index % 8})` }">
+        <article v-for="field in model.fields" :key="field.id ?? 'unassigned'" :style="{ '--field': atlasFieldColor(field) }">
           <button class="field-name" type="button" @click="expand(field)">{{ present.fieldName(field) }}</button>
           <p>{{ t('skills.atlas.fieldCounts', field) }}</p>
           <button v-for="node in earned(field)" :key="node.skill.id" class="earned-skill" type="button" :aria-label="present.accessibleName(node)" @click="expand(field, node)">

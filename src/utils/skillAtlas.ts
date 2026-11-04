@@ -1,4 +1,4 @@
-import type { SkillGraphEdge, SkillInfo, VerifiableCredential } from '@/types'
+import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { BLOOM_ORDER, type BloomLevel } from './bloom'
 
 export type BloomRank = 0 | 1 | 2 | 3 | 4 | 5
@@ -30,6 +30,8 @@ export interface AtlasNode {
 export interface AtlasField {
   id: string | null
   name: string | null
+  /** Stable colour and region; null only for unassigned skills. */
+  slot: number | null
   nodeIds: readonly string[]
   total: number
   earned: number
@@ -48,7 +50,7 @@ export interface BuildSkillAtlasInput {
   edges: readonly SkillGraphEdge[]
   activeCredentials: readonly VerifiableCredential[]
   subjectDid: string | null
-  subjectFields?: readonly { id: string; name: string }[]
+  subjectFields?: readonly (Pick<SubjectFieldInfo, 'id' | 'name'> & { atlas_slot?: number | null })[]
 }
 
 function validRank(value: unknown): BloomRank | null {
@@ -138,9 +140,18 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
     field.nodeIds.push(node.skill.id)
     if (node.status === 'earned') field.earned++
   }
-  const fields = [...fieldsMap.values()].sort((a, b) => a.id === null ? 1 : b.id === null ? -1 : compareIds(a.id, b.id)).map((field) => ({
-    ...field, total: field.nodeIds.length, ready: field.nodeIds.length - field.earned,
-  }))
+  // A field the taxonomy does not place takes the next slot after every
+  // placed one (in ID order), so it can never move a placed field.
+  const slots = new Map<string, number>()
+  for (const field of input.subjectFields ?? []) if (field.atlas_slot != null) slots.set(field.id, field.atlas_slot)
+  let nextSlot = Math.max(-1, ...slots.values()) + 1
+  for (const id of [...fieldsMap.keys()].filter((id): id is string => id !== null).sort(compareIds)) {
+    if (!slots.has(id)) slots.set(id, nextSlot++)
+  }
+  const fields = [...fieldsMap.values()].map((field) => ({
+    ...field, slot: field.id === null ? null : slots.get(field.id) ?? null,
+    total: field.nodeIds.length, ready: field.nodeIds.length - field.earned,
+  })).sort((a, b) => a.slot === null ? 1 : b.slot === null ? -1 : a.slot - b.slot)
   const earned = nodes.filter((node) => node.status === 'earned').length
   return {
     nodes, fields, edges: [...input.edges],

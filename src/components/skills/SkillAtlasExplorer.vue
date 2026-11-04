@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, NODE_HEIGHT, NODE_WIDTH } from './atlasLayout'
-import { createAtlasPresenter } from './atlasPresentation'
+import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
 import { motionDuration, useMotion } from '@/composables/useMotion'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
@@ -115,7 +115,7 @@ function fieldName(fieldId: string | null): string {
   return present.fieldName(props.model.fields.find(field => field.id === fieldId) ?? { id: fieldId, name: null })
 }
 const status = present.evidence
-function color(fieldId: string | null): string { if (fieldId === null) return 'var(--app-muted-foreground)'; return `var(--atlas-field-${layout.value.regions.find(region => region.field.id === fieldId)?.color ?? 0})` }
+function color(fieldId: string | null): string { return atlasFieldColor(props.model.fields.find(field => field.id === fieldId) ?? { id: fieldId, slot: null }) }
 function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
 function preserveOverviewFocus(): void {
   if (!viewport.value?.querySelector('.atlas-overview')?.contains(document.activeElement)) return

@@ -274,3 +274,27 @@ it('drags the public map camera without selecting the node under a drag, while p
   node.element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await nextTick()
   expect(wrapper.props('view').selectedSkillId).toBe('b')
 })
+
+it('keeps every existing field in its colour and map region when a new field is added', async () => {
+  const fields = [{ id: 'sf_math', name: 'Mathematics', atlas_slot: 0 }, { id: 'sf_eng', name: 'Engineering', atlas_slot: 1 }]
+  const skills = [skill('a', 'Algebra', 'sf_math'), skill('b', 'Bridges', 'sf_eng'), skill('e', 'Engines', 'sf_eng')]
+  const atlas = (subjectFields: typeof fields, extra: SkillInfo[] = []) =>
+    buildSkillAtlas({ skills: [...skills, ...extra], edges: [], activeCredentials: [], subjectDid: 'did:me', subjectFields })
+  const wrapper = setup()
+  await wrapper.setProps({ model: atlas(fields) })
+  await button(wrapper, 'Explore Mathematics').trigger('click')
+  const regions = () => Object.fromEntries(wrapper.findAll('.atlas-map > g').map(region => [
+    region.get('.region-heading strong').text(),
+    { x: region.get('rect').attributes('x'), y: region.get('rect').attributes('y'), colour: region.attributes('style') },
+  ]))
+  const before = regions()
+  expect(before.Mathematics?.colour).toContain('var(--atlas-field-0)')
+  expect(before.Engineering?.colour).toContain('var(--atlas-field-1)')
+  // Sorts first by ID and by name, and takes the next unused slot.
+  await wrapper.setProps({ model: atlas([...fields, { id: 'sf_agri', name: 'Agriculture', atlas_slot: 2 }], [skill('f', 'Farming', 'sf_agri')]) })
+  const after = regions()
+  expect(after.Mathematics).toEqual(before.Mathematics)
+  expect(after.Engineering).toEqual(before.Engineering)
+  expect(after.Agriculture?.colour).toContain('var(--atlas-field-2)')
+})
+

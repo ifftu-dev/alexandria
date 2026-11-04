@@ -643,6 +643,8 @@ export interface SubjectFieldInfo {
   name: string
   description: string | null
   icon_emoji: string | null
+  /** Stable atlas colour and region; null for a field the bundled taxonomy does not place. */
+  atlas_slot: number | null
   subject_count: number
   skill_count: number
   created_at: string | null
