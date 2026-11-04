@@ -67,6 +67,8 @@
     "pushNoCloud": "No hay ningún servicio de Alexandria Cloud configurado para esta red, por lo que no es posible registrarse.",
     "pushCleanupPending": "La eliminación remota está pendiente. Aún pueden llegar avisos que ya estaban en cola.",
     "pushRegistrationPending": "El registro del dispositivo está pendiente de confirmación.",
+    "pushPausedByOrganisations": "Las notificaciones push están en pausa porque «Recibir solicitudes de organizaciones» está desactivado. Tu preferencia de push se conserva y vuelve a aplicarse cuando reactives las organizaciones.",
+    "pushPausedOpenOrganisations": "Abrir los ajustes de organizaciones",
     "pushError": "El último intento ha fallado: {error}",
     "register": "Registrar ahora",
     "unregister": "Anular registro",

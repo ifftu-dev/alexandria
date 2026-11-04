@@ -8,7 +8,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::db::executor::DatabaseWorkload;
-use crate::profile::scope::ProfileState as State;
+use crate::notifications;
+use crate::profile::scope::{ProfileLease, ProfileState as State};
 use crate::settings::{registry::SettingEntry, store::SettingsError, SettingsStore};
 use crate::AppState;
 
@@ -20,6 +21,18 @@ struct SettingsChangedEvent<'a> {
 
 fn emit_changed(app: &AppHandle, key: Option<&str>) {
     let _ = app.emit("settings-changed", SettingsChangedEvent { key });
+}
+
+/// Some settings decide push eligibility. Reconcile in the background so the
+/// switch returns at once; an offline removal stays pending and retries.
+fn reconcile_push(app: &AppHandle, lease: ProfileLease, key: &str) {
+    let app = app.clone();
+    let key = key.to_string();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = notifications::push::settings_changed(&app, lease, &key).await {
+            log::warn!("push reconcile after `{key}` changed failed: {e}");
+        }
+    });
 }
 
 fn map_settings_error(e: SettingsError) -> String {
@@ -52,16 +65,18 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), String> {
     let changed_key = key.clone();
+    let lease = state.profile_lease();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "settings.set",
             move |db| SettingsStore::set_raw(db.conn(), &key, &value).map_err(map_settings_error),
         )
         .await?;
     emit_changed(&app, Some(&changed_key));
+    reconcile_push(&app, lease, &changed_key);
     Ok(())
 }
 
@@ -73,15 +88,17 @@ pub async fn reset_setting(
     key: String,
 ) -> Result<(), String> {
     let changed_key = key.clone();
+    let lease = state.profile_lease();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "settings.reset",
             move |db| SettingsStore::reset(db.conn(), &key).map_err(map_settings_error),
         )
         .await?;
     emit_changed(&app, Some(&changed_key));
+    reconcile_push(&app, lease, &changed_key);
     Ok(())
 }

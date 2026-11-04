@@ -276,7 +276,9 @@ pub mod keys {
 
     /// Device-scoped: a push token belongs to one installation, so whether
     /// this one registers for remote wake-ups is not something another
-    /// device should inherit through sync.
+    /// device should inherit through sync. Registration also needs
+    /// [`ORGANISATIONS_ENABLED`]; while that is off push is paused and this
+    /// preference is kept unchanged.
     pub const NOTIFICATIONS_PUSH_ENABLED: SettingKey<bool> = SettingKey {
         key: "notifications.push_enabled",
         scope: Scope::Device,
@@ -440,7 +442,8 @@ pub mod keys {
     /// offers. One switch rather than a list of servers: every organisation
     /// reaches a learner through the network's Cloud, and each one proves its
     /// name with a TXT record on its own domain, so there is nothing for the learner
-    /// to configure. Off means the app never contacts Cloud on its own.
+    /// to configure. Off means the app never contacts Cloud on its own, beyond
+    /// the signed request that removes this device's push registration.
     pub const ORGANISATIONS_ENABLED: SettingKey<bool> = SettingKey {
         key: "organisations.enabled",
         scope: Scope::Sync,

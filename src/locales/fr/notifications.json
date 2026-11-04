@@ -67,6 +67,8 @@
     "pushNoCloud": "Aucun service Alexandria Cloud n’est configuré pour ce réseau ; l’enregistrement est donc indisponible.",
     "pushCleanupPending": "La suppression à distance est en attente. Des bannières déjà mises en attente peuvent encore arriver.",
     "pushRegistrationPending": "L’enregistrement de l’appareil attend une confirmation.",
+    "pushPausedByOrganisations": "Les notifications push sont en pause car « Recevoir les demandes des organisations » est désactivé. Votre réglage push est conservé et s’appliquera de nouveau quand les organisations seront réactivées.",
+    "pushPausedOpenOrganisations": "Ouvrir les réglages des organisations",
     "pushError": "La dernière tentative a échoué : {error}",
     "register": "Enregistrer maintenant",
     "unregister": "Désenregistrer",

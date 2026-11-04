@@ -104,10 +104,16 @@ async function askPermission() {
 
       <div v-if="pushStatus" class="space-y-2">
         <p class="text-xs text-muted-foreground">{{ statusLine }}</p>
+        <p v-if="pushStatus.pausedByOrganisations" class="text-xs text-muted-foreground" data-testid="push-paused-by-organisations">
+          {{ $t('notifications.settings.pushPausedByOrganisations') }}
+          <RouterLink to="/settings/organisations" class="text-primary underline">
+            {{ $t('notifications.settings.pushPausedOpenOrganisations') }}
+          </RouterLink>
+        </p>
         <p v-if="pushStatus.lastError" class="text-xs text-destructive">
           {{ $t('notifications.settings.pushError', { error: pushStatus.lastError }) }}
         </p>
-        <div v-if="pushStatus.supported && pushStatus.cloudOrigin" class="flex flex-wrap items-center gap-2">
+        <div v-if="pushStatus.supported && pushStatus.cloudOrigin && !pushStatus.pausedByOrganisations" class="flex flex-wrap items-center gap-2">
           <AppButton
             v-if="!pushStatus.registered"
             variant="outline"

@@ -1210,3 +1210,160 @@ async fn locked_startup_removes_incompatible_plaintext_prototype_activity() {
         "unversioned plaintext prototype activity must not remain on disk"
     );
 }
+
+fn set_organisations(state: &AppState, enabled: bool) {
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::ORGANISATIONS_ENABLED,
+        enabled,
+    )
+    .unwrap();
+}
+
+fn stored_push_preference(state: &AppState) -> bool {
+    SettingsStore::get(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::NOTIFICATIONS_PUSH_ENABLED,
+    )
+}
+
+#[tokio::test]
+async fn organisations_off_retires_registration_until_acknowledged_and_on_re_registers() {
+    const RECIPIENT: &str = "11111111-1111-4111-8111-111111111111";
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    // Cloud sees: the first registration, a removal that fails (offline), the
+    // retried removal after restart, and a fresh registration once
+    // organisations are back on. A PUT anywhere in between fails the test.
+    let server = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        for (expected, code) in [("PUT", 200), ("DELETE", 503), ("DELETE", 204), ("PUT", 200)] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            let method = header.split(' ').next().unwrap().to_string();
+            assert_eq!(method, expected, "unexpected Cloud request {header}");
+            let body = format!(r#"{{"recipient":"{RECIPIENT}"}}"#);
+            respond(
+                &mut socket,
+                code,
+                if code == 200 { &body } else { "" },
+                &header,
+            )
+            .await;
+            seen.push(method);
+        }
+        seen
+    });
+    let registered = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(registered.registered && !registered.paused_by_organisations);
+    assert!(recipients::resolve(&state, RECIPIENT).is_some());
+
+    set_organisations(&state, false);
+    let paused = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(paused.enabled, "the push preference is remembered");
+    assert!(paused.paused_by_organisations);
+    assert!(!paused.registered && !paused.pending_registration);
+    assert!(
+        paused.pending_cleanup,
+        "an unacknowledged removal stays pending"
+    );
+    assert!(
+        recipients::resolve(&state, RECIPIENT).is_none(),
+        "routing is retired before Cloud acknowledges"
+    );
+    assert!(stored_push_preference(&state));
+
+    state.stop_active_profile().await.unwrap();
+    drop(state);
+    let state = active(directory.path()).await;
+    let pending = status(&state, admitted(&state)).await.unwrap();
+    assert!(pending.pending_cleanup && pending.paused_by_organisations);
+    let removed = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(removed.enabled && removed.paused_by_organisations);
+    assert!(!removed.pending_cleanup && !removed.registered);
+    assert!(stored_push_preference(&state));
+
+    set_organisations(&state, true);
+    let resumed = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(resumed.registered && !resumed.paused_by_organisations);
+    assert!(recipients::resolve(&state, RECIPIENT).is_some());
+    assert!(stored_push_preference(&state));
+    assert_eq!(server.await.unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn switching_organisations_off_reconciles_push_and_other_settings_do_not() {
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let mut methods = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            methods.push(header.split(' ').next().unwrap().to_string());
+            let code = if methods.len() == 1 { 200 } else { 204 };
+            respond(
+                &mut socket,
+                code,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                &header,
+            )
+            .await;
+        }
+        methods
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+    let app = mock_builder()
+        .manage(state)
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let state = app.state::<AppState>();
+    assert!(
+        settings_changed(app.handle(), admitted(&state), keys::UI_THEME.key)
+            .await
+            .unwrap()
+            .is_none(),
+        "an unrelated setting leaves push alone"
+    );
+    set_organisations(&state, false);
+    let status = settings_changed(
+        app.handle(),
+        admitted(&state),
+        keys::ORGANISATIONS_ENABLED.key,
+    )
+    .await
+    .unwrap()
+    .expect("the organisations switch reconciles push");
+    assert!(status.enabled && status.paused_by_organisations);
+    assert!(!status.registered && !status.pending_cleanup);
+    assert_eq!(server.await.unwrap(), ["PUT", "DELETE"]);
+}

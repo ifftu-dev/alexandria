@@ -67,6 +67,8 @@
     "pushNoCloud": "此网络尚未配置 Alexandria Cloud，因此无法注册。",
     "pushCleanupPending": "正在等待远程移除。之前已排队的横幅仍可能送达。",
     "pushRegistrationPending": "设备注册正在等待确认。",
+    "pushPausedByOrganisations": "推送已暂停，因为“接收来自组织的请求”已关闭。你的推送设置会保留，重新开启组织后将再次生效。",
+    "pushPausedOpenOrganisations": "打开组织设置",
     "pushError": "上次尝试失败：{error}",
     "register": "立即注册",
     "unregister": "取消注册",

@@ -67,6 +67,8 @@
     "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
     "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
     "pushRegistrationPending": "Device registration is awaiting confirmation.",
+    "pushPausedByOrganisations": "Push is paused because “Receive requests from organisations” is off. Your push setting is kept and applies again when organisations are back on.",
+    "pushPausedOpenOrganisations": "Open organisation settings",
     "pushError": "Last attempt failed: {error}",
     "register": "Register now",
     "unregister": "Unregister",

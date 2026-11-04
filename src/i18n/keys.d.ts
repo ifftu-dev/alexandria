@@ -1989,6 +1989,8 @@ export type MessageKey =
   | 'notifications.settings.pushHint'
   | 'notifications.settings.pushNoCloud'
   | 'notifications.settings.pushNotRegistered'
+  | 'notifications.settings.pushPausedByOrganisations'
+  | 'notifications.settings.pushPausedOpenOrganisations'
   | 'notifications.settings.pushRegistered'
   | 'notifications.settings.pushRegistrationPending'
   | 'notifications.settings.pushUnsupported'

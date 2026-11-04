@@ -29,6 +29,9 @@ pub struct PushStatus {
     pub enabled: bool,
     pub pending_cleanup: bool,
     pub pending_registration: bool,
+    /// Push is on but organisations are off, so nothing is registered with
+    /// Cloud. The push preference is kept for when organisations come back.
+    pub paused_by_organisations: bool,
 }
 
 pub fn platform() -> Option<&'static str> {
@@ -69,6 +72,7 @@ struct Facts {
     origin: Option<String>,
     rows: Vec<Registration>,
     enabled: bool,
+    organisations: bool,
     locale: String,
     revision: i64,
     native_error: Option<String>,
@@ -78,6 +82,7 @@ async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, String> 
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.facts", |db| {
         Ok(Facts { origin: cloud_origin(db.conn()), rows: registrations(db.conn())?,
             enabled: SettingsStore::get(db.conn(), keys::NOTIFICATIONS_PUSH_ENABLED),
+            organisations: SettingsStore::get(db.conn(), keys::ORGANISATIONS_ENABLED),
             locale: SettingsStore::get(db.conn(), keys::USER_LANGUAGE),
             revision: db.conn().query_row("SELECT revision FROM push_operation_state WHERE singleton=1", [], |r| r.get(0)).map_err(|e| e.to_string())?,
             native_error: db.conn().query_row("SELECT last_error FROM push_operation_state WHERE singleton=1 AND error_origin IS ?1", params![cloud_origin(db.conn())], |r| r.get(0)).optional().map_err(|e| e.to_string())?.flatten(),
@@ -85,24 +90,42 @@ async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, String> 
     }).await
 }
 
+impl Facts {
+    /// Registration needs the push preference and organisations both on. With
+    /// organisations off the app never contacts Cloud on its own, so push is
+    /// treated as off without touching the stored preference.
+    fn eligible(&self) -> bool {
+        self.enabled && self.organisations
+    }
+}
+
+/// Whether a stored preference pair permits registration. Read at commit time
+/// so a PUT that raced an opt-out cannot publish a recipient.
+fn eligible_db(conn: &Connection) -> bool {
+    SettingsStore::get(conn, keys::NOTIFICATIONS_PUSH_ENABLED)
+        && SettingsStore::get(conn, keys::ORGANISATIONS_ENABLED)
+}
+
 fn status_from(f: &Facts) -> PushStatus {
+    let eligible = f.eligible();
     PushStatus {
         supported: platform().is_some(),
         platform: platform().map(str::to_string),
         cloud_origin: f.origin.clone(),
         enabled: f.enabled,
-        registered: f.enabled
+        registered: eligible
             && f.rows.iter().any(|r| {
                 Some(&r.origin) == f.origin.as_ref() && r.pending == "none" && r.recipient.is_some()
             }),
         pending_cleanup: f
             .rows
             .iter()
-            .any(|r| r.pending == "delete" || !f.enabled || Some(&r.origin) != f.origin.as_ref()),
+            .any(|r| r.pending == "delete" || !eligible || Some(&r.origin) != f.origin.as_ref()),
+        paused_by_organisations: f.enabled && !f.organisations,
         pending_registration: f
             .rows
             .iter()
-            .any(|r| r.pending == "put" && f.enabled && Some(&r.origin) == f.origin.as_ref()),
+            .any(|r| r.pending == "put" && eligible && Some(&r.origin) == f.origin.as_ref()),
         last_error: f
             .rows
             .iter()
@@ -221,7 +244,8 @@ async fn reconcile_inner(
         .ok_or("no profile is unlocked")?
         .to_string();
     let before = facts(state, lease).await?;
-    let desired = enabled.unwrap_or(before.enabled);
+    // Organisations off counts as push off; the stored preference stays.
+    let desired = enabled.unwrap_or(before.enabled) && before.organisations;
     // Retire routing first. A crash before the DB transaction can lose a
     // usable association, never leave a retired one routable while locked.
     for row in &before.rows {
@@ -268,7 +292,7 @@ async fn reconcile_inner(
         }).await?;
     }
     let f = facts(state, lease).await?;
-    if !f.enabled
+    if !f.eligible()
         || f.rows
             .iter()
             .any(|r| Some(&r.origin) == f.origin.as_ref() && r.pending == "delete")
@@ -336,7 +360,7 @@ async fn reconcile_inner(
     let saved_origin = origin.clone();
     let saved_result = result.clone();
     let committed = state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.commit", move |db| {
-        if !SettingsStore::get(db.conn(), keys::NOTIFICATIONS_PUSH_ENABLED)
+        if !eligible_db(db.conn())
             || cloud_origin(db.conn()).as_ref() != Some(&saved_origin) {
             db.conn().execute("UPDATE push_registrations SET recipient=NULL,pending='delete',revision=revision+1 WHERE cloud_origin=?1 AND revision=?2", params![saved_origin, revision]).map_err(|e| e.to_string())?;
             return Ok(false);
@@ -377,7 +401,7 @@ pub(crate) async fn register_with_token(
 ) -> Result<PushStatus, String> {
     let session = lease.session_id().to_string();
     let cleaned = reconcile(state, lease.clone(), None, None).await?;
-    if !cleaned.enabled || cleaned.cloud_origin.is_none() {
+    if !cleaned.enabled || cleaned.paused_by_organisations || cleaned.cloud_origin.is_none() {
         return Ok(cleaned);
     }
     let before = facts(state, &lease).await?;
@@ -388,7 +412,7 @@ pub(crate) async fn register_with_token(
     lease.run_until_closed(async {
         let _serial = OPERATIONS.lock().await;
         let now = facts(state, &work).await?;
-        if now.revision != before.revision || now.origin != before.origin || !now.enabled {
+        if now.revision != before.revision || now.origin != before.origin || !now.eligible() {
             return Ok(status_from(&now));
         }
         let error = token.as_ref().err().cloned();
@@ -423,6 +447,21 @@ pub async fn register<R: Runtime>(
             .map_err(|e| e.to_string())
     })
     .await
+}
+
+/// Reconcile after a generic settings write that changes push eligibility.
+/// The push switch has its own command; the organisations switch arrives here,
+/// so turning it off retires the registration and turning it on re-registers.
+/// `None` when the key does not affect push.
+pub async fn settings_changed<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: ProfileLease,
+    key: &str,
+) -> Result<Option<PushStatus>, String> {
+    if key != keys::ORGANISATIONS_ENABLED.key {
+        return Ok(None);
+    }
+    register(app, lease).await.map(Some)
 }
 
 pub async fn unregister<R: Runtime>(

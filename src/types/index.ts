@@ -2733,6 +2733,8 @@ export interface PushStatus {
   enabled: boolean
   pendingCleanup: boolean
   pendingRegistration: boolean
+  /** Push is on but organisations are off, so nothing is registered with Cloud. */
+  pausedByOrganisations: boolean
   supported: boolean
   registered: boolean
   platform: string | null
