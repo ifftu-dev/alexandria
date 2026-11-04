@@ -18,7 +18,7 @@ function button(name: string, root: ParentNode = document) {
 }
 async function click(name: string, root: ParentNode = document) { button(name, root).click(); await flushPromises() }
 async function setup() {
-  const backend = atlasBackend(true)
+  const backend = atlasBackend('stress')
   ipc.mockImplementation(backend.invoke)
   const { useProfiles } = await import('@/composables/useProfiles')
   const { useSkillAtlas } = await import('@/composables/useSkillAtlas')
@@ -45,7 +45,9 @@ it('keeps browse filters separate and restores graph selection, camera and contr
   await wrapper!.get('input').setValue('impossible browse query')
   await click('My Graph')
   expect(wrapper!.text()).toContain('Visibility & teaching')
-  expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(104)
+  // The list shows every loaded skill in its count and renders its first window.
+  expect(wrapper!.find('.atlas-list summary').text()).toContain('104 matching skills')
+  expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(50)
   await wrapper!.get('input[type="search"]').setValue('Big-O')
   // The sidebar names its earned preview the same way, so pick from the page's list.
   await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[aria-label="Full-label skill list"]')!)
@@ -120,6 +122,7 @@ it('offers a course and enrollment for an already earned skill from the modal', 
 it('keeps Ready learning accessible, updates the skill filter on route reuse and explains an empty result', async () => {
   const { router, backend } = await setup()
   await click('My Graph')
+  await wrapper!.get('input[type="search"]').setValue('Sorting Algorithms')
   await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
   await click('Find learning opportunities')
   expect(wrapper!.text()).toContain('Learning for Sorting Algorithms')

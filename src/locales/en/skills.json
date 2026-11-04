@@ -162,6 +162,7 @@
     "list": "Full-label skill list",
     "results": "{count} matching skills",
     "noResults": "No matching skills. Try another search.",
+    "showMoreSkills": "Show {count} more skills",
     "map": "Skill map",
     "mapHelp": "Arrows show prerequisites → dependents. Drag to move the map; on touch, swipe sideways. Vertical swipes scroll the page. Controls and arrow keys also move the map.",
     "zoomIn": "Zoom in",

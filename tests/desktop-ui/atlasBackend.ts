@@ -2,24 +2,66 @@ import taxonomy from '../../bootstrap/public_taxonomy.json'
 import type { Chapter, Course, Element, Identity, SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
 import type { SettingEntry } from '@/composables/useSettings'
 
+/**
+ * `stress` adds one long-label unassigned skill. `scale` grows the bootstrap
+ * taxonomy to SCALE_SKILLS skills spread over every subject of every field,
+ * with prerequisites mostly inside a field and some across fields.
+ */
+export type AtlasScenario = 'stress' | 'scale'
+export const SCALE_SKILLS = 1500
+
+/** Deterministic, so every run pans the same graph. */
+export function scaleTaxonomy() {
+  let seed = 7
+  const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  const blooms = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
+  const skills = [...taxonomy.skills]
+  const edges = [...taxonomy.skill_prerequisites]
+  const byField = new Map<string, string[]>()
+  const fieldOf = new Map(taxonomy.subjects.map(subject => [subject.id, subject.subject_field_id]))
+  for (const skill of skills) byField.set(fieldOf.get(skill.subject_id)!, [...(byField.get(fieldOf.get(skill.subject_id)!) ?? []), skill.id])
+  for (let index = 0; skills.length < SCALE_SKILLS; index++) {
+    const subject = taxonomy.subjects[index % taxonomy.subjects.length]!
+    const id = `scale_${String(index).padStart(4, '0')}`
+    skills.push({ id, name: `${subject.name} practice ${index + 1}`, description: `Generated scale skill ${index + 1}`,
+      subject_id: subject.id, bloom_level: blooms[index % blooms.length]!, created_at: '', updated_at: '' })
+    const local = byField.get(subject.subject_field_id) ?? []
+    const prerequisites = new Set<string>()
+    for (let pick = 0; pick < 2 + (index % 2) && local.length; pick++) prerequisites.add(local[Math.floor(random() * local.length)]!)
+    if (index % 4 === 0) prerequisites.add(skills[Math.floor(random() * (skills.length - 1))]!.id)
+    prerequisites.delete(id)
+    for (const prerequisite_id of prerequisites) edges.push({ skill_id: id, prerequisite_id })
+    byField.set(subject.subject_field_id, [...local, id])
+  }
+  return { skills, edges }
+}
+
 /** Strict external IPC fixture shared by mounted surfaces and browser journeys. */
-export function atlasBackend(stress = false) {
-  const subjects = taxonomy.subjects.map(subject => ({ ...subject,
-    skill_count: taxonomy.skills.filter(skill => skill.subject_id === subject.id).length }))
+export function atlasBackend(scenario: AtlasScenario | null = null) {
+  const stress = scenario === 'stress'
+  const graph = scenario === 'scale' ? scaleTaxonomy() : { skills: taxonomy.skills, edges: taxonomy.skill_prerequisites }
+  const skillsPerSubject = new Map<string, number>()
+  for (const skill of graph.skills) skillsPerSubject.set(skill.subject_id, (skillsPerSubject.get(skill.subject_id) ?? 0) + 1)
+  const prerequisiteCount = new Map<string, number>(), dependentCount = new Map<string, number>()
+  for (const edge of graph.edges) {
+    prerequisiteCount.set(edge.skill_id, (prerequisiteCount.get(edge.skill_id) ?? 0) + 1)
+    dependentCount.set(edge.prerequisite_id, (dependentCount.get(edge.prerequisite_id) ?? 0) + 1)
+  }
+  const subjects = taxonomy.subjects.map(subject => ({ ...subject, skill_count: skillsPerSubject.get(subject.id) ?? 0 }))
   const fields = taxonomy.subject_fields.map(field => ({ ...field,
     subject_count: subjects.filter(subject => subject.subject_field_id === field.id).length,
     skill_count: subjects.filter(subject => subject.subject_field_id === field.id).reduce((sum, subject) => sum + subject.skill_count, 0) }))
-  const skills: SkillInfo[] = taxonomy.skills.map(skill => {
+  const skills: SkillInfo[] = graph.skills.map(skill => {
     const subject = subjects.find(item => item.id === skill.subject_id)
     const field = fields.find(item => item.id === subject?.subject_field_id)
     return { ...skill, subject_name: subject?.name ?? null, subject_field_id: field?.id ?? null,
       subject_field_name: field?.name ?? null,
-      prerequisite_count: taxonomy.skill_prerequisites.filter(edge => edge.skill_id === skill.id).length,
-      dependent_count: taxonomy.skill_prerequisites.filter(edge => edge.prerequisite_id === skill.id).length }
+      prerequisite_count: prerequisiteCount.get(skill.id) ?? 0, dependent_count: dependentCount.get(skill.id) ?? 0 }
   })
-  const edges: SkillGraphEdge[] = taxonomy.skill_prerequisites.map(edge => ({ ...edge,
-    skill_name: skills.find(s => s.id === edge.skill_id)!.name, skill_bloom: skills.find(s => s.id === edge.skill_id)!.bloom_level,
-    prerequisite_name: skills.find(s => s.id === edge.prerequisite_id)!.name, prerequisite_bloom: skills.find(s => s.id === edge.prerequisite_id)!.bloom_level }))
+  const skillById = new Map(skills.map(skill => [skill.id, skill]))
+  const edges: SkillGraphEdge[] = graph.edges.map(edge => ({ ...edge,
+    skill_name: skillById.get(edge.skill_id)!.name, skill_bloom: skillById.get(edge.skill_id)!.bloom_level,
+    prerequisite_name: skillById.get(edge.prerequisite_id)!.name, prerequisite_bloom: skillById.get(edge.prerequisite_id)!.bloom_level }))
   if (stress) {
     skills.push({ id: 'fixture-unassigned', name: 'A very long skill label about community stewardship, collaborative problem solving, and inclusive systems design — نام کی مکمل وضاحت',
       description: 'Long bilingual label and unloaded prerequisite', subject_id: null, subject_name: null,
@@ -72,7 +114,8 @@ export function atlasBackend(stress = false) {
       case 'list_credentials': {
         state.reads++
         if (args?.activeOnly && args.subject !== `did:fixture:${state.profile}`) throw new Error('Atlas credentials must be subject-bound')
-        const creds = state.earned ? [credential('skill_big_o', state.level), ...(stress ? [credential('fixture-unassigned', 'invalid')] : [])] : []
+        const creds = state.earned ? [credential('skill_big_o', state.level), ...(stress ? [credential('fixture-unassigned', 'invalid')] : []),
+          ...(scenario === 'scale' ? skills.filter((_, index) => index % 5 === 0 && index > 0).map((skill, index) => credential(skill.id, index % 6)) : [])] : []
         return args?.skillId ? creds.filter(vc => vc.credentialSubject.skillId === args.skillId) : creds
       }
       case 'get_skill': return {

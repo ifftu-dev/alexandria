@@ -3315,6 +3315,7 @@ export type MessageKey =
   | 'skills.atlas.satisfied'
   | 'skills.atlas.search'
   | 'skills.atlas.selectPrompt'
+  | 'skills.atlas.showMoreSkills'
   | 'skills.atlas.title'
   | 'skills.atlas.twoSteps'
   | 'skills.atlas.unassigned'

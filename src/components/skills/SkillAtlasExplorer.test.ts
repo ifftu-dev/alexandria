@@ -31,8 +31,9 @@ const BRIDGES = 'Bridges, not yet earned, Ready, learning-outcome Bloom level 6 
 const ALGEBRA = 'Algebra, earned, Bloom level 4 Analyze'
 const CRAFT = 'Craft, earned, earned level unavailable'
 const mounted: VueWrapper[] = []
-function setup(view = initialView(), reducedMotion = false, feedback: { revision: number; earnedIds: string[]; improvedIds: string[] } | null = null) {
+function setup(view = initialView(), reducedMotion = false, feedback: { revision: number; earnedIds: string[]; improvedIds: string[] } | null = null, attachTo?: HTMLElement) {
   const wrapper = mount(SkillAtlasExplorer, {
+    attachTo,
     props: { model, view, reducedMotion, feedback, 'onUpdate:view': (next: AtlasViewState) => { void wrapper.setProps({ view: next }) } },
     global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en } })] },
   })
@@ -273,6 +274,71 @@ it('drags the public map camera without selecting the node under a drag, while p
   await pointer('pointerup', 100, 100)
   node.element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await nextTick()
   expect(wrapper.props('view').selectedSkillId).toBe('b')
+})
+
+it('moves the map live while dragging and publishes the camera once, when the drag ends', async () => {
+  const wrapper = setup()
+  await button(wrapper, 'Explore Engineering').trigger('click')
+  const map = wrapper.get('.atlas-map')
+  const emitted = () => wrapper.emitted('update:view')?.length ?? 0
+  const pointer = async (name: string, x: number, y: number) => {
+    const event = new MouseEvent(name, { bubbles: true, button: 0, clientX: x, clientY: y })
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: 'mouse' } })
+    map.element.dispatchEvent(event)
+    await nextTick()
+  }
+  const before = wrapper.props('view').camera!
+  const viewBox = map.attributes('viewBox')
+  const published = emitted()
+  await pointer('pointerdown', 200, 200)
+  await pointer('pointermove', 150, 180)
+  await pointer('pointermove', 100, 160)
+  expect(map.attributes('viewBox')).not.toBe(viewBox)
+  expect(map.attributes('viewBox')?.split(' ').map(Number).slice(0, 2)).toEqual(viewBox!.split(' ').map(Number).slice(0, 2).map((value, axis) => value + [100, 40][axis]!))
+  expect(emitted()).toBe(published)
+  await pointer('pointerup', 100, 160)
+  expect(emitted()).toBe(published + 1)
+  expect(wrapper.props('view').camera).toEqual({ ...before, x: before.x + 100, y: before.y + 40 })
+})
+
+it('draws only the prerequisite edges that reach into the visible map, as it does nodes', async () => {
+  // Zero-padded so ID order is row order: three skills per row, ten rows.
+  const id = (index: number) => `s${String(index).padStart(2, '0')}`
+  const many = Array.from({ length: 30 }, (_, index) => skill(id(index), `Skill ${index}`, 'Long field'))
+  const edge = (from: number, to: number) => ({ skill_id: id(to), skill_name: `Skill ${to}`, skill_bloom: 'create',
+    prerequisite_id: id(from), prerequisite_name: `Skill ${from}`, prerequisite_bloom: 'create' })
+  const wrapper = setup()
+  await wrapper.setProps({ model: buildSkillAtlas({ skills: many, edges: [edge(0, 1), edge(27, 28)], activeCredentials: [], subjectDid: 'did:me' }) })
+  await button(wrapper, 'Explore Long field').trigger('click')
+  const drawn = () => wrapper.findAll('.map-edge').map(path => path.get('title').text())
+  expect(drawn()).toEqual(['Skill 0 → Skill 1'])
+  for (let step = 0; step < 8; step++) await wrapper.get('.atlas-map').trigger('keydown', { key: 'ArrowDown' })
+  expect(drawn()).toEqual(['Skill 27 → Skill 28'])
+})
+
+it('renders a long match list a window at a time, keeping the full count and the window while selecting', async () => {
+  const id = (index: number) => `s${String(index).padStart(3, '0')}`
+  const many = Array.from({ length: 120 }, (_, index) => skill(id(index), `Skill ${index}`, 'Big field'))
+  const wrapper = setup(initialView(), false, null, document.body.appendChild(document.createElement('div')))
+  await wrapper.setProps({ model: buildSkillAtlas({ skills: many, edges: [], activeCredentials: [], subjectDid: 'did:me' }) })
+  const rows = () => wrapper.findAll('.atlas-list li button')
+  expect(wrapper.get('.atlas-list summary').text()).toContain('120 matching skills')
+  expect(rows()).toHaveLength(50)
+  await button(wrapper, 'Show 50 more skills').trigger('click')
+  expect(rows()).toHaveLength(100)
+  expect(document.activeElement).toBe(rows()[50]!.element)
+  await rows()[99]!.trigger('click')
+  expect(wrapper.props('view').selectedSkillId).toBe('s099')
+  expect(rows()).toHaveLength(100)
+  await button(wrapper, 'Show 20 more skills').trigger('click')
+  expect(rows()).toHaveLength(120)
+  expect(wrapper.findAll('button').some(item => item.text().startsWith('Show '))).toBe(false)
+  await wrapper.get('input[type="search"]').setValue('Skill 1')
+  // "Skill 1", "Skill 10"–"Skill 19" and "Skill 100"–"Skill 119".
+  expect(wrapper.get('.atlas-list summary').text()).toContain('31 matching skills')
+  expect(rows()).toHaveLength(31)
+  await wrapper.get('input[type="search"]').setValue('')
+  expect(rows()).toHaveLength(50)
 })
 
 it('keeps every existing field in its colour and map region when a new field is added', async () => {

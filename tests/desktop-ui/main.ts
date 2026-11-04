@@ -60,7 +60,8 @@ if (screen === 'motion') {
   createApp(MotionFixture).use(i18n).use(router).mount('#app')
 } else if (screen === 'personal-atlas') {
   const { atlasBackend } = await import('./atlasBackend')
-  const backend = atlasBackend(params.get('scenario') === 'stress')
+  const scenario = params.get('scenario')
+  const backend = atlasBackend(scenario === 'stress' || scenario === 'scale' ? scenario : null)
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},

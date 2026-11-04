@@ -162,6 +162,7 @@
     "list": "Lista de habilidades con nombres completos",
     "results": "{count} habilidades coincidentes",
     "noResults": "No hay coincidencias. Prueba otra búsqueda.",
+    "showMoreSkills": "Mostrar {count} habilidades más",
     "map": "Mapa de habilidades",
     "mapHelp": "Las flechas muestran requisitos → dependientes. Arrastra para mover el mapa; en pantalla táctil, desliza horizontalmente. Los gestos verticales desplazan la página. También puedes usar los controles y las teclas de flecha.",
     "zoomIn": "Acercar",

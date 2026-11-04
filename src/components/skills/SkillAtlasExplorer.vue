@@ -11,7 +11,7 @@ import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
 const props = defineProps<{ model: AtlasModel; view: AtlasViewState; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>()
 const emit = defineEmits<{ 'update:view': [view: AtlasViewState]; 'open-skill': [id: string]; 'learn-skill': [id: string]; 'feedback-consumed': [revision: number] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const present = createAtlasPresenter(t)
 const id = useId()
 const { reduced: systemReducedMotion } = useMotion()
@@ -50,7 +50,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', visibilityChanged)
 })
 const layout = computed(() => atlasLayout(props.model))
-const nodesById = computed(() => new Map(props.model.nodes.map(node => [node.skill.id, node])))
+const nodesById = computed(() => props.model.nodeById)
 const selected = computed(() => nodesById.value.get(props.view.selectedSkillId ?? ''))
 const fieldFocused = computed(() => props.view.focusedFieldId !== null || props.view.unassignedFocused)
 const overview = computed(() => !fieldFocused.value && props.view.camera === null)
@@ -68,15 +68,24 @@ onMounted(() => {
 })
 onBeforeUnmount(() => resizeObserver?.disconnect())
 const focusedRegion = computed(() => layout.value.regions.find(region => region.field.id === props.view.focusedFieldId))
-const camera = computed<AtlasCamera>(() => props.view.camera ?? regionCamera(focusedRegion.value ?? { x: 0, y: 0 }, width.value))
+// A drag moves only this local camera, so the shared view (and everything
+// derived from it, such as the match list) stays put until the drag ends.
+const liveCamera = ref<AtlasCamera | null>(null)
+const camera = computed<AtlasCamera>(() => liveCamera.value ?? props.view.camera ?? regionCamera(focusedRegion.value ?? { x: 0, y: 0 }, width.value))
+/** The part of the map on screen, in map units. Nodes and edges outside it are not drawn. */
+const visibleRect = computed(() => {
+  const w = width.value / camera.value.zoom, h = height / camera.value.zoom
+  return { left: camera.value.x - w / 2, top: camera.value.y - h / 2, right: camera.value.x + w / 2, bottom: camera.value.y + h / 2, width: w, height: h }
+})
+function onScreen(left: number, top: number, right: number, bottom: number): boolean {
+  const rect = visibleRect.value
+  return right >= rect.left && left <= rect.right && bottom >= rect.top && top <= rect.bottom
+}
 const visibleNodes = computed(() => props.model.nodes.filter(node => {
   const point = layout.value.positions.get(node.skill.id)
-  if (!point) return false
-  const halfWidth = width.value / camera.value.zoom / 2, halfHeight = height / camera.value.zoom / 2
-  return point.x + NODE_WIDTH >= camera.value.x - halfWidth && point.x <= camera.value.x + halfWidth &&
-    point.y + NODE_HEIGHT >= camera.value.y - halfHeight && point.y <= camera.value.y + halfHeight
+  return point !== undefined && onScreen(point.x, point.y, point.x + NODE_WIDTH, point.y + NODE_HEIGHT)
 }))
-const viewBox = computed(() => `${camera.value.x - width.value / camera.value.zoom / 2} ${camera.value.y - height / camera.value.zoom / 2} ${width.value / camera.value.zoom} ${height / camera.value.zoom}`)
+const viewBox = computed(() => `${visibleRect.value.left} ${visibleRect.value.top} ${visibleRect.value.width} ${visibleRect.value.height}`)
 const neighborhoodIds = computed(() => {
   const ids = new Set<string>()
   if (!selected.value || props.view.neighborhood === 'none') return ids
@@ -102,18 +111,39 @@ const focusSummary = computed(() => {
     depth: t(props.view.neighborhoodDepth === 2 ? 'skills.atlas.twoSteps' : 'skills.atlas.oneStep'),
   })
 })
-const matches = computed(() => {
-  const query = props.view.query.trim().toLocaleLowerCase()
-  return props.model.nodes.filter(node => !query || `${node.skill.name} ${node.skill.description ?? ''} ${node.skill.subject_name ?? ''} ${fieldName(node.fieldId)}`.toLocaleLowerCase().includes(query))
-})
+// A string computed only notifies when the query text changes, so other view
+// updates (selection, camera) keep the same match list and its window.
+const query = computed(() => props.view.query.trim().toLocaleLowerCase())
+const searchText = computed(() => new Map(props.model.nodes.map(node => [node.skill.id,
+  `${node.skill.name} ${node.skill.description ?? ''} ${node.skill.subject_name ?? ''} ${fieldName(node.fieldId)}`.toLocaleLowerCase()])))
+const matches = computed(() => query.value
+  ? props.model.nodes.filter(node => searchText.value.get(node.skill.id)?.includes(query.value))
+  : props.model.nodes)
+/** The match list renders this many rows at first, and this many more on request or on scrolling near its end. */
+const LIST_WINDOW = 50
+const listLimit = ref(LIST_WINDOW)
+watch(matches, () => { listLimit.value = LIST_WINDOW })
+const listedMatches = computed(() => matches.value.slice(0, listLimit.value))
+const unlisted = computed(() => matches.value.length - listedMatches.value.length)
+const list = ref<HTMLUListElement>()
+function showMoreMatches(moveFocus: boolean): void {
+  const first = listLimit.value
+  if (first >= matches.value.length) return
+  listLimit.value += LIST_WINDOW
+  if (moveFocus) void nextTick(() => list.value?.querySelectorAll<HTMLButtonElement>(':scope > li > button')[first]?.focus())
+}
+function listScrolled(event: Event): void {
+  const target = event.currentTarget
+  if (target instanceof HTMLElement && target.scrollTop + target.clientHeight >= target.scrollHeight - 200) showMoreMatches(false)
+}
 const bloomMatches = computed(() => matches.value.filter(bloomMatch))
 function bloomMatch(node: AtlasNode): boolean { return props.view.bloomEmphasis !== null && node.earnedBloom?.rank === props.view.bloomEmphasis }
 const matchIds = computed(() => new Set(matches.value.map(node => node.skill.id)))
 function fieldName(fieldId: string | null): string {
-  return present.fieldName(props.model.fields.find(field => field.id === fieldId) ?? { id: fieldId, name: null })
+  return present.fieldName(props.model.fieldById.get(fieldId) ?? { id: fieldId, name: null })
 }
 const status = present.evidence
-function color(fieldId: string | null): string { return atlasFieldColor(props.model.fields.find(field => field.id === fieldId) ?? { id: fieldId, slot: null }) }
+function color(fieldId: string | null): string { return atlasFieldColor(props.model.fieldById.get(fieldId) ?? { id: fieldId, slot: null }) }
 function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
 function preserveOverviewFocus(): void {
   if (!viewport.value?.querySelector('.atlas-overview')?.contains(document.activeElement)) return
@@ -147,12 +177,12 @@ const worldBounds = computed(() => ({
   x: Math.max(REGION_WIDTH, ...layout.value.regions.map(region => region.x + region.width)),
   y: Math.max(MAP_HEIGHT, ...layout.value.regions.map(region => region.y + region.height)),
 }))
-function moveCamera(origin: AtlasCamera, x: number, y: number): void {
-  update({ camera: { ...origin,
+function movedCamera(origin: AtlasCamera, x: number, y: number): AtlasCamera {
+  return { ...origin,
     x: Math.max(0, Math.min(worldBounds.value.x, origin.x + x / origin.zoom)),
-    y: Math.max(0, Math.min(worldBounds.value.y, origin.y + y / origin.zoom)) } })
+    y: Math.max(0, Math.min(worldBounds.value.y, origin.y + y / origin.zoom)) }
 }
-function pan(x: number, y: number): void { moveCamera(camera.value, x, y) }
+function pan(x: number, y: number): void { update({ camera: movedCamera(camera.value, x, y) }) }
 let drag: { id: number; x: number; y: number; camera: AtlasCamera; moved: boolean; touch: boolean } | null = null
 let suppressMapClick = false
 const dragging = ref(false)
@@ -173,7 +203,7 @@ function pointerMove(event: PointerEvent): void {
   suppressMapClick = true
   const map = event.currentTarget as SVGSVGElement
   map.setPointerCapture?.(event.pointerId)
-  moveCamera(drag.camera, -dx, drag.touch ? 0 : -dy)
+  liveCamera.value = movedCamera(drag.camera, -dx, drag.touch ? 0 : -dy)
 }
 function pointerEnd(event: PointerEvent): void {
   if (drag?.id !== event.pointerId) return
@@ -181,6 +211,9 @@ function pointerEnd(event: PointerEvent): void {
   dragging.value = false
   const map = event.currentTarget as SVGSVGElement
   if (map.hasPointerCapture?.(event.pointerId)) map.releasePointerCapture(event.pointerId)
+  const moved = liveCamera.value
+  liveCamera.value = null
+  if (moved) update({ camera: moved })
 }
 function mapClick(event: MouseEvent): void {
   if (suppressMapClick && event.detail !== 0) { event.stopPropagation(); event.preventDefault() }
@@ -197,33 +230,47 @@ function escapeFocus(event: KeyboardEvent): void {
   update({ neighborhood: 'none' })
 }
 function reset(): void { update(createAtlasViewState()) }
-const edges = computed(() => props.model.edges.flatMap((edge, index) => {
+// Edge geometry depends only on the layout, so it is built once per model.
+const edgeShapes = computed(() => props.model.edges.flatMap((edge, index) => {
   const from = layout.value.positions.get(edge.prerequisite_id)
   const to = layout.value.positions.get(edge.skill_id)
   if (!from || !to) return [] // Unloaded endpoints remain explicit in the inspector.
   const x1 = from.x + NODE_WIDTH, y1 = from.y + NODE_HEIGHT / 2
   const x2 = to.x, y2 = to.y + NODE_HEIGHT / 2
   const bend = Math.max(42, Math.min(160, Math.abs(x2 - x1) / 2))
-  return [{ index, path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
-    active: neighborhoodIds.value.size > 0
-      ? neighborhoodIds.value.has(edge.prerequisite_id) && neighborhoodIds.value.has(edge.skill_id)
-      : edge.prerequisite_id === props.view.selectedSkillId || edge.skill_id === props.view.selectedSkillId,
+  // A cubic Bézier stays inside the box of its control points.
+  return [{ index, edge, path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
+    left: Math.min(x1, x2, x2 - bend), right: Math.max(x1 + bend, x2), top: Math.min(y1, y2), bottom: Math.max(y1, y2),
     label: `${edge.prerequisite_name} → ${edge.skill_name}` }]
 }))
-function connections(field: AtlasField): AtlasField[] {
-  const connected = new Set<string | null>()
+const edges = computed(() => edgeShapes.value.filter(shape => onScreen(shape.left, shape.top, shape.right, shape.bottom)).map(({ index, edge, path, label }) => ({
+  index, path, label,
+  active: neighborhoodIds.value.size > 0
+    ? neighborhoodIds.value.has(edge.prerequisite_id) && neighborhoodIds.value.has(edge.skill_id)
+    : edge.prerequisite_id === props.view.selectedSkillId || edge.skill_id === props.view.selectedSkillId,
+})))
+// Overview summaries are built once per model, in one pass over its edges.
+const fieldConnections = computed(() => {
+  const connected = new Map<string | null, Set<string | null>>()
+  const link = (field: string | null, other: string | null) => {
+    const set = connected.get(field) ?? new Set<string | null>()
+    set.add(other)
+    connected.set(field, set)
+  }
   for (const edge of props.model.edges) {
     const from = nodesById.value.get(edge.prerequisite_id), to = nodesById.value.get(edge.skill_id)
     if (!from || !to || from.fieldId === to.fieldId) continue
-    if (from.fieldId === field.id) connected.add(to.fieldId)
-    if (to.fieldId === field.id) connected.add(from.fieldId)
+    link(from.fieldId, to.fieldId)
+    link(to.fieldId, from.fieldId)
   }
-  return props.model.fields.filter(item => connected.has(item.id))
-}
-function earnedPreview(field: AtlasField): AtlasNode[] {
-  return props.model.nodes.filter(node => node.fieldId === field.id && node.status === 'earned')
-    .sort((a, b) => Number(bloomMatch(b)) - Number(bloomMatch(a))).slice(0, 2)
-}
+  return new Map(props.model.fields.map(field => [field.id, props.model.fields.filter(item => connected.get(field.id)?.has(item.id))]))
+})
+function connections(field: AtlasField): readonly AtlasField[] { return fieldConnections.value.get(field.id) ?? [] }
+const earnedByField = computed(() => new Map(props.model.fields.map(field => [field.id,
+  field.nodeIds.flatMap(nodeId => { const node = nodesById.value.get(nodeId); return node?.status === 'earned' ? [node] : [] })])))
+const earnedPreviews = computed(() => new Map([...earnedByField.value].map(([fieldId, nodes]) => [fieldId,
+  [...nodes].sort((a, b) => Number(bloomMatch(b)) - Number(bloomMatch(a))).slice(0, 2)])))
+function earnedPreview(field: AtlasField): readonly AtlasNode[] { return earnedPreviews.value.get(field.id) ?? [] }
 function setBloom(event: Event): void {
   const value = event.target instanceof HTMLSelectElement ? event.target.value : ''
   const rank = value === '' ? null : Number(value)
@@ -296,7 +343,9 @@ function setBloom(event: Event): void {
         </div>
         <details class="atlas-list" open>
           <summary>{{ t('skills.atlas.list') }} <span>{{ t('skills.atlas.results', { count: matches.length }) }}</span></summary>
-          <ul :aria-label="t('skills.atlas.list')"><li v-for="node in matches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span>{{ status(node) }}</span></button></li></ul>
+          <!-- Memoised: a pan or zoom re-renders the map, never these rows. -->
+          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span>{{ status(node) }}</span></button></li></ul>
+          <button v-if="unlisted > 0" class="list-more" type="button" @click="showMoreMatches(true)">{{ t('skills.atlas.showMoreSkills', { count: Math.min(LIST_WINDOW, unlisted) }) }}</button>
           <p v-if="!matches.length">{{ t('skills.atlas.noResults') }}</p>
         </details>
       </div>
@@ -393,6 +442,7 @@ function setBloom(event: Event): void {
 .atlas ul { list-style: none; padding: 0; margin: 0; }
 .atlas-list ul { max-height: 330px; overflow: auto; padding: 0 8px 8px; }
 .atlas .atlas-list li button { width: 100%; display: flex; align-items: center; gap: 12px; border: 0; border-block-start: 1px solid var(--app-border); border-radius: 0; }
+.atlas .list-more { display: block; margin: 0 8px 8px; width: calc(100% - 16px); text-align: center; font-size: 13px; }
 .atlas-list strong, .atlas-list small { display: block; }
 .atlas-list strong { font-size: 13px; font-weight: 550; }
 .atlas-list small { color: var(--app-muted-foreground); font-size: 11px; }

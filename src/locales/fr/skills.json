@@ -162,6 +162,7 @@
     "list": "Liste des compétences avec noms complets",
     "results": "{count} compétences correspondantes",
     "noResults": "Aucun résultat. Essayez une autre recherche.",
+    "showMoreSkills": "Afficher {count} compétences de plus",
     "map": "Carte des compétences",
     "mapHelp": "Les flèches indiquent prérequis → dépendants. Faites glisser pour déplacer la carte ; sur écran tactile, balayez horizontalement. Les gestes verticaux font défiler la page. Les commandes et les touches fléchées déplacent aussi la carte.",
     "zoomIn": "Agrandir",
