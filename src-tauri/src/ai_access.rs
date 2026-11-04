@@ -29,16 +29,17 @@
 //!   [`mark_delivered`] for the guardian sync. A decision is bound to the
 //!   link the request came on.
 //!
-//! Every refusal is a typed [`Refused`]; chat shows its string code, the
-//! tutor and Studio runs convert it to their error once.
+//! Every refusal is a typed [`AccessDenied`]; chat shows its string code
+//! (`ai_chat::vocab::refused`), the tutor and Studio runs map it to their
+//! error once (`alexandria_studio::access::run_error`).
 
 use alexandria_ai::endpoint::Location;
-use alexandria_studio::model::StudioConnection;
-use alexandria_studio::{provider as studio_provider, store as studio_store};
+use alexandria_studio::model::{StudioConnection, StudioDocument};
+use alexandria_studio::provider as studio_provider;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
-pub use alexandria_studio::access::{visible_lesson, Reader, Refused};
+pub use alexandria_studio::access::{visible_lesson, AccessDenied, Reader};
 
 /// How vendor terms and guardian rules see the profile's holder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +51,7 @@ enum AgeBand {
     Child,
 }
 
-fn age_band(conn: &Connection) -> Result<AgeBand, Refused> {
+fn age_band(conn: &Connection) -> Result<AgeBand, AccessDenied> {
     let birthdate: Option<String> = conn
         .query_row(
             "SELECT birthdate FROM local_identity WHERE id = 1",
@@ -58,7 +59,7 @@ fn age_band(conn: &Connection) -> Result<AgeBand, Refused> {
             |r| r.get(0),
         )
         .optional()
-        .map_err(|_| Refused::Storage("profile"))?
+        .map_err(|_| AccessDenied::Storage("profile"))?
         .flatten();
     let today = chrono::Utc::now().date_naive();
     Ok(match birthdate.as_deref() {
@@ -68,18 +69,23 @@ fn age_band(conn: &Connection) -> Result<AgeBand, Refused> {
     })
 }
 
-fn remote(connection: &StudioConnection) -> Result<bool, Refused> {
-    Ok(studio_provider::location(connection)? == Location::Remote)
+fn remote(connection: &StudioConnection) -> Result<bool, AccessDenied> {
+    // The only failure is an unknown location, which is invalid input.
+    let location = studio_provider::location(connection).map_err(|error| match error {
+        alexandria_studio::Error::Invalid(message) => AccessDenied::Invalid(message),
+        other => AccessDenied::Invalid(other.to_string()),
+    })?;
+    Ok(location == Location::Remote)
 }
 
 /// May the profile's holder send to `connection` now: it is enabled and
 /// answers text, and the age rules allow it (see the module docs).
-pub fn may_use(conn: &Connection, connection: &StudioConnection) -> Result<(), Refused> {
+pub fn may_use(conn: &Connection, connection: &StudioConnection) -> Result<(), AccessDenied> {
     if !connection.enabled {
-        return Err(Refused::ConnectionDisabled);
+        return Err(AccessDenied::ConnectionDisabled);
     }
     if connection.capability != "text" {
-        return Err(Refused::WrongCapability);
+        return Err(AccessDenied::WrongCapability);
     }
     if !remote(connection)? {
         return Ok(());
@@ -91,16 +97,16 @@ pub fn may_use(conn: &Connection, connection: &StudioConnection) -> Result<(), R
     refuse_for_minors(&connection.endpoint, band)?;
     match latest_decision(conn, &connection.id, &connection.endpoint)?.as_deref() {
         Some("approved") => Ok(()),
-        Some("pending") => Err(Refused::GuardianPending),
-        Some(_) => Err(Refused::GuardianDeclined),
-        None => Err(Refused::GuardianRequired),
+        Some("pending") => Err(AccessDenied::GuardianPending),
+        Some(_) => Err(AccessDenied::GuardianDeclined),
+        None => Err(AccessDenied::GuardianRequired),
     }
 }
 
 /// May the profile's holder set `connection` up at all: the refusals no
 /// guardian approval can lift. A teen may connect a remote model that is not
 /// adults-only and then needs a guardian's approval to use it.
-pub fn may_connect(conn: &Connection, connection: &StudioConnection) -> Result<(), Refused> {
+pub fn may_connect(conn: &Connection, connection: &StudioConnection) -> Result<(), AccessDenied> {
     if !remote(connection)? {
         return Ok(());
     }
@@ -115,21 +121,21 @@ pub fn may_connect(conn: &Connection, connection: &StudioConnection) -> Result<(
 /// runs under its own terms. Under 13, no: the same reason as remote models.
 /// Vendor age floors and guardian approvals belong to model connections and
 /// endpoints, so they do not apply here.
-pub fn may_use_remote_service(conn: &Connection) -> Result<(), Refused> {
+pub fn may_use_remote_service(conn: &Connection) -> Result<(), AccessDenied> {
     match age_band(conn)? {
-        AgeBand::Child => Err(Refused::TooYoungForRemote),
+        AgeBand::Child => Err(AccessDenied::TooYoungForRemote),
         AgeBand::Teen | AgeBand::Adult => Ok(()),
     }
 }
 
-fn refuse_for_minors(endpoint: &str, band: AgeBand) -> Result<(), Refused> {
+fn refuse_for_minors(endpoint: &str, band: AgeBand) -> Result<(), AccessDenied> {
     if band == AgeBand::Child {
-        return Err(Refused::TooYoungForRemote);
+        return Err(AccessDenied::TooYoungForRemote);
     }
     let url = alexandria_ai::endpoint::parse(endpoint, Location::Remote)
-        .map_err(|e| Refused::Invalid(e.to_string()))?;
+        .map_err(|e| AccessDenied::Invalid(e.to_string()))?;
     match alexandria_ai::terms::adults_only(&url) {
-        Some(vendor) => Err(Refused::AdultsOnly(vendor)),
+        Some(vendor) => Err(AccessDenied::AdultsOnly(vendor)),
         None => Ok(()),
     }
 }
@@ -151,7 +157,7 @@ pub enum Surface {
     /// allowing a proposal. Flagged.
     ChatModel,
     /// Every other chat command that reads or changes chat state: threads,
-    /// attachments, models, memory, notes, approvals. Refused, not flagged.
+    /// attachments, models, memory, notes, approvals. AccessDenied, not flagged.
     ChatState,
     /// Asking the lesson tutor, or having its answer checked. Flagged.
     Tutor,
@@ -181,7 +187,7 @@ impl Surface {
 /// Refuses while an assessment attempt or interview check is in progress
 /// (see `alexandria_studio::gate`), and records the surface's integrity flag
 /// into the attempt's committed snapshot chain when it has one.
-pub fn no_attempt_in_progress(conn: &Connection, surface: Surface) -> Result<(), Refused> {
+pub fn no_attempt_in_progress(conn: &Connection, surface: Surface) -> Result<(), AccessDenied> {
     match alexandria_studio::gate::require_no_assessment(conn) {
         Ok(()) => Ok(()),
         Err(alexandria_studio::Error::AssessmentActive) => {
@@ -190,9 +196,11 @@ pub fn no_attempt_in_progress(conn: &Connection, surface: Surface) -> Result<(),
                     log::warn!("{surface:?}: could not record an integrity flag: {error}");
                 }
             }
-            Err(Refused::AttemptInProgress)
+            Err(AccessDenied::AttemptInProgress)
         }
-        Err(other) => Err(other.into()),
+        Err(alexandria_studio::Error::Storage(error)) => Err(AccessDenied::Database(error)),
+        // The gate reads one row; it fails with nothing else.
+        Err(other) => Err(AccessDenied::Invalid(other.to_string())),
     }
 }
 
@@ -227,7 +235,7 @@ fn latest_decision(
     conn: &Connection,
     connection_id: &str,
     endpoint: &str,
-) -> Result<Option<String>, Refused> {
+) -> Result<Option<String>, AccessDenied> {
     conn.query_row(
         "SELECT status FROM ai_connection_approvals
           WHERE connection_id = ?1 AND endpoint = ?2
@@ -236,11 +244,11 @@ fn latest_decision(
         |r| r.get(0),
     )
     .optional()
-    .map_err(|_| Refused::Storage("approvals"))
+    .map_err(|_| AccessDenied::Storage("approvals"))
 }
 
 /// Every approval request, newest first.
-pub fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, Refused> {
+pub fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, AccessDenied> {
     let read = || -> rusqlite::Result<Vec<GuardianApproval>> {
         let mut stmt = conn.prepare(
             "SELECT id, connection_id, connection_name, endpoint, model, status, requested_at, decided_at
@@ -262,19 +270,19 @@ pub fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, Refused> {
             .collect();
         rows
     };
-    read().map_err(|_| Refused::Storage("approvals"))
+    read().map_err(|_| AccessDenied::Storage("approvals"))
 }
 
 /// Asks the learner's guardians to approve a remote connection at its
 /// current endpoint. The request travels with the next guardian sync. Asking
-/// again while a request is pending or approved returns that request.
+/// again while a request is pending or approved returns that request. The
+/// caller reads the connection, so a missing one is its error, not a denial.
 pub fn request_approval(
     conn: &Connection,
-    connection_id: &str,
-) -> Result<GuardianApproval, Refused> {
-    let doc = studio_store::connection(conn, connection_id)?;
+    doc: &StudioDocument<StudioConnection>,
+) -> Result<GuardianApproval, AccessDenied> {
     if !remote(&doc.value)? {
-        return Err(Refused::NotRemote);
+        return Err(AccessDenied::NotRemote);
     }
     // A refusal no guardian can lift is the answer, before asking for a link.
     may_connect(conn, &doc.value)?;
@@ -284,9 +292,9 @@ pub fn request_approval(
             [],
             |r| r.get(0),
         )
-        .map_err(|_| Refused::Storage("guardian links"))?;
+        .map_err(|_| AccessDenied::Storage("guardian links"))?;
     if !has_guardian {
-        return Err(Refused::NoGuardian);
+        return Err(AccessDenied::NoGuardian);
     }
     let open = matches!(
         latest_decision(conn, &doc.id, &doc.value.endpoint)?.as_deref(),
@@ -301,7 +309,7 @@ pub fn request_approval(
              VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
             rusqlite::params![id, doc.id, doc.value.name, doc.value.endpoint, doc.value.model, crate::ai_chat::now()],
         )
-        .map_err(|_| Refused::Storage("approvals"))?;
+        .map_err(|_| AccessDenied::Storage("approvals"))?;
         Some(id)
     };
     approvals(conn)?
@@ -310,11 +318,14 @@ pub fn request_approval(
             Some(id) => &a.id == id,
             None => a.connection_id == doc.id && a.endpoint == doc.value.endpoint,
         })
-        .ok_or(Refused::Storage("the approval"))
+        .ok_or(AccessDenied::Storage("the approval"))
 }
 
 /// Ward side: the open requests to send a guardian, oldest first.
-pub fn pending_approvals(conn: &Connection, limit: u32) -> Result<Vec<PendingApproval>, Refused> {
+pub fn pending_approvals(
+    conn: &Connection,
+    limit: u32,
+) -> Result<Vec<PendingApproval>, AccessDenied> {
     let read = || -> rusqlite::Result<Vec<PendingApproval>> {
         let mut stmt = conn.prepare(
             "SELECT id, connection_name, endpoint, model FROM ai_connection_approvals
@@ -332,7 +343,7 @@ pub fn pending_approvals(conn: &Connection, limit: u32) -> Result<Vec<PendingApp
             .collect();
         rows
     };
-    read().map_err(|_| Refused::Storage("approvals"))
+    read().map_err(|_| AccessDenied::Storage("approvals"))
 }
 
 /// Ward side: applies a guardian's decision, arriving on `link_id`, to a
@@ -345,7 +356,7 @@ pub fn record_decision(
     request_id: &str,
     endpoint: &str,
     approved: bool,
-) -> Result<bool, Refused> {
+) -> Result<bool, AccessDenied> {
     let status = if approved { "approved" } else { "declined" };
     conn.execute(
         "UPDATE ai_connection_approvals
@@ -354,7 +365,7 @@ pub fn record_decision(
         rusqlite::params![request_id, endpoint, status, link_id],
     )
     .map(|changed| changed == 1)
-    .map_err(|_| Refused::Storage("approvals"))
+    .map_err(|_| AccessDenied::Storage("approvals"))
 }
 
 // ─── the guardian's side ─────────────────────────────────────────────────
@@ -390,7 +401,7 @@ pub fn record_ward_request(
     conn: &Connection,
     link_id: &str,
     request: &PendingApproval,
-) -> Result<(), Refused> {
+) -> Result<(), AccessDenied> {
     conn.execute(
         "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 'pending', datetime('now'))
@@ -404,11 +415,11 @@ pub fn record_ward_request(
         ],
     )
     .map(|_| ())
-    .map_err(|_| Refused::Storage("ward requests"))
+    .map_err(|_| AccessDenied::Storage("ward requests"))
 }
 
 /// Guardian side: every request from a ward on an active link, newest first.
-pub fn ward_requests(conn: &Connection) -> Result<Vec<GuardianAiRequest>, Refused> {
+pub fn ward_requests(conn: &Connection) -> Result<Vec<GuardianAiRequest>, AccessDenied> {
     let read = || -> rusqlite::Result<Vec<GuardianAiRequest>> {
         let mut stmt = conn.prepare(
             "SELECT r.id, r.link_id, l.peer_display_name, r.connection_name, r.endpoint, r.model,
@@ -436,7 +447,7 @@ pub fn ward_requests(conn: &Connection) -> Result<Vec<GuardianAiRequest>, Refuse
             .collect();
         rows
     };
-    read().map_err(|_| Refused::Storage("ward requests"))
+    read().map_err(|_| AccessDenied::Storage("ward requests"))
 }
 
 /// Guardian side: approves, declines or withdraws an approval of the request
@@ -448,7 +459,7 @@ pub fn record_guardian_decision(
     link_id: &str,
     request_id: &str,
     approve: bool,
-) -> Result<bool, Refused> {
+) -> Result<bool, AccessDenied> {
     conn.execute(
         "UPDATE guardian_ai_requests
             SET status = ?3, decided_at = datetime('now'), delivered = 0
@@ -462,14 +473,14 @@ pub fn record_guardian_decision(
         ],
     )
     .map(|changed| changed == 1)
-    .map_err(|_| Refused::Storage("ward requests"))
+    .map_err(|_| AccessDenied::Storage("ward requests"))
 }
 
 /// Guardian side: the decisions on `link_id` the ward has not acknowledged.
 pub fn undelivered_decisions(
     conn: &Connection,
     link_id: &str,
-) -> Result<Vec<GuardianDecision>, Refused> {
+) -> Result<Vec<GuardianDecision>, AccessDenied> {
     let read = || -> rusqlite::Result<Vec<GuardianDecision>> {
         let mut stmt = conn.prepare(
             "SELECT id, endpoint, status FROM guardian_ai_requests
@@ -486,7 +497,7 @@ pub fn undelivered_decisions(
             .collect();
         rows
     };
-    read().map_err(|_| Refused::Storage("ward requests"))
+    read().map_err(|_| AccessDenied::Storage("ward requests"))
 }
 
 /// Guardian side: the ward on `link_id` acknowledged `decision`. It is
@@ -496,7 +507,7 @@ pub fn mark_delivered(
     conn: &Connection,
     link_id: &str,
     decision: &GuardianDecision,
-) -> Result<bool, Refused> {
+) -> Result<bool, AccessDenied> {
     conn.execute(
         "UPDATE guardian_ai_requests SET delivered = 1
           WHERE id = ?1 AND link_id = ?2 AND status = ?3",
@@ -511,7 +522,7 @@ pub fn mark_delivered(
         ],
     )
     .map(|changed| changed == 1)
-    .map_err(|_| Refused::Storage("ward requests"))
+    .map_err(|_| AccessDenied::Storage("ward requests"))
 }
 
 #[cfg(test)]
@@ -519,11 +530,27 @@ mod tests {
     use super::*;
     use crate::ai_chat::turn::fixtures::*;
     use crate::ai_chat::vocab::refused;
-    use alexandria_studio::model::StudioDocument;
+    use alexandria_studio::store as studio_store;
 
     /// The connection as it is stored now.
     fn current(conn: &Connection, id: &str) -> StudioConnection {
         studio_store::connection(conn, id).unwrap().value
+    }
+
+    #[test]
+    fn an_unreadable_attempt_gate_is_a_database_denial() {
+        let conn = Connection::open_in_memory().unwrap();
+        let denied = no_attempt_in_progress(&conn, Surface::ChatState).unwrap_err();
+        assert!(matches!(denied, AccessDenied::Database(_)), "{denied:?}");
+        assert_eq!(
+            refused(denied),
+            "storage_error: studio data could not be accessed"
+        );
+    }
+
+    /// Asks for approval of the connection as it is stored now.
+    fn ask(conn: &Connection, id: &str) -> Result<GuardianApproval, AccessDenied> {
+        request_approval(conn, &studio_store::connection(conn, id).unwrap())
     }
 
     #[test]
@@ -534,8 +561,8 @@ mod tests {
         assert!(may_use(&conn, &current(&conn, "c1")).is_ok());
         connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
         assert!(matches!(
-            request_approval(&conn, "c1"),
-            Err(Refused::TooYoungForRemote)
+            ask(&conn, "c1"),
+            Err(AccessDenied::TooYoungForRemote)
         ));
         conn.execute(
             "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
@@ -563,10 +590,7 @@ mod tests {
         assert!(may_use(&conn, &current(&conn, "c1")).is_ok());
         born_years_ago(&conn, 16);
         link_guardian(&conn);
-        assert!(matches!(
-            request_approval(&conn, "c1"),
-            Err(Refused::AdultsOnly(_))
-        ));
+        assert!(matches!(ask(&conn, "c1"), Err(AccessDenied::AdultsOnly(_))));
         conn.execute(
             "INSERT INTO ai_connection_approvals (id, connection_id, connection_name, endpoint, model, status, requested_at)
              VALUES ('a', 'c1', 'Ollama', ?1, 'm', 'approved', '2026-10-24T00:00:00Z')",
@@ -636,24 +660,21 @@ mod tests {
         connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
         assert!(matches!(
             may_use(&conn, &current(&conn, "c1")),
-            Err(Refused::GuardianRequired)
+            Err(AccessDenied::GuardianRequired)
         ));
         // Asking needs a linked guardian.
-        assert!(matches!(
-            request_approval(&conn, "c1"),
-            Err(Refused::NoGuardian)
-        ));
+        assert!(matches!(ask(&conn, "c1"), Err(AccessDenied::NoGuardian)));
         link_guardian(&conn);
-        let asked = request_approval(&conn, "c1").unwrap();
+        let asked = ask(&conn, "c1").unwrap();
         assert_eq!(asked.status, "pending");
         assert_eq!(
-            request_approval(&conn, "c1").unwrap().id,
+            ask(&conn, "c1").unwrap().id,
             asked.id,
             "no duplicate request"
         );
         assert!(matches!(
             may_use(&conn, &current(&conn, "c1")),
-            Err(Refused::GuardianPending)
+            Err(AccessDenied::GuardianPending)
         ));
         // The guardian sync sends what the guardian sees, and the decision
         // comes back bound to the endpoint asked about.
@@ -678,7 +699,7 @@ mod tests {
         connection(&conn, "c1", "cloud", "https://api.anthropic.com/v1", None);
         assert!(matches!(
             may_use(&conn, &current(&conn, "c1")),
-            Err(Refused::GuardianRequired)
+            Err(AccessDenied::GuardianRequired)
         ));
         // Models on the learner's own network never need approval.
         connection(
@@ -696,7 +717,7 @@ mod tests {
         );
         assert!(matches!(
             may_use(&conn, &current(&conn, "c1")),
-            Err(Refused::GuardianDeclined)
+            Err(AccessDenied::GuardianDeclined)
         ));
     }
 
@@ -862,10 +883,10 @@ mod tests {
         for (surface, flags) in surfaces {
             let id = format!("{surface:?}");
             attempt(&conn, &id);
-            let refused = no_attempt_in_progress(&conn, surface).unwrap_err();
-            assert!(matches!(refused, Refused::AttemptInProgress));
+            let denied = no_attempt_in_progress(&conn, surface).unwrap_err();
+            assert!(matches!(denied, AccessDenied::AttemptInProgress));
             assert!(matches!(
-                alexandria_studio::Error::from(refused),
+                alexandria_studio::access::run_error(denied),
                 alexandria_studio::Error::AssessmentActive
             ));
             assert_eq!(flagged(&conn, &id), flags, "{id}");
@@ -880,7 +901,7 @@ mod tests {
         link_guardian(&conn);
         let openai = "https://api.openai.com/v1";
         connection(&conn, "c1", "cloud", openai, None);
-        let asked = request_approval(&conn, "c1").unwrap();
+        let asked = ask(&conn, "c1").unwrap();
         assert!(record_decision(&conn, "link", &asked.id, openai, true).unwrap());
         // The guardian withdraws the approval after the learner reviewed.
         let prepared = prepare(&conn, "Hello").unwrap();
@@ -903,20 +924,14 @@ mod tests {
         connection(&conn, "c1", "cloud", "https://api.openai.com/v1", None);
         born_years_ago(&conn, 11);
         assert!(matches!(
-            request_approval(&conn, "c1"),
-            Err(Refused::TooYoungForRemote)
+            ask(&conn, "c1"),
+            Err(AccessDenied::TooYoungForRemote)
         ));
         born_years_ago(&conn, 16);
-        assert!(matches!(
-            request_approval(&conn, "c1"),
-            Err(Refused::NoGuardian)
-        ));
+        assert!(matches!(ask(&conn, "c1"), Err(AccessDenied::NoGuardian)));
         let gemini = "https://generativelanguage.googleapis.com/v1beta/openai";
         connection(&conn, "c1", "cloud", gemini, None);
-        assert!(matches!(
-            request_approval(&conn, "c1"),
-            Err(Refused::AdultsOnly(_))
-        ));
+        assert!(matches!(ask(&conn, "c1"), Err(AccessDenied::AdultsOnly(_))));
     }
 
     #[test]
@@ -934,18 +949,18 @@ mod tests {
         assert!(may_connect(&conn, &chatgpt).is_ok());
         assert!(matches!(
             may_use(&conn, &chatgpt),
-            Err(Refused::GuardianRequired)
+            Err(AccessDenied::GuardianRequired)
         ));
         assert!(matches!(
             may_connect(&conn, &openrouter),
-            Err(Refused::AdultsOnly("OpenRouter"))
+            Err(AccessDenied::AdultsOnly("OpenRouter"))
         ));
         // Under 13: no remote sign-in at all.
         born_years_ago(&conn, 12);
         for target in [&chatgpt, &openrouter] {
             assert!(matches!(
                 may_connect(&conn, target),
-                Err(Refused::TooYoungForRemote)
+                Err(AccessDenied::TooYoungForRemote)
             ));
         }
     }

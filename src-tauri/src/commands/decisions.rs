@@ -163,7 +163,8 @@ fn task_allowed(db: &rusqlite::Connection, task: Task) -> Result<(), Error> {
     match task {
         Task::Tutor => tutor_review_allowed(db),
         Task::LearningGoal | Task::JobDescription | Task::DocumentClaim | Task::Search => {
-            crate::ai_access::may_use_remote_service(db)?;
+            crate::ai_access::may_use_remote_service(db)
+                .map_err(alexandria_studio::access::run_error)?;
             Ok(())
         }
         Task::StudioReview | Task::Incident => Ok(()),
@@ -486,8 +487,9 @@ pub async fn decision_search(
 /// attempt it is refused and flagged like asking the tutor; under 13 it is
 /// refused like any remote model.
 fn tutor_review_allowed(db: &rusqlite::Connection) -> Result<(), Error> {
-    crate::ai_access::no_attempt_in_progress(db, crate::ai_access::Surface::Tutor)?;
-    crate::ai_access::may_use_remote_service(db)?;
+    crate::ai_access::no_attempt_in_progress(db, crate::ai_access::Surface::Tutor)
+        .map_err(alexandria_studio::access::run_error)?;
+    crate::ai_access::may_use_remote_service(db).map_err(alexandria_studio::access::run_error)?;
     Ok(())
 }
 

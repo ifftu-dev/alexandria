@@ -191,7 +191,7 @@ pub fn gather(conn: &Connection, inputs: Inputs<'_>) -> Result<Gathered, String>
                 &binding.element_id,
             ) {
                 Ok(target) => Attached::Lesson(target),
-                Err(withheld @ ai_access::Refused::LessonWithheld) => {
+                Err(withheld @ ai_access::AccessDenied::LessonWithheld) => {
                     return Err(refused(withheld))
                 }
                 Err(_) => return Err(gone()),
@@ -671,7 +671,7 @@ pub fn begin(
 
 /// A fenced block the reply carried that was dropped, and why.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Refused {
+pub enum DroppedBlock {
     /// The practice block did not parse as a question.
     MalformedPractice,
     /// The question resembles a stored assessment item.
@@ -703,7 +703,7 @@ pub struct Outcome {
     pub practice: Option<practice::Question>,
     pub memory: Option<memory::Proposal>,
     pub proposal: Option<artifact::Proposal>,
-    pub refused: Vec<Refused>,
+    pub dropped: Vec<DroppedBlock>,
     /// False when the run had already ended, so nothing was written.
     pub saved: bool,
 }
@@ -725,12 +725,12 @@ pub fn complete(
     let run_id = begun.run.run_id.as_str();
     let message_id = begun.run.assistant_message.id.as_str();
     let thread_id = begun.run.thread_id.as_str();
-    let mut refused = Vec::new();
+    let mut dropped = Vec::new();
 
     let (without_artifact, artifact_block) = memory::split_block(reply, ReplyFence::Artifact);
     let draft = match artifact_block.map(artifact::parse) {
         Some(None) => {
-            refused.push(Refused::MalformedProposal);
+            dropped.push(DroppedBlock::MalformedProposal);
             None
         }
         Some(draft) => draft,
@@ -739,7 +739,7 @@ pub fn complete(
     let (without_memory, memory_block) = memory::split_block(&without_artifact, ReplyFence::Memory);
     let proposal = match memory_block.map(memory::parse) {
         Some(None) => {
-            refused.push(Refused::MalformedMemory);
+            dropped.push(DroppedBlock::MalformedMemory);
             None
         }
         Some(proposal) => proposal,
@@ -757,15 +757,15 @@ pub fn complete(
         let text = format!("{} {}", q.prompt, q.options.join(" "));
         let fine = !bank_guard::matches_assessment_item(conn, &text);
         if !fine {
-            refused.push(Refused::PracticeResemblesItem);
+            dropped.push(DroppedBlock::PracticeResemblesItem);
         }
         fine
     });
     let (content, note) = match (&accepted, practice_mode && block_present(&without_memory)) {
         (Some(_), _) => (prose.clone(), None),
         (None, true) => {
-            if !refused.contains(&Refused::PracticeResemblesItem) {
-                refused.push(Refused::MalformedPractice);
+            if !dropped.contains(&DroppedBlock::PracticeResemblesItem) {
+                dropped.push(DroppedBlock::MalformedPractice);
             }
             (prose.clone(), Some("practice_rejected"))
         }
@@ -774,7 +774,7 @@ pub fn complete(
     let proposal = proposal.filter(|p| {
         let fine = !bank_guard::matches_assessment_item(conn, &p.content);
         if !fine {
-            refused.push(Refused::MemoryResemblesItem);
+            dropped.push(DroppedBlock::MemoryResemblesItem);
         }
         fine
     });
@@ -784,12 +784,12 @@ pub fn complete(
         Some(draft) => match resolve_draft(conn, thread_id, draft) {
             Ok(Some(made)) => Some(made),
             Ok(None) => {
-                refused.push(Refused::UnresolvedProposal);
+                dropped.push(DroppedBlock::UnresolvedProposal);
                 None
             }
             Err(error) => {
                 log::warn!("chat: a proposal could not be resolved: {error}");
-                refused.push(Refused::ProposalLookupFailed);
+                dropped.push(DroppedBlock::ProposalLookupFailed);
                 None
             }
         },
@@ -799,7 +799,7 @@ pub fn complete(
         let text = format!("{} {}", a.title, a.body.text());
         let fine = !bank_guard::matches_assessment_item(conn, &text);
         if !fine {
-            refused.push(Refused::ProposalResemblesItem);
+            dropped.push(DroppedBlock::ProposalResemblesItem);
         }
         fine
     });
@@ -849,7 +849,7 @@ pub fn complete(
         practice,
         memory,
         proposal,
-        refused,
+        dropped,
         saved: finished,
     })
 }
@@ -1095,7 +1095,7 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use super::fixtures::*;
-    use super::{artifact, now, store, Inputs, Refused, Started};
+    use super::{artifact, now, store, DroppedBlock, Inputs, Started};
     use crate::ai_chat::action;
     use crate::ai_chat::ops::{attach, attach_goal, save_note};
     use crate::db::Database;
@@ -1531,7 +1531,7 @@ mod tests {
         assert!(!outcome.content.contains("```"), "{}", outcome.content);
         assert_eq!(outcome.note, Some("practice_rejected"));
         assert!(outcome.practice.is_none());
-        assert_eq!(outcome.refused, vec![Refused::PracticeResemblesItem]);
+        assert_eq!(outcome.dropped, vec![DroppedBlock::PracticeResemblesItem]);
         assert_eq!(
             outcome.memory.as_ref().map(|m| m.content.as_str()),
             Some("Prefers worked numbers")
@@ -1843,7 +1843,7 @@ mod tests {
         assert!(outcome.saved);
         assert_eq!(outcome.content, "Try this.");
         assert!(outcome.proposal.is_none());
-        assert_eq!(outcome.refused, vec![Refused::ProposalLookupFailed]);
+        assert_eq!(outcome.dropped, vec![DroppedBlock::ProposalLookupFailed]);
         let message = store::message(&conn, &started.run.assistant_message.id).unwrap();
         assert_eq!((message.status.as_str(), message.error), ("complete", None));
         assert!(store::artifacts_for_thread(&conn, "t").unwrap().is_empty());

@@ -170,7 +170,8 @@ pub(crate) fn request_approval(
     connection_id: &str,
 ) -> Result<GuardianApproval, String> {
     ai_access::no_attempt_in_progress(conn, Surface::ChatState).map_err(refused)?;
-    ai_access::request_approval(conn, connection_id).map_err(refused)
+    let doc = studio_store::connection(conn, connection_id).map_err(|e| e.to_string())?;
+    ai_access::request_approval(conn, &doc).map_err(refused)
 }
 
 /// The connection and key to ask for models. Asking contacts the provider,
@@ -330,6 +331,12 @@ mod tests {
             .unwrap_err()
             .starts_with("invalid_input"));
         assert!(store::bindings(&conn, "t").unwrap().is_empty());
+        // A malformed identifier reads as it did when the policy passed on
+        // Studio's error.
+        assert_eq!(
+            attach(&conn, "t", "course", "").unwrap_err(),
+            "invalid_input: invalid identifier"
+        );
     }
 
     /// Every chat command that reads a thread's contents or changes chat
