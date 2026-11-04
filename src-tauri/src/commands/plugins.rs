@@ -1103,12 +1103,12 @@ pub async fn irl_submit_for_review(
 ) -> Result<String, String> {
     check_rate_limit(&state, "irl_submit_for_review")?;
 
-    let (_sk, learner_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Learner,
         "plugin.irl-submit",
         move |db| {
+            let learner_did = profile_did(db)?;
             let course_id =
                 resolve_submission_course_id(db, enrollment_id.as_deref(), element_id.as_deref());
 
@@ -1118,7 +1118,7 @@ pub async fn irl_submit_for_review(
                 element_id.as_deref(),
                 enrollment_id.as_deref(),
                 course_id.as_deref(),
-                &learner_did.0,
+                &learner_did,
                 &submission_json,
                 &skills_json,
             )
@@ -1163,14 +1163,25 @@ pub async fn irl_list_my_submissions(
     state: State<'_, AppState>,
     plugin_cid: Option<String>,
 ) -> Result<Vec<IrlSubmission>, String> {
-    let (_sk, learner_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Learner,
         "plugin.irl-list-mine",
-        move |db| irl_review::list_for_learner(db, &learner_did.0, plugin_cid.as_deref()),
+        move |db| my_submissions(db, plugin_cid.as_deref()),
     )
     .await
+}
+
+/// The profile's DID, read from its identity: the review inbox records and
+/// lists whose work is whose, and signs nothing, so it needs no keys.
+fn profile_did(db: &Database) -> Result<String, String> {
+    crate::commands::identity::local_did(db.conn())
+        .ok_or_else(|| "this profile has no identity yet".to_string())
+}
+
+/// The profile holder's own review submissions, newest first.
+fn my_submissions(db: &Database, plugin_cid: Option<&str>) -> Result<Vec<IrlSubmission>, String> {
+    irl_review::list_for_learner(db, &profile_did(db)?, plugin_cid)
 }
 
 /// List IRL Review submissions awaiting an instructor review. Optional
@@ -1220,7 +1231,6 @@ pub async fn irl_post_review(
 ) -> Result<(), String> {
     check_rate_limit(&state, "irl_post_review")?;
 
-    let (_sk, reviewer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
     plugin_db(
         &state,
         DatabaseWorkload::Instructor,
@@ -1229,7 +1239,7 @@ pub async fn irl_post_review(
             irl_review::post_review(
                 db,
                 &submission_id,
-                &reviewer_did.0,
+                &profile_did(db)?,
                 score,
                 &feedback,
                 &skill_ratings_json,
@@ -1547,5 +1557,38 @@ mod grade_credential_tests {
             )
             .unwrap();
         assert_eq!(published, 0, "evidence stays private unless opted in");
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use crate::settings::{registry::keys, SettingsStore};
+
+    #[test]
+    fn a_learner_lists_their_own_reviews_from_the_profile_identity_alone() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        // No identity yet: nothing is anyone's.
+        assert!(my_submissions(&db, None).is_err());
+        SettingsStore::set(db.conn(), keys::IDENTITY_LOCAL_DID, "did:key:zMe".into()).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO plugin_installed \
+                 (plugin_cid, name, version, author_did, install_path, source, manifest_json) \
+                 VALUES ('cid', 'Review', '1.0.0', 'did:key:zAuthor', '/p', 'builtin', '{}')",
+                [],
+            )
+            .unwrap();
+        for learner in ["did:key:zMe", "did:key:zOther"] {
+            irl_review::submit(&db, "cid", None, None, None, learner, "{}", "[]").unwrap();
+        }
+        // There is no keystore here: listing needs the profile, not its keys.
+        let mine = my_submissions(&db, None).unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].learner_did, "did:key:zMe");
+        assert!(my_submissions(&db, Some("another-plugin"))
+            .unwrap()
+            .is_empty());
     }
 }
