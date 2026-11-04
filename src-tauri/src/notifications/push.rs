@@ -25,13 +25,85 @@ pub struct PushStatus {
     pub registered: bool,
     pub platform: Option<String>,
     pub cloud_origin: Option<String>,
-    pub last_error: Option<String>,
+    /// Why the last attempt failed, as a code the webview translates.
+    pub last_error_code: Option<PushErrorCode>,
+    /// The untranslated failure text, for diagnostics. Never shown as the
+    /// learner-facing message.
+    pub last_error_detail: Option<String>,
     pub enabled: bool,
     pub pending_cleanup: bool,
     pub pending_registration: bool,
     /// Push is on but organisations are off, so nothing is registered with
     /// Cloud. The push preference is kept for when organisations come back.
     pub paused_by_organisations: bool,
+}
+
+/// Why a push registration or removal failed. The set is small and stable:
+/// the webview translates each code, and the codes are stored as written
+/// here, so renaming one is a wire and storage change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PushErrorCode {
+    /// The learner did not allow notifications on this device.
+    PermissionDenied,
+    /// The phone's push service did not hand over a token.
+    TokenUnavailable,
+    /// The Cloud origin is neither https nor loopback, so no proof is sent.
+    InsecureOrigin,
+    /// The request never got an answer from Cloud.
+    CloudUnreachable,
+    /// Cloud answered with an error status.
+    CloudRejected,
+    /// Cloud answered without acknowledging this mutation's version, or
+    /// answered a removal with something other than 204.
+    CloudUnacknowledged,
+    /// Cloud's answer to a registration had no valid recipient binding.
+    InvalidResponse,
+}
+
+impl PushErrorCode {
+    const ALL: [Self; 7] = [
+        Self::PermissionDenied,
+        Self::TokenUnavailable,
+        Self::InsecureOrigin,
+        Self::CloudUnreachable,
+        Self::CloudRejected,
+        Self::CloudUnacknowledged,
+        Self::InvalidResponse,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PermissionDenied => "permission_denied",
+            Self::TokenUnavailable => "token_unavailable",
+            Self::InsecureOrigin => "insecure_origin",
+            Self::CloudUnreachable => "cloud_unreachable",
+            Self::CloudRejected => "cloud_rejected",
+            Self::CloudUnacknowledged => "cloud_unacknowledged",
+            Self::InvalidResponse => "invalid_response",
+        }
+    }
+
+    fn parse(stored: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|code| code.as_str() == stored)
+    }
+}
+
+/// A failed push step: the code the learner sees translated, and the raw
+/// text kept beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushFailure {
+    pub code: PushErrorCode,
+    pub detail: String,
+}
+
+impl PushFailure {
+    pub fn new(code: PushErrorCode, detail: impl Into<String>) -> Self {
+        Self {
+            code,
+            detail: detail.into(),
+        }
+    }
 }
 
 pub fn platform() -> Option<&'static str> {
@@ -46,11 +118,12 @@ struct Registration {
     pending: String,
     revision: i64,
     error: Option<String>,
+    error_detail: Option<String>,
     put_body: Option<String>,
 }
 
 fn registrations(conn: &Connection) -> Result<Vec<Registration>, String> {
-    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error, put_body FROM push_registrations ORDER BY cloud_origin").map_err(|e| e.to_string())?;
+    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error, put_body, last_error_detail FROM push_registrations ORDER BY cloud_origin").map_err(|e| e.to_string())?;
     let rows = statement
         .query_map([], |row| {
             Ok(Registration {
@@ -61,6 +134,7 @@ fn registrations(conn: &Connection) -> Result<Vec<Registration>, String> {
                 revision: row.get(4)?,
                 error: row.get(5)?,
                 put_body: row.get(6)?,
+                error_detail: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -75,7 +149,7 @@ struct Facts {
     organisations: bool,
     locale: String,
     revision: i64,
-    native_error: Option<String>,
+    native_error: Option<(String, Option<String>)>,
 }
 
 async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, String> {
@@ -85,7 +159,7 @@ async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, String> 
             organisations: SettingsStore::get(db.conn(), keys::ORGANISATIONS_ENABLED),
             locale: SettingsStore::get(db.conn(), keys::USER_LANGUAGE),
             revision: db.conn().query_row("SELECT revision FROM push_operation_state WHERE singleton=1", [], |r| r.get(0)).map_err(|e| e.to_string())?,
-            native_error: db.conn().query_row("SELECT last_error FROM push_operation_state WHERE singleton=1 AND error_origin IS ?1", params![cloud_origin(db.conn())], |r| r.get(0)).optional().map_err(|e| e.to_string())?.flatten(),
+            native_error: db.conn().query_row("SELECT last_error, last_error_detail FROM push_operation_state WHERE singleton=1 AND error_origin IS ?1 AND last_error IS NOT NULL", params![cloud_origin(db.conn())], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(|e| e.to_string())?,
         })
     }).await
 }
@@ -108,6 +182,11 @@ fn eligible_db(conn: &Connection) -> bool {
 
 fn status_from(f: &Facts) -> PushStatus {
     let eligible = f.eligible();
+    let failure = f
+        .rows
+        .iter()
+        .find_map(|r| r.error.clone().map(|code| (code, r.error_detail.clone())))
+        .or_else(|| f.native_error.clone());
     PushStatus {
         supported: platform().is_some(),
         platform: platform().map(str::to_string),
@@ -126,11 +205,10 @@ fn status_from(f: &Facts) -> PushStatus {
             .rows
             .iter()
             .any(|r| r.pending == "put" && eligible && Some(&r.origin) == f.origin.as_ref()),
-        last_error: f
-            .rows
-            .iter()
-            .find_map(|r| r.error.clone())
-            .or_else(|| f.native_error.clone()),
+        last_error_code: failure
+            .as_ref()
+            .and_then(|(code, _)| PushErrorCode::parse(code)),
+        last_error_detail: failure.and_then(|(_, detail)| detail),
     }
 }
 
@@ -163,9 +241,13 @@ async fn signed_send(
     path: &str,
     body: Option<Value>,
     revision: i64,
-) -> Result<reqwest::Response, String> {
+) -> Result<reqwest::Response, PushFailure> {
+    use PushErrorCode::*;
     if !origin.starts_with("https://") && !is_loopback(origin) {
-        return Err("Alexandria Cloud must be https".into());
+        return Err(PushFailure::new(
+            InsecureOrigin,
+            "Alexandria Cloud must be https",
+        ));
     }
     let timestamp = chrono::Utc::now().timestamp();
     let n = nonce();
@@ -174,7 +256,7 @@ async fn signed_send(
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| PushFailure::new(CloudUnreachable, e.to_string()))?;
     let mut request = client
         .request(method, format!("{}{path}", origin.trim_end_matches('/')))
         .header("x-alexandria-timestamp", timestamp.to_string())
@@ -188,11 +270,11 @@ async fn signed_send(
     let response = request
         .send()
         .await
-        .map_err(|_| "Cloud push request failed".to_string())?;
+        .map_err(|_| PushFailure::new(CloudUnreachable, "Cloud push request failed"))?;
     if !response.status().is_success() {
-        return Err(format!(
-            "Cloud push request returned {}",
-            response.status().as_u16()
+        return Err(PushFailure::new(
+            CloudRejected,
+            format!("Cloud push request returned {}", response.status().as_u16()),
         ));
     }
     // Only the versioned acknowledgement proves the mutation participated in
@@ -208,7 +290,10 @@ async fn signed_send(
             .and_then(|v| v.to_str().ok())
             != Some(revision.to_string().as_str())
     {
-        return Err("Cloud did not acknowledge the push mutation version".into());
+        return Err(PushFailure::new(
+            CloudUnacknowledged,
+            "Cloud did not acknowledge the push mutation version",
+        ));
     }
     Ok(response)
 }
@@ -262,7 +347,7 @@ async fn reconcile_inner(
             SettingsStore::set(&tx, keys::NOTIFICATIONS_PUSH_ENABLED, enabled).map_err(|e| e.to_string())?;
         }
         tx.execute("UPDATE push_registrations SET pending='delete',recipient=NULL,revision=revision+1 WHERE pending!='delete' AND (?1=0 OR cloud_origin IS NOT ?2)", params![desired, current_origin]).map_err(|e| e.to_string())?;
-        tx.execute("UPDATE push_operation_state SET revision=revision+1, last_error=CASE WHEN ?1 THEN last_error ELSE NULL END, error_origin=CASE WHEN ?1 THEN error_origin ELSE NULL END WHERE singleton=1", params![desired]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE push_operation_state SET revision=revision+1, last_error=CASE WHEN ?1 THEN last_error ELSE NULL END, last_error_detail=CASE WHEN ?1 THEN last_error_detail ELSE NULL END, error_origin=CASE WHEN ?1 THEN error_origin ELSE NULL END WHERE singleton=1", params![desired]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
     }).await?;
     let staged = facts(state, lease).await?;
@@ -281,7 +366,10 @@ async fn reconcile_inner(
             if response.status() == reqwest::StatusCode::NO_CONTENT {
                 Ok(())
             } else {
-                Err("Cloud did not acknowledge removal".into())
+                Err(PushFailure::new(
+                    PushErrorCode::CloudUnacknowledged,
+                    "Cloud did not acknowledge removal",
+                ))
             }
         });
         let origin = row.origin.clone();
@@ -289,7 +377,7 @@ async fn reconcile_inner(
         state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.cleanup", move |db| {
             match result {
                 Ok(()) => db.conn().execute("DELETE FROM push_registrations WHERE cloud_origin=?1 AND revision=?2 AND pending='delete'", params![origin, revision]),
-                Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1 WHERE cloud_origin=?2 AND revision=?3", params![error, origin, revision]),
+                Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1,last_error_detail=?2 WHERE cloud_origin=?3 AND revision=?4", params![error.code.as_str(), error.detail, origin, revision]),
             }.map(drop).map_err(|e| e.to_string())
         }).await?;
     }
@@ -330,7 +418,7 @@ async fn reconcile_inner(
     let staged_token = token.clone();
     let network = recipients::network()?;
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.stage", move |db| {
-        db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id, put_body) VALUES (?1,?2,'fcm',?3,'','put',?4,?5,?6) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, network_id=excluded.network_id, put_body=excluded.put_body", params![staged_origin, staged_device, staged_token, revision, network, serialized]).map(drop).map_err(|e| e.to_string())
+        db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id, put_body) VALUES (?1,?2,'fcm',?3,'','put',?4,?5,?6) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, last_error_detail=NULL, network_id=excluded.network_id, put_body=excluded.put_body", params![staged_origin, staged_device, staged_token, revision, network, serialized]).map(drop).map_err(|e| e.to_string())
     }).await?;
     let (key, did) = issuer_key(state).await?;
     let result = async {
@@ -343,20 +431,26 @@ async fn reconcile_inner(
             revision,
         )
         .await?;
+        let invalid = || {
+            PushFailure::new(
+                PushErrorCode::InvalidResponse,
+                "Cloud returned an invalid recipient binding",
+            )
+        };
         if response.status() != reqwest::StatusCode::OK {
-            return Err("Cloud did not return a recipient binding".to_string());
+            return Err(PushFailure::new(
+                PushErrorCode::InvalidResponse,
+                "Cloud did not return a recipient binding",
+            ));
         }
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|_| "Cloud returned an invalid recipient binding".to_string())?;
+        let body: Value = response.json().await.map_err(|_| invalid())?;
         let recipient = body
             .get("recipient")
             .and_then(Value::as_str)
             .filter(|v| canonical_uuid(v))
-            .ok_or("Cloud returned an invalid recipient binding")?
+            .ok_or_else(invalid)?
             .to_string();
-        Ok::<_, String>(recipient)
+        Ok::<_, PushFailure>(recipient)
     }
     .await;
     let saved_origin = origin.clone();
@@ -369,11 +463,11 @@ async fn reconcile_inner(
         }
         match saved_result {
             Ok(recipient) => {
-                let count = db.conn().execute("UPDATE push_registrations SET recipient=?1,pending='none',registered_at=datetime('now'),last_error=NULL WHERE cloud_origin=?2 AND revision=?3", params![recipient, saved_origin, revision]).map_err(|e| e.to_string())?;
-                db.conn().execute("UPDATE push_operation_state SET last_error=NULL,error_origin=NULL WHERE singleton=1", []).map_err(|e| e.to_string())?;
+                let count = db.conn().execute("UPDATE push_registrations SET recipient=?1,pending='none',registered_at=datetime('now'),last_error=NULL,last_error_detail=NULL WHERE cloud_origin=?2 AND revision=?3", params![recipient, saved_origin, revision]).map_err(|e| e.to_string())?;
+                db.conn().execute("UPDATE push_operation_state SET last_error=NULL,last_error_detail=NULL,error_origin=NULL WHERE singleton=1", []).map_err(|e| e.to_string())?;
                 Ok(count == 1)
             },
-            Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1 WHERE cloud_origin=?2 AND revision=?3", params![error, saved_origin, revision]).map(|_| false),
+            Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1,last_error_detail=?2 WHERE cloud_origin=?3 AND revision=?4", params![error.code.as_str(), error.detail, saved_origin, revision]).map(|_| false),
         }.map_err(|e| e.to_string())
     }).await?;
     if committed && lease.is_current() {
@@ -399,7 +493,7 @@ fn admit(state: &AppState) -> Result<ProfileLease, String> {
 pub(crate) async fn register_with_token(
     state: &AppState,
     lease: ProfileLease,
-    token: impl std::future::Future<Output = Result<String, String>>,
+    token: impl std::future::Future<Output = Result<String, PushFailure>>,
 ) -> Result<PushStatus, String> {
     let session = lease.session_id().to_string();
     let cleaned = reconcile(state, lease.clone(), None, None).await?;
@@ -418,9 +512,11 @@ pub(crate) async fn register_with_token(
             return Ok(status_from(&now));
         }
         let error = token.as_ref().err().cloned();
+        let code = error.as_ref().map(|e| e.code.as_str());
+        let detail = error.map(|e| e.detail);
         let origin = now.origin.clone();
         state.db_executor.execute(DatabaseWorkload::Learner, work.clone(), "notifications.push.native_status", move |db| {
-            db.conn().execute("UPDATE push_operation_state SET last_error=?1,error_origin=?2 WHERE singleton=1", params![error, origin]).map(drop).map_err(|e| e.to_string())
+            db.conn().execute("UPDATE push_operation_state SET last_error=?1,last_error_detail=?2,error_origin=?3 WHERE singleton=1", params![code, detail, origin]).map(drop).map_err(|e| e.to_string())
         }).await?;
         match token {
             Ok(token) => reconcile_inner(state, &work, Some(token), None).await,
@@ -438,17 +534,29 @@ pub async fn register<R: Runtime>(
         return reconcile(&state, lease, None, None).await;
     }
     register_with_token(&state, lease, async {
-        let granted = tauri_plugin_mobile_push::request_permission(app)
-            .await
-            .map_err(|e| e.to_string())?;
-        if !granted {
-            return Err("Notification permission was not granted".into());
-        }
+        permission(
+            tauri_plugin_mobile_push::request_permission(app)
+                .await
+                .map_err(|e| e.to_string()),
+        )?;
         tauri_plugin_mobile_push::get_token(app)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| PushFailure::new(PushErrorCode::TokenUnavailable, e.to_string()))
     })
     .await
+}
+
+/// What the system permission prompt's answer means for registration. A
+/// prompt that could not run at all is the push SDK failing, not a refusal.
+fn permission(granted: Result<bool, String>) -> Result<(), PushFailure> {
+    match granted {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(PushFailure::new(
+            PushErrorCode::PermissionDenied,
+            "Notification permission was not granted",
+        )),
+        Err(detail) => Err(PushFailure::new(PushErrorCode::TokenUnavailable, detail)),
+    }
 }
 
 /// Reconcile after a generic settings write that changes push eligibility.

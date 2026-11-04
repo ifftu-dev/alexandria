@@ -54,6 +54,10 @@
       "body": "Ouvrez Alexandria pour consulter la mise à jour."
     }
   },
+  "channel": {
+    "name": "Activité",
+    "description": "Entretiens, offres, demandes et activité des classes"
+  },
   "settings": {
     "title": "Notifications",
     "description": "Des badges dans l’application, des bannières du système et des notifications push sur cet appareil lorsque l’application est fermée.",
@@ -69,7 +73,15 @@
     "pushRegistrationPending": "L’enregistrement de l’appareil attend une confirmation.",
     "pushPausedByOrganisations": "Les notifications push sont en pause car « Recevoir les demandes des organisations » est désactivé. Votre réglage push est conservé et s’appliquera de nouveau quand les organisations seront réactivées.",
     "pushPausedOpenOrganisations": "Ouvrir les réglages des organisations",
-    "pushError": "La dernière tentative a échoué : {error}",
+    "pushErrors": {
+      "permission_denied": "Les notifications ne sont pas autorisées pour Alexandria. Autorisez-les dans les réglages de l’appareil, puis réessayez.",
+      "token_unavailable": "Cet appareil n’a pas pu obtenir de jeton push. Vérifiez sa connexion réseau, puis réessayez.",
+      "insecure_origin": "L’adresse d’Alexandria Cloud n’est pas sécurisée : cet appareil ne s’y enregistrera pas.",
+      "cloud_unreachable": "Impossible de joindre Alexandria Cloud. Vérifiez votre connexion ; Alexandria réessaiera.",
+      "cloud_rejected": "Alexandria Cloud a refusé la demande. Alexandria réessaiera plus tard.",
+      "cloud_unacknowledged": "Alexandria Cloud n’a pas confirmé la modification. Alexandria réessaiera.",
+      "invalid_response": "Alexandria Cloud a envoyé une réponse que cette application ne comprend pas. Alexandria réessaiera."
+    },
     "register": "Enregistrer maintenant",
     "unregister": "Désenregistrer",
     "working": "Opération en cours…",

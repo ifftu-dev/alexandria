@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import en from '@/locales/en'
+import fr from '@/locales/fr'
 import type { PushStatus } from '@/types'
 import NotificationsPanel from './NotificationsPanel.vue'
 
@@ -22,12 +23,12 @@ vi.mock('@/composables/useNotifications', () => ({
 
 function status(overrides: Partial<PushStatus>): PushStatus {
   return { enabled: true, pendingCleanup: false, pendingRegistration: false, pausedByOrganisations: false,
-    supported: true, registered: false, platform: 'fcm', cloudOrigin: 'https://cloud.example', lastError: null, ...overrides }
+    supported: true, registered: false, platform: 'fcm', cloudOrigin: 'https://cloud.example', lastErrorCode: null, lastErrorDetail: null, ...overrides }
 }
 
 const RouterLink = { props: ['to'], template: '<a :href="to" data-testid="router-link"><slot /></a>' }
-const render = () => mount(NotificationsPanel, {
-  global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en } })], stubs: { RouterLink } },
+const render = (locale: 'en' | 'fr' = 'en') => mount(NotificationsPanel, {
+  global: { plugins: [createI18n({ legacy: false, locale, messages: { en, fr } })], stubs: { RouterLink } },
 })
 
 beforeEach(() => {
@@ -53,5 +54,42 @@ describe('NotificationsPanel push status', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid=push-paused-by-organisations]').exists()).toBe(false)
     expect(wrapper.findAll('button').some((b) => b.text() === en.notifications.settings.register)).toBe(true)
+  })
+})
+
+describe('NotificationsPanel push errors', () => {
+  // Written out rather than read from the type, so a renamed code fails here.
+  const messages = {
+    permission_denied: 'Notifications are not allowed for Alexandria. Allow them in the device settings, then try again.',
+    token_unavailable: 'This device could not get a push token. Check that it has a network connection and try again.',
+    insecure_origin: 'The Alexandria Cloud address is not secure, so this device will not register with it.',
+    cloud_unreachable: 'Alexandria Cloud could not be reached. Check your connection; Alexandria will try again.',
+    cloud_rejected: 'Alexandria Cloud turned the request down. Alexandria will try again later.',
+    cloud_unacknowledged: 'Alexandria Cloud did not confirm the change. Alexandria will try again.',
+    invalid_response: 'Alexandria Cloud sent an answer this app does not understand. Alexandria will try again.',
+  } as const
+
+  it.each(Object.entries(messages))('shows the translated message for %s and never the raw detail', async (code, message) => {
+    mocks.status = status({ lastErrorCode: code as keyof typeof messages, lastErrorDetail: 'Cloud push request returned 503' })
+    const wrapper = render()
+    await flushPromises()
+    const error = wrapper.find('[data-testid=push-error]')
+    expect(error.text()).toBe(message)
+    expect(wrapper.text()).not.toContain('Cloud push request returned 503')
+  })
+
+  it('shows the message in the profile language', async () => {
+    mocks.status = status({ lastErrorCode: 'cloud_unreachable', lastErrorDetail: 'Cloud push request failed' })
+    const wrapper = render('fr')
+    await flushPromises()
+    expect(wrapper.find('[data-testid=push-error]').text()).toBe(fr.notifications.settings.pushErrors.cloud_unreachable)
+    expect(fr.notifications.settings.pushErrors.cloud_unreachable).not.toBe(messages.cloud_unreachable)
+  })
+
+  it('shows no error line when the last attempt succeeded', async () => {
+    mocks.status = status({})
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid=push-error]').exists()).toBe(false)
   })
 })

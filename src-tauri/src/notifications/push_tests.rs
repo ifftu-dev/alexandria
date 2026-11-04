@@ -93,13 +93,19 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
         versioned_response(&mut socket, 200, body, wire_version(&request)).await;
     });
     let unavailable = register_with_token(&state, admitted(&state), async {
-        Err("Native token unavailable".into())
+        Err(PushFailure::new(
+            PushErrorCode::TokenUnavailable,
+            "Native token unavailable",
+        ))
     })
     .await
     .unwrap();
     assert_eq!(
-        unavailable.last_error.as_deref(),
-        Some("Native token unavailable")
+        failure(&unavailable),
+        (
+            "token_unavailable".into(),
+            "Native token unavailable".into()
+        )
     );
     let status = reconcile(
         &state,
@@ -111,7 +117,7 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
     .unwrap();
     server.await.unwrap();
     assert!(status.registered);
-    assert_eq!(status.last_error, None);
+    assert_eq!(failure(&status), (Value::Null, Value::Null));
     SettingsStore::set(
         state.db.lock().unwrap().as_ref().unwrap().conn(),
         keys::USER_LANGUAGE,
@@ -363,7 +369,9 @@ async fn locking_while_native_token_is_pending_does_not_wait_or_register_in_a_ne
     let task = tokio::spawn(async move {
         register_with_token(&task_state, lease, async {
             started_tx.send(()).unwrap();
-            token_rx.await.map_err(|e| e.to_string())
+            token_rx
+                .await
+                .map_err(|e| PushFailure::new(PushErrorCode::TokenUnavailable, e.to_string()))
         })
         .await
     });
@@ -748,7 +756,9 @@ async fn a_native_token_result_cannot_overwrite_a_newer_rotation_in_the_same_ses
     let task = tokio::spawn(async move {
         register_with_token(&task_state, admitted(&task_state), async {
             started_tx.send(()).unwrap();
-            token_rx.await.map_err(|e| e.to_string())
+            token_rx
+                .await
+                .map_err(|e| PushFailure::new(PushErrorCode::TokenUnavailable, e.to_string()))
         })
         .await
     });
@@ -1382,4 +1392,158 @@ async fn switching_organisations_off_reconciles_push_and_other_settings_do_not()
     assert!(status.enabled && status.paused_by_organisations);
     assert!(!status.registered && !status.pending_cleanup);
     assert_eq!(server.await.unwrap(), ["PUT", "DELETE"]);
+}
+
+/// The code and raw detail a status carries, read from its wire form.
+fn failure(status: &PushStatus) -> (Value, Value) {
+    let wire = serde_json::to_value(status).unwrap();
+    (
+        wire["lastErrorCode"].clone(),
+        wire["lastErrorDetail"].clone(),
+    )
+}
+
+#[tokio::test]
+async fn each_push_failure_is_reported_as_a_stable_code_with_its_raw_detail() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    // Cloud answers each PUT, then the DELETE, in turn. `None` is a 2xx with
+    // no versioned acknowledgement.
+    let server = tokio::spawn(async move {
+        for (code, body, versioned) in [
+            (503, "", true),
+            (
+                200,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                false,
+            ),
+            (201, "", true),
+            (200, r#"{"recipient":"not-a-uuid"}"#, true),
+            (
+                200,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                true,
+            ),
+            (200, "", true),
+        ] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            if versioned {
+                respond(&mut socket, code, body, &header).await;
+            } else {
+                socket.write_all(format!("HTTP/1.1 {code} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            }
+        }
+    });
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        let status = reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap();
+        seen.push(failure(&status));
+    }
+    assert_eq!(
+        seen,
+        [
+            (
+                "cloud_rejected".into(),
+                "Cloud push request returned 503".into()
+            ),
+            (
+                "cloud_unacknowledged".into(),
+                "Cloud did not acknowledge the push mutation version".into()
+            ),
+            (
+                "invalid_response".into(),
+                "Cloud did not return a recipient binding".into()
+            ),
+            (
+                "invalid_response".into(),
+                "Cloud returned an invalid recipient binding".into()
+            ),
+            (Value::Null, Value::Null),
+        ]
+    );
+    let removal = reconcile(&state, admitted(&state), None, Some(false))
+        .await
+        .unwrap();
+    assert_eq!(
+        failure(&removal),
+        (
+            "cloud_unacknowledged".into(),
+            "Cloud did not acknowledge removal".into()
+        )
+    );
+    server.await.unwrap();
+    // The listener is gone, so the retried removal cannot connect.
+    let offline = reconcile(&state, admitted(&state), None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        failure(&offline),
+        (
+            "cloud_unreachable".into(),
+            "Cloud push request failed".into()
+        )
+    );
+}
+
+#[tokio::test]
+async fn native_and_transport_failures_have_their_own_codes() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    for (native, code, detail) in [
+        (
+            permission(Ok(false)),
+            "permission_denied",
+            "Notification permission was not granted",
+        ),
+        (
+            permission(Err("plugin unavailable".into())),
+            "token_unavailable",
+            "plugin unavailable",
+        ),
+        (Ok(()), "token_unavailable", "FCM token request failed"),
+    ] {
+        let status = register_with_token(&state, admitted(&state), async move {
+            native?;
+            Err(PushFailure::new(
+                PushErrorCode::TokenUnavailable,
+                "FCM token request failed",
+            ))
+        })
+        .await
+        .unwrap();
+        assert_eq!(failure(&status), (code.into(), detail.into()));
+    }
+    let key = SigningKey::from_bytes(&[7; 32]);
+    let insecure = signed_send(
+        "http://cloud.example",
+        &key,
+        reqwest::Method::PUT,
+        "/api/push/devices/for/did:key:z",
+        None,
+        1,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        serde_json::to_value(insecure.code).unwrap(),
+        "insecure_origin"
+    );
+    assert_eq!(insecure.detail, "Alexandria Cloud must be https");
 }

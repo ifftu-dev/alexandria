@@ -1,5 +1,6 @@
 //! Generic notification text shared with the webview catalogs. Only the kind
 //! and selected profile language choose copy; event payloads never format it.
+//! The Android channel's name and description come from the same catalogs.
 
 use std::{collections::HashMap, sync::LazyLock};
 
@@ -8,6 +9,13 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 struct Catalog {
     kinds: HashMap<String, Copy>,
+    channel: Channel,
+}
+
+#[derive(Deserialize)]
+struct Channel {
+    name: String,
+    description: String,
 }
 
 #[derive(Deserialize)]
@@ -65,15 +73,25 @@ static CATALOGS: LazyLock<HashMap<&'static str, Catalog>> = LazyLock::new(|| {
     .collect()
 });
 
-pub(super) fn localized(locale: &str, kind: &str) -> (&'static str, &'static str) {
+/// The catalog for a locale tag (`fr`, `FR_ca`, `zh-Hans`), else English.
+fn catalog(locale: &str) -> &'static Catalog {
     let normalized = locale.trim().to_ascii_lowercase();
     let primary = normalized.split(['-', '_']).next().unwrap_or("en");
+    CATALOGS.get(primary).unwrap_or(&CATALOGS["en"])
+}
+
+pub(super) fn localized(locale: &str, kind: &str) -> (&'static str, &'static str) {
     let english = &CATALOGS["en"].kinds;
-    let catalog = CATALOGS.get(primary).unwrap_or(&CATALOGS["en"]);
-    let copy = catalog
+    let copy = catalog(locale)
         .kinds
         .get(kind)
         .or_else(|| english.get(kind))
         .unwrap_or(&english["generic"]);
     (&copy.title, &copy.body)
+}
+
+/// The Android channel's name and description in a locale.
+pub(super) fn channel(locale: &str) -> (&'static str, &'static str) {
+    let channel = &catalog(locale).channel;
+    (&channel.name, &channel.description)
 }

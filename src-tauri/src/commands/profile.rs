@@ -188,7 +188,8 @@ pub async fn create_profile(
 ) -> Result<CreateProfileResponse, String> {
     let operations = app.state::<AppState>().profile_operations.clone();
     let cleanup_app = app.clone();
-    operations
+    let ready_app = app.clone();
+    let response = operations
         .activate(async move {
             let state = app.state::<AppState>();
             // Username (@handle) and display name are both mandatory.
@@ -295,7 +296,9 @@ pub async fn create_profile(
                 profile: read_profile_from_db(&state)?,
             })
         }, async move { cleanup_app.state::<AppState>().stop_active_profile().await })
-        .await
+        .await?;
+    profile_ready(&ready_app);
+    Ok(response)
 }
 
 /// Create a profile from an existing BIP-39 mnemonic. Same flow as
@@ -315,7 +318,8 @@ pub async fn restore_profile_with_mnemonic(
 ) -> Result<UnlockProfileResponse, String> {
     let operations = app.state::<AppState>().profile_operations.clone();
     let cleanup_app = app.clone();
-    operations
+    let ready_app = app.clone();
+    let response = operations
         .activate(async move {
             let state = app.state::<AppState>();
             let username = crate::domain::identity::validate_username(&username)?;
@@ -409,7 +413,28 @@ pub async fn restore_profile_with_mnemonic(
                 profile: read_profile_from_db(&state)?,
             })
         }, async move { cleanup_app.state::<AppState>().stop_active_profile().await })
-        .await
+        .await?;
+    profile_ready(&ready_app);
+    Ok(response)
+}
+
+/// Bring profile-language OS surfaces in line once a profile is active: the
+/// Android notification channel is renamed in the background.
+fn profile_ready(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(lease) = state
+        .profile_operations
+        .session()
+        .and_then(|session| state.profile_operations.admit(&session).ok())
+    else {
+        return;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::notifications::refresh_channel(&app, lease).await {
+            log::debug!("notification channel refresh failed: {e}");
+        }
+    });
 }
 
 /// Unlock an existing profile with its password.
@@ -421,7 +446,8 @@ pub async fn unlock_profile(
 ) -> Result<UnlockProfileResponse, String> {
     let operations = app.state::<AppState>().profile_operations.clone();
     let cleanup_app = app.clone();
-    operations
+    let ready_app = app.clone();
+    let response = operations
         .activate(async move {
             let state = app.state::<AppState>();
             let id = ProfileId::parse(&id).map_err(|e| e.to_string())?;
@@ -497,7 +523,9 @@ pub async fn unlock_profile(
                 profile: read_profile_from_db(&state)?,
             })
         }, async move { cleanup_app.state::<AppState>().stop_active_profile().await })
-        .await
+        .await?;
+    profile_ready(&ready_app);
+    Ok(response)
 }
 
 /// Lock the currently-active profile. Idempotent.

@@ -2728,6 +2728,19 @@ export interface AppNotification {
   payload: Record<string, unknown> | null
 }
 
+/**
+ * Why the last push registration step failed. Mirrors
+ * `notifications::push::PushErrorCode`; the webview translates each code.
+ */
+export type PushErrorCode =
+  | 'permission_denied'
+  | 'token_unavailable'
+  | 'insecure_origin'
+  | 'cloud_unreachable'
+  | 'cloud_rejected'
+  | 'cloud_unacknowledged'
+  | 'invalid_response'
+
 /** Whether this device is registered for push, and with which service. */
 export interface PushStatus {
   enabled: boolean
@@ -2739,7 +2752,9 @@ export interface PushStatus {
   registered: boolean
   platform: string | null
   cloudOrigin: string | null
-  lastError: string | null
+  lastErrorCode: PushErrorCode | null
+  /** Untranslated failure text for diagnostics; never shown as the message. */
+  lastErrorDetail: string | null
 }
 
 /** Locally resolved tap; profile and origin are never taken from provider data. */

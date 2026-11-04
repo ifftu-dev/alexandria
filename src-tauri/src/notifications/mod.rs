@@ -438,18 +438,95 @@ fn os_banner<R: Runtime>(app: &AppHandle<R>, announcement: &Announcement, row: &
     }
 }
 
-/// Wire the OS side up once the plugins exist: the Android channel and the
-/// push plugin's events. Called from the app's setup hook.
-pub fn install<R: Runtime>(app: &AppHandle<R>) {
+/// The Android channel's name and description, as system notification
+/// settings show them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelText {
+    pub name: &'static str,
+    pub description: &'static str,
+}
+
+/// The channel text for a `user.language` preference. `system` (or nothing)
+/// follows the device language; an unsupported language reads in English.
+pub fn channel_text(preference: &str) -> ChannelText {
+    let preference = preference.trim();
+    let locale = if preference.is_empty() || preference == "system" {
+        tauri_plugin_os::locale().unwrap_or_default()
+    } else {
+        preference.to_string()
+    };
+    let (name, description) = copy::channel(&locale);
+    ChannelText { name, description }
+}
+
+/// Create the Android channel, or rename it in place: Android keeps a
+/// channel's importance and the learner's choices for it, and takes a new
+/// name and description for the same id. Elsewhere there is no channel.
+#[cfg_attr(not(target_os = "android"), allow(unused_variables))]
+fn apply_channel<R: Runtime>(app: &AppHandle<R>, text: ChannelText) {
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_notification::{Channel, Importance};
-        let channel = Channel::builder(ANDROID_CHANNEL, "Alexandria")
-            .description("Interviews, offers, requests and classroom activity")
+        let channel = Channel::builder(ANDROID_CHANNEL, text.name)
+            .description(text.description)
             .importance(Importance::High)
             .build();
         if let Err(error) = app.notification().create_channel(channel) {
             log::warn!("notifications: could not create the Android channel: {error}");
+        }
+    }
+}
+
+/// Write the channel in the unlocked profile's language. Called when a
+/// profile unlocks and when its language changes.
+pub async fn refresh_channel<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: crate::profile::scope::ProfileLease,
+) -> Result<ChannelText, String> {
+    let preference = app
+        .state::<crate::AppState>()
+        .db_executor
+        .execute(
+            crate::db::executor::DatabaseWorkload::Learner,
+            lease.clone(),
+            "notifications.channel",
+            |db| Ok(SettingsStore::get(db.conn(), keys::USER_LANGUAGE)),
+        )
+        .await?;
+    let text = channel_text(&preference);
+    if lease.is_current() {
+        apply_channel(app, text);
+    }
+    Ok(text)
+}
+
+/// Refresh the channel after a settings write that changes its language.
+/// `None` when the key does not affect it.
+pub async fn settings_changed<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: crate::profile::scope::ProfileLease,
+    key: &str,
+) -> Result<Option<ChannelText>, String> {
+    if key != keys::USER_LANGUAGE.key {
+        return Ok(None);
+    }
+    refresh_channel(app, lease).await.map(Some)
+}
+
+/// Wire the OS side up once the plugins exist: the Android channel and the
+/// push plugin's events. Called from the app's setup hook.
+pub fn install<R: Runtime>(app: &AppHandle<R>) {
+    // No profile is unlocked yet. A channel left by an earlier run keeps the
+    // language of the profile that last wrote it; a first run gets the
+    // device language until a profile unlocks.
+    #[cfg(target_os = "android")]
+    {
+        let exists = app
+            .notification()
+            .list_channels()
+            .is_ok_and(|channels| channels.iter().any(|c| c.id() == ANDROID_CHANNEL));
+        if !exists {
+            apply_channel(app, channel_text("system"));
         }
     }
 
@@ -629,6 +706,64 @@ mod tests {
         assert!(
             heard.iter().all(|event| event["session"] != next.as_str()),
             "the next profile's badge must not be overwritten: {heard:?}"
+        );
+    }
+
+    #[test]
+    fn the_android_channel_reads_in_the_chosen_language_and_falls_back_to_english() {
+        assert_eq!(
+            channel_text("es"),
+            ChannelText {
+                name: "Actividad",
+                description: "Entrevistas, ofertas, solicitudes y actividad de las clases",
+            }
+        );
+        assert_eq!(channel_text("zh-Hans").name, "动态");
+        assert_eq!(
+            channel_text("xx"),
+            ChannelText {
+                name: "Activity",
+                description: "Interviews, offers, requests and classroom activity",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_the_profile_language_refreshes_the_android_channel_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, _) = listening_app(directory.path()).await;
+        let state = app.state::<crate::AppState>();
+        let lease = || {
+            state
+                .profile_operations
+                .admit(&state.profile_operations.session().unwrap())
+                .unwrap()
+        };
+        in_profile(&state, |db| {
+            SettingsStore::set(db.conn(), keys::USER_LANGUAGE, "fr".to_string())
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        assert_eq!(
+            settings_changed(app.handle(), lease(), keys::USER_LANGUAGE.key)
+                .await
+                .unwrap(),
+            Some(ChannelText {
+                name: "Activité",
+                description: "Entretiens, offres, demandes et activité des classes",
+            })
+        );
+        assert_eq!(
+            settings_changed(app.handle(), lease(), keys::UI_THEME.key)
+                .await
+                .unwrap(),
+            None,
+            "other settings leave the channel alone"
+        );
+        assert_eq!(
+            refresh_channel(app.handle(), lease()).await.unwrap().name,
+            "Activité",
+            "unlocking creates the channel in the profile's language"
         );
     }
 

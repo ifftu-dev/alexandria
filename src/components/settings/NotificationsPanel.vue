@@ -9,6 +9,8 @@ import { getProfileSessionToken } from '@/composables/profileSession'
 import { useSetting } from '@/composables/useSettings'
 import { useNotifications } from '@/composables/useNotifications'
 import { isMobilePlatform } from '@/composables/usePlatform'
+import type { MessageKey } from '@/i18n/keys'
+import type { PushErrorCode } from '@/types'
 
 const { t } = useI18n()
 const enabled = useSetting<boolean>('notifications.enabled')
@@ -38,6 +40,23 @@ const statusLine = computed(() => {
   return s.registered
     ? t('notifications.settings.pushRegistered', { origin: s.cloudOrigin })
     : t('notifications.settings.pushNotRegistered')
+})
+
+// Every code has its own message; a new backend code is a type error here
+// until it is worded. The raw detail is diagnostics only and is not shown.
+const PUSH_ERROR_MESSAGES: Record<PushErrorCode, MessageKey> = {
+  permission_denied: 'notifications.settings.pushErrors.permission_denied',
+  token_unavailable: 'notifications.settings.pushErrors.token_unavailable',
+  insecure_origin: 'notifications.settings.pushErrors.insecure_origin',
+  cloud_unreachable: 'notifications.settings.pushErrors.cloud_unreachable',
+  cloud_rejected: 'notifications.settings.pushErrors.cloud_rejected',
+  cloud_unacknowledged: 'notifications.settings.pushErrors.cloud_unacknowledged',
+  invalid_response: 'notifications.settings.pushErrors.invalid_response',
+}
+
+const pushError = computed(() => {
+  const code = pushStatus.value?.lastErrorCode
+  return code ? t(PUSH_ERROR_MESSAGES[code]) : ''
 })
 
 async function doRegister() {
@@ -110,9 +129,7 @@ async function askPermission() {
             {{ $t('notifications.settings.pushPausedOpenOrganisations') }}
           </RouterLink>
         </p>
-        <p v-if="pushStatus.lastError" class="text-xs text-destructive">
-          {{ $t('notifications.settings.pushError', { error: pushStatus.lastError }) }}
-        </p>
+        <p v-if="pushError" class="text-xs text-destructive" data-testid="push-error">{{ pushError }}</p>
         <div v-if="pushStatus.supported && pushStatus.cloudOrigin && !pushStatus.pausedByOrganisations" class="flex flex-wrap items-center gap-2">
           <AppButton
             v-if="!pushStatus.registered"
