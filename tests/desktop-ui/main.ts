@@ -129,6 +129,17 @@ if (screen === 'motion') {
     { path: '/goals', component: (await import('@/pages/goals/Index.vue')).default },
     { path: '/courses', component: (await import('@/pages/courses/Index.vue')).default },
     { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
+    { path: '/settings/:section?', name: 'settings', component: (await import('@/pages/Settings.vue')).default },
+    { path: '/chat', component: (await import('./ChatFixture.vue')).default },
+    { path: '/tutoring/:id', name: 'tutoring-session', component: (await import('@/pages/tutoring/Session.vue')).default },
+    { path: '/classrooms', component: (await import('@/pages/classrooms/Index.vue')).default },
+    { path: '/classrooms/:id', name: 'classroom', component: (await import('@/pages/classrooms/Classroom.vue')).default },
+    { path: '/classrooms/:id/requests', name: 'classroom-requests', component: page },
+    { path: '/classrooms/:id/settings', name: 'classroom-settings', component: page },
+    { path: '/guardian', component: (await import('@/pages/guardian/Children.vue')).default },
+    { path: '/guardian/child/:linkId', component: (await import('@/pages/guardian/ChildDetail.vue')).default },
+    { path: '/instructor/courses', component: (await import('@/pages/instructor/MyCourses.vue')).default },
+    { path: '/instructor/composer/:id', component: (await import('@/pages/instructor/Composer.vue')).default },
     { path: '/:pathMatch(.*)*', component: page },
   ] })
   await router.push(params.get('path') ?? '/home')
