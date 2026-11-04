@@ -8,6 +8,7 @@ import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
+import { errorMessage } from '@/utils/errorMessage'
 
 export type AtlasSurface = 'page' | 'modal'
 export const ATLAS_TABS = ['credentials', 'graph', 'browse'] as const
@@ -151,7 +152,7 @@ async function load(): Promise<void> {
   } catch (cause) {
     if (!current(ticket, profileId)) return
     phase.value = hadModel ? 'ready' : 'error'
-    error.value = cause instanceof Error ? cause.message : String(cause)
+    error.value = errorMessage(cause)
   } finally {
     if (current(ticket, profileId)) refreshing.value = false
   }

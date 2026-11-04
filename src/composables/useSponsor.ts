@@ -7,6 +7,7 @@ import type {
   RoleAttemptSummary,
   VerifiableCredential,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 /**
  * Frontend wrapper for the enterprise sponsor / role-assessment IPC
@@ -28,7 +29,7 @@ export function useSponsor() {
     try {
       return await fn()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = errorMessage(e)
       return null
     } finally {
       loading.value = false

@@ -19,6 +19,7 @@ import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { AccountRole } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -259,7 +260,7 @@ const activeStepIndex = computed(() => {
   return idx >= 0 ? idx : 0
 })
 function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): string {
-  const raw = cause instanceof Error ? cause.message : String(cause)
+  const raw = errorMessage(cause)
 
   if (raw.includes('Password must be at least')) {
     return t('onboarding.errors.passwordTooShortDetail')

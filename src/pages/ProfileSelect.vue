@@ -17,6 +17,7 @@ import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
 import ProfileTile from '@/components/profile/ProfileTile.vue'
 import { AppButton, AppInput } from '@/components/ui'
 import { useSlowNotice } from '@/composables/useSlowNotice'
+import { errorMessage } from '@/utils/errorMessage'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -146,7 +147,7 @@ async function onUnlock() {
     passwordInput.value?.blur()
     if (!useDeepLinks().hasUnlockDestination()) await router.replace('/home')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = errorMessage(e)
     password.value = ''
     await nextTick()
     requestAnimationFrame(() => passwordInput.value?.focus())
@@ -173,7 +174,7 @@ async function unlockWithBiometric(auto = false) {
     // missing keychain entitlement). Stay silent on auto; explain on a
     // deliberate tap.
     if (!auto) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errorMessage(e)
       if (/itemnotfound|not found/i.test(msg)) {
         error.value = t('onboarding.profileSelect.biometricNotSetup')
       } else if (/-34018/.test(msg)) {

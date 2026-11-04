@@ -2,6 +2,7 @@ import { ref, readonly } from 'vue'
 import type { P2PStatus, PeerInfo } from '@/types'
 import { useLocalApi } from './useLocalApi'
 import { onProfileLocked } from './useProfiles'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { invoke } = useLocalApi()
 
@@ -24,7 +25,7 @@ async function refreshStatus(): Promise<void> {
     }
   } catch (e: unknown) {
     if (generation === profileGeneration) {
-      lastError.value = e instanceof Error ? e.message : String(e)
+      lastError.value = errorMessage(e)
       status.value = null
     }
   }

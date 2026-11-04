@@ -17,6 +17,7 @@ import CredentialsPanel from '@/pages/dashboard/Credentials.vue'
 import type { SubjectInfo, SkillInfo } from '@/types'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 import type { AtlasField } from '@/utils/skillAtlas'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -118,7 +119,7 @@ async function goalSkill(skill: SkillInfo) {
     await addGoal({ label: skill.name, goalSkillIds: [skill.id] })
     if (session === getProfileSessionToken()) await router.push('/goals')
   } catch (cause) {
-    if (session === getProfileSessionToken()) goalError.value = cause instanceof Error ? cause.message : String(cause)
+    if (session === getProfileSessionToken()) goalError.value = errorMessage(cause)
   } finally { if (session === getProfileSessionToken()) pendingGoal.value = null }
 }
 </script>

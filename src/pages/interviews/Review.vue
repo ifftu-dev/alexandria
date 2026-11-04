@@ -5,6 +5,7 @@ import { useInterviews } from '@/composables/useInterviews'
 import { usePanel, type PanelInterview, type PanelRecommendation } from '@/composables/usePanel'
 import { AppAlert, AppBadge, AppButton, AppTextarea } from '@/components/ui'
 import PanelIntegrity from '@/components/organisations/PanelIntegrity.vue'
+import { errorMessage } from '@/utils/errorMessage'
 
 const route = useRoute()
 const router = useRouter()
@@ -55,7 +56,7 @@ async function sendScorecard() {
     )
     scorecardSent.value = true
   } catch (cause) {
-    scorecardError.value = cause instanceof Error ? cause.message : String(cause)
+    scorecardError.value = errorMessage(cause)
   } finally {
     sending.value = false
   }

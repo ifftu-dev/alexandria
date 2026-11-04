@@ -12,6 +12,7 @@ import type {
   RetrievedGenesisPreview,
   ReviewedGenesisLocator,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -38,10 +39,6 @@ const canPin = computed(
     retrieved.value !== null &&
     confirmation.value === retrieved.value.preview.dao_id,
 )
-
-function message(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason)
-}
 
 /** Make control, format, separator and private-use characters visible as
  *  `U+XXXX` so bidi overrides or zero-width characters cannot disguise a
@@ -90,7 +87,7 @@ async function reviewLocator(): Promise<void> {
     })
     if (locatorInput.value === requested) locator.value = reviewed
   } catch (reason) {
-    if (locatorInput.value === requested) error.value = message(reason)
+    if (locatorInput.value === requested) error.value = errorMessage(reason)
   } finally {
     reviewing.value = false
   }
@@ -115,7 +112,7 @@ async function retrieveGenesis(): Promise<void> {
     }
     retrieved.value = result
   } catch (reason) {
-    if (locator.value === reviewed) error.value = message(reason)
+    if (locator.value === reviewed) error.value = errorMessage(reason)
   } finally {
     retrieving.value = false
   }
@@ -139,7 +136,7 @@ async function pinGenesis(): Promise<void> {
         ? t('common.governanceGenesisImport.equivalentAlreadyPinned')
         : t('common.governanceGenesisImport.alreadyPinned')
   } catch (reason) {
-    error.value = message(reason)
+    error.value = errorMessage(reason)
   } finally {
     pinning.value = false
   }
@@ -149,7 +146,7 @@ async function loadDefault(): Promise<void> {
   try {
     defaultGenesis.value = await invoke<DefaultGenesisStatus | null>('governance_default_genesis_status')
   } catch (reason) {
-    defaultError.value = message(reason)
+    defaultError.value = errorMessage(reason)
   }
 }
 
@@ -165,7 +162,7 @@ async function pinDefault(): Promise<void> {
     })
     await loadDefault()
   } catch (reason) {
-    defaultError.value = message(reason)
+    defaultError.value = errorMessage(reason)
   } finally {
     pinningDefault.value = false
   }

@@ -12,6 +12,7 @@
 
 import { onUnmounted, ref, type Ref } from 'vue'
 import type { useSentinel } from './useSentinel'
+import { errorMessage } from '@/utils/errorMessage'
 
 const GAZE_LOOP_INTERVAL_MS = 1000
 const FACE_ID_LOOP_INTERVAL_MS = 3000
@@ -116,7 +117,7 @@ export function useCameraPresence(sentinel: Sentinel, videoRef: Ref<HTMLVideoEle
       return true
     } catch (e) {
       if (isCurrent()) {
-        error.value = e instanceof Error ? e.message : String(e)
+        error.value = errorMessage(e)
         release()
       }
       return false

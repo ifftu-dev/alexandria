@@ -23,6 +23,7 @@ import type {
   InterviewParticipant,
   TutoringTranscriptMessage,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -258,7 +259,7 @@ async function enterPanelRoom(title: string, name: string) {
         return room
       } catch (cause) {
         if (joined) await tutoring.leaveRoom()
-        const message = cause instanceof Error ? cause.message : String(cause)
+        const message = errorMessage(cause)
         if (!/^SESSION_(UNAVAILABLE|ENDED)/.test(message) && !/\b409\b/.test(message)) throw cause
         current = await panelApi.status(id)
         panel.value = current
@@ -275,7 +276,7 @@ async function enterPanelRoom(title: string, name: string) {
       return room
     } catch (cause) {
       await tutoring.leaveRoom()
-      const message = cause instanceof Error ? cause.message : String(cause)
+      const message = errorMessage(cause)
       if (!/\b409\b/.test(message) || attempt !== 0) throw cause
       current = await panelApi.status(id)
     }
@@ -293,7 +294,7 @@ async function startInterview() {
       ? await enterPanelRoom(title, name)
       : await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
   } catch (cause) {
-    panelError.value = cause instanceof Error ? cause.message : String(cause)
+    panelError.value = errorMessage(cause)
     return
   }
   // Sentinel observes this conductor device. Prefer the interviewer attached
