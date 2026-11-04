@@ -684,7 +684,8 @@ fn complete_guardian_link(
     let notification = crate::notifications::record_if_enabled(
         conn,
         &crate::notifications::for_guardian_linked(link_id, guardian_display_name),
-    )?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok((sealed, notification))
 }
 

@@ -319,7 +319,9 @@ async fn run_pass<R: Runtime>(app: AppHandle<R>, lease: ProfileLease) -> Outcome
     let Some(origin) = origin else {
         return Ok(0);
     };
-    let (signing_key, did) = super::push::issuer_key(&state).await?;
+    let (signing_key, did) = super::push::issuer_key(&state)
+        .await
+        .map_err(|e| e.to_string())?;
     let items = fetch(&origin, &signing_key, did.as_str()).await;
     if items.is_empty() {
         return Ok(0);

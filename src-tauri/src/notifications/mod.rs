@@ -48,6 +48,60 @@ use crate::settings::{registry::keys, SettingsStore};
 
 pub use store::{clear, list, mark_all_read, mark_read, record, unread_count};
 
+/// Why a notification operation failed. Its display is the text the
+/// commands return.
+#[derive(Debug, thiserror::Error)]
+pub enum NotificationError {
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    /// A file beside the profiles (open intents, recipient routing, the open
+    /// key) could not be read or written.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// A lock on one of those files was poisoned.
+    #[error("poisoned lock: another task failed inside")]
+    Poisoned,
+    /// The profile session the operation began under ended.
+    #[error("profile session changed")]
+    SessionChanged,
+    #[error("no profile is unlocked")]
+    NoProfile,
+    #[error("vault is locked — unlock first")]
+    VaultLocked,
+    /// The vault or the wallet it holds could not give the issuer key.
+    #[error("{0}")]
+    Vault(String),
+    /// A profile-scoped step failed: the database executor (whose jobs
+    /// return strings), profile admission, or a lease.
+    #[error("{0}")]
+    Profile(String),
+    #[error(transparent)]
+    NetworkProfile(&'static crate::network_profile::NetworkProfileError),
+    #[error("push mutation version exhausted")]
+    VersionExhausted,
+    #[error("notification belongs to another profile")]
+    OtherProfile,
+    #[error("invalid notification envelope")]
+    InvalidEnvelope,
+    #[error("unsupported notification open format")]
+    UnsupportedOpenFormat,
+    #[error("notification key derivation failed")]
+    KeyDerivation,
+    #[error("invalid notification encryption key")]
+    InvalidKey,
+    /// Sealing or opening a held notification open failed.
+    #[error("{0}")]
+    Crypto(String),
+}
+
+impl<T> From<std::sync::PoisonError<T>> for NotificationError {
+    fn from(_: std::sync::PoisonError<T>) -> Self {
+        NotificationError::Poisoned
+    }
+}
+
 pub use crate::domain::notification::{
     NotificationKind, NotificationOpen, NotificationPermission, NotificationRow,
     NotificationSource, PushErrorCode, PushStatus,
@@ -240,7 +294,7 @@ pub struct Recorded {
 pub fn record_if_enabled(
     conn: &Connection,
     new: &NewNotification,
-) -> Result<Option<Recorded>, String> {
+) -> Result<Option<Recorded>, NotificationError> {
     if !SettingsStore::get(conn, keys::NOTIFICATIONS_ENABLED) {
         return Ok(None);
     }
@@ -437,7 +491,7 @@ fn apply_channel<R: Runtime>(app: &AppHandle<R>, text: ChannelText) {
 pub async fn refresh_channel<R: Runtime>(
     app: &AppHandle<R>,
     lease: crate::profile::scope::ProfileLease,
-) -> Result<ChannelText, String> {
+) -> Result<ChannelText, NotificationError> {
     let preference = app
         .state::<crate::AppState>()
         .db_executor
@@ -447,7 +501,8 @@ pub async fn refresh_channel<R: Runtime>(
             "notifications.channel",
             |db| Ok(SettingsStore::get(db.conn(), keys::USER_LANGUAGE)),
         )
-        .await?;
+        .await
+        .map_err(NotificationError::Profile)?;
     let text = channel_text(&preference);
     if lease.is_current() {
         apply_channel(app, text);
@@ -461,7 +516,7 @@ pub async fn settings_changed<R: Runtime>(
     app: &AppHandle<R>,
     lease: crate::profile::scope::ProfileLease,
     key: &str,
-) -> Result<Option<ChannelText>, String> {
+) -> Result<Option<ChannelText>, NotificationError> {
     if key != keys::USER_LANGUAGE.key {
         return Ok(None);
     }
@@ -556,9 +611,9 @@ mod tests {
         (app, heard)
     }
 
-    pub(super) async fn in_profile<T: Send + 'static>(
+    pub(super) async fn in_profile<T: Send + 'static, E: std::fmt::Display>(
         state: &crate::AppState,
-        job: impl FnOnce(&crate::db::Database) -> Result<T, String> + Send + 'static,
+        job: impl FnOnce(&crate::db::Database) -> Result<T, E> + Send + 'static,
     ) -> T {
         let lease = state
             .profile_operations
@@ -570,7 +625,7 @@ mod tests {
                 crate::db::executor::DatabaseWorkload::Background,
                 lease,
                 "test.notifications",
-                job,
+                move |db| job(db).map_err(|e| e.to_string()),
             )
             .await
             .unwrap()

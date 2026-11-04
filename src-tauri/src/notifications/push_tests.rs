@@ -1,3 +1,4 @@
+use super::super::NotificationError;
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -324,7 +325,10 @@ async fn shared_token_receipt_and_held_tap_wait_for_matching_profile_across_rest
         super::super::opens::pending(&b).await.unwrap().unwrap().id,
         tap.id
     );
-    assert!(super::super::opens::consume(&b, &admitted(&b), &tap.id).is_err());
+    assert!(matches!(
+        super::super::opens::consume(&b, &admitted(&b), &tap.id),
+        Err(NotificationError::OtherProfile)
+    ));
     b.stop_active_profile().await.unwrap();
     drop(b);
     let locked = crate::profile::lifecycle_tests::state_in(directory.path());
@@ -407,7 +411,11 @@ async fn locking_while_native_token_is_pending_does_not_wait_or_register_in_a_ne
         .unwrap();
     assert_ne!(state.profile_operations.session().unwrap(), old_session);
     token_tx.send("late-token".to_string()).unwrap();
-    assert!(task.await.unwrap().is_err());
+    // The old session is no longer admitted.
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(NotificationError::Profile(_))
+    ));
     assert!(!status(&state, admitted(&state)).await.unwrap().registered);
 }
 
@@ -517,7 +525,10 @@ async fn interrupted_put_is_cleaned_at_original_origin_after_restart_and_origin_
     .await
     .unwrap()
     .unwrap();
-    assert!(task.await.unwrap().is_err());
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(NotificationError::SessionChanged)
+    ));
     drop(state);
     let reopened = active(directory.path()).await;
     assert!(
@@ -875,7 +886,7 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
                 "test.notification_recovery",
                 move |db| {
                     if clear {
-                        super::super::clear(db.conn())?;
+                        super::super::clear(db.conn()).map_err(|e| e.to_string())?;
                     }
                     Ok(super::super::cloud_pull::unreported(db.conn(), &items).len())
                 },
@@ -903,6 +914,7 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
                 let fresh = super::super::cloud_pull::unreported(db.conn(), &items);
                 assert_eq!(fresh.len(), 1, "a genuine new room opening is a new event");
                 super::super::record_if_enabled(db.conn(), &fresh[0].notification().unwrap())
+                    .map_err(|e| e.to_string())
             },
         )
         .await
@@ -1062,7 +1074,10 @@ async fn deletion_ack_fences_a_put_that_executes_later_and_reenable_uses_fresh_i
     .await
     .unwrap()
     .unwrap();
-    assert!(put.await.unwrap().is_err());
+    assert!(matches!(
+        put.await.unwrap(),
+        Err(NotificationError::SessionChanged)
+    ));
     drop(state);
     let state = active(directory.path()).await;
     let off = reconcile(&state, admitted(&state), None, Some(false))

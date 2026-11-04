@@ -233,7 +233,7 @@ impl AppState {
         let db_key = zeroize::Zeroizing::new(keystore.derive_db_key());
         self.open_database(&paths, &db_key, initialize_defaults)?;
 
-        notifications::opens::prepare(&paths, &keystore)?;
+        notifications::opens::prepare(&paths, &keystore).map_err(|e| e.to_string())?;
 
         // 2. Stash keystore in shared state so background workers see it.
         {

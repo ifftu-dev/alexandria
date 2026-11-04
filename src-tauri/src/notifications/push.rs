@@ -8,8 +8,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
 use super::{
-    cloud_copy, recipients, NewNotification, NotificationKind, NotificationOpen, PushErrorCode,
-    PushStatus, Recorded,
+    cloud_copy, recipients, NewNotification, NotificationError, NotificationKind, NotificationOpen,
+    PushErrorCode, PushStatus, Recorded,
 };
 use crate::cloud::{is_loopback, nonce, origin as cloud_origin, proof};
 use crate::db::executor::DatabaseWorkload;
@@ -54,24 +54,21 @@ struct Registration {
     put_body: Option<String>,
 }
 
-fn registrations(conn: &Connection) -> Result<Vec<Registration>, String> {
-    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error, put_body, last_error_detail FROM push_registrations ORDER BY cloud_origin").map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(Registration {
-                origin: row.get(0)?,
-                device_id: row.get(1)?,
-                recipient: row.get(2)?,
-                pending: row.get(3)?,
-                revision: row.get(4)?,
-                error: row.get(5)?,
-                put_body: row.get(6)?,
-                error_detail: row.get(7)?,
-            })
+fn registrations(conn: &Connection) -> Result<Vec<Registration>, NotificationError> {
+    let mut statement = conn.prepare("SELECT cloud_origin, device_id, recipient, pending, revision, last_error, put_body, last_error_detail FROM push_registrations ORDER BY cloud_origin")?;
+    let rows = statement.query_map([], |row| {
+        Ok(Registration {
+            origin: row.get(0)?,
+            device_id: row.get(1)?,
+            recipient: row.get(2)?,
+            pending: row.get(3)?,
+            revision: row.get(4)?,
+            error: row.get(5)?,
+            put_body: row.get(6)?,
+            error_detail: row.get(7)?,
         })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 struct Facts {
@@ -84,16 +81,16 @@ struct Facts {
     native_error: Option<(String, Option<String>)>,
 }
 
-async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, String> {
+async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, NotificationError> {
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.facts", |db| {
-        Ok(Facts { origin: cloud_origin(db.conn()), rows: registrations(db.conn())?,
+        Ok(Facts { origin: cloud_origin(db.conn()), rows: registrations(db.conn()).map_err(|e| e.to_string())?,
             enabled: SettingsStore::get(db.conn(), keys::NOTIFICATIONS_PUSH_ENABLED),
             organisations: SettingsStore::get(db.conn(), keys::ORGANISATIONS_ENABLED),
             locale: SettingsStore::get(db.conn(), keys::USER_LANGUAGE),
             revision: db.conn().query_row("SELECT revision FROM push_operation_state WHERE singleton=1", [], |r| r.get(0)).map_err(|e| e.to_string())?,
             native_error: db.conn().query_row("SELECT last_error, last_error_detail FROM push_operation_state WHERE singleton=1 AND error_origin IS ?1 AND last_error IS NOT NULL", params![cloud_origin(db.conn())], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(|e| e.to_string())?,
         })
-    }).await
+    }).await.map_err(NotificationError::Profile)
 }
 
 impl Facts {
@@ -144,23 +141,28 @@ fn status_from(f: &Facts) -> PushStatus {
     }
 }
 
-pub async fn status(state: &AppState, lease: ProfileLease) -> Result<PushStatus, String> {
+pub async fn status(
+    state: &AppState,
+    lease: ProfileLease,
+) -> Result<PushStatus, NotificationError> {
     let f = facts(state, &lease).await?;
     if !lease.is_current() {
-        return Err("profile session changed".into());
+        return Err(NotificationError::SessionChanged);
     }
     Ok(status_from(&f))
 }
 
 pub(super) async fn issuer_key(
     state: &AppState,
-) -> Result<(SigningKey, crate::crypto::did::Did), String> {
+) -> Result<(SigningKey, crate::crypto::did::Did), NotificationError> {
     let guard = state.keystore.lock().await;
-    let keystore = guard.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = keystore.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    let keystore = guard.as_ref().ok_or(NotificationError::VaultLocked)?;
+    let mnemonic = keystore
+        .retrieve_mnemonic()
+        .map_err(|e| NotificationError::Vault(e.to_string()))?;
     drop(guard);
-    let wallet =
-        crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic)
+        .map_err(|e| NotificationError::Vault(e.to_string()))?;
     let signing_key = SigningKey::from_bytes(&wallet.signing_key.to_bytes());
     let did = crate::crypto::did::derive_did_key(&signing_key);
     Ok((signing_key, did))
@@ -241,7 +243,7 @@ pub(crate) async fn reconcile(
     lease: ProfileLease,
     token: Option<String>,
     enabled: Option<bool>,
-) -> Result<PushStatus, String> {
+) -> Result<PushStatus, NotificationError> {
     let work = lease.clone();
     lease
         .run_until_closed(async {
@@ -249,7 +251,7 @@ pub(crate) async fn reconcile(
             reconcile_inner(state, &work, token, enabled).await
         })
         .await
-        .ok_or("profile session changed")?
+        .ok_or(NotificationError::SessionChanged)?
 }
 
 async fn reconcile_inner(
@@ -257,10 +259,10 @@ async fn reconcile_inner(
     lease: &ProfileLease,
     token: Option<String>,
     enabled: Option<bool>,
-) -> Result<PushStatus, String> {
+) -> Result<PushStatus, NotificationError> {
     let profile = state
         .active_id()
-        .ok_or("no profile is unlocked")?
+        .ok_or(NotificationError::NoProfile)?
         .to_string();
     let before = facts(state, lease).await?;
     // Organisations off counts as push off; the stored preference stays.
@@ -281,7 +283,7 @@ async fn reconcile_inner(
         tx.execute("UPDATE push_registrations SET pending='delete',recipient=NULL,revision=revision+1 WHERE pending!='delete' AND (?1=0 OR cloud_origin IS NOT ?2)", params![desired, current_origin]).map_err(|e| e.to_string())?;
         tx.execute("UPDATE push_operation_state SET revision=revision+1, last_error=CASE WHEN ?1 THEN last_error ELSE NULL END, last_error_detail=CASE WHEN ?1 THEN last_error_detail ELSE NULL END, error_origin=CASE WHEN ?1 THEN error_origin ELSE NULL END WHERE singleton=1", params![desired]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
-    }).await?;
+    }).await.map_err(NotificationError::Profile)?;
     let staged = facts(state, lease).await?;
     for row in staged.rows.iter().filter(|r| r.pending == "delete") {
         let (key, did) = issuer_key(state).await?;
@@ -311,7 +313,7 @@ async fn reconcile_inner(
                 Ok(()) => db.conn().execute("DELETE FROM push_registrations WHERE cloud_origin=?1 AND revision=?2 AND pending='delete'", params![origin, revision]),
                 Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1,last_error_detail=?2 WHERE cloud_origin=?3 AND revision=?4", params![error.code.as_str(), error.detail, origin, revision]),
             }.map(drop).map_err(|e| e.to_string())
-        }).await?;
+        }).await.map_err(NotificationError::Profile)?;
     }
     let f = facts(state, lease).await?;
     if !f.eligible()
@@ -341,7 +343,7 @@ async fn reconcile_inner(
             .revision
             .checked_add(1)
             .filter(|v| *v < i64::MAX)
-            .ok_or("push mutation version exhausted")?,
+            .ok_or(NotificationError::VersionExhausted)?,
         None => 1,
     };
     recipients::replace(state, &profile, &origin, None)?;
@@ -351,7 +353,7 @@ async fn reconcile_inner(
     let network = recipients::network()?;
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.stage", move |db| {
         db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id, put_body) VALUES (?1,?2,'fcm',?3,'','put',?4,?5,?6) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, last_error_detail=NULL, network_id=excluded.network_id, put_body=excluded.put_body", params![staged_origin, staged_device, staged_token, revision, network, serialized]).map(drop).map_err(|e| e.to_string())
-    }).await?;
+    }).await.map_err(NotificationError::Profile)?;
     let (key, did) = issuer_key(state).await?;
     let result = async {
         let response = signed_send(
@@ -401,7 +403,7 @@ async fn reconcile_inner(
             },
             Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1,last_error_detail=?2 WHERE cloud_origin=?3 AND revision=?4", params![error.code.as_str(), error.detail, saved_origin, revision]).map(|_| false),
         }.map_err(|e| e.to_string())
-    }).await?;
+    }).await.map_err(NotificationError::Profile)?;
     if committed && lease.is_current() {
         if let Ok(recipient) = result {
             recipients::replace(state, &profile, &origin, Some(&recipient))?;
@@ -410,13 +412,16 @@ async fn reconcile_inner(
     status(state, lease.clone()).await
 }
 
-fn admit(state: &AppState) -> Result<ProfileLease, String> {
-    state.profile_operations.admit(
-        &state
-            .profile_operations
-            .session()
-            .ok_or("no profile is unlocked")?,
-    )
+fn admit(state: &AppState) -> Result<ProfileLease, NotificationError> {
+    state
+        .profile_operations
+        .admit(
+            &state
+                .profile_operations
+                .session()
+                .ok_or(NotificationError::NoProfile)?,
+        )
+        .map_err(NotificationError::Profile)
 }
 
 /// Native SDK work owns only device-global resources. Release admission while
@@ -426,7 +431,7 @@ pub(crate) async fn register_with_token(
     state: &AppState,
     lease: ProfileLease,
     token: impl std::future::Future<Output = Result<String, PushFailure>>,
-) -> Result<PushStatus, String> {
+) -> Result<PushStatus, NotificationError> {
     let session = lease.session_id().to_string();
     let cleaned = reconcile(state, lease.clone(), None, None).await?;
     if !cleaned.enabled || cleaned.paused_by_organisations || cleaned.cloud_origin.is_none() {
@@ -435,7 +440,10 @@ pub(crate) async fn register_with_token(
     let before = facts(state, &lease).await?;
     drop(lease);
     let token = token.await;
-    let lease = state.profile_operations.admit(&session)?;
+    let lease = state
+        .profile_operations
+        .admit(&session)
+        .map_err(NotificationError::Profile)?;
     let work = lease.clone();
     lease.run_until_closed(async {
         let _serial = OPERATIONS.lock().await;
@@ -449,18 +457,18 @@ pub(crate) async fn register_with_token(
         let origin = now.origin.clone();
         state.db_executor.execute(DatabaseWorkload::Learner, work.clone(), "notifications.push.native_status", move |db| {
             db.conn().execute("UPDATE push_operation_state SET last_error=?1,last_error_detail=?2,error_origin=?3 WHERE singleton=1", params![code, detail, origin]).map(drop).map_err(|e| e.to_string())
-        }).await?;
+        }).await.map_err(NotificationError::Profile)?;
         match token {
             Ok(token) => reconcile_inner(state, &work, Some(token), None).await,
             Err(_) => status(state, work.clone()).await,
         }
-    }).await.ok_or("profile session changed")?
+    }).await.ok_or(NotificationError::SessionChanged)?
 }
 
 pub async fn register<R: Runtime>(
     app: &AppHandle<R>,
     lease: ProfileLease,
-) -> Result<PushStatus, String> {
+) -> Result<PushStatus, NotificationError> {
     let state = app.state::<AppState>();
     if platform().is_none() {
         return reconcile(&state, lease, None, None).await;
@@ -499,7 +507,7 @@ pub async fn settings_changed<R: Runtime>(
     app: &AppHandle<R>,
     lease: ProfileLease,
     key: &str,
-) -> Result<Option<PushStatus>, String> {
+) -> Result<Option<PushStatus>, NotificationError> {
     if key != keys::ORGANISATIONS_ENABLED.key {
         return Ok(None);
     }
@@ -509,7 +517,7 @@ pub async fn settings_changed<R: Runtime>(
 pub async fn unregister<R: Runtime>(
     app: &AppHandle<R>,
     lease: ProfileLease,
-) -> Result<PushStatus, String> {
+) -> Result<PushStatus, NotificationError> {
     reconcile(&app.state::<AppState>(), lease, None, Some(false)).await
 }
 
@@ -572,7 +580,7 @@ pub(crate) async fn receive(
     state: &AppState,
     lease: ProfileLease,
     payload: Value,
-) -> Result<Option<Recorded>, String> {
+) -> Result<Option<Recorded>, NotificationError> {
     let Some(data) = parse(payload) else {
         return Ok(None);
     };
@@ -592,20 +600,28 @@ pub(crate) async fn receive(
             lease,
             "notifications.push.received",
             move |db| {
-                if !registrations(db.conn())?.iter().any(|r| {
-                    r.origin == binding.origin
-                        && r.pending == "none"
-                        && r.recipient.as_deref() == Some(&data.recipient)
-                }) {
+                if !registrations(db.conn())
+                    .map_err(|e| e.to_string())?
+                    .iter()
+                    .any(|r| {
+                        r.origin == binding.origin
+                            && r.pending == "none"
+                            && r.recipient.as_deref() == Some(&data.recipient)
+                    })
+                {
                     return Ok(None);
                 }
-                super::record_if_enabled(db.conn(), &new)
+                super::record_if_enabled(db.conn(), &new).map_err(|e| e.to_string())
             },
         )
         .await
+        .map_err(NotificationError::Profile)
 }
 
-pub(crate) fn tapped(state: &AppState, payload: Value) -> Result<Option<NotificationOpen>, String> {
+pub(crate) fn tapped(
+    state: &AppState,
+    payload: Value,
+) -> Result<Option<NotificationOpen>, NotificationError> {
     if payload.get("local").and_then(Value::as_bool) == Some(true) {
         return match payload
             .get("data")

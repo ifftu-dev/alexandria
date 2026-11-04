@@ -1,6 +1,7 @@
 //! One durable, recipient-bound destination. Reading does not consume it;
 //! only the matching admitted profile may acknowledge successful navigation.
 use super::recipients;
+use super::NotificationError;
 use super::NotificationOpen;
 use crate::crypto::{group_key, keystore::Keystore};
 use crate::profile::{ProfileId, ProfilePaths};
@@ -13,22 +14,22 @@ use zeroize::Zeroizing;
 
 const PUBLIC_KEY: &str = "notification_open.pub";
 
-fn secret(keystore: &Keystore, profile: &str) -> Result<StaticSecret, String> {
+fn secret(keystore: &Keystore, profile: &str) -> Result<StaticSecret, NotificationError> {
     let db_key = Zeroizing::new(keystore.derive_db_key());
     let mut bytes = Zeroizing::new([0; 32]);
     hkdf::Hkdf::<Sha256>::new(Some(profile.as_bytes()), db_key.as_ref())
         .expand(b"alexandria-notification-open-v1", bytes.as_mut())
-        .map_err(|_| "notification key derivation failed")?;
+        .map_err(|_| NotificationError::KeyDerivation)?;
     Ok(StaticSecret::from(*bytes))
 }
 
 /// Publish only an encryption key during the existing profile startup. The
 /// private key remains derivable only from this profile's unlocked vault.
-pub(crate) fn prepare(paths: &ProfilePaths, keystore: &Keystore) -> Result<(), String> {
+pub(crate) fn prepare(paths: &ProfilePaths, keystore: &Keystore) -> Result<(), NotificationError> {
     let key = PublicKey::from(&secret(keystore, paths.id.as_str())?);
     let temp = paths.root.join(format!("{PUBLIC_KEY}.tmp"));
-    std::fs::write(&temp, key.as_bytes()).map_err(|e| e.to_string())?;
-    std::fs::rename(temp, paths.root.join(PUBLIC_KEY)).map_err(|e| e.to_string())
+    std::fs::write(&temp, key.as_bytes())?;
+    Ok(std::fs::rename(temp, paths.root.join(PUBLIC_KEY))?)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -62,38 +63,36 @@ impl Default for OpenState {
     }
 }
 
-fn load(state: &AppState) -> Result<OpenState, String> {
+fn load(state: &AppState) -> Result<OpenState, NotificationError> {
     match std::fs::read(state.app_data_dir.join(FILE)) {
         Ok(bytes) => {
-            let value: serde_json::Value =
-                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
             if value.get("format_version").is_none() {
                 // Pre-launch data is incompatible. Do not preserve its
                 // activity history or guess a locked vault key.
-                std::fs::remove_file(state.app_data_dir.join(FILE)).map_err(|e| e.to_string())?;
+                std::fs::remove_file(state.app_data_dir.join(FILE))?;
                 let _ = std::fs::remove_file(state.app_data_dir.join(format!("{FILE}.tmp")));
                 return Ok(OpenState::default());
             }
-            let opens: OpenState = serde_json::from_value(value).map_err(|e| e.to_string())?;
+            let opens: OpenState = serde_json::from_value(value)?;
             if opens.format_version != FORMAT_VERSION {
-                return Err("unsupported notification open format".into());
+                return Err(NotificationError::UnsupportedOpenFormat);
             }
             Ok(opens)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(OpenState::default()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(e.into()),
     }
 }
 
-fn save(state: &AppState, opens: &OpenState) -> Result<(), String> {
+fn save(state: &AppState, opens: &OpenState) -> Result<(), NotificationError> {
     use std::io::Write;
     let path = state.app_data_dir.join(FILE);
     let tmp = state.app_data_dir.join(format!("{FILE}.tmp"));
-    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-    file.write_all(&serde_json::to_vec(opens).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+    let mut file = std::fs::File::create(&tmp)?;
+    file.write_all(&serde_json::to_vec(opens)?)?;
+    file.sync_all()?;
+    Ok(std::fs::rename(tmp, path)?)
 }
 
 fn valid_routing(state: &AppState, intent: &NotificationOpen) -> bool {
@@ -116,14 +115,14 @@ fn valid(state: &AppState, intent: &NotificationOpen) -> bool {
 pub fn hold(
     state: &AppState,
     mut intent: NotificationOpen,
-) -> Result<Option<NotificationOpen>, String> {
+) -> Result<Option<NotificationOpen>, NotificationError> {
     if !valid(state, &intent) {
         return Ok(None);
     }
     // The event contains random notification/recipient UUIDs. Retain only an
     // opaque digest for duplicate suppression, never event kinds or reference IDs.
     intent.id = hex::encode(Sha256::digest(intent.id.as_bytes()));
-    let _guard = FILE_LOCK.lock().map_err(|e| e.to_string())?;
+    let _guard = FILE_LOCK.lock()?;
     let mut opens = load(state)?;
     if opens.consumed.contains(&intent.id) {
         return Ok(None);
@@ -135,20 +134,21 @@ pub fn hold(
     {
         return Ok(None);
     }
-    let paths = state
-        .profile_manager
-        .paths_for(&ProfileId::parse(&intent.profile_id).map_err(|e| e.to_string())?);
-    let bytes: [u8; 32] = std::fs::read(paths.root.join(PUBLIC_KEY))
-        .map_err(|e| e.to_string())?
+    let paths = state.profile_manager.paths_for(
+        &ProfileId::parse(&intent.profile_id)
+            .map_err(|e| NotificationError::Profile(e.to_string()))?,
+    );
+    let bytes: [u8; 32] = std::fs::read(paths.root.join(PUBLIC_KEY))?
         .try_into()
-        .map_err(|_| "invalid notification encryption key")?;
+        .map_err(|_| NotificationError::InvalidKey)?;
     let ephemeral = StaticSecret::random_from_rng(rand::rngs::OsRng);
     let key = Zeroizing::new(group_key::generate_group_key());
     let encrypted_key =
         group_key::encrypt_key_for_member(&key, &PublicKey::from(bytes), &ephemeral)
-            .map_err(|e| e.to_string())?;
-    let plaintext = Zeroizing::new(serde_json::to_vec(&intent).map_err(|e| e.to_string())?);
-    let ciphertext = group_key::encrypt_message(&key, &plaintext).map_err(|e| e.to_string())?;
+            .map_err(|e| NotificationError::Crypto(e.to_string()))?;
+    let plaintext = Zeroizing::new(serde_json::to_vec(&intent)?);
+    let ciphertext = group_key::encrypt_message(&key, &plaintext)
+        .map_err(|e| NotificationError::Crypto(e.to_string()))?;
     let mut routing = intent.clone();
     routing.route.clear();
     opens.pending = Some(SealedOpen {
@@ -161,9 +161,9 @@ pub fn hold(
     Ok(Some(intent))
 }
 
-pub async fn pending(state: &AppState) -> Result<Option<NotificationOpen>, String> {
+pub async fn pending(state: &AppState) -> Result<Option<NotificationOpen>, NotificationError> {
     let sealed = {
-        let _guard = FILE_LOCK.lock().map_err(|e| e.to_string())?;
+        let _guard = FILE_LOCK.lock()?;
         load(state)?.pending
     };
     let Some(sealed) = sealed else {
@@ -175,13 +175,16 @@ pub async fn pending(state: &AppState) -> Result<Option<NotificationOpen>, Strin
     let Some(session) = state.profile_operations.session() else {
         return Ok(Some(sealed.routing));
     };
-    let lease = state.profile_operations.admit(&session)?;
+    let lease = state
+        .profile_operations
+        .admit(&session)
+        .map_err(NotificationError::Profile)?;
     if state.active_id().as_ref().map(|p| p.as_str()) != Some(sealed.routing.profile_id.as_str()) {
         return Ok(Some(sealed.routing));
     }
     let keystore = state.keystore.lock().await;
     let private = secret(
-        keystore.as_ref().ok_or("vault is locked")?,
+        keystore.as_ref().ok_or(NotificationError::VaultLocked)?,
         &sealed.routing.profile_id,
     )?;
     let key = Zeroizing::new(
@@ -190,50 +193,58 @@ pub async fn pending(state: &AppState) -> Result<Option<NotificationOpen>, Strin
             &PublicKey::from(sealed.ephemeral),
             &private,
         )
-        .map_err(|e| e.to_string())?,
+        .map_err(|e| NotificationError::Crypto(e.to_string()))?,
     );
     let plaintext = Zeroizing::new(
-        group_key::decrypt_message(&key, &sealed.ciphertext).map_err(|e| e.to_string())?,
+        group_key::decrypt_message(&key, &sealed.ciphertext)
+            .map_err(|e| NotificationError::Crypto(e.to_string()))?,
     );
-    let intent: NotificationOpen = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
+    let intent: NotificationOpen = serde_json::from_slice(&plaintext)?;
     let mut routing = intent.clone();
     routing.route.clear();
     if routing != sealed.routing || !valid(state, &intent) {
-        return Err("invalid notification envelope".into());
+        return Err(NotificationError::InvalidEnvelope);
     }
-    lease.with_current(|| Ok(Some(intent)))
+    lease
+        .with_current(|| Ok(Some(intent)))
+        .map_err(NotificationError::Profile)
 }
 
-pub fn consume(state: &AppState, lease: &ProfileLease, id: &str) -> Result<(), String> {
-    lease.with_current(|| {
-        let _guard = FILE_LOCK.lock().map_err(|e| e.to_string())?;
-        let mut opens = load(state)?;
-        let Some(sealed) = &opens.pending else {
-            return Ok(());
-        };
-        let intent = &sealed.routing;
-        if intent.id != id {
-            return Ok(());
-        }
-        if !valid_routing(state, intent)
-            || state.active_id().as_ref().map(|p| p.as_str()) != Some(intent.profile_id.as_str())
-        {
-            return Err("notification belongs to another profile".into());
-        }
-        opens.pending = None;
-        opens.consumed.push(id.into());
-        if opens.consumed.len() > 256 {
-            opens.consumed.remove(0);
-        }
-        save(state, &opens)
-    })
+pub fn consume(state: &AppState, lease: &ProfileLease, id: &str) -> Result<(), NotificationError> {
+    lease
+        .with_current(|| Ok(consume_current(state, id)))
+        .map_err(NotificationError::Profile)?
+}
+
+/// [`consume`] while its lease is held current.
+fn consume_current(state: &AppState, id: &str) -> Result<(), NotificationError> {
+    let _guard = FILE_LOCK.lock()?;
+    let mut opens = load(state)?;
+    let Some(sealed) = &opens.pending else {
+        return Ok(());
+    };
+    let intent = &sealed.routing;
+    if intent.id != id {
+        return Ok(());
+    }
+    if !valid_routing(state, intent)
+        || state.active_id().as_ref().map(|p| p.as_str()) != Some(intent.profile_id.as_str())
+    {
+        return Err(NotificationError::OtherProfile);
+    }
+    opens.pending = None;
+    opens.consumed.push(id.into());
+    if opens.consumed.len() > 256 {
+        opens.consumed.remove(0);
+    }
+    save(state, &opens)
 }
 
 /// Local banner extras are produced by this app; remote data cannot use this adapter.
 pub fn local_tap(
     state: &AppState,
     extra: &serde_json::Map<String, serde_json::Value>,
-) -> Result<Option<NotificationOpen>, String> {
+) -> Result<Option<NotificationOpen>, NotificationError> {
     let text = |key: &str| extra.get(key).and_then(serde_json::Value::as_str);
     let (Some(profile), Some(network), Some(notification), Some(route)) = (
         text("profileId"),

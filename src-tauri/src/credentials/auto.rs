@@ -114,7 +114,8 @@ fn issue_and_notify(
     let notification = crate::notifications::record_if_enabled(
         &tx,
         &crate::notifications::for_issued_credential(&credential_id),
-    )?;
+    )
+    .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok((credential_id, notification))
 }

@@ -25,7 +25,10 @@ pub async fn notifications_list(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "notifications.list",
-            move |db| notifications::list(db.conn(), limit, unread_only.unwrap_or(false)),
+            move |db| {
+                notifications::list(db.conn(), limit, unread_only.unwrap_or(false))
+                    .map_err(|e| e.to_string())
+            },
         )
         .await
 }
@@ -38,7 +41,7 @@ pub async fn notifications_unread_count(state: State<'_, AppState>) -> Result<u3
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "notifications.unread",
-            |db| notifications::unread_count(db.conn()),
+            |db| notifications::unread_count(db.conn()).map_err(|e| e.to_string()),
         )
         .await
 }
@@ -58,8 +61,8 @@ pub async fn notifications_mark_read(
             "notifications.mark_read",
             move |db| {
                 let now = crate::clock::now_rfc3339();
-                notifications::mark_read(db.conn(), &ids, &now)?;
-                notifications::unread_count(db.conn())
+                notifications::mark_read(db.conn(), &ids, &now).map_err(|e| e.to_string())?;
+                notifications::unread_count(db.conn()).map_err(|e| e.to_string())
             },
         )
         .await?;
@@ -81,7 +84,9 @@ pub async fn notifications_mark_all_read(
             "notifications.mark_all_read",
             |db| {
                 let now = crate::clock::now_rfc3339();
-                notifications::mark_all_read(db.conn(), &now).map(drop)
+                notifications::mark_all_read(db.conn(), &now)
+                    .map(drop)
+                    .map_err(|e| e.to_string())
             },
         )
         .await?;
@@ -100,7 +105,11 @@ pub async fn notifications_clear(app: AppHandle, state: State<'_, AppState>) -> 
             DatabaseWorkload::Learner,
             lease.clone(),
             "notifications.clear",
-            |db| notifications::clear(db.conn()).map(drop),
+            |db| {
+                notifications::clear(db.conn())
+                    .map(drop)
+                    .map_err(|e| e.to_string())
+            },
         )
         .await?;
     notifications::emit_changed(&app, lease.session_id(), 0);
@@ -150,7 +159,9 @@ pub async fn notifications_permission_request(
 pub async fn notifications_pending_open(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<NotificationOpen>, String> {
-    notifications::opens::pending(&state).await
+    notifications::opens::pending(&state)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -158,17 +169,21 @@ pub async fn notifications_consume_open(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    notifications::opens::consume(&state, &state.profile_lease(), &id)
+    notifications::opens::consume(&state, &state.profile_lease(), &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn push_status(state: State<'_, AppState>) -> Result<PushStatus, String> {
-    notifications::push::status(&state, state.profile_lease()).await
+    notifications::push::status(&state, state.profile_lease())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn push_register(app: AppHandle, lease: ProfileLease) -> Result<PushStatus, String> {
-    notifications::push::register(&app, lease).await
+    notifications::push::register(&app, lease)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -176,7 +191,9 @@ pub async fn push_unregister(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PushStatus, String> {
-    notifications::push::unregister(&app, state.profile_lease()).await
+    notifications::push::unregister(&app, state.profile_lease())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -192,7 +209,8 @@ pub async fn push_set_enabled(
         None,
         Some(enabled),
     )
-    .await?;
+    .await
+    .map_err(|e| e.to_string())?;
     use tauri::Emitter;
     if lease.is_current() {
         let _ = app.emit(
@@ -201,7 +219,9 @@ pub async fn push_set_enabled(
         );
     }
     if enabled {
-        notifications::push::register(&app, lease).await
+        notifications::push::register(&app, lease)
+            .await
+            .map_err(|e| e.to_string())
     } else {
         Ok(status)
     }
@@ -246,7 +266,10 @@ pub async fn notifications_emit_test(
             DatabaseWorkload::Learner,
             lease.clone(),
             "notifications.emit_test",
-            move |db| notifications::record_if_enabled(db.conn(), &notification),
+            move |db| {
+                notifications::record_if_enabled(db.conn(), &notification)
+                    .map_err(|e| e.to_string())
+            },
         )
         .await?
         .ok_or("notifications are switched off for this profile")?;
