@@ -41,8 +41,8 @@ describe('notification routes', () => {
 
   it('hands a whole deep link to the parser instead', async () => {
     const notifications = await fresh()
-    await notifications.openRoute('alexandria://notification/n-1')
-    expect(mocks.openLink).toHaveBeenCalledWith('alexandria://notification/n-1')
+    await notifications.openRoute('alexandria://classroom/c-1')
+    expect(mocks.openLink).toHaveBeenCalledWith('alexandria://classroom/c-1')
     expect(mocks.openPath).not.toHaveBeenCalled()
   })
 

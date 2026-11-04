@@ -99,28 +99,15 @@ describe('parseDeepLink', () => {
   })
 
   describe('notifications', () => {
-    it('maps the bare action to the inbox (custom + https)', () => {
-      expect(parseDeepLink('alexandria://notifications')).toEqual({
-        kind: 'route',
-        path: '/notifications',
-      })
-      expect(parseDeepLink('https://alexandria.ifftu.dev/notifications')).toEqual({
-        kind: 'route',
-        path: '/notifications',
-      })
-    })
-    it('rejects anything under notifications', () => {
-      expect(parseDeepLink('alexandria://notifications/x')).toBeNull()
-    })
-    it('maps notification/<id> to the inbox with that row opened', () => {
-      expect(parseDeepLink('alexandria://notification/n-1')).toEqual({
-        kind: 'route',
-        path: '/notifications?open=n-1',
-      })
-    })
-    it('rejects notification without an id or with more segments', () => {
-      expect(parseDeepLink('alexandria://notification')).toBeNull()
-      expect(parseDeepLink('alexandria://notification/n-1/extra')).toBeNull()
+    it('has no public notification links, in either form', () => {
+      for (const link of [
+        'alexandria://notifications',
+        'alexandria://notification/n-1',
+        'https://alexandria.ifftu.dev/notifications',
+        'https://alexandria.ifftu.dev/notification/n-1',
+      ]) {
+        expect(parseDeepLink(link), link).toBeNull()
+      }
     })
   })
 

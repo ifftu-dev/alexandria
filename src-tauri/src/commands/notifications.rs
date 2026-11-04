@@ -200,17 +200,25 @@ pub async fn push_set_enabled(
     }
 }
 
+/// The debug-only test emitter runs only when the build is a debug build.
+fn test_emitter_allowed(debug_build: bool) -> Result<(), String> {
+    if debug_build {
+        Ok(())
+    } else {
+        Err("test notifications exist in debug builds only".into())
+    }
+}
+
 /// Push a notification of `kind` through the whole pipeline, for trying the
-/// list, the badge and the banner by hand. Debug builds only.
+/// list, the badge and the banner by hand. Debug builds only: a release build
+/// refuses it (see `test_emitter_allowed`), and nothing in the UI calls it.
 #[tauri::command]
 pub async fn notifications_emit_test(
     app: AppHandle,
     state: State<'_, AppState>,
     kind: String,
 ) -> Result<NotificationRow, String> {
-    if !cfg!(debug_assertions) {
-        return Err("test notifications exist in debug builds only".into());
-    }
+    test_emitter_allowed(cfg!(debug_assertions))?;
     if !notifications::kind::ALL.contains(&kind.as_str()) {
         return Err(format!("unknown notification kind `{kind}`"));
     }
@@ -243,6 +251,15 @@ pub async fn notifications_emit_test(
 #[cfg(test)]
 mod tests {
     use crate::notifications::push;
+
+    #[test]
+    fn the_test_emitter_is_refused_outside_debug_builds() {
+        assert_eq!(
+            super::test_emitter_allowed(false),
+            Err("test notifications exist in debug builds only".to_string())
+        );
+        assert_eq!(super::test_emitter_allowed(true), Ok(()));
+    }
 
     #[tokio::test]
     async fn locked_pending_open_ipc_peeks_without_consuming_and_requires_session_for_ack() {

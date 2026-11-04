@@ -183,6 +183,7 @@ Bring the shipped features back in line with their specs and the repo's rules, i
   - Native push taps and held-tap replay keep routing through the internal route they already use. Before removal, confirm that no native path depends on the public links.
   - If a producer needs a public notification link later, a new spec adds it and documents it in the deep-link docs.
 - **Debug emitter.** The debug-only test command stays. It is refused outside debug builds and is listed as a debug-only command in this spec.
+  - Debug-only commands: `notifications_emit_test`, which records a sample notification of a given kind for manual device testing. No UI calls it.
 - **Wire types.**
   - The notification row, push status and notification-open types become domain types, snake_case in both Rust and TypeScript, as the workspace rules require. Event payload keys follow.
   - This is IPC-only. The Cloud wire contract (the seven FCM data keys and the Cloud delivery API) is unchanged.

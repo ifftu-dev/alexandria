@@ -84,8 +84,8 @@ describe('openLink', () => {
   it('routes a recognised deep link and ignores a foreign one', async () => {
     const links = await fresh()
     mocks.unlocked.value = true
-    await links.openLink('alexandria://notification/n-1')
-    expect(mocks.push).toHaveBeenCalledWith('/notifications?open=n-1')
+    await links.openLink('alexandria://classroom/c-1')
+    expect(mocks.push).toHaveBeenCalledWith('/classrooms/c-1')
     await links.openLink('https://example.com/notifications')
     expect(mocks.push).toHaveBeenCalledTimes(1)
   })

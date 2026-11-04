@@ -5,27 +5,19 @@
 // text is never used as a fallback for an unknown kind.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
 import { AppBadge, AppButton, EmptyState } from '@/components/ui'
 import { useNotifications } from '@/composables/useNotifications'
 import type { AppNotification } from '@/types'
 
 const { t, te } = useI18n()
-const route = useRoute()
-const router = useRouter()
 const { items, unread, loading, load, markAllRead, clear, open } = useNotifications()
 
 const confirmingClear = ref(false)
 
-onMounted(async () => {
-  await load().catch(() => {})
-  // `alexandria://notification/<id>` lands here with `?open=<id>`: open that
-  // row as a tap would, then drop the query so a reload does not repeat it.
-  const wanted = typeof route.query.open === 'string' ? route.query.open : null
-  if (!wanted) return
-  await router.replace({ path: route.path })
-  const row = items.value.find((n) => n.id === wanted)
-  if (row) await open(row).catch(() => {})
+// Only the learner's own tap opens a row. The page ignores its query, so a
+// link that lands here cannot mark anything read or follow a row's route.
+onMounted(() => {
+  void load().catch(() => {})
 })
 
 function titleOf(n: AppNotification): string {

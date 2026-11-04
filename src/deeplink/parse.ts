@@ -9,6 +9,10 @@
 // path segment is the action (the domain host is stripped). Anything that
 // doesn't match a known action returns null — callers must treat null as
 // "ignore this link", never navigate to a raw string.
+//
+// There is no public notification link. Banner and push taps reach the app
+// as `notifications:open` events with an in-app route, never through here, so
+// an outside page cannot open, mark read or follow an inbox row.
 
 /** Hosts we accept https app-links from. */
 const APP_LINK_HOSTS = new Set(['alexandria.ifftu.dev'])
@@ -87,19 +91,6 @@ export function parseDeepLink(raw: string): DeepLinkTarget | null {
         return null
       }
       return { kind: 'governance-genesis-locator', locator: url.href }
-    }
-    case 'notifications': {
-      // alexandria://notifications  →  the inbox
-      return segments.length === 0 ? { kind: 'route', path: '/notifications' } : null
-    }
-    case 'notification': {
-      // alexandria://notification/<id>  →  the inbox, opening that row (the
-      // page marks it read and follows its route). The id stays as the URL
-      // encoded it, for the same reason as `course`.
-      const id = segments[0]
-      return id && segments.length === 1
-        ? { kind: 'route', path: `/notifications?open=${id}` }
-        : null
     }
     case 'open': {
       // alexandria://open?route=/any/in-app/path  (generic fallback)

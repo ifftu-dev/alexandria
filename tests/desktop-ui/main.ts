@@ -78,6 +78,38 @@ if (screen === 'motion') {
   ] })
   await router.push('/skills')
   createApp(PersonalAtlasFixture, { backend }).use(i18n).use(router).mount('#app')
+} else if (screen === 'notification-links') {
+  // The real router and deep-link runtime over an unlocked profile whose inbox
+  // holds one unread row. Every IPC call is recorded for the spec to inspect.
+  const calls: string[] = []
+  const row = { id: 'n-1', kind: 'offer_sent', title: '', body: '', route: '/settings/organisations',
+    source: 'local', createdAt: '2026-11-04T00:00:00Z', readAt: null, payload: null }
+  const answers: Record<string, unknown> = {
+    get_incompatible_profile_data: null, get_profile_cleanup_required: false, list_profiles: [],
+    get_active_profile_id: 'profile-a', get_profile_session_token: 'session-a',
+    get_account_status: { account_roles: ['learner'], activation_state: 'active' },
+    notifications_list: [row], notifications_unread_count: 1, 'plugin:event|listen': 1,
+  }
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    transformCallback: () => 1, unregisterCallback: () => {},
+    invoke: async (command: string) => {
+      calls.push(command)
+      return command in answers ? structuredClone(answers[command]) : null
+    },
+  } })
+  const { default: router } = await import('@/router')
+  const { useProfiles } = await import('@/composables/useProfiles')
+  const { useDeepLinks } = await import('@/deeplink/useDeepLinks')
+  await useProfiles().initialize()
+  router.addRoute({ path: '/fixture-start', component: { render: () => h('p', 'Fixture start') } })
+  await router.push('/fixture-start')
+  createApp({ render: () => h(RouterView) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { notificationLinks: {
+    calls,
+    path: () => router.currentRoute.value.fullPath,
+    openLink: (url: string) => useDeepLinks().openLink(url),
+  } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
