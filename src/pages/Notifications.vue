@@ -20,14 +20,10 @@ onMounted(() => {
   void load().catch(() => {})
 })
 
-function titleOf(n: AppNotification): string {
-  const key = `notifications.kinds.${n.kind}.title`
-  return te(key) || te(key, 'en') ? t(key) : t('notifications.kinds.generic.title')
-}
-
-function bodyOf(n: AppNotification): string {
-  const key = `notifications.kinds.${n.kind}.body`
-  return te(key) || te(key, 'en') ? t(key) : t('notifications.kinds.generic.body')
+/** A row's title or body: its kind's copy, else the generic copy. */
+function kindText(n: AppNotification, field: 'title' | 'body'): string {
+  const key = `notifications.kinds.${n.kind}.${field}`
+  return te(key) || te(key, 'en') ? t(key) : t(`notifications.kinds.generic.${field}`)
 }
 
 const formatter = computed(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }))
@@ -85,10 +81,10 @@ async function onClear() {
           />
           <span class="min-w-0 flex-1">
             <span class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-medium text-foreground">{{ titleOf(n) }}</span>
+              <span class="text-sm font-medium text-foreground">{{ kindText(n, 'title') }}</span>
               <AppBadge v-if="n.source === 'push'" variant="secondary">{{ $t('notifications.page.viaPush') }}</AppBadge>
             </span>
-            <span class="mt-0.5 block text-sm text-muted-foreground">{{ bodyOf(n) }}</span>
+            <span class="mt-0.5 block text-sm text-muted-foreground">{{ kindText(n, 'body') }}</span>
             <span class="mt-1 block text-xs text-muted-foreground/70">{{ when(n) }}</span>
           </span>
           <svg v-if="n.route" class="mt-1 h-4 w-4 shrink-0 text-muted-foreground rtl:-scale-x-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
