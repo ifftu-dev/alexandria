@@ -713,10 +713,10 @@ mod tests {
                 );
                 assert!(inbox
                     .iter()
-                    .any(|row| row.payload.as_ref().unwrap()["callId"] == "other-call"));
+                    .any(|row| row.payload.as_ref().unwrap()["call_id"] == "other-call"));
                 assert!(!inbox
                     .iter()
-                    .any(|row| row.payload.as_ref().unwrap()["callId"] == "self-call"));
+                    .any(|row| row.payload.as_ref().unwrap()["call_id"] == "self-call"));
             }
             drop(ingest);
             dispatcher.await.unwrap();

@@ -55,3 +55,7 @@ Deviations:
 - The snapshot file and its test keep their `chat-vocab` names, but the notification lists render into their own generated file.
 - The Notifications page keeps its fallback to generic copy for a kind the catalog lacks. That is defence in depth: the backend no longer sends unknown kinds.
 - The mobile builds were not cross-compiled. The permission command uses `cfg!(mobile)`, so its code path compiles on desktop.
+
+## Notes
+
+- 2026-11-04: This ticket's commit broke `p2p::inbound::tests::classroom_notifications_follow_committed_membership_and_moderator_authority`. A bisect from the last release tip shows the commit is the first bad one, and the test is stable at its parent. Recipient routing was unchanged: each role still got the right number of rows. The test still read the classroom call row's payload as `callId`, which this ticket renamed to `call_id` on purpose, so it found no match. The ticket's checks covered `notifications::` but not `p2p::`. The fix updates the test to read `call_id`.
