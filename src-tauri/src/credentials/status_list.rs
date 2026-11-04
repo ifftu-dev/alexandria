@@ -8,7 +8,7 @@
 
 use rusqlite::{params, Connection};
 
-use super::Issuer;
+use super::{CredentialError, Issuer};
 use crate::clock::now_rfc3339;
 use crate::crypto::did::Did;
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
@@ -53,18 +53,16 @@ pub fn host(conn: &Connection) -> Option<String> {
 /// is a URN and the list travels only in exported bundles. A host that
 /// changes later starts a fresh list — ids already written into credentials
 /// are never rewritten.
-pub fn ensure(conn: &Connection, issuer_did: &Did) -> Result<String, String> {
+pub fn ensure(conn: &Connection, issuer_did: &Did) -> Result<String, CredentialError> {
     let list_id = match host(conn) {
         Some(origin) => alexandria_verify::vc::status::list_url(&origin, issuer_did, 1),
         None => format!("urn:alexandria:status-list:{}:1", issuer_did.as_str()),
     };
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM credential_status_lists WHERE list_id = ?1",
-            params![list_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM credential_status_lists WHERE list_id = ?1",
+        params![list_id],
+        |r| r.get(0),
+    )?;
     if exists == 0 {
         let bits = vec![0u8; BITS / 8];
         conn.execute(
@@ -72,26 +70,23 @@ pub fn ensure(conn: &Connection, issuer_did: &Did) -> Result<String, String> {
              (list_id, issuer_did, version, status_purpose, bits, bit_length) \
              VALUES (?1, ?2, 1, 'revocation', ?3, ?4)",
             params![list_id, issuer_did.as_str(), bits, BITS as i64],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
     }
     Ok(list_id)
 }
 
-pub fn allocate(conn: &Connection, list_id: &str) -> Result<i64, String> {
+pub fn allocate(conn: &Connection, list_id: &str) -> Result<i64, CredentialError> {
     // Next free index = max allocated + 1. We read from `credentials`
     // rather than scanning the bitmap because gaps from revocations
     // shouldn't be reused (the revoked state is permanent evidence).
-    let next: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(status_list_index), -1) + 1 FROM credentials \
+    let next: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(status_list_index), -1) + 1 FROM credentials \
              WHERE status_list_id = ?1",
-            params![list_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+        params![list_id],
+        |r| r.get(0),
+    )?;
     if next >= BITS as i64 {
-        return Err(format!("status list {list_id} is full"));
+        return Err(CredentialError::StatusListFull(list_id.to_string()));
     }
     Ok(next)
 }
@@ -108,26 +103,25 @@ pub struct PendingStatusList {
 /// Lists this issuer owns that are ahead of what their host acknowledged.
 ///
 /// URN-named lists are never pending: nothing serves them.
-pub fn pending(conn: &Connection, issuer_did: &Did) -> Result<Vec<PendingStatusList>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT list_id, status_purpose, bits, version FROM credential_status_lists \
-             WHERE issuer_did = ?1 AND version > published_version ORDER BY list_id",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![issuer_did.as_str()], |r| {
-            Ok(PendingStatusList {
-                list_id: r.get(0)?,
-                status_purpose: r.get(1)?,
-                bits: r.get(2)?,
-                version: r.get(3)?,
-            })
+pub fn pending(
+    conn: &Connection,
+    issuer_did: &Did,
+) -> Result<Vec<PendingStatusList>, CredentialError> {
+    let mut stmt = conn.prepare(
+        "SELECT list_id, status_purpose, bits, version FROM credential_status_lists \
+         WHERE issuer_did = ?1 AND version > published_version ORDER BY list_id",
+    )?;
+    let rows = stmt.query_map(params![issuer_did.as_str()], |r| {
+        Ok(PendingStatusList {
+            list_id: r.get(0)?,
+            status_purpose: r.get(1)?,
+            bits: r.get(2)?,
+            version: r.get(3)?,
         })
-        .map_err(|e| e.to_string())?;
+    })?;
     let mut pending = Vec::new();
     for row in rows {
-        let list = row.map_err(|e| e.to_string())?;
+        let list = row?;
         if alexandria_verify::vc::status::parse_list_url(&list.list_id).is_some() {
             pending.push(list);
         }
@@ -140,7 +134,7 @@ pub fn signed(
     list: &PendingStatusList,
     issuer: &Issuer,
     now: &str,
-) -> Result<VerifiableCredential, String> {
+) -> Result<VerifiableCredential, CredentialError> {
     let (key, issuer_did) = (issuer.key(), issuer.did());
     alexandria_verify::vc::status::status_list_credential(
         &list.list_id,
@@ -150,18 +144,23 @@ pub fn signed(
         now,
         key,
     )
-    .map_err(|e| format!("sign status list {}: {e}", list.list_id))
+    .map_err(|source| CredentialError::SignStatusList {
+        list_id: list.list_id.clone(),
+        source,
+    })
 }
 
 /// Record that a host acknowledged `version` of each list.
-pub fn mark_published(conn: &Connection, published: &[(String, i64)]) -> Result<(), String> {
+pub fn mark_published(
+    conn: &Connection,
+    published: &[(String, i64)],
+) -> Result<(), CredentialError> {
     for (list_id, version) in published {
         conn.execute(
             "UPDATE credential_status_lists SET published_version = ?2 \
              WHERE list_id = ?1 AND published_version < ?2",
             params![list_id, version],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
     }
     Ok(())
 }
@@ -195,28 +194,32 @@ pub async fn push(
     (accepted, errors)
 }
 
-async fn push_one(list: &PendingStatusList, issuer: &Issuer, now: &str) -> Result<(), String> {
+async fn push_one(
+    list: &PendingStatusList,
+    issuer: &Issuer,
+    now: &str,
+) -> Result<(), CredentialError> {
     let issuer_did = issuer.did();
     let location = alexandria_verify::vc::status::parse_list_url(&list.list_id)
-        .ok_or("list is not served by a host")?;
+        .ok_or(CredentialError::ListNotHosted)?;
     if &location.issuer != issuer_did {
-        return Err("list belongs to another issuer".into());
+        return Err(CredentialError::ListOfAnotherIssuer);
     }
     let document = signed(list, issuer, now)?;
-    let response = crate::cloud::client()?
+    let response = crate::cloud::client()
+        .map_err(CredentialError::Cloud)?
         .put(&list.list_id)
         .json(&document)
         .send()
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "{} returned {status}: {}",
-            location.origin,
-            body.chars().take(200).collect::<String>()
-        ));
+        return Err(CredentialError::HostRefused {
+            origin: location.origin,
+            status,
+            body: body.chars().take(200).collect(),
+        });
     }
     Ok(())
 }
@@ -230,16 +233,17 @@ pub(crate) async fn publish(
     executor: &DatabaseExecutor,
     lease: &ProfileLease,
     issuer: &Issuer,
-) -> Result<StatusPublishReport, String> {
+) -> Result<StatusPublishReport, CredentialError> {
     let issuer_for_read = issuer.did().clone();
     let pending = executor
         .execute(
             DatabaseWorkload::Instructor,
             lease.clone(),
             "credentials.status_lists.pending",
-            move |db| pending(db.conn(), &issuer_for_read),
+            move |db| pending(db.conn(), &issuer_for_read).map_err(|e| e.to_string()),
         )
-        .await?;
+        .await
+        .map_err(CredentialError::Profile)?;
     if pending.is_empty() {
         return Ok(StatusPublishReport::default());
     }
@@ -251,9 +255,10 @@ pub(crate) async fn publish(
                 DatabaseWorkload::Instructor,
                 lease.clone(),
                 "credentials.status_lists.mark",
-                move |db| mark_published(db.conn(), &accepted),
+                move |db| mark_published(db.conn(), &accepted).map_err(|e| e.to_string()),
             )
-            .await?;
+            .await
+            .map_err(CredentialError::Profile)?;
     }
     Ok(StatusPublishReport { published, errors })
 }

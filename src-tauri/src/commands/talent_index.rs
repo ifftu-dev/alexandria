@@ -322,7 +322,10 @@ pub async fn sign_consented_record(
     state: State<'_, AppState>,
     only: Option<&[String]>,
 ) -> Result<Option<SignedTalentIndexRecord>, String> {
-    let (signing_key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (signing_key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let now = crate::clock::now_rfc3339();
     let only = only.map(<[String]>::to_vec);
     state

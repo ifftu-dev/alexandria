@@ -3,19 +3,22 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::CredentialError;
 use crate::domain::vc::VerifiableCredential;
 
-pub fn get(conn: &Connection, credential_id: &str) -> Result<Option<VerifiableCredential>, String> {
+pub fn get(
+    conn: &Connection,
+    credential_id: &str,
+) -> Result<Option<VerifiableCredential>, CredentialError> {
     let json: Option<String> = conn
         .query_row(
             "SELECT signed_vc_json FROM credentials WHERE id = ?1",
             params![credential_id],
             |r| r.get(0),
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
     match json {
-        Some(s) => Ok(Some(serde_json::from_str(&s).map_err(|e| e.to_string())?)),
+        Some(s) => Ok(Some(serde_json::from_str(&s)?)),
         None => Ok(None),
     }
 }
@@ -24,7 +27,7 @@ pub fn list(
     conn: &Connection,
     subject_did: Option<&str>,
     skill_id: Option<&str>,
-) -> Result<Vec<VerifiableCredential>, String> {
+) -> Result<Vec<VerifiableCredential>, CredentialError> {
     list_filtered(conn, subject_did, skill_id, false)
 }
 
@@ -37,7 +40,7 @@ pub fn list_filtered(
     subject_did: Option<&str>,
     skill_id: Option<&str>,
     active_only: bool,
-) -> Result<Vec<VerifiableCredential>, String> {
+) -> Result<Vec<VerifiableCredential>, CredentialError> {
     let mut sql = String::from("SELECT signed_vc_json FROM credentials WHERE 1=1");
     if active_only {
         sql.push_str(" AND revoked = 0");
@@ -53,16 +56,13 @@ pub fn list_filtered(
     }
     sql.push_str(" ORDER BY received_at DESC");
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(args.iter()), |r| {
-            r.get::<_, String>(0)
-        })
-        .map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+        r.get::<_, String>(0)
+    })?;
     let mut out = Vec::new();
     for r in rows {
-        let s = r.map_err(|e| e.to_string())?;
-        out.push(serde_json::from_str(&s).map_err(|e| e.to_string())?);
+        out.push(serde_json::from_str(&r?)?);
     }
     Ok(out)
 }
@@ -83,9 +83,11 @@ pub const CREDENTIAL_PAYLOAD_JSON_LIMITS: alexandria_verify::json::JsonLimits =
 
 /// Parse an untrusted credential payload under
 /// [`CREDENTIAL_PAYLOAD_JSON_LIMITS`] before any typed decoding.
-pub(crate) fn parse_credential_payload(payload: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn parse_credential_payload(
+    payload: &str,
+) -> Result<serde_json::Value, CredentialError> {
     alexandria_verify::json::parse_untrusted(payload.as_bytes(), &CREDENTIAL_PAYLOAD_JSON_LIMITS)
-        .map_err(|error| format!("not a valid credential payload: {error}"))
+        .map_err(CredentialError::InvalidPayload)
 }
 
 /// Decode one credential entry of a parsed payload under the single-credential

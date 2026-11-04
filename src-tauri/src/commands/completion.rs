@@ -856,7 +856,8 @@ fn self_issue_completion(
 
         completion_obs::record_observation(conn, &obs).map_err(|e| e.to_string())?;
 
-        let credential_id = crate::credentials::auto::issue_for_observation(conn, learner, &obs)?;
+        let credential_id = crate::credentials::auto::issue_for_observation(conn, learner, &obs)
+            .map_err(|e| e.to_string())?;
         issued_ids.push(credential_id);
     }
 
@@ -896,7 +897,8 @@ fn self_issue_completion(
             integrity_session_id: None,
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, learner, &self_claim, &now)?;
+        let vc = crate::credentials::issue(conn, learner, &self_claim, &now)
+            .map_err(|e| e.to_string())?;
         issued_ids.push(vc.id.ok_or("issued completion credential has no id")?);
     }
 

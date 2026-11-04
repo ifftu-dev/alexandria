@@ -392,7 +392,9 @@ pub async fn assessment_finalize_adaptive(
     state: State<'_, AppState>,
     attempt_id: String,
 ) -> Result<GradeResult, String> {
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let now = now_rfc3339();
     state
         .db_executor
@@ -539,7 +541,7 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, issuer, &req, now)?;
+        let vc = crate::credentials::issue(conn, issuer, &req, now).map_err(|e| e.to_string())?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
@@ -919,7 +921,10 @@ mod tests {
         .unwrap_err()
         .contains("another learner"));
         // A key that is not the learner's cannot sign as the learner at all.
-        assert!(Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW).is_err());
+        assert!(matches!(
+            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW),
+            Err(crate::credentials::CredentialError::NotCurrentKey(_))
+        ));
         assert!(
             finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW)
                 .unwrap()

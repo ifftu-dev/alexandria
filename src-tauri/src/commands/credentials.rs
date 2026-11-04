@@ -39,7 +39,9 @@ pub async fn issue_credential(
     state: State<'_, AppState>,
     req: IssueCredentialRequest,
 ) -> Result<VerifiableCredential, String> {
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let signer = issuer.clone();
     let now = now_rfc3339();
     let issued = state
@@ -48,7 +50,7 @@ pub async fn issue_credential(
             DatabaseWorkload::Instructor,
             state.profile_lease(),
             "credentials.issue",
-            move |db| credentials::issue(db.conn(), &signer, &req, &now),
+            move |db| credentials::issue(db.conn(), &signer, &req, &now).map_err(|e| e.to_string()),
         )
         .await?;
     publish_status_lists_quietly(&state, &issuer, "after issue").await;
@@ -76,6 +78,7 @@ pub async fn list_credentials(
                     skill_id.as_deref(),
                     active_only.unwrap_or(false),
                 )
+                .map_err(|e| e.to_string())
             },
         )
         .await
@@ -92,7 +95,7 @@ pub async fn get_credential(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "credentials.get",
-            move |db| store::get(db.conn(), &credential_id),
+            move |db| store::get(db.conn(), &credential_id).map_err(|e| e.to_string()),
         )
         .await
 }
@@ -103,7 +106,9 @@ pub async fn revoke_credential(
     credential_id: String,
     reason: String,
 ) -> Result<(), String> {
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let issuer_did = issuer.did().clone();
     let now = now_rfc3339();
     state
@@ -112,7 +117,10 @@ pub async fn revoke_credential(
             DatabaseWorkload::Instructor,
             state.profile_lease(),
             "credentials.revoke",
-            move |db| lifecycle::revoke(db.conn(), &issuer_did, &credential_id, &reason, &now),
+            move |db| {
+                lifecycle::revoke(db.conn(), &issuer_did, &credential_id, &reason, &now)
+                    .map_err(|e| e.to_string())
+            },
         )
         .await?;
     publish_status_lists_quietly(&state, &issuer, "after revoke").await;
@@ -126,8 +134,12 @@ pub async fn revoke_credential(
 pub async fn publish_status_lists(
     state: State<'_, AppState>,
 ) -> Result<status_list::StatusPublishReport, String> {
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
-    status_list::publish(&state.db_executor, &state.profile_lease(), &issuer).await
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
+    status_list::publish(&state.db_executor, &state.profile_lease(), &issuer)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -137,7 +149,11 @@ pub async fn suspend_credential(
     until: Option<String>,
     reason: Option<String>,
 ) -> Result<(), String> {
-    let issuer_did = Issuer::from_keystore(&state.keystore).await?.did().clone();
+    let issuer_did = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .did()
+        .clone();
     let now = now_rfc3339();
     state
         .db_executor
@@ -154,6 +170,7 @@ pub async fn suspend_credential(
                     reason.as_deref(),
                     &now,
                 )
+                .map_err(|e| e.to_string())
             },
         )
         .await
@@ -164,14 +181,21 @@ pub async fn reinstate_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<(), String> {
-    let issuer_did = Issuer::from_keystore(&state.keystore).await?.did().clone();
+    let issuer_did = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .did()
+        .clone();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Instructor,
             state.profile_lease(),
             "credentials.reinstate",
-            move |db| lifecycle::reinstate(db.conn(), &issuer_did, &credential_id),
+            move |db| {
+                lifecycle::reinstate(db.conn(), &issuer_did, &credential_id)
+                    .map_err(|e| e.to_string())
+            },
         )
         .await
 }
@@ -243,14 +267,16 @@ pub async fn verify_credential_cmd(
 
 #[tauri::command]
 pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "credentials.export-bundle",
-            move |db| bundle::export_signed(db.conn(), Some(&issuer)),
+            move |db| bundle::export_signed(db.conn(), Some(&issuer)).map_err(|e| e.to_string()),
         )
         .await
 }

@@ -21,7 +21,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::cardano::completion::{self, CompletionObservation};
-use crate::credentials::{status_list, Issuer};
+use crate::credentials::{status_list, CredentialError, Issuer};
 use crate::domain::vc::context::W3C_VC_V2;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
@@ -47,10 +47,10 @@ pub struct AutoIssuanceReport {
 /// Process every pending [`CompletionObservation`] by self-signing a
 /// VC for it. Observations whose `subject_pubkey` doesn't match the
 /// local learner's verifying key are skipped — we only sign our own.
-pub fn tick(conn: &Connection, learner: &Issuer) -> Result<AutoIssuanceReport, String> {
+pub fn tick(conn: &Connection, learner: &Issuer) -> Result<AutoIssuanceReport, CredentialError> {
     let local_vk_hex = hex::encode(learner.key().verifying_key().as_bytes());
 
-    let pending = completion::pending_observations(conn).map_err(|e| e.to_string())?;
+    let pending = completion::pending_observations(conn)?;
 
     let mut report = AutoIssuanceReport::default();
     for obs in pending {
@@ -82,7 +82,7 @@ pub fn issue_for_observation(
     conn: &Connection,
     learner: &Issuer,
     obs: &CompletionObservation,
-) -> Result<String, String> {
+) -> Result<String, CredentialError> {
     issue_and_notify(conn, learner, obs).map(|(id, _)| id)
 }
 
@@ -90,12 +90,10 @@ fn issue_and_notify(
     conn: &Connection,
     learner: &Issuer,
     obs: &CompletionObservation,
-) -> Result<(String, Option<crate::notifications::Recorded>), String> {
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
-    let stored = completion::find_by_asset(&tx, &obs.policy_id, &obs.asset_name_hex)
-        .map_err(|e| e.to_string())?
-        .ok_or("completion observation missing")?;
+) -> Result<(String, Option<crate::notifications::Recorded>), CredentialError> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let stored = completion::find_by_asset(&tx, &obs.policy_id, &obs.asset_name_hex)?
+        .ok_or(CredentialError::ObservationMissing)?;
     if stored.tx_hash != obs.tx_hash
         || stored.subject_pubkey != obs.subject_pubkey
         || stored.course_id != obs.course_id
@@ -103,20 +101,18 @@ fn issue_and_notify(
         || stored.completion_time != obs.completion_time
         || stored.subject_pubkey != hex::encode(learner.key().verifying_key().as_bytes())
     {
-        return Err("completion issuance does not match the stored observation and learner".into());
+        return Err(CredentialError::ObservationMismatch);
     }
     if let Some(existing) = stored.credential_id {
         return Ok((existing, None));
     }
     let credential_id = issue_new_observation(&tx, learner, obs)?;
-    completion::mark_issued(&tx, &obs.policy_id, &obs.asset_name_hex, &credential_id)
-        .map_err(|e| e.to_string())?;
+    completion::mark_issued(&tx, &obs.policy_id, &obs.asset_name_hex, &credential_id)?;
     let notification = crate::notifications::record_if_enabled(
         &tx,
         &crate::notifications::for_issued_credential(&credential_id),
-    )
-    .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
+    )?;
+    tx.commit()?;
     Ok((credential_id, notification))
 }
 
@@ -124,7 +120,7 @@ fn issue_new_observation(
     conn: &Connection,
     learner: &Issuer,
     obs: &CompletionObservation,
-) -> Result<String, String> {
+) -> Result<String, CredentialError> {
     let learner_did = learner.did();
     let list_id = status_list::ensure(conn, learner_did)?;
     let index = status_list::allocate(conn, &list_id)?;
@@ -159,7 +155,8 @@ fn issue_new_observation(
         &now,
         &list_id,
         index,
-    )?;
+    )
+    .map_err(CredentialError::Envelope)?;
 
     let witness = Witness {
         tx_hash: obs.tx_hash.clone(),
@@ -192,10 +189,10 @@ fn issue_new_observation(
         learner.key(),
         learner_did,
     )
-    .map_err(|e| format!("sign: {e}"))?;
+    .map_err(CredentialError::Sign)?;
 
-    let signed_json = serde_json::to_string(&signed).map_err(|e| e.to_string())?;
-    let integrity_hash = integrity_hash_of(&signed)?;
+    let signed_json = serde_json::to_string(&signed)?;
+    let integrity_hash = integrity_hash_of(&signed).map_err(CredentialError::Envelope)?;
 
     conn.execute(
         "INSERT INTO credentials \
@@ -220,7 +217,7 @@ fn issue_new_observation(
             completion::WITNESS_VALIDATOR_NAME,
         ],
     )
-    .map_err(|e| format!("insert credential: {e}"))?;
+    .map_err(CredentialError::step("insert credential"))?;
 
     // Queue for optional §12.3 integrity anchoring. Soft-fail: the
     // witness is already on-chain, so a missing anchor is tolerable.
@@ -242,14 +239,14 @@ fn issue_new_observation(
 pub fn credential_for_witness_tx(
     conn: &Connection,
     tx_hash: &str,
-) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT id FROM credentials WHERE witness_tx_hash = ?1 LIMIT 1",
-        params![tx_hash],
-        |r| r.get::<_, String>(0),
-    )
-    .optional()
-    .map_err(|e| e.to_string())
+) -> Result<Option<String>, CredentialError> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM credentials WHERE witness_tx_hash = ?1 LIMIT 1",
+            params![tx_hash],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?)
 }
 
 #[cfg(test)]
@@ -507,11 +504,10 @@ mod tests {
         seed_observation(&db, &obs);
         db.conn().execute_batch("CREATE TRIGGER fail_issuance BEFORE UPDATE OF credential_id
             ON completion_observations BEGIN SELECT RAISE(ABORT, 'injected issuance failure'); END;").unwrap();
-        assert!(
-            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs)
-                .unwrap_err()
-                .contains("injected issuance failure")
-        );
+        let error =
+            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs).unwrap_err();
+        assert!(matches!(error, CredentialError::Completion(_)), "{error:?}");
+        assert!(error.to_string().contains("injected issuance failure"));
         let counts: (i64, i64) = db.conn().query_row(
             "SELECT (SELECT COUNT(*) FROM credentials), (SELECT COUNT(*) FROM credential_status_lists)",
             [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -530,9 +526,10 @@ mod tests {
         );
         let mut changed = obs.clone();
         changed.completion_root = "06".repeat(32);
-        assert!(
-            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &changed).is_err()
-        );
+        assert!(matches!(
+            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &changed),
+            Err(CredentialError::ObservationMismatch)
+        ));
         assert!(completion::pending_observations(db.conn())
             .unwrap()
             .is_empty());

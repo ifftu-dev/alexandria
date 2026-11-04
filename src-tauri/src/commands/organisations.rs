@@ -434,7 +434,10 @@ pub async fn send_listing(cloud_url: &str, signed: &SignedTalentIndexRecord) -> 
 
 /// Run one sync pass for the open profile: grants, then the listing.
 pub(crate) async fn sync_for(state: &State<'_, AppState>) -> Result<SyncReport, String> {
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let now_unix = chrono::Utc::now().timestamp();
     let now = now_rfc3339();
     let (plan_key, plan_did, plan_now) = (key.clone(), did.as_str().to_string(), now.clone());
@@ -498,7 +501,10 @@ async fn signed_get(
     cloud_url: &str,
     path: &str,
 ) -> Result<Value, String> {
-    let (key, _) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, _) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let timestamp = chrono::Utc::now().timestamp();
     let nonce = uuid::Uuid::new_v4().to_string();
     let proof = super::holder_pull::proof(&key, "GET", path, timestamp, &nonce);
@@ -530,7 +536,11 @@ async fn post(cloud_url: &str, path: &str, body: &impl Serialize) -> Result<Valu
 pub async fn org_access_requests(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessRequestItem>, String> {
-    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
+    let did = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .did()
+        .clone();
     let path = format!("/api/access-requests/for/{}", did.as_str());
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -595,7 +605,10 @@ pub async fn org_grant(
     let org = org_trust::check_item(&state, &request, org_proof.as_ref()).await;
     let org_name = org.require()?.to_string();
     let org_domain = org.domain.clone().unwrap_or_default();
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let now_unix = chrono::Utc::now().timestamp();
     let now = now_rfc3339();
 
@@ -699,7 +712,11 @@ fn view(
 /// when each last looked.
 #[tauri::command]
 pub async fn org_grants(state: State<'_, AppState>) -> Result<GrantsView, String> {
-    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
+    let did = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .did()
+        .clone();
     let mut problems = Vec::new();
     let mut remote: Vec<Value> = Vec::new();
     for cloud in super::holder_pull::directories(&state).await? {
@@ -745,7 +762,10 @@ async fn follow_up(
     action: GrantAction,
     sync: bool,
 ) -> Result<GrantView, String> {
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let id = grant_id.clone();
     let current = state
         .db_executor

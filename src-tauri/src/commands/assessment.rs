@@ -924,7 +924,9 @@ pub async fn assessment_grade(
     attempt_id: String,
     answers: Vec<SubmittedAnswer>,
 ) -> Result<GradeResult, String> {
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let signer = issuer.clone();
     let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
@@ -1184,7 +1186,7 @@ pub fn grade_attempt_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, issuer, &req, now)?;
+        let vc = crate::credentials::issue(conn, issuer, &req, now).map_err(|e| e.to_string())?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
@@ -1619,7 +1621,10 @@ mod tests {
         )
         .is_err());
         // A key that is not the learner's cannot sign as the learner at all.
-        assert!(Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW).is_err());
+        assert!(matches!(
+            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW),
+            Err(crate::credentials::CredentialError::NotCurrentKey(_))
+        ));
         let rows: i64 = ctx
             .db
             .conn()

@@ -648,7 +648,9 @@ pub async fn plugin_submit_and_grade(
     // Derive the learner's DID from the unlocked keystore. The keystore
     // must be open — graded plugin submissions only make sense for an
     // enrolled learner whose vault is unlocked anyway.
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let learner_did = issuer.did().clone();
     let learner_did_str = learner_did.0.clone();
 

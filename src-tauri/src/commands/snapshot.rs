@@ -144,7 +144,8 @@ fn create_snapshot(
                 integrity_policy: None,
             },
             &now,
-        )?;
+        )
+        .map_err(|e| e.to_string())?;
         let credential_id = credential.id.ok_or("snapshot credential has no id")?;
         // The common issuance path currently treats queue insertion as a soft
         // convenience. A snapshot explicitly promises this optional path, so
