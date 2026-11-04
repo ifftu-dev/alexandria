@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton } from '@/components/ui'
+import { AppButton, AppSpinner } from '@/components/ui'
 import type { ElementSubmissionRecord } from '@/types'
 
 type McqType = 'objective_single_mcq' | 'objective_multi_mcq' | 'subjective_mcq'
@@ -205,7 +205,7 @@ watch(() => props.elementId, () => {
   <div class="mcq-question">
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <AppSpinner size="lg" />
     </div>
 
     <!-- Error -->

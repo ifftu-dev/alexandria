@@ -275,7 +275,7 @@ onUnmounted(() => {
         </button>
       </template>
       <template v-else>
-        <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <div data-progress aria-hidden="true" class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
         <p class="text-sm text-muted-foreground">{{ $t('common.app.locking') }}</p>
       </template>
     </div>

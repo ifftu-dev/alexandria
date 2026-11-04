@@ -1027,7 +1027,7 @@ function onSectionClick(id: SettingsSectionId) {
           </div>
 
           <div v-else-if="exporting" class="text-center py-4">
-            <div class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <div data-progress aria-hidden="true" class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
             <p class="text-sm text-muted-foreground">{{ $t('settings.export.decrypting') }}</p>
           </div>
 

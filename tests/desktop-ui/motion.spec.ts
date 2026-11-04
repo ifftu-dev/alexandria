@@ -55,3 +55,36 @@ test('long course completion stays dismissible at compact widths without navigat
   await expect(dialog).toHaveCount(0)
   await expect(page.locator('output')).toHaveText('/skills')
 })
+
+test('progress indicators keep turning slowly in Reduced and stand still beside their text in Off', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=motion&progress=1')
+  const specimens = page.locator('[data-progress-specimens]')
+  const spinner = specimens.locator('svg[data-progress]')
+  const buttonSpinner = specimens.locator('button [data-progress]')
+  const pending = specimens.getByRole('button', { name: 'Save draft' })
+  const style = (target: typeof spinner) => target.evaluate(el => {
+    const computed = getComputedStyle(el)
+    return { name: computed.animationName, duration: computed.animationDuration, iterations: computed.animationIterationCount, running: el.getAnimations().some(a => a.playState === 'running') }
+  })
+
+  await page.getByRole('button', { name: 'Reduced', exact: true }).click()
+  for (const target of [spinner, buttonSpinner]) {
+    expect(await style(target)).toEqual(expect.objectContaining({ duration: '3s', iterations: 'infinite', running: true }))
+  }
+  await expect(pending).toHaveAttribute('aria-busy', 'true')
+
+  await page.getByRole('button', { name: 'Off', exact: true }).click()
+  for (const target of [spinner, buttonSpinner]) {
+    expect(await style(target)).toEqual(expect.objectContaining({ name: 'none', running: false }))
+  }
+  await expect(specimens.getByRole('status')).toHaveText('Saving draft')
+  await expect(pending.getByText('Save draft')).toHaveCSS('opacity', '1')
+  await page.getByRole('button', { name: 'System', exact: true }).click()
+})
+
+test('the OS reduce preference slows progress instead of freezing it', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/tests/desktop-ui/?screen=motion&progress=1')
+  const spinner = page.locator('[data-progress-specimens] svg[data-progress]')
+  await expect.poll(() => spinner.evaluate(el => [getComputedStyle(el).animationDuration, el.getAnimations().some(a => a.playState === 'running')])).toEqual(['3s', true])
+})

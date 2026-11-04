@@ -5,6 +5,7 @@ import ProfileSelect from '@/pages/ProfileSelect.vue'
 import Onboarding from '@/pages/Onboarding.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import MotionSettings from '@/components/ui/MotionSettings.vue'
+import { AppButton, AppSpinner } from '@/components/ui'
 import { useMotion } from '@/composables/useMotion'
 const params = new URLSearchParams(location.search)
 const ready = ref(false)
@@ -17,6 +18,10 @@ onBeforeUnmount(() => clearTimeout(boot))
   <AppOpening :ready="ready" />
   <BlankLayout v-if="ready">
     <div class="p-4 border-b border-border"><MotionSettings /></div>
+    <div v-if="params.get('progress') === '1'" class="p-4 flex gap-4 items-center" data-progress-specimens>
+      <AppSpinner label="Saving draft" />
+      <AppButton loading>Save draft</AppButton>
+    </div>
     <ProfileSelect v-if="params.get('existing') === '1'" />
     <Onboarding v-else />
   </BlankLayout>

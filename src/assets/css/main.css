@@ -87,11 +87,18 @@
   /* Focus Ring — WCAG 2.1 AA */
   --focus-ring: 0 0 0 2px var(--app-background), 0 0 0 4px var(--app-ring);
 
-  /* Transitions */
+  /* Motion. useMotion reads these for script-driven effects and timers, so
+     an animation and the timer that waits for it share one token. */
   --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
-  --transition-fast: 120ms var(--ease-settle);
-  --transition-base: 200ms var(--ease-settle);
-  --transition-slow: 320ms var(--ease-settle);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --duration-emphasis: 650ms;
+  --duration-reveal: 800ms;
+  --duration-progress-reduced: 3s;
+  --transition-fast: var(--duration-fast) var(--ease-settle);
+  --transition-base: var(--duration-base) var(--ease-settle);
+  --transition-slow: var(--duration-slow) var(--ease-settle);
 }
 
 /* Dark Mode */
@@ -325,9 +332,10 @@ pre,
   background: color-mix(in srgb, var(--app-primary) 50%, transparent);
 }
 
-/* Reduced Motion */
+/* Reduced Motion. Progress indicators carry `data-progress` (the one shared
+   marker): they keep turning slowly so waiting still reads as work. */
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not([data-progress]),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
@@ -336,6 +344,11 @@ pre,
     transition-duration: 0.01ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+  [data-progress] {
+    animation-duration: var(--duration-progress-reduced) !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -690,6 +703,7 @@ select optgroup {
 }
 
 /* Spinner */
+.btn[aria-busy='true'] > .btn-label { opacity: 0; }
 .spinner {
   width: 1.25rem;
   height: 1.25rem;
@@ -1185,7 +1199,7 @@ select optgroup {
 }
 
 /* The device preference is resolved before mount and shared with imperative effects. */
-:root[data-motion='reduced'] *, :root[data-motion='off'] *,
+:root[data-motion='reduced'] *:not([data-progress]), :root[data-motion='off'] *:not([data-progress]),
 :root[data-motion='reduced'] *::before, :root[data-motion='off'] *::before,
 :root[data-motion='reduced'] *::after, :root[data-motion='off'] *::after {
   animation-duration: 0.01ms !important;
@@ -1195,6 +1209,17 @@ select optgroup {
   transition-delay: 0ms !important;
   scroll-behavior: auto !important;
 }
+/* Progress indicators: Reduced turns them slowly, Off holds them still. In Off
+   each one sits beside visible or accessible text (AppSpinner, AppButton). */
+:root[data-motion='reduced'] [data-progress],
+:root[data-motion='off'] [data-progress] {
+  animation-duration: var(--duration-progress-reduced) !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+}
+:root[data-motion='off'] [data-progress] { animation-name: none !important; }
+:root[data-motion='off'] .btn[aria-busy='true'] > [data-progress] { position: static; }
+:root[data-motion='off'] .btn[aria-busy='true'] > .btn-label { opacity: 1; }
 :root[data-motion='reduced'] .sf-line-draw,
 :root[data-motion='off'] .sf-line-draw { stroke-dashoffset: 0; }
 :root[data-motion='reduced'] .btn:active,

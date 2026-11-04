@@ -64,7 +64,7 @@ onUnmounted(() => {
         {{ (status.downloaded_bytes / 1_000_000).toFixed(1) }} / 612.1 MB stored
         <span v-if="status.elapsed_ms > 0"> · {{ (status.elapsed_ms / 1000).toFixed(1) }} seconds</span>
       </p>
-      <progress v-if="status.phase === 'downloading'" class="w-full" :value="percentage" max="100" aria-label="Test key download" />
+      <progress data-progress v-if="status.phase === 'downloading'" class="w-full" :value="percentage" max="100" aria-label="Test key download" />
     </div>
     <AppAlert v-if="error || status.error" variant="error">{{ error || status.error }}</AppAlert>
     <AppAlert v-if="status.result" variant="success">

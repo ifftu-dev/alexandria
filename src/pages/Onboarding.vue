@@ -916,11 +916,11 @@ function enterApp() {
               <svg v-if="i < progressLines.length - 1" class="w-3 h-3 mt-0.5 shrink-0 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              <div v-else class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <div v-else data-progress aria-hidden="true" class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>{{ line }}</span>
             </div>
             <div v-if="progressLines.length === 0" class="flex items-start gap-2 text-primary">
-              <div class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <div data-progress aria-hidden="true" class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>{{ $t('onboarding.generating.initializing') }}</span>
             </div>
           </div>

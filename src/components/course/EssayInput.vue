@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton } from '@/components/ui'
+import { AppButton, AppSpinner } from '@/components/ui'
 import type { ElementSubmissionRecord } from '@/types'
 
 interface EssayContent {
@@ -206,7 +206,7 @@ watch(() => props.elementId, async () => {
   <div class="essay-input">
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <AppSpinner size="lg" />
     </div>
 
     <!-- Error -->

@@ -291,7 +291,7 @@ function onKeydown(event: KeyboardEvent) {
                 v-if="unlocking && unlockStatus"
                 class="flex items-center gap-2 text-xs text-muted-foreground"
               >
-                <span class="inline-block h-3 w-3 rounded-full border-2 border-current border-e-transparent animate-spin" />
+                <span data-progress aria-hidden="true" class="inline-block h-3 w-3 rounded-full border-2 border-current border-e-transparent animate-spin" />
                 <span>{{ unlockStatus }}</span>
               </div>
             </Transition>

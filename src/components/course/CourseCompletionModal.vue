@@ -305,7 +305,7 @@ function continueToDashboard() {
                 <span class="mint-item-kind">{{ $t(kindMeta(it.kind).label) }}</span>
                 <span class="mint-status" :class="{ done: it.status === 'minted' }">
                   <svg v-if="it.status === 'minted'" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-                  <span v-else class="spinner" />
+                  <span v-else data-progress aria-hidden="true" class="spinner" />
                 </span>
               </li>
             </ul>

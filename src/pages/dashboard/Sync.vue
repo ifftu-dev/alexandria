@@ -157,6 +157,8 @@ async function toggleAutoSync() {
           >
             <svg
               v-if="syncing"
+              data-progress
+              aria-hidden="true"
               class="h-4 w-4 animate-spin"
               fill="none"
               viewBox="0 0 24 24"
