@@ -81,6 +81,12 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+it('accepts only the skills page tabs from outside values', async () => {
+  const { isAtlasTab } = await import('@/composables/useSkillAtlas')
+  expect(['credentials', 'graph', 'browse'].every(isAtlasTab)).toBe(true)
+  expect(['Graph', '', 'settings', null, 1].some(isAtlasTab)).toBe(false)
+})
+
 describe('shared skill atlas state', () => {
   it('loads a subject-bound snapshot at startup, including incomplete field metadata', async () => {
     const { atlas } = await setup()

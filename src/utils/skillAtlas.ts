@@ -53,10 +53,9 @@ export interface BuildSkillAtlasInput {
   subjectFields?: readonly (Pick<SubjectFieldInfo, 'id' | 'name'> & { atlas_slot?: number | null })[]
 }
 
-function validRank(value: unknown): BloomRank | null {
+/** A credential level, route or DOM value is a Bloom rank only if it is one of the six. */
+export function isBloomRank(value: unknown): value is BloomRank {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 5
-    ? value as BloomRank
-    : null
 }
 
 function bloomLevel(value: string | null | undefined): BloomLevel | null {
@@ -79,8 +78,9 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
       const claim = credential.credentialSubject
       if (claim.id !== input.subjectDid || typeof claim.skillId !== 'string' || claim.skillId.length === 0) continue
       earnedIds.add(claim.skillId)
-      const rank = validRank(claim.level)
-      if (rank !== null) ranks.set(claim.skillId, Math.max(ranks.get(claim.skillId) ?? rank, rank) as BloomRank)
+      const rank = claim.level
+      const best = ranks.get(claim.skillId)
+      if (isBloomRank(rank) && (best === undefined || rank > best)) ranks.set(claim.skillId, rank)
     }
   }
 

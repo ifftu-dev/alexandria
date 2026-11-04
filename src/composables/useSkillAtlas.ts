@@ -10,7 +10,11 @@ import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
 
 export type AtlasSurface = 'page' | 'modal'
-export type AtlasTab = 'credentials' | 'graph' | 'browse'
+export const ATLAS_TABS = ['credentials', 'graph', 'browse'] as const
+export type AtlasTab = typeof ATLAS_TABS[number]
+export function isAtlasTab(value: unknown): value is AtlasTab {
+  return ATLAS_TABS.some((tab) => tab === value)
+}
 export type AtlasPhase = 'idle' | 'loading' | 'ready' | 'error'
 export type AtlasRefreshReason = 'navigation' | 'credentials' | 'retry'
 
@@ -33,8 +37,20 @@ const feedback = ref<AtlasFeedback | null>(null)
 const feedbackSurface = ref<AtlasSurface | null>(null)
 const isLoading = computed(() => phase.value === 'loading')
 
+/** Where Open skill came from, so returning from the skill detail restores it. */
+interface SkillReturn {
+  router: Router
+  /** The atlas route the learner left. */
+  origin: string
+  /** The skill detail route that was opened. */
+  detail: string
+  surface: AtlasSurface
+  /** Set once the learner explicitly asks to go back. */
+  explicit: boolean
+}
+
 // A return belongs to one explicit Open skill action and one profile session.
-let skillReturn: { router: Router; origin: string; detail: string; surface: AtlasSurface; explicit: boolean } | null = null
+let skillReturn: SkillReturn | null = null
 let generation = 0
 let feedbackRevision = 0
 let baselineEstablished = false
@@ -182,7 +198,7 @@ function acknowledgeFeedback(revision: number): void {
 
 async function openSkill(router: Router, surface: AtlasSurface, id: string): Promise<void> {
   const ticket = generation
-  const pending = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false }
+  const pending: SkillReturn = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false }
   skillReturn = pending
   try {
     const failure = await router.push(pending.detail)

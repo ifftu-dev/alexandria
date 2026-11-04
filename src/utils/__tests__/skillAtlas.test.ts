@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSkillAtlas } from '../skillAtlas'
+import { buildSkillAtlas, isBloomRank } from '../skillAtlas'
 import type { SkillInfo, VerifiableCredential } from '@/types'
 
 const skill = (id: string, overrides: Partial<SkillInfo> = {}): SkillInfo => ({
@@ -94,5 +94,10 @@ describe('buildSkillAtlas', () => {
     const atlas = buildSkillAtlas({ skills, edges: [], subjectDid: 'did:me', activeCredentials: [],
       subjectFields: [{ id: 'b_field', name: 'B', atlas_slot: 4 }, { id: 'unloaded', name: 'U', atlas_slot: 6 }] })
     expect(atlas.fields.map(f => [f.id, f.slot])).toEqual([['b_field', 4], ['a_field', 7], [null, null]])
+  })
+
+  it('accepts only the six Bloom ranks from outside values', () => {
+    expect([0, 1, 2, 3, 4, 5].every(isBloomRank)).toBe(true)
+    expect([-1, 6, 1.5, NaN, '3', null, undefined].some(isBloomRank)).toBe(false)
   })
 })

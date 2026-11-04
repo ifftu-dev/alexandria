@@ -21,6 +21,24 @@ const NODE_PITCH_X = NODE_WIDTH + NODE_GAP_X
 const NODE_PITCH_Y = NODE_HEIGHT + NODE_GAP_Y
 export const REGION_WIDTH = REGION_INSET * 2 + NODE_COLUMNS * NODE_PITCH_X - NODE_GAP_X
 const REGION_PITCH_X = REGION_WIDTH + REGION_GAP_X
+/** Where a region's name and counts sit inside its heading band. */
+export const REGION_HEADING_BOX = { dx: REGION_INSET, dy: 18, width: REGION_WIDTH - REGION_INSET * 2, height: 72 } as const
+
+/** The map viewport's height, in map units at zoom 1. */
+export const MAP_HEIGHT = 520
+/** Below this viewport width, framing a region shows its first node column instead of its centre. */
+export const NARROW_MAP_WIDTH = 600
+/** How far below a region's top edge a framed view starts. */
+const REGION_FRAME_TOP = 30
+
+/** The camera that frames a region in a viewport of the given width. */
+export function regionCamera(region: { x: number; y: number }, viewportWidth: number) {
+  return {
+    x: region.x + (viewportWidth < NARROW_MAP_WIDTH ? REGION_INSET + NODE_WIDTH / 2 : REGION_WIDTH / 2),
+    y: region.y + MAP_HEIGHT / 2 + REGION_FRAME_TOP,
+    zoom: 1,
+  }
+}
 
 function regionHeight(field: AtlasField): number {
   return REGION_HEADING_HEIGHT + Math.ceil(field.total / NODE_COLUMNS) * NODE_PITCH_Y + REGION_INSET

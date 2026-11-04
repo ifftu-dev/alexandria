@@ -7,14 +7,16 @@ import { useSettings } from '@/composables/useSettings'
 import { useGoals } from '@/composables/useGoals'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles } from '@/composables/useProfiles'
-import { useSkillAtlas, type AtlasTab } from '@/composables/useSkillAtlas'
+import { isAtlasTab, useSkillAtlas } from '@/composables/useSkillAtlas'
 import { useSkillAtlasActions } from '@/composables/useSkillAtlasActions'
 import { AppBadge, AppTabs } from '@/components/ui'
 import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
+import { createAtlasPresenter } from '@/components/skills/atlasPresentation'
 import GraphVisibilityEditor from '@/components/skills/GraphVisibilityEditor.vue'
 import CredentialsPanel from '@/pages/dashboard/Credentials.vue'
 import type { SubjectInfo, SkillInfo } from '@/types'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
+import type { AtlasField } from '@/utils/skillAtlas'
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
@@ -29,13 +31,14 @@ const profiles = useProfiles()
 const loading = computed(() => atlas.isLoading.value)
 const subjects = ref<SubjectInfo[]>([])
 const skills = computed(() => model.value?.nodes.map(node => node.skill) ?? [])
-const fields = computed(() => model.value?.fields.filter(field => field.id !== null).map(field => ({
-  id: field.id!, name: field.name ?? t('skills.atlas.unknownField', { id: field.id }), icon_emoji: null, skill_count: field.total,
+const present = createAtlasPresenter(t)
+const fields = computed(() => model.value?.fields.filter((field): field is AtlasField & { id: string } => field.id !== null).map(field => ({
+  id: field.id, name: present.fieldName(field), icon_emoji: null, skill_count: field.total,
 })) ?? [])
 const search = ref('')
 const selectedField = ref<string | null>(null)
 const selectedSubject = ref<string | null>(null)
-const activeTab = computed({ get: () => atlas.skillsTab.value, set: (tab: string) => atlas.setSkillsTab(tab as AtlasTab) })
+const activeTab = computed({ get: () => atlas.skillsTab.value, set: (tab: string) => { if (isAtlasTab(tab)) atlas.setSkillsTab(tab) } })
 const tabs = computed(() => [
   { key: 'credentials', label: t('skills.tabs.credentials') },
   { key: 'graph', label: t('skills.tabs.graph') },

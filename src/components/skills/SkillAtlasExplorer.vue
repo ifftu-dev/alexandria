@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { atlasLayout, NODE_HEIGHT, NODE_WIDTH } from './atlasLayout'
+import { atlasLayout, MAP_HEIGHT, NODE_HEIGHT, NODE_WIDTH, REGION_HEADING_BOX, REGION_WIDTH, regionCamera } from './atlasLayout'
 import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
 import { motionDuration, useMotion } from '@/composables/useMotion'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
-import type { AtlasField, AtlasModel, AtlasNode, BloomRank } from '@/utils/skillAtlas'
+import { isBloomRank, type AtlasField, type AtlasModel, type AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
 const props = defineProps<{ model: AtlasModel; view: AtlasViewState; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>()
@@ -56,7 +56,9 @@ const fieldFocused = computed(() => props.view.focusedFieldId !== null || props.
 const overview = computed(() => !fieldFocused.value && props.view.camera === null)
 const viewport = ref<HTMLElement>()
 const width = ref(800)
-const height = 520
+const height = MAP_HEIGHT
+/** How far one arrow press or pan button moves the map, in map units. */
+const PAN_STEP = 180
 let resizeObserver: ResizeObserver | undefined
 onMounted(() => {
   if (viewport.value && typeof ResizeObserver !== 'undefined') {
@@ -66,11 +68,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => resizeObserver?.disconnect())
 const focusedRegion = computed(() => layout.value.regions.find(region => region.field.id === props.view.focusedFieldId))
-const camera = computed<AtlasCamera>(() => props.view.camera ?? {
-  x: (focusedRegion.value?.x ?? 0) + 400,
-  y: (focusedRegion.value?.y ?? 0) + 300,
-  zoom: 1,
-})
+const camera = computed<AtlasCamera>(() => props.view.camera ?? regionCamera(focusedRegion.value ?? { x: 0, y: 0 }, width.value))
 const visibleNodes = computed(() => props.model.nodes.filter(node => {
   const point = layout.value.positions.get(node.skill.id)
   if (!point) return false
@@ -135,7 +133,7 @@ function focus(field: AtlasField): void {
   const region = layout.value.regions.find(item => item.field.id === field.id)
   if (!region) return
   update({ focusedFieldId: field.id, unassignedFocused: field.id === null,
-    camera: { x: region.x + (width.value < 600 ? 144 : 400), y: region.y + 290, zoom: 1 } })
+    camera: regionCamera(region, width.value) })
   preserveOverviewFocus()
 }
 function dimmed(node: AtlasNode): boolean {
@@ -146,8 +144,8 @@ function dimmed(node: AtlasNode): boolean {
 }
 function zoom(delta: number): void { update({ camera: { ...camera.value, zoom: Math.min(1.8, Math.max(1, camera.value.zoom + delta)) } }) }
 const worldBounds = computed(() => ({
-  x: Math.max(800, ...layout.value.regions.map(region => region.x + region.width)),
-  y: Math.max(520, ...layout.value.regions.map(region => region.y + region.height)),
+  x: Math.max(REGION_WIDTH, ...layout.value.regions.map(region => region.x + region.width)),
+  y: Math.max(MAP_HEIGHT, ...layout.value.regions.map(region => region.y + region.height)),
 }))
 function moveCamera(origin: AtlasCamera, x: number, y: number): void {
   update({ camera: { ...origin,
@@ -189,7 +187,7 @@ function mapClick(event: MouseEvent): void {
 }
 function keyPan(event: KeyboardEvent): void {
   if (event.target !== event.currentTarget) return
-  const moves: Record<string, [number, number]> = { ArrowLeft: [-180, 0], ArrowRight: [180, 0], ArrowUp: [0, -180], ArrowDown: [0, 180] }
+  const moves: Record<string, [number, number]> = { ArrowLeft: [-PAN_STEP, 0], ArrowRight: [PAN_STEP, 0], ArrowUp: [0, -PAN_STEP], ArrowDown: [0, PAN_STEP] }
   const move = moves[event.key]
   if (move) { event.preventDefault(); pan(...move) }
 }
@@ -227,8 +225,9 @@ function earnedPreview(field: AtlasField): AtlasNode[] {
     .sort((a, b) => Number(bloomMatch(b)) - Number(bloomMatch(a))).slice(0, 2)
 }
 function setBloom(event: Event): void {
-  const value = (event.target as HTMLSelectElement).value
-  update({ bloomEmphasis: value === '' ? null : Number(value) as BloomRank })
+  const value = event.target instanceof HTMLSelectElement ? event.target.value : ''
+  const rank = value === '' ? null : Number(value)
+  update({ bloomEmphasis: isBloomRank(rank) ? rank : null })
 }
 </script>
 
@@ -270,10 +269,10 @@ function setBloom(event: Event): void {
               <button type="button" :aria-label="t('skills.atlas.zoomIn')" :disabled="camera.zoom >= 1.8" @click="zoom(.2)">+</button>
               <button type="button" :aria-label="t('skills.atlas.zoomOut')" :disabled="camera.zoom <= 1" @click="zoom(-.2)">−</button>
               <span>{{ Math.round(camera.zoom * 100) }}%</span>
-              <button type="button" :aria-label="t('skills.atlas.panLeft')" @click="pan(-180, 0)">←</button>
-              <button type="button" :aria-label="t('skills.atlas.panUp')" @click="pan(0, -180)">↑</button>
-              <button type="button" :aria-label="t('skills.atlas.panDown')" @click="pan(0, 180)">↓</button>
-              <button type="button" :aria-label="t('skills.atlas.panRight')" @click="pan(180, 0)">→</button>
+              <button type="button" :aria-label="t('skills.atlas.panLeft')" @click="pan(-PAN_STEP, 0)">←</button>
+              <button type="button" :aria-label="t('skills.atlas.panUp')" @click="pan(0, -PAN_STEP)">↑</button>
+              <button type="button" :aria-label="t('skills.atlas.panDown')" @click="pan(0, PAN_STEP)">↓</button>
+              <button type="button" :aria-label="t('skills.atlas.panRight')" @click="pan(PAN_STEP, 0)">→</button>
             </div>
             <div class="map-focus" :class="{ 'is-active': focusSummary }">
               <p role="status">{{ focusSummary }}</p>
@@ -283,7 +282,7 @@ function setBloom(event: Event): void {
               <defs><marker :id="`${id}-arrow`" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke" /></marker></defs>
               <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
                 <rect :x="region.x" :y="region.y" :width="region.width" :height="region.height" rx="24" class="map-region" />
-                <foreignObject :x="region.x + 32" :y="region.y + 18" width="736" height="72"><div class="region-heading"><strong>{{ fieldName(region.field.id) }}</strong><span>{{ t('skills.atlas.fieldCounts', { ...region.field }) }}</span></div></foreignObject>
+                <foreignObject :x="region.x + REGION_HEADING_BOX.dx" :y="region.y + REGION_HEADING_BOX.dy" :width="REGION_HEADING_BOX.width" :height="REGION_HEADING_BOX.height"><div class="region-heading"><strong>{{ fieldName(region.field.id) }}</strong><span>{{ t('skills.atlas.fieldCounts', { ...region.field }) }}</span></div></foreignObject>
               </g>
               <path v-for="edge in edges" :key="edge.index" :d="edge.path" class="map-edge" :class="{ 'map-edge-active': edge.active }" :marker-end="`url(#${id}-arrow)`"><title>{{ edge.label }}</title></path>
               <foreignObject v-for="node in visibleNodes" :key="node.skill.id" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
