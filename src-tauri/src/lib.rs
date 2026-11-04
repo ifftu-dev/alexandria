@@ -92,6 +92,8 @@ pub struct AppState {
     pub profile_manager: Arc<ProfileManager>,
     pub active: Arc<std::sync::RwLock<Option<ActiveProfile>>>,
     pub(crate) profile_operations: profile::operations::ProfileOperations,
+    /// The Cloud discovery pass in flight, which an overlapping caller joins.
+    pub(crate) cloud_discovery: notifications::cloud_pull::Passes,
     pub tutoring: Arc<TutoringManager>,
     pub classroom: Arc<ClassroomManager>,
     /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
@@ -1255,56 +1257,16 @@ pub fn run() {
 
                                 // What Alexandria Cloud is holding for the
                                 // learner — invitations, offers, requests —
-                                // reported once each. Read without holding the
-                                // database, recorded with it.
-                                if let Some(w) = wallet.as_ref() {
-                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
-                                        &w.signing_key.to_bytes(),
-                                    );
-                                    let did = crypto::did::derive_did_key(&signing_key);
-                                    let origin = {
-                                        let guard = db_for_queue.lock();
-                                        match guard.as_deref() {
-                                            Ok(Some(db)) => {
-                                                commands::holder_pull::directories_db(db.conn())
-                                                    .ok()
-                                                    .and_then(|dirs| dirs.into_iter().next())
-                                                    .map(|dir| dir.url)
-                                            }
-                                            _ => None,
-                                        }
-                                    };
-                                    if let Some(origin) = origin {
-                                        let items = notifications::cloud_pull::fetch(
-                                            &origin,
-                                            &signing_key,
-                                            did.as_str(),
-                                        )
-                                        .await;
-                                        if !items.is_empty() {
-                                            let guard = db_for_queue.lock();
-                                            if let Ok(Some(db)) = guard.as_deref() {
-                                                let fresh = notifications::cloud_pull::unreported(
-                                                    db.conn(),
-                                                    &items,
-                                                );
-                                                for item in fresh {
-                                                    let Some(notification) = item.notification()
-                                                    else {
-                                                        continue;
-                                                    };
-                                                    if let Err(e) = notifications::deliver(
-                                                        &app_for_notifications,
-                                                        &session,
-                                                        db.conn(),
-                                                        &notification,
-                                                    ) {
-                                                        log::debug!("cloud notification: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                // reported once each. A phone coming back to
+                                // the foreground runs the same pass, and one
+                                // that overlaps this joins it.
+                                if let Err(e) = notifications::cloud_pull::discover(
+                                    &app_for_notifications,
+                                    guardian_lease.clone(),
+                                )
+                                .await
+                                {
+                                    log::debug!("cloud discovery: {e}");
                                 }
 
                                 drop(wallet);
@@ -1349,6 +1311,7 @@ pub fn run() {
                 profile_manager,
                 active,
                 profile_operations,
+                cloud_discovery: Default::default(),
                 tutoring,
                 classroom,
                 #[cfg(grader)]
@@ -1776,6 +1739,7 @@ pub fn run() {
             commands::notifications::notifications_unread_count,
             commands::notifications::notifications_mark_read,
             commands::notifications::notifications_mark_all_read,
+            commands::notifications::notifications_discover,
             commands::notifications::notifications_clear,
             commands::notifications::notifications_permission_request,
             commands::notifications::notifications_pending_open,

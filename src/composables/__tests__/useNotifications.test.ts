@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>(),
@@ -136,6 +136,7 @@ it('ignores a queued inbox event from the previous session after new listeners a
   expect(notifications.items.value).toEqual([])
   handlers.get('notifications:changed')!({ payload: { session: 'session-A', unread: 9 } })
   expect(notifications.unread.value).toBe(0)
+  notifications.teardown()
 })
 
 it.each(['clear', 'markAllRead', 'markRead', 'refreshPushStatus', 'registerPush', 'unregisterPush'] as const)('ignores late %s completion after profile teardown', async action => {
@@ -231,4 +232,40 @@ it('does not publish a delayed inbox snapshot into a newly unlocked session', as
   expect(notifications.items.value).toEqual([{ id: 'B', readAt: null }])
   expect(notifications.unread.value).toBe(1)
   notifications.teardown()
+})
+
+describe('mobile resume', () => {
+  function resume(state: DocumentVisibilityState = 'visible') {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  const calls = (command: string) => mocks.invoke.mock.calls.filter(([name]) => name === command).length
+  let started: Awaited<ReturnType<typeof fresh>> | null = null
+  afterEach(() => started?.teardown())
+
+  it('looks for missed activity and re-registers push once each when the app returns', async () => {
+    const notifications = started = await fresh()
+    const session = await import('../profileSession')
+    session.setProfileSessionToken('A')
+    await notifications.init()
+    mocks.invoke.mockClear()
+
+    resume('hidden')
+    expect(mocks.invoke).not.toHaveBeenCalled()
+    resume()
+    await vi.waitFor(() => expect(calls('push_register')).toBe(1))
+    expect(calls('notifications_discover')).toBe(1)
+  })
+
+  it('does nothing on resume once the profile session has changed', async () => {
+    const notifications = started = await fresh()
+    const session = await import('../profileSession')
+    session.setProfileSessionToken('A')
+    await notifications.init()
+    mocks.invoke.mockClear()
+    session.setProfileSessionToken('B')
+    resume()
+    await Promise.resolve()
+    expect(mocks.invoke).not.toHaveBeenCalled()
+  })
 })

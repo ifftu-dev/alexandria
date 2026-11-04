@@ -104,6 +104,15 @@ pub async fn notifications_clear(app: AppHandle, state: State<'_, AppState>) -> 
     Ok(())
 }
 
+/// Run one Cloud discovery pass for this profile now instead of waiting for
+/// the background loop. A phone's webview calls this when the app comes back
+/// to the foreground; a pass already running is joined, not repeated.
+/// Returns how many notifications the pass recorded.
+#[tauri::command]
+pub async fn notifications_discover(app: AppHandle, lease: ProfileLease) -> Result<usize, String> {
+    notifications::cloud_pull::discover(&app, lease).await
+}
+
 /// Ask the OS for permission to show banners. The desktop needs none and
 /// answers `granted`; a phone shows its prompt the first time.
 ///

@@ -15,6 +15,7 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         profile_manager: Arc::new(ProfileManager::open(directory).expect("profile manager")),
         active: Arc::new(std::sync::RwLock::new(None)),
         profile_operations: super::operations::ProfileOperations::default(),
+        cloud_discovery: Default::default(),
         tutoring: Arc::new(TutoringManager::new(
             crate::tutoring::PlatformMedia::new(),
             crate::tutoring::events::RecordedEvents::default(),

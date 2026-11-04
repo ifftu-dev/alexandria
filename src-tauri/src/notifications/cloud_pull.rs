@@ -2,7 +2,8 @@
 //! Asking Alexandria Cloud what is waiting for the learner, so the app can
 //! say so without the learner opening the organisations page.
 //!
-//! Runs from the profile's background pass. It reads the same four lists the
+//! Runs from the profile's background pass, and on a phone as soon as the app
+//! returns to the foreground (see [`discover`]). It reads the same four lists the
 //! organisations page reads — interview invitations, offers, access requests
 //! and assessment requests — plus currently live accepted rooms. It records
 //! a notification for each event it has
@@ -16,11 +17,15 @@
 //! declined push, and anything a push missed.
 
 use ed25519_dalek::SigningKey;
+use futures::FutureExt;
 use rusqlite::Connection;
 use serde_json::Value;
+use tauri::{AppHandle, Manager, Runtime};
 
 use super::{cloud_copy, kind, NewNotification};
-use crate::cloud::{signed_get, Directory};
+use crate::cloud::{directories_db, signed_get, Directory};
+use crate::db::executor::DatabaseWorkload;
+use crate::profile::scope::ProfileLease;
 
 /// One thing Cloud is holding for the learner.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,9 +236,269 @@ fn answered(conn: &Connection, item: &PendingItem) -> bool {
     .is_ok()
 }
 
+type Outcome = Result<usize, String>;
+type Pass = futures::future::Shared<futures::future::BoxFuture<'static, Outcome>>;
+
+/// The discovery pass in flight, if any, and the profile session it runs for.
+#[derive(Clone, Default)]
+pub(crate) struct Passes(std::sync::Arc<std::sync::Mutex<Option<(String, Pass)>>>);
+
+/// Run one discovery pass for the profile `lease` admits, from the background
+/// loop or when a phone comes back to the foreground. Returns how many
+/// notifications the pass recorded.
+///
+/// Passes are serialised. A caller arriving while a pass for the same session
+/// is running joins that pass and shares its result, so Cloud is not asked
+/// twice. Rows still go through the dedupe keys, so a push and a pass for the
+/// same event record it once.
+pub async fn discover<R: Runtime>(app: &AppHandle<R>, lease: ProfileLease) -> Outcome {
+    let state = app
+        .try_state::<crate::AppState>()
+        .ok_or("application state unavailable")?;
+    let pass = {
+        let mut running = state
+            .cloud_discovery
+            .0
+            .lock()
+            .map_err(|_| "discovery state poisoned".to_string())?;
+        match running.as_ref() {
+            Some((session, pass)) if session == lease.session_id() && pass.peek().is_none() => {
+                pass.clone()
+            }
+            _ => {
+                // The pass runs as its own task, so it finishes even if every
+                // caller stops waiting, and it ends at once when the profile
+                // locks: the slot never holds a lease nobody polls.
+                let session = lease.session_id().to_owned();
+                let task = tokio::spawn({
+                    let app = app.clone();
+                    let lease = lease.clone();
+                    async move {
+                        lease
+                            .clone()
+                            .run_until_closed(run_pass(app, lease))
+                            .await
+                            .unwrap_or_else(|| Err("profile session changed".into()))
+                    }
+                });
+                let pass = async move {
+                    task.await
+                        .unwrap_or_else(|error| Err(format!("discovery pass failed: {error}")))
+                }
+                .boxed()
+                .shared();
+                *running = Some((session, pass.clone()));
+                pass
+            }
+        }
+    };
+    drop(lease);
+    pass.await
+}
+
+/// Ask Cloud what is waiting, record what has not been reported, and announce
+/// it under the lease's session. Nothing to do without a Cloud origin (or with
+/// organisations off) or while the vault is locked.
+async fn run_pass<R: Runtime>(app: AppHandle<R>, lease: ProfileLease) -> Outcome {
+    let state = app
+        .try_state::<crate::AppState>()
+        .ok_or("application state unavailable")?;
+    let origin = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            lease.clone(),
+            "notifications.discovery.origin",
+            |db| Ok(directories_db(db.conn())?.into_iter().next().map(|d| d.url)),
+        )
+        .await?;
+    let Some(origin) = origin else {
+        return Ok(0);
+    };
+    let (signing_key, did) = super::push::issuer_key(&state).await?;
+    let items = fetch(&origin, &signing_key, did.as_str()).await;
+    if items.is_empty() {
+        return Ok(0);
+    }
+    let recorded = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            lease.clone(),
+            "notifications.discovery.record",
+            move |db| {
+                let mut recorded = Vec::new();
+                for item in unreported(db.conn(), &items) {
+                    let Some(notification) = item.notification() else {
+                        continue;
+                    };
+                    match super::record_if_enabled(db.conn(), &notification) {
+                        Ok(Some(row)) => recorded.push(row),
+                        Ok(None) => {}
+                        Err(error) => log::debug!("cloud notification: {error}"),
+                    }
+                }
+                Ok(recorded)
+            },
+        )
+        .await?;
+    for row in &recorded {
+        super::announce(&app, lease.session_id(), row);
+    }
+    Ok(recorded.len())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::tests::{in_profile, listening_app};
     use super::*;
+    use crate::settings::{registry::keys, SettingsStore};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tauri::Manager;
+
+    const INVITE: &str = "33333333-3333-4333-8333-333333333333";
+
+    /// A fake Alexandria Cloud holding one interview invitation for `did`.
+    /// It counts the requests it receives and answers none of them until
+    /// `release` turns true.
+    async fn fake_cloud(
+        did: String,
+        release: tokio::sync::watch::Receiver<bool>,
+    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let received = Arc::new(AtomicUsize::new(0));
+        let counter = received.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let did = did.clone();
+                let mut release = release.clone();
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let mut buffer = [0; 8192];
+                    let n = socket.read(&mut buffer).await.unwrap();
+                    let request = String::from_utf8_lossy(&buffer[..n]).into_owned();
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    release.wait_for(|released| *released).await.unwrap();
+                    let body = if request.starts_with("GET /api/interviews/for/") {
+                        serde_json::json!([{
+                            "eventId": format!("interview_invited:{INVITE}"),
+                            "invite": { "id": INVITE, "subject_did": did, "expires_at": 4_102_444_800_i64 }
+                        }])
+                    } else {
+                        serde_json::json!([])
+                    }
+                    .to_string();
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        (origin, received, server)
+    }
+
+    /// An unlocked profile pointed at a fake Cloud holding one invitation.
+    async fn learner_with_invitation(
+        directory: &std::path::Path,
+        released: bool,
+    ) -> (
+        tauri::App<tauri::test::MockRuntime>,
+        super::super::tests::Heard,
+        Arc<AtomicUsize>,
+        tokio::sync::watch::Sender<bool>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (app, heard) = listening_app(directory).await;
+        let state = app.state::<crate::AppState>();
+        let (_, did) = super::super::push::issuer_key(&state).await.unwrap();
+        let (release, gate) = tokio::sync::watch::channel(released);
+        let (origin, received, server) = fake_cloud(did.as_str().to_string(), gate).await;
+        in_profile(&state, move |db| {
+            SettingsStore::set(db.conn(), keys::CLOUD_ORIGIN, origin).map_err(|e| e.to_string())
+        })
+        .await;
+        (app, heard, received, release, server)
+    }
+
+    fn admitted(state: &crate::AppState) -> ProfileLease {
+        state
+            .profile_operations
+            .admit(&state.profile_operations.session().unwrap())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_resume_pass_records_a_missed_invitation_without_waiting_for_the_loop() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, heard, _, _release, server) =
+            learner_with_invitation(directory.path(), true).await;
+        let state = app.state::<crate::AppState>();
+        let session = state.profile_operations.session().unwrap();
+
+        assert_eq!(discover(app.handle(), admitted(&state)).await, Ok(1));
+
+        let rows = in_profile(&state, |db| super::super::list(db.conn(), None, false)).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, kind::INTERVIEW_INVITED);
+        assert_eq!(rows[0].route.as_deref(), Some("/settings/organisations"));
+        assert!(heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["session"] == session.as_str()
+                && event["row"]["id"] == rows[0].id.as_str()));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_resume_during_a_running_pass_joins_it_without_repeating_requests_or_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, _, received, release, server) =
+            learner_with_invitation(directory.path(), false).await;
+        let state = app.state::<crate::AppState>();
+        let lists = LISTS.len();
+
+        let background = tokio::spawn({
+            let app = app.handle().clone();
+            let lease = admitted(&state);
+            async move { discover(&app, lease).await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while received.load(Ordering::SeqCst) < lists {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the background pass reaches Cloud");
+        let resume = tokio::spawn({
+            let app = app.handle().clone();
+            let lease = admitted(&state);
+            async move { discover(&app, lease).await }
+        });
+        // Long enough for a second pass to reach the fake Cloud if one started.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            received.load(Ordering::SeqCst),
+            lists,
+            "the resume pass must join, not ask Cloud again"
+        );
+        release.send(true).unwrap();
+        assert_eq!(background.await.unwrap(), Ok(1));
+        assert_eq!(resume.await.unwrap(), Ok(1), "the joiner shares the result");
+        assert_eq!(received.load(Ordering::SeqCst), lists);
+
+        // A later pass is a new one, and de-duplication keeps the row single.
+        assert_eq!(discover(app.handle(), admitted(&state)).await, Ok(0));
+        assert_eq!(received.load(Ordering::SeqCst), 2 * lists);
+        let rows = in_profile(&state, |db| super::super::list(db.conn(), None, false)).await;
+        assert_eq!(rows.len(), 1);
+        server.abort();
+    }
 
     #[tokio::test]
     async fn authenticated_room_recovery_survives_an_independent_list_failure() {

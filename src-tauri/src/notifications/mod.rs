@@ -7,9 +7,9 @@
 //! for the moments nobody is looking at the app. Every producer — the
 //! background pass that asks Alexandria Cloud what is waiting, a classroom
 //! event arriving over gossip, a credential the pipeline just issued, a push
-//! the phone received — goes through [`deliver`], so there is exactly one
-//! place that decides whether to record, whether to interrupt, and what the
-//! webview hears.
+//! the phone received — goes through [`record_if_enabled`] and [`announce`],
+//! so there is exactly one place that decides whether to record, whether to
+//! interrupt, and what the webview hears.
 //!
 //! # Not repeating ourselves
 //!
@@ -353,21 +353,6 @@ pub fn announce<R: Runtime>(app: &AppHandle<R>, session: &str, recorded: &Record
     }
 }
 
-/// Record and announce in one step, for producers that hold the connection
-/// outside an executor job. `session` is the lease the producer runs under.
-pub fn deliver<R: Runtime>(
-    app: &AppHandle<R>,
-    session: &str,
-    conn: &Connection,
-    new: &NewNotification,
-) -> Result<Option<Recorded>, String> {
-    let recorded = record_if_enabled(conn, new)?;
-    if let Some(recorded) = &recorded {
-        announce(app, session, recorded);
-    }
-    Ok(recorded)
-}
-
 /// Emit the unread count after anything that changes it, under `session`,
 /// the session of the lease that changed it. Dropped once that session is no
 /// longer current, so the next profile's badge is never overwritten.
@@ -514,11 +499,11 @@ fn route_of_action(performed: &tauri_plugin_notification::ActionPerformed) -> Op
 mod tests {
     use super::*;
 
-    type Heard = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+    pub(super) type Heard = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
 
     /// A test app over an unlocked "Learner" profile, and every
     /// `notifications:new` / `notifications:changed` payload it emits.
-    async fn listening_app(
+    pub(super) async fn listening_app(
         directory: &std::path::Path,
     ) -> (tauri::App<tauri::test::MockRuntime>, Heard) {
         use tauri::Listener;
@@ -539,7 +524,7 @@ mod tests {
         (app, heard)
     }
 
-    async fn in_profile<T: Send + 'static>(
+    pub(super) async fn in_profile<T: Send + 'static>(
         state: &crate::AppState,
         job: impl FnOnce(&crate::db::Database) -> Result<T, String> + Send + 'static,
     ) -> T {

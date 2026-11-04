@@ -142,7 +142,9 @@ pub async fn status(state: &AppState, lease: ProfileLease) -> Result<PushStatus,
     Ok(status_from(&f))
 }
 
-async fn issuer_key(state: &AppState) -> Result<(SigningKey, crate::crypto::did::Did), String> {
+pub(super) async fn issuer_key(
+    state: &AppState,
+) -> Result<(SigningKey, crate::crypto::did::Did), String> {
     let guard = state.keystore.lock().await;
     let keystore = guard.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = keystore.retrieve_mnemonic().map_err(|e| e.to_string())?;

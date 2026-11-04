@@ -167,11 +167,15 @@ async function init(): Promise<void> {
   const gen = ++generation
   const session = getProfileSessionToken()
   if (isMobilePlatform) {
-    const retry = () => {
-      if (gen === generation && session === getProfileSessionToken()) void reconcilePush()
+    const current = () => gen === generation && session === getProfileSessionToken()
+    retryTimer = setInterval(() => { if (current()) void reconcilePush() }, 60_000)
+    // Coming back to the foreground: re-register push and look for anything a
+    // push missed, without waiting for the backend's 60-second pass.
+    onResume = () => {
+      if (document.visibilityState !== 'visible' || !current()) return
+      void reconcilePush()
+      void discover()
     }
-    retryTimer = setInterval(retry, 60_000)
-    onResume = () => { if (document.visibilityState === 'visible') retry() }
     document.addEventListener('visibilitychange', onResume)
   }
 
@@ -253,6 +257,19 @@ async function reconcilePush(): Promise<void> {
   } catch (e) {
     console.warn('[notifications] push registration failed:', e)
     if (current()) await refreshPushStatus()
+  }
+}
+
+/**
+ * Run one Cloud discovery pass now. The backend joins a pass that is already
+ * running, and its de-duplication keeps rows single. Failures are logged: the
+ * background pass tries again within a minute.
+ */
+async function discover(): Promise<void> {
+  try {
+    await invoke<number>('notifications_discover')
+  } catch (e) {
+    console.warn('[notifications] discovery failed:', e)
   }
 }
 
