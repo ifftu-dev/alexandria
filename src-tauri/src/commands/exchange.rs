@@ -146,7 +146,7 @@ pub async fn exchange_start_assessment(
         .await
         .require()?;
     let request = envelope.request;
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     validate_request(&request, did.as_str())?;
     let seed: u64 = rand::random();
     let now = now_rfc3339();
@@ -208,7 +208,7 @@ pub async fn exchange_credentials(
     state: State<'_, AppState>,
     request: CredentialRequest,
 ) -> Result<Vec<ShareableCredential>, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     validate_request(&request, did.as_str())?;
     state.db_executor.execute(DatabaseWorkload::Learner,state.profile_lease(),"exchange.credentials",move |db| {
         let mut query = db.conn().prepare("SELECT id,issuer_did,issuance_date,signed_vc_json FROM credentials WHERE subject_did=?1 AND skill_id=?2 AND revoked=0 ORDER BY issuance_date DESC").map_err(|e|e.to_string())?;
@@ -259,7 +259,7 @@ pub async fn exchange_send(
     signed: VerifiablePresentation,
 ) -> Result<serde_json::Value, String> {
     let dir = directory(&state, &directory_url).await?;
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let request = shared_credential(&signed)?.request;
     validate_request(&request, did.as_str())?;
     // Checked again here rather than trusted from the preview: this is the

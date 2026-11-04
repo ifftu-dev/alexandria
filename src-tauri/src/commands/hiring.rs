@@ -323,7 +323,7 @@ async fn signed_get<T: serde::de::DeserializeOwned>(
 pub async fn hiring_interviews(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryInterview>, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let path = format!("/api/interviews/for/{}", did.as_str());
     let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
@@ -367,7 +367,7 @@ pub async fn hiring_interviews(
 pub async fn hiring_offers(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryOffer>, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let path = format!("/api/offers/for/{}", did.as_str());
     let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();

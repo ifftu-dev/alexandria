@@ -530,7 +530,7 @@ async fn post(cloud_url: &str, path: &str, body: &impl Serialize) -> Result<Valu
 pub async fn org_access_requests(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessRequestItem>, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let path = format!("/api/access-requests/for/{}", did.as_str());
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -699,7 +699,7 @@ fn view(
 /// when each last looked.
 #[tauri::command]
 pub async fn org_grants(state: State<'_, AppState>) -> Result<GrantsView, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore).await?.did().clone();
     let mut problems = Vec::new();
     let mut remote: Vec<Value> = Vec::new();
     for cloud in super::holder_pull::directories(&state).await? {
