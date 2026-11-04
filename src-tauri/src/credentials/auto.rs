@@ -18,12 +18,10 @@
 //! datum fields → VC envelope → Data Integrity proof by the same key that
 //! signed the tx. All of that is cryptographically linked.
 
-use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::cardano::completion::{self, CompletionObservation};
-use crate::credentials::status_list;
-use crate::crypto::did::{did_from_verifying_key, Did};
+use crate::credentials::{status_list, Issuer};
 use crate::domain::vc::context::W3C_VC_V2;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
@@ -49,9 +47,8 @@ pub struct AutoIssuanceReport {
 /// Process every pending [`CompletionObservation`] by self-signing a
 /// VC for it. Observations whose `subject_pubkey` doesn't match the
 /// local learner's verifying key are skipped — we only sign our own.
-pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceReport, String> {
-    let local_vk_hex = hex::encode(learner_key.verifying_key().as_bytes());
-    let local_did = did_from_verifying_key(&learner_key.verifying_key());
+pub fn tick(conn: &Connection, learner: &Issuer) -> Result<AutoIssuanceReport, String> {
+    let local_vk_hex = hex::encode(learner.key().verifying_key().as_bytes());
 
     let pending = completion::pending_observations(conn).map_err(|e| e.to_string())?;
 
@@ -62,7 +59,7 @@ pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceR
             continue;
         }
 
-        match issue_and_notify(conn, learner_key, &local_did, &obs) {
+        match issue_and_notify(conn, learner, &obs) {
             Ok((credential_id, notification)) => {
                 if let Some(notification) = notification {
                     report.notifications.push(notification);
@@ -83,17 +80,15 @@ pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceR
 /// the new credential id. Pure function — no network, no keystore.
 pub fn issue_for_observation(
     conn: &Connection,
-    learner_key: &SigningKey,
-    learner_did: &Did,
+    learner: &Issuer,
     obs: &CompletionObservation,
 ) -> Result<String, String> {
-    issue_and_notify(conn, learner_key, learner_did, obs).map(|(id, _)| id)
+    issue_and_notify(conn, learner, obs).map(|(id, _)| id)
 }
 
 fn issue_and_notify(
     conn: &Connection,
-    learner_key: &SigningKey,
-    learner_did: &Did,
+    learner: &Issuer,
     obs: &CompletionObservation,
 ) -> Result<(String, Option<crate::notifications::Recorded>), String> {
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
@@ -106,15 +101,14 @@ fn issue_and_notify(
         || stored.course_id != obs.course_id
         || stored.completion_root != obs.completion_root
         || stored.completion_time != obs.completion_time
-        || stored.subject_pubkey != hex::encode(learner_key.verifying_key().as_bytes())
-        || *learner_did != did_from_verifying_key(&learner_key.verifying_key())
+        || stored.subject_pubkey != hex::encode(learner.key().verifying_key().as_bytes())
     {
         return Err("completion issuance does not match the stored observation and learner".into());
     }
     if let Some(existing) = stored.credential_id {
         return Ok((existing, None));
     }
-    let credential_id = issue_new_observation(&tx, learner_key, learner_did, obs)?;
+    let credential_id = issue_new_observation(&tx, learner, obs)?;
     completion::mark_issued(&tx, &obs.policy_id, &obs.asset_name_hex, &credential_id)
         .map_err(|e| e.to_string())?;
     let notification = crate::notifications::record_if_enabled(
@@ -127,10 +121,10 @@ fn issue_and_notify(
 
 fn issue_new_observation(
     conn: &Connection,
-    learner_key: &SigningKey,
-    learner_did: &Did,
+    learner: &Issuer,
     obs: &CompletionObservation,
 ) -> Result<String, String> {
+    let learner_did = learner.did();
     let list_id = status_list::ensure(conn, learner_did)?;
     let index = status_list::allocate(conn, &list_id)?;
 
@@ -194,7 +188,7 @@ fn issue_new_observation(
     };
     let signed = sign_credential(
         UnsignedCredential { credential: vc },
-        learner_key,
+        learner.key(),
         learner_did,
     )
     .map_err(|e| format!("sign: {e}"))?;
@@ -260,7 +254,9 @@ pub fn credential_for_witness_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::did::did_from_verifying_key;
     use crate::db::Database;
+    use ed25519_dalek::SigningKey;
 
     fn test_db() -> Database {
         let db = Database::open_in_memory().expect("open");
@@ -310,7 +306,7 @@ mod tests {
         };
         seed_observation(&db, &obs);
 
-        let report = tick(db.conn(), &key).unwrap();
+        let report = tick(db.conn(), &Issuer::from_key(key.clone())).unwrap();
         assert_eq!(report.issued, 1, "expected one issuance");
         let inbox = crate::notifications::list(db.conn(), None, false).unwrap();
         assert_eq!(
@@ -373,7 +369,7 @@ mod tests {
         };
         seed_observation(&db, &obs);
 
-        let report = tick(db.conn(), &key).unwrap();
+        let report = tick(db.conn(), &Issuer::from_key(key.clone())).unwrap();
         assert_eq!(report.issued, 0);
         assert_eq!(report.skipped_foreign, 1);
 
@@ -406,7 +402,7 @@ mod tests {
         };
         seed_observation(&db, &obs);
 
-        let issued = tick(db.conn(), &key).unwrap();
+        let issued = tick(db.conn(), &Issuer::from_key(key.clone())).unwrap();
         assert_eq!(issued.issued, 1);
         let count: i64 = db
             .conn()
@@ -419,7 +415,6 @@ mod tests {
     fn issue_is_idempotent_when_already_resolved() {
         let db = test_db();
         let key = SigningKey::from_bytes(&[3u8; 32]);
-        let did = did_from_verifying_key(&key.verifying_key());
 
         let obs = CompletionObservation {
             policy_id: "01".repeat(28),
@@ -435,10 +430,10 @@ mod tests {
         };
 
         seed_observation(&db, &obs);
-        let cid = issue_for_observation(db.conn(), &key, &did, &obs).unwrap();
+        let cid = issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs).unwrap();
         assert_ne!(cid, "urn:uuid:already-issued");
         assert_eq!(
-            issue_for_observation(db.conn(), &key, &did, &obs).unwrap(),
+            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs).unwrap(),
             cid
         );
 
@@ -453,10 +448,49 @@ mod tests {
     }
 
     #[test]
+    fn a_rotated_issuer_self_issues_under_its_own_did() {
+        let db = test_db();
+        let original = SigningKey::from_bytes(&[3u8; 32]);
+        let did = did_from_verifying_key(&original.verifying_key());
+        let rotated = SigningKey::from_bytes(&[4u8; 32]);
+        crate::crypto::key_registry::rotate_key(db.conn(), &did, &rotated).unwrap();
+        let now = crate::clock::now_rfc3339();
+        let issuer =
+            crate::credentials::Issuer::rotated(db.conn(), did.clone(), rotated.clone(), &now)
+                .unwrap();
+        // The mint was signed by the key the DID holds now.
+        let obs = CompletionObservation {
+            policy_id: "01".repeat(28),
+            asset_name_hex: "02".repeat(16),
+            tx_hash: "03".repeat(32),
+            subject_pubkey: hex::encode(rotated.verifying_key().as_bytes()),
+            course_id: "04".repeat(16),
+            completion_root: "05".repeat(32),
+            completion_time: "2026-04-24T12:00:00Z".into(),
+            credential_id: None,
+            observed_at: "2026-04-24 12:00:00".into(),
+            issued_at: None,
+        };
+        seed_observation(&db, &obs);
+        let id = issue_for_observation(db.conn(), &issuer, &obs).unwrap();
+        let (issuer_did, subject_did): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT issuer_did, subject_did FROM credentials WHERE id = ?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (issuer_did.as_str(), subject_did.as_str()),
+            (did.as_str(), did.as_str())
+        );
+    }
+
+    #[test]
     fn issuance_and_status_slot_roll_back_when_observation_update_fails() {
         let db = test_db();
         let key = SigningKey::from_bytes(&[3; 32]);
-        let did = did_from_verifying_key(&key.verifying_key());
         let obs = CompletionObservation {
             policy_id: "01".repeat(28),
             asset_name_hex: "02".repeat(32),
@@ -472,9 +506,11 @@ mod tests {
         seed_observation(&db, &obs);
         db.conn().execute_batch("CREATE TRIGGER fail_issuance BEFORE UPDATE OF credential_id
             ON completion_observations BEGIN SELECT RAISE(ABORT, 'injected issuance failure'); END;").unwrap();
-        assert!(issue_for_observation(db.conn(), &key, &did, &obs)
-            .unwrap_err()
-            .contains("injected issuance failure"));
+        assert!(
+            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs)
+                .unwrap_err()
+                .contains("injected issuance failure")
+        );
         let counts: (i64, i64) = db.conn().query_row(
             "SELECT (SELECT COUNT(*) FROM credentials), (SELECT COUNT(*) FROM credential_status_lists)",
             [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -486,14 +522,16 @@ mod tests {
         db.conn()
             .execute_batch("DROP TRIGGER fail_issuance")
             .unwrap();
-        let id = issue_for_observation(db.conn(), &key, &did, &obs).unwrap();
+        let id = issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs).unwrap();
         assert_eq!(
-            issue_for_observation(db.conn(), &key, &did, &obs).unwrap(),
+            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &obs).unwrap(),
             id
         );
         let mut changed = obs.clone();
         changed.completion_root = "06".repeat(32);
-        assert!(issue_for_observation(db.conn(), &key, &did, &changed).is_err());
+        assert!(
+            issue_for_observation(db.conn(), &Issuer::from_key(key.clone()), &changed).is_err()
+        );
         assert!(completion::pending_observations(db.conn())
             .unwrap()
             .is_empty());

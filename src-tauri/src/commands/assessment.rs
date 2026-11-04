@@ -925,7 +925,7 @@ pub async fn assessment_grade(
     answers: Vec<SubmittedAnswer>,
 ) -> Result<GradeResult, String> {
     let issuer = Issuer::from_keystore(&state.keystore).await?;
-    let (signing_key, issuer_did) = issuer.clone().into_parts();
+    let signer = issuer.clone();
     let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
@@ -943,15 +943,7 @@ pub async fn assessment_grade(
                 };
                 #[cfg(not(desktop))]
                 let engine = GradeEngine::default();
-                grade_attempt_impl(
-                    db,
-                    &engine,
-                    &signing_key,
-                    &issuer_did,
-                    &attempt_id,
-                    &answers,
-                    &now,
-                )
+                grade_attempt_impl(db, &engine, &signer, &attempt_id, &answers, &now)
             },
         )
         .await?;
@@ -972,15 +964,12 @@ pub async fn assessment_grade(
 pub fn grade_attempt_impl(
     db: &crate::db::Database,
     engine: &GradeEngine<'_>,
-    signing_key: &ed25519_dalek::SigningKey,
-    issuer_did: &crate::crypto::did::Did,
+    issuer: &Issuer,
     attempt_id: &str,
     answers: &[SubmittedAnswer],
     now: &str,
 ) -> Result<GradeResult, String> {
-    if crate::crypto::did::derive_did_key(signing_key).as_str() != issuer_did.as_str() {
-        return Err("assessment signing key does not match the learner".into());
-    }
+    let issuer_did = issuer.did();
     let conn = db.conn();
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
@@ -1195,8 +1184,7 @@ pub fn grade_attempt_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc =
-            crate::credentials::issue(conn, &Issuer::from_key(signing_key.clone()), &req, now)?;
+        let vc = crate::credentials::issue(conn, issuer, &req, now)?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
@@ -1344,7 +1332,7 @@ mod tests {
     struct Ctx {
         db: Database,
         runtime: GraderRuntime,
-        key: SigningKey,
+        issuer: Issuer,
         did: Did,
         _dir: TempDir,
     }
@@ -1424,7 +1412,7 @@ mod tests {
         Ctx {
             db,
             runtime: GraderRuntime::new().unwrap(),
-            key,
+            issuer: Issuer::from_key(key),
             did,
             _dir: dir,
         }
@@ -1439,16 +1427,8 @@ mod tests {
             .conn()
             .execute("UPDATE assessment_items SET points=99 WHERE id='q1'", [])
             .unwrap();
-        let error = grade_attempt_impl(
-            &ctx.db,
-            &ctx.engine(),
-            &ctx.key,
-            &ctx.did,
-            "att_1",
-            &answers,
-            NOW,
-        )
-        .unwrap_err();
+        let error = grade_attempt_impl(&ctx.db, &ctx.engine(), &ctx.issuer, "att_1", &answers, NOW)
+            .unwrap_err();
         assert!(error.contains("items changed"));
     }
 
@@ -1466,16 +1446,8 @@ mod tests {
 
     fn grade(ctx: &Ctx, answers: &[SubmittedAnswer]) -> GradeResult {
         prepare(ctx, answers);
-        grade_attempt_impl(
-            &ctx.db,
-            &ctx.engine(),
-            &ctx.key,
-            &ctx.did,
-            "att_1",
-            answers,
-            NOW,
-        )
-        .expect("grading succeeds")
+        grade_attempt_impl(&ctx.db, &ctx.engine(), &ctx.issuer, "att_1", answers, NOW)
+            .expect("grading succeeds")
     }
 
     #[test]
@@ -1572,7 +1544,7 @@ mod tests {
                 superseded: false,
             }),
             now,
-            &ctx.key,
+            ctx.issuer.key(),
         )
         .unwrap();
         let verdict = verify_share(&signed, &request, now, NOW).unwrap();
@@ -1580,6 +1552,34 @@ mod tests {
             verdict.acceptance_decision,
             alexandria_verify::vc::AcceptanceDecision::Accept
         );
+    }
+
+    #[test]
+    fn a_rotated_issuer_earns_the_credential_for_its_own_did() {
+        let ctx = setup();
+        let rotated = SigningKey::from_bytes(&[9u8; 32]);
+        crate::crypto::key_registry::rotate_key(ctx.db.conn(), &ctx.did, &rotated).unwrap();
+        // A rotation takes effect at the wall clock; grade after it.
+        let now = crate::clock::now_rfc3339();
+        let issuer =
+            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), rotated.clone(), &now).unwrap();
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let result = grade_attempt_impl(&ctx.db, &ctx.engine(), &issuer, "att_1", &answers, &now)
+            .expect("a rotated issuer grades its own attempt");
+        let json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [result.credential_id.unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let rotated_did = serde_json::json!(ctx.did.as_str());
+        assert_eq!(vc.pointer("/issuer"), Some(&rotated_did));
+        assert_eq!(vc.pointer("/credentialSubject/id"), Some(&rotated_did));
     }
 
     #[test]
@@ -1591,29 +1591,17 @@ mod tests {
             .unwrap_err()
             .contains("cannot be changed"));
         assert!(save_draft_impl(ctx.db.conn(), "att_1", &[]).is_err());
-        assert!(grade_attempt_impl(
-            &ctx.db,
-            &ctx.engine(),
-            &ctx.key,
-            &ctx.did,
-            "att_1",
-            &answers,
-            NOW
-        )
-        .unwrap_err()
-        .contains("finalize assessment monitoring"));
+        assert!(
+            grade_attempt_impl(&ctx.db, &ctx.engine(), &ctx.issuer, "att_1", &answers, NOW)
+                .unwrap_err()
+                .contains("finalize assessment monitoring")
+        );
         prepare(&ctx, &answers);
-        assert!(grade_attempt_impl(
-            &ctx.db,
-            &ctx.engine(),
-            &ctx.key,
-            &ctx.did,
-            "att_1",
-            &[],
-            NOW
-        )
-        .unwrap_err()
-        .contains("frozen submission"));
+        assert!(
+            grade_attempt_impl(&ctx.db, &ctx.engine(), &ctx.issuer, "att_1", &[], NOW)
+                .unwrap_err()
+                .contains("frozen submission")
+        );
         assert!(grade(&ctx, &answers).passed);
     }
 
@@ -1621,18 +1609,17 @@ mod tests {
     fn another_learner_or_mismatched_signing_key_cannot_grade_the_attempt() {
         let ctx = setup();
         let other_key = SigningKey::from_bytes(&[88; 32]);
-        for did in [&ctx.did, &derive_did_key(&other_key)] {
-            assert!(grade_attempt_impl(
-                &ctx.db,
-                &ctx.engine(),
-                &other_key,
-                did,
-                "att_1",
-                &[answer("q1", &[0]), answer("q2", &[1])],
-                NOW
-            )
-            .is_err());
-        }
+        assert!(grade_attempt_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &Issuer::from_key(other_key.clone()),
+            "att_1",
+            &[answer("q1", &[0]), answer("q2", &[1])],
+            NOW
+        )
+        .is_err());
+        // A key that is not the learner's cannot sign as the learner at all.
+        assert!(Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW).is_err());
         let rows: i64 = ctx
             .db
             .conn()
@@ -1681,8 +1668,7 @@ mod tests {
             let result = grade_attempt_impl(
                 &ctx.db,
                 &ctx.engine(),
-                &ctx.key,
-                &ctx.did,
+                &ctx.issuer,
                 "att_1",
                 &[answer("q1", &[0]), answer("q2", &[1])],
                 NOW,
@@ -1819,8 +1805,7 @@ mod tests {
         let second = grade_attempt_impl(
             &ctx.db,
             &ctx.engine(),
-            &ctx.key,
-            &ctx.did,
+            &ctx.issuer,
             "att_1",
             &[answer("q1", &[0]), answer("q2", &[1])],
             NOW,
@@ -1971,17 +1956,11 @@ mod tests {
         assert!(save_draft_impl(ctx.db.conn(), "att_1", &[])
             .unwrap_err()
             .contains("not open"));
-        assert!(grade_attempt_impl(
-            &ctx.db,
-            &ctx.engine(),
-            &ctx.key,
-            &ctx.did,
-            "att_1",
-            &[],
-            NOW,
-        )
-        .unwrap_err()
-        .contains("not found or already graded"));
+        assert!(
+            grade_attempt_impl(&ctx.db, &ctx.engine(), &ctx.issuer, "att_1", &[], NOW,)
+                .unwrap_err()
+                .contains("not found or already graded")
+        );
     }
 
     #[test]

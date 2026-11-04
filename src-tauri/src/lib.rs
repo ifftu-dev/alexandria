@@ -1038,10 +1038,15 @@ pub fn run() {
                                     _ => {}
                                 }
 
+                                // One issuer for the passes below that sign.
+                                let issuer = wallet.as_ref().map(credentials::Issuer::from_wallet);
+
                                 // Completion-witness observer + auto-issuance pipeline.
                                 // Gated on ALEXANDRIA_COMPLETION_POLICY_ID + the vault
                                 // being unlocked (wallet present). Silent no-op otherwise.
-                                if let (Some(bf_client), Some(w)) = (bf.as_ref(), wallet.as_ref()) {
+                                if let (Some(bf_client), Some(learner)) =
+                                    (bf.as_ref(), issuer.as_ref())
+                                {
                                     if let Ok(policy_id_raw) =
                                         std::env::var("ALEXANDRIA_COMPLETION_POLICY_ID")
                                     {
@@ -1069,10 +1074,9 @@ pub fn run() {
                                     let issuance = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => Some(credentials::auto::tick(
-                                                db.conn(),
-                                                &w.signing_key,
-                                            )),
+                                            Ok(Some(db)) => {
+                                                Some(credentials::auto::tick(db.conn(), learner))
+                                            }
                                             _ => None,
                                         }
                                     };
@@ -1109,9 +1113,6 @@ pub fn run() {
                                         );
                                     }
                                 }
-
-                                // One issuer for the passes below that sign.
-                                let issuer = wallet.as_ref().map(credentials::Issuer::from_wallet);
 
                                 // Status lists a host has not yet seen. Every
                                 // issuance site creates or changes a list; the

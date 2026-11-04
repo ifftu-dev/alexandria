@@ -14,7 +14,6 @@
 //! and the on-chain witness the observer later ingests.
 
 use crate::profile::scope::ProfileState as State;
-use ed25519_dalek::SigningKey;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +25,7 @@ use crate::cardano::{
 use crate::clock::now_rfc3339;
 use crate::credentials::IssueCredentialRequest;
 use crate::credentials::Issuer;
-use crate::crypto::did::{did_from_verifying_key, Did};
+use crate::crypto::did::Did;
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::completion::{element_leaf, merkle_root, ElementCompletion};
@@ -653,7 +652,9 @@ fn persist_completion(
     leaves: Vec<String>,
     witness: Option<&completion_recovery::CompletionContext>,
 ) -> Result<CompletionWitnessResult, String> {
-    let subject = did_from_verifying_key(&wallet.signing_key.verifying_key());
+    // The learner signs every credential this completion issues.
+    let learner = Issuer::from_wallet(wallet);
+    let subject = learner.did().clone();
     let enrollment = exact_enrollment(conn, course_id)?;
     let identity = serde_json::to_vec(&(
         subject.as_str(),
@@ -709,7 +710,7 @@ fn persist_completion(
         } else {
             let ids = self_issue_completion(
                 conn,
-                &wallet.signing_key,
+                &learner,
                 course_id,
                 &enrollment.course_document_cid,
                 enrollment.course_document_version,
@@ -811,7 +812,7 @@ fn course_skill_ids(conn: &Connection, course_id: &str) -> Vec<String> {
 #[allow(clippy::too_many_arguments)]
 fn self_issue_completion(
     conn: &Connection,
-    learner_key: &SigningKey,
+    learner: &Issuer,
     course_id: &str,
     course_document_cid: &str,
     course_document_version: u32,
@@ -822,7 +823,7 @@ fn self_issue_completion(
     tx_hash: Option<&str>,
     timestamp_ms: i64,
 ) -> Result<Vec<String>, String> {
-    let learner_did = did_from_verifying_key(&learner_key.verifying_key());
+    let learner_did = learner.did().clone();
     // Ids of every credential issued here, in mint order: the witnessed
     // completion VC (when anchored), then per skill the learner's self-claim.
     // Instructor endorsement must be signed separately by the instructor.
@@ -855,8 +856,7 @@ fn self_issue_completion(
 
         completion_obs::record_observation(conn, &obs).map_err(|e| e.to_string())?;
 
-        let credential_id =
-            crate::credentials::auto::issue_for_observation(conn, learner_key, &learner_did, &obs)?;
+        let credential_id = crate::credentials::auto::issue_for_observation(conn, learner, &obs)?;
         issued_ids.push(credential_id);
     }
 
@@ -896,12 +896,7 @@ fn self_issue_completion(
             integrity_session_id: None,
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(
-            conn,
-            &Issuer::from_key(learner_key.clone()),
-            &self_claim,
-            &now,
-        )?;
+        let vc = crate::credentials::issue(conn, learner, &self_claim, &now)?;
         issued_ids.push(vc.id.ok_or("issued completion credential has no id")?);
     }
 
@@ -915,6 +910,8 @@ fn self_issue_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::did::did_from_verifying_key;
+    use ed25519_dalek::SigningKey;
 
     #[test]
     fn local_receipt_is_atomic_idempotent_and_independent_of_provider() {
@@ -1197,7 +1194,7 @@ mod tests {
 
         self_issue_completion(
             db.conn(),
-            &key,
+            &Issuer::from_key(key.clone()),
             "c1",
             &"11".repeat(32),
             2,
@@ -1309,7 +1306,7 @@ mod tests {
         let key = SigningKey::from_bytes(&[9; 32]);
         let ids = self_issue_completion(
             db.conn(),
-            &key,
+            &Issuer::from_key(key.clone()),
             "offline",
             &"11".repeat(32),
             2,

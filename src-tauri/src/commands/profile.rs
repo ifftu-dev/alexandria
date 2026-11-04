@@ -85,10 +85,10 @@ struct AccountFields {
 /// this VC is local-only and must never be announced or exported publicly.
 fn issue_birthdate_vc(
     conn: &rusqlite::Connection,
-    signing_key: &ed25519_dalek::SigningKey,
+    issuer: &crate::credentials::Issuer,
     birthdate: &str,
 ) -> Result<(), String> {
-    let did = crate::crypto::did::derive_did_key(signing_key);
+    let did = issuer.did();
     let mut properties = serde_json::Map::new();
     properties.insert("birthdate".to_string(), birthdate.into());
     let req = crate::credentials::IssueCredentialRequest {
@@ -102,12 +102,7 @@ fn issue_birthdate_vc(
         integrity_policy: None,
     };
     let now = crate::clock::now_rfc3339();
-    crate::credentials::issue(
-        conn,
-        &crate::credentials::Issuer::from_key(signing_key.clone()),
-        &req,
-        &now,
-    )?;
+    crate::credentials::issue(conn, issuer, &req, &now)?;
     Ok(())
 }
 
@@ -266,7 +261,7 @@ pub async fn create_profile(
                 // The birthdate doubles as a self-asserted record in the
                 // credentials store (VC-first). Local-only — never gossiped.
                 if let Some(b) = &birthdate {
-                    issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
+                    issue_birthdate_vc(db.conn(), &crate::credentials::Issuer::from_wallet(&w), b)?;
                 }
             }
 
@@ -390,7 +385,7 @@ pub async fn restore_profile_with_mnemonic(
                     .map_err(|e| e.to_string())?;
 
                 if let Some(b) = &birthdate {
-                    issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
+                    issue_birthdate_vc(db.conn(), &crate::credentials::Issuer::from_wallet(&w), b)?;
                 }
             }
 
