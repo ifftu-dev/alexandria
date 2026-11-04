@@ -21,7 +21,7 @@ async function select(next: AppMode) {
     :aria-label="$t('nav.mode.ariaLabel')"
   >
     <button
-      class="mode-switcher-btn"
+      class="mode-switcher-btn pressable selectable"
       :class="{ 'mode-switcher-btn--active-learner': mode === 'learner' }"
       role="radio"
       :aria-checked="mode === 'learner'"
@@ -34,7 +34,7 @@ async function select(next: AppMode) {
       {{ $t('nav.mode.learner') }}
     </button>
     <button
-      class="mode-switcher-btn"
+      class="mode-switcher-btn pressable selectable"
       :class="{ 'mode-switcher-btn--active-instructor': mode === 'instructor' }"
       role="radio"
       :aria-checked="mode === 'instructor'"
@@ -72,7 +72,9 @@ async function select(next: AppMode) {
   font-weight: 500;
   color: var(--app-muted-foreground);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+  /* The shared selection indicator is the raised segment. */
+  --selection-background: var(--app-card);
+  --selection-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
 .mode-switcher-btn:hover {
@@ -80,14 +82,10 @@ async function select(next: AppMode) {
 }
 
 .mode-switcher-btn--active-learner {
-  background: var(--app-card);
   color: var(--app-primary);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
 .mode-switcher-btn--active-instructor {
-  background: var(--app-card);
   color: var(--mode-instructor-accent, #b45309);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 </style>

@@ -408,6 +408,52 @@ pre,
   box-shadow: var(--focus-ring);
 }
 
+/* Shared press feedback for controls outside .btn: navigation and tab bar
+   items, list rows, search results, chips, icon buttons and cards. Opting in
+   is the class alone; the class also owns the control's transition, so a
+   pressable control declares no transition of its own. Cards set
+   --press-scale closer to 1. Reduced and Off dim in place instead of scaling
+   (see the motion rules at the end of this file). */
+.pressable {
+  transition-property: scale, opacity, color, background-color, border-color, box-shadow, transform, translate;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-settle);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.pressable:active:not(:disabled, [aria-disabled='true']) {
+  scale: var(--press-scale, 0.97);
+}
+
+/* Persistent selection indicator. The control marks its selection with
+   aria-current, aria-checked or aria-selected; the indicator settles in
+   behind its content while the previous one fades. Controls may restyle the
+   indicator's geometry and colour through ::before, never its timing. */
+.selectable {
+  position: relative;
+  isolation: isolate;
+}
+
+.selectable::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--selection-background, color-mix(in srgb, var(--app-muted) 80%, transparent));
+  box-shadow: var(--selection-shadow, none);
+  opacity: 0;
+  scale: 0.92;
+  transition: opacity var(--transition-base), scale var(--transition-base);
+  pointer-events: none;
+}
+
+.selectable:is([aria-current='page'], [aria-checked='true'], [aria-selected='true'])::before {
+  opacity: 1;
+  scale: 1;
+}
+
 .btn-primary {
   background-color: var(--app-primary);
   color: var(--app-primary-foreground);
@@ -1245,6 +1291,11 @@ select optgroup {
 :root[data-motion='off'] .sf-line-draw { stroke-dashoffset: 0; }
 :root[data-motion='reduced'] .btn:active,
 :root[data-motion='off'] .btn:active { transform: none; }
+/* Press feedback stays visible without movement: the control dims in place. */
+:root:is([data-motion='reduced'], [data-motion='off']) .pressable:active:not(:disabled, [aria-disabled='true']) {
+  scale: none;
+  opacity: 0.72;
+}
 
 :root[data-motion-hidden='true'] *,
 :root[data-motion-hidden='true'] *::before,

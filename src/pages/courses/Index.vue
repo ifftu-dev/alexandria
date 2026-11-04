@@ -105,7 +105,7 @@ onMounted(async () => {
         :key="opt"
         type="button"
         :class="[
-          'text-xs font-medium px-3 py-1.5 rounded-full transition-colors',
+          'pressable text-xs font-medium px-3 py-1.5 rounded-full',
           kindFilter === opt
             ? 'bg-primary text-primary-foreground'
             : 'bg-muted text-muted-foreground hover:bg-muted/70',

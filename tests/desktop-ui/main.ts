@@ -111,6 +111,30 @@ if (screen === 'motion') {
     path: () => router.currentRoute.value.fullPath,
     openLink: (url: string) => useDeepLinks().openLink(url),
   } })
+} else if (screen === 'motion-surfaces') {
+  const { motionBackend } = await import('./motionBackend')
+  const backend = motionBackend()
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  const { useSettings } = await import('@/composables/useSettings')
+  const { useAccountStatus } = await import('@/composables/useAccountStatus')
+  await useProfiles().initialize()
+  await Promise.all([useSettings().initialize(), useAccountStatus().refreshAccountStatus()])
+  const page = { render: () => h('p', 'Fixture page') }
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/home', component: (await import('@/pages/Home.vue')).default },
+    { path: '/goals', component: (await import('@/pages/goals/Index.vue')).default },
+    { path: '/courses', component: (await import('@/pages/courses/Index.vue')).default },
+    { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
+    { path: '/:pathMatch(.*)*', component: page },
+  ] })
+  await router.push(params.get('path') ?? '/home')
+  const { default: MotionSurfacesFixture } = await import('./MotionSurfacesFixture.vue')
+  createApp(MotionSurfacesFixture).use(i18n).use(router).mount('#app')
+  Object.assign(window, { motionFixture: { unexpected: backend.unexpected } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')

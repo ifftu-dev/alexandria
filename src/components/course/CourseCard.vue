@@ -58,7 +58,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <router-link :to="course.kind === 'tutorial' ? `/learn/${course.id}` : `/courses/${course.id}`" class="cc-grid group" v-if="variant === 'grid'">
+  <router-link :to="course.kind === 'tutorial' ? `/learn/${course.id}` : `/courses/${course.id}`" class="cc-grid pressable group" v-if="variant === 'grid'">
     <!-- Thumbnail -->
     <div class="cc-thumb">
       <div v-if="course.thumbnail_svg" class="cc-thumb__img" v-html="sanitizeSvg(course.thumbnail_svg)" />
@@ -152,8 +152,7 @@ onMounted(async () => {
   background: var(--app-card);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.04), 0 4px 12px rgb(0 0 0 / 0.03);
   overflow: hidden;
-  transition: transform 0.25s var(--ease-settle),
-              box-shadow 0.25s var(--ease-settle);
+  --press-scale: 0.985;
   cursor: pointer;
   text-decoration: none;
   color: inherit;

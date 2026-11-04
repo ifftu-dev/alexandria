@@ -1216,7 +1216,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <button
               v-for="el in elements[ch.id] ?? []"
               :key="el.id"
-              class="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
+              class="pressable group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start md:hover:-translate-y-px md:hover:shadow-sm"
               :class="activeElement === el.id
                 ? 'bg-primary/10 shadow-sm ring-1 ring-primary/20'
                 : 'hover:bg-muted/50'"
@@ -1360,7 +1360,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   v-for="skill in elementSkills"
                   :key="skill.skill_id"
                   :to="`/skills/${skill.skill_id}`"
-                  class="inline-flex items-center rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15"
+                  class="pressable inline-flex items-center rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/15"
                 >
                   {{ skill.skill_name }}
                 </router-link>

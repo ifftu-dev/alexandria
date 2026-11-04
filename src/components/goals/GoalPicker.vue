@@ -166,7 +166,7 @@ async function addJdGoal() {
       <button
         v-for="t in tabs"
         :key="t.id"
-        class="min-h-11 rounded-full border px-3 py-1.5 text-sm transition-colors"
+        class="pressable min-h-11 rounded-full border px-3 py-1.5 text-sm"
         :aria-pressed="tab === t.id"
         :disabled="busy"
         :class="tab === t.id

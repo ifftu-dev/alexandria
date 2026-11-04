@@ -193,7 +193,7 @@ watch(isOpen, async (val) => {
                     :key="item.id"
                     type="button"
                     :data-omni-selected="flatIndexFor(item.type, item.id) === selectedIndex"
-                    class="w-full flex items-center gap-3 px-4 py-2 text-start transition-colors"
+                    class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
                     :class="
                       flatIndexFor(item.type, item.id) === selectedIndex
                         ? 'bg-primary/10 text-foreground'
@@ -238,7 +238,7 @@ watch(isOpen, async (val) => {
                   :key="item.id"
                   type="button"
                   :data-omni-selected="index === selectedIndex"
-                  class="w-full flex items-center gap-3 px-4 py-2 text-start transition-colors"
+                  class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
                   :class="
                     index === selectedIndex
                       ? 'bg-primary/10 text-foreground'

@@ -162,7 +162,8 @@ const classroomPreviews = computed(() =>
         <button
           v-for="item in primaryNav"
           :key="item.path"
-          :class="['sb-item', { 'sb-item--active': isActive(item.path) }]"
+          :class="['sb-item pressable selectable', { 'sb-item--active': isActive(item.path) }]"
+          :aria-current="isActive(item.path) ? 'page' : undefined"
           :title="collapsed ? (item.label ?? (item.labelKey ? $t(item.labelKey) : '')) : undefined"
           @click="navigate(item.path)"
         >
@@ -193,7 +194,8 @@ const classroomPreviews = computed(() =>
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
-          :class="['sb-item', { 'sb-item--active': isActive('/tutoring') }]"
+          :class="['sb-item pressable selectable', { 'sb-item--active': isActive('/tutoring') }]"
+          :aria-current="isActive('/tutoring') ? 'page' : undefined"
           :title="$t('nav.sections.liveTutoring')"
           @click="navigate('/tutoring')"
         >
@@ -205,9 +207,14 @@ const classroomPreviews = computed(() =>
 
         <!-- Expanded: section header + chevron -->
         <div v-if="!collapsed" class="sb-section-header">
-          <button class="sb-section-title" @click="navigate('/tutoring')">{{ $t('nav.sections.liveTutoring') }}</button>
-          <button class="sb-section-chevron" @click.stop="toggleSection('tutoring')">
-            <svg :class="['h-3.5 w-3.5 transition-transform duration-200', isSectionOpen('tutoring') ? '' : '-rotate-90']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <button class="sb-section-title pressable" @click="navigate('/tutoring')">{{ $t('nav.sections.liveTutoring') }}</button>
+          <button
+            class="sb-section-chevron pressable"
+            :aria-label="$t('nav.sections.liveTutoring')"
+            :aria-expanded="isSectionOpen('tutoring')"
+            @click.stop="toggleSection('tutoring')"
+          >
+            <svg :class="['h-3.5 w-3.5 transition-transform duration-(--duration-base) ease-(--ease-settle)', isSectionOpen('tutoring') ? '' : '-rotate-90']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
@@ -215,10 +222,10 @@ const classroomPreviews = computed(() =>
 
         <!-- Inline previews -->
         <Transition
-          enter-active-class="transition-all duration-200 ease-out"
+          enter-active-class="transition-all duration-(--duration-base) ease-(--ease-settle)"
           enter-from-class="max-h-0 opacity-0"
           enter-to-class="max-h-96 opacity-100"
-          leave-active-class="transition-all duration-150 ease-in"
+          leave-active-class="transition-all duration-(--duration-fast) ease-in"
           leave-from-class="max-h-96 opacity-100"
           leave-to-class="max-h-0 opacity-0"
         >
@@ -227,7 +234,7 @@ const classroomPreviews = computed(() =>
               <button
                 v-for="session in tutoringPreviews"
                 :key="session.id"
-                class="sb-preview-card group"
+                class="sb-preview-card pressable group"
                 @click="navigate(`/tutoring/${session.id}`)"
               >
                 <div class="sb-avatar">{{ session.initials }}</div>
@@ -261,7 +268,8 @@ const classroomPreviews = computed(() =>
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
-          :class="['sb-item', { 'sb-item--active': isActive('/classrooms') }]"
+          :class="['sb-item pressable selectable', { 'sb-item--active': isActive('/classrooms') }]"
+          :aria-current="isActive('/classrooms') ? 'page' : undefined"
           :title="$t('nav.sections.classrooms')"
           @click="navigate('/classrooms')"
         >
@@ -273,9 +281,14 @@ const classroomPreviews = computed(() =>
 
         <!-- Expanded: section header + chevron -->
         <div v-if="!collapsed" class="sb-section-header">
-          <button class="sb-section-title" @click="navigate('/classrooms')">{{ $t('nav.sections.classrooms') }}</button>
-          <button class="sb-section-chevron" @click.stop="toggleSection('classrooms')">
-            <svg :class="['h-3.5 w-3.5 transition-transform duration-200', isSectionOpen('classrooms') ? '' : '-rotate-90']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <button class="sb-section-title pressable" @click="navigate('/classrooms')">{{ $t('nav.sections.classrooms') }}</button>
+          <button
+            class="sb-section-chevron pressable"
+            :aria-label="$t('nav.sections.classrooms')"
+            :aria-expanded="isSectionOpen('classrooms')"
+            @click.stop="toggleSection('classrooms')"
+          >
+            <svg :class="['h-3.5 w-3.5 transition-transform duration-(--duration-base) ease-(--ease-settle)', isSectionOpen('classrooms') ? '' : '-rotate-90']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
@@ -283,10 +296,10 @@ const classroomPreviews = computed(() =>
 
         <!-- Inline previews -->
         <Transition
-          enter-active-class="transition-all duration-200 ease-out"
+          enter-active-class="transition-all duration-(--duration-base) ease-(--ease-settle)"
           enter-from-class="max-h-0 opacity-0"
           enter-to-class="max-h-96 opacity-100"
-          leave-active-class="transition-all duration-150 ease-in"
+          leave-active-class="transition-all duration-(--duration-fast) ease-in"
           leave-from-class="max-h-96 opacity-100"
           leave-to-class="max-h-0 opacity-0"
         >
@@ -295,7 +308,7 @@ const classroomPreviews = computed(() =>
               <button
                 v-for="classroom in classroomPreviews"
                 :key="classroom.id"
-                class="sb-preview-card group"
+                class="sb-preview-card pressable group"
                 @click="navigate(`/classrooms/${classroom.id}`)"
               >
                 <div class="sb-avatar sb-avatar--classroom">{{ classroom.initial }}</div>
@@ -319,7 +332,7 @@ const classroomPreviews = computed(() =>
     <!-- Skill Graph widget -->
     <!-- Collapsed: icon-only with tooltip -->
     <div v-if="collapsed" class="sb-skill-graph-collapsed">
-      <button class="sb-item" :title="$t('nav.sections.skillGraph')" @click="navigate('/skills')">
+      <button class="sb-item pressable" :title="$t('nav.sections.skillGraph')" @click="navigate('/skills')">
         <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
         </svg>
@@ -346,7 +359,7 @@ const classroomPreviews = computed(() =>
   overflow: hidden;
   border-right: 1px solid var(--app-border);
   background: var(--app-background);
-  transition: width 0.3s var(--ease-settle);
+  transition: width var(--transition-slow);
 }
 
 .sb-root--expanded { width: 15rem; }   /* 240px — slightly tighter than before */
@@ -400,7 +413,6 @@ const classroomPreviews = computed(() =>
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
   text-align: start;
 }
 
@@ -410,7 +422,6 @@ const classroomPreviews = computed(() =>
 }
 
 .sb-item--active {
-  background: color-mix(in srgb, var(--app-muted) 80%, transparent);
   color: var(--app-foreground);
   font-weight: 600;
 }
@@ -423,7 +434,7 @@ const classroomPreviews = computed(() =>
 
 .sb-label {
   white-space: nowrap;
-  transition: opacity 0.3s, width 0.3s;
+  transition: opacity var(--transition-slow), width var(--transition-slow);
 }
 
 .sb-root--collapsed .sb-label {
@@ -457,7 +468,6 @@ const classroomPreviews = computed(() =>
   cursor: pointer;
   text-align: start;
   padding: 0;
-  transition: opacity 0.15s;
 }
 
 .sb-section-title:hover { opacity: 1; }
@@ -473,7 +483,6 @@ const classroomPreviews = computed(() =>
   color: var(--app-muted-foreground);
   opacity: 0.5;
   cursor: pointer;
-  transition: background 0.15s, opacity 0.15s;
 }
 
 .sb-section-chevron:hover {
@@ -499,7 +508,6 @@ const classroomPreviews = computed(() =>
   gap: 0.5rem;
   padding: 0.375rem 0.5rem;
   border-radius: 0.5rem;
-  transition: background 0.15s;
   text-decoration: none;
   cursor: pointer;
   text-align: start;
