@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
+import { animateMotion } from '@/composables/useMotion'
 import { AppButton, AppModal, AppTextarea, ProvenanceBadge } from '@/components/ui'
 import InfoTip from '@/components/ui/InfoTip.vue'
 import LearnerTutor from '@/components/course/LearnerTutor.vue'
@@ -233,6 +234,24 @@ const flatElements = computed<FlatCourseElement[]>(() => {
     }
   }
   return out
+})
+
+// Moving between lessons keeps the learner's place in the course: the next
+// lesson arrives from the end of the reading direction, the previous one from
+// its start. Decorative only: the lesson is rendered and usable at once, and
+// Reduced and Off show it without movement.
+const lessonBody = ref<HTMLElement | null>(null)
+watch(activeElement, async (next, previous) => {
+  if (!next || !previous || next === previous) return
+  const from = flatElements.value.findIndex(item => item.element.id === previous)
+  const to = flatElements.value.findIndex(item => item.element.id === next)
+  if (from < 0 || to < 0) return
+  await nextTick()
+  const body = lessonBody.value
+  if (!body) return
+  const inline = getComputedStyle(body).direction === 'rtl' ? -1 : 1
+  const offset = (to > from ? 16 : -16) * inline
+  animateMotion(body, [{ opacity: 0, transform: `translateX(${offset}px)` }, { opacity: 1, transform: 'none' }], 'base')
 })
 
 const activeFlatIndex = computed(() => {
@@ -1268,7 +1287,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           <p>{{ monitoringError }}</p>
           <AppButton variant="outline" :loading="monitoringPending" @click="monitoringRetry++">{{ $t('common.actions.retry') }}</AppButton>
         </div>
-        <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
+        <div v-if="currentElement" :key="currentElement.id" ref="lessonBody" data-lesson-body class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
             <!-- Element header. For full-bleed elements (plugins/video) it is
                  hidden on mobile — the compact top header already carries the
                  chapter/element/progress context, so the renderer gets the
@@ -1641,28 +1660,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 </template>
 
 <style scoped>
-.lesson-body {
-  animation: lesson-body-in 0.22s ease;
-}
-
 .progress-fill {
   transition: width 560ms var(--ease-settle);
 }
 
-@keyframes lesson-body-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lesson-body {
-    animation: none;
-  }
-}
 </style>

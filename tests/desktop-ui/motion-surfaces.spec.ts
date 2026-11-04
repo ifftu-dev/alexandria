@@ -244,3 +244,46 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
     await expect(cards.filter({ hasText: 'Data engineer' })).toHaveCSS('opacity', '1')
   })
 }
+
+/**
+ * Click a lesson control and report how far the arriving lesson started from
+ * its resting place along the inline axis (two frames in), and the motion it ran.
+ */
+async function lessonStep(action: Locator) {
+  return action.evaluate(el => new Promise<{ shift: number, motion: number }>(resolve => {
+    (el as HTMLElement).click()
+    requestAnimationFrame(() => requestAnimationFrame(async () => {
+      const body = document.querySelector('[data-lesson-body]')
+      if (!body) return resolve({ shift: Number.NaN, motion: Number.NaN })
+      const animations = body.getAnimations().filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1)
+      const start = body.getBoundingClientRect().left
+      await Promise.all(animations.map(a => a.finished.catch(() => undefined)))
+      resolve({ shift: Math.round(start - body.getBoundingClientRect().left), motion: animations.length })
+    }))
+  }))
+}
+
+for (const mode of ['System', 'Reduced', 'Off'] as const) {
+  test(`lesson steps arrive from the reading direction under the motion setting (${mode})`, async ({ page }) => {
+    await open(page, '/learn/course-sorting')
+    await setMode(page, mode)
+    await expect(page.getByRole('heading', { name: 'Bubble sort' })).toBeVisible()
+
+    const forward = await lessonStep(page.getByRole('button', { name: /Insertion sort/ }))
+    await expect(page.getByRole('heading', { name: 'Insertion sort' })).toBeVisible()
+    const back = await lessonStep(page.getByRole('button', { name: 'Previous', exact: true }))
+    await expect(page.getByRole('heading', { name: 'Bubble sort' })).toHaveCSS('opacity', '1')
+    if (mode === 'System') {
+      expect(forward.shift).toBeGreaterThan(0)
+      expect(back.shift).toBeLessThan(0)
+    } else {
+      expect([forward, back]).toEqual([{ shift: 0, motion: 0 }, { shift: 0, motion: 0 }])
+    }
+  })
+}
+
+test('in a right-to-left locale the next lesson arrives from the left', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=motion-surfaces&locale=ur&path=/learn/course-sorting')
+  await expect(page.getByRole('heading', { name: 'Bubble sort' })).toBeVisible()
+  expect((await lessonStep(page.getByRole('button', { name: /Insertion sort/ }))).shift).toBeLessThan(0)
+})
