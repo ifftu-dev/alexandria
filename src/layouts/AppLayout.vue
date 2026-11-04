@@ -33,7 +33,7 @@ watch(() => route.path, () => {
   cancelRouteMotion()
   // Persistent media and assessment surfaces own their state and presentation.
   if (!isImmersiveRoute.value && routeContent.value) {
-    cancelRouteMotion = animateMotion(routeContent.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 200)
+    cancelRouteMotion = animateMotion(routeContent.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
   }
 }, { flush: 'post' })
 onUnmounted(() => cancelRouteMotion())

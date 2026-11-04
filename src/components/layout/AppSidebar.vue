@@ -346,7 +346,7 @@ const classroomPreviews = computed(() =>
   overflow: hidden;
   border-right: 1px solid var(--app-border);
   background: var(--app-background);
-  transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 0.3s var(--ease-settle);
 }
 
 .sb-root--expanded { width: 15rem; }   /* 240px — slightly tighter than before */

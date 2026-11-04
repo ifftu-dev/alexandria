@@ -1644,7 +1644,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 }
 
 .progress-fill {
-  transition: width 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 560ms var(--ease-settle);
 }
 
 @keyframes lesson-body-in {

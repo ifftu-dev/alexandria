@@ -159,6 +159,18 @@ describe('personal atlas explorer public interactions', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('keeps new evidence highlighted for exactly as long as its reveal animation', async () => {
+    vi.useFakeTimers()
+    document.documentElement.style.setProperty('--duration-reveal', '900ms')
+    const wrapper = setup()
+    await wrapper.setProps({ feedback: { revision: 6, earnedIds: ['b'], improvedIds: [] } })
+    await vi.advanceTimersByTimeAsync(850)
+    expect(wrapper.get('[role="status"]').text()).toContain('Bridges')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(wrapper.get('[role="status"]').text()).toBe('')
+    document.documentElement.style.removeProperty('--duration-reveal')
+  })
+
   it('moves the map with arrow keys and exits relationship focus with Escape without routing', async () => {
     const wrapper = setup()
     await button(wrapper, 'Bridges · Ready').trigger('click')

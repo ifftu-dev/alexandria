@@ -90,7 +90,7 @@ let cancelStepMotion = () => {}
 watch(step, () => {
   cancelStepMotion()
   if (!stepContent.value) return
-  cancelStepMotion = animateMotion(stepContent.value, [{ opacity: 0.5, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 240)
+  cancelStepMotion = animateMotion(stepContent.value, [{ opacity: 0.5, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 'base')
   stepContent.value.focus({ preventScroll: true })
   stepContent.value.scrollIntoView?.({ block: 'start', behavior: 'instant' })
 }, { flush: 'post' })

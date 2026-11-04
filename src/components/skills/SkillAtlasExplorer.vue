@@ -3,7 +3,7 @@ import '@/assets/css/skill-atlas.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, NODE_HEIGHT, NODE_WIDTH } from './atlasLayout'
-import { useMotion } from '@/composables/useMotion'
+import { motionDuration, useMotion } from '@/composables/useMotion'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
 import type { AtlasField, AtlasModel, AtlasNode, BloomRank } from '@/utils/skillAtlas'
@@ -36,7 +36,8 @@ watch(() => props.feedback, feedback => {
   if (document.visibilityState === 'hidden') { emit('feedback-consumed', feedback.revision); return }
   highlightedIds.value = [...new Set([...feedback.earnedIds, ...feedback.improvedIds])]
   feedbackRevision.value = feedback.revision
-  feedbackTimer = setTimeout(finishFeedback, 650)
+  // Same token as the atlas-evidence animation, so the highlight is never cut short.
+  feedbackTimer = setTimeout(finishFeedback, motionDuration('reveal'))
 })
 onMounted(() => {
   // A remount is navigation, never a new achievement. The shared owner also expires feedback.
@@ -327,7 +328,7 @@ function setBloom(event: Event): void {
 .atlas button[aria-pressed=true] { border-color: var(--app-primary); box-shadow: inset 0 0 0 1px var(--app-primary); }
 .atlas-feedback:not(:empty) { padding: 10px 14px; margin-block-end: 12px; border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); border-radius: 8px; }
 .atlas .map-node.is-updated { outline: 2px solid var(--app-primary); outline-offset: -2px; }
-.atlas:not(.motion-reduced) .map-node.is-updated { animation: atlas-evidence 800ms ease-out 1; }
+.atlas:not(.motion-reduced) .map-node.is-updated { animation: atlas-evidence var(--duration-reveal) ease-out 1; }
 @keyframes atlas-evidence { from { box-shadow: inset 0 0 0 5px var(--app-primary); } to { box-shadow: inset 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .atlas .map-node.is-updated { animation: none !important; } }
 .atlas-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-block-end: 20px; }

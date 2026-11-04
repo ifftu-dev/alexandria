@@ -10,7 +10,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useModalFocus } from '@/composables/useModalFocus'
-import { useMotion } from '@/composables/useMotion'
+import { motionDuration, useMotion } from '@/composables/useMotion'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
@@ -128,7 +128,8 @@ watch(isOpen, (open) => {
     endorsementImportJson.value = ''
     endorsementUiMessage.value = ''
     spawnConfetti()
-    confettiTimer = setTimeout(clearConfetti, 650)
+    // Every piece lands within the emphasis token (delay + duration < 650 ms).
+    confettiTimer = setTimeout(clearConfetti, motionDuration('emphasis'))
     document.addEventListener('visibilitychange', clearConfetti)
   } else {
     clearConfetti()
@@ -477,7 +478,7 @@ function continueToDashboard() {
   text-align: center;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
-  animation: card-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-pop var(--duration-emphasis) var(--ease-settle) both;
 }
 .celebrate-close {
   position: sticky;
@@ -610,7 +611,7 @@ function continueToDashboard() {
   inset: 0;
   border-radius: 9999px;
   border: 2px solid rgba(52, 211, 153, 0.5);
-  animation: ring-pulse 650ms ease-out both;
+  animation: ring-pulse var(--duration-emphasis) ease-out both;
 }
 .emblem-glow {
   position: absolute;
@@ -618,7 +619,7 @@ function continueToDashboard() {
   border-radius: 9999px;
   background: radial-gradient(circle, rgba(52, 211, 153, 0.45), transparent 65%);
   filter: blur(6px);
-  animation: glow-breathe 650ms ease-in-out both;
+  animation: glow-breathe var(--duration-emphasis) ease-in-out both;
 }
 .emblem-shine {
   position: absolute;
@@ -636,7 +637,7 @@ function continueToDashboard() {
   height: 220%;
   background: linear-gradient(75deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   transform: rotate(8deg);
-  animation: shine 500ms ease-out 100ms both;
+  animation: shine var(--duration-slow) ease-out 100ms both;
 }
 
 .eyebrow {
@@ -731,7 +732,7 @@ function continueToDashboard() {
   height: 100%;
   border-radius: 9999px;
   background: linear-gradient(90deg, #34d399, #10b981);
-  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width var(--duration-slow) var(--ease-settle);
 }
 .mint-bar-fill.anchoring {
   background-image: linear-gradient(
@@ -919,7 +920,7 @@ function continueToDashboard() {
   display: flex;
   gap: 0.5rem;
   margin-top: 1.25rem;
-  animation: fade-up 200ms ease both;
+  animation: fade-up var(--duration-base) ease both;
 }
 .btn {
   flex: 1;
@@ -931,7 +932,7 @@ function continueToDashboard() {
   background: transparent;
   color: var(--app-foreground, #e2e8f0);
   cursor: pointer;
-  transition: background-color 120ms ease, transform 80ms ease;
+  transition: background-color var(--duration-fast) ease, transform var(--duration-fast) ease;
 }
 .btn:hover {
   background: rgba(148, 163, 184, 0.1);

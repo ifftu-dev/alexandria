@@ -1,4 +1,5 @@
 import { expect, test, vi } from 'vitest'
+import { nextTick } from 'vue'
 
 test('device preference survives reload and the OS can reduce system motion', async () => {
   localStorage.clear()
@@ -41,5 +42,50 @@ test('returning to the app rechecks the OS preference and cancels an in-flight e
   window.dispatchEvent(new Event('focus'))
   expect(motion.mode.value).toBe('reduced')
   expect(animation.cancel).toHaveBeenCalled()
+  vi.unstubAllGlobals()
+})
+
+test('script-driven effects take their easing and duration from the CSS motion tokens', async () => {
+  vi.resetModules()
+  localStorage.clear()
+  vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }))
+  const root = document.documentElement.style
+  root.setProperty('--ease-settle', 'cubic-bezier(0.1, 0.2, 0.3, 0.4)')
+  root.setProperty('--duration-base', '210ms')
+  root.setProperty('--duration-reveal', '0.9s')
+  const element = document.createElement('div')
+  const animation = Object.assign(new EventTarget(), { cancel: vi.fn() })
+  element.animate = vi.fn(() => animation as unknown as Animation)
+  const { animateMotion, motionDuration } = await import('./useMotion')
+  animateMotion(element, [{ opacity: 0 }, { opacity: 1 }], 'base')
+  expect(element.animate).toHaveBeenCalledWith(expect.anything(), { duration: 210, easing: 'cubic-bezier(0.1, 0.2, 0.3, 0.4)' })
+  expect(motionDuration('reveal')).toBe(900)
+  for (const name of ['--ease-settle', '--duration-base', '--duration-reveal']) root.removeProperty(name)
+  vi.unstubAllGlobals()
+})
+
+test('after unlock the device setting drives motion and refreshes the pre-unlock cache', async () => {
+  vi.resetModules()
+  localStorage.setItem('alexandria-motion', 'reduced')
+  vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }))
+  const motionEntry = { key: 'ui.motion', scope: 'device', category: 'Appearance', label: 'Motion', description: '', kind: 'string', default_value: 'system', current_value: 'off', is_default: false }
+  const invoke = vi.fn(async (command: string) => command === 'list_settings' ? [motionEntry] : undefined)
+  vi.doMock('./useLocalApi', () => ({ useLocalApi: () => ({ invoke }) }))
+  vi.doMock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
+  const { useMotion } = await import('./useMotion')
+  const { useSettings } = await import('./useSettings')
+  const motion = useMotion()
+  expect(motion.mode.value).toBe('reduced')
+  motion.setPreference('reduced')
+  expect(invoke).not.toHaveBeenCalledWith('set_setting', expect.anything())
+  await useSettings().initialize()
+  await nextTick()
+  expect(motion.preference.value).toBe('off')
+  expect(document.documentElement.dataset.motion).toBe('off')
+  expect(localStorage.getItem('alexandria-motion')).toBe('off')
+  motion.setPreference('reduced')
+  expect(invoke).toHaveBeenCalledWith('set_setting', { key: 'ui.motion', value: 'reduced' })
+  vi.doUnmock('./useLocalApi')
+  vi.doUnmock('@tauri-apps/api/event')
   vi.unstubAllGlobals()
 })
