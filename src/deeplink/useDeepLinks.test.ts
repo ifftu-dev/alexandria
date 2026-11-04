@@ -26,6 +26,12 @@ async function fresh() {
   return (await import('./useDeepLinks')).useDeepLinks()
 }
 
+/** A profile becomes ready: unlocked, then every replay hook runs. */
+async function unlock() {
+  mocks.unlocked.value = true
+  for (const cb of mocks.readyCallbacks) await cb()
+}
+
 beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.unlocked.value = false
@@ -40,26 +46,27 @@ describe('openPath', () => {
     mocks.unlocked.value = true
     await links.openPath('/interview-room/abc')
     expect(mocks.push).toHaveBeenCalledWith('/interview-room/abc')
-    expect(links.heldTarget()).toBeNull()
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledOnce()
   })
 
   it('holds a path while locked and replays it on the next unlock', async () => {
     const links = await fresh()
     await links.openPath('/settings/organisations')
     expect(mocks.push).not.toHaveBeenCalled()
-    expect(links.heldTarget()).toEqual({ kind: 'route', path: '/settings/organisations' })
 
-    mocks.unlocked.value = true
-    for (const cb of mocks.readyCallbacks) await cb()
-    expect(mocks.push).toHaveBeenCalledWith('/settings/organisations')
-    expect(links.heldTarget()).toBeNull()
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/settings/organisations')
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledOnce()
   })
 
   it('keeps only the most recent held target', async () => {
     const links = await fresh()
     await links.openPath('/credentials/1')
     await links.openPath('/credentials/2')
-    expect(links.heldTarget()).toEqual({ kind: 'route', path: '/credentials/2' })
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/credentials/2')
   })
 
   it('refuses a path the router does not know', async () => {
@@ -78,8 +85,8 @@ describe('openPath', () => {
     await links.openPath('javascript:alert(1)')
     await links.openPath('skills')
     await links.openPath('')
+    await unlock()
     expect(mocks.push).not.toHaveBeenCalled()
-    expect(links.heldTarget()).toBeNull()
   })
 })
 

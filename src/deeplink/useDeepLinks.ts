@@ -168,11 +168,6 @@ async function openLink(raw: string): Promise<void> {
   await openTarget(target)
 }
 
-/** The target currently held for replay, if any (exposed for tests). */
-function heldTarget(): DeepLinkTarget | null {
-  return pending
-}
-
 async function init(): Promise<void> {
   if (initialized) return
   initialized = true
@@ -219,5 +214,5 @@ function dispose(): void {
 }
 
 export function useDeepLinks() {
-  return { init, dispose, openTarget, openPath, openLink, heldTarget, openNotification, hasUnlockDestination }
+  return { init, dispose, openTarget, openPath, openLink, openNotification, hasUnlockDestination }
 }
