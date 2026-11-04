@@ -1232,9 +1232,12 @@ mod tests {
         assert!(prepare(&conn, "Hello")
             .unwrap_err()
             .starts_with("assessment_active"));
-        assert!(attach(&conn, "t", "course", "lesson")
-            .unwrap_err()
-            .starts_with("assessment_active"));
+        assert!(matches!(
+            attach(&conn, "t", "course", "lesson"),
+            Err(crate::ai_chat::ops::OpError::Denied(
+                crate::ai_access::AccessDenied::AttemptInProgress
+            ))
+        ));
         assert!(start(&conn, &prepared, "q1")
             .unwrap_err()
             .starts_with("assessment_active"));

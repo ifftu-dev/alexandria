@@ -144,8 +144,13 @@ pub fn refuse(code: ChatErrorCode, reason: impl std::fmt::Display) -> String {
 /// A refusal from the AI access policy (`crate::ai_access`) as chat returns
 /// it: the typed reason's code from this vocabulary, then its reason.
 pub fn refused(denied: alexandria_studio::access::AccessDenied) -> String {
+    refuse(denial_code(&denied), denied)
+}
+
+/// The code chat shows for an access denial.
+pub fn denial_code(denied: &alexandria_studio::access::AccessDenied) -> ChatErrorCode {
     use alexandria_studio::access::AccessDenied as D;
-    let code = match &denied {
+    match denied {
         D::TooYoungForRemote => ChatErrorCode::Under13,
         D::AdultsOnly(_) => ChatErrorCode::AdultsOnly,
         D::GuardianRequired => ChatErrorCode::GuardianRequired,
@@ -157,8 +162,7 @@ pub fn refused(denied: alexandria_studio::access::AccessDenied) -> String {
         D::AttemptInProgress => ChatErrorCode::AssessmentActive,
         D::LessonNotFound => ChatErrorCode::NotFound,
         D::Storage(_) | D::Database(_) => ChatErrorCode::StorageError,
-    };
-    refuse(code, denied)
+    }
 }
 
 vocabulary! {

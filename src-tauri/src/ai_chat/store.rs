@@ -8,7 +8,7 @@
 //! referenced from every snapshot that used them. Completed message content is
 //! never rewritten.
 
-use super::vocab::{refuse, ChatErrorCode};
+use super::vocab::ChatErrorCode;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -21,39 +21,19 @@ pub const MAX_THREAD_MESSAGES: i64 = 1000;
 pub const MAX_TITLE_CHARS: usize = 120;
 pub const MAX_DRAFT_BYTES: usize = 32_000;
 
-#[derive(Debug)]
+/// Why the chat store refused or failed. Its display is the `code: reason`
+/// string the webview reads.
+#[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("{}: this chat no longer exists", ChatErrorCode::NotFound)]
     NotFound,
+    #[error("{}: this chat changed; reload it", ChatErrorCode::Conflict)]
     Conflict,
+    #[error("{code}: {0}", code = ChatErrorCode::InvalidInput)]
     Invalid(String),
-    Sql(rusqlite::Error),
-}
-
-impl From<rusqlite::Error> for StoreError {
-    fn from(e: rusqlite::Error) -> Self {
-        StoreError::Sql(e)
-    }
-}
-
-impl std::fmt::Display for StoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StoreError::NotFound => f.write_str(&refuse(
-                ChatErrorCode::NotFound,
-                "this chat no longer exists",
-            )),
-            StoreError::Conflict => f.write_str(&refuse(
-                ChatErrorCode::Conflict,
-                "this chat changed; reload it",
-            )),
-            StoreError::Invalid(m) => f.write_str(&refuse(ChatErrorCode::InvalidInput, m)),
-            // Never surface SQL text; it can echo stored content.
-            StoreError::Sql(_) => f.write_str(&refuse(
-                ChatErrorCode::StorageError,
-                "chat data could not be accessed",
-            )),
-        }
-    }
+    /// Never surfaces SQL text; it can echo stored content.
+    #[error("{}: chat data could not be accessed", ChatErrorCode::StorageError)]
+    Sql(#[from] rusqlite::Error),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
