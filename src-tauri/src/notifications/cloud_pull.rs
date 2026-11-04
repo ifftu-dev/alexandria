@@ -22,7 +22,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
-use super::{cloud_copy, kind, NewNotification};
+use super::{cloud_copy, interview_room_route, NewNotification, NotificationKind};
 use crate::cloud::{directories_db, signed_get, Directory};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileLease;
@@ -30,7 +30,7 @@ use crate::profile::scope::ProfileLease;
 /// One thing Cloud is holding for the learner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingItem {
-    pub kind: &'static str,
+    pub kind: NotificationKind,
     pub id: String,
     pub role_label: Option<String>,
     pub event_id: String,
@@ -46,12 +46,12 @@ impl PendingItem {
     pub fn notification(&self) -> Option<NewNotification> {
         let (title, body, route) = cloud_copy(self.kind, &self.id)?;
         let mut payload = serde_json::json!({ "id": self.id });
-        payload["eventId"] = Value::String(self.event_id.clone());
+        payload["event_id"] = Value::String(self.event_id.clone());
         if let Some(origin) = &self.cloud_origin {
-            payload["cloudOrigin"] = Value::String(origin.clone());
+            payload["cloud_origin"] = Value::String(origin.clone());
         }
         if let Some(role) = &self.role_label {
-            payload["roleLabel"] = Value::String(role.clone());
+            payload["role_label"] = Value::String(role.clone());
         }
         Some(
             NewNotification::new(self.kind, title, body)
@@ -64,22 +64,26 @@ impl PendingItem {
 
 /// The lists to read: the path under the learner's DID, the kind each item
 /// becomes, and the envelope field the item sits under.
-const LISTS: &[(&str, &str, &str)] = &[
-    ("/api/interviews/for/", kind::INTERVIEW_INVITED, "invite"),
-    ("/api/offers/for/", kind::OFFER_SENT, "offer"),
+const LISTS: &[(&str, NotificationKind, &str)] = &[
+    (
+        "/api/interviews/for/",
+        NotificationKind::InterviewInvited,
+        "invite",
+    ),
+    ("/api/offers/for/", NotificationKind::OfferSent, "offer"),
     (
         "/api/access-requests/for/",
-        kind::ACCESS_REQUESTED,
+        NotificationKind::AccessRequested,
         "request",
     ),
     (
         "/api/assessment-requests/for/",
-        kind::ASSESSMENT_REQUESTED,
+        NotificationKind::AssessmentRequested,
         "request",
     ),
     (
         "/api/interviews/rooms/for/",
-        kind::INTERVIEW_ROOM_OPENED,
+        NotificationKind::InterviewRoomOpened,
         "",
     ),
 ];
@@ -93,7 +97,7 @@ fn canonical_uuid(value: &str) -> bool {
 /// Lenient on purpose: an envelope this cannot read is skipped, not an error,
 /// because one malformed item must not hide the others.
 pub fn parse_items(
-    kind: &'static str,
+    kind: NotificationKind,
     field: &str,
     body: &Value,
     did: &str,
@@ -104,13 +108,13 @@ pub fn parse_items(
     };
     envelopes
         .iter()
-        .take(if kind == kind::INTERVIEW_ROOM_OPENED {
+        .take(if kind == NotificationKind::InterviewRoomOpened {
             100
         } else {
             1000
         })
         .filter_map(|envelope| {
-            if kind == kind::INTERVIEW_ROOM_OPENED {
+            if kind == NotificationKind::InterviewRoomOpened {
                 let id = envelope.get("id")?.as_str()?;
                 let opening = envelope.get("openingId")?.as_str()?;
                 let event_id = envelope.get("eventId")?.as_str()?;
@@ -125,8 +129,8 @@ pub fn parse_items(
                 if !canonical_uuid(id)
                     || !canonical_uuid(opening)
                     || event_id != format!("interview_room_opened:{id}:{opening}")
-                    || envelope.get("kind")?.as_str()? != kind
-                    || envelope.get("route")?.as_str()? != format!("/interview-room/{id}")
+                    || envelope.get("kind")?.as_str()? != kind.as_str()
+                    || envelope.get("route")?.as_str()? != interview_room_route(id)
                     || expires <= now
                     || opened > now
                     || opened >= expires
@@ -192,7 +196,7 @@ pub async fn fetch(origin: &str, signing_key: &SigningKey, did: &str) -> Vec<Pen
         async move {
             let path = format!("{prefix}{did}");
             match signed_get(client, directory, signing_key, &path).await {
-                Ok(body) => parse_items(kind, field, &body, did, chrono::Utc::now().timestamp()),
+                Ok(body) => parse_items(*kind, field, &body, did, chrono::Utc::now().timestamp()),
                 Err(error) => {
                     log::debug!("notifications: {kind} pull: {error}");
                     Vec::new()
@@ -225,7 +229,7 @@ pub fn unreported(conn: &Connection, items: &[PendingItem]) -> Vec<PendingItem> 
 }
 
 fn answered(conn: &Connection, item: &PendingItem) -> bool {
-    if item.kind != kind::INTERVIEW_INVITED && item.kind != kind::OFFER_SENT {
+    if item.kind != NotificationKind::InterviewInvited && item.kind != NotificationKind::OfferSent {
         return false;
     }
     conn.query_row(
@@ -444,7 +448,7 @@ mod tests {
 
         let rows = in_profile(&state, |db| super::super::list(db.conn(), None, false)).await;
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].kind, kind::INTERVIEW_INVITED);
+        assert_eq!(rows[0].kind, NotificationKind::InterviewInvited);
         assert_eq!(rows[0].route.as_deref(), Some("/settings/organisations"));
         assert!(heard
             .lock()
@@ -564,11 +568,11 @@ mod tests {
             "assessment_requested",
             "interview_room_opened",
         ] {
-            assert!(items.iter().any(|item| item.kind == kind));
+            assert!(items.iter().any(|item| item.kind.as_str() == kind));
         }
         let new = items
             .iter()
-            .find(|item| item.kind == kind::INTERVIEW_ROOM_OPENED)
+            .find(|item| item.kind == NotificationKind::InterviewRoomOpened)
             .unwrap()
             .notification()
             .unwrap();
@@ -580,7 +584,7 @@ mod tests {
             Some("/interview-room/11111111-1111-4111-8111-111111111111")
         );
         assert_eq!(new.dedupe_key.as_deref(), Some("interview_room_opened:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222"));
-        assert_eq!(new.payload.as_ref().unwrap()["cloudOrigin"], origin);
+        assert_eq!(new.payload.as_ref().unwrap()["cloud_origin"], origin);
     }
 
     #[test]
@@ -596,7 +600,7 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         let parse = |item: Value| {
             parse_items(
-                kind::INTERVIEW_ROOM_OPENED,
+                NotificationKind::InterviewRoomOpened,
                 "",
                 &serde_json::json!([item]),
                 DID,
@@ -675,11 +679,17 @@ mod tests {
 
     #[test]
     fn parses_live_items_for_this_learner_only() {
-        let items = parse_items(kind::INTERVIEW_INVITED, "invite", &interviews(), DID, 1_000);
+        let items = parse_items(
+            NotificationKind::InterviewInvited,
+            "invite",
+            &interviews(),
+            DID,
+            1_000,
+        );
         assert_eq!(
             items,
             vec![PendingItem {
-                kind: kind::INTERVIEW_INVITED,
+                kind: NotificationKind::InterviewInvited,
                 id: "11111111-1111-4111-8111-111111111111".into(),
                 role_label: Some("Backend engineer".into()),
                 event_id: "interview_invited:11111111-1111-4111-8111-111111111111".into(),
@@ -687,13 +697,20 @@ mod tests {
                 expires_at: 4_102_444_800,
             }]
         );
-        assert!(parse_items(kind::OFFER_SENT, "offer", &serde_json::json!({}), DID, 0).is_empty());
+        assert!(parse_items(
+            NotificationKind::OfferSent,
+            "offer",
+            &serde_json::json!({}),
+            DID,
+            0
+        )
+        .is_empty());
     }
 
     #[test]
     fn an_item_becomes_a_deduplicated_notification() {
         let item = PendingItem {
-            kind: kind::ACCESS_REQUESTED,
+            kind: NotificationKind::AccessRequested,
             id: "req-9".into(),
             role_label: None,
             event_id: "access_requested:req-9".into(),
@@ -705,7 +722,7 @@ mod tests {
         assert_eq!(n.route.as_deref(), Some("/settings/organisations"));
         assert_eq!(
             n.payload,
-            Some(serde_json::json!({ "id": "req-9", "eventId": "access_requested:req-9" }))
+            Some(serde_json::json!({ "id": "req-9", "event_id": "access_requested:req-9" }))
         );
     }
 
@@ -715,7 +732,7 @@ mod tests {
         db.run_migrations().unwrap();
         let conn = db.conn();
         let fresh = PendingItem {
-            kind: kind::OFFER_SENT,
+            kind: NotificationKind::OfferSent,
             id: "o-1".into(),
             role_label: None,
             event_id: "offer_sent:o-1".into(),
@@ -723,7 +740,7 @@ mod tests {
             expires_at: i64::MAX,
         };
         let seen = PendingItem {
-            kind: kind::OFFER_SENT,
+            kind: NotificationKind::OfferSent,
             id: "o-2".into(),
             role_label: None,
             event_id: "offer_sent:o-2".into(),
@@ -731,7 +748,7 @@ mod tests {
             expires_at: i64::MAX,
         };
         let answered = PendingItem {
-            kind: kind::OFFER_SENT,
+            kind: NotificationKind::OfferSent,
             id: "o-3".into(),
             role_label: None,
             event_id: "offer_sent:o-3".into(),

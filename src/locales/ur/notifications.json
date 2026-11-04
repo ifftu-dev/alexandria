@@ -87,6 +87,7 @@
     "working": "کام جاری ہے…",
     "permission": "اجازت مانگیں",
     "permissionGranted": "سسٹم بینر کی اجازت دیتا ہے۔",
-    "permissionDenied": "سسٹم بینر روک رہا ہے۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔"
+    "permissionDenied": "سسٹم بینر روک رہا ہے۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔",
+    "permissionPromptUnavailable": "سسٹم اجازت نہیں مانگ سکا۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔"
   }
 }

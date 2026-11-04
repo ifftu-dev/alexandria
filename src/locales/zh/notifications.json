@@ -87,6 +87,7 @@
     "working": "处理中…",
     "permission": "请求权限",
     "permissionGranted": "系统允许显示横幅。",
-    "permissionDenied": "系统正在阻止横幅。请在设备通知设置中允许 Alexandria 发送通知。"
+    "permissionDenied": "系统正在阻止横幅。请在设备通知设置中允许 Alexandria 发送通知。",
+    "permissionPromptUnavailable": "系统无法请求权限。请在设备通知设置中允许 Alexandria 发送通知。"
   }
 }

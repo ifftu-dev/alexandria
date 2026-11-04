@@ -12,6 +12,7 @@ pub mod governance_certificate;
 pub mod governance_locator;
 pub mod identity;
 pub mod integrity_commitment;
+pub mod notification;
 pub mod opinions;
 pub mod plugin;
 pub mod profile;

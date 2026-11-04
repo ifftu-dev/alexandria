@@ -83,7 +83,7 @@ if (screen === 'motion') {
   // holds one unread row. Every IPC call is recorded for the spec to inspect.
   const calls: string[] = []
   const row = { id: 'n-1', kind: 'offer_sent', title: '', body: '', route: '/settings/organisations',
-    source: 'local', createdAt: '2026-11-04T00:00:00Z', readAt: null, payload: null }
+    source: 'local', created_at: '2026-11-04T00:00:00Z', read_at: null, payload: null }
   const answers: Record<string, unknown> = {
     get_incompatible_profile_data: null, get_profile_cleanup_required: false, list_profiles: [],
     get_active_profile_id: 'profile-a', get_profile_session_token: 'session-a',

@@ -4,10 +4,10 @@ import { ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import en from '@/locales/en'
 import fr from '@/locales/fr'
-import type { PushStatus } from '@/types'
+import type { NotificationPermission, PushStatus } from '@/types'
 import NotificationsPanel from './NotificationsPanel.vue'
 
-const mocks = vi.hoisted(() => ({ status: null as PushStatus | null, register: vi.fn() }))
+const mocks = vi.hoisted(() => ({ status: null as PushStatus | null, register: vi.fn(), requestPermission: vi.fn() }))
 vi.mock('@/composables/usePlatform', () => ({ isMobilePlatform: true }))
 vi.mock('@/composables/profileSession', () => ({ getProfileSessionToken: () => 'session' }))
 vi.mock('@/composables/useSettings', () => ({ useSetting: () => ({ ref: ref(true), set: vi.fn() }) }))
@@ -17,13 +17,13 @@ vi.mock('@/composables/useNotifications', () => ({
     refreshPushStatus: vi.fn(async () => mocks.status),
     registerPush: mocks.register,
     setPushEnabled: vi.fn(),
-    requestPermission: vi.fn(),
+    requestPermission: mocks.requestPermission,
   }),
 }))
 
 function status(overrides: Partial<PushStatus>): PushStatus {
-  return { enabled: true, pendingCleanup: false, pendingRegistration: false, pausedByOrganisations: false,
-    supported: true, registered: false, platform: 'fcm', cloudOrigin: 'https://cloud.example', lastErrorCode: null, lastErrorDetail: null, ...overrides }
+  return { enabled: true, pending_cleanup: false, pending_registration: false, paused_by_organisations: false,
+    supported: true, registered: false, platform: 'fcm', cloud_origin: 'https://cloud.example', last_error_code: null, last_error_detail: null, ...overrides }
 }
 
 const RouterLink = { props: ['to'], template: '<a :href="to" data-testid="router-link"><slot /></a>' }
@@ -33,11 +33,12 @@ const render = (locale: 'en' | 'fr' = 'en') => mount(NotificationsPanel, {
 
 beforeEach(() => {
   mocks.register.mockReset()
+  mocks.requestPermission.mockReset()
 })
 
 describe('NotificationsPanel push status', () => {
   it('explains that push is paused by the organisations switch and links to it', async () => {
-    mocks.status = status({ pausedByOrganisations: true })
+    mocks.status = status({ paused_by_organisations: true })
     const wrapper = render()
     await flushPromises()
     const paused = wrapper.find('[data-testid=push-paused-by-organisations]')
@@ -70,7 +71,7 @@ describe('NotificationsPanel push errors', () => {
   } as const
 
   it.each(Object.entries(messages))('shows the translated message for %s and never the raw detail', async (code, message) => {
-    mocks.status = status({ lastErrorCode: code as keyof typeof messages, lastErrorDetail: 'Cloud push request returned 503' })
+    mocks.status = status({ last_error_code: code as keyof typeof messages, last_error_detail: 'Cloud push request returned 503' })
     const wrapper = render()
     await flushPromises()
     const error = wrapper.find('[data-testid=push-error]')
@@ -79,7 +80,7 @@ describe('NotificationsPanel push errors', () => {
   })
 
   it('shows the message in the profile language', async () => {
-    mocks.status = status({ lastErrorCode: 'cloud_unreachable', lastErrorDetail: 'Cloud push request failed' })
+    mocks.status = status({ last_error_code: 'cloud_unreachable', last_error_detail: 'Cloud push request failed' })
     const wrapper = render('fr')
     await flushPromises()
     expect(wrapper.find('[data-testid=push-error]').text()).toBe(fr.notifications.settings.pushErrors.cloud_unreachable)
@@ -91,5 +92,24 @@ describe('NotificationsPanel push errors', () => {
     const wrapper = render()
     await flushPromises()
     expect(wrapper.find('[data-testid=push-error]').exists()).toBe(false)
+  })
+})
+
+describe('NotificationsPanel permission request', () => {
+  // Written out rather than read from the catalog, so a dropped case fails here.
+  const outcomes: Record<NotificationPermission, string> = {
+    granted: 'The system allows banners.',
+    denied: "The system is blocking banners. Allow Alexandria in the device's notification settings.",
+    prompt_unavailable: "The system could not ask for permission. Allow Alexandria in the device's notification settings.",
+  }
+
+  it.each(Object.entries(outcomes))('says what %s means', async (outcome, message) => {
+    mocks.status = status({})
+    mocks.requestPermission.mockResolvedValue(outcome)
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text() === en.notifications.settings.permission)!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid=permission-outcome]').text()).toBe(message)
   })
 })

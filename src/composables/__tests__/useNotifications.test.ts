@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AppNotification } from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>(),
@@ -57,12 +58,12 @@ describe('notification routes', () => {
     mocks.invoke.mockImplementation(async (command) => {
       if (command === 'notifications_list') return []
       if (command === 'notifications_unread_count') return 0
-      if (command === 'notifications_pending_open') return { id: 'tap', profileId: 'A', networkId: 'network', recipient: 'r', route: '/settings/organisations' }
+      if (command === 'notifications_pending_open') return { id: 'tap', profile_id: 'A', network_id: 'network', recipient: 'r', route: '/settings/organisations' }
       return null
     })
     const notifications = await fresh()
     await notifications.initOpens()
-    expect(mocks.openNotification).toHaveBeenCalledWith({ id: 'tap', profileId: 'A', networkId: 'network', recipient: 'r', route: '/settings/organisations' })
+    expect(mocks.openNotification).toHaveBeenCalledWith({ id: 'tap', profile_id: 'A', network_id: 'network', recipient: 'r', route: '/settings/organisations' })
   })
 
   it('routes an open event from the backend', async () => {
@@ -73,9 +74,9 @@ describe('notification routes', () => {
       return () => undefined
     })
     await notifications.initOpens()
-    handlers.get('notifications:open')!({ payload: { id: 'tap', profileId: 'A', networkId: 'network', recipient: null, route: '/credentials/1' } })
+    handlers.get('notifications:open')!({ payload: { id: 'tap', profile_id: 'A', network_id: 'network', recipient: null, route: '/credentials/1' } })
     await Promise.resolve()
-    expect(mocks.openNotification).toHaveBeenCalledWith({ id: 'tap', profileId: 'A', networkId: 'network', recipient: null, route: '/credentials/1' })
+    expect(mocks.openNotification).toHaveBeenCalledWith({ id: 'tap', profile_id: 'A', network_id: 'network', recipient: null, route: '/credentials/1' })
   })
 })
 
@@ -88,7 +89,7 @@ describe('inbox state', () => {
       return () => undefined
     })
     await notifications.init()
-    const row = { id: 'n1', kind: 'offer_sent', title: 'New offer', body: '', route: null, source: 'push', createdAt: 'now', readAt: null, payload: null }
+    const row = { id: 'n1', kind: 'offer_sent', title: 'New offer', body: '', route: null, source: 'push', created_at: 'now', read_at: null, payload: null }
     handlers.get('notifications:new')!({ payload: { session: null, row } })
     handlers.get('notifications:new')!({ payload: { session: null, row } })
     expect(notifications.items.value).toHaveLength(1)
@@ -97,7 +98,7 @@ describe('inbox state', () => {
     await notifications.markRead(['n1'])
     expect(mocks.invoke).toHaveBeenCalledWith('notifications_mark_read', { ids: ['n1'] })
     expect(notifications.unread.value).toBe(0)
-    expect(notifications.items.value[0]!.readAt).not.toBeNull()
+    expect(notifications.items.value[0]!.read_at).not.toBeNull()
 
     notifications.teardown()
     expect(notifications.items.value).toHaveLength(0)
@@ -105,7 +106,7 @@ describe('inbox state', () => {
 
   it('opening a row marks it read, then follows its route', async () => {
     const notifications = await fresh()
-    const row = { id: 'n2', kind: 'credential_issued', title: 'Credential', body: '', route: '/credentials/2', source: 'local' as const, createdAt: 'now', readAt: null, payload: null }
+    const row: AppNotification = { id: 'n2', kind: 'credential_issued', title: 'Credential', body: '', route: '/credentials/2', source: 'local', created_at: 'now', read_at: null, payload: null }
     await notifications.open(row)
     expect(mocks.invoke).toHaveBeenCalledWith('notifications_mark_read', { ids: ['n2'] })
     expect(mocks.openPath).toHaveBeenCalledWith('/credentials/2')
@@ -117,7 +118,7 @@ describe('profile changes during actions', () => {
     const notifications = await fresh()
     let rejectRead!: (cause: Error) => void
     mocks.invoke.mockImplementation(() => new Promise((_resolve, reject) => { rejectRead = reject }))
-    const opening = notifications.open({ id: 'old', kind: 'offer_sent', title: '', body: '', route: '/settings/organisations', source: 'push', createdAt: '', readAt: null, payload: null })
+    const opening = notifications.open({ id: 'old', kind: 'offer_sent', title: '', body: '', route: '/settings/organisations', source: 'push', created_at: '', read_at: null, payload: null })
     notifications.teardown()
     rejectRead(new Error('Profile session changed'))
     await opening
@@ -132,7 +133,7 @@ it('ignores a queued inbox event from the previous session after new listeners a
   const handlers = new Map<string, (event: { payload: unknown }) => void>()
   mocks.listen.mockImplementation(async (event, callback) => { handlers.set(event, callback); return () => {} })
   await notifications.init()
-  handlers.get('notifications:new')!({ payload: { session: 'session-A', row: { id: 'private-A', readAt: null } } })
+  handlers.get('notifications:new')!({ payload: { session: 'session-A', row: { id: 'private-A', read_at: null } } })
   expect(notifications.items.value).toEqual([])
   handlers.get('notifications:changed')!({ payload: { session: 'session-A', unread: 9 } })
   expect(notifications.unread.value).toBe(0)
@@ -145,11 +146,11 @@ it.each(['clear', 'markAllRead', 'markRead', 'refreshPushStatus', 'registerPush'
   mocks.invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
   const pending = action === 'markRead' ? notifications.markRead(['A']) : notifications[action]()
   notifications.teardown()
-  mocks.invoke.mockImplementation(async command => command === 'notifications_list' ? [{ id: 'B', readAt: null }] : command === 'notifications_unread_count' ? 1 : null)
+  mocks.invoke.mockImplementation(async command => command === 'notifications_list' ? [{ id: 'B', read_at: null }] : command === 'notifications_unread_count' ? 1 : null)
   await notifications.load()
-  finish({ registered: true, cloudOrigin: 'https://old-profile.example' })
+  finish({ registered: true, cloud_origin: 'https://old-profile.example' })
   await pending
-  expect(notifications.items.value).toEqual([{ id: 'B', readAt: null }])
+  expect(notifications.items.value).toEqual([{ id: 'B', read_at: null }])
   expect(notifications.unread.value).toBe(1)
   expect(notifications.pushStatus.value).toBeNull()
 })
@@ -162,7 +163,7 @@ it('reconciles opted-out registrations on unlock so offline cleanup is retried',
 
 it('changes desired push state through one durable registration command', async () => {
   const notifications = await fresh()
-  const result = { enabled: false, registered: false, pendingCleanup: true }
+  const result = { enabled: false, registered: false, pending_cleanup: true }
   mocks.invoke.mockResolvedValue(result)
   await notifications.setPushEnabled(false)
   expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('push_set_enabled', { enabled: false })
@@ -172,7 +173,7 @@ it('changes desired push state through one durable registration command', async 
 
 it('loads activity committed while the inbox listeners are being installed', async () => {
   const notifications = await fresh()
-  const row = { id: 'during-unlock', readAt: null }
+  const row = { id: 'during-unlock', read_at: null }
   let committed = false
   mocks.listen.mockImplementation(async () => {
     committed = true
@@ -196,7 +197,7 @@ it('keeps an event received while an older initial snapshot is in flight', async
   let finishRows!: (rows: unknown) => void
   const oldRows = new Promise(resolve => { finishRows = resolve })
   let first = true
-  const row = { id: 'after-snapshot', readAt: null }
+  const row = { id: 'after-snapshot', read_at: null }
   mocks.invoke.mockImplementation(async command => {
     if (command === 'notifications_list') {
       if (first) { first = false; return oldRows }
@@ -225,11 +226,11 @@ it('does not publish a delayed inbox snapshot into a newly unlocked session', as
   await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('notifications_list', expect.anything()))
   notifications.teardown()
   session.setProfileSessionToken('B')
-  mocks.invoke.mockImplementation(async command => command === 'notifications_list' ? [{ id: 'B', readAt: null }] : 1)
+  mocks.invoke.mockImplementation(async command => command === 'notifications_list' ? [{ id: 'B', read_at: null }] : 1)
   await notifications.init()
   finish([{ id: 'private-A' }])
   await starting
-  expect(notifications.items.value).toEqual([{ id: 'B', readAt: null }])
+  expect(notifications.items.value).toEqual([{ id: 'B', read_at: null }])
   expect(notifications.unread.value).toBe(1)
   notifications.teardown()
 })

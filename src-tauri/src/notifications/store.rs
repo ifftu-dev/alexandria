@@ -3,7 +3,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{NewNotification, NotificationRow};
+use super::{NewNotification, NotificationKind, NotificationRow, NotificationSource};
 
 const DEFAULT_LIMIT: u32 = 100;
 
@@ -39,7 +39,7 @@ pub fn record(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
-                new.kind,
+                new.kind.as_str(),
                 new.title,
                 new.body,
                 new.route,
@@ -52,11 +52,11 @@ pub fn record(
         .map_err(|e| e.to_string())?;
         Ok(Some(NotificationRow {
             id,
-            kind: new.kind.clone(),
+            kind: new.kind,
             title: new.title.clone(),
             body: new.body.clone(),
             route: new.route.clone(),
-            source: new.source.as_str().to_string(),
+            source: new.source,
             created_at: now.to_string(),
             read_at: None,
             payload: new.payload.clone(),
@@ -82,13 +82,16 @@ pub fn list(
     let rows = statement
         .query_map(params![limit], |row| {
             let payload_json: Option<String> = row.get(8)?;
+            let kind: String = row.get(1)?;
+            let source: String = row.get(5)?;
             Ok(NotificationRow {
                 id: row.get(0)?,
-                kind: row.get(1)?,
+                kind: NotificationKind::stored(&kind),
                 title: row.get(2)?,
                 body: row.get(3)?,
                 route: row.get(4)?,
-                source: row.get(5)?,
+                // Only this app writes the source; anything else reads as local.
+                source: NotificationSource::parse(&source).unwrap_or(NotificationSource::Local),
                 created_at: row.get(6)?,
                 read_at: row.get(7)?,
                 payload: payload_json.and_then(|json| serde_json::from_str(&json).ok()),
@@ -156,7 +159,6 @@ pub fn seen(conn: &Connection, dedupe_key: &str) -> Result<bool, String> {
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::notifications::{kind, Source};
 
     fn db() -> Database {
         let db = Database::open_in_memory().expect("in-memory database");
@@ -166,7 +168,7 @@ mod tests {
 
     fn sample() -> NewNotification {
         NewNotification::new(
-            kind::OFFER_SENT,
+            NotificationKind::OfferSent,
             "New offer",
             "An organisation sent you an offer.",
         )
@@ -181,8 +183,8 @@ mod tests {
         let row = record(db.conn(), &sample(), "2026-10-20T10:00:00Z")
             .unwrap()
             .expect("recorded");
-        assert_eq!(row.kind, kind::OFFER_SENT);
-        assert_eq!(row.source, Source::Local.as_str());
+        assert_eq!(row.kind, NotificationKind::OfferSent);
+        assert_eq!(row.source, NotificationSource::Local);
         assert_eq!(row.payload, Some(serde_json::json!({ "id": "abc" })));
 
         let listed = list(db.conn(), None, false).unwrap();
@@ -230,6 +232,22 @@ mod tests {
         // Newest first, and the first row keeps `r1`.
         assert_eq!(all[0].id, second.id);
         assert_eq!(all[1].read_at.as_deref(), Some("r1"));
+    }
+
+    #[test]
+    fn a_stored_kind_this_build_does_not_know_lists_as_generic() {
+        let db = db();
+        // Written by a newer build: the row stays readable, as the generic kind.
+        db.conn()
+            .execute(
+                "INSERT INTO notifications (id, kind, title, body, source, created_at) \
+                 VALUES ('n1', 'future_kind', 't', 'b', 'local', 't1')",
+                [],
+            )
+            .unwrap();
+        let listed = list(db.conn(), None, false).unwrap();
+        assert_eq!(listed[0].kind, NotificationKind::Generic);
+        assert_eq!(listed[0].source, NotificationSource::Local);
     }
 
     #[test]

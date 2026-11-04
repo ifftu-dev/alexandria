@@ -80,12 +80,15 @@ fn catalog(locale: &str) -> &'static Catalog {
     CATALOGS.get(primary).unwrap_or(&CATALOGS["en"])
 }
 
-pub(super) fn localized(locale: &str, kind: &str) -> (&'static str, &'static str) {
+pub(super) fn localized(
+    locale: &str,
+    kind: super::NotificationKind,
+) -> (&'static str, &'static str) {
     let english = &CATALOGS["en"].kinds;
     let copy = catalog(locale)
         .kinds
-        .get(kind)
-        .or_else(|| english.get(kind))
+        .get(kind.as_str())
+        .or_else(|| english.get(kind.as_str()))
         .unwrap_or(&english["generic"]);
     (&copy.title, &copy.body)
 }

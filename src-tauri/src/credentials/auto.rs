@@ -318,7 +318,10 @@ mod tests {
             1,
             "committed issuance must leave an inbox entry even before its UI event"
         );
-        assert_eq!(inbox[0].kind, crate::notifications::kind::CREDENTIAL_ISSUED);
+        assert_eq!(
+            inbox[0].kind,
+            crate::notifications::NotificationKind::CredentialIssued
+        );
         assert_eq!(
             inbox[0].route,
             Some(format!("/credentials/{}", report.issued_ids[0]))

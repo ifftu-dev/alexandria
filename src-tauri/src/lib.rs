@@ -33,6 +33,7 @@ pub mod sentinel;
 pub mod settings;
 pub mod studio;
 pub mod tutoring;
+pub(crate) mod vocabulary;
 
 #[cfg(target_os = "macos")]
 mod macos_media_delegate;

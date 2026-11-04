@@ -41,7 +41,6 @@ pub(crate) mod recipients;
 mod store;
 
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
@@ -49,34 +48,10 @@ use crate::settings::{registry::keys, SettingsStore};
 
 pub use store::{clear, list, mark_all_read, mark_read, record, unread_count};
 
-/// The kinds the app and Alexandria Cloud share. A kind is a string on the
-/// wire and in the database; these constants are the vocabulary.
-pub mod kind {
-    pub const INTERVIEW_INVITED: &str = "interview_invited";
-    pub const INTERVIEW_ROOM_OPENED: &str = "interview_room_opened";
-    pub const OFFER_SENT: &str = "offer_sent";
-    pub const ACCESS_REQUESTED: &str = "access_requested";
-    pub const ASSESSMENT_REQUESTED: &str = "assessment_requested";
-    pub const CLASSROOM_CALL_STARTED: &str = "classroom_call_started";
-    pub const CLASSROOM_JOIN_REQUESTED: &str = "classroom_join_requested";
-    pub const CREDENTIAL_ISSUED: &str = "credential_issued";
-    pub const GUARDIAN_REQUEST: &str = "guardian_request";
-    pub const GENERIC: &str = "generic";
-
-    /// Every kind the app knows, for validating what arrives from outside.
-    pub const ALL: &[&str] = &[
-        INTERVIEW_INVITED,
-        INTERVIEW_ROOM_OPENED,
-        OFFER_SENT,
-        ACCESS_REQUESTED,
-        ASSESSMENT_REQUESTED,
-        CLASSROOM_CALL_STARTED,
-        CLASSROOM_JOIN_REQUESTED,
-        CREDENTIAL_ISSUED,
-        GUARDIAN_REQUEST,
-        GENERIC,
-    ];
-}
+pub use crate::domain::notification::{
+    NotificationKind, NotificationOpen, NotificationPermission, NotificationRow,
+    NotificationSource, PushErrorCode, PushStatus,
+};
 
 /// Emitted with a [`NotificationRow`] when one is recorded.
 pub const EVENT_NEW: &str = "notifications:new";
@@ -89,43 +64,10 @@ pub const EVENT_OPEN: &str = "notifications:open";
 /// names the same channel in its FCM payloads.
 pub const ANDROID_CHANNEL: &str = "alexandria_default";
 
-/// Where a notification came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// Produced by this app from something it observed itself.
-    Local,
-    /// Produced from a remote push the platform delivered.
-    Push,
-}
-
-impl Source {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Push => "push",
-        }
-    }
-}
-
-/// A notification as the webview sees it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct NotificationRow {
-    pub id: String,
-    pub kind: String,
-    pub title: String,
-    pub body: String,
-    pub route: Option<String>,
-    pub source: String,
-    pub created_at: String,
-    pub read_at: Option<String>,
-    pub payload: Option<serde_json::Value>,
-}
-
 /// A notification about to be recorded.
 #[derive(Debug, Clone)]
 pub struct NewNotification {
-    pub kind: String,
+    pub kind: NotificationKind,
     pub title: String,
     pub body: String,
     pub route: Option<String>,
@@ -133,19 +75,19 @@ pub struct NewNotification {
     /// same key is dropped.
     pub dedupe_key: Option<String>,
     pub payload: Option<serde_json::Value>,
-    pub source: Source,
+    pub source: NotificationSource,
 }
 
 impl NewNotification {
-    pub fn new(kind: &str, title: impl Into<String>, body: impl Into<String>) -> Self {
+    pub fn new(kind: NotificationKind, title: impl Into<String>, body: impl Into<String>) -> Self {
         Self {
-            kind: kind.to_string(),
+            kind,
             title: title.into(),
             body: body.into(),
             route: None,
             dedupe_key: None,
             payload: None,
-            source: Source::Local,
+            source: NotificationSource::Local,
         }
     }
 
@@ -165,22 +107,35 @@ impl NewNotification {
     }
 
     pub fn from_push(mut self) -> Self {
-        self.source = Source::Push;
+        self.source = NotificationSource::Push;
         self
     }
+}
+
+/// Where an interview-room notification leads. Inbox rows, pushes and Cloud
+/// discovery all name the room through this.
+pub fn interview_room_route(id: &str) -> String {
+    format!("/interview-room/{id}")
 }
 
 /// English generic copy and destination for a Cloud-originated kind.
 /// `None` for a kind Cloud does not send. Recording selects the profile locale
 /// from the shared webview catalogs; contract fixtures check Cloud agreement.
-pub fn cloud_copy(kind: &str, id: &str) -> Option<(&'static str, &'static str, String)> {
+pub fn cloud_copy(
+    kind: NotificationKind,
+    id: &str,
+) -> Option<(&'static str, &'static str, String)> {
+    use NotificationKind as K;
     let route = match kind {
-        kind::INTERVIEW_ROOM_OPENED => format!("/interview-room/{id}"),
-        kind::INTERVIEW_INVITED
-        | kind::OFFER_SENT
-        | kind::ACCESS_REQUESTED
-        | kind::ASSESSMENT_REQUESTED => "/settings/organisations".to_string(),
-        _ => return None,
+        K::InterviewRoomOpened => interview_room_route(id),
+        K::InterviewInvited | K::OfferSent | K::AccessRequested | K::AssessmentRequested => {
+            "/settings/organisations".to_string()
+        }
+        K::ClassroomCallStarted
+        | K::ClassroomJoinRequested
+        | K::CredentialIssued
+        | K::GuardianRequest
+        | K::Generic => return None,
     };
     let (title, body) = copy::localized("en", kind);
     Some((title, body, route))
@@ -205,15 +160,15 @@ pub fn for_classroom_meta(
             }
             Some(
                 NewNotification::new(
-                    kind::CLASSROOM_CALL_STARTED,
+                    NotificationKind::ClassroomCallStarted,
                     "A classroom call started",
                     "Somebody started a call in one of your classrooms.",
                 )
                 .route(format!("/classrooms/{}", event.classroom_id))
                 .dedupe(format!("classroom_call:{call_id}"))
                 .payload(serde_json::json!({
-                    "classroomId": event.classroom_id,
-                    "callId": call_id,
+                    "classroom_id": event.classroom_id,
+                    "call_id": call_id,
                 })),
             )
         }
@@ -222,7 +177,7 @@ pub fn for_classroom_meta(
             let display_name = data.get("display_name").and_then(serde_json::Value::as_str);
             Some(
                 NewNotification::new(
-                    kind::CLASSROOM_JOIN_REQUESTED,
+                    NotificationKind::ClassroomJoinRequested,
                     "Someone wants to join your classroom",
                     match display_name {
                         Some(name) => format!("{name} asked to join."),
@@ -235,8 +190,8 @@ pub fn for_classroom_meta(
                     event.classroom_id
                 ))
                 .payload(serde_json::json!({
-                    "classroomId": event.classroom_id,
-                    "requestId": request_id,
+                    "classroom_id": event.classroom_id,
+                    "request_id": request_id,
                 })),
             )
         }
@@ -247,7 +202,7 @@ pub fn for_classroom_meta(
 /// A credential the auto-issuance pipeline just signed.
 pub fn for_issued_credential(credential_id: &str) -> NewNotification {
     NewNotification::new(
-        kind::CREDENTIAL_ISSUED,
+        NotificationKind::CredentialIssued,
         "New credential",
         "A completion was verified on-chain and a credential was issued to you.",
     )
@@ -259,7 +214,7 @@ pub fn for_issued_credential(credential_id: &str) -> NewNotification {
 /// A guardian completed a link to this (ward) profile.
 pub fn for_guardian_linked(link_id: &str, guardian_display_name: Option<&str>) -> NewNotification {
     NewNotification::new(
-        kind::GUARDIAN_REQUEST,
+        NotificationKind::GuardianRequest,
         "A guardian linked to your account",
         match guardian_display_name {
             Some(name) => format!("{name} now has oversight of this account."),
@@ -268,7 +223,7 @@ pub fn for_guardian_linked(link_id: &str, guardian_display_name: Option<&str>) -
     )
     .route("/settings/guardian")
     .dedupe(format!("guardian_link:{link_id}"))
-    .payload(serde_json::json!({ "linkId": link_id }))
+    .payload(serde_json::json!({ "link_id": link_id }))
 }
 
 /// A recorded notification and the unread count after it.
@@ -291,7 +246,7 @@ pub fn record_if_enabled(
     }
     let now = crate::clock::now_rfc3339();
     let locale = SettingsStore::get(conn, keys::USER_LANGUAGE);
-    let (title, body) = copy::localized(&locale, &new.kind);
+    let (title, body) = copy::localized(&locale, new.kind);
     let localized = NewNotification {
         title: title.into(),
         body: body.into(),
@@ -373,7 +328,7 @@ fn emit_unread<R: Runtime>(app: &AppHandle<R>, session: &str, unread: u32) {
 }
 
 /// Publish an already persisted and locally resolved tap.
-pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &opens::NotificationOpen) {
+pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &NotificationOpen) {
     let _ = app.emit(EVENT_OPEN, intent);
 }
 
@@ -384,7 +339,7 @@ pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &opens::NotificationOpe
 /// A push on iOS is the exception: iOS already showed the system banner
 /// before handing the payload over, so showing another would double it.
 fn should_interrupt<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) -> bool {
-    if cfg!(target_os = "ios") && row.source == Source::Push.as_str() {
+    if cfg!(target_os = "ios") && row.source == NotificationSource::Push {
         return false;
     }
     if cfg!(mobile) {
@@ -418,10 +373,10 @@ fn os_banner<R: Runtime>(app: &AppHandle<R>, announcement: &Announcement, row: &
         let origin = row
             .payload
             .as_ref()
-            .and_then(|p| p.get("cloudOrigin"))
+            .and_then(|p| p.get("cloud_origin"))
             .and_then(serde_json::Value::as_str);
         let destination = match origin {
-            Some(origin) if row.kind == kind::INTERVIEW_ROOM_OPENED => format!(
+            Some(origin) if row.kind == NotificationKind::InterviewRoomOpened => format!(
                 "{route}?cloud={}",
                 url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
             ),
@@ -710,6 +665,41 @@ mod tests {
     }
 
     #[test]
+    fn the_webview_receives_rows_with_snake_case_fields_and_typed_vocabulary() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let row = record_if_enabled(db.conn(), &for_issued_credential("c1"))
+            .unwrap()
+            .unwrap()
+            .row;
+        let wire = serde_json::to_value(&row).unwrap();
+        let mut keys: Vec<&str> = wire
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "body",
+                "created_at",
+                "id",
+                "kind",
+                "payload",
+                "read_at",
+                "route",
+                "source",
+                "title"
+            ]
+        );
+        assert_eq!(wire["kind"], "credential_issued");
+        assert_eq!(wire["source"], "local");
+        assert_eq!(wire["payload"], serde_json::json!({ "id": "c1" }));
+    }
+
+    #[test]
     fn the_android_channel_reads_in_the_chosen_language_and_falls_back_to_english() {
         assert_eq!(
             channel_text("es"),
@@ -808,7 +798,7 @@ mod tests {
             SettingsStore::set(db.conn(), keys::USER_LANGUAGE, locale.clone()).unwrap();
             for (kind, copy) in contract["locales"][expected].as_object().unwrap() {
                 let new = NewNotification::new(
-                    kind,
+                    NotificationKind::parse(kind).unwrap(),
                     "Private person",
                     "Private organisation did:key:secret",
                 )
@@ -825,23 +815,25 @@ mod tests {
     }
 
     #[test]
-    fn every_local_kind_records_generic_copy_and_unknown_kinds_fall_back_safely() {
+    fn every_local_kind_records_generic_copy() {
         let db = crate::db::Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         SettingsStore::set(db.conn(), keys::USER_LANGUAGE, "fr".to_string()).unwrap();
         for (kind, expected) in [
             (
-                kind::CLASSROOM_CALL_STARTED,
+                NotificationKind::ClassroomCallStarted,
                 "Un appel de classe a commencé",
             ),
-            (kind::CLASSROOM_JOIN_REQUESTED, "Demande d’adhésion"),
-            (kind::CREDENTIAL_ISSUED, "Justificatif délivré"),
             (
-                kind::GUARDIAN_REQUEST,
+                NotificationKind::ClassroomJoinRequested,
+                "Demande d’adhésion",
+            ),
+            (NotificationKind::CredentialIssued, "Justificatif délivré"),
+            (
+                NotificationKind::GuardianRequest,
                 "Un responsable légal est lié à votre compte",
             ),
-            (kind::GENERIC, "Nouvelle activité"),
-            ("future_kind", "New activity"),
+            (NotificationKind::Generic, "Nouvelle activité"),
         ] {
             let row = record_if_enabled(
                 db.conn(),
@@ -877,14 +869,14 @@ mod tests {
 
     #[test]
     fn cloud_copy_names_a_route_per_kind() {
-        let (title, _, route) = cloud_copy(kind::INTERVIEW_ROOM_OPENED, "abc").unwrap();
+        let (title, _, route) = cloud_copy(NotificationKind::InterviewRoomOpened, "abc").unwrap();
         assert_eq!(title, "Your interview room is open");
         assert_eq!(route, "/interview-room/abc");
         assert_eq!(
-            cloud_copy(kind::OFFER_SENT, "x").unwrap().2,
+            cloud_copy(NotificationKind::OfferSent, "x").unwrap().2,
             "/settings/organisations"
         );
-        assert!(cloud_copy(kind::CLASSROOM_CALL_STARTED, "x").is_none());
+        assert!(cloud_copy(NotificationKind::ClassroomCallStarted, "x").is_none());
     }
 
     #[test]
@@ -902,7 +894,7 @@ mod tests {
             started_by: "stake_other".into(),
         });
         let n = for_classroom_meta(&call, Some("stake_me")).unwrap();
-        assert_eq!(n.kind, kind::CLASSROOM_CALL_STARTED);
+        assert_eq!(n.kind, NotificationKind::ClassroomCallStarted);
         assert_eq!(n.route.as_deref(), Some("/classrooms/c1"));
         assert_eq!(n.dedupe_key.as_deref(), Some("classroom_call:call-1"));
         // The learner who started the call is not told about it.

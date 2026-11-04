@@ -87,6 +87,7 @@
     "working": "काम सुरू आहे…",
     "permission": "परवानगी मागा",
     "permissionGranted": "सिस्टीम बॅनरला परवानगी देते.",
-    "permissionDenied": "सिस्टीम बॅनर अडवत आहे. उपकरणाच्या सूचना सेटिंगमध्ये Alexandria ला परवानगी द्या."
+    "permissionDenied": "सिस्टीम बॅनर अडवत आहे. उपकरणाच्या सूचना सेटिंगमध्ये Alexandria ला परवानगी द्या.",
+    "permissionPromptUnavailable": "सिस्टीम परवानगी मागू शकली नाही. उपकरणाच्या सूचना सेटिंगमध्ये Alexandria ला परवानगी द्या."
   }
 }

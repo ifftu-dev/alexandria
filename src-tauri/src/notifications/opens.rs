@@ -1,6 +1,7 @@
 //! One durable, recipient-bound destination. Reading does not consume it;
 //! only the matching admitted profile may acknowledge successful navigation.
 use super::recipients;
+use super::NotificationOpen;
 use crate::crypto::{group_key, keystore::Keystore};
 use crate::profile::{ProfileId, ProfilePaths};
 use crate::{profile::scope::ProfileLease, AppState};
@@ -40,19 +41,11 @@ struct SealedOpen {
 
 static FILE_LOCK: Mutex<()> = Mutex::new(());
 const FILE: &str = "notification_open.json";
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct NotificationOpen {
-    pub id: String,
-    pub profile_id: String,
-    pub recipient: Option<String>,
-    pub route: String,
-    pub network_id: String,
-}
+/// Version 2 is snake_case throughout. Earlier files (camelCase, or the
+/// unversioned plaintext prototype) are pre-launch data, discarded unread.
+const FORMAT_VERSION: u8 = 2;
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct OpenState {
     format_version: u8,
     pending: Option<SealedOpen>,
@@ -62,7 +55,7 @@ struct OpenState {
 impl Default for OpenState {
     fn default() -> Self {
         Self {
-            format_version: 1,
+            format_version: FORMAT_VERSION,
             pending: None,
             consumed: Vec::new(),
         }
@@ -74,15 +67,15 @@ fn load(state: &AppState) -> Result<OpenState, String> {
         Ok(bytes) => {
             let value: serde_json::Value =
                 serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-            if value.get("formatVersion").is_none() {
-                // Pre-launch plaintext prototype data is incompatible. Do not
-                // preserve its activity history or guess a locked vault key.
+            if value.get("format_version").is_none() {
+                // Pre-launch data is incompatible. Do not preserve its
+                // activity history or guess a locked vault key.
                 std::fs::remove_file(state.app_data_dir.join(FILE)).map_err(|e| e.to_string())?;
                 let _ = std::fs::remove_file(state.app_data_dir.join(format!("{FILE}.tmp")));
                 return Ok(OpenState::default());
             }
             let opens: OpenState = serde_json::from_value(value).map_err(|e| e.to_string())?;
-            if opens.format_version != 1 {
+            if opens.format_version != FORMAT_VERSION {
                 return Err("unsupported notification open format".into());
             }
             Ok(opens)

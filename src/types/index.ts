@@ -4,6 +4,7 @@
 // ============================================
 
 import type { ChatLocation, ConnectionLocation, ProposalKind, Protocol } from '@/generated/chat-vocab'
+import type { NotificationKind, NotificationSource, PushErrorCode } from '@/generated/notification-vocab'
 
 export type { ChatLocation }
 
@@ -2701,67 +2702,50 @@ export interface SeedResetPlan {
 }
 
 // ── Notifications ──────────────────────────────────────────────
+// Mirrors `src-tauri/src/domain/notification.rs`. The vocabularies are
+// generated from the same module into `@/generated/notification-vocab`.
 
-/** The kinds the backend records (`src-tauri/src/notifications`). */
-export type NotificationKind =
-  | 'interview_invited'
-  | 'interview_room_opened'
-  | 'offer_sent'
-  | 'access_requested'
-  | 'assessment_requested'
-  | 'classroom_call_started'
-  | 'classroom_join_requested'
-  | 'credential_issued'
-  | 'guardian_request'
-  | 'generic'
+export type {
+  NotificationKind,
+  NotificationPermission,
+  NotificationSource,
+  PushErrorCode,
+} from '@/generated/notification-vocab'
 
 /** One row in the per-profile notifications inbox. */
 export interface AppNotification {
   id: string
-  kind: NotificationKind | string
+  kind: NotificationKind
   title: string
   body: string
   route: string | null
-  source: 'local' | 'push'
-  createdAt: string
-  readAt: string | null
+  source: NotificationSource
+  created_at: string
+  read_at: string | null
   payload: Record<string, unknown> | null
 }
-
-/**
- * Why the last push registration step failed. Mirrors
- * `notifications::push::PushErrorCode`; the webview translates each code.
- */
-export type PushErrorCode =
-  | 'permission_denied'
-  | 'token_unavailable'
-  | 'insecure_origin'
-  | 'cloud_unreachable'
-  | 'cloud_rejected'
-  | 'cloud_unacknowledged'
-  | 'invalid_response'
 
 /** Whether this device is registered for push, and with which service. */
 export interface PushStatus {
   enabled: boolean
-  pendingCleanup: boolean
-  pendingRegistration: boolean
+  pending_cleanup: boolean
+  pending_registration: boolean
   /** Push is on but organisations are off, so nothing is registered with Cloud. */
-  pausedByOrganisations: boolean
+  paused_by_organisations: boolean
   supported: boolean
   registered: boolean
   platform: string | null
-  cloudOrigin: string | null
-  lastErrorCode: PushErrorCode | null
+  cloud_origin: string | null
+  last_error_code: PushErrorCode | null
   /** Untranslated failure text for diagnostics; never shown as the message. */
-  lastErrorDetail: string | null
+  last_error_detail: string | null
 }
 
 /** Locally resolved tap; profile and origin are never taken from provider data. */
 export interface NotificationOpen {
-  networkId: string
+  network_id: string
   id: string
-  profileId: string
+  profile_id: string
   recipient: string | null
   route: string
 }

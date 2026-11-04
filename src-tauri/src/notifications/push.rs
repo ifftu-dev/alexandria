@@ -3,11 +3,14 @@
 //! intent; the locked-access sidecar contains only routing associations.
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
-use super::{cloud_copy, recipients, NewNotification, Recorded};
+use super::{
+    cloud_copy, recipients, NewNotification, NotificationKind, NotificationOpen, PushErrorCode,
+    PushStatus, Recorded,
+};
 use crate::cloud::{is_loopback, nonce, origin as cloud_origin, proof};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileLease;
@@ -17,77 +20,6 @@ use crate::AppState;
 // Serialize intent, PUT and DELETE, including SDK callbacks. The profile lease
 // cancels waiters on lock; this gate owns no profile resources or session state.
 static OPERATIONS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PushStatus {
-    pub supported: bool,
-    pub registered: bool,
-    pub platform: Option<String>,
-    pub cloud_origin: Option<String>,
-    /// Why the last attempt failed, as a code the webview translates.
-    pub last_error_code: Option<PushErrorCode>,
-    /// The untranslated failure text, for diagnostics. Never shown as the
-    /// learner-facing message.
-    pub last_error_detail: Option<String>,
-    pub enabled: bool,
-    pub pending_cleanup: bool,
-    pub pending_registration: bool,
-    /// Push is on but organisations are off, so nothing is registered with
-    /// Cloud. The push preference is kept for when organisations come back.
-    pub paused_by_organisations: bool,
-}
-
-/// Why a push registration or removal failed. The set is small and stable:
-/// the webview translates each code, and the codes are stored as written
-/// here, so renaming one is a wire and storage change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PushErrorCode {
-    /// The learner did not allow notifications on this device.
-    PermissionDenied,
-    /// The phone's push service did not hand over a token.
-    TokenUnavailable,
-    /// The Cloud origin is neither https nor loopback, so no proof is sent.
-    InsecureOrigin,
-    /// The request never got an answer from Cloud.
-    CloudUnreachable,
-    /// Cloud answered with an error status.
-    CloudRejected,
-    /// Cloud answered without acknowledging this mutation's version, or
-    /// answered a removal with something other than 204.
-    CloudUnacknowledged,
-    /// Cloud's answer to a registration had no valid recipient binding.
-    InvalidResponse,
-}
-
-impl PushErrorCode {
-    const ALL: [Self; 7] = [
-        Self::PermissionDenied,
-        Self::TokenUnavailable,
-        Self::InsecureOrigin,
-        Self::CloudUnreachable,
-        Self::CloudRejected,
-        Self::CloudUnacknowledged,
-        Self::InvalidResponse,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PermissionDenied => "permission_denied",
-            Self::TokenUnavailable => "token_unavailable",
-            Self::InsecureOrigin => "insecure_origin",
-            Self::CloudUnreachable => "cloud_unreachable",
-            Self::CloudRejected => "cloud_rejected",
-            Self::CloudUnacknowledged => "cloud_unacknowledged",
-            Self::InvalidResponse => "invalid_response",
-        }
-    }
-
-    fn parse(stored: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|code| code.as_str() == stored)
-    }
-}
 
 /// A failed push step: the code the learner sees translated, and the raw
 /// text kept beside it.
@@ -581,12 +513,15 @@ pub async fn unregister<R: Runtime>(
     reconcile(&app.state::<AppState>(), lease, None, Some(false)).await
 }
 
+/// The seven FCM data keys Cloud sends. This is Cloud's wire contract, so it
+/// keeps Cloud's camelCase names; only the app's own IPC types are snake_case.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PushData {
     recipient: String,
     event_id: String,
-    kind: String,
+    /// A kind this build does not know fails the whole payload.
+    kind: NotificationKind,
     id: String,
     route: String,
     title: String,
@@ -601,12 +536,12 @@ fn parse(payload: Value) -> Option<PushData> {
     {
         return None;
     }
-    let (_, _, route) = cloud_copy(&data.kind, &data.id)?;
+    let (_, _, route) = cloud_copy(data.kind, &data.id)?;
     if route != data.route {
         return None;
     }
     let prefix = format!("{}:{}", data.kind, data.id);
-    if data.kind == super::kind::INTERVIEW_ROOM_OPENED {
+    if data.kind == NotificationKind::InterviewRoomOpened {
         if !data
             .event_id
             .strip_prefix(&format!("{prefix}:"))
@@ -621,13 +556,13 @@ fn parse(payload: Value) -> Option<PushData> {
 }
 
 fn notification(data: &PushData, origin: &str) -> Option<NewNotification> {
-    let (title, body, route) = cloud_copy(&data.kind, &data.id)?;
+    let (title, body, route) = cloud_copy(data.kind, &data.id)?;
     Some(
-        NewNotification::new(&data.kind, title, body)
+        NewNotification::new(data.kind, title, body)
             .route(route)
             .dedupe(&data.event_id)
             .payload(
-                serde_json::json!({"id": data.id, "eventId": data.event_id, "cloudOrigin": origin}),
+                serde_json::json!({"id": data.id, "event_id": data.event_id, "cloud_origin": origin}),
             )
             .from_push(),
     )
@@ -670,10 +605,7 @@ pub(crate) async fn receive(
         .await
 }
 
-pub(crate) fn tapped(
-    state: &AppState,
-    payload: Value,
-) -> Result<Option<super::opens::NotificationOpen>, String> {
+pub(crate) fn tapped(state: &AppState, payload: Value) -> Result<Option<NotificationOpen>, String> {
     if payload.get("local").and_then(Value::as_bool) == Some(true) {
         return match payload
             .get("data")
@@ -696,7 +628,7 @@ pub(crate) fn tapped(
     let mut route = new.route.unwrap_or_default();
     // A locked/inactive tap has no inbox row yet. Carry only the origin
     // resolved from this local binding; provider routes cannot supply one.
-    if data.kind == super::kind::INTERVIEW_ROOM_OPENED {
+    if data.kind == NotificationKind::InterviewRoomOpened {
         route = format!(
             "{route}?cloud={}",
             url::form_urlencoded::byte_serialize(binding.origin.as_bytes()).collect::<String>()
@@ -704,7 +636,7 @@ pub(crate) fn tapped(
     }
     super::opens::hold(
         state,
-        super::opens::NotificationOpen {
+        NotificationOpen {
             id: format!("{}:{}", data.recipient, data.event_id),
             profile_id: binding.profile_id,
             recipient: Some(data.recipient),

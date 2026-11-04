@@ -87,6 +87,7 @@
     "working": "Opération en cours…",
     "permission": "Demander l’autorisation",
     "permissionGranted": "Le système autorise les bannières.",
-    "permissionDenied": "Le système bloque les bannières. Autorisez Alexandria dans les réglages de notification de l’appareil."
+    "permissionDenied": "Le système bloque les bannières. Autorisez Alexandria dans les réglages de notification de l’appareil.",
+    "permissionPromptUnavailable": "Le système n’a pas pu demander l’autorisation. Autorisez Alexandria dans les réglages de notification de l’appareil."
   }
 }

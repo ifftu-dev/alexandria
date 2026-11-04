@@ -1985,6 +1985,7 @@ export type MessageKey =
   | 'notifications.settings.permission'
   | 'notifications.settings.permissionDenied'
   | 'notifications.settings.permissionGranted'
+  | 'notifications.settings.permissionPromptUnavailable'
   | 'notifications.settings.push'
   | 'notifications.settings.pushCleanupPending'
   | 'notifications.settings.pushErrors.cloud_rejected'

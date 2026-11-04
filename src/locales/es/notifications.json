@@ -87,6 +87,7 @@
     "working": "En curso…",
     "permission": "Solicitar permiso",
     "permissionGranted": "El sistema permite los avisos.",
-    "permissionDenied": "El sistema bloquea los avisos. Permite las notificaciones de Alexandria en los ajustes del dispositivo."
+    "permissionDenied": "El sistema bloquea los avisos. Permite las notificaciones de Alexandria en los ajustes del dispositivo.",
+    "permissionPromptUnavailable": "El sistema no pudo pedir permiso. Permite las notificaciones de Alexandria en los ajustes del dispositivo."
   }
 }

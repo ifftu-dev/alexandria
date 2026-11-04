@@ -675,6 +675,9 @@ async fn legacy_response_and_rotated_bindings_fail_closed_and_wire_routes_are_ex
         ),
         ("recipient", "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"),
         ("cloudOrigin", "https://foreign.example"),
+        // A kind this build does not know is refused at the boundary.
+        ("kind", "future_kind"),
+        ("kind", "generic"),
     ] {
         let mut payload = valid.clone();
         payload["data"][key] = Value::String(value.into());
@@ -701,7 +704,7 @@ async fn legacy_response_and_rotated_bindings_fail_closed_and_wire_routes_are_ex
         Some("/interview-room/22222222-2222-4222-8222-222222222222")
     );
     assert_eq!(
-        recorded.row.payload.as_ref().unwrap()["cloudOrigin"],
+        recorded.row.payload.as_ref().unwrap()["cloud_origin"],
         origin
     );
     assert!(receive(&state, admitted(&state), room)
@@ -849,11 +852,11 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        received.row.payload.as_ref().unwrap()["cloudOrigin"],
+        received.row.payload.as_ref().unwrap()["cloud_origin"],
         origin
     );
     assert_eq!(
-        received.row.payload.as_ref().unwrap()["eventId"],
+        received.row.payload.as_ref().unwrap()["event_id"],
         push["data"]["eventId"]
     );
     assert_eq!(
@@ -1235,6 +1238,20 @@ async fn locked_startup_removes_incompatible_plaintext_prototype_activity() {
         !path.exists(),
         "unversioned plaintext prototype activity must not remain on disk"
     );
+    // The camelCase format that preceded snake_case taps is discarded too.
+    std::fs::write(
+        &path,
+        r#"{"formatVersion":1,"pending":null,"consumed":["opaque"]}"#,
+    )
+    .unwrap();
+    assert!(super::super::opens::pending(&state)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(
+        !path.exists(),
+        "camelCase tap files must not remain on disk"
+    );
 }
 
 fn set_organisations(state: &AppState, enabled: bool) {
@@ -1398,8 +1415,8 @@ async fn switching_organisations_off_reconciles_push_and_other_settings_do_not()
 fn failure(status: &PushStatus) -> (Value, Value) {
     let wire = serde_json::to_value(status).unwrap();
     (
-        wire["lastErrorCode"].clone(),
-        wire["lastErrorDetail"].clone(),
+        wire["last_error_code"].clone(),
+        wire["last_error_detail"].clone(),
     )
 }
 

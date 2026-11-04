@@ -4,7 +4,10 @@
 use tauri::AppHandle;
 
 use crate::db::executor::DatabaseWorkload;
-use crate::notifications::{self, push::PushStatus, NewNotification, NotificationRow};
+use crate::notifications::{
+    self, NewNotification, NotificationKind, NotificationOpen, NotificationPermission,
+    NotificationRow, PushStatus,
+};
 use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
@@ -116,25 +119,29 @@ pub async fn notifications_discover(app: AppHandle, lease: ProfileLease) -> Resu
 /// Ask the OS for permission to show banners. The desktop needs none and
 /// answers `granted`; a phone shows its prompt the first time.
 ///
-/// `granted` | `denied` | `unavailable`.
+/// `granted` or `denied` is the learner's answer; `prompt_unavailable` means
+/// the system prompt could not run at all. Errs only when the profile session
+/// changed before asking.
 #[tauri::command]
 pub async fn notifications_permission_request(
     app: AppHandle,
     lease: ProfileLease,
-) -> Result<String, String> {
+) -> Result<NotificationPermission, String> {
     if !lease.is_current() {
         return Err("profile session changed".into());
     }
     // Permission is device-global; do not retain a profile while awaiting the OS.
     drop(lease);
-    if cfg!(mobile) {
-        let granted = tauri_plugin_mobile_push::request_permission(&app)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(if granted { "granted" } else { "denied" }.into())
-    } else {
-        Ok("granted".into())
+    if !cfg!(mobile) {
+        return Ok(NotificationPermission::Granted);
     }
+    let answer = tauri_plugin_mobile_push::request_permission(&app)
+        .await
+        .map_err(|e| e.to_string());
+    if let Err(error) = &answer {
+        log::warn!("notifications: the permission prompt could not run: {error}");
+    }
+    Ok(NotificationPermission::of_prompt(answer))
 }
 
 /// Peek at a validated tap even while locked. Only the matching admitted
@@ -142,7 +149,7 @@ pub async fn notifications_permission_request(
 #[tauri::command]
 pub async fn notifications_pending_open(
     state: tauri::State<'_, AppState>,
-) -> Result<Option<notifications::opens::NotificationOpen>, String> {
+) -> Result<Option<NotificationOpen>, String> {
     notifications::opens::pending(&state).await
 }
 
@@ -219,14 +226,13 @@ pub async fn notifications_emit_test(
     kind: String,
 ) -> Result<NotificationRow, String> {
     test_emitter_allowed(cfg!(debug_assertions))?;
-    if !notifications::kind::ALL.contains(&kind.as_str()) {
-        return Err(format!("unknown notification kind `{kind}`"));
-    }
+    let kind =
+        NotificationKind::parse(&kind).ok_or(format!("unknown notification kind `{kind}`"))?;
     let id = uuid::Uuid::new_v4().to_string();
-    let notification = match notifications::cloud_copy(&kind, &id) {
-        Some((title, body, route)) => NewNotification::new(&kind, title, body).route(route),
+    let notification = match notifications::cloud_copy(kind, &id) {
+        Some((title, body, route)) => NewNotification::new(kind, title, body).route(route),
         None => NewNotification::new(
-            &kind,
+            kind,
             format!("Test: {kind}"),
             "A notification produced on request, to see how it looks.",
         )
@@ -314,12 +320,17 @@ mod tests {
             .await
             .unwrap();
             if command == "notifications_pending_open" {
+                let wire = response
+                    .unwrap()
+                    .deserialize::<serde_json::Value>()
+                    .unwrap();
                 assert_eq!(
-                    response
-                        .unwrap()
-                        .deserialize::<crate::notifications::opens::NotificationOpen>()
-                        .unwrap(),
-                    intent
+                    wire,
+                    serde_json::json!({
+                        "id": intent.id, "profile_id": profile.id.as_str(),
+                        "recipient": null, "route": "",
+                        "network_id": crate::notifications::recipients::network().unwrap(),
+                    })
                 );
             } else {
                 assert_eq!(

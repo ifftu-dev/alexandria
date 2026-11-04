@@ -33,8 +33,8 @@ function bodyOf(n: AppNotification): string {
 const formatter = computed(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }))
 
 function when(n: AppNotification): string {
-  const d = new Date(n.createdAt)
-  return Number.isNaN(d.getTime()) ? n.createdAt : formatter.value.format(d)
+  const d = new Date(n.created_at)
+  return Number.isNaN(d.getTime()) ? n.created_at : formatter.value.format(d)
 }
 
 async function onClear() {
@@ -75,13 +75,13 @@ async function onClear() {
         <button
           type="button"
           class="flex w-full items-start gap-3 px-4 py-3 text-start transition-colors hover:bg-muted/40"
-          :class="n.readAt ? 'opacity-80' : ''"
+          :class="n.read_at ? 'opacity-80' : ''"
           @click="open(n)"
         >
           <span
             class="mt-2 h-2 w-2 shrink-0 rounded-full"
-            :class="n.readAt ? 'bg-transparent' : 'bg-primary'"
-            :aria-label="n.readAt ? undefined : $t('notifications.page.unreadLabel')"
+            :class="n.read_at ? 'bg-transparent' : 'bg-primary'"
+            :aria-label="n.read_at ? undefined : $t('notifications.page.unreadLabel')"
           />
           <span class="min-w-0 flex-1">
             <span class="flex flex-wrap items-center gap-2">

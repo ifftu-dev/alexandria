@@ -2,55 +2,21 @@
 //! stable string form that crosses the Tauri bridge.
 //!
 //! The webview never retypes these. `scripts/chat-vocab.json` is a snapshot
-//! of this module, checked by the `chat_vocab_snapshot_is_current` test
-//! below and rewritten by `npm run generate:chat-vocab`, which then has
+//! of this module and of the notification vocabularies in
+//! `domain::notification`, checked by the `chat_vocab_snapshot_is_current`
+//! test below and rewritten by `npm run generate:chat-vocab`, which then has
 //! `scripts/check-tauri-commands.mjs --write` render it into
-//! `src/generated/chat-vocab.ts`. Both guards run in CI, so adding a variant
-//! here without regenerating fails the build rather than drifting.
+//! `src/generated/chat-vocab.ts` and `src/generated/notification-vocab.ts`.
+//! Both guards run in CI, so adding a variant without regenerating fails the
+//! build rather than drifting.
 
 use alexandria_ai::{Location, Protocol};
 use serde::Serialize;
 
-/// A closed set of names with one stable string form each. The string is
-/// part of the variant, so a variant cannot exist without one; `ALL` lists
-/// every variant for the snapshot and the round-trip test.
-macro_rules! vocabulary {
-    (
-        $(#[$meta:meta])*
-        $name:ident {
-            $($(#[$variant_meta:meta])* $variant:ident => $text:literal),+ $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum $name {
-            $($(#[$variant_meta])* $variant),+
-        }
-
-        impl $name {
-            pub const ALL: &'static [$name] = &[$($name::$variant),+];
-
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $($name::$variant => $text),+
-                }
-            }
-
-            pub fn parse(text: &str) -> Option<Self> {
-                match text {
-                    $($text => Some($name::$variant),)+
-                    _ => None,
-                }
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-    };
-}
+use crate::domain::notification::{
+    NotificationKind, NotificationPermission, NotificationSource, PushErrorCode,
+};
+use crate::vocabulary::vocabulary;
 
 vocabulary! {
     /// The code before the first colon of a chat or sign-in error, stored
@@ -269,12 +235,20 @@ struct Snapshot {
     chat_locations: Vec<&'static str>,
     protocols: Vec<&'static str>,
     restricts_apps_for_minors_hosts: Vec<&'static str>,
+    notification_kinds: Vec<&'static str>,
+    notification_sources: Vec<&'static str>,
+    notification_permissions: Vec<&'static str>,
+    push_error_codes: Vec<&'static str>,
+}
+
+fn names<T: Copy>(all: &[T], as_str: fn(T) -> &'static str) -> Vec<&'static str> {
+    all.iter().map(|&item| as_str(item)).collect()
 }
 
 /// The snapshot `scripts/check-tauri-commands.mjs` renders into TypeScript.
 pub fn snapshot_json() -> String {
     let snapshot = Snapshot {
-        _comment: "Written by `npm run generate:chat-vocab` from src-tauri/src/ai_chat/vocab.rs and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
+        _comment: "Written by `npm run generate:chat-vocab` from src-tauri/src/ai_chat/vocab.rs and src-tauri/src/domain/notification.rs, and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
         chat_error_codes: ChatErrorCode::ALL.iter().map(|c| c.as_str()).collect(),
         proposal_kinds: ProposalKind::ALL.iter().map(|k| k.as_str()).collect(),
         reply_fence_tags: ReplyFence::ALL.iter().map(|f| f.as_str()).collect(),
@@ -288,6 +262,13 @@ pub fn snapshot_json() -> String {
         chat_locations: CHAT_LOCATIONS.iter().map(|l| l.as_str()).collect(),
         protocols: PROTOCOLS.iter().map(|p| p.as_str()).collect(),
         restricts_apps_for_minors_hosts: alexandria_ai::terms::RESTRICTS_APPS_FOR_MINORS.to_vec(),
+        notification_kinds: names(NotificationKind::ALL, NotificationKind::as_str),
+        notification_sources: names(NotificationSource::ALL, NotificationSource::as_str),
+        notification_permissions: names(
+            NotificationPermission::ALL,
+            NotificationPermission::as_str,
+        ),
+        push_error_codes: names(PushErrorCode::ALL, PushErrorCode::as_str),
     };
     let mut json = serde_json::to_string_pretty(&snapshot).expect("vocabulary serialises");
     json.push('\n');
@@ -357,6 +338,26 @@ mod tests {
             ConnectionLocation::ALL,
             ConnectionLocation::as_str,
             ConnectionLocation::parse,
+        );
+        round_trips(
+            NotificationKind::ALL,
+            NotificationKind::as_str,
+            NotificationKind::parse,
+        );
+        round_trips(
+            NotificationSource::ALL,
+            NotificationSource::as_str,
+            NotificationSource::parse,
+        );
+        round_trips(
+            NotificationPermission::ALL,
+            NotificationPermission::as_str,
+            NotificationPermission::parse,
+        );
+        round_trips(
+            PushErrorCode::ALL,
+            PushErrorCode::as_str,
+            PushErrorCode::parse,
         );
     }
 

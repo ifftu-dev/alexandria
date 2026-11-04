@@ -87,6 +87,7 @@
     "working": "Working…",
     "permission": "Ask for permission",
     "permissionGranted": "The system allows banners.",
-    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings."
+    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings.",
+    "permissionPromptUnavailable": "The system could not ask for permission. Allow Alexandria in the device's notification settings."
   }
 }

@@ -2,15 +2,15 @@
 
 [![npm](https://img.shields.io/npm/v/tauri-plugin-mobile-push-api.svg)](https://www.npmjs.com/package/tauri-plugin-mobile-push-api)
 
-Push notifications for Tauri v2 mobile apps -- iOS (APNs) and Android (FCM).
+Push notifications for Tauri v2 mobile apps through Firebase Cloud Messaging (FCM) -- on iOS (delivered over APNs) and Android.
 
-A Tauri v2 plugin that provides native remote push notification support using Apple Push Notification service (APNs) on iOS and Firebase Cloud Messaging (FCM) on Android. Unlike `tauri-plugin-notification` which only handles local notifications, this plugin handles **server-sent remote push notifications** -- the kind you need for chat apps, alerts, and real-time engagement.
+A Tauri v2 plugin that provides native remote push notification support using Firebase Cloud Messaging (FCM) on both platforms; on iOS, FCM delivers through Apple Push Notification service (APNs). Unlike `tauri-plugin-notification` which only handles local notifications, this plugin handles **server-sent remote push notifications** -- the kind you need for chat apps, alerts, and real-time engagement.
 
-**Zero-config on iOS.** No AppDelegate file, no method swizzling, no manual setup. The plugin automatically injects APNs handlers into the Tao AppDelegate at runtime using ObjC runtime APIs. Just enable the Push Notifications capability in Xcode and you are ready to go.
+**Zero-config on iOS.** No AppDelegate file, no method swizzling, no manual setup. The plugin automatically injects APNs handlers into the Tao AppDelegate at runtime using ObjC runtime APIs. Enable the Push Notifications capability in Xcode and bundle your Firebase `GoogleService-Info.plist`, and you are ready to go.
 
 ## Features
 
-- **APNs on iOS** -- native device token registration and push delivery
+- **FCM on iOS** -- registers with APNs, hands the APNs device token to Firebase, and returns the FCM registration token derived from it
 - **FCM on Android** -- Firebase Cloud Messaging integration with automatic token management
 - **Zero iOS configuration** -- no AppDelegate.swift file needed; APNs methods are injected automatically at runtime
 - **No method swizzling** -- uses direct `@_cdecl` FFI and `class_addMethod` injection, which is transparent and future-proof
@@ -24,7 +24,7 @@ A Tauri v2 plugin that provides native remote push notification support using Ap
 
 | Platform | Push Token | Foreground Notifications | Notification Tap | Token Refresh |
 |----------|-----------|--------------------------|------------------|---------------|
-| iOS 13+  | APNs device token (hex) | Yes | Yes | Yes |
+| iOS 13+  | FCM registration token (derived from the APNs token) | Yes | Yes | Yes |
 | Android 7+ (API 24) | FCM registration token | Yes | Yes | Yes |
 | Desktop  | No-op (returns an error) | N/A | N/A | N/A |
 
@@ -163,7 +163,11 @@ Ensure your `.entitlements` file includes:
 
 Change to `production` for App Store / TestFlight builds. If you added the Push Notifications capability via Xcode, this is handled automatically.
 
-That is the complete iOS setup. No AppDelegate.swift file is needed -- the plugin handles all APNs delegate methods automatically via runtime injection.
+#### 3. Add Firebase
+
+Add your iOS app to the Firebase project, upload its APNs key in the Firebase console, and bundle the `GoogleService-Info.plist` it gives you. Without the file the app still runs and local notifications work, but remote push is off and `getToken()` rejects.
+
+No AppDelegate.swift file is needed -- the plugin handles all APNs delegate methods automatically via runtime injection.
 
 ### Android
 
@@ -223,7 +227,7 @@ if (!granted) {
 
 ### Get Device Token
 
-Returns the APNs device token (hex string) on iOS or the FCM registration token on Android. On iOS, this triggers `registerForRemoteNotifications()` and resolves when the OS delivers the token.
+Returns the FCM registration token on both platforms. On iOS, this triggers `registerForRemoteNotifications()`, hands the APNs device token to Firebase when the OS delivers it, and resolves with the FCM token Firebase derives from it.
 
 ```typescript
 import { getToken } from "tauri-plugin-mobile-push-api";
@@ -312,7 +316,7 @@ function getToken(): Promise<string>;
 
 Get the current device push token.
 
-- **iOS**: Calls `registerForRemoteNotifications()`, waits for the APNs callback, and returns the device token as a hex string. Times out after 15 seconds.
+- **iOS**: Calls `registerForRemoteNotifications()`, waits for the APNs callback, gives the APNs token to Firebase, and returns the FCM registration token derived from it (never the hex APNs token). Times out after 15 seconds.
 - **Android**: Calls `FirebaseMessaging.getInstance().token` and returns the FCM registration token.
 - **Desktop**: Rejects — there is no push service to register with.
 
@@ -356,7 +360,7 @@ function onTokenRefresh(
 ): Promise<PluginListener>;
 ```
 
-Fires when the OS issues a new push token (APNs token refresh on iOS, FCM token rotation on Android). Send the new token to your backend whenever this fires.
+Fires when Firebase issues a new FCM registration token, on either platform (including the first token after launch on iOS). Send the new token to your backend whenever this fires.
 
 ### Types
 
@@ -375,8 +379,7 @@ interface PushNotification {
 
 Once you have the device token, send pushes from your backend:
 
-- **iOS (APNs):** Use the [APNs HTTP/2 API](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns) with a `.p8` signing key or `.p12` certificate. The token from `getToken()` is a hex-encoded APNs device token.
-- **Android (FCM):** Use the [FCM HTTP v1 API](https://firebase.google.com/docs/cloud-messaging/send-message) with a service account. The token from `getToken()` is an FCM registration token.
+- **iOS and Android:** Use the [FCM HTTP v1 API](https://firebase.google.com/docs/cloud-messaging/send-message) with a service account. The token from `getToken()` is an FCM registration token on both platforms; FCM forwards iOS messages to APNs with the key uploaded in the Firebase console. It is not an APNs device token, so the APNs HTTP/2 API cannot use it.
 
 The notification payload should include `title`, `body`, and any custom `data` fields your app needs. These will be delivered to your `onNotificationReceived` and `onNotificationTapped` handlers.
 
@@ -405,7 +408,7 @@ Tauri v2's `swift-rs` compilation model creates duplicate `PluginManager` single
 This plugin bypasses that system entirely using `@_cdecl` FFI functions, which is the same mechanism Tauri uses for `init_plugin_<name>()` and is proven to work reliably:
 
 - **`request_permission`**: Rust spawns a thread that calls `extern "C" mobile_push_request_permission()` in Swift. The Swift function calls `UNUserNotificationCenter.requestAuthorization()` and blocks with a `DispatchSemaphore` until the user responds. Returns 1 (granted) or 0 (denied) to Rust.
-- **`get_token`**: Rust spawns a thread that calls `extern "C" mobile_push_get_device_token()` in Swift. On first call, the Swift function lazily injects APNs delegate methods (`didRegisterForRemoteNotificationsWithDeviceToken`, `didFailToRegisterForRemoteNotificationsWithError`) into Tao's dynamically-created AppDelegate using `imp_implementationWithBlock` + `class_addMethod`. It then calls `registerForRemoteNotifications()` and blocks until the APNs callback fires, writing the hex token to a C buffer.
+- **`get_token`**: Rust spawns a thread that calls `extern "C" mobile_push_get_device_token()` in Swift. On first call, the Swift function lazily injects APNs delegate methods (`didRegisterForRemoteNotificationsWithDeviceToken`, `didFailToRegisterForRemoteNotificationsWithError`) into Tao's dynamically-created AppDelegate using `imp_implementationWithBlock` + `class_addMethod`. It then calls `registerForRemoteNotifications()` and blocks until the APNs callback fires, hands that APNs token to Firebase, and writes the FCM registration token Firebase returns to a C buffer.
 
 ### Events
 
