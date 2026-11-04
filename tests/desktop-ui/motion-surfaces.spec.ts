@@ -7,29 +7,37 @@ async function open(page: Page, path = '/home') {
   await expect(page.locator('output')).toHaveText(path)
 }
 
+/** Choose a motion setting, then let motion started under the previous one finish. */
 async function setMode(page: Page, mode: Mode) {
   await page.getByRole('button', { name: mode, exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-motion', mode === 'System' ? 'full' : mode.toLowerCase())
+  await page.mouse.move(0, 0)
+  await expect.poll(() => page.evaluate(() => document.getAnimations().filter(a => a.playState === 'running'
+    && Number(a.effect?.getComputedTiming().duration) > 1
+    && !(a.effect as KeyframeEffect | null)?.target?.closest('[data-progress]')).length)).toBe(0)
 }
 
 /** Hold the pointer on a control and read its settled pressed style, then release. */
 async function pressedStyle(page: Page, target: Locator) {
   await target.scrollIntoViewIfNeeded()
+  const read = () => target.evaluate(el => {
+    const computed = getComputedStyle(el)
+    return JSON.stringify({ scale: computed.scale, opacity: computed.opacity, pointerEvents: computed.pointerEvents })
+  })
   const box = (await target.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  const resting = await read()
   await page.mouse.down()
-  let style = { scale: '', opacity: '', pointerEvents: '' }
+  // Settled: changed from rest, and the same on two reads in a row.
+  let style = resting
   await expect.poll(async () => {
-    const next = await target.evaluate(el => {
-      const computed = getComputedStyle(el)
-      return { scale: computed.scale, opacity: computed.opacity, pointerEvents: computed.pointerEvents }
-    })
-    const settled = JSON.stringify(next) === JSON.stringify(style)
+    const next = await read()
+    const settled = next !== resting && next === style
     style = next
     return settled
   }).toBe(true)
   await page.mouse.up()
-  return style
+  return JSON.parse(style) as { scale: string, opacity: string, pointerEvents: string }
 }
 
 /** Full motion presses inward; Reduced and Off dim in place instead. */
@@ -85,6 +93,7 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
  * Click `action` through the DOM and, two frames later, report the motion the
  * change started inside `surface` (the whole document by default): every
  * running animation or transition longer than the 0.01 ms Reduced/Off floor.
+ * Progress indicators (`data-progress`) are exempt: Reduced keeps them turning.
  */
 async function motionAfter(action: Locator, surface?: Locator): Promise<number> {
   const scope = surface ? await surface.elementHandle() : null
@@ -92,7 +101,8 @@ async function motionAfter(action: Locator, surface?: Locator): Promise<number> 
     (el as HTMLElement).click()
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const animations = scoped ? scoped.getAnimations({ subtree: true }) : document.getAnimations()
-      resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1).length)
+      resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1
+        && !(a.effect as KeyframeEffect | null)?.target?.closest('[data-progress]')).length)
     }))
   }), scope)
 }
@@ -146,7 +156,8 @@ async function motionOnArrival(page: Page, act: () => Promise<void>, selector: s
     const report = (arrived: Element) => requestAnimationFrame(() => requestAnimationFrame(() => {
       const root = scope ? document.querySelector(scope) : arrived
       const animations = root ? root.getAnimations({ subtree: Boolean(scope) }) : []
-      resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1).length)
+      resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1
+        && !(a.effect as KeyframeEffect | null)?.target?.closest('[data-progress]')).length)
     }))
     const now = find()
     if (now) return report(now)
@@ -176,7 +187,7 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
   test(`search opens, brings results in and closes under the motion setting (${mode})`, async ({ page }) => {
     await open(page)
     await setMode(page, mode)
-    expectMotion(await motionAfter(page.getByRole('button', { name: 'Open search' })), mode)
+    expectMotion(await motionOnArrival(page, () => page.getByRole('button', { name: 'Open search' }).click(), '[role="dialog"]', ''), mode)
     const search = page.getByRole('dialog', { name: 'Search' })
     await expect(search).toBeVisible()
     await expect(search.getByRole('textbox')).toBeFocused()
@@ -286,4 +297,14 @@ test('in a right-to-left locale the next lesson arrives from the left', async ({
   await page.goto('/tests/desktop-ui/?screen=motion-surfaces&locale=ur&path=/learn/course-sorting')
   await expect(page.getByRole('heading', { name: 'Bubble sort' })).toBeVisible()
   expect((await lessonStep(page.getByRole('button', { name: /Insertion sort/ }))).shift).toBeLessThan(0)
+})
+
+test('the OS reduce preference swaps press scaling and list motion for immediate changes', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await open(page, '/courses')
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced')
+  const chip = page.getByRole('button', { name: /Tutorials/ })
+  expect(await pressedStyle(page, chip)).toEqual(expect.objectContaining({ scale: 'none', opacity: '0.72' }))
+  await expect(chip).toHaveAttribute('aria-pressed', 'true')
+  expect(await motionAfter(page.getByRole('button', { name: /All/ }), page.locator('[data-catalog-grid]'))).toBe(0)
 })
