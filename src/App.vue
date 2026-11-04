@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { isTauri } from '@tauri-apps/api/core'
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
 import { useAccountStatus } from '@/composables/useAccountStatus'
@@ -247,9 +245,6 @@ onMounted(async () => {
   // queuing until one unlocks). Warm opens are handled for the app's lifetime.
   void useDeepLinks().init()
   void notifications.initOpens()
-
-  // Show the window now that the frontend is rendered and themed
-  if (isTauri()) void getCurrentWebviewWindow().show().catch(() => {})
 
   // Silent, fail-closed check for a signed update — reveals the banner only
   // when one is genuinely available. Desktop Tauri only; inert elsewhere.

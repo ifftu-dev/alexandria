@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <!-- The opening mark at rest (src/components/auth/BrandMark.vue). -->
+  <path d="M32 6 8 18v28l24 12 24-12V18L32 6Z" stroke="#818CF8" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M32 18v28M16 26l16 8 16-8" stroke="#818CF8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -22,6 +22,7 @@ pub mod goals;
 pub mod interview_panel;
 #[cfg(test)]
 mod json_limit_boundaries;
+pub mod launch_window;
 pub mod network_profile;
 pub mod notifications;
 pub mod org_trust;
@@ -739,6 +740,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             use tauri::Manager;
             if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
@@ -807,6 +809,11 @@ pub fn run() {
                     .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                     .build(),
             )?;
+
+            // The main window starts hidden; give it the theme background
+            // and arm the fallback that shows it if the frontend cannot.
+            #[cfg(desktop)]
+            launch_window::install(app.handle());
 
             // If the user installed the CLI, keep its symlink pointing at this
             // build. Repair only — never creates a link the user did not ask

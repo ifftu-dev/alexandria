@@ -1,9 +1,12 @@
 import { createApp } from 'vue'
+import { isTauri } from '@tauri-apps/api/core'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import App from './App.vue'
 import router from './router'
 import { i18n } from './i18n'
 import { initMotion } from './composables/useMotion'
 import { initLocale } from './composables/useLocale'
+import { showOnFirstPaint } from './composables/launchWindow'
 import './assets/fonts.css'
 // Non-Latin script fonts (self-hosted via @fontsource; each @font-face is
 // unicode-range-scoped so Latin users don't download them). Covers the six
@@ -29,3 +32,6 @@ const app = createApp(App)
 app.use(router)
 app.use(i18n)
 app.mount('#app')
+
+// The window was created hidden; show it with the themed first frame.
+if (isTauri()) showOnFirstPaint(() => { void getCurrentWebviewWindow().show().catch(() => {}) })

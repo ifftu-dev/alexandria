@@ -7,4 +7,8 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Launch handoff: the web first-paint background and the opening mark
+         (index.html and the app primary colour). Night values are in values-night. -->
+    <color name="launch_background">#FFF7F6F3</color>
+    <color name="launch_mark">#FF4F46E5</color>
 </resources>

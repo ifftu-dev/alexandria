@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The opening mark (src/components/auth/BrandMark.vue) at rest, for the
+     Android 12+ splash. The splash icon is 288dp with a 192dp safe circle;
+     the 64-unit mark is drawn 96dp wide at its centre, the size the web
+     opening starts at. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:translateX="96"
+        android:translateY="96"
+        android:scaleX="1.5"
+        android:scaleY="1.5">
+        <path
+            android:pathData="M32,6 L8,18 L8,46 L32,58 L56,46 L56,18 Z"
+            android:strokeColor="@color/launch_mark"
+            android:strokeWidth="3"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M32,18 L32,46 M16,26 L32,34 L48,26"
+            android:strokeColor="@color/launch_mark"
+            android:strokeWidth="3"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>
