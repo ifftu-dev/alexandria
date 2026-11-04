@@ -199,3 +199,47 @@ it('keeps graph visibility and teaching settings usable alongside independent br
   prefs = JSON.parse(backend.settings.find(item => item.key === 'instructor.graph_prefs')!.current_value)
   expect(prefs.skill_big_o).toEqual({ public: true, teaching: true })
 })
+
+it('accepted: learning for a skill shows courses and tutorials whatever kind the catalog last browsed', async () => {
+  const { router, backend } = await setup()
+  sessionStorage.setItem('courses-kind-filter', 'tutorial')
+  await router.push('/courses')
+  await flushPromises()
+  expect(wrapper!.findAll('a.cc-grid')).toHaveLength(0)
+  await router.push('/courses?skillId=skill_big_o')
+  await flushPromises()
+  expect(wrapper!.text()).toContain('Learning for Big-O Analysis')
+  expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Further algorithm analysis')])
+  expect(backend.state.unexpected).toEqual([])
+})
+
+it('accepted: the Browse Goal button saves one goal for a double tap and reports a failed save', async () => {
+  const { router, backend } = await setup()
+  await click('Browse Skills')
+  const saves: Array<() => void> = []
+  let failure: Error | null = null
+  ipc.mockImplementation((command: string, args?: Record<string, unknown>) => {
+    if (command !== 'set_setting' || args?.key !== 'learner.targets') return backend.invoke(command, args)
+    if (failure) return Promise.reject(failure)
+    return new Promise(resolve => saves.push(() => resolve(backend.invoke(command, args))))
+  })
+  const goal = () => document.querySelector<HTMLButtonElement>('button[title="Set Big-O Analysis as a goal"]')!
+  goal().click()
+  goal().click()
+  await flushPromises()
+  expect(goal().disabled).toBe(true)
+  expect(saves).toHaveLength(1)
+  saves[0]!()
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/goals')
+  expect(JSON.parse(backend.settings.find(entry => entry.key === 'learner.targets')!.current_value)).toHaveLength(1)
+  await router.push('/skills')
+  await flushPromises()
+  await click('Browse Skills')
+  failure = new Error('Disk full')
+  document.querySelector<HTMLButtonElement>('button[title="Set Sorting Algorithms as a goal"]')!.click()
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/skills')
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Disk full')
+  expect(document.querySelector<HTMLButtonElement>('button[title="Set Sorting Algorithms as a goal"]')!.disabled).toBe(false)
+})
