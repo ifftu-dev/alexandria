@@ -19,10 +19,15 @@
 //!   assessment attempt or interview check runs; chat and the tutor record
 //!   the refusal as an integrity flag (see [`Surface`]).
 //! * [`visible_lesson`]: which lesson a model may see (text lessons only).
-//! * Guardian approvals: [`request_approval`], [`approvals`],
+//! * Guardian approvals, ward side: [`request_approval`], [`approvals`],
 //!   [`pending_approvals`] for the guardian sync, and [`record_decision`]
 //!   when a guardian's decision arrives. Guardians see a connection's name,
 //!   endpoint and model, never chat content.
+//! * Guardian approvals, guardian side: [`record_ward_request`] when a
+//!   ward's request arrives, [`ward_requests`] for the overview,
+//!   [`record_guardian_decision`], and [`undelivered_decisions`] with
+//!   [`mark_delivered`] for the guardian sync. A decision is bound to the
+//!   link the request came on.
 //!
 //! Every refusal is a typed [`Refused`]; chat shows its string code, the
 //! tutor and Studio runs convert it to their error once.
@@ -352,6 +357,163 @@ pub fn record_decision(
     .map_err(|_| Refused::Storage("approvals"))
 }
 
+// ─── the guardian's side ─────────────────────────────────────────────────
+
+/// A ward's request, as the guardian sees it in the overview.
+#[derive(Debug, Clone, Serialize)]
+pub struct GuardianAiRequest {
+    pub id: String,
+    pub link_id: String,
+    pub ward_name: Option<String>,
+    pub connection_name: String,
+    pub endpoint: String,
+    pub model: String,
+    pub status: String,
+    pub received_at: String,
+    pub decided_at: Option<String>,
+    /// The current decision reached the ward.
+    pub delivered: bool,
+}
+
+/// A guardian's decision on a ward's request, as the guardian sync sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardianDecision {
+    pub request_id: String,
+    pub endpoint: String,
+    pub approved: bool,
+}
+
+/// Guardian side: stores a request a ward sent on `link_id`. The ward
+/// re-sends until it hears a decision, so a repeat changes nothing. The
+/// caller has already authenticated the link as one this profile guards.
+pub fn record_ward_request(
+    conn: &Connection,
+    link_id: &str,
+    request: &PendingApproval,
+) -> Result<(), Refused> {
+    conn.execute(
+        "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', datetime('now'))
+         ON CONFLICT(id, link_id) DO NOTHING",
+        rusqlite::params![
+            request.id,
+            link_id,
+            request.connection_name,
+            request.endpoint,
+            request.model
+        ],
+    )
+    .map(|_| ())
+    .map_err(|_| Refused::Storage("ward requests"))
+}
+
+/// Guardian side: every request from a ward on an active link, newest first.
+pub fn ward_requests(conn: &Connection) -> Result<Vec<GuardianAiRequest>, Refused> {
+    let read = || -> rusqlite::Result<Vec<GuardianAiRequest>> {
+        let mut stmt = conn.prepare(
+            "SELECT r.id, r.link_id, l.peer_display_name, r.connection_name, r.endpoint, r.model,
+                    r.status, r.received_at, r.decided_at, r.delivered
+               FROM guardian_ai_requests r
+               JOIN guardian_links l ON l.id = r.link_id
+              WHERE l.side = 'guardian' AND l.status = 'active'
+              ORDER BY r.received_at DESC, r.rowid DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(GuardianAiRequest {
+                    id: r.get(0)?,
+                    link_id: r.get(1)?,
+                    ward_name: r.get(2)?,
+                    connection_name: r.get(3)?,
+                    endpoint: r.get(4)?,
+                    model: r.get(5)?,
+                    status: r.get(6)?,
+                    received_at: r.get(7)?,
+                    decided_at: r.get(8)?,
+                    delivered: r.get(9)?,
+                })
+            })?
+            .collect();
+        rows
+    };
+    read().map_err(|_| Refused::Storage("ward requests"))
+}
+
+/// Guardian side: approves, declines or withdraws an approval of the request
+/// the ward on `link_id` sent. Only that link's request changes, and only
+/// while this profile is its active guardian. The decision waits for the
+/// next guardian sync. Returns whether such a request existed.
+pub fn record_guardian_decision(
+    conn: &Connection,
+    link_id: &str,
+    request_id: &str,
+    approve: bool,
+) -> Result<bool, Refused> {
+    conn.execute(
+        "UPDATE guardian_ai_requests
+            SET status = ?3, decided_at = datetime('now'), delivered = 0
+          WHERE id = ?1 AND link_id = ?2
+            AND EXISTS(SELECT 1 FROM guardian_links
+                        WHERE id = ?2 AND side = 'guardian' AND status = 'active')",
+        rusqlite::params![
+            request_id,
+            link_id,
+            if approve { "approved" } else { "declined" }
+        ],
+    )
+    .map(|changed| changed == 1)
+    .map_err(|_| Refused::Storage("ward requests"))
+}
+
+/// Guardian side: the decisions on `link_id` the ward has not acknowledged.
+pub fn undelivered_decisions(
+    conn: &Connection,
+    link_id: &str,
+) -> Result<Vec<GuardianDecision>, Refused> {
+    let read = || -> rusqlite::Result<Vec<GuardianDecision>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, endpoint, status FROM guardian_ai_requests
+              WHERE link_id = ?1 AND status != 'pending' AND delivered = 0",
+        )?;
+        let rows = stmt
+            .query_map([link_id], |r| {
+                Ok(GuardianDecision {
+                    request_id: r.get(0)?,
+                    endpoint: r.get(1)?,
+                    approved: r.get::<_, String>(2)? == "approved",
+                })
+            })?
+            .collect();
+        rows
+    };
+    read().map_err(|_| Refused::Storage("ward requests"))
+}
+
+/// Guardian side: the ward on `link_id` acknowledged `decision`. It is
+/// marked delivered only if it is still the current decision, so one changed
+/// while in flight is sent again. Returns whether it was marked.
+pub fn mark_delivered(
+    conn: &Connection,
+    link_id: &str,
+    decision: &GuardianDecision,
+) -> Result<bool, Refused> {
+    conn.execute(
+        "UPDATE guardian_ai_requests SET delivered = 1
+          WHERE id = ?1 AND link_id = ?2 AND status = ?3",
+        rusqlite::params![
+            decision.request_id,
+            link_id,
+            if decision.approved {
+                "approved"
+            } else {
+                "declined"
+            }
+        ],
+    )
+    .map(|changed| changed == 1)
+    .map_err(|_| Refused::Storage("ward requests"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,6 +698,151 @@ mod tests {
             may_use(&conn, &current(&conn, "c1")),
             Err(Refused::GuardianDeclined)
         ));
+    }
+
+    /// Guardian side: a linked ward on `link_id`, seen as `name`.
+    fn ward_link(conn: &Connection, link_id: &str, name: &str) {
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, peer_display_name, shared_key, status)
+             VALUES (?1, 'guardian', 'did:key:zWard', ?2, zeroblob(32), 'active')",
+            [link_id, name],
+        )
+        .unwrap();
+    }
+
+    fn ward_asks(conn: &Connection, link_id: &str, id: &str) {
+        record_ward_request(
+            conn,
+            link_id,
+            &PendingApproval {
+                id: id.into(),
+                connection_name: "Work OpenAI".into(),
+                endpoint: "https://api.openai.com/v1".into(),
+                model: "gpt-5.1-mini".into(),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_guardian_receives_decides_and_delivers_a_wards_request() {
+        let conn = db();
+        ward_link(&conn, "link", "Sam");
+        let openai = "https://api.openai.com/v1";
+        // The ward re-sends until it hears a decision; a repeat is one request.
+        ward_asks(&conn, "link", "req");
+        ward_asks(&conn, "link", "req");
+        let listed = ward_requests(&conn).unwrap();
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        let request = &listed[0];
+        assert_eq!(
+            (
+                request.id.as_str(),
+                request.link_id.as_str(),
+                request.ward_name.as_deref(),
+                request.connection_name.as_str(),
+                request.endpoint.as_str(),
+                request.model.as_str(),
+                request.status.as_str(),
+                request.decided_at.is_none(),
+                request.delivered,
+            ),
+            (
+                "req",
+                "link",
+                Some("Sam"),
+                "Work OpenAI",
+                openai,
+                "gpt-5.1-mini",
+                "pending",
+                true,
+                false
+            )
+        );
+        assert!(undelivered_decisions(&conn, "link").unwrap().is_empty());
+
+        assert!(record_guardian_decision(&conn, "link", "req", true).unwrap());
+        let approved = GuardianDecision {
+            request_id: "req".into(),
+            endpoint: openai.into(),
+            approved: true,
+        };
+        assert_eq!(
+            undelivered_decisions(&conn, "link").unwrap(),
+            vec![approved.clone()]
+        );
+        let request = &ward_requests(&conn).unwrap()[0];
+        assert_eq!(request.status, "approved");
+        assert!(request.decided_at.is_some());
+
+        // The guardian withdraws while the approval is in flight: its
+        // acknowledgement must not mark the withdrawal delivered.
+        assert!(record_guardian_decision(&conn, "link", "req", false).unwrap());
+        assert!(!mark_delivered(&conn, "link", &approved).unwrap());
+        let declined = GuardianDecision {
+            approved: false,
+            ..approved
+        };
+        assert_eq!(
+            undelivered_decisions(&conn, "link").unwrap(),
+            vec![declined.clone()]
+        );
+        assert!(mark_delivered(&conn, "link", &declined).unwrap());
+        assert!(undelivered_decisions(&conn, "link").unwrap().is_empty());
+        assert!(ward_requests(&conn).unwrap()[0].delivered);
+        // A new decision is delivered again.
+        assert!(record_guardian_decision(&conn, "link", "req", true).unwrap());
+        assert!(!ward_requests(&conn).unwrap()[0].delivered);
+        // An unknown request is not found.
+        assert!(!record_guardian_decision(&conn, "link", "nope", true).unwrap());
+    }
+
+    #[test]
+    fn a_decision_through_one_guardian_link_never_touches_another_links_request() {
+        let conn = db();
+        ward_link(&conn, "sam", "Sam");
+        ward_link(&conn, "alex", "Alex");
+        // Two wards whose requests share an id.
+        ward_asks(&conn, "sam", "req");
+        ward_asks(&conn, "alex", "req");
+        assert!(record_guardian_decision(&conn, "sam", "req", true).unwrap());
+        let status = |link: &str| {
+            ward_requests(&conn)
+                .unwrap()
+                .into_iter()
+                .find(|r| r.link_id == link)
+                .unwrap()
+                .status
+        };
+        assert_eq!(status("sam"), "approved");
+        assert_eq!(status("alex"), "pending");
+        assert!(undelivered_decisions(&conn, "alex").unwrap().is_empty());
+        // Delivering through one link marks only that link's request.
+        let decision = undelivered_decisions(&conn, "sam").unwrap().remove(0);
+        assert!(!mark_delivered(&conn, "alex", &decision).unwrap());
+        assert!(mark_delivered(&conn, "sam", &decision).unwrap());
+        // A link this profile is the ward on, or a revoked link, decides nothing.
+        link_guardian(&conn);
+        conn.execute(
+            "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
+             VALUES ('req', 'link', 'x', 'https://api.openai.com/v1', 'm', 'pending', datetime('now'))",
+            [],
+        )
+        .unwrap();
+        assert!(!record_guardian_decision(&conn, "link", "req", true).unwrap());
+        conn.execute(
+            "UPDATE guardian_links SET status = 'revoked' WHERE id = 'alex'",
+            [],
+        )
+        .unwrap();
+        assert!(!record_guardian_decision(&conn, "alex", "req", true).unwrap());
+        // The overview lists active guardian links only.
+        let listed: Vec<String> = ward_requests(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.link_id)
+            .collect();
+        assert_eq!(listed, vec!["sam".to_string()]);
     }
 
     #[test]

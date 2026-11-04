@@ -498,19 +498,14 @@ fn handle_approval_request(conn: &Connection, link_id: &str, sealed: &[u8]) -> G
         return GuardianResponse::Error("approval request out of bounds".into());
     }
     // Repeats are expected: the ward re-sends until it hears a decision.
-    match conn.execute(
-        "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', datetime('now'))
-         ON CONFLICT(id, link_id) DO NOTHING",
-        rusqlite::params![
-            request.request_id,
-            link_id,
-            request.connection_name,
-            request.endpoint,
-            request.model
-        ],
-    ) {
-        Ok(_) => GuardianResponse::Acknowledged,
+    let request = crate::ai_access::PendingApproval {
+        id: request.request_id,
+        connection_name: request.connection_name,
+        endpoint: request.endpoint,
+        model: request.model,
+    };
+    match crate::ai_access::record_ward_request(conn, link_id, &request) {
+        Ok(()) => GuardianResponse::Acknowledged,
         Err(e) => GuardianResponse::Error(e.to_string()),
     }
 }
@@ -1363,12 +1358,11 @@ mod tests {
                 GuardianResponse::Acknowledged
             ));
         }
-        let count: i64 = g
-            .query_row("SELECT COUNT(*) FROM guardian_ai_requests", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 1, "repeats are idempotent");
+        assert_eq!(
+            crate::ai_access::ward_requests(g).unwrap().len(),
+            1,
+            "repeats are idempotent"
+        );
         // A wrong key or the wrong side is refused.
         let forged = seal(&[9u8; 32], &request).unwrap();
         assert!(matches!(
