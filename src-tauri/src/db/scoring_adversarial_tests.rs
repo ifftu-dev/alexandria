@@ -187,7 +187,10 @@ fn failed_recomputation_never_presents_a_stale_score() {
         .unwrap();
 
     assert!(revalidate_rows(db.conn(), Some(learner.as_str())).is_err());
-    assert!(get_derived_skill_state_impl(db.conn(), &learner, "skill", NOW).is_err());
+    assert!(matches!(
+        get_derived_skill_state_impl(db.conn(), &learner, "skill", NOW),
+        Err(crate::aggregation::store::AggregationError::Database(_))
+    ));
 
     db.conn()
         .execute_batch(

@@ -902,7 +902,7 @@ fn self_issue_completion(
 
     // (4) Refresh derived proficiency so the skill graph reflects the
     // new evidence right away.
-    crate::aggregation::store::recompute_all_impl(conn, &now)?;
+    crate::aggregation::store::recompute_all_impl(conn, &now).map_err(|e| e.to_string())?;
 
     Ok(issued_ids)
 }
