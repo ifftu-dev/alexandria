@@ -101,6 +101,13 @@ for (const mode of MODES) {
     await expectPressFeedback(page, channel, mode)
     await expect(channel).toHaveAttribute('aria-current', 'true')
 
+    // Older messages from "load earlier" show at once in every mode; only
+    // arriving messages rise in.
+    const earlier = await motionOnArrival(page, () => page.getByRole('button', { name: 'Load earlier messages' }).click(), '[data-classroom-message]', 'An earlier hello')
+    expect(earlier).toBe(0)
+    await expect(page.locator('[data-classroom-message]').first()).toContainText('An earlier hello')
+    await expect(page.locator('[data-classroom-message]').first()).toHaveCSS('opacity', '1')
+
     const input = page.getByPlaceholder('Message #general')
     await input.fill('Here is my puzzle')
     const arrival = await motionOnArrival(page, () => input.press('Enter'), '[data-classroom-message]', 'Here is my puzzle')

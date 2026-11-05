@@ -151,7 +151,11 @@ export function motionBackend() {
       case 'tutoring_status': return structuredClone(call)
       case 'tutoring_toggle_audio': call.audio_enabled = Boolean(args?.enable); return call.audio_enabled
       case 'tutoring_toggle_video': call.video_enabled = Boolean(args?.enable); return call.video_enabled
-      case 'classroom_get_messages': return structuredClone(classroomMessages)
+      case 'classroom_get_messages': {
+        // "Load earlier messages" asks for what came before the oldest shown.
+        if (!args?.beforeId) return structuredClone(classroomMessages)
+        return [{ ...classroomMessages[0]!, id: 'classroom-message-earlier', content: 'An earlier hello', sent_at: '2026-11-04T08:00:00Z', received_at: '2026-11-04T08:00:00Z' }]
+      }
       case 'classroom_send_message': {
         const sent: ClassroomMessage = { ...classroomMessages[0]!, id: `classroom-message-${classroomMessages.length + 1}`,
           sender_address: 'stake-instructor', content: String(args?.content), sent_at: '2026-11-04T09:30:00Z', received_at: '2026-11-04T09:30:00Z' }

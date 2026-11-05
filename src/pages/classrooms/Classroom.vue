@@ -157,6 +157,25 @@ const channelMessages = computed(() =>
   activeChannelId.value ? (messages.value[activeChannelId.value] ?? []) : [],
 )
 
+// The oldest message on screen after the last render. A message entering
+// before it came from "load earlier" and shows at once; only messages after it
+// (new arrivals) rise in. Updated after each render, so while a render inserts
+// messages it still names the previous oldest.
+let oldestShownId: string | null = null
+watch(() => channelMessages.value[0]?.id, (id) => { oldestShownId = id ?? null }, { flush: 'post', immediate: true })
+
+function holdEarlierMessage(el: Element) {
+  const node = el as HTMLElement
+  const list = channelMessages.value
+  const oldest = list.findIndex((m) => m.id === oldestShownId)
+  const index = list.findIndex((m) => m.id === node.dataset.classroomMessage)
+  if (oldest > -1 && index > -1 && index < oldest) node.dataset.motionInstant = ''
+}
+
+function releaseEarlierMessage(el: Element) {
+  delete (el as HTMLElement).dataset.motionInstant
+}
+
 function canDeleteMessage(senderAddress: string): boolean {
   const myAddress = walletInfo.value?.stake_address
   if (!myAddress) return false
@@ -416,13 +435,20 @@ onBeforeUnmount(() => {
           </button>
 
           <!-- New messages rise in (full motion only); a channel's history,
-               and another channel, show at once. Sending never waits. -->
-          <TransitionGroup :key="activeChannelId ?? ''" name="motion-rise">
+               earlier messages and another channel show at once. Sending
+               never waits. -->
+          <TransitionGroup
+            :key="activeChannelId ?? ''"
+            name="motion-rise"
+            @before-enter="holdEarlierMessage"
+            @after-enter="releaseEarlierMessage"
+            @enter-cancelled="releaseEarlierMessage"
+          >
           <div
             v-for="msg in channelMessages"
             :key="msg.id"
-            data-classroom-message
-            class="flex gap-3 group hover:bg-muted/50 rounded px-2 py-1 -mx-2"
+            :data-classroom-message="msg.id"
+            class="classroom-message flex gap-3 group hover:bg-muted/50 rounded px-2 py-1 -mx-2"
           >
             <!-- Avatar -->
             <div class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground flex-shrink-0 mt-0.5">
@@ -639,3 +665,9 @@ onBeforeUnmount(() => {
     </AppModal>
   </div>
 </template>
+
+<style scoped>
+/* Earlier messages skip the motion-rise entry (see holdEarlierMessage). */
+.classroom-message[data-motion-instant].motion-rise-enter-active { transition: none; }
+.classroom-message[data-motion-instant].motion-rise-enter-from { opacity: 1; translate: none; }
+</style>
