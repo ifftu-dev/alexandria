@@ -414,7 +414,7 @@ onMounted(async () => {
         <button
           v-for="t in goals"
           :key="t.id"
-          class="goal-card pressable group"
+          class="goal-card pressable group *:pointer-events-none"
           @click="openGoalModal(t)"
         >
           <svg width="46" height="46" viewBox="0 0 46 46" class="shrink-0">

@@ -21,7 +21,7 @@ async function select(next: AppMode) {
     :aria-label="$t('nav.mode.ariaLabel')"
   >
     <button
-      class="mode-switcher-btn pressable selection-indicator"
+      class="mode-switcher-btn pressable selection-indicator *:pointer-events-none"
       :class="{ 'mode-switcher-btn--active-learner': mode === 'learner' }"
       role="radio"
       :aria-checked="mode === 'learner'"
@@ -34,7 +34,7 @@ async function select(next: AppMode) {
       {{ $t('nav.mode.learner') }}
     </button>
     <button
-      class="mode-switcher-btn pressable selection-indicator"
+      class="mode-switcher-btn pressable selection-indicator *:pointer-events-none"
       :class="{ 'mode-switcher-btn--active-instructor': mode === 'instructor' }"
       role="radio"
       :aria-checked="mode === 'instructor'"

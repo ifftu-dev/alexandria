@@ -416,6 +416,12 @@ const classroomPreviews = computed(() =>
   text-align: start;
 }
 
+/* Items hold no controls; their content takes no pointer, so a press on the
+   unwrapped label still reaches the item (WebKit drops :active on a clipped child). */
+.sb-item > * {
+  pointer-events: none;
+}
+
 .sb-item:hover {
   background: var(--app-muted);
   color: var(--app-foreground);

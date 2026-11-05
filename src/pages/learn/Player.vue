@@ -1231,11 +1231,12 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               </span>
             </div>
 
-            <!-- Element (lesson) buttons — title is the visual anchor. -->
+            <!-- Element (lesson) buttons — title is the visual anchor. Their truncated
+                 content takes no pointer, so WebKit keeps :active on the row. -->
             <button
               v-for="el in elements[ch.id] ?? []"
               :key="el.id"
-              class="pressable group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start md:hover:-translate-y-px md:hover:shadow-sm"
+              class="pressable group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start md:hover:-translate-y-px md:hover:shadow-sm *:pointer-events-none"
               :class="activeElement === el.id
                 ? 'bg-primary/10 shadow-sm ring-1 ring-primary/20'
                 : 'hover:bg-muted/50'"

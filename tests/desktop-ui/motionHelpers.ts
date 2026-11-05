@@ -28,10 +28,33 @@ export async function pressedStyle(page: Page, target: Locator) {
     const computed = getComputedStyle(el)
     return JSON.stringify({ scale: computed.scale, opacity: computed.opacity, pointerEvents: computed.pointerEvents })
   })
-  const box = (await target.boundingBox())!
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  // Press where the control is now: late data can still shift the layout, so
+  // wait until its centre holds still across two reads and hits the control.
+  const centre = async () => {
+    const box = await target.boundingBox()
+    return box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null
+  }
+  let point = await centre()
+  await expect.poll(async () => {
+    const next = await centre()
+    const steady = !!next && next.x === point?.x && next.y === point?.y
+      && await target.evaluate((el, { x, y }) => el.contains(document.elementFromPoint(x, y)), next)
+    point = next
+    return steady
+  }, { message: 'the control holds still under the pointer' }).toBe(true)
+  await page.mouse.move(point!.x, point!.y)
   const resting = await read()
-  await page.mouse.down()
+  // A loaded browser can lose a press between the protocol and the page, so
+  // that nothing is :active; release and press again, at most three times. A
+  // control that never takes :active (WebKit and a clipped child) still fails.
+  const active = () => target.evaluate(el => new Promise<boolean>(resolve => requestAnimationFrame(() => resolve(el.matches(':active')))))
+  for (let attempt = 1; ; attempt++) {
+    await page.mouse.down()
+    const pressed = await expect.poll(active, { timeout: 1000 }).toBe(true).then(() => true, () => false)
+    if (pressed) break
+    await page.mouse.up()
+    expect(attempt, 'a press on the control makes it :active').toBeLessThan(3)
+  }
   // Settled: changed from rest, and the same on two reads in a row.
   let style = resting
   await expect.poll(async () => {
