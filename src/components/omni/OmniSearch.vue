@@ -174,13 +174,14 @@ watch(isOpen, async (val) => {
                   <p class="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {{ group.label }}
                   </p>
+                  <!-- A result's children take no pointer: WebKit drops :active when a press lands on a clipped (truncated) child. -->
                   <TransitionGroup name="motion-rise" appear>
                     <button
                       v-for="item in group.items"
                       :key="item.id"
                       type="button"
                       :data-omni-selected="flatIndexFor(item.type, item.id) === selectedIndex"
-                      class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
+                      class="pressable w-full flex items-center gap-3 px-4 py-2 text-start *:pointer-events-none"
                       :class="
                         flatIndexFor(item.type, item.id) === selectedIndex
                           ? 'bg-primary/10 text-foreground'
@@ -227,7 +228,7 @@ watch(isOpen, async (val) => {
                     :key="item.id"
                     type="button"
                     :data-omni-selected="index === selectedIndex"
-                    class="pressable w-full flex items-center gap-3 px-4 py-2 text-start"
+                    class="pressable w-full flex items-center gap-3 px-4 py-2 text-start *:pointer-events-none"
                     :class="
                       index === selectedIndex
                         ? 'bg-primary/10 text-foreground'
