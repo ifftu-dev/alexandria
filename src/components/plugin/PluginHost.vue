@@ -22,6 +22,7 @@ import { useI18n } from 'vue-i18n'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import PluginIframe from './PluginIframe.vue'
 import PermissionPrompt from './PermissionPrompt.vue'
 import { AppSpinner, AppAlert } from '@/components/ui'
@@ -468,6 +469,8 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
       publishEvidence: false,
     })
     gradeNotice.value = null
+    // A passing grade issues a credential; the atlas recounts on this event.
+    announceCredentialsChanged()
     iframeRef.value?.resolveSubmit(requestId, { score: score.score })
     iframeRef.value?.sendSubmitAck(blake3HexHint(), score.score)
     emit('scored-complete', score.score)

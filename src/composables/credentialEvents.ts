@@ -1,6 +1,7 @@
 /**
- * Fired after this app changes the learner's own credentials (an assessment
- * or course completion issued one, an import stored some, or one was revoked),
+ * Fired after this app changes the learner's own credentials (an assessment,
+ * a graded plugin, course completion, a skill bootstrap, a role assessment or
+ * a direct issue minted one, an import stored some, or one was revoked),
  * so views that cache derived state, such as the skill atlas, can recount
  * without a reload. The atlas does not refresh on route changes, so every
  * issuing path must announce.

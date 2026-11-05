@@ -72,7 +72,11 @@ export function useCredentials() {
   }
 
   async function issue(req: IssueCredentialRequest) {
-    return run(() => invoke<VerifiableCredential>('issue_credential', { req }))
+    return run(async () => {
+      const vc = await invoke<VerifiableCredential>('issue_credential', { req })
+      announceCredentialsChanged()
+      return vc
+    })
   }
 
   async function revoke(credentialId: string, reason: string) {
