@@ -144,15 +144,27 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
  */
 async function lessonStep(action: Locator) {
   return action.evaluate(el => new Promise<{ shift: number, motion: number }>(resolve => {
-    (el as HTMLElement).click()
-    requestAnimationFrame(() => requestAnimationFrame(async () => {
+    // The step's own animation, recorded as it starts: on a slow machine a
+    // short one can start and finish between two frames.
+    const started: { target: Element; duration: number; first: Keyframe | undefined }[] = []
+    const animate = Element.prototype.animate
+    Element.prototype.animate = function (this: Element, frames, options) {
+      started.push({ target: this, duration: typeof options === 'number' ? options : Number(options?.duration ?? 0), first: Array.isArray(frames) ? frames[0] : undefined })
+      return animate.call(this, frames, options)
+    }
+    ;(el as HTMLElement).click()
+    let frames = 0
+    const settle = () => {
+      if (++frames < 20) { requestAnimationFrame(settle); return }
+      Element.prototype.animate = animate
       const body = document.querySelector('[data-lesson-body]')
       if (!body) return resolve({ shift: Number.NaN, motion: Number.NaN })
-      const animations = body.getAnimations().filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1)
-      const start = body.getBoundingClientRect().left
-      await Promise.all(animations.map(a => a.finished.catch(() => undefined)))
-      resolve({ shift: Math.round(start - body.getBoundingClientRect().left), motion: animations.length })
-    }))
+      const steps = started.filter(entry => entry.target === body && entry.duration > 1)
+      // Where the arriving lesson starts: a positive offset arrives from the right.
+      const from = /translateX\((-?[\d.]+)px\)/.exec(String(steps[0]?.first?.transform ?? ''))
+      resolve({ shift: from ? Math.sign(Number(from[1])) : 0, motion: steps.length })
+    }
+    requestAnimationFrame(settle)
   }))
 }
 

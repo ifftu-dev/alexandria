@@ -65,16 +65,26 @@ export async function expectPressFeedback(page: Page, target: Locator, mode: Mod
 export async function motionAfter(action: Locator, surface?: Locator): Promise<number> {
   const scope = surface ? await surface.elementHandle() : null
   return action.evaluate((el, scoped) => new Promise<number>(resolve => {
-    (el as HTMLElement).click()
+    // Record every Web Animation started meanwhile: on a slow machine a short
+    // one can start and finish between two frames, out of reach of polling.
+    const started: { target: Element; duration: number }[] = []
+    const animate = Element.prototype.animate
+    Element.prototype.animate = function (this: Element, frames, options) {
+      started.push({ target: this, duration: typeof options === 'number' ? options : Number(options?.duration ?? 0) })
+      return animate.call(this, frames, options)
+    }
+    const within = (target: Element | null | undefined) => !!target && (!scoped || scoped.contains(target)) && !target.closest('[data-progress]')
+    ;(el as HTMLElement).click()
     // Every frame for a while: a change that follows a route or a backend
     // reply starts later on a slow machine than two frames after the click.
     let most = 0, frames = 0
     const sample = () => {
       const animations = scoped ? scoped.getAnimations({ subtree: true }) : document.getAnimations()
       most = Math.max(most, animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1
-        && !(a.effect as KeyframeEffect | null)?.target?.closest('[data-progress]')).length)
-      if (++frames < 20) requestAnimationFrame(sample)
-      else resolve(most)
+        && within((a.effect as KeyframeEffect | null)?.target)).length)
+      if (++frames < 20) { requestAnimationFrame(sample); return }
+      Element.prototype.animate = animate
+      resolve(Math.max(most, started.filter(entry => entry.duration > 1 && within(entry.target)).length))
     }
     requestAnimationFrame(() => requestAnimationFrame(sample))
   }), scope)
