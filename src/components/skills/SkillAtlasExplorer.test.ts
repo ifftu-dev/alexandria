@@ -284,11 +284,13 @@ it('drags the public map camera without selecting the node under a drag, while p
   expect(wrapper.props('view').selectedSkillId).toBe('b')
 })
 
-it('moves the map live while dragging and publishes the camera once, when the drag ends', async () => {
+it('moves the canvas live while dragging and publishes the camera once, when the drag ends', async () => {
   const wrapper = setup()
   await button(wrapper, 'Explore Engineering').trigger('click')
   const map = wrapper.get('.atlas-map')
+  const canvas = wrapper.get('.atlas-canvas').element as SVGSVGElement
   const emitted = () => wrapper.emitted('update:view')?.length ?? 0
+  const offset = () => (canvas.style.transform.match(/-?[\d.]+(?=px)/g) ?? []).map(Number).slice(0, 2)
   const pointer = async (name: string, x: number, y: number) => {
     const event = new MouseEvent(name, { bubbles: true, button: 0, clientX: x, clientY: y })
     Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: 'mouse' } })
@@ -296,20 +298,25 @@ it('moves the map live while dragging and publishes the camera once, when the dr
     await nextTick()
   }
   const before = wrapper.props('view').camera!
-  const viewBox = map.attributes('viewBox')
+  const start = offset()
+  expect(start).toHaveLength(2)
   const published = emitted()
   await pointer('pointerdown', 200, 200)
   await pointer('pointermove', 150, 180)
   await pointer('pointermove', 100, 160)
-  expect(map.attributes('viewBox')).not.toBe(viewBox)
-  expect(map.attributes('viewBox')?.split(' ').map(Number).slice(0, 2)).toEqual(viewBox!.split(' ').map(Number).slice(0, 2).map((value, axis) => value + [100, 40][axis]!))
+  // Only the canvas moves: the camera and the shared view wait for the drag to end.
+  expect(offset()).toEqual([start[0]! - 100, start[1]! - 40])
+  expect(map.attributes('data-camera')).toBe(`${before.x} ${before.y} ${before.zoom}`)
   expect(emitted()).toBe(published)
   await pointer('pointerup', 100, 160)
   expect(emitted()).toBe(published + 1)
   expect(wrapper.props('view').camera).toEqual({ ...before, x: before.x + 100, y: before.y + 40 })
+  await nextTick()
+  expect(map.attributes('data-camera')).toBe(`${before.x + 100} ${before.y + 40} ${before.zoom}`)
+  expect(offset()).toEqual([start[0]! - 100, start[1]! - 40])
 })
 
-it('draws only the prerequisite edges that reach into the visible map, as it does nodes', async () => {
+it('draws every prerequisite edge whole, highlights the selected skill\'s, and leaves them alone while panning', async () => {
   // Zero-padded so ID order is row order: three skills per row, ten rows.
   const id = (index: number) => `s${String(index).padStart(2, '0')}`
   const many = Array.from({ length: 30 }, (_, index) => skill(id(index), `Skill ${index}`, 'Long field'))
@@ -318,10 +325,37 @@ it('draws only the prerequisite edges that reach into the visible map, as it doe
   const wrapper = setup()
   await wrapper.setProps({ model: buildSkillAtlas({ skills: many, edges: [edge(0, 1), edge(27, 28)], activeCredentials: [], subjectDid: 'did:me' }) })
   await button(wrapper, 'Explore Long field').trigger('click')
-  const drawn = () => wrapper.findAll('.map-edge').map(path => path.get('title').text())
-  expect(drawn()).toEqual(['Skill 0 → Skill 1'])
+  const curves = (selector: string) => wrapper.get(selector).attributes('d')?.match(/M /g)?.length ?? 0
+  expect(curves('.map-edge:not(.map-edge-active)')).toBe(2)
+  expect(curves('.map-edge-head:not(.map-edge-active)')).toBe(2)
+  expect(curves('.map-edge.map-edge-active')).toBe(0)
+  await wrapper.setProps({ view: { ...wrapper.props('view'), selectedSkillId: id(28) } })
+  expect(curves('.map-edge:not(.map-edge-active)')).toBe(1)
+  expect(curves('.map-edge.map-edge-active')).toBe(1)
+  expect(curves('.map-edge-head.map-edge-active')).toBe(1)
+  const plain = wrapper.get('.map-edge:not(.map-edge-active)').attributes('d')
   for (let step = 0; step < 8; step++) await wrapper.get('.atlas-map').trigger('keydown', { key: 'ArrowDown' })
-  expect(drawn()).toEqual(['Skill 27 → Skill 28'])
+  expect(wrapper.get('.map-edge:not(.map-edge-active)').attributes('d')).toBe(plain)
+})
+
+it('draws nodes past the screen edge without letting them take focus, and follows the screen as it moves', async () => {
+  const id = (index: number) => `s${String(index).padStart(2, '0')}`
+  const many = Array.from({ length: 60 }, (_, index) => skill(id(index), `Skill ${index}`, 'Long field'))
+  const wrapper = setup()
+  await wrapper.setProps({ model: buildSkillAtlas({ skills: many, edges: [], activeCredentials: [], subjectDid: 'did:me' }) })
+  await button(wrapper, 'Explore Long field').trigger('click')
+  const nodes = () => wrapper.findAll('.map-node')
+  const focusable = () => nodes().filter(node => node.attributes('inert') === undefined).map(node => node.find('.skill-name').text())
+  const drawnOnly = () => nodes().filter(node => node.attributes('inert') !== undefined).map(node => node.find('.skill-name').text())
+  expect(focusable()).toContain('Skill 0')
+  expect(focusable()).not.toContain('Skill 59')
+  // Nodes past the edge join a few per frame.
+  for (let frame = 0; frame < 60 && drawnOnly().length === 0; frame++) await new Promise(resolve => setTimeout(resolve, 20))
+  expect(drawnOnly().length).toBeGreaterThan(0)
+  expect(nodes().map(node => node.find('.skill-name').text())).not.toContain('Skill 59')
+  for (let step = 0; step < 40; step++) await wrapper.get('.atlas-map').trigger('keydown', { key: 'ArrowDown' })
+  expect(focusable()).toContain('Skill 59')
+  expect(nodes().map(node => node.find('.skill-name').text())).not.toContain('Skill 0')
 })
 
 it('renders a long match list a window at a time, keeping the full count and the window while selecting', async () => {
@@ -357,7 +391,7 @@ it('keeps every existing field in its colour and map region when a new field is 
   const wrapper = setup()
   await wrapper.setProps({ model: atlas(fields) })
   await button(wrapper, 'Explore Mathematics').trigger('click')
-  const regions = () => Object.fromEntries(wrapper.findAll('.atlas-map > g').map(region => [
+  const regions = () => Object.fromEntries(wrapper.findAll('.atlas-canvas > g:not(.map-edges)').map(region => [
     region.get('.region-heading strong').text(),
     { x: region.get('rect').attributes('x'), y: region.get('rect').attributes('y'), colour: region.attributes('style') },
   ]))

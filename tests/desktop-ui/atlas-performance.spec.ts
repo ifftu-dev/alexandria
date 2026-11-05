@@ -23,7 +23,7 @@ test('a 1,500-skill atlas pans without a main-thread task over 50 ms', async ({ 
   const box = await map.boundingBox()
   if (!box) throw new Error('The atlas map has no box')
   const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
-  const startViewBox = await map.getAttribute('viewBox')
+  const startCamera = await map.getAttribute('data-camera')
   // Down through the field, across into its neighbours, and back up.
   for (const [dx, dy] of [[0, -240], [0, -240], [-300, 0], [-300, 0], [300, 120], [0, 240]]) {
     await page.mouse.move(centre.x, centre.y)
@@ -32,7 +32,7 @@ test('a 1,500-skill atlas pans without a main-thread task over 50 ms', async ({ 
     await page.mouse.up()
   }
   await page.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 250)))
-  expect(await map.getAttribute('viewBox')).not.toBe(startViewBox)
+  expect(await map.getAttribute('data-camera')).not.toBe(startCamera)
   const longTasks = await page.evaluate(() => window.atlasLongTasks ?? [])
   const longest = Math.max(0, ...longTasks)
   testInfo.annotations.push({ type: 'longest pan task (ms)', description: longest.toFixed(1) })
