@@ -23,6 +23,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use crate::domain::guardian_ai::GuardianDecision;
 use crate::domain::vc::{verify_credential_db, VerifiableCredential, VerificationPolicy};
 
 /// Tables mirrored to the guardian. Deliberately independent of the
@@ -93,7 +94,7 @@ pub enum GuardianRequest {
     /// Child → guardian: sealed [`ApprovalRequestPayload`], asking the
     /// guardian to approve a remote model connection.
     ApprovalRequest { link_id: String, sealed: Vec<u8> },
-    /// Guardian → child: sealed [`ApprovalDecisionPayload`].
+    /// Guardian → child: sealed [`GuardianDecision`].
     ApprovalDecision { link_id: String, sealed: Vec<u8> },
 }
 
@@ -105,15 +106,6 @@ pub struct ApprovalRequestPayload {
     pub connection_name: String,
     pub endpoint: String,
     pub model: String,
-}
-
-/// The guardian's decision. The latest decision applies, so an approval can
-/// be withdrawn later.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalDecisionPayload {
-    pub request_id: String,
-    pub endpoint: String,
-    pub approved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -518,7 +510,7 @@ fn handle_approval_decision(conn: &Connection, link_id: &str, sealed: &[u8]) -> 
         Ok(None) => return GuardianResponse::Unauthorized,
         Err(e) => return GuardianResponse::Error(e),
     };
-    let decision: ApprovalDecisionPayload = match open(&key, sealed) {
+    let decision: GuardianDecision = match open(&key, sealed) {
         Ok(d) => d,
         Err(e) => return GuardianResponse::Error(format!("open approval decision: {e}")),
     };
@@ -1400,7 +1392,7 @@ mod tests {
         )
         .unwrap();
         let decide = |approved: bool, endpoint: &str| {
-            let d = ApprovalDecisionPayload {
+            let d = GuardianDecision {
                 request_id: "req".into(),
                 endpoint: endpoint.into(),
                 approved,

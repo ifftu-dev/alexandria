@@ -2315,7 +2315,10 @@ export interface ChatBinding { id: string; thread_id: string; kind: 'lesson' | '
 export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
 export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
 export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; requested_at: string; decided_at: string | null }
-export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; received_at: string; decided_at: string | null; delivered: boolean }
+/** Mirrors `GuardianAiRequestStatus` in `src-tauri/src/domain/guardian_ai.rs`. */
+export type GuardianAiRequestStatus = 'pending' | 'approved' | 'declined'
+/** Mirrors `GuardianAiRequest` in `src-tauri/src/domain/guardian_ai.rs`. */
+export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: GuardianAiRequestStatus; received_at: string; decided_at: string | null; delivered: boolean }
 export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'; content: string; status: 'proposed' | 'approved'; active: boolean; thread_id: string | null; source_message_id: string | null; revision: number; created_at: string; updated_at: string }
 export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; artifacts: ChatArtifact[]; active_run_id: string | null }
 /** The shape of each proposal body by kind. The kinds come from the backend; a kind without a shape here is a type error. */

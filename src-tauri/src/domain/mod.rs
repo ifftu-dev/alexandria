@@ -10,6 +10,7 @@ pub mod evidence;
 pub mod governance;
 pub mod governance_certificate;
 pub mod governance_locator;
+pub mod guardian_ai;
 pub mod identity;
 pub mod integrity_commitment;
 pub mod notification;

@@ -39,6 +39,9 @@ use alexandria_studio::provider as studio_provider;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
+pub use crate::domain::guardian_ai::{
+    GuardianAiRequest, GuardianAiRequestStatus, GuardianDecision,
+};
 pub use alexandria_studio::access::{visible_lesson, AccessDenied, Reader};
 
 /// How vendor terms and guardian rules see the profile's holder.
@@ -370,28 +373,20 @@ pub fn record_decision(
 
 // ─── the guardian's side ─────────────────────────────────────────────────
 
-/// A ward's request, as the guardian sees it in the overview.
-#[derive(Debug, Clone, Serialize)]
-pub struct GuardianAiRequest {
-    pub id: String,
-    pub link_id: String,
-    pub ward_name: Option<String>,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-    pub status: String,
-    pub received_at: String,
-    pub decided_at: Option<String>,
-    /// The current decision reached the ward.
-    pub delivered: bool,
-}
-
-/// A guardian's decision on a ward's request, as the guardian sync sends it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuardianDecision {
-    pub request_id: String,
-    pub endpoint: String,
-    pub approved: bool,
+/// A request's status column. A status this build does not know fails the
+/// read rather than reaching the overview as free text.
+fn stored_status(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<GuardianAiRequestStatus> {
+    let text: String = row.get(index)?;
+    GuardianAiRequestStatus::parse(&text).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            format!("unknown guardian AI request status {text:?}").into(),
+        )
+    })
 }
 
 /// Guardian side: stores a request a ward sent on `link_id`. The ward
@@ -438,7 +433,7 @@ pub fn ward_requests(conn: &Connection) -> Result<Vec<GuardianAiRequest>, Access
                     connection_name: r.get(3)?,
                     endpoint: r.get(4)?,
                     model: r.get(5)?,
-                    status: r.get(6)?,
+                    status: stored_status(r, 6)?,
                     received_at: r.get(7)?,
                     decided_at: r.get(8)?,
                     delivered: r.get(9)?,
@@ -469,7 +464,7 @@ pub fn record_guardian_decision(
         rusqlite::params![
             request_id,
             link_id,
-            if approve { "approved" } else { "declined" }
+            GuardianAiRequestStatus::of_decision(approve).as_str()
         ],
     )
     .map(|changed| changed == 1)
@@ -491,7 +486,7 @@ pub fn undelivered_decisions(
                 Ok(GuardianDecision {
                     request_id: r.get(0)?,
                     endpoint: r.get(1)?,
-                    approved: r.get::<_, String>(2)? == "approved",
+                    approved: stored_status(r, 2)? == GuardianAiRequestStatus::Approved,
                 })
             })?
             .collect();
@@ -514,11 +509,7 @@ pub fn mark_delivered(
         rusqlite::params![
             decision.request_id,
             link_id,
-            if decision.approved {
-                "approved"
-            } else {
-                "declined"
-            }
+            GuardianAiRequestStatus::of_decision(decision.approved).as_str()
         ],
     )
     .map(|changed| changed == 1)
@@ -764,7 +755,7 @@ mod tests {
                 request.connection_name.as_str(),
                 request.endpoint.as_str(),
                 request.model.as_str(),
-                request.status.as_str(),
+                request.status,
                 request.decided_at.is_none(),
                 request.delivered,
             ),
@@ -775,7 +766,7 @@ mod tests {
                 "Work OpenAI",
                 openai,
                 "gpt-5.1-mini",
-                "pending",
+                GuardianAiRequestStatus::Pending,
                 true,
                 false
             )
@@ -793,7 +784,7 @@ mod tests {
             vec![approved.clone()]
         );
         let request = &ward_requests(&conn).unwrap()[0];
-        assert_eq!(request.status, "approved");
+        assert_eq!(request.status, GuardianAiRequestStatus::Approved);
         assert!(request.decided_at.is_some());
 
         // The guardian withdraws while the approval is in flight: its
@@ -835,8 +826,8 @@ mod tests {
                 .unwrap()
                 .status
         };
-        assert_eq!(status("sam"), "approved");
-        assert_eq!(status("alex"), "pending");
+        assert_eq!(status("sam"), GuardianAiRequestStatus::Approved);
+        assert_eq!(status("alex"), GuardianAiRequestStatus::Pending);
         assert!(undelivered_decisions(&conn, "alex").unwrap().is_empty());
         // Delivering through one link marks only that link's request.
         let decision = undelivered_decisions(&conn, "sam").unwrap().remove(0);

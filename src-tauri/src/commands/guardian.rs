@@ -602,12 +602,7 @@ async fn deliver_approval_decisions(
     }
     let peer: libp2p::PeerId = peer_str.parse().map_err(|e| format!("bad peer id: {e}"))?;
     for decision in undelivered {
-        let payload = proto::ApprovalDecisionPayload {
-            request_id: decision.request_id.clone(),
-            endpoint: decision.endpoint.clone(),
-            approved: decision.approved,
-        };
-        let sealed = proto::seal(key, &payload)?;
+        let sealed = proto::seal(key, &decision)?;
         let response = {
             let node = node_handle.lock().await;
             let node = node.as_ref().ok_or("P2P node not running")?;
@@ -651,7 +646,7 @@ async fn deliver_approval_decisions(
 #[tauri::command]
 pub async fn guardian_list_ai_requests(
     state: State<'_, AppState>,
-) -> Result<Vec<crate::ai_access::GuardianAiRequest>, String> {
+) -> Result<Vec<crate::domain::guardian_ai::GuardianAiRequest>, String> {
     state
         .db_executor
         .execute(
