@@ -162,7 +162,7 @@ const classroomPreviews = computed(() =>
         <button
           v-for="item in primaryNav"
           :key="item.path"
-          :class="['sb-item pressable selectable', { 'sb-item--active': isActive(item.path) }]"
+          :class="['sb-item pressable selection-indicator', { 'sb-item--active': isActive(item.path) }]"
           :aria-current="isActive(item.path) ? 'page' : undefined"
           :title="collapsed ? (item.label ?? (item.labelKey ? $t(item.labelKey) : '')) : undefined"
           @click="navigate(item.path)"
@@ -194,7 +194,7 @@ const classroomPreviews = computed(() =>
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
-          :class="['sb-item pressable selectable', { 'sb-item--active': isActive('/tutoring') }]"
+          :class="['sb-item pressable selection-indicator', { 'sb-item--active': isActive('/tutoring') }]"
           :aria-current="isActive('/tutoring') ? 'page' : undefined"
           :title="$t('nav.sections.liveTutoring')"
           @click="navigate('/tutoring')"
@@ -268,7 +268,7 @@ const classroomPreviews = computed(() =>
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
-          :class="['sb-item pressable selectable', { 'sb-item--active': isActive('/classrooms') }]"
+          :class="['sb-item pressable selection-indicator', { 'sb-item--active': isActive('/classrooms') }]"
           :aria-current="isActive('/classrooms') ? 'page' : undefined"
           :title="$t('nav.sections.classrooms')"
           @click="navigate('/classrooms')"

@@ -45,7 +45,7 @@ const ChannelList = defineComponent({
               onClick: () => emit('select', ch.id),
               'aria-current': props.activeChannelId === ch.id ? 'true' : undefined,
               class: [
-                'pressable selectable w-full flex items-center gap-2 px-3 py-2 rounded-lg my-1 text-sm text-start [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)]',
+                'pressable selection-indicator w-full flex items-center gap-2 px-3 py-2 rounded-lg my-1 text-sm text-start [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)]',
                 props.activeChannelId === ch.id
                   ? 'text-primary font-medium'
                   : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',

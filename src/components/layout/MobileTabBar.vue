@@ -52,7 +52,7 @@ function navigate(path: string) {
       <button
         v-for="tab in tabs"
         :key="tab.path"
-        class="tab-item pressable selectable flex flex-1 flex-col items-center justify-center gap-0.5 pt-2 pb-1"
+        class="tab-item pressable selection-indicator flex flex-1 flex-col items-center justify-center gap-0.5 pt-2 pb-1"
         :class="isActive(tab.path) ? 'text-primary' : 'text-muted-foreground'"
         :aria-current="isActive(tab.path) ? 'page' : undefined"
         @click="navigate(tab.path)"

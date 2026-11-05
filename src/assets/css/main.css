@@ -435,12 +435,12 @@ pre,
    aria-selected; the indicator settles in
    behind its content while the previous one fades. Controls may restyle the
    indicator's geometry and colour through ::before, never its timing. */
-.selectable {
+.selection-indicator {
   position: relative;
   isolation: isolate;
 }
 
-.selectable::before {
+.selection-indicator::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -454,7 +454,7 @@ pre,
   pointer-events: none;
 }
 
-.selectable:is([aria-current]:not([aria-current='false']), [aria-checked='true'], [aria-selected='true'])::before {
+.selection-indicator:is([aria-current]:not([aria-current='false']), [aria-checked='true'], [aria-selected='true'])::before {
   opacity: 1;
   scale: 1;
 }

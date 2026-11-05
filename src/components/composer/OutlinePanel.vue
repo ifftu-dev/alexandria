@@ -173,7 +173,7 @@ function typeLabel(type: string): string {
           v-for="el in elements[chapter.id] ?? []"
           :key="el.id"
           data-outline-element
-          class="pressable selectable w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm cursor-grab [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)] [&>*]:pointer-events-none"
+          class="pressable selection-indicator w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm cursor-grab [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)] [&>*]:pointer-events-none"
           :class="[
             selectedElementId === el.id ? 'text-primary' : 'text-foreground hover:bg-muted/40',
             { 'opacity-50': dragFor(chapter.id).draggingId.value === el.id },

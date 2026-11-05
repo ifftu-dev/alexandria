@@ -7,7 +7,7 @@ import MobileTabBar from './MobileTabBar.vue'
 import ModeSwitcher from './ModeSwitcher.vue'
 
 // jsdom does not apply main.css, so these check the shared opt-in contract:
-// the `pressable` class carries press feedback and the `selectable` class
+// the `pressable` class carries press feedback and the `selection-indicator` class
 // draws the selection indicator from the control's ARIA state. The desktop UI
 // suite proves the cascade itself in Chromium and WebKit.
 
@@ -27,7 +27,7 @@ test('every tab bar item takes the shared press feedback and only the current on
   const bar = mount(MobileTabBar, { global: { plugins: [i18n, router] } })
   const tabs = bar.findAll('button')
   expect(tabs).toHaveLength(4)
-  for (const tab of tabs) expect(tab.classes()).toEqual(expect.arrayContaining(['pressable', 'selectable']))
+  for (const tab of tabs) expect(tab.classes()).toEqual(expect.arrayContaining(['pressable', 'selection-indicator']))
   expect(tabs.map(tab => tab.attributes('aria-current') ?? null)).toEqual([null, null, null, 'page'])
 
   await tabs[0]!.trigger('click')
@@ -39,7 +39,7 @@ test('the mode switcher segments take the shared press feedback and selection in
   const router = await routerAt('/home')
   const switcher = mount(ModeSwitcher, { global: { plugins: [i18n, router] } })
   const radios = switcher.findAll('[role="radio"]')
-  for (const radio of radios) expect(radio.classes()).toEqual(expect.arrayContaining(['pressable', 'selectable']))
+  for (const radio of radios) expect(radio.classes()).toEqual(expect.arrayContaining(['pressable', 'selection-indicator']))
   expect(radios.map(radio => radio.attributes('aria-checked'))).toEqual(['true', 'false'])
 
   await radios[1]!.trigger('click')

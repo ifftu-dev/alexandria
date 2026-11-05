@@ -542,7 +542,7 @@ function onSectionClick(id: SettingsSectionId) {
                 <button
                   v-for="s in filteredSections"
                   :key="s.id"
-                  class="settings-nav-item pressable selectable"
+                  class="settings-nav-item pressable selection-indicator"
                   :class="{ 'settings-nav-item--active': activeSection === s.id && showingSection }"
                   :aria-current="activeSection === s.id && showingSection ? 'page' : undefined"
                   @click="onSectionClick(s.id)"
