@@ -2441,19 +2441,28 @@ async fn swarm_event_loop(
                                     Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
                                         let job_db = inbound_db.clone();
                                         let peer_id = peer.to_string();
+                                        let events = event_tx.clone();
                                         inbound_requests.spawn(async move {
-                                            let response = job_db
-                                                .run("p2p.device-sync", move |database| {
+                                            let handled = job_db
+                                                .run_in_session("p2p.device-sync", move |database| {
                                                     Ok(super::device_sync::handle_sync_request(
                                                         database.conn(),
                                                         &peer_id,
                                                         &request,
                                                     ))
                                                 })
-                                                .await
-                                                .unwrap_or_else(|error| {
-                                                    SyncResponse::Error(inbound::refusal_text(&error))
-                                                });
+                                                .await;
+                                            let response = match handled {
+                                                Ok((handled, session)) => {
+                                                    // Committed: settings that reach outside
+                                                    // the store follow, as after a local write.
+                                                    if !handled.settings.is_empty() {
+                                                        let _ = events.send(P2pEvent::SettingsSynced { session, keys: handled.settings }).await;
+                                                    }
+                                                    handled.response
+                                                }
+                                                Err(error) => SyncResponse::Error(inbound::refusal_text(&error)),
+                                            };
                                             InboundCompletion::DeviceSync(channel, response)
                                         });
                                     }

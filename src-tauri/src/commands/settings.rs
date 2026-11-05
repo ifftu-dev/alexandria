@@ -27,16 +27,16 @@ fn emit_changed(app: &AppHandle, key: Option<&str>) {
 /// Some settings reach outside the store. Push eligibility follows the
 /// organisations switch, and the Android notification channel follows the
 /// profile language. Both run in the background so the write returns at
-/// once; an offline push removal stays pending and retries.
-fn after_change(app: &AppHandle, lease: ProfileLease, key: &str) {
+/// once; an offline push removal stays pending and retries. Runs after a
+/// local write and after settings sync applied rows from another device.
+pub(crate) fn after_change(app: &AppHandle, lease: ProfileLease, keys: Vec<String>) {
+    if keys.is_empty() {
+        return;
+    }
     let app = app.clone();
-    let key = key.to_string();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = notifications::settings_changed(&app, lease.clone(), &key).await {
-            log::debug!("notification channel refresh after `{key}` changed failed: {e}");
-        }
-        if let Err(e) = notifications::push::settings_changed(&app, lease, &key).await {
-            log::warn!("push reconcile after `{key}` changed failed: {e}");
+        if let Err(e) = notifications::follow_settings(&app, lease, &keys).await {
+            log::warn!("push reconcile after {keys:?} changed failed: {e}");
         }
     });
 }
@@ -82,7 +82,7 @@ pub async fn set_setting(
         )
         .await?;
     emit_changed(&app, Some(&changed_key));
-    after_change(&app, lease, &changed_key);
+    after_change(&app, lease, vec![changed_key]);
     Ok(())
 }
 
@@ -105,6 +105,6 @@ pub async fn reset_setting(
         )
         .await?;
     emit_changed(&app, Some(&changed_key));
-    after_change(&app, lease, &changed_key);
+    after_change(&app, lease, vec![changed_key]);
     Ok(())
 }

@@ -152,6 +152,7 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                 });
             operations.spawn_job(gossip_dispatcher).await;
             let app_for_guardian = app_for_events.clone();
+            let operations_for_sync = operations.clone();
 
             // Spawn event consumer
             operations
@@ -180,6 +181,18 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                                     &session,
                                     &recorded,
                                 );
+                            }
+                            crate::p2p::types::P2pEvent::SettingsSynced { session, keys } => {
+                                // A paired device changed these settings here.
+                                // Follow them under that session only; a
+                                // switch in between drops them.
+                                if let Ok(lease) = operations_for_sync.admit(&session) {
+                                    crate::commands::settings::after_change(
+                                        &app_for_guardian,
+                                        lease,
+                                        keys,
+                                    );
+                                }
                             }
                             _ => {}
                         }

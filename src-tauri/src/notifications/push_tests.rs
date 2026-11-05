@@ -1426,6 +1426,122 @@ async fn switching_organisations_off_reconciles_push_and_other_settings_do_not()
     assert_eq!(server.await.unwrap(), ["PUT", "DELETE"]);
 }
 
+#[tokio::test]
+async fn a_synced_organisations_switch_pauses_push_like_a_local_change() {
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    const RECIPIENT: &str = "11111111-1111-4111-8111-111111111111";
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let mut methods = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            methods.push(header.split(' ').next().unwrap().to_string());
+            let code = if methods.len() == 1 { 200 } else { 204 };
+            let body = format!(r#"{{"recipient":"{RECIPIENT}"}}"#);
+            respond(&mut socket, code, &body, &header).await;
+        }
+        methods
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+    let app = mock_builder()
+        .manage(state)
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let state = app.state::<AppState>();
+
+    // Another device turned organisations off; settings sync applies it.
+    let payload = crate::p2p::sync::SyncPayload {
+        settings: vec![crate::p2p::sync::SettingsSyncRow {
+            key: keys::ORGANISATIONS_ENABLED.key.into(),
+            value: "false".into(),
+            updated_at: "2999-01-01T00:00:00Z".into(),
+        }],
+        tables: vec![],
+    };
+    let applied = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            admitted(&state),
+            "test.sync.apply",
+            move |db| crate::p2p::sync::apply_sync_payload(db.conn(), &payload),
+        )
+        .await
+        .unwrap();
+    assert_eq!(applied.settings, [keys::ORGANISATIONS_ENABLED.key]);
+
+    let status = super::super::follow_settings(app.handle(), admitted(&state), &applied.settings)
+        .await
+        .unwrap()
+        .expect("a synced organisations switch reconciles push");
+    assert!(status.enabled && status.paused_by_organisations);
+    assert!(!status.registered && !status.pending_cleanup);
+    assert!(
+        recipients::resolve(&state, RECIPIENT).is_none(),
+        "routing is retired"
+    );
+    assert!(stored_push_preference(&state));
+    assert_eq!(server.await.unwrap(), ["PUT", "DELETE"]);
+}
+
+#[tokio::test]
+async fn an_organisation_push_is_dropped_while_organisations_are_off() {
+    const RECIPIENT: &str = "11111111-1111-4111-8111-111111111111";
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let (header, _) = request(&mut socket).await;
+        let body = format!(r#"{{"recipient":"{RECIPIENT}"}}"#);
+        respond(&mut socket, 200, &body, &header).await;
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    server.await.unwrap();
+
+    // The switch is off but no reconcile has run yet (a sync just landed, or
+    // the reconcile is still offline): the routing is still live.
+    set_organisations(&state, false);
+    assert!(recipients::resolve(&state, RECIPIENT).is_some());
+    assert!(receive(&state, admitted(&state), offer(RECIPIENT))
+        .await
+        .unwrap()
+        .is_none());
+    let rows = super::super::list(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        None,
+        false,
+    )
+    .unwrap();
+    assert!(rows.is_empty(), "nothing is recorded: {rows:?}");
+}
+
 /// The code and raw detail a status carries, read from its wire form.
 fn failure(status: &PushStatus) -> (Value, Value) {
     let wire = serde_json::to_value(status).unwrap();

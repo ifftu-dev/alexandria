@@ -523,6 +523,28 @@ pub async fn settings_changed<R: Runtime>(
     refresh_channel(app, lease).await.map(Some)
 }
 
+/// Follow settings that changed, whether a write on this device or rows
+/// settings sync applied from another one: the Android channel follows the
+/// profile language, and push eligibility follows the organisations switch.
+/// A channel failure is logged and does not stop the push reconcile. Returns
+/// the push status when push was reconciled.
+pub async fn follow_settings<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: crate::profile::scope::ProfileLease,
+    changed: &[String],
+) -> Result<Option<PushStatus>, NotificationError> {
+    let mut status = None;
+    for key in changed {
+        if let Err(e) = settings_changed(app, lease.clone(), key).await {
+            log::debug!("notification channel refresh after `{key}` changed failed: {e}");
+        }
+        if let Some(now) = push::settings_changed(app, lease.clone(), key).await? {
+            status = Some(now);
+        }
+    }
+    Ok(status)
+}
+
 /// Wire the OS side up once the plugins exist: the Android channel and the
 /// push plugin's events. Called from the app's setup hook.
 pub fn install<R: Runtime>(app: &AppHandle<R>) {

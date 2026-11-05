@@ -499,7 +499,8 @@ fn permission(granted: Result<bool, String>) -> Result<(), PushFailure> {
     }
 }
 
-/// Reconcile after a generic settings write that changes push eligibility.
+/// Reconcile after a generic settings write that changes push eligibility,
+/// local or applied by settings sync (see [`super::follow_settings`]).
 /// The push switch has its own command; the organisations switch arrives here,
 /// so turning it off retires the registration and turning it on re-registers.
 /// `None` when the key does not affect push.
@@ -600,6 +601,13 @@ pub(crate) async fn receive(
             lease,
             "notifications.push.received",
             move |db| {
+                // Every push comes from an organisation through Cloud. With
+                // organisations off it is dropped even before the reconcile
+                // that retires its routing has run (a switch synced from
+                // another device, or an offline removal).
+                if !SettingsStore::get(db.conn(), keys::ORGANISATIONS_ENABLED) {
+                    return Ok(None);
+                }
                 if !registrations(db.conn())
                     .map_err(|e| e.to_string())?
                     .iter()

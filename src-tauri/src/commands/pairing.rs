@@ -7,9 +7,10 @@
 //! [`crate::p2p::device_sync`]).
 
 use crate::profile::scope::ProfileState as State;
+use tauri::{AppHandle, Manager};
 
 use crate::crypto::pairing::{self, PairingCode};
-use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::sync::SyncResult;
 use crate::p2p::device_sync::{PairingHandshake, SyncRequest, SyncResponse};
 use crate::p2p::sync;
@@ -113,6 +114,7 @@ pub async fn pairing_generate_code(state: State<'_, AppState>) -> Result<String,
 /// on the other side). Returns the resulting [`SyncResult`].
 #[tauri::command]
 pub async fn pairing_accept_code(
+    app: AppHandle,
     state: State<'_, AppState>,
     code: String,
 ) -> Result<SyncResult, String> {
@@ -185,7 +187,7 @@ pub async fn pairing_accept_code(
     };
 
     finish_exchange(
-        &state.db_executor,
+        &app,
         state.profile_lease(),
         DatabaseWorkload::Learner,
         &parsed.peer_id,
@@ -197,9 +199,10 @@ pub async fn pairing_accept_code(
 }
 
 /// Apply a peer's [`SyncResponse`] to the local DB and assemble a
-/// [`SyncResult`]. Shared by pairing and the routine sync driver.
+/// [`SyncResult`]. Shared by pairing and the routine sync driver. Settings
+/// the peer changed are followed as a local write's are, once committed.
 pub(crate) async fn finish_exchange(
-    db_executor: &DatabaseExecutor,
+    app: &AppHandle,
     lease: ProfileLease,
     workload: DatabaseWorkload,
     peer_id: &str,
@@ -212,11 +215,15 @@ pub(crate) async fn finish_exchange(
             let payload = sync::open_payload(key, &sealed)?;
             let received = sync::payload_row_count(&payload);
             let peer_id = peer_id.to_string();
-            let locally_merged = db_executor
-                .execute(workload, lease, "sync.payload.apply", move |db| {
+            let applied = app
+                .state::<AppState>()
+                .db_executor
+                .execute(workload, lease.clone(), "sync.payload.apply", move |db| {
                     apply_exchange_payload(db.conn(), &peer_id, &payload)
                 })
                 .await?;
+            let locally_merged = applied.merged();
+            crate::commands::settings::after_change(app, lease, applied.settings);
             Ok(SyncResult {
                 rows_sent: merged,
                 rows_received: received,
@@ -236,12 +243,11 @@ fn apply_exchange_payload(
     conn: &rusqlite::Connection,
     peer_id: &str,
     payload: &sync::SyncPayload,
-) -> Result<i64, String> {
+) -> Result<sync::SyncApplied, String> {
     crate::db::with_transaction(conn, || {
-        let (rows, settings) = sync::apply_sync_payload(conn, payload)?;
-        let locally_merged = rows + settings;
-        sync::record_sync_event(conn, peer_id, "bidirectional", locally_merged)?;
-        Ok(locally_merged)
+        let applied = sync::apply_sync_payload(conn, payload)?;
+        sync::record_sync_event(conn, peer_id, "bidirectional", applied.merged())?;
+        Ok(applied)
     })
 }
 

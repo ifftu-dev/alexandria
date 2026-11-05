@@ -238,4 +238,12 @@ pub enum P2pEvent {
         session: String,
         notification: Option<Box<crate::notifications::Recorded>>,
     },
+    /// A paired device's sync request changed these settings here. They are
+    /// committed; this is what lets the app follow them as it follows a
+    /// local write (push eligibility, the notification channel).
+    SettingsSynced {
+        /// The profile session the payload was applied under.
+        session: String,
+        keys: Vec<String>,
+    },
 }

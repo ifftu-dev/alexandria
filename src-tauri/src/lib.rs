@@ -1234,7 +1234,7 @@ pub fn run() {
                                 // toggle is off, no profile is unlocked, or the
                                 // node isn't running.
                                 let merged = commands::sync::auto_sync_all(
-                                    &db_executor_for_queue,
+                                    &app_for_notifications,
                                     &guardian_lease,
                                     &node_for_sync,
                                 )

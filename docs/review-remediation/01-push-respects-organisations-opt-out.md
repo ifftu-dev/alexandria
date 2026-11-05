@@ -45,3 +45,22 @@ Red → green:
 Checks: `cargo test -p alexandria-node notifications::` (34 passed), `cargo fmt --check`, `cargo clippy -p alexandria-node --all-targets -- -D warnings`, `npx vue-tsc -b --noEmit`, `npm run i18n:keys`, `npm run i18n:parity`, `npm run i18n:no-raw-text`, `npm run check:tauri-commands`, `scripts/check-docs.sh`.
 
 Deviation: the Rust tests use the existing encrypted on-disk profile helper (`boundary_tests::active`) rather than `Database::open_in_memory()`, because surviving a restart needs a profile that can be reopened. An inbound settings sync that turns organisations off is reconciled by the mobile retry and resume paths, not straight away.
+
+## Follow-up — 2026-11-05
+
+Review found that an organisations switch synced from another device left push routing live until the next resume or retry, and that `push::receive` recorded an organisation push while organisations were off.
+
+What changed:
+
+- `p2p::sync::apply_sync_payload` returns `SyncApplied`, which names the settings keys that took effect. `device_sync::handle_sync_request` hands them back with its response (`HandledSync`).
+- Both sync directions follow those keys once the merge has committed, through the same `commands::settings::after_change` a local write uses. The inbound side sends `P2pEvent::SettingsSynced` with the profile session; the outbound side (`finish_exchange`, used by pairing, sync now and auto-sync) calls it directly.
+- `notifications::follow_settings` is the shared reaction: the Android channel follows the language, and push reconciles for the organisations switch.
+- `push::receive` drops a push while organisations are off, before the reconcile that retires its routing has run.
+
+Red → green:
+
+- `a_synced_organisations_switch_pauses_push_like_a_local_change`: red, because it would not build until the sync apply named its keys and `follow_settings` existed. Now green: a synced `organisations.enabled = false` sends the DELETE, retires routing and keeps the push preference.
+- `an_organisation_push_is_dropped_while_organisations_are_off`: red, because the push was recorded. Now green.
+- `device_sync::tests::the_settings_a_peer_changed_are_reported_for_the_caller_to_follow` (new).
+
+Text the webview sees: unchanged. The earlier deviation (inbound sync reconciled only by retry and resume) no longer applies.
