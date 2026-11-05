@@ -734,17 +734,6 @@ function continueToDashboard() {
   background: linear-gradient(90deg, #34d399, #10b981);
   transition: width var(--duration-slow) var(--ease-settle);
 }
-.mint-bar-fill.anchoring {
-  background-image: linear-gradient(
-    115deg,
-    #34d399 0%, #34d399 40%, #6ee7b7 50%, #34d399 60%, #34d399 100%
-  );
-  background-size: 200% 100%;
-  animation: bar-shimmer 1.4s linear infinite;
-}
-@keyframes bar-shimmer {
-  to { background-position: -200% 0; }
-}
 .mint-list {
   list-style: none;
   margin: 0;
@@ -1029,9 +1018,7 @@ function continueToDashboard() {
   .chip,
   .mint,
   .actions,
-  .confetti-piece,
-  .spinner,
-  .mint-bar-fill.anchoring {
+  .confetti-piece {
     animation: none !important;
   }
   .confetti { display: none; }

@@ -548,8 +548,8 @@ function onIframeError(msg: string) {
             v-if="!pluginReady"
             class="ph-loading absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card"
           >
-            <div class="ph-loading__orbit">
-              <span></span><span></span><span></span>
+            <div class="ph-loading__orbit" aria-hidden="true">
+              <span v-for="dot in 3" :key="dot" class="ph-loading__dot" data-progress />
             </div>
             <p class="text-sm text-muted-foreground">{{ $t('plugins.host.loading') }}</p>
           </div>
@@ -596,7 +596,7 @@ function onIframeError(msg: string) {
   width: 2.75rem;
   height: 2.75rem;
 }
-.ph-loading__orbit span {
+.ph-loading__dot {
   position: absolute;
   inset: 0;
   margin: auto;
@@ -606,9 +606,8 @@ function onIframeError(msg: string) {
   background: var(--app-primary);
   animation: ph-orbit 1.1s ease-in-out infinite;
 }
-.ph-loading__orbit span:nth-child(1) { animation-delay: 0s; }
-.ph-loading__orbit span:nth-child(2) { animation-delay: -0.37s; }
-.ph-loading__orbit span:nth-child(3) { animation-delay: -0.74s; }
+.ph-loading__dot:nth-child(2) { animation-delay: -0.37s; }
+.ph-loading__dot:nth-child(3) { animation-delay: -0.74s; }
 
 @keyframes ph-orbit {
   0%   { transform: rotate(0deg) translateX(1.05rem) scale(0.6); opacity: 0.35; }
@@ -616,10 +615,9 @@ function onIframeError(msg: string) {
   100% { transform: rotate(360deg) translateX(1.05rem) scale(0.6); opacity: 0.35; }
 }
 
-.plugin-fade-leave-active { transition: opacity 0.25s ease; }
+.plugin-fade-leave-active { transition: opacity var(--transition-base); }
 .plugin-fade-leave-to { opacity: 0; }
 
-@media (prefers-reduced-motion: reduce) {
-  .ph-loading__orbit span { animation-duration: 2.4s; }
-}
+/* Reduced and Off: the shared progress rule (main.css) slows the dots to
+   --duration-progress-reduced or holds them still beside the loading text. */
 </style>

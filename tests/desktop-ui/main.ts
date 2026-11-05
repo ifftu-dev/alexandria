@@ -37,6 +37,11 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
       if (['get_my_skill_graph', 'get_local_did', 'check_my_username_conflict'].includes(command)) return null
       if (command === 'hydrate_catalog_courses') return 0
       if (command === 'p2p_status') return offlineNetwork
+      // The progress specimens' plugin host: it loads, then waits for a plugin
+      // that never handshakes, so its loading dots stay up.
+      if (command === 'plugin_get_manifest') return { name: 'Specimen', kinds: ['interactive'], grader: null, capabilities: [], entry: 'index.html', author_did: 'did:key:specimen' }
+      if (['plugin_list', 'plugin_list_permissions'].includes(command)) return []
+      if (['plugin_load_element_state', 'plugin_set_media_grants', 'plugin_clear_media_grants', 'frontend_log'].includes(command)) return null
       if (['p2p_start', 'claim_username'].includes(command)) return undefined
       throw new Error(`Unexpected fixture IPC command: ${command}`)
     },

@@ -110,7 +110,7 @@ async function copy() {
     <div v-else-if="text" class="chat-prose" @click="onClick" @keydown="onClick" v-html="html" />
 
     <p v-if="streaming" class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
-      <span class="chat-spin" aria-hidden="true" />{{ t('chat.message.writing') }}
+      <span class="chat-spin" data-progress aria-hidden="true" />{{ t('chat.message.writing') }}
     </p>
 
     <div
@@ -210,7 +210,7 @@ async function copy() {
 .chat-spin { width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--app-border); border-top-color: var(--app-primary); animation: chat-spin 0.8s linear infinite; }
 @keyframes chat-blink { 50% { opacity: 0; } }
 @keyframes chat-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .chat-caret, .chat-spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .chat-caret { animation: none; } }
 .chat-icon-btn { display: inline-grid; place-items: center; min-width: 1.75rem; height: 1.75rem; border-radius: 0.5rem; color: var(--app-muted-foreground); }
 .chat-icon-btn:hover:not(:disabled) { background: var(--app-muted); color: var(--app-foreground); }
 .chat-icon-btn:disabled { opacity: 0.4; }

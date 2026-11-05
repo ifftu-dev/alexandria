@@ -85,7 +85,7 @@ test('progress indicators keep turning slowly in Reduced and stand still beside 
   }
   await expect(track).toHaveCSS('stroke-dasharray', 'none')
   await expect(arc).toHaveCSS('stroke-dasharray', '30px, 60px')
-  await expect(specimens.getByRole('status')).toHaveText('Saving draft')
+  await expect(specimens.locator('[role="status"]:has(.app-spinner)')).toHaveText('Saving draft')
   await expect(pending.getByText('Save draft')).toHaveCSS('opacity', '1')
   await page.getByRole('button', { name: 'System', exact: true }).click()
 })
@@ -95,4 +95,33 @@ test('the OS reduce preference slows progress instead of freezing it', async ({ 
   await page.goto('/tests/desktop-ui/?screen=motion&progress=1')
   const spinner = page.locator('[data-progress-specimens] svg[data-progress]')
   await expect.poll(() => spinner.evaluate(el => [getComputedStyle(el).animationDuration, el.getAnimations().some(a => a.playState === 'running')])).toEqual(['3s', true])
+})
+
+test('chat and plugin loading indicators are marked progress: slow in Reduced, still beside their text in Off', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=motion&progress=1')
+  const specimens = page.locator('[data-progress-specimens]')
+  const chatSpin = specimens.locator('.chat-spin')
+  const pluginDots = specimens.locator('.ph-loading__orbit > span')
+  await expect(pluginDots).toHaveCount(3)
+  const style = (target: typeof chatSpin) => target.evaluate(el => {
+    const computed = getComputedStyle(el)
+    return { name: computed.animationName, duration: computed.animationDuration, iterations: computed.animationIterationCount, running: el.getAnimations().some(a => a.playState === 'running') }
+  })
+
+  await page.getByRole('button', { name: 'Reduced', exact: true }).click()
+  for (const target of [chatSpin, pluginDots.first()]) {
+    expect(await style(target)).toEqual(expect.objectContaining({ duration: '3s', iterations: 'infinite', running: true }))
+  }
+
+  await page.getByRole('button', { name: 'Off', exact: true }).click()
+  for (const target of [chatSpin, pluginDots.first()]) {
+    expect(await style(target)).toEqual(expect.objectContaining({ name: 'none', running: false }))
+  }
+  await expect(specimens.getByRole('status').filter({ hasText: 'Writing' })).toBeVisible()
+  await expect(specimens.getByText('Loading plugin')).toBeVisible()
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.getByRole('button', { name: 'System', exact: true }).click()
+  await expect.poll(() => style(chatSpin)).toEqual(expect.objectContaining({ duration: '3s', running: true }))
+  await expect.poll(() => style(pluginDots.first())).toEqual(expect.objectContaining({ duration: '3s', running: true }))
 })
