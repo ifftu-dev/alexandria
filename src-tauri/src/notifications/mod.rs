@@ -74,8 +74,13 @@ pub enum NotificationError {
     /// The vault or the wallet it holds could not give the issuer key.
     #[error("{0}")]
     Vault(String),
-    /// A profile-scoped step failed: the database executor (whose jobs
-    /// return strings), profile admission, or a lease.
+    /// A database executor job failed: the job's own error, or the executor
+    /// refusing it (a full lane, a session that ended before it started).
+    /// Jobs return strings, so this carries the job's text.
+    #[error("{0}")]
+    Executor(String),
+    /// The profile could not be admitted or held: profile admission, a lease
+    /// that is no longer current, or a profile id that does not parse.
     #[error("{0}")]
     Profile(String),
     #[error(transparent)]
@@ -546,7 +551,7 @@ pub async fn refresh_channel<R: Runtime>(
             |db| Ok(SettingsStore::get(db.conn(), keys::USER_LANGUAGE)),
         )
         .await
-        .map_err(NotificationError::Profile)?;
+        .map_err(NotificationError::Executor)?;
     let text = channel_text(&preference);
     if lease.is_current() {
         apply_channel(app, text);

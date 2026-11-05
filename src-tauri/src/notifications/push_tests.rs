@@ -1695,3 +1695,25 @@ async fn native_and_transport_failures_have_their_own_codes() {
     );
     assert_eq!(insecure.detail, "Alexandria Cloud must be https");
 }
+
+#[tokio::test]
+async fn a_failed_database_job_is_an_executor_failure_not_a_profile_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    state
+        .db
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .conn()
+        .execute_batch("DROP TABLE push_operation_state")
+        .unwrap();
+    let error = status(&state, admitted(&state)).await.unwrap_err();
+    assert!(matches!(error, NotificationError::Executor(_)), "{error:?}");
+    // The text the webview sees is the job's own.
+    assert!(
+        error.to_string().contains("push_operation_state"),
+        "{error}"
+    );
+}

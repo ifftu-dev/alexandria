@@ -91,7 +91,7 @@ async fn facts(state: &AppState, lease: &ProfileLease) -> Result<Facts, Notifica
             revision: db.conn().query_row("SELECT revision FROM push_operation_state WHERE singleton=1", [], |r| r.get(0)).map_err(|e| e.to_string())?,
             native_error: db.conn().query_row("SELECT last_error, last_error_detail FROM push_operation_state WHERE singleton=1 AND error_origin IS ?1 AND last_error IS NOT NULL", params![cloud_origin(db.conn())], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(|e| e.to_string())?,
         })
-    }).await.map_err(NotificationError::Profile)
+    }).await.map_err(NotificationError::Executor)
 }
 
 impl Facts {
@@ -279,7 +279,7 @@ async fn reconcile_inner(
         tx.execute("UPDATE push_registrations SET pending='delete',recipient=NULL,revision=revision+1 WHERE pending!='delete' AND (?1=0 OR cloud_origin IS NOT ?2)", params![desired, current_origin]).map_err(|e| e.to_string())?;
         tx.execute("UPDATE push_operation_state SET revision=revision+1, last_error=CASE WHEN ?1 THEN last_error ELSE NULL END, last_error_detail=CASE WHEN ?1 THEN last_error_detail ELSE NULL END, error_origin=CASE WHEN ?1 THEN error_origin ELSE NULL END WHERE singleton=1", params![desired]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
-    }).await.map_err(NotificationError::Profile)?;
+    }).await.map_err(NotificationError::Executor)?;
     let staged = facts(state, lease).await?;
     for row in staged.rows.iter().filter(|r| r.pending == "delete") {
         let (key, did) = issuer(state).await?.into_parts();
@@ -309,7 +309,7 @@ async fn reconcile_inner(
                 Ok(()) => db.conn().execute("DELETE FROM push_registrations WHERE cloud_origin=?1 AND revision=?2 AND pending='delete'", params![origin, revision]),
                 Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1,last_error_detail=?2 WHERE cloud_origin=?3 AND revision=?4", params![error.code.as_str(), error.detail, origin, revision]),
             }.map(drop).map_err(|e| e.to_string())
-        }).await.map_err(NotificationError::Profile)?;
+        }).await.map_err(NotificationError::Executor)?;
     }
     let f = facts(state, lease).await?;
     if !f.eligible()
@@ -349,7 +349,7 @@ async fn reconcile_inner(
     let network = recipients::network()?;
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.stage", move |db| {
         db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id, put_body) VALUES (?1,?2,'fcm',?3,'','put',?4,?5,?6) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, last_error_detail=NULL, network_id=excluded.network_id, put_body=excluded.put_body", params![staged_origin, staged_device, staged_token, revision, network, serialized]).map(drop).map_err(|e| e.to_string())
-    }).await.map_err(NotificationError::Profile)?;
+    }).await.map_err(NotificationError::Executor)?;
     let (key, did) = issuer(state).await?.into_parts();
     let result = async {
         let response = signed_send(
@@ -399,7 +399,7 @@ async fn reconcile_inner(
             },
             Err(error) => db.conn().execute("UPDATE push_registrations SET last_error=?1,last_error_detail=?2 WHERE cloud_origin=?3 AND revision=?4", params![error.code.as_str(), error.detail, saved_origin, revision]).map(|_| false),
         }.map_err(|e| e.to_string())
-    }).await.map_err(NotificationError::Profile)?;
+    }).await.map_err(NotificationError::Executor)?;
     if committed && lease.is_current() {
         if let Ok(recipient) = result {
             recipients::replace(state, &profile, &origin, Some(&recipient))?;
@@ -453,7 +453,7 @@ pub(crate) async fn register_with_token(
         let origin = now.origin.clone();
         state.db_executor.execute(DatabaseWorkload::Learner, work.clone(), "notifications.push.native_status", move |db| {
             db.conn().execute("UPDATE push_operation_state SET last_error=?1,last_error_detail=?2,error_origin=?3 WHERE singleton=1", params![code, detail, origin]).map(drop).map_err(|e| e.to_string())
-        }).await.map_err(NotificationError::Profile)?;
+        }).await.map_err(NotificationError::Executor)?;
         match token {
             Ok(token) => reconcile_inner(state, &work, Some(token), None).await,
             Err(_) => status(state, work.clone()).await,
@@ -620,7 +620,7 @@ pub(crate) async fn receive(
             },
         )
         .await
-        .map_err(NotificationError::Profile)
+        .map_err(NotificationError::Executor)
 }
 
 pub(crate) fn tapped(

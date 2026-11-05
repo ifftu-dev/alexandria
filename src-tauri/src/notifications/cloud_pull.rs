@@ -324,7 +324,7 @@ async fn run_pass<R: Runtime>(
             |db| Ok(directories_db(db.conn())?.into_iter().next().map(|d| d.url)),
         )
         .await
-        .map_err(NotificationError::Profile)?;
+        .map_err(NotificationError::Executor)?;
     let Some(origin) = origin else {
         return Ok(0);
     };
@@ -355,7 +355,7 @@ async fn run_pass<R: Runtime>(
             },
         )
         .await
-        .map_err(NotificationError::Profile)?;
+        .map_err(NotificationError::Executor)?;
     for row in &recorded {
         super::announce(&app, lease.session_id(), row);
     }
