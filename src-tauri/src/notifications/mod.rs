@@ -39,6 +39,7 @@ pub mod opens;
 pub mod push;
 pub(crate) mod recipients;
 mod store;
+pub mod vocabulary;
 
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager, Runtime};

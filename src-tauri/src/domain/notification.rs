@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Notification types as the webview sees them. Mirrors the notification
 //! section of `src/types/index.ts`; the vocabularies here are generated into
-//! `src/generated/notification-vocab.ts` (see `ai_chat::vocab::snapshot_json`).
+//! `src/generated/notification-vocab.ts` (see `notifications::vocabulary`).
 //!
 //! These cross the Tauri bridge only. The Cloud wire contract (the FCM data
 //! keys and the Cloud push API bodies) is defined where it is spoken, in

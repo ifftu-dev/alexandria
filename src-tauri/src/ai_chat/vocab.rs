@@ -2,20 +2,17 @@
 //! stable string form that crosses the Tauri bridge.
 //!
 //! The webview never retypes these. `scripts/chat-vocab.json` is a snapshot
-//! of this module and of the notification vocabularies in
-//! `domain::notification`, checked by the `chat_vocab_snapshot_is_current`
-//! test below and rewritten by `npm run generate:chat-vocab`, which then has
+//! of this module, checked by the `chat_vocab_snapshot_is_current` test below
+//! and rewritten by `npm run generate:chat-vocab`, which then has
 //! `scripts/check-tauri-commands.mjs --write` render it into
-//! `src/generated/chat-vocab.ts` and `src/generated/notification-vocab.ts`.
-//! Both guards run in CI, so adding a variant without regenerating fails the
-//! build rather than drifting.
+//! `src/generated/chat-vocab.ts`. Both guards run in CI, so adding a variant
+//! without regenerating fails the build rather than drifting. The
+//! notification vocabularies have their own snapshot, owned by
+//! `notifications::vocabulary`.
 
 use alexandria_ai::{Location, Protocol};
 use serde::Serialize;
 
-use crate::domain::notification::{
-    NotificationKind, NotificationPermission, NotificationSource, PushErrorCode,
-};
 use crate::vocabulary::vocabulary;
 
 vocabulary! {
@@ -237,20 +234,12 @@ struct Snapshot {
     chat_locations: Vec<&'static str>,
     protocols: Vec<&'static str>,
     restricts_apps_for_minors_hosts: Vec<&'static str>,
-    notification_kinds: Vec<&'static str>,
-    notification_sources: Vec<&'static str>,
-    notification_permissions: Vec<&'static str>,
-    push_error_codes: Vec<&'static str>,
-}
-
-fn names<T: Copy>(all: &[T], as_str: fn(T) -> &'static str) -> Vec<&'static str> {
-    all.iter().map(|&item| as_str(item)).collect()
 }
 
 /// The snapshot `scripts/check-tauri-commands.mjs` renders into TypeScript.
 pub fn snapshot_json() -> String {
     let snapshot = Snapshot {
-        _comment: "Written by `npm run generate:chat-vocab` from src-tauri/src/ai_chat/vocab.rs and src-tauri/src/domain/notification.rs, and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
+        _comment: "Written by `npm run generate:chat-vocab` from src-tauri/src/ai_chat/vocab.rs and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
         chat_error_codes: ChatErrorCode::ALL.iter().map(|c| c.as_str()).collect(),
         proposal_kinds: ProposalKind::ALL.iter().map(|k| k.as_str()).collect(),
         reply_fence_tags: ReplyFence::ALL.iter().map(|f| f.as_str()).collect(),
@@ -264,13 +253,6 @@ pub fn snapshot_json() -> String {
         chat_locations: CHAT_LOCATIONS.iter().map(|l| l.as_str()).collect(),
         protocols: PROTOCOLS.iter().map(|p| p.as_str()).collect(),
         restricts_apps_for_minors_hosts: alexandria_ai::terms::RESTRICTS_APPS_FOR_MINORS.to_vec(),
-        notification_kinds: names(NotificationKind::ALL, NotificationKind::as_str),
-        notification_sources: names(NotificationSource::ALL, NotificationSource::as_str),
-        notification_permissions: names(
-            NotificationPermission::ALL,
-            NotificationPermission::as_str,
-        ),
-        push_error_codes: names(PushErrorCode::ALL, PushErrorCode::as_str),
     };
     let mut json = serde_json::to_string_pretty(&snapshot).expect("vocabulary serialises");
     json.push('\n');
@@ -280,7 +262,7 @@ pub fn snapshot_json() -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn every_policy_refusal_reads_as_the_code_the_webview_translates() {
@@ -311,23 +293,7 @@ mod tests {
 
     use super::*;
 
-    fn round_trips<T: Copy + PartialEq + std::fmt::Debug>(
-        all: &[T],
-        as_str: fn(T) -> &'static str,
-        parse: fn(&str) -> Option<T>,
-    ) {
-        let mut seen = HashSet::new();
-        for &item in all {
-            let text = as_str(item);
-            assert_eq!(parse(text), Some(item), "{text}");
-            assert!(seen.insert(text), "{text} is listed twice");
-            assert!(
-                text.bytes()
-                    .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit()),
-                "{text} is not a stable snake_case name"
-            );
-        }
-    }
+    use crate::vocabulary::assert_round_trips as round_trips;
 
     #[test]
     fn every_vocabulary_round_trips_through_its_string_form() {
@@ -342,26 +308,6 @@ mod tests {
             ConnectionLocation::ALL,
             ConnectionLocation::as_str,
             ConnectionLocation::parse,
-        );
-        round_trips(
-            NotificationKind::ALL,
-            NotificationKind::as_str,
-            NotificationKind::parse,
-        );
-        round_trips(
-            NotificationSource::ALL,
-            NotificationSource::as_str,
-            NotificationSource::parse,
-        );
-        round_trips(
-            NotificationPermission::ALL,
-            NotificationPermission::as_str,
-            NotificationPermission::parse,
-        );
-        round_trips(
-            PushErrorCode::ALL,
-            PushErrorCode::as_str,
-            PushErrorCode::parse,
         );
     }
 
@@ -671,39 +617,16 @@ mod tests {
         }
     }
 
-    fn snapshot_path() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/chat-vocab.json")
-    }
-
     /// The checked-in snapshot equals this module. With `UPDATE_CHAT_VOCAB=1`
     /// (set by `npm run generate:chat-vocab`) the snapshot is rewritten
     /// instead; otherwise a stale snapshot fails with the lines that differ.
     #[test]
     fn chat_vocab_snapshot_is_current() {
-        let expected = snapshot_json();
-        let path = snapshot_path();
-        if std::env::var_os("UPDATE_CHAT_VOCAB").is_some_and(|v| v == "1") {
-            std::fs::write(&path, &expected)
-                .unwrap_or_else(|e| panic!("could not write {}: {e}", path.display()));
-            return;
-        }
-        let actual = std::fs::read_to_string(&path).unwrap_or_default();
-        if actual == expected {
-            return;
-        }
-        let expected_lines: HashSet<&str> = expected.lines().collect();
-        let actual_lines: HashSet<&str> = actual.lines().collect();
-        let missing: Vec<&str> = expected
-            .lines()
-            .filter(|l| !actual_lines.contains(l))
-            .collect();
-        let extra: Vec<&str> = actual
-            .lines()
-            .filter(|l| !expected_lines.contains(l))
-            .collect();
-        panic!(
-            "{} is stale; run `npm run generate:chat-vocab` and commit the result.\n  missing from the snapshot: {missing:?}\n  no longer in the vocabulary: {extra:?}",
-            path.display()
+        crate::vocabulary::assert_snapshot_current(
+            "../scripts/chat-vocab.json",
+            &snapshot_json(),
+            "UPDATE_CHAT_VOCAB",
+            "npm run generate:chat-vocab",
         );
     }
 }
