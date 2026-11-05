@@ -36,16 +36,18 @@ const PATH_BASE = 'http://in-app.invalid'
 /**
  * Is this a same-document absolute path: one leading slash, then nothing a
  * URL parser could read as another origin? Rejects protocol-relative `//host`,
- * backslashes (`/\host` is `//host` to a browser), control characters and
- * whitespace (parsers strip tabs and newlines, so `/\t/host` would become
- * `//host`), and every scheme. The one check for every in-app route a link,
- * notification or caller hands over; the router still has to know the path.
+ * backslashes (`/\host` is `//host` to a browser), control characters (parsers
+ * strip tabs and newlines, so `/\t/host` would become `//host`), and every
+ * scheme. A plain space is allowed (`/search?q=two words`): parsers encode it
+ * rather than strip it, so it cannot join slashes. The one check for every
+ * in-app route a link, notification or caller hands over; the router still has
+ * to know the path.
  */
 export function isInAppPath(path: string | null | undefined): path is string {
   if (!path || path[0] !== '/' || path[1] === '/') return false
   for (let i = 0; i < path.length; i++) {
     const code = path.charCodeAt(i)
-    if (code <= 0x20 || code === 0x7f || code === 0x5c) return false
+    if (code < 0x20 || code === 0x7f || code === 0x5c) return false
   }
   try {
     return new URL(path, PATH_BASE).origin === PATH_BASE

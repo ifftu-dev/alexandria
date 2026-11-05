@@ -138,6 +138,20 @@ describe('parseDeepLink', () => {
         expect(isInAppPath(path), path).toBe(true)
       }
     })
+    it('accepts a route with unencoded spaces, as a router path may carry them', () => {
+      for (const path of ['/search?q=two words', '/skills/data structures', '/courses/x#section two']) {
+        expect(isInAppPath(path), path).toBe(true)
+      }
+      expect(parseDeepLink('alexandria://open?route=%2Fsearch%3Fq%3Dtwo%20words')).toEqual({ kind: 'route', path: '/search?q=two words' })
+    })
+    it('still rejects tabs, newlines, other control characters and backslashes next to a space', () => {
+      for (const path of [
+        '/ \\evil.example', '/search?q=two\twords', '/a b\t/evil', '/x \n/y', '/x \r', '/x \u0000',
+        '/x \u001f', '/x \u007f', ' /x y', '// evil.example', 'https://evil.example/a b',
+      ]) {
+        expect(isInAppPath(path), JSON.stringify(path)).toBe(false)
+      }
+    })
     it('rejects anything that could leave the app or is not a path', () => {
       for (const path of [
         '', null, undefined, 'skills', ' /skills', '//evil.example/x', '/\\evil.example', '\\/evil.example',
