@@ -23,7 +23,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
 use super::{
-    cloud_copy, interview_room_route, NewNotification, NotificationError, NotificationKind,
+    interview_room_route, CloudEvent, NewNotification, NotificationError, NotificationKind,
 };
 use crate::cloud::{directories_db, signed_get, Directory};
 use crate::db::executor::DatabaseWorkload;
@@ -46,21 +46,14 @@ impl PendingItem {
     }
 
     pub fn notification(&self) -> Option<NewNotification> {
-        let (title, body, route) = cloud_copy(self.kind, &self.id)?;
-        let mut payload = serde_json::json!({ "id": self.id });
-        payload["event_id"] = Value::String(self.event_id.clone());
-        if let Some(origin) = &self.cloud_origin {
-            payload["cloud_origin"] = Value::String(origin.clone());
+        CloudEvent {
+            kind: self.kind,
+            id: &self.id,
+            event_id: &self.event_id,
+            cloud_origin: self.cloud_origin.as_deref(),
+            role_label: self.role_label.as_deref(),
         }
-        if let Some(role) = &self.role_label {
-            payload["role_label"] = Value::String(role.clone());
-        }
-        Some(
-            NewNotification::new(self.kind, title, body)
-                .route(route)
-                .dedupe(self.dedupe_key())
-                .payload(payload),
-        )
+        .notification()
     }
 }
 

@@ -202,6 +202,43 @@ pub fn cloud_copy(
     Some((title, body, route))
 }
 
+/// Something Alexandria Cloud holds for the learner, as Cloud discovery
+/// lists it or a push names it. Both record it through
+/// [`CloudEvent::notification`], so the row reads the same whichever arrives
+/// first, and the shared event id lets only the first one be recorded.
+#[derive(Debug, Clone, Copy)]
+pub struct CloudEvent<'a> {
+    pub kind: NotificationKind,
+    pub id: &'a str,
+    pub event_id: &'a str,
+    pub cloud_origin: Option<&'a str>,
+    /// Discovery only: Cloud never puts a role into a push.
+    pub role_label: Option<&'a str>,
+}
+
+impl CloudEvent<'_> {
+    /// Cloud's generic copy, route and payload for this event. `None` for a
+    /// kind Cloud does not send.
+    pub fn notification(&self) -> Option<NewNotification> {
+        let (title, body, route) = cloud_copy(self.kind, self.id)?;
+        let mut payload = serde_json::Map::new();
+        payload.insert("id".into(), self.id.into());
+        payload.insert("event_id".into(), self.event_id.into());
+        if let Some(origin) = self.cloud_origin {
+            payload.insert("cloud_origin".into(), origin.into());
+        }
+        if let Some(role) = self.role_label {
+            payload.insert("role_label".into(), role.into());
+        }
+        Some(
+            NewNotification::new(self.kind, title, body)
+                .route(route)
+                .dedupe(self.event_id)
+                .payload(payload.into()),
+        )
+    }
+}
+
 /// The notification a committed classroom meta event warrants for this
 /// learner, if any: a call somebody else started, or a request to join a
 /// classroom this learner moderates. `apply_incoming_meta` has already
@@ -781,6 +818,48 @@ mod tests {
         assert_eq!(wire["kind"], "credential_issued");
         assert_eq!(wire["source"], "local");
         assert_eq!(wire["payload"], serde_json::json!({ "id": "c1" }));
+    }
+
+    #[test]
+    fn a_cloud_event_records_the_same_row_from_discovery_or_a_push() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let event_id = format!("interview_room_opened:{id}:22222222-2222-4222-8222-222222222222");
+        let event = CloudEvent {
+            kind: NotificationKind::InterviewRoomOpened,
+            id,
+            event_id: &event_id,
+            cloud_origin: Some("https://cloud.example"),
+            role_label: None,
+        };
+        let new = event.notification().unwrap();
+        assert_eq!(
+            new.route.as_deref(),
+            Some(interview_room_route(id).as_str())
+        );
+        assert_eq!(new.dedupe_key.as_deref(), Some(event_id.as_str()));
+        assert_eq!(
+            new.payload,
+            Some(serde_json::json!({
+                "id": id,
+                "event_id": event_id,
+                "cloud_origin": "https://cloud.example",
+            }))
+        );
+        let labelled = CloudEvent {
+            kind: NotificationKind::OfferSent,
+            cloud_origin: None,
+            role_label: Some("Analyst"),
+            ..event
+        };
+        assert_eq!(
+            labelled.notification().unwrap().payload,
+            Some(serde_json::json!({ "id": id, "event_id": event_id, "role_label": "Analyst" }))
+        );
+        let local = CloudEvent {
+            kind: NotificationKind::CredentialIssued,
+            ..event
+        };
+        assert!(local.notification().is_none(), "Cloud does not send it");
     }
 
     #[test]

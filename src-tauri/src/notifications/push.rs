@@ -8,8 +8,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
 use super::{
-    cloud_copy, recipients, NewNotification, NotificationError, NotificationKind, NotificationOpen,
-    NotificationPermission, PushErrorCode, PushStatus, Recorded,
+    cloud_copy, recipients, CloudEvent, NewNotification, NotificationError, NotificationKind,
+    NotificationOpen, NotificationPermission, PushErrorCode, PushStatus, Recorded,
 };
 use crate::cloud::{is_loopback, nonce, origin as cloud_origin, proof};
 use crate::credentials::{CredentialError, Issuer};
@@ -564,16 +564,14 @@ fn parse(payload: Value) -> Option<PushData> {
 }
 
 fn notification(data: &PushData, origin: &str) -> Option<NewNotification> {
-    let (title, body, route) = cloud_copy(data.kind, &data.id)?;
-    Some(
-        NewNotification::new(data.kind, title, body)
-            .route(route)
-            .dedupe(&data.event_id)
-            .payload(
-                serde_json::json!({"id": data.id, "event_id": data.event_id, "cloud_origin": origin}),
-            )
-            .from_push(),
-    )
+    let event = CloudEvent {
+        kind: data.kind,
+        id: &data.id,
+        event_id: &data.event_id,
+        cloud_origin: Some(origin),
+        role_label: None,
+    };
+    event.notification().map(NewNotification::from_push)
 }
 
 pub(crate) async fn receive(
