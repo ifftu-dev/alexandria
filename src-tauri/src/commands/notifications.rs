@@ -5,7 +5,7 @@ use tauri::AppHandle;
 
 use crate::db::executor::DatabaseWorkload;
 use crate::notifications::{
-    self, NewNotification, NotificationKind, NotificationOpen, NotificationPermission,
+    self, NewNotification, NotificationKind, NotificationOpen, NotificationPermissionOutcome,
     NotificationRow, PushStatus,
 };
 use crate::profile::scope::ProfileLease;
@@ -137,14 +137,14 @@ pub async fn notifications_discover(app: AppHandle, lease: ProfileLease) -> Resu
 pub async fn notifications_permission_request(
     app: AppHandle,
     lease: ProfileLease,
-) -> Result<NotificationPermission, String> {
+) -> Result<NotificationPermissionOutcome, String> {
     if !lease.is_current() {
         return Err("profile session changed".into());
     }
     // Permission is device-global; do not retain a profile while awaiting the OS.
     drop(lease);
     if !cfg!(mobile) {
-        return Ok(NotificationPermission::Granted);
+        return Ok(NotificationPermissionOutcome::Granted);
     }
     let answer = tauri_plugin_mobile_push::request_permission(&app)
         .await
@@ -152,7 +152,7 @@ pub async fn notifications_permission_request(
     if let Err(error) = &answer {
         log::warn!("notifications: the permission prompt could not run: {error}");
     }
-    Ok(NotificationPermission::of_prompt(answer))
+    Ok(NotificationPermissionOutcome::of_prompt(answer))
 }
 
 /// Peek at a validated tap even while locked. Only the matching admitted

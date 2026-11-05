@@ -186,7 +186,7 @@ const notificationVocabularies = [
     "What a notification is about. A stored kind this build does not know arrives as `generic`."],
   ["NOTIFICATION_SOURCES", "notification_sources", "NotificationSource",
     "Where a notification came from: this app, or a remote push."],
-  ["NOTIFICATION_PERMISSIONS", "notification_permissions", "NotificationPermission",
+  ["NOTIFICATION_PERMISSION_OUTCOMES", "notification_permission_outcomes", "NotificationPermissionOutcome",
     "The answer to asking the OS whether the app may show banners."],
   ["PUSH_ERROR_CODES", "push_error_codes", "PushErrorCode",
     "Why the last push registration step failed; the webview translates each code."],

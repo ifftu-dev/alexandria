@@ -27,13 +27,13 @@ export const NOTIFICATION_SOURCES = [
 export type NotificationSource = (typeof NOTIFICATION_SOURCES)[number]
 
 /** The answer to asking the OS whether the app may show banners. */
-export const NOTIFICATION_PERMISSIONS = [
+export const NOTIFICATION_PERMISSION_OUTCOMES = [
   "granted",
   "denied",
   "prompt_unavailable",
 ] as const
 
-export type NotificationPermission = (typeof NOTIFICATION_PERMISSIONS)[number]
+export type NotificationPermissionOutcome = (typeof NOTIFICATION_PERMISSION_OUTCOMES)[number]
 
 /** Why the last push registration step failed; the webview translates each code. */
 export const PUSH_ERROR_CODES = [

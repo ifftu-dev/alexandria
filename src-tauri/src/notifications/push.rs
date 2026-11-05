@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use super::{
     cloud_copy, recipients, CloudEvent, NewNotification, NotificationError, NotificationKind,
-    NotificationOpen, NotificationPermission, PushErrorCode, PushStatus, Recorded,
+    NotificationOpen, NotificationPermissionOutcome, PushErrorCode, PushStatus, Recorded,
 };
 use crate::cloud::{is_loopback, nonce, origin as cloud_origin, proof};
 use crate::credentials::{CredentialError, Issuer};
@@ -486,13 +486,13 @@ pub async fn register<R: Runtime>(
 /// prompt that could not run at all is the push SDK failing, not a refusal.
 fn permission(answer: Result<bool, String>) -> Result<(), PushFailure> {
     let detail = answer.as_ref().err().cloned().unwrap_or_default();
-    match NotificationPermission::of_prompt(answer) {
-        NotificationPermission::Granted => Ok(()),
-        NotificationPermission::Denied => Err(PushFailure::new(
+    match NotificationPermissionOutcome::of_prompt(answer) {
+        NotificationPermissionOutcome::Granted => Ok(()),
+        NotificationPermissionOutcome::Denied => Err(PushFailure::new(
             PushErrorCode::PermissionDenied,
             "Notification permission was not granted",
         )),
-        NotificationPermission::PromptUnavailable => {
+        NotificationPermissionOutcome::PromptUnavailable => {
             Err(PushFailure::new(PushErrorCode::TokenUnavailable, detail))
         }
     }

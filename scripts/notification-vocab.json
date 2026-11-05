@@ -16,7 +16,7 @@
     "local",
     "push"
   ],
-  "notification_permissions": [
+  "notification_permission_outcomes": [
     "granted",
     "denied",
     "prompt_unavailable"

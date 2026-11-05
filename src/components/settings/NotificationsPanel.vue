@@ -10,7 +10,7 @@ import { useSetting } from '@/composables/useSettings'
 import { useNotifications } from '@/composables/useNotifications'
 import { isMobilePlatform } from '@/composables/usePlatform'
 import type { MessageKey } from '@/i18n/keys'
-import type { NotificationPermission, PushErrorCode } from '@/types'
+import type { NotificationPermissionOutcome, PushErrorCode } from '@/types'
 
 const { t } = useI18n()
 const enabled = useSetting<boolean>('notifications.enabled')
@@ -24,7 +24,7 @@ const {
 } = useNotifications()
 
 const busy = ref(false)
-const permission = ref<NotificationPermission | null>(null)
+const permission = ref<NotificationPermissionOutcome | null>(null)
 
 onMounted(() => {
   void refreshPushStatus()
@@ -55,7 +55,7 @@ const PUSH_ERROR_MESSAGES: Record<PushErrorCode, MessageKey> = {
 }
 
 // One message per outcome the backend returns.
-const PERMISSION_MESSAGES: Record<NotificationPermission, MessageKey> = {
+const PERMISSION_MESSAGES: Record<NotificationPermissionOutcome, MessageKey> = {
   granted: 'notifications.settings.permissionGranted',
   denied: 'notifications.settings.permissionDenied',
   prompt_unavailable: 'notifications.settings.permissionPromptUnavailable',

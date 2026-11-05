@@ -11,7 +11,7 @@ import { getProfileSessionToken } from '@/composables/profileSession'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { isMobilePlatform } from '@/composables/usePlatform'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
-import type { AppNotification, NotificationOpen, NotificationPermission, PushStatus } from '@/types'
+import type { AppNotification, NotificationOpen, NotificationPermissionOutcome, PushStatus } from '@/types'
 
 const { invoke } = useLocalApi()
 
@@ -153,9 +153,9 @@ async function setPushEnabled(enabled: boolean): Promise<PushStatus> {
  * A request that fails before the prompt (the profile session changed) reads
  * as `prompt_unavailable`, like a prompt the system could not show.
  */
-async function requestPermission(): Promise<NotificationPermission> {
+async function requestPermission(): Promise<NotificationPermissionOutcome> {
   try {
-    return await invoke<NotificationPermission>('notifications_permission_request')
+    return await invoke<NotificationPermissionOutcome>('notifications_permission_request')
   } catch {
     return 'prompt_unavailable'
   }

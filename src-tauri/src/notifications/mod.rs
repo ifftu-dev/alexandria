@@ -116,7 +116,7 @@ impl<T> From<std::sync::PoisonError<T>> for NotificationError {
 }
 
 pub use crate::domain::notification::{
-    NotificationKind, NotificationOpen, NotificationPermission, NotificationRow,
+    NotificationKind, NotificationOpen, NotificationPermissionOutcome, NotificationRow,
     NotificationSource, PushErrorCode, PushStatus,
 };
 

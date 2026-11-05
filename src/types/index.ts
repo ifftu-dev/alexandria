@@ -2712,7 +2712,7 @@ export interface SeedResetPlan {
 
 export type {
   NotificationKind,
-  NotificationPermission,
+  NotificationPermissionOutcome,
   NotificationSource,
   PushErrorCode,
 } from '@/generated/notification-vocab'

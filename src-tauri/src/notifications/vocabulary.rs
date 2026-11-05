@@ -11,7 +11,7 @@
 
 use serde::Serialize;
 
-use super::{NotificationKind, NotificationPermission, NotificationSource, PushErrorCode};
+use super::{NotificationKind, NotificationPermissionOutcome, NotificationSource, PushErrorCode};
 
 /// The whole notification vocabulary as the webview generator reads it.
 #[derive(Serialize)]
@@ -19,7 +19,7 @@ struct Snapshot {
     _comment: &'static str,
     notification_kinds: Vec<&'static str>,
     notification_sources: Vec<&'static str>,
-    notification_permissions: Vec<&'static str>,
+    notification_permission_outcomes: Vec<&'static str>,
     push_error_codes: Vec<&'static str>,
 }
 
@@ -33,9 +33,9 @@ pub fn snapshot_json() -> String {
         _comment: "Written by `npm run generate:notification-vocab` from src-tauri/src/domain/notification.rs, and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
         notification_kinds: names(NotificationKind::ALL, NotificationKind::as_str),
         notification_sources: names(NotificationSource::ALL, NotificationSource::as_str),
-        notification_permissions: names(
-            NotificationPermission::ALL,
-            NotificationPermission::as_str,
+        notification_permission_outcomes: names(
+            NotificationPermissionOutcome::ALL,
+            NotificationPermissionOutcome::as_str,
         ),
         push_error_codes: names(PushErrorCode::ALL, PushErrorCode::as_str),
     };
@@ -62,9 +62,9 @@ mod tests {
             NotificationSource::parse,
         );
         round_trips(
-            NotificationPermission::ALL,
-            NotificationPermission::as_str,
-            NotificationPermission::parse,
+            NotificationPermissionOutcome::ALL,
+            NotificationPermissionOutcome::as_str,
+            NotificationPermissionOutcome::parse,
         );
         round_trips(
             PushErrorCode::ALL,

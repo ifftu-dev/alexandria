@@ -72,8 +72,10 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// The answer to asking the OS whether the app may show banners.
-    NotificationPermission {
+    /// The answer to asking the OS whether the app may show banners. Named
+    /// apart from the browser's own `NotificationPermission` type, which the
+    /// webview's TypeScript also sees.
+    NotificationPermissionOutcome {
         /// Banners are allowed. The desktop always answers this.
         Granted => "granted",
         /// The learner refused, now or earlier.
@@ -83,7 +85,7 @@ vocabulary! {
     }
 }
 
-impl NotificationPermission {
+impl NotificationPermissionOutcome {
     /// The outcome of the system prompt: its answer, or why it could not run.
     pub fn of_prompt(answer: Result<bool, String>) -> Self {
         match answer {
@@ -146,19 +148,19 @@ mod tests {
     #[test]
     fn the_permission_prompt_has_one_outcome_per_real_case() {
         assert_eq!(
-            NotificationPermission::of_prompt(Ok(true)),
-            NotificationPermission::Granted
+            NotificationPermissionOutcome::of_prompt(Ok(true)),
+            NotificationPermissionOutcome::Granted
         );
         assert_eq!(
-            NotificationPermission::of_prompt(Ok(false)),
-            NotificationPermission::Denied
+            NotificationPermissionOutcome::of_prompt(Ok(false)),
+            NotificationPermissionOutcome::Denied
         );
         assert_eq!(
-            NotificationPermission::of_prompt(Err("no activity".into())),
-            NotificationPermission::PromptUnavailable
+            NotificationPermissionOutcome::of_prompt(Err("no activity".into())),
+            NotificationPermissionOutcome::PromptUnavailable
         );
         assert_eq!(
-            serde_json::to_value(NotificationPermission::PromptUnavailable).unwrap(),
+            serde_json::to_value(NotificationPermissionOutcome::PromptUnavailable).unwrap(),
             "prompt_unavailable"
         );
     }

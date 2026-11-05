@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import en from '@/locales/en'
 import fr from '@/locales/fr'
-import type { NotificationPermission, PushStatus } from '@/types'
+import type { NotificationPermissionOutcome, PushStatus } from '@/types'
 import NotificationsPanel from './NotificationsPanel.vue'
 
 const mocks = vi.hoisted(() => ({ status: null as PushStatus | null, register: vi.fn(), requestPermission: vi.fn() }))
@@ -97,7 +97,7 @@ describe('NotificationsPanel push errors', () => {
 
 describe('NotificationsPanel permission request', () => {
   // Written out rather than read from the catalog, so a dropped case fails here.
-  const outcomes: Record<NotificationPermission, string> = {
+  const outcomes: Record<NotificationPermissionOutcome, string> = {
     granted: 'The system allows banners.',
     denied: "The system is blocking banners. Allow Alexandria in the device's notification settings.",
     prompt_unavailable: "The system could not ask for permission. Allow Alexandria in the device's notification settings.",
