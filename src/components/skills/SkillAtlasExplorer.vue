@@ -510,7 +510,7 @@ function setBloom(event: Event): void {
           <template v-if="selected">
             <p class="inspector-field" :style="{ '--field': color(selected.fieldId) }"><i class="field-dot" aria-hidden="true" />{{ fieldName(selected.fieldId) }}</p>
             <h2 dir="auto">{{ selected.skill.name }}</h2>
-            <p class="inspector-status" :class="{ 'is-ready-next': selected.readyNext }"><span v-if="selected.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="selected.readyNext" aria-hidden="true">◎ </span>{{ present.state(selected) }}</p>
+            <p class="inspector-status"><span v-if="selected.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="selected.readyNext" aria-hidden="true">◎ </span>{{ present.state(selected) }}</p>
             <p dir="auto">{{ selected.skill.description }}</p>
             <dl><template v-if="selected.status === 'earned'"><dt>{{ t('skills.atlas.currentBloom') }}</dt><dd>{{ status(selected) }}</dd></template><dt>{{ t('skills.atlas.intrinsicBloom') }}</dt><dd>{{ selected.intrinsicBloom ? t(`common.bloom.${selected.intrinsicBloom}`) : t('skills.atlas.unavailable') }}</dd></dl>
             <div class="inspector-actions"><button class="atlas-primary" type="button" :aria-label="t('skills.atlas.open')" @click="emit('open-skill', selected.skill.id)">{{ t('skills.atlas.open') }} <span aria-hidden="true">↗</span></button><button type="button" @click="emit('learn-skill', selected.skill.id)">{{ t('skills.atlas.learn') }}</button></div>
@@ -609,7 +609,7 @@ function setBloom(event: Event): void {
 .atlas-list strong { font-size: 13px; font-weight: 550; }
 .atlas-list small { color: var(--app-muted-foreground); font-size: 11px; }
 .atlas .atlas-list li button.is-ready-next { background: color-mix(in srgb, var(--field) 8%, var(--app-card)); }
-.is-ready-next .list-evidence, .inspector-status.is-ready-next { color: var(--field); font-weight: 650; }
+.is-ready-next .list-evidence { font-weight: 650; }
 .list-evidence { margin-inline-start: auto; font-size: 12px; flex-shrink: 0; max-width: 42%; color: var(--field); }
 .bloom-summary { margin-block-end: 12px; padding: 10px 12px; border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); border-radius: 8px; font-size: 13px; }
 .atlas button.is-bloom-match { background: var(--app-muted); outline: 2px solid var(--app-primary); outline-offset: -2px; }
