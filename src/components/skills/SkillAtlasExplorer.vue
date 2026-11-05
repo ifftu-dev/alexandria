@@ -118,10 +118,24 @@ watch([camera, width], () => keepDrawn(camera.value))
 // Canvas upkeep runs in a task of its own when the main thread is idle, never
 // inside a pointer event or a frame, so the frame that shows it does only the
 // rendering. (Safari has no idle callbacks, so there it is the next task.)
-const whenIdle = (run: () => void): void => {
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 100 })
-  else window.setTimeout(run, 0)
+// Whatever is still scheduled is cancelled when the explorer goes.
+const scheduled = new Set<() => void>()
+function whenIdle(run: () => void): void {
+  let cancel: () => void
+  const task = () => { scheduled.delete(cancel); run() }
+  if (typeof requestIdleCallback === 'function') {
+    const handle = requestIdleCallback(task, { timeout: 100 })
+    cancel = () => cancelIdleCallback(handle)
+  } else {
+    const handle = setTimeout(task, 0)
+    cancel = () => clearTimeout(handle)
+  }
+  scheduled.add(cancel)
 }
+onBeforeUnmount(() => {
+  for (const cancel of scheduled) cancel()
+  scheduled.clear()
+})
 // During a drag the drawn area follows when idle: it moves half a margin
 // early, so nothing on screen waits for it.
 let followScheduled = false

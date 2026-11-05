@@ -338,6 +338,21 @@ it('draws every prerequisite edge whole, highlights the selected skill\'s, and l
   expect(wrapper.get('.map-edge:not(.map-edge-active)').attributes('d')).toBe(plain)
 })
 
+it('leaves no canvas upkeep scheduled once it unmounts', async () => {
+  vi.useFakeTimers()
+  const id = (index: number) => `s${String(index).padStart(2, '0')}`
+  const many = Array.from({ length: 60 }, (_, index) => skill(id(index), `Skill ${index}`, 'Long field'))
+  const wrapper = setup()
+  await wrapper.setProps({ model: buildSkillAtlas({ skills: many, edges: [], activeCredentials: [], subjectDid: 'did:me' }) })
+  // jsdom queues a toggle event for the open <details>; let it go first.
+  await vi.runOnlyPendingTimersAsync()
+  await button(wrapper, 'Explore Long field').trigger('click')
+  // Nodes past the screen edge are still waiting to join the canvas.
+  expect(vi.getTimerCount()).toBeGreaterThan(0)
+  wrapper.unmount()
+  expect(vi.getTimerCount()).toBe(0)
+})
+
 it('draws nodes past the screen edge without letting them take focus, and follows the screen as it moves', async () => {
   const id = (index: number) => `s${String(index).padStart(2, '0')}`
   const many = Array.from({ length: 60 }, (_, index) => skill(id(index), `Skill ${index}`, 'Long field'))
