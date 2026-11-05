@@ -9,6 +9,8 @@ import { getProfileSessionToken } from '@/composables/profileSession'
 import { useSetting } from '@/composables/useSettings'
 import { useNotifications } from '@/composables/useNotifications'
 import { isMobilePlatform } from '@/composables/usePlatform'
+import type { MessageKey } from '@/i18n/keys'
+import type { NotificationPermissionOutcome, PushErrorCode } from '@/types'
 
 const { t } = useI18n()
 const enabled = useSetting<boolean>('notifications.enabled')
@@ -22,7 +24,7 @@ const {
 } = useNotifications()
 
 const busy = ref(false)
-const permission = ref<string | null>(null)
+const permission = ref<NotificationPermissionOutcome | null>(null)
 
 onMounted(() => {
   void refreshPushStatus()
@@ -31,13 +33,37 @@ onMounted(() => {
 const statusLine = computed(() => {
   const s = pushStatus.value
   if (!s) return ''
-  if (s.pendingCleanup) return t('notifications.settings.pushCleanupPending')
-  if (s.pendingRegistration) return t('notifications.settings.pushRegistrationPending')
+  if (s.pending_cleanup) return t('notifications.settings.pushCleanupPending')
+  if (s.pending_registration) return t('notifications.settings.pushRegistrationPending')
   if (!s.supported) return t('notifications.settings.pushUnsupported')
-  if (!s.cloudOrigin) return t('notifications.settings.pushNoCloud')
+  if (!s.cloud_origin) return t('notifications.settings.pushNoCloud')
   return s.registered
-    ? t('notifications.settings.pushRegistered', { origin: s.cloudOrigin })
+    ? t('notifications.settings.pushRegistered', { origin: s.cloud_origin })
     : t('notifications.settings.pushNotRegistered')
+})
+
+// Every code has its own message; a new backend code is a type error here
+// until it is worded. The raw detail is diagnostics only and is not shown.
+const PUSH_ERROR_MESSAGES: Record<PushErrorCode, MessageKey> = {
+  permission_denied: 'notifications.settings.pushErrors.permission_denied',
+  token_unavailable: 'notifications.settings.pushErrors.token_unavailable',
+  insecure_origin: 'notifications.settings.pushErrors.insecure_origin',
+  cloud_unreachable: 'notifications.settings.pushErrors.cloud_unreachable',
+  cloud_rejected: 'notifications.settings.pushErrors.cloud_rejected',
+  cloud_unacknowledged: 'notifications.settings.pushErrors.cloud_unacknowledged',
+  invalid_response: 'notifications.settings.pushErrors.invalid_response',
+}
+
+// One message per outcome the backend returns.
+const PERMISSION_MESSAGES: Record<NotificationPermissionOutcome, MessageKey> = {
+  granted: 'notifications.settings.permissionGranted',
+  denied: 'notifications.settings.permissionDenied',
+  prompt_unavailable: 'notifications.settings.permissionPromptUnavailable',
+}
+
+const pushError = computed(() => {
+  const code = pushStatus.value?.last_error_code
+  return code ? t(PUSH_ERROR_MESSAGES[code]) : ''
 })
 
 async function doRegister() {
@@ -104,10 +130,14 @@ async function askPermission() {
 
       <div v-if="pushStatus" class="space-y-2">
         <p class="text-xs text-muted-foreground">{{ statusLine }}</p>
-        <p v-if="pushStatus.lastError" class="text-xs text-destructive">
-          {{ $t('notifications.settings.pushError', { error: pushStatus.lastError }) }}
+        <p v-if="pushStatus.paused_by_organisations" class="text-xs text-muted-foreground" data-testid="push-paused-by-organisations">
+          {{ $t('notifications.settings.pushPausedByOrganisations') }}
+          <RouterLink to="/settings/organisations" class="text-primary underline">
+            {{ $t('notifications.settings.pushPausedOpenOrganisations') }}
+          </RouterLink>
         </p>
-        <div v-if="pushStatus.supported && pushStatus.cloudOrigin" class="flex flex-wrap items-center gap-2">
+        <p v-if="pushError" class="text-xs text-destructive" data-testid="push-error">{{ pushError }}</p>
+        <div v-if="pushStatus.supported && pushStatus.cloud_origin && !pushStatus.paused_by_organisations" class="flex flex-wrap items-center gap-2">
           <AppButton
             v-if="!pushStatus.registered"
             variant="outline"
@@ -133,11 +163,13 @@ async function askPermission() {
         <AppButton variant="outline" size="sm" @click="askPermission">
           {{ $t('notifications.settings.permission') }}
         </AppButton>
-        <span v-if="permission === 'granted'" class="text-xs text-muted-foreground">
-          {{ $t('notifications.settings.permissionGranted') }}
-        </span>
-        <span v-else-if="permission === 'denied'" class="text-xs text-destructive">
-          {{ $t('notifications.settings.permissionDenied') }}
+        <span
+          v-if="permission"
+          class="text-xs"
+          :class="permission === 'granted' ? 'text-muted-foreground' : 'text-destructive'"
+          data-testid="permission-outcome"
+        >
+          {{ $t(PERMISSION_MESSAGES[permission]) }}
         </span>
       </div>
     </div>

@@ -23,6 +23,7 @@ import type {
   InterviewParticipant,
   TutoringTranscriptMessage,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -258,7 +259,7 @@ async function enterPanelRoom(title: string, name: string) {
         return room
       } catch (cause) {
         if (joined) await tutoring.leaveRoom()
-        const message = cause instanceof Error ? cause.message : String(cause)
+        const message = errorMessage(cause)
         if (!/^SESSION_(UNAVAILABLE|ENDED)/.test(message) && !/\b409\b/.test(message)) throw cause
         current = await panelApi.status(id)
         panel.value = current
@@ -275,7 +276,7 @@ async function enterPanelRoom(title: string, name: string) {
       return room
     } catch (cause) {
       await tutoring.leaveRoom()
-      const message = cause instanceof Error ? cause.message : String(cause)
+      const message = errorMessage(cause)
       if (!/\b409\b/.test(message) || attempt !== 0) throw cause
       current = await panelApi.status(id)
     }
@@ -293,7 +294,7 @@ async function startInterview() {
       ? await enterPanelRoom(title, name)
       : await tutoring.createRoom(title, name, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, callContext.value)
   } catch (cause) {
-    panelError.value = cause instanceof Error ? cause.message : String(cause)
+    panelError.value = errorMessage(cause)
     return
   }
   // Sentinel observes this conductor device. Prefer the interviewer attached
@@ -803,10 +804,12 @@ function formatTime(ms: number) {
     <AppModal :open="showChat" :title="$t('interviews.session.chatTitle')" max-width="28rem" @close="showChat = false">
       <div class="max-h-80 space-y-2 overflow-y-auto">
         <p v-if="tutoring.chatMessages.value.length === 0" class="py-8 text-center text-sm text-muted-foreground">{{ $t('interviews.session.chatEmpty') }}</p>
-        <div v-for="(message, index) in tutoring.chatMessages.value" :key="index" class="rounded-lg bg-muted p-3">
-          <p class="text-xs font-semibold text-primary">{{ message.sender_name || (message.sender === 'self' ? 'You' : message.sender.slice(0, 8)) }}</p>
-          <p class="mt-1 text-sm text-foreground">{{ message.text }}</p>
-        </div>
+        <TransitionGroup name="motion-rise">
+          <div v-for="(message, index) in tutoring.chatMessages.value" :key="index" data-call-message class="rounded-lg bg-muted p-3">
+            <p class="text-xs font-semibold text-primary">{{ message.sender_name || (message.sender === 'self' ? 'You' : message.sender.slice(0, 8)) }}</p>
+            <p class="mt-1 text-sm text-foreground">{{ message.text }}</p>
+          </div>
+        </TransitionGroup>
       </div>
       <form class="mt-4 flex gap-2" @submit.prevent="sendChat"><input v-model="chatInput" class="input flex-1" :placeholder="$t('interviews.session.chatPlaceholder')" /><AppButton type="submit" size="sm" :disabled="!chatInput.trim()">{{ $t('interviews.common.send') }}</AppButton></form>
     </AppModal>

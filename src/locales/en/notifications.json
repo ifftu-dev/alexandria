@@ -54,6 +54,10 @@
       "body": "Open Alexandria to view the update."
     }
   },
+  "channel": {
+    "name": "Activity",
+    "description": "Interviews, offers, requests and classroom activity"
+  },
   "settings": {
     "title": "Notifications",
     "description": "Badges in the app, banners from the system, and pushes to this device when the app is closed.",
@@ -67,12 +71,23 @@
     "pushNoCloud": "No Alexandria Cloud is configured for this network, so there is nothing to register with.",
     "pushCleanupPending": "Remote removal is pending. Previously queued banners may still arrive.",
     "pushRegistrationPending": "Device registration is awaiting confirmation.",
-    "pushError": "Last attempt failed: {error}",
+    "pushPausedByOrganisations": "Push is paused because “Receive requests from organisations” is off. Your push setting is kept and applies again when organisations are back on.",
+    "pushPausedOpenOrganisations": "Open organisation settings",
+    "pushErrors": {
+      "permission_denied": "Notifications are not allowed for Alexandria. Allow them in the device settings, then try again.",
+      "token_unavailable": "This device could not get a push token. Check that it has a network connection and try again.",
+      "insecure_origin": "The Alexandria Cloud address is not secure, so this device will not register with it.",
+      "cloud_unreachable": "Alexandria Cloud could not be reached. Check your connection; Alexandria will try again.",
+      "cloud_rejected": "Alexandria Cloud turned the request down. Alexandria will try again later.",
+      "cloud_unacknowledged": "Alexandria Cloud did not confirm the change. Alexandria will try again.",
+      "invalid_response": "Alexandria Cloud sent an answer this app does not understand. Alexandria will try again."
+    },
     "register": "Register now",
     "unregister": "Unregister",
     "working": "Working…",
     "permission": "Ask for permission",
     "permissionGranted": "The system allows banners.",
-    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings."
+    "permissionDenied": "The system is blocking banners. Allow Alexandria in the device's notification settings.",
+    "permissionPromptUnavailable": "The system could not ask for permission. Allow Alexandria in the device's notification settings."
   }
 }

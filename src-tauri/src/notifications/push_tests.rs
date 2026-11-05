@@ -1,3 +1,4 @@
+use super::super::NotificationError;
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -7,6 +8,23 @@ pub(crate) async fn active(directory: &std::path::Path) -> std::sync::Arc<AppSta
 
 async fn active_named(directory: &std::path::Path, name: &str) -> std::sync::Arc<AppState> {
     let state = crate::profile::lifecycle_tests::state_in(directory);
+    open_named(&state, name).await;
+    state
+}
+
+/// Lock the active profile and unlock the one called `name` (created on first
+/// use) in the same app state, as a profile switch does.
+pub(crate) async fn switch_to(state: &AppState, name: &str) {
+    state
+        .profile_operations
+        .lock(async { Ok(()) })
+        .await
+        .unwrap();
+    state.stop_active_profile().await.unwrap();
+    open_named(state, name).await;
+}
+
+async fn open_named(state: &AppState, name: &str) {
     let paths = match state
         .profile_manager
         .list()
@@ -44,7 +62,6 @@ async fn active_named(directory: &std::path::Path, name: &str) -> std::sync::Arc
         .activate(async { Ok(()) }, async { Ok(()) })
         .await
         .unwrap();
-    state
 }
 
 fn admitted(state: &AppState) -> crate::profile::scope::ProfileLease {
@@ -77,13 +94,19 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
         versioned_response(&mut socket, 200, body, wire_version(&request)).await;
     });
     let unavailable = register_with_token(&state, admitted(&state), async {
-        Err("Native token unavailable".into())
+        Err(PushFailure::new(
+            PushErrorCode::TokenUnavailable,
+            "Native token unavailable",
+        ))
     })
     .await
     .unwrap();
     assert_eq!(
-        unavailable.last_error.as_deref(),
-        Some("Native token unavailable")
+        failure(&unavailable),
+        (
+            "token_unavailable".into(),
+            "Native token unavailable".into()
+        )
     );
     let status = reconcile(
         &state,
@@ -95,7 +118,7 @@ async fn registration_response_binds_receipt_to_the_registered_profile() {
     .unwrap();
     server.await.unwrap();
     assert!(status.registered);
-    assert_eq!(status.last_error, None);
+    assert_eq!(failure(&status), (Value::Null, Value::Null));
     SettingsStore::set(
         state.db.lock().unwrap().as_ref().unwrap().conn(),
         keys::USER_LANGUAGE,
@@ -302,7 +325,10 @@ async fn shared_token_receipt_and_held_tap_wait_for_matching_profile_across_rest
         super::super::opens::pending(&b).await.unwrap().unwrap().id,
         tap.id
     );
-    assert!(super::super::opens::consume(&b, &admitted(&b), &tap.id).is_err());
+    assert!(matches!(
+        super::super::opens::consume(&b, &admitted(&b), &tap.id),
+        Err(NotificationError::OtherProfile)
+    ));
     b.stop_active_profile().await.unwrap();
     drop(b);
     let locked = crate::profile::lifecycle_tests::state_in(directory.path());
@@ -347,7 +373,9 @@ async fn locking_while_native_token_is_pending_does_not_wait_or_register_in_a_ne
     let task = tokio::spawn(async move {
         register_with_token(&task_state, lease, async {
             started_tx.send(()).unwrap();
-            token_rx.await.map_err(|e| e.to_string())
+            token_rx
+                .await
+                .map_err(|e| PushFailure::new(PushErrorCode::TokenUnavailable, e.to_string()))
         })
         .await
     });
@@ -383,7 +411,11 @@ async fn locking_while_native_token_is_pending_does_not_wait_or_register_in_a_ne
         .unwrap();
     assert_ne!(state.profile_operations.session().unwrap(), old_session);
     token_tx.send("late-token".to_string()).unwrap();
-    assert!(task.await.unwrap().is_err());
+    // The old session is no longer admitted.
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(NotificationError::Profile(_))
+    ));
     assert!(!status(&state, admitted(&state)).await.unwrap().registered);
 }
 
@@ -493,7 +525,10 @@ async fn interrupted_put_is_cleaned_at_original_origin_after_restart_and_origin_
     .await
     .unwrap()
     .unwrap();
-    assert!(task.await.unwrap().is_err());
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(NotificationError::SessionChanged)
+    ));
     drop(state);
     let reopened = active(directory.path()).await;
     assert!(
@@ -651,6 +686,9 @@ async fn legacy_response_and_rotated_bindings_fail_closed_and_wire_routes_are_ex
         ),
         ("recipient", "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"),
         ("cloudOrigin", "https://foreign.example"),
+        // A kind this build does not know is refused at the boundary.
+        ("kind", "future_kind"),
+        ("kind", "generic"),
     ] {
         let mut payload = valid.clone();
         payload["data"][key] = Value::String(value.into());
@@ -677,7 +715,7 @@ async fn legacy_response_and_rotated_bindings_fail_closed_and_wire_routes_are_ex
         Some("/interview-room/22222222-2222-4222-8222-222222222222")
     );
     assert_eq!(
-        recorded.row.payload.as_ref().unwrap()["cloudOrigin"],
+        recorded.row.payload.as_ref().unwrap()["cloud_origin"],
         origin
     );
     assert!(receive(&state, admitted(&state), room)
@@ -732,7 +770,9 @@ async fn a_native_token_result_cannot_overwrite_a_newer_rotation_in_the_same_ses
     let task = tokio::spawn(async move {
         register_with_token(&task_state, admitted(&task_state), async {
             started_tx.send(()).unwrap();
-            token_rx.await.map_err(|e| e.to_string())
+            token_rx
+                .await
+                .map_err(|e| PushFailure::new(PushErrorCode::TokenUnavailable, e.to_string()))
         })
         .await
     });
@@ -823,18 +863,18 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        received.row.payload.as_ref().unwrap()["cloudOrigin"],
+        received.row.payload.as_ref().unwrap()["cloud_origin"],
         origin
     );
     assert_eq!(
-        received.row.payload.as_ref().unwrap()["eventId"],
+        received.row.payload.as_ref().unwrap()["event_id"],
         push["data"]["eventId"]
     );
     assert_eq!(
         received.row.route.as_deref(),
         Some("/interview-room/22222222-2222-4222-8222-222222222222")
     );
-    let (key, did) = issuer_key(&state).await.unwrap();
+    let (key, did) = issuer(&state).await.unwrap().into_parts();
     for clear in [false, true] {
         let items = super::super::cloud_pull::fetch(&origin, &key, did.as_str()).await;
         assert_eq!(items.len(), 1);
@@ -846,7 +886,7 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
                 "test.notification_recovery",
                 move |db| {
                     if clear {
-                        super::super::clear(db.conn())?;
+                        super::super::clear(db.conn()).map_err(|e| e.to_string())?;
                     }
                     Ok(super::super::cloud_pull::unreported(db.conn(), &items).len())
                 },
@@ -874,6 +914,7 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
                 let fresh = super::super::cloud_pull::unreported(db.conn(), &items);
                 assert_eq!(fresh.len(), 1, "a genuine new room opening is a new event");
                 super::super::record_if_enabled(db.conn(), &fresh[0].notification().unwrap())
+                    .map_err(|e| e.to_string())
             },
         )
         .await
@@ -1033,7 +1074,10 @@ async fn deletion_ack_fences_a_put_that_executes_later_and_reenable_uses_fresh_i
     .await
     .unwrap()
     .unwrap();
-    assert!(put.await.unwrap().is_err());
+    assert!(matches!(
+        put.await.unwrap(),
+        Err(NotificationError::SessionChanged)
+    ));
     drop(state);
     let state = active(directory.path()).await;
     let off = reconcile(&state, admitted(&state), None, Some(false))
@@ -1208,5 +1252,468 @@ async fn locked_startup_removes_incompatible_plaintext_prototype_activity() {
     assert!(
         !path.exists(),
         "unversioned plaintext prototype activity must not remain on disk"
+    );
+    // The camelCase format that preceded snake_case taps is discarded too.
+    std::fs::write(
+        &path,
+        r#"{"formatVersion":1,"pending":null,"consumed":["opaque"]}"#,
+    )
+    .unwrap();
+    assert!(super::super::opens::pending(&state)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(
+        !path.exists(),
+        "camelCase tap files must not remain on disk"
+    );
+}
+
+fn set_organisations(state: &AppState, enabled: bool) {
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::ORGANISATIONS_ENABLED,
+        enabled,
+    )
+    .unwrap();
+}
+
+fn stored_push_preference(state: &AppState) -> bool {
+    SettingsStore::get(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::NOTIFICATIONS_PUSH_ENABLED,
+    )
+}
+
+#[tokio::test]
+async fn organisations_off_retires_registration_until_acknowledged_and_on_re_registers() {
+    const RECIPIENT: &str = "11111111-1111-4111-8111-111111111111";
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    // Cloud sees: the first registration, a removal that fails (offline), the
+    // retried removal after restart, and a fresh registration once
+    // organisations are back on. A PUT anywhere in between fails the test.
+    let server = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        for (expected, code) in [("PUT", 200), ("DELETE", 503), ("DELETE", 204), ("PUT", 200)] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            let method = header.split(' ').next().unwrap().to_string();
+            assert_eq!(method, expected, "unexpected Cloud request {header}");
+            let body = format!(r#"{{"recipient":"{RECIPIENT}"}}"#);
+            respond(
+                &mut socket,
+                code,
+                if code == 200 { &body } else { "" },
+                &header,
+            )
+            .await;
+            seen.push(method);
+        }
+        seen
+    });
+    let registered = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(registered.registered && !registered.paused_by_organisations);
+    assert!(recipients::resolve(&state, RECIPIENT).is_some());
+
+    set_organisations(&state, false);
+    let paused = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(paused.enabled, "the push preference is remembered");
+    assert!(paused.paused_by_organisations);
+    assert!(!paused.registered && !paused.pending_registration);
+    assert!(
+        paused.pending_cleanup,
+        "an unacknowledged removal stays pending"
+    );
+    assert!(
+        recipients::resolve(&state, RECIPIENT).is_none(),
+        "routing is retired before Cloud acknowledges"
+    );
+    assert!(stored_push_preference(&state));
+
+    state.stop_active_profile().await.unwrap();
+    drop(state);
+    let state = active(directory.path()).await;
+    let pending = status(&state, admitted(&state)).await.unwrap();
+    assert!(pending.pending_cleanup && pending.paused_by_organisations);
+    let removed = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(removed.enabled && removed.paused_by_organisations);
+    assert!(!removed.pending_cleanup && !removed.registered);
+    assert!(stored_push_preference(&state));
+
+    set_organisations(&state, true);
+    let resumed = reconcile(&state, admitted(&state), Some("token".into()), None)
+        .await
+        .unwrap();
+    assert!(resumed.registered && !resumed.paused_by_organisations);
+    assert!(recipients::resolve(&state, RECIPIENT).is_some());
+    assert!(stored_push_preference(&state));
+    assert_eq!(server.await.unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn switching_organisations_off_reconciles_push_and_other_settings_do_not() {
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let mut methods = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            methods.push(header.split(' ').next().unwrap().to_string());
+            let code = if methods.len() == 1 { 200 } else { 204 };
+            respond(
+                &mut socket,
+                code,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                &header,
+            )
+            .await;
+        }
+        methods
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+    let app = mock_builder()
+        .manage(state)
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let state = app.state::<AppState>();
+    assert!(
+        settings_changed(app.handle(), admitted(&state), keys::UI_THEME.key)
+            .await
+            .unwrap()
+            .is_none(),
+        "an unrelated setting leaves push alone"
+    );
+    set_organisations(&state, false);
+    let status = settings_changed(
+        app.handle(),
+        admitted(&state),
+        keys::ORGANISATIONS_ENABLED.key,
+    )
+    .await
+    .unwrap()
+    .expect("the organisations switch reconciles push");
+    assert!(status.enabled && status.paused_by_organisations);
+    assert!(!status.registered && !status.pending_cleanup);
+    assert_eq!(server.await.unwrap(), ["PUT", "DELETE"]);
+}
+
+#[tokio::test]
+async fn a_synced_organisations_switch_pauses_push_like_a_local_change() {
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    const RECIPIENT: &str = "11111111-1111-4111-8111-111111111111";
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let mut methods = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            methods.push(header.split(' ').next().unwrap().to_string());
+            let code = if methods.len() == 1 { 200 } else { 204 };
+            let body = format!(r#"{{"recipient":"{RECIPIENT}"}}"#);
+            respond(&mut socket, code, &body, &header).await;
+        }
+        methods
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+    let app = mock_builder()
+        .manage(state)
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let state = app.state::<AppState>();
+
+    // Another device turned organisations off; settings sync applies it.
+    let payload = crate::p2p::sync::SyncPayload {
+        settings: vec![crate::p2p::sync::SettingsSyncRow {
+            key: keys::ORGANISATIONS_ENABLED.key.into(),
+            value: "false".into(),
+            updated_at: "2999-01-01T00:00:00Z".into(),
+        }],
+        tables: vec![],
+    };
+    let applied = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            admitted(&state),
+            "test.sync.apply",
+            move |db| crate::p2p::sync::apply_sync_payload(db.conn(), &payload),
+        )
+        .await
+        .unwrap();
+    assert_eq!(applied.settings, [keys::ORGANISATIONS_ENABLED.key]);
+
+    let status = super::super::follow_settings(app.handle(), admitted(&state), &applied.settings)
+        .await
+        .unwrap()
+        .expect("a synced organisations switch reconciles push");
+    assert!(status.enabled && status.paused_by_organisations);
+    assert!(!status.registered && !status.pending_cleanup);
+    assert!(
+        recipients::resolve(&state, RECIPIENT).is_none(),
+        "routing is retired"
+    );
+    assert!(stored_push_preference(&state));
+    assert_eq!(server.await.unwrap(), ["PUT", "DELETE"]);
+}
+
+#[tokio::test]
+async fn an_organisation_push_is_dropped_while_organisations_are_off() {
+    const RECIPIENT: &str = "11111111-1111-4111-8111-111111111111";
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let (header, _) = request(&mut socket).await;
+        let body = format!(r#"{{"recipient":"{RECIPIENT}"}}"#);
+        respond(&mut socket, 200, &body, &header).await;
+    });
+    assert!(
+        reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap()
+            .registered
+    );
+    server.await.unwrap();
+
+    // The switch is off but no reconcile has run yet (a sync just landed, or
+    // the reconcile is still offline): the routing is still live.
+    set_organisations(&state, false);
+    assert!(recipients::resolve(&state, RECIPIENT).is_some());
+    assert!(receive(&state, admitted(&state), offer(RECIPIENT))
+        .await
+        .unwrap()
+        .is_none());
+    let rows = super::super::list(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        None,
+        false,
+    )
+    .unwrap();
+    assert!(rows.is_empty(), "nothing is recorded: {rows:?}");
+}
+
+/// The code and raw detail a status carries, read from its wire form.
+fn failure(status: &PushStatus) -> (Value, Value) {
+    let wire = serde_json::to_value(status).unwrap();
+    (
+        wire["last_error_code"].clone(),
+        wire["last_error_detail"].clone(),
+    )
+}
+
+#[tokio::test]
+async fn each_push_failure_is_reported_as_a_stable_code_with_its_raw_detail() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    // Cloud answers each PUT, then the DELETE, in turn. `None` is a 2xx with
+    // no versioned acknowledgement.
+    let server = tokio::spawn(async move {
+        for (code, body, versioned) in [
+            (503, "", true),
+            (
+                200,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                false,
+            ),
+            (201, "", true),
+            (200, r#"{"recipient":"not-a-uuid"}"#, true),
+            (
+                200,
+                r#"{"recipient":"11111111-1111-4111-8111-111111111111"}"#,
+                true,
+            ),
+            (200, "", true),
+        ] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (header, _) = request(&mut socket).await;
+            if versioned {
+                respond(&mut socket, code, body, &header).await;
+            } else {
+                socket.write_all(format!("HTTP/1.1 {code} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            }
+        }
+    });
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        let status = reconcile(&state, admitted(&state), Some("token".into()), None)
+            .await
+            .unwrap();
+        seen.push(failure(&status));
+    }
+    assert_eq!(
+        seen,
+        [
+            (
+                "cloud_rejected".into(),
+                "Cloud push request returned 503".into()
+            ),
+            (
+                "cloud_unacknowledged".into(),
+                "Cloud did not acknowledge the push mutation version".into()
+            ),
+            (
+                "invalid_response".into(),
+                "Cloud did not return a recipient binding".into()
+            ),
+            (
+                "invalid_response".into(),
+                "Cloud returned an invalid recipient binding".into()
+            ),
+            (Value::Null, Value::Null),
+        ]
+    );
+    let removal = reconcile(&state, admitted(&state), None, Some(false))
+        .await
+        .unwrap();
+    assert_eq!(
+        failure(&removal),
+        (
+            "cloud_unacknowledged".into(),
+            "Cloud did not acknowledge removal".into()
+        )
+    );
+    server.await.unwrap();
+    // The listener is gone, so the retried removal cannot connect.
+    let offline = reconcile(&state, admitted(&state), None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        failure(&offline),
+        (
+            "cloud_unreachable".into(),
+            "Cloud push request failed".into()
+        )
+    );
+}
+
+#[tokio::test]
+async fn native_and_transport_failures_have_their_own_codes() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    SettingsStore::set(
+        state.db.lock().unwrap().as_ref().unwrap().conn(),
+        keys::CLOUD_ORIGIN,
+        format!("http://{}", listener.local_addr().unwrap()),
+    )
+    .unwrap();
+    for (native, code, detail) in [
+        (
+            permission(Ok(false)),
+            "permission_denied",
+            "Notification permission was not granted",
+        ),
+        (
+            permission(Err("plugin unavailable".into())),
+            "token_unavailable",
+            "plugin unavailable",
+        ),
+        (Ok(()), "token_unavailable", "FCM token request failed"),
+    ] {
+        let status = register_with_token(&state, admitted(&state), async move {
+            native?;
+            Err(PushFailure::new(
+                PushErrorCode::TokenUnavailable,
+                "FCM token request failed",
+            ))
+        })
+        .await
+        .unwrap();
+        assert_eq!(failure(&status), (code.into(), detail.into()));
+    }
+    let key = SigningKey::from_bytes(&[7; 32]);
+    let insecure = signed_send(
+        "http://cloud.example",
+        &key,
+        reqwest::Method::PUT,
+        "/api/push/devices/for/did:key:z",
+        None,
+        1,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        serde_json::to_value(insecure.code).unwrap(),
+        "insecure_origin"
+    );
+    assert_eq!(insecure.detail, "Alexandria Cloud must be https");
+}
+
+#[tokio::test]
+async fn a_failed_database_job_is_an_executor_failure_not_a_profile_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = active(directory.path()).await;
+    state
+        .db
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .conn()
+        .execute_batch("DROP TABLE push_operation_state")
+        .unwrap();
+    let error = status(&state, admitted(&state)).await.unwrap_err();
+    assert!(matches!(error, NotificationError::Executor(_)), "{error:?}");
+    // The text the webview sees is the job's own.
+    assert!(
+        error.to_string().contains("push_operation_state"),
+        "{error}"
     );
 }

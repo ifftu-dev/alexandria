@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useMotion } from '@/composables/useMotion'
+import { isMobilePlatform } from '@/composables/usePlatform'
 import BrandMark from './BrandMark.vue'
 
 const props = defineProps<{ ready: boolean }>()
 const { reduced } = useMotion()
 const visible = ref(!reduced.value && !document.hidden)
-const position = ref<Record<string, string>>({ left: 'calc(50% - 48px)', top: 'calc(50% - 64px)', width: '96px', height: '96px' })
+// The Android splash and the iOS launch screen already showed the mark,
+// centred. Continue from it, still and in the same place, rather than
+// replaying the reveal. Desktop has no native mark, so it plays the reveal.
+const continuesSplash = isMobilePlatform
+const position = ref<Record<string, string>>({ left: 'calc(50% - 48px)', top: continuesSplash ? 'calc(50% - 48px)' : 'calc(50% - 64px)', width: '96px', height: '96px' })
 let deadline: ReturnType<typeof setTimeout> | undefined
 let target: HTMLElement | null = null
 function finish(): void {
@@ -49,7 +54,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="visible || !ready" data-opening class="app-opening" :style="position" aria-hidden="true" inert>
-    <BrandMark :opening="visible" />
+    <BrandMark :opening="visible && !continuesSplash" />
   </div>
 </template>
 

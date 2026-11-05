@@ -16,7 +16,7 @@ import { isNavigationFailure, NavigationFailureType, type RouteLocationRaw } fro
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import router from '@/router'
 import { useProfiles, onProfileReady } from '@/composables/useProfiles'
-import { parseDeepLink, type DeepLinkTarget } from './parse'
+import { isInAppPath, parseDeepLink, type DeepLinkTarget } from './parse'
 
 let initialized = false
 let replayRegistered = false
@@ -44,8 +44,8 @@ async function replay(): Promise<void> {
     if (intent && !intent.route) {
       const resolved = await useLocalApi().invoke<NotificationOpen | null>('notifications_pending_open')
       if (session !== getProfileSessionToken() || pending !== target || !resolved
-        || resolved.id !== intent.id || resolved.profileId !== intent.profileId
-        || !resolved.route.startsWith('/') || resolved.route.startsWith('//')) return
+        || resolved.id !== intent.id || resolved.profile_id !== intent.profile_id
+        || !isInAppPath(resolved.route)) return
       destination = { kind: 'route', path: resolved.route }
     }
     if (!await navigate(destination)) return
@@ -64,12 +64,12 @@ async function replay(): Promise<void> {
 }
 
 async function openNotification(intent: NotificationOpen): Promise<void> {
-  if (!intent.id || !intent.profileId || (intent.route !== '' && (!intent.route?.startsWith('/') || intent.route.startsWith('//')))) return
+  if (!intent.id || !intent.profile_id || (intent.route !== '' && !isInAppPath(intent.route))) return
   if (consumed.has(intent.id) || notification?.id === intent.id) return
   ensureReplay()
   pending = { kind: 'route', path: intent.route }
   notification = intent
-  pendingProfile = intent.profileId
+  pendingProfile = intent.profile_id
   await replay()
 }
 
@@ -157,7 +157,7 @@ async function openTarget(target: DeepLinkTarget): Promise<void> {
  * absolute, same-document, and known to the router (checked at navigation).
  */
 async function openPath(path: string | null | undefined): Promise<void> {
-  if (!path || !path.startsWith('/') || path.startsWith('//')) return
+  if (!isInAppPath(path)) return
   await openTarget({ kind: 'route', path })
 }
 
@@ -166,11 +166,6 @@ async function openLink(raw: string): Promise<void> {
   const target = parseDeepLink(raw)
   if (!target) return
   await openTarget(target)
-}
-
-/** The target currently held for replay, if any (exposed for tests). */
-function heldTarget(): DeepLinkTarget | null {
-  return pending
 }
 
 async function init(): Promise<void> {
@@ -219,5 +214,5 @@ function dispose(): void {
 }
 
 export function useDeepLinks() {
-  return { init, dispose, openTarget, openPath, openLink, heldTarget, openNotification, hasUnlockDestination }
+  return { init, dispose, openTarget, openPath, openLink, openNotification, hasUnlockDestination }
 }

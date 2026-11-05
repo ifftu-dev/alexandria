@@ -11,6 +11,7 @@ import type {
   SentinelHoldoutPlaintextShare,
   SentinelPriorBlob,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 // Committee-member flow for running classifier evaluation against the
 // DAO-private holdout set (Phase 6 + follow-up #3). Each member brings
@@ -84,7 +85,7 @@ async function onSelect(holdoutId: string) {
       shareInputs.value[s.share_index] = ''
     }
   } catch (e) {
-    policyError.value = e instanceof Error ? e.message : String(e)
+    policyError.value = errorMessage(e)
   }
 }
 
@@ -117,7 +118,7 @@ async function runEvaluation() {
       evalVerdict.value = verdict
     }
   } catch (e) {
-    evalError.value = e instanceof Error ? e.message : String(e)
+    evalError.value = errorMessage(e)
   } finally {
     evaluating.value = false
   }

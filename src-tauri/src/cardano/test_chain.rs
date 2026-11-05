@@ -176,7 +176,7 @@ pub(crate) struct TestProfile {
     pub(crate) db: Arc<Mutex<Option<Database>>>,
     pub(crate) executor: DatabaseExecutor,
     pub(crate) admission: Admission,
-    session: String,
+    session: crate::profile::scope::ProfileSession,
 }
 
 impl TestProfile {

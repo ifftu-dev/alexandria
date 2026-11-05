@@ -11,6 +11,7 @@ use crate::ai_access::{may_use, no_attempt_in_progress, Surface};
 use crate::ai_chat::vocab::refused;
 use crate::studio::StudioRuntime;
 use crate::AppState;
+use alexandria_studio::access::run_error;
 
 pub(crate) fn with_db<T>(
     state: &AppState,
@@ -140,9 +141,9 @@ pub async fn studio_ask_tutor(
     }
     let epoch = state.studio.epoch.load(Ordering::SeqCst);
     let context = with_db(&state, |db| {
-        no_attempt_in_progress(db, Surface::Tutor)?;
+        no_attempt_in_progress(db, Surface::Tutor).map_err(run_error)?;
         let context = store::tutor_context(db, &course_id, &element_id, &connection_id)?;
-        may_use(db, &context.connection)?;
+        may_use(db, &context.connection).map_err(run_error)?;
         Ok(context)
     })?;
     let expected_messages = context.thread.messages.len();
@@ -218,7 +219,7 @@ pub(crate) fn save_tutor_answer(
     question: &str,
     answer: &str,
 ) -> alexandria_studio::Result<TutorThread> {
-    no_attempt_in_progress(db, Surface::LateAnswer)?;
+    no_attempt_in_progress(db, Surface::LateAnswer).map_err(run_error)?;
     store::save_tutor_exchange(db, thread, expected_messages, question, answer)
 }
 
@@ -443,7 +444,7 @@ async fn execute_run(
             let Some(index) = run.value.steps.iter().position(|s| s.output.is_none()) else {
                 return Ok(None);
             };
-            no_attempt_in_progress(db, Surface::StudioRun)?;
+            no_attempt_in_progress(db, Surface::StudioRun).map_err(run_error)?;
             let step = run.value.steps[index].clone();
             let current = store::connection(db, &step.connection.id)?.value;
             if !current.enabled
@@ -455,7 +456,7 @@ async fn execute_run(
                         .into(),
                 ));
             }
-            may_use(db, &current)?;
+            may_use(db, &current).map_err(run_error)?;
             let key = store::secret(db, &step.connection.id)?;
             let previous: Vec<_> = run.value.steps[..index]
                 .iter()
@@ -491,7 +492,7 @@ async fn execute_run(
                     if state.studio.epoch.load(Ordering::SeqCst) != epoch {
                         return Err(StudioError::Locked);
                     }
-                    no_attempt_in_progress(db, Surface::StudioRun)?;
+                    no_attempt_in_progress(db, Surface::StudioRun).map_err(run_error)?;
                     let current = store::run(db, &id)?;
                     if current.revision != run.revision || current.value.status != "running" {
                         return Err(StudioError::Conflict);
@@ -669,7 +670,7 @@ mod tests {
         // Asking during the attempt is refused and flagged.
         assert!(matches!(
             no_attempt_in_progress(&conn, Surface::Tutor),
-            Err(alexandria_studio::access::Refused::AttemptInProgress)
+            Err(alexandria_studio::access::AccessDenied::AttemptInProgress)
         ));
         assert!(flagged(&conn, "attempt"));
     }

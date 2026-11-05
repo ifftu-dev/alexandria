@@ -709,14 +709,15 @@ pub fn settings_outbound_snapshot(conn: &Connection) -> Result<Vec<SettingsSyncR
         .map_err(|e| e.to_string())
 }
 
-/// Merge a batch of inbound settings rows from a peer. Returns the
-/// number of rows that actually took effect (i.e. were strictly
-/// newer than the local copy and matched a registered sync key).
+/// Merge a batch of inbound settings rows from a peer. Returns the keys
+/// of the rows that actually took effect (i.e. were strictly newer than
+/// the local copy and matched a registered sync key), so the caller can
+/// react to them as it would to a local write.
 pub fn settings_apply_inbound(
     conn: &Connection,
     rows: &[SettingsSyncRow],
-) -> Result<usize, String> {
-    let mut applied = 0usize;
+) -> Result<Vec<String>, String> {
+    let mut applied = Vec::new();
     for row in rows {
         match crate::settings::SettingsStore::apply_sync_row(
             conn,
@@ -724,7 +725,7 @@ pub fn settings_apply_inbound(
             &row.value,
             &row.updated_at,
         ) {
-            Ok(true) => applied += 1,
+            Ok(true) => applied.push(row.key.clone()),
             Ok(false) => {}
             Err(e) => log::warn!("settings sync: drop {}: {e}", row.key),
         }
@@ -963,20 +964,38 @@ pub fn build_sync_payload(conn: &Connection) -> Result<SyncPayload, String> {
     Ok(SyncPayload { settings, tables })
 }
 
+/// What an inbound payload changed locally.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncApplied {
+    /// Table rows merged.
+    pub rows: i64,
+    /// Keys of the settings rows that took effect. Settings that reach
+    /// outside the store (push eligibility, the notification channel)
+    /// follow these once the merge has committed.
+    pub settings: Vec<String>,
+}
+
+impl SyncApplied {
+    /// Rows and settings merged, together.
+    pub fn merged(&self) -> i64 {
+        self.rows + self.settings.len() as i64
+    }
+}
+
 /// Apply an inbound payload: per-key settings LWW + per-table row LWW.
-/// Returns `(rows_merged, settings_applied)`. Unknown tables are
-/// skipped (defence against a malformed/hostile payload).
-pub fn apply_sync_payload(conn: &Connection, payload: &SyncPayload) -> Result<(i64, i64), String> {
-    let settings_applied = settings_apply_inbound(conn, &payload.settings)? as i64;
-    let mut merged = 0i64;
-    for (table, rows) in &payload.tables {
+/// Unknown tables are skipped (defence against a malformed/hostile
+/// payload).
+pub fn apply_sync_payload(conn: &Connection, payload: &SyncPayload) -> Result<SyncApplied, String> {
+    let settings = settings_apply_inbound(conn, &payload.settings)?;
+    let mut rows = 0i64;
+    for (table, table_rows) in &payload.tables {
         if !SYNCABLE_TABLES.contains(&table.as_str()) {
             log::warn!("sync: ignoring non-syncable table '{table}' from peer");
             continue;
         }
-        merged += merge_lww_rows(conn, table, rows)?;
+        rows += merge_lww_rows(conn, table, table_rows)?;
     }
-    Ok((merged, settings_applied))
+    Ok(SyncApplied { rows, settings })
 }
 
 /// Count of rows carried in a payload (settings + all table rows) —

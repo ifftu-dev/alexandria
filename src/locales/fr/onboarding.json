@@ -165,7 +165,8 @@
     "biometricNotSetup": "Le déverrouillage biométrique n'est pas encore configuré. Déverrouillez une fois avec votre mot de passe pour l'activer.",
     "biometricUnavailable": "Le déverrouillage biométrique est indisponible dans cette version (droit -34018). Utilisez une version signée.",
     "biometricFailed": "Échec du déverrouillage biométrique : {error}",
-    "biometricMismatch": "Le mot de passe biométrique ne correspondait pas à ce profil. Saisissez votre mot de passe."
+    "biometricMismatch": "Le mot de passe biométrique ne correspondait pas à ce profil. Saisissez votre mot de passe.",
+    "stillUnlocking": "Déverrouillage toujours en cours. Certains appareils sont un peu plus lents."
   },
   "guardianGate": {
     "heading": "Un tuteur doit activer votre compte",

@@ -1,6 +1,7 @@
 //! Locked-access recipient routing. No tokens, DIDs, keys or notification copy.
 use std::sync::Mutex;
 
+use super::NotificationError;
 use crate::{profile::ProfileId, AppState};
 use serde::{Deserialize, Serialize};
 
@@ -15,18 +16,18 @@ pub struct Binding {
     pub origin: String,
 }
 
-fn load(state: &AppState) -> Result<Vec<Binding>, String> {
+fn load(state: &AppState) -> Result<Vec<Binding>, NotificationError> {
     match std::fs::read(state.app_data_dir.join(FILE)) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string()),
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(e.into()),
     }
 }
 
-pub fn network() -> Result<String, String> {
+pub fn network() -> Result<String, NotificationError> {
     crate::network_profile::embedded_preprod()
         .map(|p| p.network_id.clone())
-        .map_err(|e| e.to_string())
+        .map_err(NotificationError::NetworkProfile)
 }
 
 pub fn valid_profile(state: &AppState, profile: &str, network_id: &str) -> bool {
@@ -57,8 +58,8 @@ pub fn replace(
     profile: &str,
     origin: &str,
     recipient: Option<&str>,
-) -> Result<(), String> {
-    let _guard = FILE_LOCK.lock().map_err(|e| e.to_string())?;
+) -> Result<(), NotificationError> {
+    let _guard = FILE_LOCK.lock()?;
     let mut bindings = load(state)?;
     bindings.retain(|b| b.profile_id != profile || b.origin != origin);
     if let Some(recipient) = recipient {
@@ -71,10 +72,9 @@ pub fn replace(
     }
     let path = state.app_data_dir.join(FILE);
     let tmp = state.app_data_dir.join(format!("{FILE}.tmp"));
-    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::create(&tmp)?;
     use std::io::Write;
-    file.write_all(&serde_json::to_vec(&bindings).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+    file.write_all(&serde_json::to_vec(&bindings)?)?;
+    file.sync_all()?;
+    Ok(std::fs::rename(tmp, path)?)
 }

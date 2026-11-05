@@ -12,7 +12,7 @@ const skill: SkillInfo = {
   prerequisite_count: 0, dependent_count: 0, created_at: null,
 }
 const field: SubjectFieldInfo = {
-  id: 'field', name: 'Field', description: null, icon_emoji: null, subject_count: 1, skill_count: 1, created_at: null,
+  id: 'field', name: 'Field', description: null, icon_emoji: null, atlas_slot: 0, subject_count: 1, skill_count: 1, created_at: null,
 }
 const identity: Identity = {
   stake_address: 'stake-a', payment_address: 'payment-a', username: null, display_name: 'A',
@@ -79,6 +79,12 @@ afterEach(() => {
   cleanups.forEach(cleanup => cleanup())
   vi.restoreAllMocks()
   vi.useRealTimers()
+})
+
+it('accepts only the skills page tabs from outside values', async () => {
+  const { isAtlasTab } = await import('@/composables/useSkillAtlas')
+  expect(['credentials', 'graph', 'browse'].every(isAtlasTab)).toBe(true)
+  expect(['Graph', '', 'settings', null, 1].some(isAtlasTab)).toBe(false)
 })
 
 describe('shared skill atlas state', () => {
@@ -261,45 +267,71 @@ describe('shared skill atlas state', () => {
     expect(atlas.refreshing.value).toBe(false)
     expect(reads).toBe(2)
   })
-  it('shares navigation/event subscriptions until the last owner leaves and ignores cancelled navigation', async () => {
+  it('shares event subscriptions until the last owner leaves and never refreshes on route changes', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
     const { atlas } = await setup()
     const { installSkillAtlasRefresh } = await import('./useSkillAtlas')
     const { announceCredentialsChanged } = await import('./credentialEvents')
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: {} }] })
-    router.beforeEach(to => to.path !== '/blocked')
     const stopOne = installSkillAtlasRefresh(router)
     const stopTwo = installSkillAtlasRefresh(router)
     cleanups.push(stopOne, stopTwo)
     await atlas.ensureLoaded()
+    const reads = () => ipc.mock.calls.filter(([command]) => command === 'list_credentials').length
+    const loaded = reads()
     credentials = [vc(2)]
-    await router.push('/first')
-    await flushPromises()
-    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
+    for (const [path, at] of [['/first', 2000], ['/courses', 4000], ['/settings', 6000]] as const) {
+      vi.setSystemTime(at)
+      await router.push(path)
+      await flushPromises()
+    }
+    expect(reads()).toBe(loaded)
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(1)
     stopOne()
-    credentials = [vc(3)]
-    await router.push('/rapid')
-    await flushPromises()
-    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
-    vi.setSystemTime(1600)
-    await router.push('/blocked')
-    await flushPromises()
-    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
-    await router.push('/later')
-    await flushPromises()
-    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(3)
-    credentials = [vc(4)]
     announceCredentialsChanged()
     await flushPromises()
-    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(4)
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
     stopTwo()
     credentials = [vc(5)]
     announceCredentialsChanged()
-    vi.setSystemTime(3200)
-    await router.push('/detached')
     await flushPromises()
-    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(4)
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
+  })
+  it('refreshes when an atlas surface comes on screen, or the window returns with one showing', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const { atlas } = await setup()
+    const { installSkillAtlasRefresh } = await import('./useSkillAtlas')
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    cleanups.push(installSkillAtlasRefresh(router))
+    await atlas.ensureLoaded()
+    const reads = () => ipc.mock.calls.filter(([command]) => command === 'list_credentials').length
+    // A surface opening right after a load reuses that snapshot.
+    const leave = atlas.activateSurface('page')
+    await flushPromises()
+    expect(reads()).toBe(1)
+    leave()
+    credentials = [vc(2)]
+    vi.setSystemTime(5000)
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(reads()).toBe(1)
+    cleanups.push(atlas.activateSurface('modal'))
+    await flushPromises()
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
+    credentials = [vc(3)]
+    vi.setSystemTime(10000)
+    visibility.mockReturnValue('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(2)
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(3)
+    expect(reads()).toBe(3)
   })
   it('drops feedback when the document becomes hidden instead of replaying it on return', async () => {
     const { atlas } = await setup()

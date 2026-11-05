@@ -4,7 +4,13 @@ for (const theme of ['light', 'dark']) {
   test(`${theme} atlas presents the whole taxonomy and restores explicit exploration`, async ({ page }, testInfo) => {
     await page.goto(`/tests/desktop-ui/?screen=skill-atlas&theme=${theme}`)
     await expect(page.getByRole('heading', { name: '35 earned · 68 Ready · 103 loaded skills' })).toBeVisible()
-    await expect(page.getByRole('list', { name: 'Full-label skill list' }).getByRole('button')).toHaveCount(103)
+    const rows = page.getByRole('list', { name: 'Full-label skill list' }).getByRole('button')
+    await expect(page.locator('.atlas-list summary')).toContainText('103 matching skills')
+    await expect(rows).toHaveCount(50)
+    await page.getByRole('button', { name: 'Show 50 more skills', exact: true }).click()
+    await expect(rows.nth(50)).toBeFocused()
+    await page.getByRole('button', { name: 'Show 3 more skills', exact: true }).click()
+    await expect(rows).toHaveCount(103)
     await page.screenshot({ path: testInfo.outputPath('overview.png'), fullPage: true })
     await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
     await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Big-O')
@@ -16,7 +22,10 @@ for (const theme of ['light', 'dark']) {
     await expect(page.locator('output')).toHaveText('')
     await page.getByRole('button', { name: 'Zoom in', exact: true }).click()
     await page.getByRole('button', { name: 'Focus dependents', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Collapse inspector', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Showing dependents of Big-O Analysis · 1 step' })).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath('selected.png'), fullPage: true })
+    await inspector.getByRole('button', { name: 'Expand inspector', exact: true }).click()
     await page.getByRole('button', { name: 'Remount explorer', exact: true }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('Big-O')
     await expect(page.getByRole('button', { name: 'Focus dependents', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -76,4 +85,35 @@ test('new evidence has no visible-duration animation with system reduced motion'
     ).length,
   )).toBe(0)
   await expect(page.getByRole('status').filter({ hasText: 'New evidence highlighted' })).toHaveCount(0)
+})
+
+test('only skills whose prerequisites are all earned are emphasised as ready next', async ({ page }, testInfo) => {
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=light')
+  const list = page.getByRole('list', { name: 'Full-label skill list' })
+  await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Algorithms')
+  // Sorting needs Arrays and Big-O, both earned; Greedy needs Sorting too; Graph needs neither of its two.
+  const sorting = list.getByRole('button', { name: 'Sorting Algorithms, not yet earned, ready next, learning-outcome Bloom level 3 Apply', exact: true })
+  await expect(sorting).toContainText('Ready next')
+  await expect(list.getByRole('button', { name: 'Greedy Algorithms, not yet earned, Ready, learning-outcome Bloom level 4 Analyze', exact: true })).toBeVisible()
+  await expect(list.getByRole('button', { name: 'Graph Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply', exact: true })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Python')
+  // No prerequisites: Ready, never ready next.
+  await expect(list.getByRole('button', { name: 'Python, not yet earned, Ready, learning-outcome Bloom level 3 Apply', exact: true })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Sorting')
+  await sorting.click()
+  const map = page.getByRole('group', { name: 'Skill map' })
+  const node = map.getByRole('button', { name: 'Sorting Algorithms, not yet earned, ready next, learning-outcome Bloom level 3 Apply', exact: true })
+  await expect(node).toBeVisible()
+  await expect(node).toContainText('Ready next')
+  const greedy = map.locator('.map-node').filter({ hasText: 'Greedy Algorithms' })
+  const style = (locator: typeof node) => locator.evaluate(element => {
+    const computed = getComputedStyle(element)
+    return { border: computed.borderInlineStartWidth, background: computed.backgroundColor }
+  })
+  const [next, ready] = [await style(node), await style(greedy)]
+  expect(next.border).toBe('7px')
+  expect(ready.border).toBe('4px')
+  expect(next.background).not.toBe(ready.background)
+  await expect(page.getByRole('complementary', { name: 'Skill inspector' }).locator('.inspector-status')).toHaveText('◎ Ready next')
+  await page.screenshot({ path: testInfo.outputPath('ready-next.png'), fullPage: true })
 })

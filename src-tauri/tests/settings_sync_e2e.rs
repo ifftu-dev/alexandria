@@ -71,7 +71,7 @@ fn sync_a_to_b(a: &Connection, b: &Connection) -> i64 {
         sealed,
         pairing: None,
     };
-    match handle_sync_request(b, PEER_A, &req) {
+    match handle_sync_request(b, PEER_A, &req).response {
         SyncResponse::Ok { merged, .. } => merged,
         other => panic!("expected Ok from B, got {other:?}"),
     }

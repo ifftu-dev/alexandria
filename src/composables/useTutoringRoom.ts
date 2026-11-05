@@ -13,6 +13,7 @@ import type {
 } from '@/types'
 import { useLocalApi } from './useLocalApi'
 import { onProfileLocked } from './useProfiles'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { invoke } = useLocalApi()
 
@@ -311,7 +312,7 @@ async function refreshStatus(): Promise<void> {
     }
   } catch (e: unknown) {
     if (isCurrentProfile(generation)) {
-      lastError.value = e instanceof Error ? e.message : String(e)
+      lastError.value = errorMessage(e)
     }
   }
 }
@@ -323,7 +324,7 @@ async function refreshSessions(): Promise<void> {
     if (isCurrentProfile(generation)) sessions.value = loaded
   } catch (e: unknown) {
     if (isCurrentProfile(generation)) {
-      lastError.value = e instanceof Error ? e.message : String(e)
+      lastError.value = errorMessage(e)
     }
   }
 }
@@ -368,7 +369,7 @@ async function createRoom(
     await refreshSessions()
     return session
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errorMessage(e)
     if (isCurrentProfile(generation)) lastError.value = msg
     throw new Error(msg)
   } finally {
@@ -411,7 +412,7 @@ async function joinRoom(
     await refreshSessions()
     return session
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errorMessage(e)
     if (isCurrentProfile(generation)) lastError.value = msg
     throw new Error(msg)
   } finally {
@@ -436,7 +437,7 @@ async function leaveRoom(): Promise<void> {
     await refreshSessions()
   } catch (e: unknown) {
     if (isCurrentProfile(generation)) {
-      lastError.value = e instanceof Error ? e.message : String(e)
+      lastError.value = errorMessage(e)
     }
   } finally {
     if (isCurrentProfile(generation)) loading.value = false
@@ -460,7 +461,7 @@ async function changeMedia<T>(change: () => Promise<T>, current: () => T): Promi
     if (isCurrentProfile(generation)) await refreshStatus()
     return result
   } catch (e: unknown) {
-    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = errorMessage(e)
     throw e
   } finally {
     mediaBusy.value = false
@@ -505,7 +506,7 @@ async function sendChat(text: string): Promise<void> {
       },
     ]
   } catch (e: unknown) {
-    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = errorMessage(e)
     throw e
   }
 }
@@ -526,7 +527,7 @@ async function sendTranscript(text: string, confidence?: number): Promise<void> 
       },
     ].slice(-200)
   } catch (e: unknown) {
-    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = errorMessage(e)
     throw e
   }
 }
@@ -584,7 +585,7 @@ async function setAudioDevices(micId?: string | null, speakerId?: string | null)
     })
     if (isCurrentProfile(generation)) await refreshStatus()
   } catch (e: unknown) {
-    if (isCurrentProfile(generation)) lastError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrentProfile(generation)) lastError.value = errorMessage(e)
     throw e
   }
 }
@@ -607,7 +608,7 @@ async function checkDevices(): Promise<DeviceCheckResult> {
       has_camera: false,
       camera_name: null,
       has_audio: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     }
   }
 }

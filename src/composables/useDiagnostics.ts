@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import { useLocalApi } from './useLocalApi'
 import { useSentinel } from './useSentinel'
+import { errorMessage } from '@/utils/errorMessage'
 
 interface DiagnosticsStatus {
   enabled: boolean
@@ -56,7 +57,7 @@ export function useDiagnostics() {
       openAssessmentCount.value = status.open_assessment_count
       promptOpen.value = false
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : String(cause)
+      error.value = errorMessage(cause)
       throw cause
     } finally {
       busy.value = false
@@ -72,7 +73,7 @@ export function useDiagnostics() {
       enabled.value = false
       promptOpen.value = false
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : String(cause)
+      error.value = errorMessage(cause)
       throw cause
     } finally {
       busy.value = false
@@ -84,7 +85,7 @@ export function useDiagnostics() {
     try {
       await invoke('diagnostics_run_action', { action })
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : String(cause)
+      error.value = errorMessage(cause)
       throw cause
     }
   }

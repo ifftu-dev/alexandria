@@ -54,6 +54,10 @@
       "body": "打开 Alexandria 查看更新。"
     }
   },
+  "channel": {
+    "name": "动态",
+    "description": "面试、录用邀约、请求和课堂动态"
+  },
   "settings": {
     "title": "通知",
     "description": "应用内角标、系统横幅，以及应用关闭时发送到此设备的推送。",
@@ -67,12 +71,23 @@
     "pushNoCloud": "此网络尚未配置 Alexandria Cloud，因此无法注册。",
     "pushCleanupPending": "正在等待远程移除。之前已排队的横幅仍可能送达。",
     "pushRegistrationPending": "设备注册正在等待确认。",
-    "pushError": "上次尝试失败：{error}",
+    "pushPausedByOrganisations": "推送已暂停，因为“接收来自组织的请求”已关闭。你的推送设置会保留，重新开启组织后将再次生效。",
+    "pushPausedOpenOrganisations": "打开组织设置",
+    "pushErrors": {
+      "permission_denied": "Alexandria 未获准发送通知。请在设备设置中允许通知，然后重试。",
+      "token_unavailable": "此设备未能获取推送令牌。请检查网络连接，然后重试。",
+      "insecure_origin": "Alexandria Cloud 的地址不安全，因此此设备不会向其注册。",
+      "cloud_unreachable": "无法连接 Alexandria Cloud。请检查网络连接；Alexandria 会再次尝试。",
+      "cloud_rejected": "Alexandria Cloud 拒绝了该请求。Alexandria 稍后会再次尝试。",
+      "cloud_unacknowledged": "Alexandria Cloud 未确认此更改。Alexandria 会再次尝试。",
+      "invalid_response": "Alexandria Cloud 返回了此应用无法识别的响应。Alexandria 会再次尝试。"
+    },
     "register": "立即注册",
     "unregister": "取消注册",
     "working": "处理中…",
     "permission": "请求权限",
     "permissionGranted": "系统允许显示横幅。",
-    "permissionDenied": "系统正在阻止横幅。请在设备通知设置中允许 Alexandria 发送通知。"
+    "permissionDenied": "系统正在阻止横幅。请在设备通知设置中允许 Alexandria 发送通知。",
+    "permissionPromptUnavailable": "系统无法请求权限。请在设备通知设置中允许 Alexandria 发送通知。"
   }
 }

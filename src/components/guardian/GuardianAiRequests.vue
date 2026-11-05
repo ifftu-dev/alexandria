@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useGuardian } from '@/composables/useGuardian'
+import { useSettleIn } from '@/composables/useMotion'
 import type { GuardianAiRequest } from '@/types'
 
 /**
@@ -20,6 +21,18 @@ const busy = ref<string | null>(null)
 const error = ref('')
 
 const mine = computed(() => requests.value.filter((r) => r.link_id === props.linkId))
+const rows = new Map<string, Element>()
+function rowRef(id: string, el: unknown) {
+  if (el instanceof Element) rows.set(id, el)
+  else rows.delete(id)
+}
+
+const settleRow = useSettleIn()
+/** The decided request settles into its new state; the decision never waits for it. */
+async function confirmDecision(id: string) {
+  await nextTick()
+  settleRow(rows.get(id))
+}
 
 async function load() {
   try {
@@ -35,6 +48,7 @@ async function decide(request: GuardianAiRequest, approve: boolean) {
   try {
     await invoke('guardian_decide_ai_request', { requestId: request.id, linkId: request.link_id, approve })
     await load()
+    void confirmDecision(request.id)
     // Deliver now if the child is reachable; otherwise the next sync will.
     void syncNow().then(load).catch(() => {})
   } catch (e) {
@@ -62,7 +76,7 @@ onMounted(load)
     <p v-if="error" class="mt-2 text-xs text-error" role="alert">{{ error }}</p>
     <p v-if="!mine.length" class="mt-3 text-sm text-muted-foreground">{{ t('guardian.aiRequests.none') }}</p>
     <ul v-else class="mt-3 space-y-2">
-      <li v-for="r in mine" :key="r.id" class="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3 text-sm">
+      <li v-for="r in mine" :key="r.id" :ref="(el) => rowRef(r.id, el)" data-ai-request class="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3 text-sm">
         <div class="min-w-0 flex-1">
           <p class="font-medium text-foreground">{{ r.connection_name }}</p>
           <p class="text-xs text-muted-foreground">{{ host(r.endpoint) }} · {{ r.model }}</p>

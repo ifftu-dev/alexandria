@@ -68,7 +68,7 @@ pub async fn chat_status(state: State<'_, AppState>) -> Result<ChatStatus, Strin
 pub async fn chat_list_threads(state: State<'_, AppState>) -> Result<Vec<ChatThread>, String> {
     let runtime = state.ai_chat.clone();
     with_conn(&state, "chat.list-threads", move |conn| {
-        ops::recover(conn, &runtime)?;
+        ops::recover(conn, &runtime).map_err(|e| e.to_string())?;
         store::list_threads(conn, 200).map_err(|e| e.to_string())
     })
     .await
@@ -81,7 +81,7 @@ pub async fn chat_search_threads(
     query: String,
 ) -> Result<Vec<store::SearchHit>, String> {
     with_conn(&state, "chat.search", move |conn| {
-        ops::search_threads(conn, &query)
+        ops::search_threads(conn, &query).map_err(|e| e.to_string())
     })
     .await
 }
@@ -94,6 +94,7 @@ pub async fn chat_create_thread(
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.create-thread", move |conn| {
         ops::create_thread(conn, connection_id.as_deref(), model_id.as_deref())
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -105,7 +106,7 @@ pub async fn chat_get_thread(
 ) -> Result<ops::ThreadDetail, String> {
     let runtime = state.ai_chat.clone();
     with_conn(&state, "chat.get-thread", move |conn| {
-        ops::thread_detail(conn, &runtime, &thread_id)
+        ops::thread_detail(conn, &runtime, &thread_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -117,7 +118,7 @@ pub async fn chat_rename_thread(
     title: String,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.rename-thread", move |conn| {
-        ops::rename_thread(conn, &thread_id, &title)
+        ops::rename_thread(conn, &thread_id, &title).map_err(|e| e.to_string())
     })
     .await
 }
@@ -131,6 +132,7 @@ pub async fn chat_set_thread_model(
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.set-thread-model", move |conn| {
         ops::set_thread_model(conn, &thread_id, connection_id.as_deref(), model_id)
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -142,7 +144,7 @@ pub async fn chat_delete_thread(
 ) -> Result<(), String> {
     let runtime = state.ai_chat.clone();
     with_conn(&state, "chat.delete-thread", move |conn| {
-        ops::delete_thread(conn, &runtime, &thread_id)
+        ops::delete_thread(conn, &runtime, &thread_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -158,7 +160,7 @@ pub async fn chat_attach_lesson(
     element_id: String,
 ) -> Result<ChatBinding, String> {
     with_conn(&state, "chat.attach-lesson", move |conn| {
-        ops::attach(conn, &thread_id, &course_id, &element_id)
+        ops::attach(conn, &thread_id, &course_id, &element_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -172,7 +174,7 @@ pub async fn chat_attach_goal(
     goal_id: String,
 ) -> Result<ChatBinding, String> {
     with_conn(&state, "chat.attach-goal", move |conn| {
-        ops::attach_goal(conn, &thread_id, &goal_id)
+        ops::attach_goal(conn, &thread_id, &goal_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -184,7 +186,7 @@ pub async fn chat_detach(
     binding_id: String,
 ) -> Result<(), String> {
     with_conn(&state, "chat.detach", move |conn| {
-        ops::detach(conn, &thread_id, &binding_id)
+        ops::detach(conn, &thread_id, &binding_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -216,7 +218,7 @@ pub async fn chat_list_models(
     connection_id: String,
 ) -> Result<Vec<String>, String> {
     let (connection, key) = with_conn(&state, "chat.list-models", move |conn| {
-        ops::models_source(conn, &connection_id)
+        ops::models_source(conn, &connection_id).map_err(|e| e.to_string())
     })
     .await?;
     let target = studio_provider::connection(&connection).map_err(|e| {
@@ -256,7 +258,7 @@ pub async fn chat_request_guardian_approval(
     connection_id: String,
 ) -> Result<GuardianApproval, String> {
     with_conn(&state, "chat.request-approval", move |conn| {
-        ops::request_approval(conn, &connection_id)
+        ops::request_approval(conn, &connection_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -407,7 +409,7 @@ pub async fn chat_set_thread_mode(
     mode: String,
 ) -> Result<ChatThread, String> {
     with_conn(&state, "chat.set-mode", move |conn| {
-        ops::set_thread_mode(conn, &thread_id, &mode)
+        ops::set_thread_mode(conn, &thread_id, &mode).map_err(|e| e.to_string())
     })
     .await
 }
@@ -420,7 +422,7 @@ pub async fn chat_practice_attempt(
     answer: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-attempt", move |conn| {
-        ops::practice_attempt(conn, &item_id, &answer)
+        ops::practice_attempt(conn, &item_id, &answer).map_err(|e| e.to_string())
     })
     .await
 }
@@ -431,7 +433,7 @@ pub async fn chat_practice_hint(
     item_id: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-hint", move |conn| {
-        ops::practice_hint(conn, &item_id)
+        ops::practice_hint(conn, &item_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -442,7 +444,7 @@ pub async fn chat_practice_reveal(
     item_id: String,
 ) -> Result<store::PracticeView, String> {
     with_conn(&state, "chat.practice-reveal", move |conn| {
-        ops::practice_reveal(conn, &item_id)
+        ops::practice_reveal(conn, &item_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -465,7 +467,7 @@ pub async fn chat_add_memory(
     content: String,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.add-memory", move |conn| {
-        ops::add_memory(conn, &kind, &content)
+        ops::add_memory(conn, &kind, &content).map_err(|e| e.to_string())
     })
     .await
 }
@@ -477,7 +479,7 @@ pub async fn chat_approve_memory(
     content: Option<String>,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.approve-memory", move |conn| {
-        ops::approve_memory(conn, &memory_id, content.as_deref())
+        ops::approve_memory(conn, &memory_id, content.as_deref()).map_err(|e| e.to_string())
     })
     .await
 }
@@ -490,7 +492,7 @@ pub async fn chat_update_memory(
     active: Option<bool>,
 ) -> Result<store::MemoryItem, String> {
     with_conn(&state, "chat.update-memory", move |conn| {
-        ops::update_memory(conn, &memory_id, content.as_deref(), active)
+        ops::update_memory(conn, &memory_id, content.as_deref(), active).map_err(|e| e.to_string())
     })
     .await
 }
@@ -502,7 +504,7 @@ pub async fn chat_forget_memory(
     memory_id: String,
 ) -> Result<(), String> {
     with_conn(&state, "chat.forget-memory", move |conn| {
-        ops::forget_memory(conn, &memory_id)
+        ops::forget_memory(conn, &memory_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -515,7 +517,7 @@ pub async fn chat_save_note(
     title: String,
 ) -> Result<store::Artifact, String> {
     with_conn(&state, "chat.save-note", move |conn| {
-        ops::save_note(conn, &message_id, &title)
+        ops::save_note(conn, &message_id, &title).map_err(|e| e.to_string())
     })
     .await
 }
@@ -572,7 +574,7 @@ pub async fn chat_delete_artifact(
     artifact_id: String,
 ) -> Result<(), String> {
     with_conn(&state, "chat.delete-artifact", move |conn| {
-        ops::delete_artifact(conn, &artifact_id)
+        ops::delete_artifact(conn, &artifact_id).map_err(|e| e.to_string())
     })
     .await
 }
@@ -582,5 +584,8 @@ pub async fn chat_delete_artifact(
 pub async fn chat_list_artifacts(
     state: State<'_, AppState>,
 ) -> Result<Vec<store::Artifact>, String> {
-    with_conn(&state, "chat.list-artifacts", ops::saved_artifacts).await
+    with_conn(&state, "chat.list-artifacts", |conn| {
+        ops::saved_artifacts(conn).map_err(|e| e.to_string())
+    })
+    .await
 }

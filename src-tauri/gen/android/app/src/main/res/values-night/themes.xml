@@ -1,6 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Base application theme. Light and dark come from the colour
+         resources (values, values-night). The night qualifier outranks the
+         API level, so values-night, values-v31 and values-night-v31 all
+         carry the same items; keep the four in step. -->
     <style name="Theme.alexandria_node" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Below Android 12 the launch surface is the window background. -->
+        <item name="android:windowBackground">@color/launch_background</item>
     </style>
 </resources>

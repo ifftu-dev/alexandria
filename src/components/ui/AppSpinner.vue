@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 interface Props {
   size?: 'xs' | 'sm' | 'md' | 'lg'
   label?: string
@@ -8,6 +10,7 @@ withDefaults(defineProps<Props>(), {
   size: 'md',
   label: '',
 })
+const { t } = useI18n()
 
 // Dimensions come from this prop, never from a caller's class: a `class` on
 // this component lands on the wrapper below, which would leave the spinner
@@ -21,7 +24,10 @@ const sizeMap = {
 </script>
 
 <template>
-  <div class="flex items-center gap-2">
+  <!-- Always paired with text: the caption when given, otherwise an
+       accessible "Loading". With motion Off the ring stands still
+       (data-progress, main.css), so the text carries the state. -->
+  <div class="flex items-center gap-2" role="status">
     <!-- Stroked SVG arc rather than a bordered div. A border-radius ring
          quantises its border to whole pixels, so at small sizes the
          transparent segment that shows rotation turns into a hard notch and
@@ -32,8 +38,8 @@ const sizeMap = {
       :class="sizeMap[size]"
       viewBox="0 0 24 24"
       fill="none"
-      role="status"
-      :aria-label="label || undefined"
+      aria-hidden="true"
+      data-progress
     >
       <circle class="app-spinner__track" cx="12" cy="12" r="9.5" stroke-width="2.5" />
       <circle
@@ -46,6 +52,7 @@ const sizeMap = {
       />
     </svg>
     <span v-if="label" class="text-sm text-muted-foreground">{{ label }}</span>
+    <span v-else class="sr-only">{{ t('common.actions.loading') }}</span>
   </div>
 </template>
 
@@ -87,12 +94,14 @@ const sizeMap = {
   }
 }
 
-/* Still show motion for reduced-motion users, just slower and without the
-   sweeping arc — a static gap rotating gently. */
+/* Reduced and Off: the shared progress rule (main.css) slows or stops the
+   rotation; the sweeping arc becomes a fixed gap. */
+:root[data-motion='reduced'] .app-spinner__arc,
+:root[data-motion='off'] .app-spinner__arc {
+  animation: none;
+  stroke-dasharray: 30 60;
+}
 @media (prefers-reduced-motion: reduce) {
-  .app-spinner {
-    animation-duration: 3s;
-  }
   .app-spinner__arc {
     animation: none;
     stroke-dasharray: 30 60;

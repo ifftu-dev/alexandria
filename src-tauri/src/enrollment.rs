@@ -15,9 +15,41 @@ use crate::crypto::hash::entity_id;
 use crate::domain::course_document::{CourseCompletionPolicy, COURSE_DOCUMENT_VERSION};
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
 
+/// Why an enrolment operation failed. Its display is the text the commands
+/// return.
+#[derive(Debug, thiserror::Error)]
+pub enum EnrollmentError {
+    #[error("no identity found — generate a wallet first: {0}")]
+    NoIdentity(#[source] rusqlite::Error),
+    #[error("course has no verified document to enroll in; publish or hydrate it first")]
+    NoVerifiedDocument,
+    #[error("already enrolled in this course")]
+    AlreadyEnrolled,
+    #[error("verified course document CID must be canonical lowercase 32-byte hex")]
+    NonCanonicalCid,
+    #[error("invalid verified course document version")]
+    InvalidVersion,
+    #[error("unsupported verified course document version: {0}")]
+    UnsupportedVersion(u32),
+    /// The stored completion policy does not parse or validate.
+    #[error("invalid completion policy projection: {0}")]
+    InvalidPolicy(String),
+    #[error("canonicalize completion policy: {0}")]
+    CanonicalizePolicy(String),
+    #[error("completion policy projection is not canonical JSON")]
+    NonCanonicalPolicy,
+    #[error("failed to record element submission: {0}")]
+    RecordSubmission(#[source] rusqlite::Error),
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+}
+
 /// The learner's enrolments, optionally with one status, most recently
 /// active first.
-pub fn list(db: &crate::db::Database, status: Option<String>) -> Result<Vec<Enrollment>, String> {
+pub fn list(
+    db: &crate::db::Database,
+    status: Option<String>,
+) -> Result<Vec<Enrollment>, EnrollmentError> {
     // Order by most recent learner activity so the dashboard "pick up where
     // you left off" card surfaces the course/tutorial the user last
     // viewed/progressed. Activity is the latest element_progress.updated_at
@@ -52,7 +84,7 @@ pub fn list(db: &crate::db::Database, status: Option<String>) -> Result<Vec<Enro
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
         param_values.iter().map(|v| v.as_ref()).collect();
 
-    let mut stmt = db.conn().prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = db.conn().prepare(&sql)?;
 
     let enrollments = stmt
         .query_map(params_ref.as_slice(), |row| {
@@ -67,17 +99,15 @@ pub fn list(db: &crate::db::Database, status: Option<String>) -> Result<Vec<Enro
                 status: row.get(7)?,
                 updated_at: row.get(8)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(enrollments)
 }
 
 /// Enrols the learner in a course, freezing its verified document. Refused
 /// for a course with no verified document and when already enrolled.
-pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, String> {
+pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, EnrollmentError> {
     // Get the local user's stake address for deterministic ID
     let stake_address: String = db
         .conn()
@@ -86,7 +116,7 @@ pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, S
             [],
             |row| row.get(0),
         )
-        .map_err(|e| format!("no identity found — generate a wallet first: {}", e))?;
+        .map_err(EnrollmentError::NoIdentity)?;
 
     // Read only the projection written by verified publication/hydration.
     let course_binding: Option<(Option<String>, Option<i64>, Option<String>)> = db
@@ -97,14 +127,11 @@ pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, S
             params![course_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
     let Some((Some(course_document_cid), Some(course_document_version), completion_policy_json)) =
         course_binding
     else {
-        return Err(
-            "course has no verified document to enroll in; publish or hydrate it first".into(),
-        );
+        return Err(EnrollmentError::NoVerifiedDocument);
     };
     validate_course_binding(
         &course_document_cid,
@@ -113,35 +140,30 @@ pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, S
     )?;
 
     // Check for existing active enrollment
-    let already_enrolled: bool = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM enrollments WHERE course_id = ?1 AND status = 'active'",
-            params![course_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let already_enrolled: bool = db.conn().query_row(
+        "SELECT COUNT(*) > 0 FROM enrollments WHERE course_id = ?1 AND status = 'active'",
+        params![course_id],
+        |row| row.get(0),
+    )?;
 
     if already_enrolled {
-        return Err("already enrolled in this course".into());
+        return Err(EnrollmentError::AlreadyEnrolled);
     }
 
     let id = entity_id(&[&stake_address, course_id, &course_document_cid]);
 
-    db.conn()
-        .execute(
-            "INSERT INTO enrollments \
+    db.conn().execute(
+        "INSERT INTO enrollments \
              (id, course_id, course_document_cid, course_document_version, completion_policy_json) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                id,
-                course_id,
-                course_document_cid,
-                course_document_version,
-                completion_policy_json,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
+        params![
+            id,
+            course_id,
+            course_document_cid,
+            course_document_version,
+            completion_policy_json,
+        ],
+    )?;
 
     db.conn()
         .query_row(
@@ -163,41 +185,37 @@ pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, S
                 })
             },
         )
-        .map_err(|e| e.to_string())
+        .map_err(EnrollmentError::from)
 }
 
 fn validate_course_binding(
     course_document_cid: &str,
     course_document_version: i64,
     completion_policy_json: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), EnrollmentError> {
     if course_document_cid.len() != 64
         || !course_document_cid
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
-        return Err("verified course document CID must be canonical lowercase 32-byte hex".into());
+        return Err(EnrollmentError::NonCanonicalCid);
     }
-    let version = u32::try_from(course_document_version)
-        .map_err(|_| "invalid verified course document version".to_string())?;
+    let version =
+        u32::try_from(course_document_version).map_err(|_| EnrollmentError::InvalidVersion)?;
     match version {
         COURSE_DOCUMENT_VERSION => {}
-        _ => {
-            return Err(format!(
-                "unsupported verified course document version: {version}"
-            ))
-        }
+        _ => return Err(EnrollmentError::UnsupportedVersion(version)),
     }
     if let Some(json) = completion_policy_json {
         let policy: CourseCompletionPolicy = serde_json::from_str(json)
-            .map_err(|error| format!("invalid completion policy projection: {error}"))?;
+            .map_err(|error| EnrollmentError::InvalidPolicy(error.to_string()))?;
         policy
             .validate()
-            .map_err(|error| format!("invalid completion policy projection: {error}"))?;
+            .map_err(|error| EnrollmentError::InvalidPolicy(error.to_string()))?;
         let canonical = serde_json_canonicalizer::to_string(&policy)
-            .map_err(|error| format!("canonicalize completion policy: {error}"))?;
+            .map_err(|error| EnrollmentError::CanonicalizePolicy(error.to_string()))?;
         if canonical != json {
-            return Err("completion policy projection is not canonical JSON".into());
+            return Err(EnrollmentError::NonCanonicalPolicy);
         }
     }
     Ok(())
@@ -209,7 +227,7 @@ pub fn update_progress(
     db: &crate::db::Database,
     enrollment_id: String,
     req: UpdateProgressRequest,
-) -> Result<ElementProgress, String> {
+) -> Result<ElementProgress, EnrollmentError> {
     let id = entity_id(&[&enrollment_id, &req.element_id]);
 
     // Upsert: insert or update
@@ -231,8 +249,7 @@ pub fn update_progress(
                     req.score,
                     req.time_spent,
                 ],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
 
     // Read back the progress
     let progress: ElementProgress = db
@@ -253,8 +270,7 @@ pub fn update_progress(
                         updated_at: row.get(7)?,
                     })
                 },
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
 
     // Post-migration 040: completion no longer triggers evidence
     // creation or aggregation. In the VC-first model, element
@@ -271,14 +287,13 @@ pub fn update_progress(
 pub fn progress(
     db: &crate::db::Database,
     enrollment_id: &str,
-) -> Result<Vec<ElementProgress>, String> {
+) -> Result<Vec<ElementProgress>, EnrollmentError> {
     let mut stmt = db
         .conn()
         .prepare(
             "SELECT id, enrollment_id, element_id, status, score, time_spent, completed_at, updated_at \
              FROM element_progress WHERE enrollment_id = ?1 ORDER BY element_id",
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
 
     let progress = stmt
         .query_map(params![enrollment_id], |row| {
@@ -292,10 +307,8 @@ pub fn progress(
                 completed_at: row.get(6)?,
                 updated_at: row.get(7)?,
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(progress)
 }
@@ -332,7 +345,7 @@ pub fn record_submission(
     element_type: String,
     answers_json: String,
     score: f64,
-) -> Result<(), String> {
+) -> Result<(), EnrollmentError> {
     let conn = db.conn();
 
     let score = score.clamp(0.0, 1.0);
@@ -391,7 +404,7 @@ pub fn record_submission(
             grader_version,
         ],
     )
-    .map_err(|e| format!("failed to record element submission: {e}"))?;
+    .map_err(EnrollmentError::RecordSubmission)?;
 
     Ok(())
 }
@@ -402,7 +415,7 @@ pub fn latest_submission(
     db: &crate::db::Database,
     enrollment_id: &str,
     element_id: &str,
-) -> Result<Option<ElementSubmissionRecord>, String> {
+) -> Result<Option<ElementSubmissionRecord>, EnrollmentError> {
     let row = db
         .conn()
         .query_row(
@@ -419,15 +432,14 @@ pub fn latest_submission(
                 })
             },
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
 
     Ok(row)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{enroll, list};
+    use super::{enroll, list, EnrollmentError};
     use crate::crypto::hash::entity_id;
     use crate::db::Database;
     use alexandria_verify::course::{
@@ -483,7 +495,10 @@ mod tests {
             .unwrap();
 
         let error = enroll(&db, "c1").unwrap_err();
-        assert!(error.contains("no verified document"), "got: {error}");
+        assert!(
+            matches!(error, EnrollmentError::NoVerifiedDocument),
+            "got: {error:?}"
+        );
     }
 
     #[test]
@@ -513,6 +528,10 @@ mod tests {
             enrolled.completion_policy_json.as_deref(),
             Some(first_policy.as_str())
         );
+        assert!(matches!(
+            enroll(&db, "c1"),
+            Err(EnrollmentError::AlreadyEnrolled)
+        ));
 
         db.conn()
             .execute(
@@ -546,8 +565,8 @@ mod tests {
 
         let error = enroll(&db, "c1").unwrap_err();
         assert!(
-            error.contains("invalid completion policy projection"),
-            "got: {error}"
+            matches!(error, EnrollmentError::InvalidPolicy(_)),
+            "got: {error:?}"
         );
     }
 
@@ -570,8 +589,13 @@ mod tests {
 
         let error = enroll(&db, "c1").unwrap_err();
         assert!(
-            error.contains("unsupported verified course document version: 1"),
-            "got: {error}"
+            matches!(error, EnrollmentError::UnsupportedVersion(1)),
+            "got: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "unsupported verified course document version: 1",
+            "the text the course page shows is unchanged"
         );
         let enrolled: i64 = db
             .conn()

@@ -12,6 +12,7 @@ import type {
 
 import { useLocalApi } from './useLocalApi'
 import { setProfileSessionToken } from './profileSession'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { invoke } = useLocalApi()
 
@@ -254,7 +255,7 @@ function lockProfile(): Promise<void> {
       lockState.value = 'idle'
     } catch (error) {
       lockState.value = 'failed'
-      lockError.value = error instanceof Error ? error.message : String(error)
+      lockError.value = errorMessage(error)
       throw error
     } finally {
       lockOperation = null

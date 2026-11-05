@@ -4,6 +4,7 @@
 // confirmed skill becomes a self-asserted VC with a provenance tier.
 
 import { useLocalApi } from './useLocalApi'
+import { announceCredentialsChanged } from './credentialEvents'
 import type { SkillSuggestion } from '@/types'
 
 export type DocType = 'resume' | 'transcript' | 'accredited_credential'
@@ -58,12 +59,14 @@ export function useSkillBootstrap() {
   }
 
   /** Claim the confirmed skills as self-asserted VCs; returns the count. */
-  function confirm(skillIds: string[], docType: DocType, contentHash?: string): Promise<number> {
-    return invoke<number>('bootstrap_confirm', {
+  async function confirm(skillIds: string[], docType: DocType, contentHash?: string): Promise<number> {
+    const claimed = await invoke<number>('bootstrap_confirm', {
       skillIds,
       docType,
       contentHash: contentHash ?? null,
     })
+    if (claimed > 0) announceCredentialsChanged()
+    return claimed
   }
 
   return { pickFile, readFile, extract, confirm }

@@ -8,6 +8,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::db::executor::DatabaseWorkload;
+use crate::notifications;
+use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
 use crate::settings::{registry::SettingEntry, store::SettingsError, SettingsStore};
 use crate::AppState;
@@ -20,6 +22,23 @@ struct SettingsChangedEvent<'a> {
 
 fn emit_changed(app: &AppHandle, key: Option<&str>) {
     let _ = app.emit("settings-changed", SettingsChangedEvent { key });
+}
+
+/// Some settings reach outside the store. Push eligibility follows the
+/// organisations switch, and the Android notification channel follows the
+/// profile language. Both run in the background so the write returns at
+/// once; an offline push removal stays pending and retries. Runs after a
+/// local write and after settings sync applied rows from another device.
+pub(crate) fn after_change(app: &AppHandle, lease: ProfileLease, keys: Vec<String>) {
+    if keys.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = notifications::follow_settings(&app, lease, &keys).await {
+            log::warn!("push reconcile after {keys:?} changed failed: {e}");
+        }
+    });
 }
 
 fn map_settings_error(e: SettingsError) -> String {
@@ -52,16 +71,18 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), String> {
     let changed_key = key.clone();
+    let lease = state.profile_lease();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "settings.set",
             move |db| SettingsStore::set_raw(db.conn(), &key, &value).map_err(map_settings_error),
         )
         .await?;
     emit_changed(&app, Some(&changed_key));
+    after_change(&app, lease, vec![changed_key]);
     Ok(())
 }
 
@@ -73,15 +94,17 @@ pub async fn reset_setting(
     key: String,
 ) -> Result<(), String> {
     let changed_key = key.clone();
+    let lease = state.profile_lease();
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
-            state.profile_lease(),
+            lease.clone(),
             "settings.reset",
             move |db| SettingsStore::reset(db.conn(), &key).map_err(map_settings_error),
         )
         .await?;
     emit_changed(&app, Some(&changed_key));
+    after_change(&app, lease, vec![changed_key]);
     Ok(())
 }

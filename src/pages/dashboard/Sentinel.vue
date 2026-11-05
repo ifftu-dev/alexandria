@@ -387,17 +387,17 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div class="flex h-3 overflow-hidden rounded-full">
               <div
                 v-if="sessionBreakdown.cleanPct > 0"
-                class="bg-emerald-500 transition-all duration-500"
+                class="bg-emerald-500 transition-all duration-(--duration-emphasis)"
                 :style="{ width: sessionBreakdown.cleanPct + '%' }"
               />
               <div
                 v-if="sessionBreakdown.flaggedPct > 0"
-                class="bg-amber-500 transition-all duration-500"
+                class="bg-amber-500 transition-all duration-(--duration-emphasis)"
                 :style="{ width: sessionBreakdown.flaggedPct + '%' }"
               />
               <div
                 v-if="sessionBreakdown.suspendedPct > 0"
-                class="bg-red-500 transition-all duration-500"
+                class="bg-red-500 transition-all duration-(--duration-emphasis)"
                 :style="{ width: sessionBreakdown.suspendedPct + '%' }"
               />
             </div>
@@ -635,7 +635,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               <!-- Weight bar -->
               <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
-                  class="h-full rounded-full bg-primary transition-all duration-500"
+                  class="h-full rounded-full bg-primary transition-all duration-(--duration-emphasis)"
                   :style="{ width: signal.weight + '%' }"
                 />
               </div>
@@ -650,7 +650,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div
               v-for="(signal, idx) in signalWeights"
               :key="signal.key"
-              class="transition-all duration-500"
+              class="transition-all duration-(--duration-emphasis)"
               :class="[
                 idx === 0 ? 'bg-violet-500' : '',
                 idx === 1 ? 'bg-blue-500' : '',

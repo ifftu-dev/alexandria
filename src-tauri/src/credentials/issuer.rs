@@ -6,6 +6,7 @@ use alexandria_verify::did::resolve_did_key;
 use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 
+use super::CredentialError;
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::key_registry;
 use crate::crypto::keystore::Keystore;
@@ -39,12 +40,15 @@ impl Issuer {
     /// derived.
     pub async fn from_keystore(
         keystore: &tokio::sync::Mutex<Option<Keystore>>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, CredentialError> {
         let ks_guard = keystore.lock().await;
-        let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
-        let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+        let ks = ks_guard.as_ref().ok_or(CredentialError::VaultLocked)?;
+        let mnemonic = ks
+            .retrieve_mnemonic()
+            .map_err(|e| CredentialError::Vault(e.to_string()))?;
         drop(ks_guard);
-        let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+        let w = wallet::wallet_from_mnemonic(&mnemonic)
+            .map_err(|e| CredentialError::Vault(e.to_string()))?;
         Ok(Self::from_wallet(&w))
     }
 
@@ -54,23 +58,20 @@ impl Issuer {
     /// window open then. Only a DID the registry has never seen falls back to
     /// the key its `did:key` embeds; one with history but no open window has
     /// no current key, so its retired original key is refused too.
-    pub fn rotated(conn: &Connection, did: Did, key: SigningKey, at: &str) -> Result<Self, String> {
-        let open = key_registry::resolve_key_at(conn, &did, at).map_err(|e| e.to_string())?;
+    pub fn rotated(
+        conn: &Connection,
+        did: Did,
+        key: SigningKey,
+        at: &str,
+    ) -> Result<Self, CredentialError> {
+        let open = key_registry::resolve_key_at(conn, &did, at)?;
         let current = match open {
             Some(entry) => Some(entry.public_key_bytes),
             None if has_history(conn, &did)? => None,
-            None => Some(
-                resolve_did_key(&did)
-                    .map_err(|e| e.to_string())?
-                    .as_bytes()
-                    .to_vec(),
-            ),
+            None => Some(resolve_did_key(&did)?.as_bytes().to_vec()),
         };
         if current.as_deref() != Some(key.verifying_key().as_bytes().as_slice()) {
-            return Err(format!(
-                "the signing key is not this DID's current key: {}",
-                did.as_str()
-            ));
+            return Err(CredentialError::NotCurrentKey(did));
         }
         Ok(Self { key, did })
     }
@@ -91,25 +92,26 @@ impl Issuer {
 }
 
 /// Whether the key registry holds any window, open or not, for `did`.
-fn has_history(conn: &Connection, did: &Did) -> Result<bool, String> {
-    conn.query_row(
+fn has_history(conn: &Connection, did: &Did) -> Result<bool, CredentialError> {
+    Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM key_registry WHERE did = ?1)",
         [did.as_str()],
         |row| row.get(0),
-    )
-    .map_err(|e| e.to_string())
+    )?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::credentials::fixtures::{test_key, NOW};
+    use crate::credentials::CredentialError;
 
     #[tokio::test]
     async fn a_locked_vault_has_no_issuer() {
         let locked = tokio::sync::Mutex::new(None);
         let error = Issuer::from_keystore(&locked).await.err().unwrap();
-        assert!(error.contains("vault is locked"), "{error}");
+        assert!(matches!(error, CredentialError::VaultLocked), "{error:?}");
+        assert_eq!(error.to_string(), "vault is locked — unlock first");
     }
 
     #[test]
@@ -129,14 +131,20 @@ mod tests {
         let error = Issuer::rotated(db.conn(), did.clone(), rotated.clone(), &now)
             .err()
             .unwrap();
-        assert!(error.contains("not this DID's current key"), "{error}");
+        assert!(
+            matches!(&error, CredentialError::NotCurrentKey(refused) if refused == &did),
+            "{error:?}"
+        );
 
         crate::crypto::key_registry::rotate_key(db.conn(), &did, &rotated).unwrap();
         let issuer = Issuer::rotated(db.conn(), did.clone(), rotated.clone(), &now).unwrap();
         assert_eq!(issuer.did(), &did);
         assert_eq!(issuer.key().to_bytes(), rotated.to_bytes());
         // The pre-rotation key is no longer the DID's current key.
-        assert!(Issuer::rotated(db.conn(), did, original.key().clone(), &now).is_err());
+        assert!(matches!(
+            Issuer::rotated(db.conn(), did, original.key().clone(), &now),
+            Err(CredentialError::NotCurrentKey(_))
+        ));
     }
 
     #[test]
@@ -154,9 +162,12 @@ mod tests {
                 ],
             )
             .unwrap();
-        let error = Issuer::rotated(db.conn(), did, original.key().clone(), NOW)
+        let error = Issuer::rotated(db.conn(), did.clone(), original.key().clone(), NOW)
             .err()
             .unwrap();
-        assert!(error.contains("not this DID's current key"), "{error}");
+        assert!(
+            matches!(&error, CredentialError::NotCurrentKey(refused) if refused == &did),
+            "{error:?}"
+        );
     }
 }

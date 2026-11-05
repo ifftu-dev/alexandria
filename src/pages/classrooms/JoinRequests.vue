@@ -23,8 +23,9 @@
         <p class="text-muted-foreground text-sm">{{ $t('classrooms.requests.empty') }}</p>
       </div>
 
-      <!-- Requests list -->
-      <div v-else class="space-y-3">
+      <!-- Requests list: an approved or denied request leaves while the rest
+           move up (full motion only). -->
+      <MotionList v-else class="space-y-3">
         <div
           v-for="req in joinRequests"
           :key="req.id"
@@ -68,7 +69,7 @@
             </AppButton>
           </div>
         </div>
-      </div>
+      </MotionList>
     </div>
   </div>
 </template>
@@ -77,6 +78,7 @@
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
+import { MotionList } from '@/components/ui'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { JoinRequest } from '@/types'
 

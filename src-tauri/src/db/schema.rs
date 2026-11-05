@@ -114,6 +114,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (28, "notifications", MIGRATION_028_NOTIFICATIONS),
     (29, "notification_recipient_lifecycle", include_str!("notification_recipient_lifecycle.sql")),
     (30, "notification_mutation_body", include_str!("notification_mutation_body.sql")),
+    // Push failures as a translatable code plus the raw diagnostic text.
+    (31, "push_error_codes", include_str!("push_error_codes.sql")),
+    // Each subject field's stable atlas slot (colour and map region).
+    (32, "subject_field_atlas_slot", include_str!("subject_field_atlas_slot.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

@@ -58,7 +58,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <router-link :to="course.kind === 'tutorial' ? `/learn/${course.id}` : `/courses/${course.id}`" class="cc-grid group" v-if="variant === 'grid'">
+  <router-link :to="course.kind === 'tutorial' ? `/learn/${course.id}` : `/courses/${course.id}`" class="cc-grid pressable group" v-if="variant === 'grid'">
     <!-- Thumbnail -->
     <div class="cc-thumb">
       <div v-if="course.thumbnail_svg" class="cc-thumb__img" v-html="sanitizeSvg(course.thumbnail_svg)" />
@@ -152,13 +152,16 @@ onMounted(async () => {
   background: var(--app-card);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.04), 0 4px 12px rgb(0 0 0 / 0.03);
   overflow: hidden;
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-              box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  --press-scale: 0.985;
   cursor: pointer;
   text-decoration: none;
   color: inherit;
   height: 100%;
 }
+
+/* WebKit drops :active when a press lands on a clipped (truncated) child.
+   These parts hold no controls, so a press on them reaches the card. */
+.cc-thumb, .cc-tags, .cc-title, .cc-desc { pointer-events: none; }
 
 .cc-grid:hover {
   transform: translateY(-3px);
@@ -190,7 +193,7 @@ onMounted(async () => {
 .cc-thumb__img {
   width: 100%;
   height: 100%;
-  transition: transform 0.4s ease;
+  transition: transform var(--duration-slow) ease;
 }
 
 .cc-thumb__img :deep(svg),

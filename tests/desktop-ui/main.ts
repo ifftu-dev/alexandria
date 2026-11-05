@@ -4,7 +4,7 @@ import { i18n, setActiveLocale } from '@/i18n'
 import { loadLocaleMessages } from '@/i18n/loadLocale'
 import { directionOf, isAppLocale } from '@/locales/meta'
 import '@/assets/css/main.css'
-import type { GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
+import type { AppNotification, GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
 
 const templates: GoalTemplate[] = [{
   id: 'audit-software-engineer',
@@ -37,6 +37,11 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
       if (['get_my_skill_graph', 'get_local_did', 'check_my_username_conflict'].includes(command)) return null
       if (command === 'hydrate_catalog_courses') return 0
       if (command === 'p2p_status') return offlineNetwork
+      // The progress specimens' plugin host: it loads, then waits for a plugin
+      // that never handshakes, so its loading dots stay up.
+      if (command === 'plugin_get_manifest') return { name: 'Specimen', kinds: ['interactive'], grader: null, capabilities: [], entry: 'index.html', author_did: 'did:key:specimen' }
+      if (['plugin_list', 'plugin_list_permissions'].includes(command)) return []
+      if (['plugin_load_element_state', 'plugin_set_media_grants', 'plugin_clear_media_grants', 'frontend_log'].includes(command)) return null
       if (['p2p_start', 'claim_username'].includes(command)) return undefined
       throw new Error(`Unexpected fixture IPC command: ${command}`)
     },
@@ -60,7 +65,8 @@ if (screen === 'motion') {
   createApp(MotionFixture).use(i18n).use(router).mount('#app')
 } else if (screen === 'personal-atlas') {
   const { atlasBackend } = await import('./atlasBackend')
-  const backend = atlasBackend(params.get('scenario') === 'stress')
+  const scenario = params.get('scenario')
+  const backend = atlasBackend(scenario === 'stress' || scenario === 'scale' ? scenario : null)
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
@@ -78,6 +84,100 @@ if (screen === 'motion') {
   ] })
   await router.push('/skills')
   createApp(PersonalAtlasFixture, { backend }).use(i18n).use(router).mount('#app')
+} else if (screen === 'notification-links') {
+  // The real router and deep-link runtime over an unlocked profile whose inbox
+  // holds one unread row. Every IPC call is recorded for the spec to inspect.
+  const calls: string[] = []
+  const row = { id: 'n-1', kind: 'offer_sent', title: '', body: '', route: '/settings/organisations',
+    source: 'local', created_at: '2026-11-04T00:00:00Z', read_at: null, payload: null }
+  const answers: Record<string, unknown> = {
+    get_incompatible_profile_data: null, get_profile_cleanup_required: false, list_profiles: [],
+    get_active_profile_id: 'profile-a', get_profile_session_token: 'session-a',
+    get_account_status: { account_roles: ['learner'], activation_state: 'active' },
+    notifications_list: [row], notifications_unread_count: 1, 'plugin:event|listen': 1,
+  }
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    transformCallback: () => 1, unregisterCallback: () => {},
+    invoke: async (command: string) => {
+      calls.push(command)
+      return command in answers ? structuredClone(answers[command]) : null
+    },
+  } })
+  const { default: router } = await import('@/router')
+  const { useProfiles } = await import('@/composables/useProfiles')
+  const { useDeepLinks } = await import('@/deeplink/useDeepLinks')
+  await useProfiles().initialize()
+  router.addRoute({ path: '/fixture-start', component: { render: () => h('p', 'Fixture start') } })
+  await router.push('/fixture-start')
+  createApp({ render: () => h(RouterView) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { notificationLinks: {
+    calls,
+    path: () => router.currentRoute.value.fullPath,
+    openLink: (url: string) => useDeepLinks().openLink(url),
+  } })
+} else if (screen === 'motion-surfaces') {
+  const { motionBackend } = await import('./motionBackend')
+  const backend = motionBackend()
+  // Backend events: listeners are kept by event name, so the spec can emit.
+  const callbacks = new Map<number, (message: unknown) => void>()
+  const listeners = new Map<string, number[]>()
+  let nextCallback = 1
+  const emit = (event: string, payload: unknown) => {
+    for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload })
+  }
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+      if (command !== 'plugin:event|listen') return backend.invoke(command, args)
+      const { event, handler } = args as { event: string, handler: number }
+      listeners.set(event, [...(listeners.get(event) ?? []), handler])
+      return handler
+    },
+    transformCallback: (callback?: (message: unknown) => void) => {
+      const id = nextCallback++
+      if (callback) callbacks.set(id, callback)
+      return id
+    },
+    unregisterCallback: (id: number) => callbacks.delete(id),
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  const { useSettings } = await import('@/composables/useSettings')
+  const { useAccountStatus } = await import('@/composables/useAccountStatus')
+  const { useNotifications } = await import('@/composables/useNotifications')
+  const { getProfileSessionToken } = await import('@/composables/profileSession')
+  await useProfiles().initialize()
+  await Promise.all([useSettings().initialize(), useAccountStatus().refreshAccountStatus(), useNotifications().init()])
+  const page = { render: () => h('p', 'Fixture page') }
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/home', component: (await import('@/pages/Home.vue')).default },
+    { path: '/goals', component: (await import('@/pages/goals/Index.vue')).default },
+    { path: '/courses', component: (await import('@/pages/courses/Index.vue')).default },
+    { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
+    { path: '/settings/:section?', name: 'settings', component: (await import('@/pages/Settings.vue')).default },
+    { path: '/chat', component: (await import('./ChatFixture.vue')).default },
+    { path: '/tutoring/:id', name: 'tutoring-session', component: (await import('@/pages/tutoring/Session.vue')).default },
+    { path: '/classrooms', component: (await import('@/pages/classrooms/Index.vue')).default },
+    { path: '/classrooms/:id', name: 'classroom', component: (await import('@/pages/classrooms/Classroom.vue')).default },
+    { path: '/classrooms/:id/requests', name: 'classroom-requests', component: page },
+    { path: '/classrooms/:id/settings', name: 'classroom-settings', component: page },
+    { path: '/guardian', component: (await import('@/pages/guardian/Children.vue')).default },
+    { path: '/guardian/child/:linkId', component: (await import('@/pages/guardian/ChildDetail.vue')).default },
+    { path: '/instructor/courses', component: (await import('@/pages/instructor/MyCourses.vue')).default },
+    { path: '/instructor/composer/:id', component: (await import('@/pages/instructor/Composer.vue')).default },
+    { path: '/notifications', component: (await import('@/pages/Notifications.vue')).default },
+    { path: '/:pathMatch(.*)*', component: page },
+  ] })
+  await router.push(params.get('path') ?? '/home')
+  const { default: MotionSurfacesFixture } = await import('./MotionSurfacesFixture.vue')
+  createApp(MotionSurfacesFixture).use(i18n).use(router).mount('#app')
+  const session = getProfileSessionToken()
+  Object.assign(window, { motionFixture: {
+    unexpected: backend.unexpected,
+    navigate: (path: string) => router.push(path),
+    notify: (kind: AppNotification['kind']) => emit('notifications:new', { session, row: backend.notify(kind) }),
+    removeNotification: (kind: AppNotification['kind']) => emit('notifications:changed', { session, unread: backend.removeNotification(kind) }),
+  } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')

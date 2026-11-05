@@ -18,7 +18,7 @@ function button(name: string, root: ParentNode = document) {
 }
 async function click(name: string, root: ParentNode = document) { button(name, root).click(); await flushPromises() }
 async function setup() {
-  const backend = atlasBackend(true)
+  const backend = atlasBackend('stress')
   ipc.mockImplementation(backend.invoke)
   const { useProfiles } = await import('@/composables/useProfiles')
   const { useSkillAtlas } = await import('@/composables/useSkillAtlas')
@@ -45,9 +45,12 @@ it('keeps browse filters separate and restores graph selection, camera and contr
   await wrapper!.get('input').setValue('impossible browse query')
   await click('My Graph')
   expect(wrapper!.text()).toContain('Visibility & teaching')
-  expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(104)
+  // The list shows every loaded skill in its count and renders its first window.
+  expect(wrapper!.find('.atlas-list summary').text()).toContain('104 matching skills')
+  expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(50)
   await wrapper!.get('input[type="search"]').setValue('Big-O')
-  await click('Big-O Analysis · 2 Understand')
+  // The sidebar names its earned preview the same way, so pick from the page's list.
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[aria-label="Full-label skill list"]')!)
   await click('Zoom in')
   await click('Focus dependents')
   const saved = structuredClone(JSON.parse(JSON.stringify(atlas.pageView.value)))
@@ -74,7 +77,7 @@ it('returns to the expanded context once, releases scroll locks and does not reo
   input.value = 'Big-O'
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await flushPromises()
-  await click('Big-O Analysis · 2 Understand', dialog)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', dialog)
   await click('Zoom in', dialog)
   const saved = JSON.parse(JSON.stringify(atlas.modalView.value))
   expect(document.body.style.overflow).toBe('hidden')
@@ -100,7 +103,7 @@ it('offers a course and enrollment for an already earned skill from the modal', 
   sessionStorage.setItem('courses-kind-filter', 'tutorial')
   atlas.setModalOpen(true)
   await flushPromises()
-  await click('Big-O Analysis · 2 Understand', document.querySelector('[role="dialog"]')!)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[role="dialog"]')!)
   await click('Find learning opportunities', document.querySelector('[role="dialog"]')!)
   expect(wrapper!.text()).toContain('Learning for Big-O Analysis')
   const courses = wrapper!.findAll('a.cc-grid')
@@ -119,7 +122,8 @@ it('offers a course and enrollment for an already earned skill from the modal', 
 it('keeps Ready learning accessible, updates the skill filter on route reuse and explains an empty result', async () => {
   const { router, backend } = await setup()
   await click('My Graph')
-  await click('Sorting Algorithms · Ready')
+  await wrapper!.get('input[type="search"]').setValue('Sorting Algorithms')
+  await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
   await click('Find learning opportunities')
   expect(wrapper!.text()).toContain('Learning for Sorting Algorithms')
   expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Practising sorting algorithms')])
@@ -141,7 +145,7 @@ it('keeps the modal open with an actionable error when learning navigation fails
   atlas.setModalOpen(true)
   await flushPromises()
   const dialog = document.querySelector('[role="dialog"]')!
-  await click('Big-O Analysis · 2 Understand', dialog)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', dialog)
   router.onError(() => {})
   const removeGuard = router.beforeEach(to => {
     if (to.path === '/courses') throw new Error('Could not open courses')
@@ -160,7 +164,7 @@ it('clears modal returns on lock and tears down the app refresh owner without le
   document.body.style.overflow = 'clip'
   atlas.setModalOpen(true)
   await flushPromises()
-  await click('Big-O Analysis · 2 Understand', document.querySelector('[role="dialog"]')!)
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', document.querySelector('[role="dialog"]')!)
   await click('Open skill', document.querySelector('[role="dialog"]')!)
   await profiles.lockProfile()
   backend.state.earned = false
@@ -194,4 +198,48 @@ it('keeps graph visibility and teaching settings usable alongside independent br
   await click('☆ Teach')
   prefs = JSON.parse(backend.settings.find(item => item.key === 'instructor.graph_prefs')!.current_value)
   expect(prefs.skill_big_o).toEqual({ public: true, teaching: true })
+})
+
+it('accepted: learning for a skill shows courses and tutorials whatever kind the catalog last browsed', async () => {
+  const { router, backend } = await setup()
+  sessionStorage.setItem('courses-kind-filter', 'tutorial')
+  await router.push('/courses')
+  await flushPromises()
+  expect(wrapper!.findAll('a.cc-grid')).toHaveLength(0)
+  await router.push('/courses?skillId=skill_big_o')
+  await flushPromises()
+  expect(wrapper!.text()).toContain('Learning for Big-O Analysis')
+  expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Further algorithm analysis')])
+  expect(backend.state.unexpected).toEqual([])
+})
+
+it('accepted: the Browse Goal button saves one goal for a double tap and reports a failed save', async () => {
+  const { router, backend } = await setup()
+  await click('Browse Skills')
+  const saves: Array<() => void> = []
+  let failure: Error | null = null
+  ipc.mockImplementation((command: string, args?: Record<string, unknown>) => {
+    if (command !== 'set_setting' || args?.key !== 'learner.targets') return backend.invoke(command, args)
+    if (failure) return Promise.reject(failure)
+    return new Promise(resolve => saves.push(() => resolve(backend.invoke(command, args))))
+  })
+  const goal = () => document.querySelector<HTMLButtonElement>('button[title="Set Big-O Analysis as a goal"]')!
+  goal().click()
+  goal().click()
+  await flushPromises()
+  expect(goal().disabled).toBe(true)
+  expect(saves).toHaveLength(1)
+  saves[0]!()
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/goals')
+  expect(JSON.parse(backend.settings.find(entry => entry.key === 'learner.targets')!.current_value)).toHaveLength(1)
+  await router.push('/skills')
+  await flushPromises()
+  await click('Browse Skills')
+  failure = new Error('Disk full')
+  document.querySelector<HTMLButtonElement>('button[title="Set Sorting Algorithms as a goal"]')!.click()
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/skills')
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Disk full')
+  expect(document.querySelector<HTMLButtonElement>('button[title="Set Sorting Algorithms as a goal"]')!.disabled).toBe(false)
 })

@@ -22,6 +22,7 @@ pub mod goals;
 pub mod interview_panel;
 #[cfg(test)]
 mod json_limit_boundaries;
+pub mod launch_window;
 pub mod network_profile;
 pub mod notifications;
 pub mod org_trust;
@@ -33,6 +34,7 @@ pub mod sentinel;
 pub mod settings;
 pub mod studio;
 pub mod tutoring;
+pub(crate) mod vocabulary;
 
 #[cfg(target_os = "macos")]
 mod macos_media_delegate;
@@ -92,6 +94,8 @@ pub struct AppState {
     pub profile_manager: Arc<ProfileManager>,
     pub active: Arc<std::sync::RwLock<Option<ActiveProfile>>>,
     pub(crate) profile_operations: profile::operations::ProfileOperations,
+    /// The Cloud discovery pass in flight, which an overlapping caller joins.
+    pub(crate) cloud_discovery: notifications::cloud_pull::Passes,
     pub tutoring: Arc<TutoringManager>,
     pub classroom: Arc<ClassroomManager>,
     /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
@@ -229,7 +233,7 @@ impl AppState {
         let db_key = zeroize::Zeroizing::new(keystore.derive_db_key());
         self.open_database(&paths, &db_key, initialize_defaults)?;
 
-        notifications::opens::prepare(&paths, &keystore)?;
+        notifications::opens::prepare(&paths, &keystore).map_err(|e| e.to_string())?;
 
         // 2. Stash keystore in shared state so background workers see it.
         {
@@ -736,6 +740,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             use tauri::Manager;
             if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
@@ -804,6 +809,11 @@ pub fn run() {
                     .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                     .build(),
             )?;
+
+            // The main window starts hidden; give it the theme background
+            // and arm the fallback that shows it if the frontend cannot.
+            #[cfg(desktop)]
+            launch_window::install(app.handle());
 
             // If the user installed the CLI, keep its symlink pointing at this
             // build. Repair only — never creates a link the user did not ask
@@ -918,6 +928,9 @@ pub fn run() {
                         };
                         let guardian_lease = lease.clone();
                         let chain_lease = lease.clone();
+                        // What this pass records is announced to this
+                        // session only; a switch in between drops it.
+                        let session = lease.session_id().to_owned();
                         // This pass contains cancellation-safe provider/P2P
                         // awaits and synchronous local transactions, not detached
                         // blocking jobs. Stop on lock before releasing its lease;
@@ -1025,10 +1038,15 @@ pub fn run() {
                                     _ => {}
                                 }
 
+                                // One issuer for the passes below that sign.
+                                let issuer = wallet.as_ref().map(credentials::Issuer::from_wallet);
+
                                 // Completion-witness observer + auto-issuance pipeline.
                                 // Gated on ALEXANDRIA_COMPLETION_POLICY_ID + the vault
                                 // being unlocked (wallet present). Silent no-op otherwise.
-                                if let (Some(bf_client), Some(w)) = (bf.as_ref(), wallet.as_ref()) {
+                                if let (Some(bf_client), Some(learner)) =
+                                    (bf.as_ref(), issuer.as_ref())
+                                {
                                     if let Ok(policy_id_raw) =
                                         std::env::var("ALEXANDRIA_COMPLETION_POLICY_ID")
                                     {
@@ -1056,10 +1074,9 @@ pub fn run() {
                                     let issuance = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => Some(credentials::auto::tick(
-                                                db.conn(),
-                                                &w.signing_key,
-                                            )),
+                                            Ok(Some(db)) => {
+                                                Some(credentials::auto::tick(db.conn(), learner))
+                                            }
                                             _ => None,
                                         }
                                     };
@@ -1089,12 +1106,13 @@ pub fn run() {
                                     // Each new credential is something to tell
                                     // the learner about.
                                     for recorded in issued_notifications {
-                                        notifications::announce(&app_for_notifications, &recorded);
+                                        notifications::announce(
+                                            &app_for_notifications,
+                                            &session,
+                                            &recorded,
+                                        );
                                     }
                                 }
-
-                                // One issuer for the passes below that sign.
-                                let issuer = wallet.as_ref().map(credentials::Issuer::from_wallet);
 
                                 // Status lists a host has not yet seen. Every
                                 // issuance site creates or changes a list; the
@@ -1216,7 +1234,7 @@ pub fn run() {
                                 // toggle is off, no profile is unlocked, or the
                                 // node isn't running.
                                 let merged = commands::sync::auto_sync_all(
-                                    &db_executor_for_queue,
+                                    &app_for_notifications,
                                     &guardian_lease,
                                     &node_for_sync,
                                 )
@@ -1248,55 +1266,16 @@ pub fn run() {
 
                                 // What Alexandria Cloud is holding for the
                                 // learner — invitations, offers, requests —
-                                // reported once each. Read without holding the
-                                // database, recorded with it.
-                                if let Some(w) = wallet.as_ref() {
-                                    let signing_key = ed25519_dalek::SigningKey::from_bytes(
-                                        &w.signing_key.to_bytes(),
-                                    );
-                                    let did = crypto::did::derive_did_key(&signing_key);
-                                    let origin = {
-                                        let guard = db_for_queue.lock();
-                                        match guard.as_deref() {
-                                            Ok(Some(db)) => {
-                                                commands::holder_pull::directories_db(db.conn())
-                                                    .ok()
-                                                    .and_then(|dirs| dirs.into_iter().next())
-                                                    .map(|dir| dir.url)
-                                            }
-                                            _ => None,
-                                        }
-                                    };
-                                    if let Some(origin) = origin {
-                                        let items = notifications::cloud_pull::fetch(
-                                            &origin,
-                                            &signing_key,
-                                            did.as_str(),
-                                        )
-                                        .await;
-                                        if !items.is_empty() {
-                                            let guard = db_for_queue.lock();
-                                            if let Ok(Some(db)) = guard.as_deref() {
-                                                let fresh = notifications::cloud_pull::unreported(
-                                                    db.conn(),
-                                                    &items,
-                                                );
-                                                for item in fresh {
-                                                    let Some(notification) = item.notification()
-                                                    else {
-                                                        continue;
-                                                    };
-                                                    if let Err(e) = notifications::deliver(
-                                                        &app_for_notifications,
-                                                        db.conn(),
-                                                        &notification,
-                                                    ) {
-                                                        log::debug!("cloud notification: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                // reported once each. A phone coming back to
+                                // the foreground runs the same pass, and one
+                                // that overlaps this joins it.
+                                if let Err(e) = notifications::cloud_pull::discover(
+                                    &app_for_notifications,
+                                    guardian_lease.clone(),
+                                )
+                                .await
+                                {
+                                    log::debug!("cloud discovery: {e}");
                                 }
 
                                 drop(wallet);
@@ -1341,6 +1320,7 @@ pub fn run() {
                 profile_manager,
                 active,
                 profile_operations,
+                cloud_discovery: Default::default(),
                 tutoring,
                 classroom,
                 #[cfg(grader)]
@@ -1768,6 +1748,7 @@ pub fn run() {
             commands::notifications::notifications_unread_count,
             commands::notifications::notifications_mark_read,
             commands::notifications::notifications_mark_all_read,
+            commands::notifications::notifications_discover,
             commands::notifications::notifications_clear,
             commands::notifications::notifications_permission_request,
             commands::notifications::notifications_pending_open,

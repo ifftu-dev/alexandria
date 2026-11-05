@@ -16,7 +16,7 @@ afterEach(() => useNotifications().teardown())
 it('renders a completed guardian link in French without displaying stored identifying copy', async () => {
   ipc.invoke.mockImplementation(async (command: string) => command === 'notifications_list' ? [{
     id: 'link', kind: 'guardian_request', title: 'Private name', body: 'Private organisation',
-    route: null, source: 'local', createdAt: '2026-10-27T00:00:00Z', readAt: null, payload: null,
+    route: null, source: 'local', created_at: '2026-10-27T00:00:00Z', read_at: null, payload: null,
   }] : 1)
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: Notifications }] })
   await router.push('/')
@@ -31,8 +31,8 @@ it('renders a completed guardian link in French without displaying stored identi
 
 it.each(['fr-CA', 'unknown'])('uses English fallback rather than stored payload copy when %s has no catalog', async (locale) => {
   ipc.invoke.mockImplementation(async (command: string) => command === 'notifications_list' ? [
-    { id: 'offer', kind: 'offer_sent', title: 'Private name', body: 'Private organisation', route: null, source: 'push', createdAt: '', readAt: null, payload: null },
-    { id: 'future', kind: 'future_kind', title: 'Private name', body: 'Private organisation', route: null, source: 'push', createdAt: '', readAt: null, payload: null },
+    { id: 'offer', kind: 'offer_sent', title: 'Private name', body: 'Private organisation', route: null, source: 'push', created_at: '', read_at: null, payload: null },
+    { id: 'future', kind: 'future_kind', title: 'Private name', body: 'Private organisation', route: null, source: 'push', created_at: '', read_at: null, payload: null },
   ] : 2)
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: Notifications }] })
   await router.push('/')

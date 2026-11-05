@@ -338,7 +338,7 @@ defineExpose({ focus: () => input.value?.focus() })
 <style scoped>
 .composer { padding: 0.5rem 0.75rem 0.75rem; }
 .composer--sheet { padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); }
-.composer-box { border: 1px solid var(--app-border); background: var(--app-card); border-radius: 1.25rem; padding: 0.75rem 0.625rem 0.5rem 0.875rem; transition: border-color 0.15s, box-shadow 0.15s; }
+.composer-box { border: 1px solid var(--app-border); background: var(--app-card); border-radius: 1.25rem; padding: 0.75rem 0.625rem 0.5rem 0.875rem; transition: border-color var(--duration-fast), box-shadow var(--duration-fast); }
 .composer-box:focus-within { border-color: color-mix(in srgb, var(--app-primary) 60%, var(--app-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-primary) 14%, transparent); }
 .composer-input { display: block; width: 100%; max-height: 12.5rem; resize: none; background: transparent; font-size: 0.875rem; line-height: 1.55; color: var(--app-foreground); outline: none; }
 .composer--sheet .composer-input { font-size: 0.9375rem; }

@@ -5,44 +5,32 @@
 // text is never used as a fallback for an unknown kind.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
-import { AppBadge, AppButton, EmptyState } from '@/components/ui'
+import { AppBadge, AppButton, EmptyState, MotionList } from '@/components/ui'
 import { useNotifications } from '@/composables/useNotifications'
 import type { AppNotification } from '@/types'
 
 const { t, te } = useI18n()
-const route = useRoute()
-const router = useRouter()
 const { items, unread, loading, load, markAllRead, clear, open } = useNotifications()
 
 const confirmingClear = ref(false)
 
-onMounted(async () => {
-  await load().catch(() => {})
-  // `alexandria://notification/<id>` lands here with `?open=<id>`: open that
-  // row as a tap would, then drop the query so a reload does not repeat it.
-  const wanted = typeof route.query.open === 'string' ? route.query.open : null
-  if (!wanted) return
-  await router.replace({ path: route.path })
-  const row = items.value.find((n) => n.id === wanted)
-  if (row) await open(row).catch(() => {})
+// Only the learner's own tap opens a row. The page ignores its query, so a
+// link that lands here cannot mark anything read or follow a row's route.
+onMounted(() => {
+  void load().catch(() => {})
 })
 
-function titleOf(n: AppNotification): string {
-  const key = `notifications.kinds.${n.kind}.title`
-  return te(key) || te(key, 'en') ? t(key) : t('notifications.kinds.generic.title')
-}
-
-function bodyOf(n: AppNotification): string {
-  const key = `notifications.kinds.${n.kind}.body`
-  return te(key) || te(key, 'en') ? t(key) : t('notifications.kinds.generic.body')
+/** A row's title or body: its kind's copy, else the generic copy. */
+function kindText(n: AppNotification, field: 'title' | 'body'): string {
+  const key = `notifications.kinds.${n.kind}.${field}`
+  return te(key) || te(key, 'en') ? t(key) : t(`notifications.kinds.generic.${field}`)
 }
 
 const formatter = computed(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }))
 
 function when(n: AppNotification): string {
-  const d = new Date(n.createdAt)
-  return Number.isNaN(d.getTime()) ? n.createdAt : formatter.value.format(d)
+  const d = new Date(n.created_at)
+  return Number.isNaN(d.getTime()) ? n.created_at : formatter.value.format(d)
 }
 
 async function onClear() {
@@ -78,25 +66,26 @@ async function onClear() {
       :description="$t('notifications.page.emptyHint')"
     />
 
-    <ul v-else class="divide-y divide-border rounded-lg border border-border bg-card">
+    <!-- Rows enter, leave and move like the other lists; Reduced and Off change at once. -->
+    <MotionList v-else tag="ul" appear class="divide-y divide-border rounded-lg border border-border bg-card" data-notification-list>
       <li v-for="n in items" :key="n.id">
         <button
           type="button"
           class="flex w-full items-start gap-3 px-4 py-3 text-start transition-colors hover:bg-muted/40"
-          :class="n.readAt ? 'opacity-80' : ''"
+          :class="n.read_at ? 'opacity-80' : ''"
           @click="open(n)"
         >
           <span
             class="mt-2 h-2 w-2 shrink-0 rounded-full"
-            :class="n.readAt ? 'bg-transparent' : 'bg-primary'"
-            :aria-label="n.readAt ? undefined : $t('notifications.page.unreadLabel')"
+            :class="n.read_at ? 'bg-transparent' : 'bg-primary'"
+            :aria-label="n.read_at ? undefined : $t('notifications.page.unreadLabel')"
           />
           <span class="min-w-0 flex-1">
             <span class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-medium text-foreground">{{ titleOf(n) }}</span>
+              <span class="text-sm font-medium text-foreground">{{ kindText(n, 'title') }}</span>
               <AppBadge v-if="n.source === 'push'" variant="secondary">{{ $t('notifications.page.viaPush') }}</AppBadge>
             </span>
-            <span class="mt-0.5 block text-sm text-muted-foreground">{{ bodyOf(n) }}</span>
+            <span class="mt-0.5 block text-sm text-muted-foreground">{{ kindText(n, 'body') }}</span>
             <span class="mt-1 block text-xs text-muted-foreground/70">{{ when(n) }}</span>
           </span>
           <svg v-if="n.route" class="mt-1 h-4 w-4 shrink-0 text-muted-foreground rtl:-scale-x-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -104,6 +93,6 @@ async function onClear() {
           </svg>
         </button>
       </li>
-    </ul>
+    </MotionList>
   </div>
 </template>

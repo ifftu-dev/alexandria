@@ -1,6 +1,6 @@
 # Motion and visual polish
 
-Status: code implemented and reviewed; native acceptance open
+Status: rollout steps 1–4 implemented and covered by the desktop UI suite (Chromium, WebKit); native acceptance open
 
 ## Confirmed direction
 

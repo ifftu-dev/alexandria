@@ -12,7 +12,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 import { useGoals } from '@/composables/useGoals'
 import { useAccountStatus } from '@/composables/useAccountStatus'
-import { StatusBadge, AppButton, InfoTip, AppModal } from '@/components/ui'
+import { StatusBadge, AppButton, InfoTip, AppModal, MotionList } from '@/components/ui'
 import { bloomFill } from '@/utils/bloom'
 import { sanitizeSvg } from '@/utils/sanitize'
 import CourseCard from '@/components/course/CourseCard.vue'
@@ -309,7 +309,7 @@ onMounted(async () => {
     <!-- ═══ Hero: single highest-value next action ═══ -->
     <button
       v-if="!loading"
-      class="home-hero group mb-6"
+      class="home-hero pressable group mb-6"
       @click="router.push(heroAction.to)"
     >
       <div class="min-w-0 text-start">
@@ -328,7 +328,7 @@ onMounted(async () => {
     <section class="mb-6">
       <div class="grid grid-cols-2 gap-3" :class="isInstructor ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
         <div v-if="isInstructor" class="relative">
-          <button class="stat-card w-full" @click="router.push('/reputation')">
+          <button class="stat-card pressable w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--teaching">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l9-5-9-5-9 5 9 5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l6.16-3.42A12 12 0 0112 21a12 12 0 01-6.16-10.42L12 14z"/></svg>
@@ -344,7 +344,7 @@ onMounted(async () => {
           />
         </div>
         <div class="relative">
-          <button class="stat-card w-full" @click="router.push('/reputation')">
+          <button class="stat-card pressable w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--learning">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.5C10.5 5.5 8.5 5 6.5 5 5.5 5 4.7 5.1 4 5.3v12.4c.7-.2 1.5-.3 2.5-.3 2 0 4 .5 5.5 1.5m0-13.4c1.5-1 3.5-1.5 5.5-1.5 1 0 1.8.1 2.5.3v12.4c-.7-.2-1.5-.3-2.5-.3-2 0-4 .5-5.5 1.5m0-13.4V19.9"/></svg>
@@ -360,7 +360,7 @@ onMounted(async () => {
           />
         </div>
         <div class="relative">
-          <button class="stat-card w-full" @click="router.push('/skills')">
+          <button class="stat-card pressable w-full" @click="router.push('/skills')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--skills">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.5l2 2 4-4.5M12 3l2.09 1.26 2.43-.1.99 2.22 1.99 1.4-.55 2.37.55 2.37-1.99 1.4-.99 2.22-2.43-.1L12 21l-2.09-1.26-2.43.1-.99-2.22-1.99-1.4.55-2.37L4.5 10l1.99-1.4.99-2.22 2.43.1L12 3z"/></svg>
@@ -376,7 +376,7 @@ onMounted(async () => {
           />
         </div>
         <div class="relative">
-          <button class="stat-card w-full" @click="router.push('/reputation')">
+          <button class="stat-card pressable w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--confidence">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.5 12l1.8 1.8 3.2-3.6"/></svg>
@@ -406,12 +406,15 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div class="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
+      <MotionList
+        appear
+        class="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0"
+      >
         <!-- goal cards -->
         <button
           v-for="t in goals"
           :key="t.id"
-          class="goal-card group"
+          class="goal-card pressable group *:pointer-events-none"
           @click="openGoalModal(t)"
         >
           <svg width="46" height="46" viewBox="0 0 46 46" class="shrink-0">
@@ -420,7 +423,7 @@ onMounted(async () => {
               cx="23" cy="23" r="18" fill="none" stroke="var(--app-primary)" stroke-width="4"
               stroke-linecap="round" :stroke-dasharray="ringDash"
               :stroke-dashoffset="ringDash * (1 - pathPct(goalPaths[t.id]) / 100)"
-              transform="rotate(-90 23 23)" class="transition-all duration-500"
+              transform="rotate(-90 23 23)" class="transition-all duration-(--duration-emphasis)"
             />
             <text x="23" y="23" text-anchor="middle" dominant-baseline="central"
               font-size="11" font-weight="600" fill="var(--app-foreground)">
@@ -441,14 +444,14 @@ onMounted(async () => {
         </button>
 
         <!-- add goal -->
-        <button class="goal-card goal-card--add" @click="router.push({ path: '/goals', query: { add: '1' } })">
+        <button key="add-goal" class="goal-card goal-card--add pressable" @click="router.push({ path: '/goals', query: { add: '1' } })">
           <span class="text-2xl leading-none text-muted-foreground">+</span>
           <span class="text-sm font-medium text-muted-foreground">{{ $t('dashboard.home.goals.add') }}</span>
         </button>
 
         <!-- trailing gap: WebKit drops a scroll container's right padding -->
-        <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
-      </div>
+        <div key="trailing-gap" class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
+      </MotionList>
     </section>
 
     <!-- ═══ Skill graph summary (collapsible) ═══ -->
@@ -469,7 +472,7 @@ onMounted(async () => {
             <button
               v-for="n in myGraph?.nodes ?? []"
               :key="n.id"
-              class="graph-chip"
+              class="graph-chip pressable"
               :class="{ 'graph-chip--teaching': n.teaching, 'graph-chip--private': !n.public }"
               :title="$t('dashboard.home.graph.levelTitle', { level: n.bloom_level })"
               @click="router.push(`/skills/${n.id}`)"
@@ -530,12 +533,15 @@ onMounted(async () => {
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-foreground">{{ $t('dashboard.home.continue') }}</h2>
         </div>
-        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
+        <MotionList
+          appear
+          class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0"
+        >
           <router-link
             v-for="enrollment in enrollments"
             :key="enrollment.id"
             :to="`/learn/${enrollment.course_id}`"
-            class="w-64 shrink-0 snap-start group"
+            class="w-64 shrink-0 snap-start group pressable [--press-scale:0.985]"
           >
             <div class="card card-interactive overflow-hidden">
               <!-- Thumbnail -->
@@ -579,8 +585,8 @@ onMounted(async () => {
           </router-link>
 
           <!-- trailing gap: WebKit drops a scroll container's right padding -->
-          <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
-        </div>
+          <div key="trailing-gap" class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
+        </MotionList>
       </section>
 
       <!-- Quick Tutorials -->
@@ -597,12 +603,15 @@ onMounted(async () => {
             {{ $t('dashboard.home.tutorials.count', { count: tutorials.length }, tutorials.length) }}
           </span>
         </div>
-        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin scroll-pl-4 sm:mx-0 sm:px-0 sm:scroll-pl-0">
+        <MotionList
+          appear
+          class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin scroll-pl-4 sm:mx-0 sm:px-0 sm:scroll-pl-0"
+        >
           <router-link
             v-for="tut in tutorials"
             :key="tut.id"
             :to="`/learn/${tut.id}`"
-            class="w-72 shrink-0 snap-start group"
+            class="w-72 shrink-0 snap-start group pressable [--press-scale:0.985]"
           >
             <div class="card card-interactive overflow-hidden rounded-xl border border-primary/15">
               <!-- Thumbnail -->
@@ -640,8 +649,8 @@ onMounted(async () => {
           </router-link>
 
           <!-- trailing gap: WebKit drops a scroll container's right padding -->
-          <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
-        </div>
+          <div key="trailing-gap" class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
+        </MotionList>
       </section>
 
       <!-- Courses -->
@@ -676,13 +685,17 @@ onMounted(async () => {
         </div>
 
         <!-- Course grid (gap-6, 4 columns) -->
-        <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <MotionList
+          v-else
+          appear
+          class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+        >
           <CourseCard
             v-for="course in (recommendedCourses.length > 0 ? recommendedCourses : courses.filter(c => c.kind !== 'tutorial'))"
             :key="course.id"
             :course="course"
           />
-        </div>
+        </MotionList>
       </section>
     </template>
 
@@ -765,7 +778,7 @@ onMounted(async () => {
     radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--app-accent) 65%, transparent), transparent 60%),
     linear-gradient(120deg, color-mix(in srgb, var(--app-primary) 92%, black), color-mix(in srgb, var(--app-primary) 70%, black));
   box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--app-primary) 60%, transparent);
-  transition: box-shadow 0.15s, transform 0.15s;
+  --press-scale: 0.99;
 }
 .home-hero:hover {
   transform: translateY(-1px);
@@ -814,9 +827,7 @@ onMounted(async () => {
   background: var(--app-card);
   box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
   text-align: left;
-  transition:
-    box-shadow 0.15s,
-    transform 0.15s;
+  --press-scale: 0.98;
 }
 .stat-card:hover {
   box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
@@ -878,9 +889,7 @@ onMounted(async () => {
   border-radius: 0.85rem;
   background: var(--app-card);
   box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
-  transition:
-    box-shadow 0.15s,
-    transform 0.15s;
+  --press-scale: 0.98;
 }
 .goal-card:hover {
   box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
@@ -903,7 +912,6 @@ onMounted(async () => {
   border-radius: 999px;
   background: var(--app-muted);
   color: var(--app-foreground);
-  transition: background 0.15s;
 }
 .graph-chip-dot {
   width: 0.5rem;

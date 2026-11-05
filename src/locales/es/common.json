@@ -4,7 +4,8 @@
     "lockFailed": "No se pudo completar la limpieza. Tu contenido privado está oculto. Reintenta finalizar el bloqueo antes de desbloquear un perfil.",
     "name": "Alexandria",
     "initializing": "Iniciando…",
-    "tagline": "Yo soy, porque todos somos"
+    "tagline": "Yo soy, porque todos somos",
+    "takingLonger": "Está tardando más de lo esperado"
   },
   "actions": {
     "save": "Guardar",

@@ -54,6 +54,10 @@
       "body": "تازہ معلومات دیکھنے کے لیے Alexandria کھولیں۔"
     }
   },
+  "channel": {
+    "name": "سرگرمی",
+    "description": "انٹرویوز، پیشکشیں، درخواستیں اور کلاس کی سرگرمی"
+  },
   "settings": {
     "title": "اطلاعات",
     "description": "ایپ میں بیج، سسٹم کے بینر اور ایپ بند ہونے پر اس آلے پر پش اطلاعات۔",
@@ -67,12 +71,23 @@
     "pushNoCloud": "اس نیٹ ورک کے لیے Alexandria Cloud ترتیب نہیں دیا گیا، اس لیے رجسٹریشن دستیاب نہیں۔",
     "pushCleanupPending": "دور کی رجسٹریشن ہٹانا زیر التوا ہے۔ پہلے سے قطار میں موجود بینر اب بھی آ سکتے ہیں۔",
     "pushRegistrationPending": "آلے کی رجسٹریشن تصدیق کی منتظر ہے۔",
-    "pushError": "آخری کوشش ناکام ہوئی: {error}",
+    "pushPausedByOrganisations": "پُش موقوف ہے کیونکہ “اداروں سے درخواستیں وصول کریں” بند ہے۔ آپ کی پُش ترتیب محفوظ رہتی ہے اور اداروں کو دوبارہ آن کرنے پر پھر سے لاگو ہوگی۔",
+    "pushPausedOpenOrganisations": "اداروں کی ترتیبات کھولیں",
+    "pushErrors": {
+      "permission_denied": "Alexandria کے لیے اطلاعات کی اجازت نہیں ہے۔ آلے کی ترتیبات میں اجازت دیں، پھر دوبارہ کوشش کریں۔",
+      "token_unavailable": "یہ آلہ پش ٹوکن حاصل نہیں کر سکا۔ دیکھیں کہ نیٹ ورک کنکشن موجود ہے، پھر دوبارہ کوشش کریں۔",
+      "insecure_origin": "Alexandria Cloud کا پتہ محفوظ نہیں ہے، اس لیے یہ آلہ اس کے ساتھ رجسٹر نہیں ہوگا۔",
+      "cloud_unreachable": "Alexandria Cloud سے رابطہ نہیں ہو سکا۔ اپنا کنکشن چیک کریں؛ Alexandria دوبارہ کوشش کرے گا۔",
+      "cloud_rejected": "Alexandria Cloud نے درخواست مسترد کر دی۔ Alexandria بعد میں دوبارہ کوشش کرے گا۔",
+      "cloud_unacknowledged": "Alexandria Cloud نے تبدیلی کی تصدیق نہیں کی۔ Alexandria دوبارہ کوشش کرے گا۔",
+      "invalid_response": "Alexandria Cloud نے ایسا جواب بھیجا جو یہ ایپ نہیں سمجھتی۔ Alexandria دوبارہ کوشش کرے گا۔"
+    },
     "register": "ابھی رجسٹر کریں",
     "unregister": "رجسٹریشن ختم کریں",
     "working": "کام جاری ہے…",
     "permission": "اجازت مانگیں",
     "permissionGranted": "سسٹم بینر کی اجازت دیتا ہے۔",
-    "permissionDenied": "سسٹم بینر روک رہا ہے۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔"
+    "permissionDenied": "سسٹم بینر روک رہا ہے۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔",
+    "permissionPromptUnavailable": "سسٹم اجازت نہیں مانگ سکا۔ آلے کی اطلاعات کی ترتیبات میں Alexandria کو اجازت دیں۔"
   }
 }

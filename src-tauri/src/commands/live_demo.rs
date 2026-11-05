@@ -32,8 +32,8 @@ use crate::commands::hiring::{
 };
 use crate::commands::talent_index::{get_talent_index_preview_impl, set_talent_index_consent_impl};
 use crate::credentials::bundle;
-use crate::credentials::{lifecycle, status_list};
-use crate::crypto::did::{derive_did_key, Did};
+use crate::credentials::{lifecycle, status_list, Issuer};
+use crate::crypto::did::Did;
 use crate::db::Database;
 use crate::domain::talent_index::{sign_record, TalentIndexConsent};
 use crate::settings::registry::keys;
@@ -124,8 +124,7 @@ impl Cloud {
 /// correct options mapped through the served order, end the session, grade.
 fn pass_assessment(
     db: &Database,
-    key: &SigningKey,
-    did: &Did,
+    issuer: &Issuer,
     skill: &str,
     session: &str,
     attempt_id: &str,
@@ -205,7 +204,7 @@ fn pass_assessment(
     };
     #[cfg(not(desktop))]
     let engine = crate::assessment::items::GradeEngine::default();
-    let graded = grade_attempt_impl(db, &engine, key, did, attempt_id, &answers, &now).unwrap();
+    let graded = grade_attempt_impl(db, &engine, issuer, attempt_id, &answers, &now).unwrap();
     assert!(graded.passed, "all-correct answers pass: {graded:?}");
     graded
         .credential_id
@@ -226,13 +225,13 @@ fn credential(db: &Database, id: &str) -> VerifiableCredential {
 
 /// Push whatever is pending, as the app does after issue, revoke and grading.
 /// Issuing into an existing list changes no bit, so nothing may be pending.
-async fn publish_lists(db: &Database, key: &SigningKey, did: &Did) {
+async fn publish_lists(db: &Database, issuer: &Issuer) {
+    let did = issuer.did();
     let pending = status_list::pending(db.conn(), did).unwrap();
     if pending.is_empty() {
         return;
     }
-    let issuer = crate::credentials::Issuer::from_key(key.clone());
-    let (accepted, errors) = status_list::push(&pending, &issuer, &now_rfc3339()).await;
+    let (accepted, errors) = status_list::push(&pending, issuer, &now_rfc3339()).await;
     assert!(errors.is_empty(), "{errors:?}");
     status_list::mark_published(db.conn(), &accepted).unwrap();
     assert!(status_list::pending(db.conn(), did).unwrap().is_empty());
@@ -275,7 +274,8 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         .unwrap();
     crate::plugins::registry::install_builtin(&db, plugin_dir.path(), mcq).unwrap();
     let key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-    let did = derive_did_key(&key);
+    let issuer = Issuer::from_key(key.clone());
+    let did = issuer.did().clone();
     SettingsStore::set(
         db.conn(),
         keys::IDENTITY_LOCAL_DID,
@@ -293,8 +293,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     // ── 1. Learner earns a credential ─────────────────────────────────
     let first_id = pass_assessment(
         &db,
-        &key,
-        &did,
+        &issuer,
         "skill_javascript",
         "live-1",
         "live-att-1",
@@ -309,7 +308,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         1,
         "a new list is pending"
     );
-    publish_lists(&db, &key, &did).await;
+    publish_lists(&db, &issuer).await;
     let (code, served) = cloud.open("GET", &list_url[base.len()..], None).await;
     assert_eq!(code, 200, "{served}");
     let served: VerifiableCredential = serde_json::from_value(served).unwrap();
@@ -404,8 +403,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     let binding = format!("request:{}:{}", request.id, request.nonce);
     let second_id = pass_assessment(
         &db,
-        &key,
-        &did,
+        &issuer,
         "skill_big_o",
         "live-2",
         "live-att-2",
@@ -417,7 +415,7 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
             .is_some_and(|c| c.evidence_refs.contains(&binding)),
         "the credential carries the request binding"
     );
-    publish_lists(&db, &key, &did).await;
+    publish_lists(&db, &issuer).await;
     let now = chrono::Utc::now().timestamp();
     let presentation = present_credential(
         request.clone(),
@@ -654,16 +652,12 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
         1,
         "revocation leaves the list pending"
     );
-    publish_lists(&db, &key, &did).await;
+    publish_lists(&db, &issuer).await;
     let (exit, out) = node_verify(&first);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("status     revoked"), "{out}");
     // And the exported bundle still verifies on its own, revocation included.
-    let bundle = bundle::export_signed(
-        db.conn(),
-        Some(&crate::credentials::Issuer::from_key(key.clone())),
-    )
-    .unwrap();
+    let bundle = bundle::export_signed(db.conn(), Some(&issuer)).unwrap();
     let (accepted, total) = bundle::verify_bundle_offline(&bundle, &now_rfc3339()).unwrap();
     assert_eq!(
         (accepted, total),

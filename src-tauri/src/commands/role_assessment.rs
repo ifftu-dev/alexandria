@@ -411,7 +411,7 @@ pub fn issue_role_credential_impl(
         integrity_policy: Some(policy),
     };
     // The org's DID is the signer's own (checked above), so the signer issues.
-    credentials::issue(conn, signer, &req, now)
+    credentials::issue(conn, signer, &req, now).map_err(|e| e.to_string())
 }
 
 fn issue_role_credential_transactional(
@@ -567,7 +567,9 @@ pub async fn issue_role_credential(
     subject: String,
     integrity_session_id: String,
 ) -> Result<VerifiableCredential, String> {
-    let signer = Issuer::from_keystore(&state.keystore).await?;
+    let signer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let now = now_rfc3339();
     state
         .db_executor

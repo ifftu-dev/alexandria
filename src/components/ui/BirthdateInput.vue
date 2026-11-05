@@ -139,8 +139,8 @@ watch([day, month, year], () => {
   background-repeat: no-repeat;
   background-position: right 0.5rem center;
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+    border-color var(--duration-fast),
+    box-shadow var(--duration-fast);
 }
 .bd-select:focus {
   outline: none;

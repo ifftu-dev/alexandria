@@ -31,7 +31,7 @@ it('cancels notification navigation if the session changes during router resolut
   const sessions = await import('@/composables/profileSession')
   sessions.setProfileSessionToken('session-A')
   const links = (await import('./useDeepLinks')).useDeepLinks()
-  const opening = links.openNotification({ id: 'tap', recipient: 'r', profileId: 'A', networkId: 'n', route: '/settings/organisations' })
+  const opening = links.openNotification({ id: 'tap', recipient: 'r', profile_id: 'A', network_id: 'n', route: '/settings/organisations' })
   await entered
   sessions.setProfileSessionToken('session-B')
   mocks.profile.value = 'B'

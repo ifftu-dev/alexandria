@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useProfiles } from '@/composables/useProfiles'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import { useGoals } from '@/composables/useGoals'
 import { isMac } from '@/composables/usePlatform'
 import { useLocale } from '@/composables/useLocale'
@@ -19,6 +19,7 @@ import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { AccountRole } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -86,15 +87,13 @@ type Mode = 'create' | 'import'
 const mode = ref<Mode>('create')
 const step = ref<Step>('welcome')
 const stepContent = ref<HTMLElement | null>(null)
-let cancelStepMotion = () => {}
+const settleStep = useSettleIn()
 watch(step, () => {
-  cancelStepMotion()
+  settleStep(stepContent.value)
   if (!stepContent.value) return
-  cancelStepMotion = animateMotion(stepContent.value, [{ opacity: 0.5, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 240)
   stepContent.value.focus({ preventScroll: true })
   stepContent.value.scrollIntoView?.({ block: 'start', behavior: 'instant' })
 }, { flush: 'post' })
-onUnmounted(() => cancelStepMotion())
 
 // ── Roles & birthdate ───────────────────────────────────────────
 // Everybody is a learner. Instructor and parent are added on top, in any
@@ -259,7 +258,7 @@ const activeStepIndex = computed(() => {
   return idx >= 0 ? idx : 0
 })
 function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): string {
-  const raw = cause instanceof Error ? cause.message : String(cause)
+  const raw = errorMessage(cause)
 
   if (raw.includes('Password must be at least')) {
     return t('onboarding.errors.passwordTooShortDetail')
@@ -916,11 +915,11 @@ function enterApp() {
               <svg v-if="i < progressLines.length - 1" class="w-3 h-3 mt-0.5 shrink-0 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              <div v-else class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <div v-else data-progress aria-hidden="true" class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>{{ line }}</span>
             </div>
             <div v-if="progressLines.length === 0" class="flex items-start gap-2 text-primary">
-              <div class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <div data-progress aria-hidden="true" class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>{{ $t('onboarding.generating.initializing') }}</span>
             </div>
           </div>
@@ -1220,7 +1219,7 @@ function enterApp() {
   font-weight: 700;
   border: 1.5px solid rgb(55, 65, 81);
   background: transparent;
-  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 .onb-step__label {
   font-weight: 500;
@@ -1296,7 +1295,7 @@ function enterApp() {
   border: 1.5px solid var(--app-border);
   text-align: start;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
 }
 .onb-role:hover {
   border-color: color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
@@ -1314,7 +1313,7 @@ function enterApp() {
   place-items: center;
   background: color-mix(in srgb, var(--app-foreground) 8%, transparent);
   color: var(--app-muted-foreground);
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 .onb-role--sel .onb-role__ic {
   background: var(--app-primary);
@@ -1345,7 +1344,7 @@ function enterApp() {
   border: 2px solid var(--app-border);
   display: grid;
   place-items: center;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
 }
 .onb-role--sel .onb-role__chk {
   background: var(--app-primary);
@@ -1391,7 +1390,7 @@ function enterApp() {
   font-size: 0.9375rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
+  transition: background var(--duration-fast), box-shadow var(--duration-fast), opacity var(--duration-fast);
   box-shadow: 0 10px 24px -10px var(--app-primary);
 }
 .onb-cta:hover:not(:disabled) {
@@ -1419,7 +1418,7 @@ function enterApp() {
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
 }
 .onb-secondary:hover {
   background: color-mix(in srgb, var(--app-foreground) 6%, transparent);

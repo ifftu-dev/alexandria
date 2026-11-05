@@ -64,6 +64,17 @@
   --mode-instructor-accent: rgb(180, 83, 9);
   --mode-guardian-accent: rgb(13, 148, 136);
 
+  /* Skill atlas fields: eight colours, each readable as text on cards. A field
+     takes the colour of its atlas slot modulo eight (see atlasPresentation.ts). */
+  --atlas-field-0: #5561be;
+  --atlas-field-1: #ad5b23;
+  --atlas-field-2: #26776d;
+  --atlas-field-3: #92609f;
+  --atlas-field-4: #9e4860;
+  --atlas-field-5: #497598;
+  --atlas-field-6: #72702d;
+  --atlas-field-7: #8b6049;
+
   /* Typography.
      The Noto families carry non-Latin scripts (CJK, Devanagari, Bengali,
      Telugu, Nastaliq/Urdu). Each is bundled via @fontsource (imported in
@@ -87,11 +98,20 @@
   /* Focus Ring — WCAG 2.1 AA */
   --focus-ring: 0 0 0 2px var(--app-background), 0 0 0 4px var(--app-ring);
 
-  /* Transitions */
+  /* Motion. useMotion reads these for script-driven effects and timers, so
+     an animation and the timer that waits for it share one token. */
   --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
-  --transition-fast: 120ms var(--ease-settle);
-  --transition-base: 200ms var(--ease-settle);
-  --transition-slow: 320ms var(--ease-settle);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --duration-emphasis: 650ms;
+  --duration-reveal: 800ms;
+  /* The step between items that arrive in sequence (staggered entries). */
+  --duration-stagger: 60ms;
+  --duration-progress-reduced: 3s;
+  --transition-fast: var(--duration-fast) var(--ease-settle);
+  --transition-base: var(--duration-base) var(--ease-settle);
+  --transition-slow: var(--duration-slow) var(--ease-settle);
 }
 
 /* Dark Mode */
@@ -140,6 +160,16 @@
   --app-governance-muted: rgb(69, 46, 7);
   --app-governance-dark: rgb(253, 224, 71);
 
+  /* Skill atlas fields */
+  --atlas-field-0: #a7b0ff;
+  --atlas-field-1: #edac78;
+  --atlas-field-2: #7dc7b7;
+  --atlas-field-3: #cea4db;
+  --atlas-field-4: #e99eb4;
+  --atlas-field-5: #92bbdf;
+  --atlas-field-6: #c6c885;
+  --atlas-field-7: #d3b09a;
+
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.5), 0 1px 2px -1px rgb(0 0 0 / 0.5);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
@@ -177,6 +207,8 @@
   --color-governance-hover: var(--app-governance-hover);
   --color-governance-muted: var(--app-governance-muted);
   --color-governance-dark: var(--app-governance-dark);
+  /* Bare `transition` utilities take the fast token, like everything else. */
+  --default-transition-duration: var(--duration-fast);
 }
 
 /* ============================================
@@ -325,9 +357,10 @@ pre,
   background: color-mix(in srgb, var(--app-primary) 50%, transparent);
 }
 
-/* Reduced Motion */
+/* Reduced Motion. Progress indicators carry `data-progress` (the one shared
+   marker): they keep turning slowly so waiting still reads as work. */
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not([data-progress]),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
@@ -336,6 +369,11 @@ pre,
     transition-duration: 0.01ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+  [data-progress] {
+    animation-duration: var(--duration-progress-reduced) !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -373,6 +411,85 @@ pre,
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* Shared press feedback for controls outside .btn: navigation and tab bar
+   items, list rows, search results, chips, icon buttons and cards. Opting in
+   is the class alone; the class also owns the control's transition, so a
+   pressable control declares no transition of its own. Cards set
+   --press-scale closer to 1. Reduced and Off dim in place instead of scaling
+   (see the motion rules at the end of this file). */
+.pressable {
+  transition-property: scale, opacity, color, background-color, border-color, box-shadow, transform, translate;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-settle);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.pressable:active:not(:disabled, [aria-disabled='true']) {
+  scale: var(--press-scale, 0.97);
+}
+
+/* Persistent selection indicator. The control marks its selection with
+   aria-current (any value but false: page, step, true), aria-checked or
+   aria-selected; the indicator settles in
+   behind its content while the previous one fades. Controls may restyle the
+   indicator's geometry and colour through ::before, never its timing. */
+.selection-indicator {
+  position: relative;
+  isolation: isolate;
+}
+
+.selection-indicator::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--selection-background, color-mix(in srgb, var(--app-muted) 80%, transparent));
+  box-shadow: var(--selection-shadow, none);
+  opacity: 0;
+  scale: 0.92;
+  transition: opacity var(--transition-base), scale var(--transition-base);
+  pointer-events: none;
+}
+
+.selection-indicator:is([aria-current]:not([aria-current='false']), [aria-checked='true'], [aria-selected='true'])::before {
+  opacity: 1;
+  scale: 1;
+}
+
+/* Shared names for Vue <Transition> and <TransitionGroup>. Only full motion
+   moves: under Reduced and Off no from-state applies, so content appears and
+   goes at once with nothing hidden. A leaving element never takes input.
+   - motion-fade: opacity (backdrops, status lines)
+   - motion-pop:  a surface opening from its anchor (search)
+   - motion-rise: entry only; superseded items go at once (search results)
+   - motion-list: enter, leave and move; pair with holdLeavingPlace from
+                  useMotion on a position: relative list (cards, goals) */
+.motion-fade-leave-active,
+.motion-pop-leave-active,
+.motion-rise-leave-active,
+.motion-list-leave-active {
+  pointer-events: none;
+}
+:root[data-motion='full'] .motion-fade-enter-active { transition: opacity var(--transition-base); }
+:root[data-motion='full'] .motion-fade-leave-active { transition: opacity var(--transition-fast); }
+:root[data-motion='full'] :is(.motion-fade-enter-from, .motion-fade-leave-to) { opacity: 0; }
+:root[data-motion='full'] .motion-pop-enter-active {
+  transition: opacity var(--transition-base), translate var(--transition-base), scale var(--transition-base);
+}
+:root[data-motion='full'] .motion-pop-leave-active {
+  transition: opacity var(--transition-fast), translate var(--transition-fast), scale var(--transition-fast);
+}
+:root[data-motion='full'] :is(.motion-pop-enter-from, .motion-pop-leave-to) { opacity: 0; translate: 0 -6px; scale: 0.98; }
+:root[data-motion='full'] :is(.motion-rise-enter-active, .motion-list-enter-active) {
+  transition: opacity var(--transition-base), translate var(--transition-base);
+}
+:root[data-motion='full'] :is(.motion-rise-enter-from, .motion-list-enter-from) { opacity: 0; translate: 0 6px; }
+:root[data-motion='full'] .motion-list-leave-active { transition: opacity var(--transition-fast), scale var(--transition-fast); }
+:root[data-motion='full'] .motion-list-leave-to { opacity: 0; scale: 0.97; }
+:root[data-motion='full'] .motion-list-move { transition: transform var(--transition-slow); }
 
 .btn-primary {
   background-color: var(--app-primary);
@@ -690,6 +807,7 @@ select optgroup {
 }
 
 /* Spinner */
+.btn[aria-busy='true'] > .btn-label { opacity: 0; }
 .spinner {
   width: 1.25rem;
   height: 1.25rem;
@@ -871,7 +989,7 @@ select optgroup {
 .phase-bar-fill {
   height: 100%;
   border-radius: 2px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width var(--duration-emphasis) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Vote gauge */
@@ -885,12 +1003,12 @@ select optgroup {
 
 .vote-gauge-for {
   background: var(--app-success);
-  transition: width 0.5s ease;
+  transition: width var(--duration-emphasis) ease;
 }
 
 .vote-gauge-against {
   background: var(--app-error);
-  transition: width 0.5s ease;
+  transition: width var(--duration-emphasis) ease;
 }
 
 /* Governance accent button */
@@ -1108,15 +1226,15 @@ select optgroup {
 }
 
 .sf-drift-slow {
-  animation: sf-settle 480ms var(--ease-settle) both;
+  animation: sf-settle var(--duration-slow) var(--ease-settle) both;
 }
 
 .sf-drift-mid {
-  animation: sf-settle 560ms var(--ease-settle) both;
+  animation: sf-settle var(--duration-emphasis) var(--ease-settle) both;
 }
 
 .sf-drift-fast {
-  animation: sf-settle 640ms var(--ease-settle) both;
+  animation: sf-settle var(--duration-emphasis) var(--ease-settle) both;
 }
 
 .sf-pulse {
@@ -1157,7 +1275,7 @@ select optgroup {
 .sf-line-draw {
   stroke-dasharray: 1000;
   stroke-dashoffset: 0;
-  animation: sf-line-draw 640ms var(--ease-settle) backwards;
+  animation: sf-line-draw var(--duration-emphasis) var(--ease-settle) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1185,7 +1303,7 @@ select optgroup {
 }
 
 /* The device preference is resolved before mount and shared with imperative effects. */
-:root[data-motion='reduced'] *, :root[data-motion='off'] *,
+:root[data-motion='reduced'] *:not([data-progress]), :root[data-motion='off'] *:not([data-progress]),
 :root[data-motion='reduced'] *::before, :root[data-motion='off'] *::before,
 :root[data-motion='reduced'] *::after, :root[data-motion='off'] *::after {
   animation-duration: 0.01ms !important;
@@ -1195,10 +1313,26 @@ select optgroup {
   transition-delay: 0ms !important;
   scroll-behavior: auto !important;
 }
+/* Progress indicators: Reduced turns them slowly, Off holds them still. In Off
+   each one sits beside visible or accessible text (AppSpinner, AppButton). */
+:root[data-motion='reduced'] [data-progress],
+:root[data-motion='off'] [data-progress] {
+  animation-duration: var(--duration-progress-reduced) !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+}
+:root[data-motion='off'] [data-progress] { animation-name: none !important; }
+:root[data-motion='off'] .btn[aria-busy='true'] > [data-progress] { position: static; }
+:root[data-motion='off'] .btn[aria-busy='true'] > .btn-label { opacity: 1; }
 :root[data-motion='reduced'] .sf-line-draw,
 :root[data-motion='off'] .sf-line-draw { stroke-dashoffset: 0; }
 :root[data-motion='reduced'] .btn:active,
 :root[data-motion='off'] .btn:active { transform: none; }
+/* Press feedback stays visible without movement: the control dims in place. */
+:root:is([data-motion='reduced'], [data-motion='off']) .pressable:active:not(:disabled, [aria-disabled='true']) {
+  scale: none;
+  opacity: 0.72;
+}
 
 :root[data-motion-hidden='true'] *,
 :root[data-motion-hidden='true'] *::before,

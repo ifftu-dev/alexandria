@@ -223,7 +223,7 @@ async function onRemoveGoal() {
   border-radius: 999px;
   color: white;
   background: color-mix(in srgb, var(--app-primary) 85%, black);
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 .teach-pill:hover {
   opacity: 0.85;

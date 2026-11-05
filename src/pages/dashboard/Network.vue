@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useP2P } from '@/composables/useP2P'
 import type { PeerInfo } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const { t } = useI18n()
 
@@ -24,7 +25,7 @@ onMounted(async () => {
       peerList.value = await fetchPeers().catch(() => [])
     }
   } catch (e: unknown) {
-    mountError.value = e instanceof Error ? e.message : String(e)
+    mountError.value = errorMessage(e)
   } finally {
     loading.value = false
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDeepLink } from './parse'
+import { isInAppPath, parseDeepLink } from './parse'
 
 describe('parseDeepLink', () => {
   describe('interview panel', () => {
@@ -99,28 +99,15 @@ describe('parseDeepLink', () => {
   })
 
   describe('notifications', () => {
-    it('maps the bare action to the inbox (custom + https)', () => {
-      expect(parseDeepLink('alexandria://notifications')).toEqual({
-        kind: 'route',
-        path: '/notifications',
-      })
-      expect(parseDeepLink('https://alexandria.ifftu.dev/notifications')).toEqual({
-        kind: 'route',
-        path: '/notifications',
-      })
-    })
-    it('rejects anything under notifications', () => {
-      expect(parseDeepLink('alexandria://notifications/x')).toBeNull()
-    })
-    it('maps notification/<id> to the inbox with that row opened', () => {
-      expect(parseDeepLink('alexandria://notification/n-1')).toEqual({
-        kind: 'route',
-        path: '/notifications?open=n-1',
-      })
-    })
-    it('rejects notification without an id or with more segments', () => {
-      expect(parseDeepLink('alexandria://notification')).toBeNull()
-      expect(parseDeepLink('alexandria://notification/n-1/extra')).toBeNull()
+    it('has no public notification links, in either form', () => {
+      for (const link of [
+        'alexandria://notifications',
+        'alexandria://notification/n-1',
+        'https://alexandria.ifftu.dev/notifications',
+        'https://alexandria.ifftu.dev/notification/n-1',
+      ]) {
+        expect(parseDeepLink(link), link).toBeNull()
+      }
     })
   })
 
@@ -139,6 +126,40 @@ describe('parseDeepLink', () => {
     })
     it('rejects a missing route param', () => {
       expect(parseDeepLink('alexandria://open')).toBeNull()
+    })
+    it('rejects a backslash route a browser would read as another origin', () => {
+      expect(parseDeepLink('alexandria://open?route=%2F%5Cevil.com%2Fx')).toBeNull()
+    })
+  })
+
+  describe('isInAppPath', () => {
+    it('accepts same-document absolute paths', () => {
+      for (const path of ['/', '/skills/rust', '/credentials/1?tab=proof#top', '/guardian?accept=a%2Fb']) {
+        expect(isInAppPath(path), path).toBe(true)
+      }
+    })
+    it('accepts a route with unencoded spaces, as a router path may carry them', () => {
+      for (const path of ['/search?q=two words', '/skills/data structures', '/courses/x#section two']) {
+        expect(isInAppPath(path), path).toBe(true)
+      }
+      expect(parseDeepLink('alexandria://open?route=%2Fsearch%3Fq%3Dtwo%20words')).toEqual({ kind: 'route', path: '/search?q=two words' })
+    })
+    it('still rejects tabs, newlines, other control characters and backslashes next to a space', () => {
+      for (const path of [
+        '/ \\evil.example', '/search?q=two\twords', '/a b\t/evil', '/x \n/y', '/x \r', '/x \u0000',
+        '/x \u001f', '/x \u007f', ' /x y', '// evil.example', 'https://evil.example/a b',
+      ]) {
+        expect(isInAppPath(path), JSON.stringify(path)).toBe(false)
+      }
+    })
+    it('rejects anything that could leave the app or is not a path', () => {
+      for (const path of [
+        '', null, undefined, 'skills', ' /skills', '//evil.example/x', '/\\evil.example', '\\/evil.example',
+        '/\tevil', '/\n/evil.example', 'javascript:alert(1)', '/javascript:alert(1)\u0000',
+        'https://evil.example', 'alexandria://open?route=/x',
+      ]) {
+        expect(isInAppPath(path), JSON.stringify(path)).toBe(false)
+      }
     })
   })
 

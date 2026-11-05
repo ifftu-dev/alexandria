@@ -43,16 +43,18 @@ const ChannelList = defineComponent({
             {
               key: ch.id,
               onClick: () => emit('select', ch.id),
+              'aria-current': props.activeChannelId === ch.id ? 'true' : undefined,
               class: [
-                'w-full flex items-center gap-2 px-3 py-2 rounded-lg my-1 text-sm transition-colors text-start',
+                'pressable selection-indicator w-full flex items-center gap-2 px-3 py-2 rounded-lg my-1 text-sm text-start [--selection-background:color-mix(in_srgb,var(--app-primary)_10%,transparent)]',
                 props.activeChannelId === ch.id
-                  ? 'bg-primary/10 text-primary font-medium'
+                  ? 'text-primary font-medium'
                   : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
               ],
             },
             [
               h('span', { class: 'text-muted-foreground/60 text-xs' }, '#'),
-              h('span', { class: 'truncate' }, ch.name),
+              // WebKit drops :active when a press lands on a clipped descendant.
+              h('span', { class: 'truncate pointer-events-none' }, ch.name),
               ch.channel_type === 'announcement'
                 ? h('span', { class: 'ms-auto text-xs text-warning', title: t('classrooms.channels.announcementBadge') }, '📢')
                 : null,
@@ -154,6 +156,25 @@ const activeChannel = computed(() =>
 const channelMessages = computed(() =>
   activeChannelId.value ? (messages.value[activeChannelId.value] ?? []) : [],
 )
+
+// The oldest message on screen after the last render. A message entering
+// before it came from "load earlier" and shows at once; only messages after it
+// (new arrivals) rise in. Updated after each render, so while a render inserts
+// messages it still names the previous oldest.
+let oldestShownId: string | null = null
+watch(() => channelMessages.value[0]?.id, (id) => { oldestShownId = id ?? null }, { flush: 'post', immediate: true })
+
+function holdEarlierMessage(el: Element) {
+  const node = el as HTMLElement
+  const list = channelMessages.value
+  const oldest = list.findIndex((m) => m.id === oldestShownId)
+  const index = list.findIndex((m) => m.id === node.dataset.classroomMessage)
+  if (oldest > -1 && index > -1 && index < oldest) node.dataset.motionInstant = ''
+}
+
+function releaseEarlierMessage(el: Element) {
+  delete (el as HTMLElement).dataset.motionInstant
+}
 
 function canDeleteMessage(senderAddress: string): boolean {
   const myAddress = walletInfo.value?.stake_address
@@ -413,10 +434,21 @@ onBeforeUnmount(() => {
             {{ $t('classrooms.messages.loadMore') }}
           </button>
 
+          <!-- New messages rise in (full motion only); a channel's history,
+               earlier messages and another channel show at once. Sending
+               never waits. -->
+          <TransitionGroup
+            :key="activeChannelId ?? ''"
+            name="motion-rise"
+            @before-enter="holdEarlierMessage"
+            @after-enter="releaseEarlierMessage"
+            @enter-cancelled="releaseEarlierMessage"
+          >
           <div
             v-for="msg in channelMessages"
             :key="msg.id"
-            class="flex gap-3 group hover:bg-muted/50 rounded px-2 py-1 -mx-2"
+            :data-classroom-message="msg.id"
+            class="classroom-message flex gap-3 group hover:bg-muted/50 rounded px-2 py-1 -mx-2"
           >
             <!-- Avatar -->
             <div class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground flex-shrink-0 mt-0.5">
@@ -446,6 +478,7 @@ onBeforeUnmount(() => {
               </svg>
             </button>
           </div>
+          </TransitionGroup>
         </template>
       </div>
 
@@ -482,20 +515,20 @@ onBeforeUnmount(() => {
     <!-- ── Mobile channel drawer ─────────────────────────────── -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-200 ease-out"
+        enter-active-class="transition duration-(--duration-base) ease-out"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition duration-150 ease-in"
+        leave-active-class="transition duration-(--duration-fast) ease-in"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
         <div v-if="showChannelDrawer" class="lg:hidden fixed inset-0 z-40" @click.self="showChannelDrawer = false">
           <div class="absolute inset-0 bg-black/50" @click="showChannelDrawer = false" />
           <Transition
-            enter-active-class="transition duration-200 ease-out"
+            enter-active-class="transition duration-(--duration-base) ease-out"
             enter-from-class="-translate-x-full"
             enter-to-class="translate-x-0"
-            leave-active-class="transition duration-150 ease-in"
+            leave-active-class="transition duration-(--duration-fast) ease-in"
             leave-from-class="translate-x-0"
             leave-to-class="-translate-x-full"
             appear
@@ -563,20 +596,20 @@ onBeforeUnmount(() => {
     <!-- ── Mobile members drawer ─────────────────────────────── -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-200 ease-out"
+        enter-active-class="transition duration-(--duration-base) ease-out"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition duration-150 ease-in"
+        leave-active-class="transition duration-(--duration-fast) ease-in"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
         <div v-if="showMembersDrawer" class="xl:hidden fixed inset-0 z-40" @click.self="showMembersDrawer = false">
           <div class="absolute inset-0 bg-black/50" @click="showMembersDrawer = false" />
           <Transition
-            enter-active-class="transition duration-200 ease-out"
+            enter-active-class="transition duration-(--duration-base) ease-out"
             enter-from-class="translate-x-full"
             enter-to-class="translate-x-0"
-            leave-active-class="transition duration-150 ease-in"
+            leave-active-class="transition duration-(--duration-fast) ease-in"
             leave-from-class="translate-x-0"
             leave-to-class="translate-x-full"
             appear
@@ -632,3 +665,9 @@ onBeforeUnmount(() => {
     </AppModal>
   </div>
 </template>
+
+<style scoped>
+/* Earlier messages skip the motion-rise entry (see holdEarlierMessage). */
+.classroom-message[data-motion-instant].motion-rise-enter-active { transition: none; }
+.classroom-message[data-motion-instant].motion-rise-enter-from { opacity: 1; translate: none; }
+</style>

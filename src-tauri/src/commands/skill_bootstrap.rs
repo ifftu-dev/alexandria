@@ -155,7 +155,9 @@ pub async fn bootstrap_confirm(
     if skill_ids.is_empty() {
         return Ok(0);
     }
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let issuer_did = issuer.did().clone();
     let now = crate::clock::now_rfc3339();
     let provenance = doc_type.provenance();

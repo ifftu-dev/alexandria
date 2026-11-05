@@ -392,7 +392,9 @@ pub async fn assessment_finalize_adaptive(
     state: State<'_, AppState>,
     attempt_id: String,
 ) -> Result<GradeResult, String> {
-    let (signing_key, issuer_did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let now = now_rfc3339();
     state
         .db_executor
@@ -400,7 +402,7 @@ pub async fn assessment_finalize_adaptive(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "assessment.finalize_adaptive",
-            move |db| finalize_adaptive_impl(db, &signing_key, &issuer_did, &attempt_id, &now),
+            move |db| finalize_adaptive_impl(db, &issuer, &attempt_id, &now),
         )
         .await
 }
@@ -408,14 +410,11 @@ pub async fn assessment_finalize_adaptive(
 /// Core of `assessment_finalize_adaptive`, separated from Tauri state.
 pub fn finalize_adaptive_impl(
     db: &crate::db::Database,
-    signing_key: &ed25519_dalek::SigningKey,
-    issuer_did: &crate::crypto::did::Did,
+    issuer: &Issuer,
     attempt_id: &str,
     now: &str,
 ) -> Result<GradeResult, String> {
-    if crate::crypto::did::derive_did_key(signing_key).as_str() != issuer_did.as_str() {
-        return Err("assessment signing key does not match the learner".into());
-    }
+    let issuer_did = issuer.did();
     let conn = db.conn();
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
@@ -542,8 +541,7 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc =
-            crate::credentials::issue(conn, &Issuer::from_key(signing_key.clone()), &req, now)?;
+        let vc = crate::credentials::issue(conn, issuer, &req, now).map_err(|e| e.to_string())?;
         credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
@@ -555,7 +553,7 @@ pub fn finalize_adaptive_impl(
     .map_err(|e| e.to_string())?;
 
     if passed {
-        crate::aggregation::store::recompute_all_impl(conn, now)?;
+        crate::aggregation::store::recompute_all_impl(conn, now).map_err(|e| e.to_string())?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
@@ -699,7 +697,7 @@ mod tests {
     struct Ctx {
         db: Database,
         runtime: GraderRuntime,
-        key: SigningKey,
+        issuer: Issuer,
         did: Did,
         _dir: TempDir,
     }
@@ -759,7 +757,7 @@ mod tests {
         Ctx {
             db,
             runtime: GraderRuntime::new().unwrap(),
-            key,
+            issuer: Issuer::from_key(key),
             did,
             _dir: dir,
         }
@@ -836,14 +834,42 @@ mod tests {
         assert!(step.finished, "attempt should finish");
         assert!(step.items_served >= 3, "must serve at least min_items");
 
-        let result =
-            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW).unwrap();
+        let result = finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW).unwrap();
         assert!(
             result.passed,
             "an all-correct run should pass, score {}",
             result.score
         );
         assert!(result.credential_id.is_some());
+    }
+
+    #[test]
+    fn a_rotated_issuer_earns_the_credential_for_its_own_did() {
+        let ctx = setup();
+        let rotated = SigningKey::from_bytes(&[10u8; 32]);
+        crate::crypto::key_registry::rotate_key(ctx.db.conn(), &ctx.did, &rotated).unwrap();
+        // A rotation takes effect at the wall clock; finalize after it.
+        let now = now_rfc3339();
+        let issuer = Issuer::rotated(ctx.db.conn(), ctx.did.clone(), rotated, &now).unwrap();
+        let mut step = start(&ctx);
+        while !step.finished {
+            step = answer(&ctx, &step, true);
+        }
+        let result = finalize_adaptive_impl(&ctx.db, &issuer, &step.attempt_id, &now)
+            .expect("a rotated issuer finalizes its own attempt");
+        let json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id = ?1",
+                [result.credential_id.unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let rotated_did = serde_json::json!(ctx.did.as_str());
+        assert_eq!(vc.pointer("/issuer"), Some(&rotated_did));
+        assert_eq!(vc.pointer("/credentialSubject/id"), Some(&rotated_did));
     }
 
     #[test]
@@ -855,8 +881,7 @@ mod tests {
             step = answer(&ctx, &step, false);
             guard += 1;
         }
-        let result =
-            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW).unwrap();
+        let result = finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW).unwrap();
         assert!(
             !result.passed,
             "all-wrong should fail, score {}",
@@ -887,18 +912,21 @@ mod tests {
         while !step.finished {
             step = answer(&ctx, &step, true);
         }
+        assert!(finalize_adaptive_impl(
+            &ctx.db,
+            &Issuer::from_key(other_key.clone()),
+            &step.attempt_id,
+            NOW
+        )
+        .unwrap_err()
+        .contains("another learner"));
+        // A key that is not the learner's cannot sign as the learner at all.
+        assert!(matches!(
+            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW),
+            Err(crate::credentials::CredentialError::NotCurrentKey(_))
+        ));
         assert!(
-            finalize_adaptive_impl(&ctx.db, &other_key, &other_did, &step.attempt_id, NOW)
-                .unwrap_err()
-                .contains("another learner")
-        );
-        assert!(
-            finalize_adaptive_impl(&ctx.db, &other_key, &ctx.did, &step.attempt_id, NOW)
-                .unwrap_err()
-                .contains("signing key")
-        );
-        assert!(
-            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW)
+            finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW)
                 .unwrap()
                 .passed
         );
@@ -947,7 +975,7 @@ mod tests {
         let step = answer(&ctx, &start(&ctx), true);
         assert!(!step.finished);
         assert!(
-            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW)
+            finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW)
                 .unwrap_err()
                 .contains("unanswered")
         );
@@ -998,7 +1026,7 @@ mod tests {
                 "CREATE TEMP TRIGGER fail_finalization {trigger} BEGIN SELECT RAISE(ABORT, 'injected finalization failure'); END;"
             )).unwrap();
             assert!(
-                finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW)
+                finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW)
                     .unwrap_err()
                     .contains("injected finalization failure")
             );
@@ -1013,8 +1041,7 @@ mod tests {
                 .execute_batch("DROP TRIGGER fail_finalization;")
                 .unwrap();
         }
-        let result =
-            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW).unwrap();
+        let result = finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW).unwrap();
         assert!(result.passed);
         assert!(result.credential_id.is_some());
         assert_eq!(counts()[0], baseline[0]);
@@ -1111,8 +1138,8 @@ mod tests {
             step = answer(&ctx, &step, true);
             guard += 1;
         }
-        finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW).unwrap();
-        let second = finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW);
+        finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW).unwrap();
+        let second = finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW);
         assert!(second.is_err(), "an attempt must finalize only once");
     }
 

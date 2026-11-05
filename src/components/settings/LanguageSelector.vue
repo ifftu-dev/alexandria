@@ -74,7 +74,7 @@ function choose(code: Choice) {
   border-radius: var(--radius, 0.5rem);
   background: transparent;
   text-align: start;
-  transition: border-color 0.15s, background-color 0.15s;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
 }
 
 .locale-text {

@@ -1,4 +1,4 @@
-import type { SkillGraphEdge, SkillInfo, VerifiableCredential } from '@/types'
+import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { BLOOM_ORDER, type BloomLevel } from './bloom'
 
 export type BloomRank = 0 | 1 | 2 | 3 | 4 | 5
@@ -24,12 +24,20 @@ export interface AtlasNode {
   intrinsicBloom: BloomLevel | null
   prerequisites: readonly AtlasRelation[]
   dependents: readonly AtlasRelation[]
+  /**
+   * At least one prerequisite, and every one the skill counts is loaded and
+   * earned. Unknown, unloaded or uncounted prerequisites never satisfy it.
+   */
   prerequisitesSatisfied: boolean
+  /** Not yet earned, with its prerequisites satisfied: the only skills the atlas emphasises as next. */
+  readyNext: boolean
 }
 
 export interface AtlasField {
   id: string | null
   name: string | null
+  /** Stable colour and region; null only for unassigned skills. */
+  slot: number | null
   nodeIds: readonly string[]
   total: number
   earned: number
@@ -41,6 +49,10 @@ export interface AtlasModel {
   fields: readonly AtlasField[]
   edges: readonly SkillGraphEdge[]
   counts: { total: number; earned: number; ready: number }
+  /** Built once per load; key order matches `nodes`. */
+  nodeById: ReadonlyMap<string, AtlasNode>
+  /** Unassigned skills sit under `null`. */
+  fieldById: ReadonlyMap<string | null, AtlasField>
 }
 
 export interface BuildSkillAtlasInput {
@@ -48,13 +60,12 @@ export interface BuildSkillAtlasInput {
   edges: readonly SkillGraphEdge[]
   activeCredentials: readonly VerifiableCredential[]
   subjectDid: string | null
-  subjectFields?: readonly { id: string; name: string }[]
+  subjectFields?: readonly (Pick<SubjectFieldInfo, 'id' | 'name'> & { atlas_slot?: number | null })[]
 }
 
-function validRank(value: unknown): BloomRank | null {
+/** A credential level, route or DOM value is a Bloom rank only if it is one of the six. */
+export function isBloomRank(value: unknown): value is BloomRank {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 5
-    ? value as BloomRank
-    : null
 }
 
 function bloomLevel(value: string | null | undefined): BloomLevel | null {
@@ -77,8 +88,9 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
       const claim = credential.credentialSubject
       if (claim.id !== input.subjectDid || typeof claim.skillId !== 'string' || claim.skillId.length === 0) continue
       earnedIds.add(claim.skillId)
-      const rank = validRank(claim.level)
-      if (rank !== null) ranks.set(claim.skillId, Math.max(ranks.get(claim.skillId) ?? rank, rank) as BloomRank)
+      const rank = claim.level
+      const best = ranks.get(claim.skillId)
+      if (isBloomRank(rank) && (best === undefined || rank > best)) ranks.set(claim.skillId, rank)
     }
   }
 
@@ -109,15 +121,19 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
     const prerequisites = [...(prerequisitesBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
     const dependents = [...(dependentsBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
     const rank = ranks.get(skill.id)
+    const status: AtlasStatus = earnedIds.has(skill.id) ? 'earned' : 'ready'
+    const prerequisitesSatisfied = prerequisites.length > 0 && prerequisites.length === skill.prerequisite_count &&
+      prerequisites.every((relation) => relation.loaded && relation.earned)
     return {
       skill,
       fieldId: skill.subject_field_id || null,
-      status: earnedIds.has(skill.id) ? 'earned' : 'ready',
+      status,
       earnedBloom: rank == null ? null : { rank, name: BLOOM_ORDER[rank] },
       intrinsicBloom: bloomLevel(skill.bloom_level),
       prerequisites,
       dependents,
-      prerequisitesSatisfied: prerequisites.length >= skill.prerequisite_count && prerequisites.every((relation) => relation.earned),
+      prerequisitesSatisfied,
+      readyNext: status === 'ready' && prerequisitesSatisfied,
     }
   })
 
@@ -136,12 +152,23 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
     field.nodeIds.push(node.skill.id)
     if (node.status === 'earned') field.earned++
   }
-  const fields = [...fieldsMap.values()].sort((a, b) => a.id === null ? 1 : b.id === null ? -1 : compareIds(a.id, b.id)).map((field) => ({
-    ...field, total: field.nodeIds.length, ready: field.nodeIds.length - field.earned,
-  }))
+  // A field the taxonomy does not place takes the next slot after every
+  // placed one (in ID order), so it can never move a placed field.
+  const slots = new Map<string, number>()
+  for (const field of input.subjectFields ?? []) if (field.atlas_slot != null) slots.set(field.id, field.atlas_slot)
+  let nextSlot = Math.max(-1, ...slots.values()) + 1
+  for (const id of [...fieldsMap.keys()].filter((id): id is string => id !== null).sort(compareIds)) {
+    if (!slots.has(id)) slots.set(id, nextSlot++)
+  }
+  const fields = [...fieldsMap.values()].map((field) => ({
+    ...field, slot: field.id === null ? null : slots.get(field.id) ?? null,
+    total: field.nodeIds.length, ready: field.nodeIds.length - field.earned,
+  })).sort((a, b) => a.slot === null ? 1 : b.slot === null ? -1 : a.slot - b.slot)
   const earned = nodes.filter((node) => node.status === 'earned').length
   return {
     nodes, fields, edges: [...input.edges],
     counts: { total: nodes.length, earned, ready: nodes.length - earned },
+    nodeById: new Map(nodes.map((node) => [node.skill.id, node])),
+    fieldById: new Map(fields.map((field) => [field.id, field])),
   }
 }

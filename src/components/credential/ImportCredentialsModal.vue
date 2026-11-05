@@ -15,6 +15,7 @@
 
 import { ref } from 'vue'
 import { useLocalApi } from "@/composables/useLocalApi"
+import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { useI18n } from 'vue-i18n'
 
 import { AppButton, AppModal, AppTextarea } from '@/components/ui'
@@ -57,7 +58,10 @@ async function runImport(payload: string) {
     summary.value = result
     // Refresh the list even on a partial import — the credentials that did
     // land should appear without the user reopening anything.
-    if (result.imported > 0) emit('imported')
+    if (result.imported > 0) {
+      emit('imported')
+      announceCredentialsChanged()
+    }
   } catch (e) {
     error.value = String(e)
   } finally {

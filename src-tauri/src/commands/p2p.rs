@@ -147,9 +147,12 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
             // are emitted after the message's job has committed.
             let app_events = app_for_events.clone();
             let (mut gossip, gossip_dispatcher) =
-                inbound::gossip_ingest(inbound_db.clone(), move |event| event.emit(&app_events));
+                inbound::gossip_ingest(inbound_db.clone(), move |event, session| {
+                    event.emit(&app_events, session)
+                });
             operations.spawn_job(gossip_dispatcher).await;
             let app_for_guardian = app_for_events.clone();
+            let operations_for_sync = operations.clone();
 
             // Spawn event consumer
             operations
@@ -170,9 +173,26 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                                 log::debug!("P2P: {} peers", status.connected_peers);
                             }
                             crate::p2p::types::P2pEvent::GuardianLinked {
+                                session,
                                 notification: Some(recorded),
                             } => {
-                                crate::notifications::announce(&app_for_guardian, &recorded);
+                                crate::notifications::announce(
+                                    &app_for_guardian,
+                                    &session,
+                                    &recorded,
+                                );
+                            }
+                            crate::p2p::types::P2pEvent::SettingsSynced { session, keys } => {
+                                // A paired device changed these settings here.
+                                // Follow them under that session only; a
+                                // switch in between drops them.
+                                if let Ok(lease) = operations_for_sync.admit(&session) {
+                                    crate::commands::settings::after_change(
+                                        &app_for_guardian,
+                                        lease,
+                                        keys,
+                                    );
+                                }
                             }
                             _ => {}
                         }

@@ -15,6 +15,7 @@ import type {
   VerificationResult,
   StatusPublishReport,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 /**
  * Frontend-side wrapper for the VC-first IPC surface (PRs 2–13).
@@ -45,7 +46,7 @@ export function useCredentials() {
     try {
       return await fn()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = errorMessage(e)
       return null
     } finally {
       loading.value = false
@@ -71,7 +72,11 @@ export function useCredentials() {
   }
 
   async function issue(req: IssueCredentialRequest) {
-    return run(() => invoke<VerifiableCredential>('issue_credential', { req }))
+    return run(async () => {
+      const vc = await invoke<VerifiableCredential>('issue_credential', { req })
+      announceCredentialsChanged()
+      return vc
+    })
   }
 
   async function revoke(credentialId: string, reason: string) {

@@ -495,7 +495,7 @@ fn a_sign_in_is_admitted_on_the_token_it_will_send() {
 
 #[test]
 fn the_tutor_and_chat_refuse_a_non_text_lesson_through_the_shared_rule() {
-    use alexandria_studio::access::{visible_lesson, Reader, Refused};
+    use alexandria_studio::access::{run_error, visible_lesson, AccessDenied, Reader};
     let db = db();
     setup(&db);
     let mut course = store::course(&db, "mine").unwrap();
@@ -516,7 +516,7 @@ fn the_tutor_and_chat_refuse_a_non_text_lesson_through_the_shared_rule() {
         assert!(
             matches!(
                 visible_lesson(&db, Reader::Tutor, "mine", withheld),
-                Err(Refused::LessonWithheld)
+                Err(AccessDenied::LessonWithheld)
             ),
             "{withheld}"
         );
@@ -527,12 +527,12 @@ fn the_tutor_and_chat_refuse_a_non_text_lesson_through_the_shared_rule() {
     }
     assert!(matches!(
         visible_lesson(&db, Reader::Tutor, "mine", "missing"),
-        Err(Refused::LessonNotFound)
+        Err(AccessDenied::LessonNotFound)
     ));
     // Chat sees published courses only, with the same text rule.
     assert!(matches!(
         visible_lesson(&db, Reader::Chat, "mine", "lesson"),
-        Err(Refused::LessonNotFound)
+        Err(AccessDenied::LessonNotFound)
     ));
     db.execute("UPDATE courses SET status='published' WHERE id='mine'", [])
         .unwrap();
@@ -542,9 +542,21 @@ fn the_tutor_and_chat_refuse_a_non_text_lesson_through_the_shared_rule() {
             .title,
         "Lesson"
     );
-    let Err(refused) = visible_lesson(&db, Reader::Chat, "mine", "quiz") else {
+    let Err(denied) = visible_lesson(&db, Reader::Chat, "mine", "quiz") else {
         panic!("a quiz is never shown to a model");
     };
-    assert!(matches!(refused, Refused::LessonWithheld));
-    assert!(matches!(Error::from(refused), Error::Permission));
+    assert!(matches!(denied, AccessDenied::LessonWithheld));
+    assert!(matches!(run_error(denied), Error::Permission));
+    // A course the learner neither takes nor wrote is not said to exist,
+    // and a malformed identifier is invalid input, both denials.
+    db.execute_batch("DELETE FROM enrollments; UPDATE local_identity SET stake_address='other';")
+        .unwrap();
+    assert!(matches!(
+        visible_lesson(&db, Reader::Tutor, "mine", "lesson"),
+        Err(AccessDenied::LessonNotFound)
+    ));
+    assert!(matches!(
+        visible_lesson(&db, Reader::Chat, "mine", ""),
+        Err(AccessDenied::Invalid(_))
+    ));
 }

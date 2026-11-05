@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
+import { animateMotion } from '@/composables/useMotion'
 import { AppButton, AppModal, AppTextarea, ProvenanceBadge } from '@/components/ui'
 import InfoTip from '@/components/ui/InfoTip.vue'
 import LearnerTutor from '@/components/course/LearnerTutor.vue'
@@ -11,6 +12,7 @@ import CourseNotesSection from '@/components/course/CourseNotesSection.vue'
 import { useChatOffer, useChatRestriction } from '@/composables/useChatOffers'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
+import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { getProfileSessionToken } from '@/composables/profileSession'
 import type {
   Chapter,
@@ -115,6 +117,7 @@ async function claimCredential() {
     claimTxHash.value = result.tx_hash
     completionReceipt.value = result
     claimCredentialIds.value = result.credential_ids ?? []
+    if (claimCredentialIds.value.length) announceCredentialsChanged()
     return result
   } catch (e) {
     claimError.value = String(e)
@@ -231,6 +234,24 @@ const flatElements = computed<FlatCourseElement[]>(() => {
     }
   }
   return out
+})
+
+// Moving between lessons keeps the learner's place in the course: the next
+// lesson arrives from the end of the reading direction, the previous one from
+// its start. Decorative only: the lesson is rendered and usable at once, and
+// Reduced and Off show it without movement.
+const lessonBody = ref<HTMLElement | null>(null)
+watch(activeElement, async (next, previous) => {
+  if (!next || !previous || next === previous) return
+  const from = flatElements.value.findIndex(item => item.element.id === previous)
+  const to = flatElements.value.findIndex(item => item.element.id === next)
+  if (from < 0 || to < 0) return
+  await nextTick()
+  const body = lessonBody.value
+  if (!body) return
+  const inline = getComputedStyle(body).direction === 'rtl' ? -1 : 1
+  const offset = (to > from ? 16 : -16) * inline
+  animateMotion(body, [{ opacity: 0, transform: `translateX(${offset}px)` }, { opacity: 1, transform: 'none' }], 'base')
 })
 
 const activeFlatIndex = computed(() => {
@@ -1210,11 +1231,12 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               </span>
             </div>
 
-            <!-- Element (lesson) buttons — title is the visual anchor. -->
+            <!-- Element (lesson) buttons — title is the visual anchor. Their truncated
+                 content takes no pointer, so WebKit keeps :active on the row. -->
             <button
               v-for="el in elements[ch.id] ?? []"
               :key="el.id"
-              class="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
+              class="pressable group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start md:hover:-translate-y-px md:hover:shadow-sm *:pointer-events-none"
               :class="activeElement === el.id
                 ? 'bg-primary/10 shadow-sm ring-1 ring-primary/20'
                 : 'hover:bg-muted/50'"
@@ -1266,7 +1288,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           <p>{{ monitoringError }}</p>
           <AppButton variant="outline" :loading="monitoringPending" @click="monitoringRetry++">{{ $t('common.actions.retry') }}</AppButton>
         </div>
-        <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
+        <div v-if="currentElement" :key="currentElement.id" ref="lessonBody" data-lesson-body class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
             <!-- Element header. For full-bleed elements (plugins/video) it is
                  hidden on mobile — the compact top header already carries the
                  chapter/element/progress context, so the renderer gets the
@@ -1358,7 +1380,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   v-for="skill in elementSkills"
                   :key="skill.skill_id"
                   :to="`/skills/${skill.skill_id}`"
-                  class="inline-flex items-center rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15"
+                  class="pressable inline-flex items-center rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/15"
                 >
                   {{ skill.skill_name }}
                 </router-link>
@@ -1513,9 +1535,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     <!-- ============================== -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-opacity duration-150 ease-out"
+        enter-active-class="transition-opacity duration-(--duration-fast) ease-out"
         enter-from-class="opacity-0"
-        leave-active-class="transition-opacity duration-150 ease-in"
+        leave-active-class="transition-opacity duration-(--duration-fast) ease-in"
         leave-to-class="opacity-0"
       >
         <div
@@ -1524,9 +1546,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           @click.self="mobileNavOpen = false"
         >
           <Transition
-            enter-active-class="transition-transform duration-200 ease-out"
+            enter-active-class="transition-transform duration-(--duration-base) ease-out"
             enter-from-class="translate-y-full"
-            leave-active-class="transition-transform duration-150 ease-in"
+            leave-active-class="transition-transform duration-(--duration-fast) ease-in"
             leave-to-class="translate-y-full"
             appear
           >
@@ -1639,28 +1661,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 </template>
 
 <style scoped>
-.lesson-body {
-  animation: lesson-body-in 0.22s ease;
-}
-
 .progress-fill {
-  transition: width 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width var(--duration-emphasis) var(--ease-settle);
 }
 
-@keyframes lesson-body-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lesson-body {
-    animation: none;
-  }
-}
 </style>

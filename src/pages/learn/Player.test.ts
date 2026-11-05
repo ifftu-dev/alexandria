@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import Player from './Player.vue'
+import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { Course, Element, ElementSkillTag, Enrollment } from '@/types'
 
 const mocks = vi.hoisted(() => ({
@@ -148,6 +149,24 @@ describe('course player monitoring ownership', () => {
     expect(wrapper.text()).not.toContain('learn.player.completed')
     await vi.advanceTimersByTimeAsync(600)
     expect(wrapper.find('h1')?.text()).toContain('Quiz')
+  })
+
+  it('announces new credentials after claiming a completion, so cached skill views recount', async () => {
+    const original = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command === 'get_course_completion_status') return Promise.resolve({ ready: true, missing_elements: [], required_count: 1, preview: null })
+      if (command === 'claim_course_completion') return Promise.resolve({ tx_hash: null, credential_ids: ['vc-1'] })
+      return original(command, args)
+    })
+    const announced = vi.fn()
+    window.addEventListener(CREDENTIALS_CHANGED, announced)
+    try {
+      const wrapper = render()
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'learn.player.claimCredential')!.trigger('click')
+      await flushPromises()
+      expect(announced).toHaveBeenCalledTimes(1)
+    } finally { window.removeEventListener(CREDENTIALS_CHANGED, announced) }
   })
 
   it('loads current-element skill tags from their typed command', async () => {

@@ -55,7 +55,7 @@ function onBackdropClick(e: MouseEvent) {
                 </slot>
               </div>
               <button
-                class="shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
+                class="pressable shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted/50 *:pointer-events-none"
                 @click="emit('close')"
                 :aria-label="$t('common.actions.close')"
               >

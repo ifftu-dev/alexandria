@@ -152,7 +152,7 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
   border-radius: 999px;
   background: var(--app-muted);
   color: var(--app-foreground);
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 .course-pill:hover {
   background: color-mix(in srgb, var(--app-primary) 18%, var(--app-muted));
@@ -167,7 +167,7 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
   border-radius: 999px;
   color: var(--app-primary-foreground, #fff);
   background: var(--app-primary);
-  transition: filter 0.15s;
+  transition: filter var(--duration-fast);
 }
 .assess-btn:hover {
   filter: brightness(1.08);

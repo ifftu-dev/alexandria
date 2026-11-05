@@ -360,10 +360,10 @@ const avatarEmoji = computed(() => {
         </button>
 
         <Transition
-          enter-active-class="transition duration-100 ease-out"
+          enter-active-class="transition duration-(--duration-fast) ease-out"
           enter-from-class="transform scale-95 opacity-0"
           enter-to-class="transform scale-100 opacity-100"
-          leave-active-class="transition duration-75 ease-in"
+          leave-active-class="transition duration-(--duration-fast) ease-in"
           leave-from-class="transform scale-100 opacity-100"
           leave-to-class="transform scale-95 opacity-0"
         >
@@ -410,10 +410,10 @@ const avatarEmoji = computed(() => {
         </button>
 
         <Transition
-          enter-active-class="transition duration-100 ease-out"
+          enter-active-class="transition duration-(--duration-fast) ease-out"
           enter-from-class="transform scale-95 opacity-0"
           enter-to-class="transform scale-100 opacity-100"
-          leave-active-class="transition duration-75 ease-in"
+          leave-active-class="transition duration-(--duration-fast) ease-in"
           leave-from-class="transform scale-100 opacity-100"
           leave-to-class="transform scale-95 opacity-0"
         >
@@ -586,8 +586,8 @@ const avatarEmoji = computed(() => {
   height: 1rem;
   padding: 0 0.25rem;
   border-radius: 9999px;
-  background: var(--app-error, #dc2626);
-  color: #fff;
+  background: var(--app-error);
+  color: var(--app-error-foreground);
   font-size: 0.6rem;
   font-weight: 700;
   line-height: 1rem;
@@ -611,7 +611,7 @@ const avatarEmoji = computed(() => {
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: color var(--duration-fast), background var(--duration-fast);
 }
 
 .topbar button,
@@ -657,9 +657,9 @@ const avatarEmoji = computed(() => {
   border: 1px solid transparent;
   border-radius: 0.5rem;
   transition:
-    background 0.2s,
-    border-color 0.2s,
-    box-shadow 0.2s;
+    background var(--duration-base),
+    border-color var(--duration-base),
+    box-shadow var(--duration-base);
 }
 
 .topbar-search:hover {
@@ -717,7 +717,7 @@ const avatarEmoji = computed(() => {
   height: 1.25rem;
   border-radius: 0.25rem;
   color: color-mix(in srgb, var(--app-muted-foreground) 60%, transparent);
-  transition: color 0.15s, background 0.15s;
+  transition: color var(--duration-fast), background var(--duration-fast);
   cursor: pointer;
   background: transparent;
   border: none;

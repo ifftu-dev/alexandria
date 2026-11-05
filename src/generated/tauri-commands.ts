@@ -284,6 +284,7 @@ export const TAURI_COMMANDS = [
   "move_incompatible_profile_data",
   "notifications_clear",
   "notifications_consume_open",
+  "notifications_discover",
   "notifications_emit_test",
   "notifications_list",
   "notifications_mark_all_read",

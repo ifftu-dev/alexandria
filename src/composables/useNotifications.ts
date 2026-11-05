@@ -11,7 +11,7 @@ import { getProfileSessionToken } from '@/composables/profileSession'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { isMobilePlatform } from '@/composables/usePlatform'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
-import type { AppNotification, PushStatus, NotificationOpen } from '@/types'
+import type { AppNotification, NotificationOpen, NotificationPermissionOutcome, PushStatus } from '@/types'
 
 const { invoke } = useLocalApi()
 
@@ -84,8 +84,8 @@ async function markRead(ids: string[]): Promise<void> {
   const set = new Set(ids)
   let cleared = 0
   for (const n of items.value) {
-    if (set.has(n.id) && !n.readAt) {
-      n.readAt = now
+    if (set.has(n.id) && !n.read_at) {
+      n.read_at = now
       cleared++
     }
   }
@@ -97,7 +97,7 @@ async function markAllRead(): Promise<void> {
   await invoke('notifications_mark_all_read')
   if (!current()) return
   const now = new Date().toISOString()
-  for (const n of items.value) if (!n.readAt) n.readAt = now
+  for (const n of items.value) if (!n.read_at) n.read_at = now
   unread.value = 0
 }
 
@@ -112,7 +112,7 @@ async function clear(): Promise<void> {
 /** Tap a row: mark it read and follow its route. */
 async function open(n: AppNotification): Promise<void> {
   const current = currentAction()
-  if (!n.readAt) await markRead([n.id]).catch(() => {})
+  if (!n.read_at) await markRead([n.id]).catch(() => {})
   if (current()) await openRoute(n.route)
 }
 
@@ -148,12 +148,16 @@ async function setPushEnabled(enabled: boolean): Promise<PushStatus> {
   return status
 }
 
-/** Ask the OS once for permission to show banners. Desktop answers granted. */
-async function requestPermission(): Promise<string> {
+/**
+ * Ask the OS once for permission to show banners. Desktop answers `granted`.
+ * A request that fails before the prompt (the profile session changed) reads
+ * as `prompt_unavailable`, like a prompt the system could not show.
+ */
+async function requestPermission(): Promise<NotificationPermissionOutcome> {
   try {
-    return await invoke<string>('notifications_permission_request')
+    return await invoke<NotificationPermissionOutcome>('notifications_permission_request')
   } catch {
-    return 'unavailable'
+    return 'prompt_unavailable'
   }
 }
 
@@ -167,11 +171,15 @@ async function init(): Promise<void> {
   const gen = ++generation
   const session = getProfileSessionToken()
   if (isMobilePlatform) {
-    const retry = () => {
-      if (gen === generation && session === getProfileSessionToken()) void reconcilePush()
+    const current = () => gen === generation && session === getProfileSessionToken()
+    retryTimer = setInterval(() => { if (current()) void reconcilePush() }, 60_000)
+    // Coming back to the foreground: re-register push and look for anything a
+    // push missed, without waiting for the backend's 60-second pass.
+    onResume = () => {
+      if (document.visibilityState !== 'visible' || !current()) return
+      void reconcilePush()
+      void discover()
     }
-    retryTimer = setInterval(retry, 60_000)
-    onResume = () => { if (document.visibilityState === 'visible') retry() }
     document.addEventListener('visibilitychange', onResume)
   }
 
@@ -183,7 +191,7 @@ async function init(): Promise<void> {
         const row = event.payload.row
         if (!items.value.some((n) => n.id === row.id)) {
           items.value.unshift(row)
-          if (!row.readAt) unread.value++
+          if (!row.read_at) unread.value++
         }
       }),
       listen<{ session: string; unread: number }>('notifications:changed', (event) => {
@@ -253,6 +261,19 @@ async function reconcilePush(): Promise<void> {
   } catch (e) {
     console.warn('[notifications] push registration failed:', e)
     if (current()) await refreshPushStatus()
+  }
+}
+
+/**
+ * Run one Cloud discovery pass now. The backend joins a pass that is already
+ * running, and its de-duplication keeps rows single. Failures are logged: the
+ * background pass tries again within a minute.
+ */
+async function discover(): Promise<void> {
+  try {
+    await invoke<number>('notifications_discover')
+  } catch (e) {
+    console.warn('[notifications] discovery failed:', e)
   }
 }
 

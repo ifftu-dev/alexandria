@@ -410,14 +410,30 @@ pub(crate) fn with_transaction<T>(
     conn: &Connection,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
+    transaction_with(conn, operation, |e| e.to_string())
+}
+
+/// [`with_transaction`] for an operation with a typed error.
+pub(crate) fn with_typed_transaction<T, E: From<rusqlite::Error>>(
+    conn: &Connection,
+    operation: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    transaction_with(conn, operation, E::from)
+}
+
+fn transaction_with<T, E>(
+    conn: &Connection,
+    operation: impl FnOnce() -> Result<T, E>,
+    db_error: impl Fn(rusqlite::Error) -> E,
+) -> Result<T, E> {
     let tx = if conn.is_autocommit() {
-        Some(conn.unchecked_transaction().map_err(|e| e.to_string())?)
+        Some(conn.unchecked_transaction().map_err(&db_error)?)
     } else {
         None
     };
     let result = operation()?;
     if let Some(tx) = tx {
-        tx.commit().map_err(|e| e.to_string())?;
+        tx.commit().map_err(&db_error)?;
     }
     Ok(result)
 }

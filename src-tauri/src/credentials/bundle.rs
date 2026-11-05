@@ -12,7 +12,7 @@
 
 use rusqlite::Connection;
 
-use super::{store, Issuer};
+use super::{store, CredentialError, Issuer};
 use crate::clock::now_rfc3339;
 use crate::domain::vc::{VerifiableCredential, VerificationPendingReason, VerificationResult};
 
@@ -54,12 +54,17 @@ pub struct StatusListRow {
 
 const BUNDLE_FORMAT_VERSION: &str = "alexandria-credential-bundle/1.0";
 
-fn bounded_credentials(entries: &[serde_json::Value]) -> Result<Vec<VerifiableCredential>, String> {
+fn bounded_credentials(
+    entries: &[serde_json::Value],
+) -> Result<Vec<VerifiableCredential>, CredentialError> {
     entries
         .iter()
         .enumerate()
         .map(|(index, entry)| {
-            store::credential_entry(entry).map_err(|error| format!("credential {index}: {error}"))
+            store::credential_entry(entry).map_err(|source| CredentialError::CredentialEntry {
+                index: Some(index),
+                source,
+            })
         })
         .collect()
 }
@@ -67,104 +72,88 @@ fn bounded_credentials(entries: &[serde_json::Value]) -> Result<Vec<VerifiableCr
 /// Decode a parsed payload as a §20.4 bundle. `None` means the payload is not
 /// a bundle; an unsupported format version or an over-limit credential entry
 /// is an error.
-fn bundle_from_payload(value: &serde_json::Value) -> Result<Option<CredentialBundle>, String> {
+fn bundle_from_payload(
+    value: &serde_json::Value,
+) -> Result<Option<CredentialBundle>, CredentialError> {
     let Ok(mut bundle) = serde_json::from_value::<CredentialBundle>(value.clone()) else {
         return Ok(None);
     };
     if bundle.format_version != BUNDLE_FORMAT_VERSION {
-        return Err(format!(
-            "unsupported bundle format_version: {}",
-            bundle.format_version
+        return Err(CredentialError::UnsupportedBundleVersion(
+            bundle.format_version,
         ));
     }
     let entries = value
         .get("credentials")
         .and_then(serde_json::Value::as_array)
-        .ok_or("bundle credentials are not a list")?;
+        .ok_or(CredentialError::BundleCredentialsNotAList)?;
     bundle.credentials = bounded_credentials(entries)?;
     Ok(Some(bundle))
 }
 
 /// Build a JCS-canonical export bundle of every credential, key
 /// registry row, and status list known to this node.
-pub fn export(conn: &Connection) -> Result<String, String> {
+pub fn export(conn: &Connection) -> Result<String, CredentialError> {
     export_signed(conn, None)
 }
 
 /// As [`export`], and when `signer` is this node's issuer key,
 /// also carry each list this node issues as a signed
 /// `BitstringStatusListCredential`.
-pub fn export_signed(conn: &Connection, signer: Option<&Issuer>) -> Result<String, String> {
+pub fn export_signed(
+    conn: &Connection,
+    signer: Option<&Issuer>,
+) -> Result<String, CredentialError> {
     use base64::Engine;
 
     // Credentials, ordered deterministically by id so ad-hoc ordering
     // in the credentials table doesn't leak into the bundle.
-    let mut stmt = conn
-        .prepare("SELECT signed_vc_json FROM credentials ORDER BY id")
-        .map_err(|e| e.to_string())?;
-    let cred_rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT signed_vc_json FROM credentials ORDER BY id")?;
+    let cred_rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     let mut credentials = Vec::new();
     for r in cred_rows {
-        let json = r.map_err(|e| e.to_string())?;
-        credentials.push(serde_json::from_str(&json).map_err(|e| e.to_string())?);
+        credentials.push(serde_json::from_str(&r?)?);
     }
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT did, key_id, public_key_hex, valid_from, valid_until, rotated_by \
-             FROM key_registry ORDER BY did, key_id",
-        )
-        .map_err(|e| e.to_string())?;
-    let key_rows = stmt
-        .query_map([], |r| {
-            Ok(KeyRegistryRow {
-                did: r.get(0)?,
-                key_id: r.get(1)?,
-                public_key_hex: r.get(2)?,
-                valid_from: r.get(3)?,
-                valid_until: r.get(4)?,
-                rotated_by: r.get(5)?,
-            })
+    let mut stmt = conn.prepare(
+        "SELECT did, key_id, public_key_hex, valid_from, valid_until, rotated_by \
+         FROM key_registry ORDER BY did, key_id",
+    )?;
+    let key_rows = stmt.query_map([], |r| {
+        Ok(KeyRegistryRow {
+            did: r.get(0)?,
+            key_id: r.get(1)?,
+            public_key_hex: r.get(2)?,
+            valid_from: r.get(3)?,
+            valid_until: r.get(4)?,
+            rotated_by: r.get(5)?,
         })
-        .map_err(|e| e.to_string())?;
-    let mut key_registry = Vec::new();
-    for r in key_rows {
-        key_registry.push(r.map_err(|e| e.to_string())?);
-    }
+    })?;
+    let key_registry = key_rows.collect::<Result<Vec<_>, _>>()?;
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT list_id, issuer_did, version, status_purpose, bits, bit_length \
-             FROM credential_status_lists ORDER BY list_id",
-        )
-        .map_err(|e| e.to_string())?;
-    let list_rows = stmt
-        .query_map([], |r| {
-            let bits: Vec<u8> = r.get(4)?;
-            Ok(StatusListRow {
-                list_id: r.get(0)?,
-                issuer_did: r.get(1)?,
-                version: r.get(2)?,
-                status_purpose: r.get(3)?,
-                bits_b64: base64::engine::general_purpose::STANDARD.encode(&bits),
-                bit_length: r.get(5)?,
-            })
+    let mut stmt = conn.prepare(
+        "SELECT list_id, issuer_did, version, status_purpose, bits, bit_length \
+         FROM credential_status_lists ORDER BY list_id",
+    )?;
+    let list_rows = stmt.query_map([], |r| {
+        let bits: Vec<u8> = r.get(4)?;
+        Ok(StatusListRow {
+            list_id: r.get(0)?,
+            issuer_did: r.get(1)?,
+            version: r.get(2)?,
+            status_purpose: r.get(3)?,
+            bits_b64: base64::engine::general_purpose::STANDARD.encode(&bits),
+            bit_length: r.get(5)?,
         })
-        .map_err(|e| e.to_string())?;
-    let mut status_lists = Vec::new();
-    for r in list_rows {
-        status_lists.push(r.map_err(|e| e.to_string())?);
-    }
+    })?;
+    let status_lists = list_rows.collect::<Result<Vec<_>, _>>()?;
     let mut status_list_credentials = Vec::new();
     if let Some(issuer) = signer {
         let (key, did) = (issuer.key(), issuer.did());
         let created = now_rfc3339();
         for list in status_lists.iter().filter(|l| l.issuer_did == did.as_str()) {
-            let bits = base64::engine::general_purpose::STANDARD
-                .decode(list.bits_b64.as_bytes())
-                .map_err(|e| format!("decode list bits: {e}"))?;
+            let bits =
+                base64::engine::general_purpose::STANDARD.decode(list.bits_b64.as_bytes())?;
             status_list_credentials.push(
                 alexandria_verify::vc::status::status_list_credential(
                     &list.list_id,
@@ -174,7 +163,10 @@ pub fn export_signed(conn: &Connection, signer: Option<&Issuer>) -> Result<Strin
                     &created,
                     key,
                 )
-                .map_err(|e| format!("sign status list: {e}"))?,
+                .map_err(|source| CredentialError::SignStatusList {
+                    list_id: list.list_id.clone(),
+                    source,
+                })?,
             );
         }
     }
@@ -186,7 +178,7 @@ pub fn export_signed(conn: &Connection, signer: Option<&Issuer>) -> Result<Strin
         status_lists,
         status_list_credentials,
     };
-    serde_json_canonicalizer::to_string(&bundle).map_err(|e| format!("canonicalize bundle: {e}"))
+    serde_json_canonicalizer::to_string(&bundle).map_err(CredentialError::Canonicalize)
 }
 
 /// Verify a bundle with no dependence on the calling node's state —
@@ -296,7 +288,7 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
 /// supersession: those are facts held elsewhere. [`NullStore`] reports them as
 /// "not known", and `revocation_unknown` says so rather than letting a caller
 /// read the result as a clean bill of health.
-pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, String> {
+pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, CredentialError> {
     use crate::domain::vc::{verify, AcceptanceDecision, NullStore, VerificationPolicy};
 
     let policy = VerificationPolicy::default();
@@ -332,7 +324,11 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Stri
     }
 
     if serde_json::from_value::<VerifiableCredential>(value.clone()).is_ok() {
-        let vc = store::credential_entry(&value).map_err(|error| format!("credential: {error}"))?;
+        let vc =
+            store::credential_entry(&value).map_err(|source| CredentialError::CredentialEntry {
+                index: None,
+                source,
+            })?;
         let results = vec![verify::verify_credential(&NullStore, &vc, now, &policy)];
         return Ok(tally(results, OfflineSource::Credential, true));
     }
@@ -352,19 +348,17 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Stri
     // Say what was expected rather than echoing whichever parse failed last —
     // the bundle error ("missing field `format_version`") is confusing when
     // the caller handed over a perfectly good credential.
-    Err("not recognised as a credential, a list of credentials, or a §20.4 bundle".into())
+    Err(CredentialError::Unrecognised)
 }
 
 pub fn verify_bundle_offline(
     bundle_json: &str,
     verification_time: &str,
-) -> Result<(u32, u32), String> {
+) -> Result<(u32, u32), CredentialError> {
     use crate::domain::vc::{verify, AcceptanceDecision, VerificationPolicy};
 
-    let value =
-        store::parse_credential_payload(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
-    let bundle = bundle_from_payload(&value)?
-        .ok_or_else(|| "parse bundle: not a §20.4 credential bundle".to_string())?;
+    let value = store::parse_credential_payload(bundle_json)?;
+    let bundle = bundle_from_payload(&value)?.ok_or(CredentialError::NotABundle)?;
 
     let store = BundleStore::new(&bundle)?;
 
@@ -399,7 +393,7 @@ struct BundleStore {
 impl BundleStore {
     /// Status-list bits are decoded up front so a corrupt bundle fails loudly
     /// here rather than being silently read as "nothing is revoked" later.
-    fn new(bundle: &CredentialBundle) -> Result<Self, String> {
+    fn new(bundle: &CredentialBundle) -> Result<Self, CredentialError> {
         use base64::Engine;
         let mut status_lists = Vec::with_capacity(bundle.status_lists.len());
         // A signed BitstringStatusListCredential is evidence on its own
@@ -407,21 +401,23 @@ impl BundleStore {
         // verifies, wins over the raw row for the same list id.
         for list_vc in &bundle.status_list_credentials {
             let Some(id) = list_vc.id.as_deref() else {
-                return Err("status list credential has no id".into());
+                return Err(CredentialError::StatusListWithoutId);
             };
             let key = alexandria_verify::did::resolve_did_key(&list_vc.issuer)
-                .map_err(|e| format!("status list issuer: {e}"))?;
+                .map_err(CredentialError::StatusListIssuer)?;
             let bits = alexandria_verify::vc::status::verify_status_list_credential(list_vc, &key)
-                .map_err(|e| format!("status list {id}: {e}"))?;
+                .map_err(|source| CredentialError::StatusListInvalid {
+                    list_id: id.to_string(),
+                    source,
+                })?;
             status_lists.push((id.to_string(), bits));
         }
         for list in &bundle.status_lists {
             if status_lists.iter().any(|(id, _)| id == &list.list_id) {
                 continue;
             }
-            let bits = base64::engine::general_purpose::STANDARD
-                .decode(list.bits_b64.as_bytes())
-                .map_err(|e| format!("decode list bits: {e}"))?;
+            let bits =
+                base64::engine::general_purpose::STANDARD.decode(list.bits_b64.as_bytes())?;
             status_lists.push((list.list_id.clone(), bits));
         }
         Ok(Self {
@@ -487,8 +483,9 @@ impl crate::domain::vc::VerificationStore for BundleStore {
 mod tests {
     use super::*;
     use crate::credentials::fixtures::{sample_request, setup, NOW};
-    use crate::credentials::{self, lifecycle};
+    use crate::credentials::{self, lifecycle, CredentialError};
     use crate::domain::vc::AcceptanceDecision;
+    use alexandria_verify::json::UntrustedJsonError;
 
     // ---- Shape-agnostic offline verification ---------------------------
 
@@ -533,11 +530,23 @@ mod tests {
         assert_eq!(verify_bundle_offline(&exact, NOW).unwrap(), (1, 1));
         exact.push(' ');
         let error = verify_bundle_offline(&exact, NOW).unwrap_err();
-        assert!(error.contains("exceeds"), "{error}");
+        assert!(
+            matches!(
+                error,
+                CredentialError::InvalidPayload(UntrustedJsonError::TooLarge { max: limit }) if limit == max
+            ),
+            "{error:?}"
+        );
 
         let duplicated = format!("{{\"format_version\":\"forged\",{}", &bundle[1..]);
         let error = verify_offline(&duplicated, NOW).unwrap_err();
-        assert!(error.contains("duplicate"), "{error}");
+        assert!(
+            matches!(
+                &error,
+                CredentialError::InvalidPayload(UntrustedJsonError::DuplicateKey(key)) if key == "format_version"
+            ),
+            "{error:?}"
+        );
 
         // The bundle fits, but one credential in it exceeds what a direct
         // import of that credential would accept.
@@ -546,7 +555,17 @@ mod tests {
             "a".repeat(alexandria_verify::vc::CREDENTIAL_JSON_LIMITS.max_string_bytes + 1),
         );
         let error = verify_offline(&value.to_string(), NOW).unwrap_err();
-        assert!(error.contains("credential 0"), "{error}");
+        assert!(
+            matches!(
+                error,
+                CredentialError::CredentialEntry {
+                    index: Some(0),
+                    source: UntrustedJsonError::StringTooLong { .. }
+                }
+            ),
+            "{error:?}"
+        );
+        assert!(error.to_string().starts_with("credential 0: "), "{error}");
     }
 
     #[test]
@@ -598,11 +617,10 @@ mod tests {
         // `format_version`, which made no sense to someone holding a
         // credential.
         let err = verify_offline(r#"{"hello":"world"}"#, NOW).unwrap_err();
-        assert!(err.contains("credential"), "got: {err}");
-        assert!(err.contains("bundle"), "got: {err}");
-        assert!(
-            !err.contains("format_version"),
-            "leaked parser detail: {err}"
+        assert!(matches!(err, CredentialError::Unrecognised), "{err:?}");
+        assert_eq!(
+            err.to_string(),
+            "not recognised as a credential, a list of credentials, or a §20.4 bundle"
         );
     }
 
@@ -876,8 +894,28 @@ mod tests {
             "status_lists": []
         });
         assert!(
-            verify_bundle_offline(&bundle.to_string(), NOW).is_err(),
+            matches!(
+                verify_bundle_offline(&bundle.to_string(), NOW),
+                Err(CredentialError::UnsupportedBundleVersion(version))
+                    if version == "alexandria-credential-bundle/0.0"
+            ),
             "must reject unknown format_version"
+        );
+    }
+
+    #[test]
+    fn the_bundle_verifier_refuses_what_is_not_a_bundle() {
+        let (db, key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        let json = serde_json::to_string(&vc).unwrap();
+        assert!(matches!(
+            verify_bundle_offline(&json, NOW),
+            Err(CredentialError::NotABundle)
+        ));
+        // The shape-agnostic verifier takes the same credential.
+        assert_eq!(
+            verify_offline(&json, NOW).unwrap().source,
+            OfflineSource::Credential
         );
     }
 }

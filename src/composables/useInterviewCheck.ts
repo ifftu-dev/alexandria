@@ -12,6 +12,7 @@
 import { readonly, ref } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
+import { errorMessage } from '@/utils/errorMessage'
 
 export interface IntegrityFlag {
   flag: string
@@ -82,7 +83,7 @@ export function useInterviewCheck() {
       unsent.value = null
       return sent
     } catch (cause) {
-      sendError.value = cause instanceof Error ? cause.message : String(cause)
+      sendError.value = errorMessage(cause)
       return null
     }
   }

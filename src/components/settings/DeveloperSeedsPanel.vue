@@ -189,7 +189,7 @@ async function reset() {
     <footer class="seed-footer">
       <div v-if="progress" role="status" aria-live="polite" class="mb-3 space-y-2 text-sm">
         <p>{{ progress.completed }} of {{ progress.total }} resources completed</p>
-        <progress class="h-2 w-full" :value="progress.completed" :max="progress.total" aria-label="Seeding progress" />
+        <progress data-progress class="h-2 w-full" :value="progress.completed" :max="progress.total" aria-label="Seeding progress" />
         <p>{{ progress.phase === 'compiling' ? 'Preparing grader' : progress.phase === 'completed' ? 'Finished' : 'Installing' }}: {{ progress.title }}</p>
         <p v-if="progress.phase === 'compiling'" class="text-xs text-muted-foreground">First-time setup can take a few minutes. You can use the app while it finishes.</p>
       </div>

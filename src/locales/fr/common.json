@@ -4,7 +4,8 @@
     "lockFailed": "Le nettoyage n’a pas pu se terminer. Votre contenu privé est masqué. Réessayez de terminer le verrouillage avant de déverrouiller un profil.",
     "name": "Alexandria",
     "initializing": "Initialisation…",
-    "tagline": "Je suis, parce que nous sommes tous"
+    "tagline": "Je suis, parce que nous sommes tous",
+    "takingLonger": "Cela prend plus de temps que prévu"
   },
   "actions": {
     "save": "Enregistrer",
