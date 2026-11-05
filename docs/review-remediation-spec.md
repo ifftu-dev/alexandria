@@ -1,7 +1,7 @@
 # Review remediation: notifications, motion, skill atlas and deepening follow-ups
 
 Status: active
-Updated: 2026-11-04
+Updated: 2026-11-05
 Triage: ready-for-agent
 Repos: alexandria
 
@@ -263,11 +263,12 @@ Bring the shipped features back in line with their specs and the repo's rules, i
   - The chat turn's outcome is renamed to say a fenced block was dropped.
   - The two-way conversion between access refusals and Studio errors is removed. Callers map explicitly.
 - **Accepted behaviour changes** (recorded because the deepening umbrella promised none outside its single exception):
-  - **Under-13 refusal.** Learners under 13 are refused learning-goal, job-description, document-claim and search AI checks. This is a policy decision; propose an ADR if it should bind future work.
+  - **Under-13 refusal.** Learners under 13 are refused learning-goal, job-description, document-claim and search AI checks, and the tutor answer check. This is a policy decision; propose an ADR if it should bind future work.
   - **Per-room call chat.** Call chat uses one gossip topic per room. Builds from before and after this change can't exchange call chat. Accepted pre-launch, with no compatibility shim.
-  - **AI timeout.** The tutor and Studio model timeout is 600 seconds.
-  - **Attempt gate.** It runs when an answer completes, and a failed save is recorded as a storage-error failure.
-  - **Cloud module.** It and issuer rotation are kept as prerequisites of the credentials module.
+  - **AI timeout.** The tutor, Studio, chat and AI sign-in model timeout is 600 seconds, with a 60-second idle limit.
+  - **Attempt gate.** It runs when an answer completes and at streaming checkpoints, and a failed save is recorded as a storage-error failure.
+  - **Cloud module.** `crate::cloud` (the Cloud origin, loopback check, HTTP client and signed-request helpers) and issuer rotation are kept as prerequisites of the credentials module.
+  - Confirmed against the code on 2026-11-04.
 - **Bookkeeping.**
   - The credentials ticket's header moves to done/implemented with a dated closing note.
   - The call-manager ticket gets a dated note recording the human device retest result.

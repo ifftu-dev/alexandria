@@ -1,6 +1,6 @@
 # Frontend hygiene and tracker bookkeeping
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: alexandria/docs/review-remediation-spec.md
 
@@ -28,7 +28,7 @@ Covers spec stories 71–72 and 74–75.
 
 ## Completion evidence — 2026-11-04 (code part)
 
-Bookkeeping doc edits proposed, awaiting go-ahead.
+Bookkeeping applied 2026-11-05 with the go-ahead: the credentials deepening ticket is closed with a dated note, and the parent spec's accepted behaviour changes are confirmed against the code, with four of them widened to match it.
 
 What changed:
 
