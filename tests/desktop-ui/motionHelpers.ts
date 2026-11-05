@@ -57,8 +57,8 @@ export async function expectPressFeedback(page: Page, target: Locator, mode: Mod
 }
 
 /**
- * Click `action` through the DOM and, two frames later, report the motion the
- * change started inside `surface` (the whole document by default): every
+ * Click `action` through the DOM and report the most motion the
+ * change starts inside `surface` (the whole document by default) over the next twenty frames: every
  * running animation or transition longer than the 0.01 ms Reduced/Off floor.
  * Progress indicators (`data-progress`) are exempt: Reduced keeps them turning.
  */
@@ -66,11 +66,17 @@ export async function motionAfter(action: Locator, surface?: Locator): Promise<n
   const scope = surface ? await surface.elementHandle() : null
   return action.evaluate((el, scoped) => new Promise<number>(resolve => {
     (el as HTMLElement).click()
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // Every frame for a while: a change that follows a route or a backend
+    // reply starts later on a slow machine than two frames after the click.
+    let most = 0, frames = 0
+    const sample = () => {
       const animations = scoped ? scoped.getAnimations({ subtree: true }) : document.getAnimations()
-      resolve(animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1
+      most = Math.max(most, animations.filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1
         && !(a.effect as KeyframeEffect | null)?.target?.closest('[data-progress]')).length)
-    }))
+      if (++frames < 20) requestAnimationFrame(sample)
+      else resolve(most)
+    }
+    requestAnimationFrame(() => requestAnimationFrame(sample))
   }), scope)
 }
 
