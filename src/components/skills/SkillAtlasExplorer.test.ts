@@ -349,7 +349,7 @@ it('draws nodes past the screen edge without letting them take focus, and follow
   const drawnOnly = () => nodes().filter(node => node.attributes('inert') !== undefined).map(node => node.find('.skill-name').text())
   expect(focusable()).toContain('Skill 0')
   expect(focusable()).not.toContain('Skill 59')
-  // Nodes past the edge join a few per frame.
+  // Nodes past the edge join one at a time when idle.
   for (let frame = 0; frame < 60 && drawnOnly().length === 0; frame++) await new Promise(resolve => setTimeout(resolve, 20))
   expect(drawnOnly().length).toBeGreaterThan(0)
   expect(nodes().map(node => node.find('.skill-name').text())).not.toContain('Skill 59')

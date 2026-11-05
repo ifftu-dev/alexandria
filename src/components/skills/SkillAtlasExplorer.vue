@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId,
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, MAP_HEIGHT, NODE_HEIGHT, NODE_WIDTH, REGION_HEADING_BOX, REGION_WIDTH, regionCamera } from './atlasLayout'
 import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
+import AtlasNodeLayer from './AtlasNodeLayer.vue'
 import { motionDuration, useMotion } from '@/composables/useMotion'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
@@ -97,11 +98,12 @@ function onScreen(node: AtlasNode): boolean {
 // compositor transform, so panning restyles and repaints nothing. Nodes are
 // drawn for the screen plus a margin. The drawn area moves when the screen
 // comes within half a margin of its edge, so the nodes it adds are still off
-// screen: they join the canvas a few per frame, and a pan never waits for them.
+// screen: they join the canvas one at a time when the main thread is idle,
+// and a pan never waits for them.
 /** How far past each edge of the screen the map is drawn, in pixels. */
 const DRAWN_MARGIN = 360
-/** How many off-screen nodes join the canvas per frame. */
-const NODES_PER_FRAME = 2
+/** How many off-screen nodes join the canvas at a time. */
+const NODES_PER_FRAME = 1
 function drawnAround(at: AtlasCamera): MapRect & { zoom: number; width: number } {
   return { ...rectAround(at, width.value + 2 * DRAWN_MARGIN, height + 2 * DRAWN_MARGIN), zoom: at.zoom, width: width.value }
 }
@@ -113,17 +115,20 @@ function keepDrawn(at: AtlasCamera): void {
   drawn.value = drawnAround(at)
 }
 watch([camera, width], () => keepDrawn(camera.value))
-const nextFrame = (run: () => void): void => {
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
-  else window.setTimeout(run, 16)
+// Canvas upkeep runs in a task of its own when the main thread is idle, never
+// inside a pointer event or a frame, so the frame that shows it does only the
+// rendering. (Safari has no idle callbacks, so there it is the next task.)
+const whenIdle = (run: () => void): void => {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 100 })
+  else window.setTimeout(run, 0)
 }
-// During a drag the drawn area follows on the next frame, never inside the
-// pointer event: it moves half a margin early, so nothing on screen waits.
+// During a drag the drawn area follows when idle: it moves half a margin
+// early, so nothing on screen waits for it.
 let followScheduled = false
 function followDrag(): void {
   if (followScheduled) return
   followScheduled = true
-  nextFrame(() => { followScheduled = false; if (drag?.target) keepDrawn(drag.target) })
+  whenIdle(() => { followScheduled = false; if (drag?.target) keepDrawn(drag.target) })
 }
 function placed(node: AtlasNode, rect: MapRect): boolean {
   const point = layout.value.positions.get(node.skill.id)
@@ -131,12 +136,15 @@ function placed(node: AtlasNode, rect: MapRect): boolean {
 }
 const drawnNodes = computed(() => props.model.nodes.filter(node => placed(node, drawn.value)))
 /**
- * The drawn nodes on the canvas: every one on screen, and the rest a few per
- * frame. Ordered by arrival, so a node that joins goes last and the memoised
+ * The drawn nodes on the canvas: every one on screen, and the rest one at a
+ * time. Ordered by arrival, so a node that joins goes last and the memoised
  * nodes before it keep their places (Vue matches a memoised list by position).
  */
 const canvasIds = shallowRef<readonly string[]>(drawnNodes.value.map(node => node.skill.id))
 const canvasNodes = computed(() => canvasIds.value.flatMap(id => { const node = nodesById.value.get(id); return node ? [node] : [] }))
+// Read through a getter by the node layer, so adding a node re-renders that
+// layer and not the whole explorer.
+const nodeLayer = { get items(): readonly AtlasNode[] { return canvasNodes.value } }
 let fillScheduled = false
 /** Drops nodes that left the drawn area and adds those on screen; with `more`, also a few of the rest. */
 function fillCanvas(more: boolean): void {
@@ -159,7 +167,7 @@ function fillCanvas(more: boolean): void {
   if (next.length !== canvasIds.value.length || next.some((id, index) => id !== canvasIds.value[index])) canvasIds.value = next
   if (waiting.length > added && !fillScheduled) {
     fillScheduled = true
-    nextFrame(() => { fillScheduled = false; fillCanvas(true) })
+    whenIdle(() => { fillScheduled = false; fillCanvas(true) })
   }
 }
 watch(drawnNodes, () => fillCanvas(false))
@@ -466,11 +474,13 @@ function setBloom(event: Event): void {
                   <path class="map-edge" :d="edgePaths.plain" /><path class="map-edge-head" :d="edgePaths.plainHeads" />
                   <path class="map-edge map-edge-active" :d="edgePaths.active" /><path class="map-edge-head map-edge-active" :d="edgePaths.activeHeads" />
                 </g>
-                <foreignObject v-for="node in canvasNodes" :key="node.skill.id" v-memo="[node, layout, locale, onScreen(node), node.skill.id === view.selectedSkillId, bloomMatch(node), dimmed(node), highlightedIds.includes(node.skill.id)]" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
-                  <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="!onScreen(node) || undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
-                    <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
-                  </button>
-                </foreignObject>
+                <AtlasNodeLayer v-slot="{ items }" :source="nodeLayer">
+                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, layout, locale, onScreen(node), node.skill.id === view.selectedSkillId, bloomMatch(node), dimmed(node), highlightedIds.includes(node.skill.id)]" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
+                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="!onScreen(node) || undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
+                      <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
+                    </button>
+                  </foreignObject>
+                </AtlasNodeLayer>
               </svg>
               <div ref="grabCover" class="atlas-grab-cover" hidden />
             </div>
