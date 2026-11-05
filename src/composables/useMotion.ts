@@ -1,4 +1,4 @@
-import { computed, readonly, ref, watch } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, readonly, ref, watch } from 'vue'
 import { useSetting } from './useSettings'
 
 export type MotionPreference = 'system' | 'reduced' | 'off'
@@ -113,6 +113,24 @@ export function animateMotion(element: Element, frames: Keyframe[], duration: Mo
   animation.addEventListener('finish', cleanup, { once: true })
   animation.addEventListener('cancel', cleanup, { once: true })
   return () => { animation.cancel(); cleanup() }
+}
+
+/** A surface that replaces the one before it arrives a little low and faded. */
+const SETTLE_IN: Keyframe[] = [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }]
+
+/**
+ * The settle-in for a surface that changes in place (a route, section, tab,
+ * stage or step): returns `settleIn(element)`, which settles the element in
+ * over `--duration-base`. Each call cancels the last one, and so does the
+ * owning component's unmount. Nothing waits for it; Reduced and Off skip it.
+ */
+export function useSettleIn(): (element: Element | null | undefined) => void {
+  let cancel = () => {}
+  if (getCurrentScope()) onScopeDispose(() => cancel())
+  return (element) => {
+    cancel()
+    cancel = element ? animateMotion(element, SETTLE_IN, 'base') : () => {}
+  }
 }
 
 /**

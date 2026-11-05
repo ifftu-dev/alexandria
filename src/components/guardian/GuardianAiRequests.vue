@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useGuardian } from '@/composables/useGuardian'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import type { GuardianAiRequest } from '@/types'
 
 /**
@@ -27,11 +27,11 @@ function rowRef(id: string, el: unknown) {
   else rows.delete(id)
 }
 
+const settleRow = useSettleIn()
 /** The decided request settles into its new state; the decision never waits for it. */
 async function confirmDecision(id: string) {
   await nextTick()
-  const row = rows.get(id)
-  if (row) animateMotion(row, [{ opacity: 0.6, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], 'base')
+  settleRow(rows.get(id))
 }
 
 async function load() {

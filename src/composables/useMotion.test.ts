@@ -89,3 +89,44 @@ test('after unlock the device setting drives motion and refreshes the pre-unlock
   vi.doUnmock('@tauri-apps/api/event')
   vi.unstubAllGlobals()
 })
+
+test('useSettleIn settles a surface in, cancels the last settle on the next one and on unmount', async () => {
+  vi.resetModules()
+  localStorage.clear()
+  vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }))
+  const { defineComponent, h } = await import('vue')
+  const { mount } = await import('@vue/test-utils')
+  const { useMotion, useSettleIn } = await import('./useMotion')
+  const animationFor = () => Object.assign(new EventTarget(), { cancel: vi.fn() }) as unknown as Animation
+  const first = document.createElement('div')
+  const second = document.createElement('div')
+  const firstAnimation = animationFor()
+  const secondAnimation = animationFor()
+  first.animate = vi.fn(() => firstAnimation)
+  second.animate = vi.fn(() => secondAnimation)
+  let settleIn: (element: Element | null | undefined) => void = () => {}
+  const wrapper = mount(defineComponent({ setup() { settleIn = useSettleIn(); return () => h('div') } }))
+
+  settleIn(first)
+  expect(first.animate).toHaveBeenCalledWith(
+    [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
+    expect.objectContaining({ duration: expect.any(Number) }),
+  )
+  settleIn(second)
+  expect(firstAnimation.cancel).toHaveBeenCalled()
+  settleIn(null)
+  expect(secondAnimation.cancel).toHaveBeenCalled()
+
+  const third = animationFor()
+  first.animate = vi.fn(() => third)
+  settleIn(first)
+  wrapper.unmount()
+  expect(third.cancel).toHaveBeenCalled()
+
+  useMotion().setPreference('reduced')
+  const reducedElement = document.createElement('div')
+  reducedElement.animate = vi.fn(() => animationFor())
+  mount(defineComponent({ setup() { useSettleIn()(reducedElement); return () => h('div') } }))
+  expect(reducedElement.animate).not.toHaveBeenCalled()
+  vi.unstubAllGlobals()
+})

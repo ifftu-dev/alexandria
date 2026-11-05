@@ -5,7 +5,7 @@
 // tutorials — one implicit chapter), the selected element's editor on
 // the right. Draft ↔ publish lifecycle wraps the existing
 // `publish_course` pipeline.
-import { computed, onBeforeUnmount, ref, toRaw, watch } from 'vue'
+import { computed, ref, toRaw, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -14,7 +14,7 @@ import OutlinePanel from '@/components/composer/OutlinePanel.vue'
 import ElementEditorHost from '@/components/composer/ElementEditorHost.vue'
 import StudioRunPanel from '@/components/composer/StudioRunPanel.vue'
 import { useStudio } from '@/composables/useStudio'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import type { CourseStudio, LessonFeedback, StudioDocument, StudioRun, TutorPolicy } from '@/types'
 import type {
   Chapter,
@@ -64,12 +64,8 @@ const stageIndex = computed(() => stages.value.findIndex(item => item.id === sta
 // The next stage settles in where the last one stood; saving and the switch
 // itself never wait for it.
 const stageContent = ref<HTMLElement | null>(null)
-let cancelStageMotion = () => {}
-watch(stage, () => {
-  cancelStageMotion()
-  if (stageContent.value) cancelStageMotion = animateMotion(stageContent.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
-}, { flush: 'post' })
-onBeforeUnmount(() => cancelStageMotion())
+const settleStage = useSettleIn()
+watch(stage, () => settleStage(stageContent.value), { flush: 'post' })
 async function saveStudio() {
   if (!courseStudio.value || !studioDirty.value) return true
   savingStudio.value = true; error.value = ''

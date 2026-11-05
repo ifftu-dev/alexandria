@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -7,7 +7,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useProfiles } from '@/composables/useProfiles'
 import { useP2P } from '@/composables/useP2P'
 import { useTheme } from '@/composables/useTheme'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import {
   shortcutName,
   useKeyboardShortcuts,
@@ -157,18 +157,14 @@ const sectionHeading = ref<HTMLElement | null>(null)
 const navigationHeading = ref<HTMLElement | null>(null)
 // The new section settles in where the old one stood; focus and scroll
 // never wait for it.
-let cancelSectionMotion = () => {}
+const settleSection = useSettleIn()
 watch(() => route.params.section, async () => {
   await nextTick()
   contentScroll.value?.scrollTo?.({ top: 0 })
   if (showingSection.value) sectionHeading.value?.focus({ preventScroll: true })
   else navigationHeading.value?.focus({ preventScroll: true })
-  cancelSectionMotion()
-  if (showingSection.value && contentScroll.value) {
-    cancelSectionMotion = animateMotion(contentScroll.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
-  }
+  settleSection(showingSection.value ? contentScroll.value : null)
 })
-onBeforeUnmount(() => cancelSectionMotion())
 
 // ---- Profile ----
 const displayName = ref('')

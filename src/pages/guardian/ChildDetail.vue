@@ -2,11 +2,11 @@
 // One child's mirrored activity: courses & progress, submissions,
 // classrooms — everything their device has pushed over the sealed
 // guardian link.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useGuardian, childAge } from '@/composables/useGuardian'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import { AppBadge, AppButton, AppTabs, EmptyState } from '@/components/ui'
 import type { GuardianLinkInfo } from '@/types'
 import GuardianAiRequests from '@/components/guardian/GuardianAiRequests.vue'
@@ -78,12 +78,8 @@ const tabs = computed(() => [
 // The chosen tab's content settles in where the last one stood. The tab
 // itself changes at once; nothing waits for the motion.
 const panel = ref<HTMLElement | null>(null)
-let cancelPanelMotion = () => {}
-watch(activeTab, () => {
-  cancelPanelMotion()
-  if (panel.value) cancelPanelMotion = animateMotion(panel.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 'base')
-}, { flush: 'post' })
-onBeforeUnmount(() => cancelPanelMotion())
+const settlePanel = useSettleIn()
+watch(activeTab, () => settlePanel(panel.value), { flush: 'post' })
 
 const courseTitle = (courseId: string) =>
   courses.value.find(c => c.id === courseId)?.title ?? `${courseId.slice(0, 12)}…`

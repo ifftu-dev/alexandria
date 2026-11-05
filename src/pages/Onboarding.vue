@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useProfiles } from '@/composables/useProfiles'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import { useGoals } from '@/composables/useGoals'
 import { isMac } from '@/composables/usePlatform'
 import { useLocale } from '@/composables/useLocale'
@@ -87,15 +87,13 @@ type Mode = 'create' | 'import'
 const mode = ref<Mode>('create')
 const step = ref<Step>('welcome')
 const stepContent = ref<HTMLElement | null>(null)
-let cancelStepMotion = () => {}
+const settleStep = useSettleIn()
 watch(step, () => {
-  cancelStepMotion()
+  settleStep(stepContent.value)
   if (!stepContent.value) return
-  cancelStepMotion = animateMotion(stepContent.value, [{ opacity: 0.5, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 'base')
   stepContent.value.focus({ preventScroll: true })
   stepContent.value.scrollIntoView?.({ block: 'start', behavior: 'instant' })
 }, { flush: 'post' })
-onUnmounted(() => cancelStepMotion())
 
 // ── Roles & birthdate ───────────────────────────────────────────
 // Everybody is a learner. Instructor and parent are added on top, in any
