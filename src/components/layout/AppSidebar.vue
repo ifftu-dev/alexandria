@@ -588,7 +588,7 @@ const classroomPreviews = computed(() =>
   inset: 0;
   border-radius: 50%;
   background: inherit;
-  animation: sb-ping 600ms cubic-bezier(0, 0, 0.2, 1) both;
+  animation: sb-ping var(--duration-emphasis) cubic-bezier(0, 0, 0.2, 1) both;
 }
 
 .sb-status-ended {
@@ -613,7 +613,7 @@ const classroomPreviews = computed(() =>
   background: none;
   border: none;
   cursor: pointer;
-  transition: gap 0.15s, opacity 0.15s;
+  transition: gap var(--duration-fast), opacity var(--duration-fast);
 }
 
 .sb-view-all:hover {
@@ -650,7 +650,7 @@ const classroomPreviews = computed(() =>
   z-index: 70;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 
 .sb-item:hover .sb-tooltip { opacity: 1; }

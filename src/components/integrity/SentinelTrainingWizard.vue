@@ -588,7 +588,7 @@ onBeforeUnmount(() => {
     <!-- Progress bar -->
     <div class="h-1 overflow-hidden rounded-t-xl bg-muted">
       <div
-        class="h-full rounded-full bg-primary transition-all duration-500"
+        class="h-full rounded-full bg-primary transition-all duration-(--duration-emphasis)"
         :style="{ width: `${progress}%` }"
       />
     </div>
@@ -746,7 +746,7 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-3">
             <div class="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
               <div
-                class="h-full rounded-full bg-primary transition-all duration-300"
+                class="h-full rounded-full bg-primary transition-all duration-(--duration-slow)"
                 :style="{ width: `${Math.min(100, (typedText.length / (typingText.length * 0.8)) * 100)}%` }"
               />
             </div>
@@ -790,7 +790,7 @@ onBeforeUnmount(() => {
           <button
             v-for="target in mouseTargets"
             :key="target.id"
-            class="absolute flex items-center justify-center transition-all duration-300"
+            class="absolute flex items-center justify-center transition-all duration-(--duration-slow)"
             :class="target.hit
               ? 'scale-0 opacity-0'
               : 'scale-100 opacity-100 hover:scale-110'"
@@ -1074,7 +1074,7 @@ onBeforeUnmount(() => {
             <div class="relative mx-auto aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted/30">
               <div
                 v-if="activeGazeDot"
-                class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-4 ring-primary/30 transition-all duration-300"
+                class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-4 ring-primary/30 transition-all duration-(--duration-slow)"
                 :style="{ left: `${activeGazeDot.x * 100}%`, top: `${activeGazeDot.y * 100}%` }"
               />
             </div>

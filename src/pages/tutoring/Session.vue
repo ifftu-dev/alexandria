@@ -728,7 +728,7 @@ function peerInitials(nodeId: string): string {
                           stroke-width="3"
                           :stroke-dasharray="`${micLevel * 238.8} 238.8`"
                           stroke-linecap="round"
-                          class="transition-[stroke-dasharray,stroke] duration-75"
+                          class="transition-[stroke-dasharray,stroke] duration-(--duration-fast)"
                         />
                       </svg>
                     </div>
@@ -763,7 +763,7 @@ function peerInitials(nodeId: string): string {
                       <div
                         v-for="i in 5"
                         :key="i"
-                        class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                        class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-(--duration-fast)"
                         :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
                         :class="[
                           micLevel >= (i * 0.18)
@@ -829,7 +829,7 @@ function peerInitials(nodeId: string): string {
                         <div
                           v-for="i in 4"
                           :key="i"
-                          class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                          class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-(--duration-fast)"
                           :style="{ height: outputLevel >= (i * 0.2) ? `${3 + i * 2}px` : '2px' }"
                           :class="[
                             outputLevel >= (i * 0.2)
@@ -913,7 +913,7 @@ function peerInitials(nodeId: string): string {
                       <div
                         v-for="i in 5"
                         :key="i"
-                        class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                        class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-(--duration-fast)"
                         :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
                         :class="[
                           micLevel >= (i * 0.18)
@@ -966,7 +966,7 @@ function peerInitials(nodeId: string): string {
                         <div
                           v-for="i in 4"
                           :key="i"
-                          class="w-[2px] rounded-[1px] transition-[height,background-color] duration-75"
+                          class="w-[2px] rounded-[1px] transition-[height,background-color] duration-(--duration-fast)"
                           :style="{ height: outputLevel >= (i * 0.2) ? `${2 + i * 1.5}px` : '2px' }"
                           :class="[
                             outputLevel >= (i * 0.2)
@@ -1045,7 +1045,7 @@ function peerInitials(nodeId: string): string {
                 stroke-width="2.5"
                 :stroke-dasharray="`${micLevel * 125.6} 125.6`"
                 stroke-linecap="round"
-                class="transition-[stroke-dasharray,stroke] duration-75"
+                class="transition-[stroke-dasharray,stroke] duration-(--duration-fast)"
               />
             </svg>
           </div>
@@ -1106,7 +1106,7 @@ function peerInitials(nodeId: string): string {
                 stroke-width="2.5"
                 :stroke-dasharray="`${outputLevel * 125.6} 125.6`"
                 stroke-linecap="round"
-                class="transition-[stroke-dasharray,stroke] duration-75"
+                class="transition-[stroke-dasharray,stroke] duration-(--duration-fast)"
               />
             </svg>
           </div>
@@ -1130,10 +1130,10 @@ function peerInitials(nodeId: string): string {
       <!-- Chat sidebar (full overlay on mobile, side panel on desktop) -->
       <!-- Backdrop (mobile only) -->
       <Transition
-        enter-active-class="transition-opacity duration-150 ease-out"
+        enter-active-class="transition-opacity duration-(--duration-fast) ease-out"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-opacity duration-100 ease-in"
+        leave-active-class="transition-opacity duration-(--duration-fast) ease-in"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
@@ -1145,10 +1145,10 @@ function peerInitials(nodeId: string): string {
       </Transition>
 
       <Transition
-        enter-active-class="transition-all duration-200 ease-out"
+        enter-active-class="transition-all duration-(--duration-base) ease-out"
         enter-from-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
         enter-to-class="translate-x-0 sm:w-72 opacity-100"
-        leave-active-class="transition-all duration-150 ease-in"
+        leave-active-class="transition-all duration-(--duration-fast) ease-in"
         leave-from-class="translate-x-0 sm:w-72 opacity-100"
         leave-to-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
       >
@@ -1274,10 +1274,10 @@ function peerInitials(nodeId: string): string {
 
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
@@ -1359,10 +1359,10 @@ function peerInitials(nodeId: string): string {
     <!-- Leave confirmation modal -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
@@ -1392,10 +1392,10 @@ function peerInitials(nodeId: string): string {
     <!-- Ticket fallback modal (when clipboard API fails) -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
@@ -1426,10 +1426,10 @@ function peerInitials(nodeId: string): string {
     <!-- QR invite modal -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >

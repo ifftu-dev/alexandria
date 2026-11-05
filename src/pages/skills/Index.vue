@@ -363,7 +363,7 @@ async function goalSkill(skill: SkillInfo) {
   background: color-mix(in srgb, var(--app-primary) 12%, transparent);
   color: var(--app-primary);
   white-space: nowrap;
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 .goal-btn:hover {
   background: color-mix(in srgb, var(--app-primary) 22%, transparent);

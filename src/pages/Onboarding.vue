@@ -1221,7 +1221,7 @@ function enterApp() {
   font-weight: 700;
   border: 1.5px solid rgb(55, 65, 81);
   background: transparent;
-  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 .onb-step__label {
   font-weight: 500;
@@ -1297,7 +1297,7 @@ function enterApp() {
   border: 1.5px solid var(--app-border);
   text-align: start;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
 }
 .onb-role:hover {
   border-color: color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
@@ -1315,7 +1315,7 @@ function enterApp() {
   place-items: center;
   background: color-mix(in srgb, var(--app-foreground) 8%, transparent);
   color: var(--app-muted-foreground);
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 .onb-role--sel .onb-role__ic {
   background: var(--app-primary);
@@ -1346,7 +1346,7 @@ function enterApp() {
   border: 2px solid var(--app-border);
   display: grid;
   place-items: center;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
 }
 .onb-role--sel .onb-role__chk {
   background: var(--app-primary);
@@ -1392,7 +1392,7 @@ function enterApp() {
   font-size: 0.9375rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
+  transition: background var(--duration-fast), box-shadow var(--duration-fast), opacity var(--duration-fast);
   box-shadow: 0 10px 24px -10px var(--app-primary);
 }
 .onb-cta:hover:not(:disabled) {
@@ -1420,7 +1420,7 @@ function enterApp() {
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
 }
 .onb-secondary:hover {
   background: color-mix(in srgb, var(--app-foreground) 6%, transparent);

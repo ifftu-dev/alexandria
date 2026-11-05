@@ -427,7 +427,7 @@ onMounted(async () => {
               cx="23" cy="23" r="18" fill="none" stroke="var(--app-primary)" stroke-width="4"
               stroke-linecap="round" :stroke-dasharray="ringDash"
               :stroke-dashoffset="ringDash * (1 - pathPct(goalPaths[t.id]) / 100)"
-              transform="rotate(-90 23 23)" class="transition-all duration-500"
+              transform="rotate(-90 23 23)" class="transition-all duration-(--duration-emphasis)"
             />
             <text x="23" y="23" text-anchor="middle" dominant-baseline="central"
               font-size="11" font-weight="600" fill="var(--app-foreground)">

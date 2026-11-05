@@ -1534,9 +1534,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     <!-- ============================== -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-opacity duration-150 ease-out"
+        enter-active-class="transition-opacity duration-(--duration-fast) ease-out"
         enter-from-class="opacity-0"
-        leave-active-class="transition-opacity duration-150 ease-in"
+        leave-active-class="transition-opacity duration-(--duration-fast) ease-in"
         leave-to-class="opacity-0"
       >
         <div
@@ -1545,9 +1545,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           @click.self="mobileNavOpen = false"
         >
           <Transition
-            enter-active-class="transition-transform duration-200 ease-out"
+            enter-active-class="transition-transform duration-(--duration-base) ease-out"
             enter-from-class="translate-y-full"
-            leave-active-class="transition-transform duration-150 ease-in"
+            leave-active-class="transition-transform duration-(--duration-fast) ease-in"
             leave-to-class="translate-y-full"
             appear
           >
@@ -1661,7 +1661,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 
 <style scoped>
 .progress-fill {
-  transition: width 560ms var(--ease-settle);
+  transition: width var(--duration-emphasis) var(--ease-settle);
 }
 
 </style>

@@ -193,7 +193,7 @@ onMounted(async () => {
 .cc-thumb__img {
   width: 100%;
   height: 100%;
-  transition: transform 0.4s ease;
+  transition: transform var(--duration-slow) ease;
 }
 
 .cc-thumb__img :deep(svg),

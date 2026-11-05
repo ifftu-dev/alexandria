@@ -85,7 +85,7 @@ export function useMotion() {
 }
 
 /** Duration tokens in main.css (`--duration-<name>`). */
-export type MotionDuration = 'fast' | 'base' | 'slow' | 'emphasis' | 'reveal'
+export type MotionDuration = 'fast' | 'base' | 'slow' | 'emphasis' | 'reveal' | 'stagger'
 // Used only where the stylesheet is absent (unit tests, a failed CSS load).
 const FALLBACK_DURATION_MS = 200
 

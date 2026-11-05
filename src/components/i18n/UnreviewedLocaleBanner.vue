@@ -74,7 +74,7 @@ function dismiss() {
   border-radius: var(--radius, 0.5rem);
   font-weight: 500;
   background: color-mix(in srgb, currentColor 10%, transparent);
-  transition: background-color 0.15s;
+  transition: background-color var(--duration-fast);
 }
 
 .unreviewed-banner__dismiss:hover {

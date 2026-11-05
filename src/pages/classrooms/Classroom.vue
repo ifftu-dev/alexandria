@@ -515,20 +515,20 @@ onBeforeUnmount(() => {
     <!-- ── Mobile channel drawer ─────────────────────────────── -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-200 ease-out"
+        enter-active-class="transition duration-(--duration-base) ease-out"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition duration-150 ease-in"
+        leave-active-class="transition duration-(--duration-fast) ease-in"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
         <div v-if="showChannelDrawer" class="lg:hidden fixed inset-0 z-40" @click.self="showChannelDrawer = false">
           <div class="absolute inset-0 bg-black/50" @click="showChannelDrawer = false" />
           <Transition
-            enter-active-class="transition duration-200 ease-out"
+            enter-active-class="transition duration-(--duration-base) ease-out"
             enter-from-class="-translate-x-full"
             enter-to-class="translate-x-0"
-            leave-active-class="transition duration-150 ease-in"
+            leave-active-class="transition duration-(--duration-fast) ease-in"
             leave-from-class="translate-x-0"
             leave-to-class="-translate-x-full"
             appear
@@ -596,20 +596,20 @@ onBeforeUnmount(() => {
     <!-- ── Mobile members drawer ─────────────────────────────── -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-200 ease-out"
+        enter-active-class="transition duration-(--duration-base) ease-out"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition duration-150 ease-in"
+        leave-active-class="transition duration-(--duration-fast) ease-in"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
         <div v-if="showMembersDrawer" class="xl:hidden fixed inset-0 z-40" @click.self="showMembersDrawer = false">
           <div class="absolute inset-0 bg-black/50" @click="showMembersDrawer = false" />
           <Transition
-            enter-active-class="transition duration-200 ease-out"
+            enter-active-class="transition duration-(--duration-base) ease-out"
             enter-from-class="translate-x-full"
             enter-to-class="translate-x-0"
-            leave-active-class="transition duration-150 ease-in"
+            leave-active-class="transition duration-(--duration-fast) ease-in"
             leave-from-class="translate-x-0"
             leave-to-class="translate-x-full"
             appear

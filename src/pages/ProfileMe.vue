@@ -186,7 +186,7 @@ onMounted(async () => {
   background: var(--app-card);
   box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
   text-align: left;
-  transition: box-shadow 0.15s;
+  transition: box-shadow var(--duration-fast);
 }
 .stat-card:hover {
   box-shadow: 0 4px 12px rgb(0 0 0 / 8%);

@@ -89,10 +89,10 @@ onUnmounted(() => {
 
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-100 ease-out"
+        enter-active-class="transition duration-(--duration-fast) ease-out"
         enter-from-class="opacity-0 scale-95"
         enter-to-class="opacity-100 scale-100"
-        leave-active-class="transition duration-75 ease-in"
+        leave-active-class="transition duration-(--duration-fast) ease-in"
         leave-from-class="opacity-100 scale-100"
         leave-to-class="opacity-0 scale-95"
       >
@@ -127,7 +127,7 @@ onUnmounted(() => {
   color: var(--app-muted-foreground);
   border-radius: 9999px;
   cursor: pointer;
-  transition: color 0.15s;
+  transition: color var(--duration-fast);
 }
 
 .infotip-trigger svg {

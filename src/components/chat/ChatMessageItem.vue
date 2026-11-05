@@ -180,7 +180,7 @@ async function copy() {
 
 <style scoped>
 .chat-you { max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 1.125rem 1.125rem 0.375rem 1.125rem; background: color-mix(in srgb, var(--app-foreground) 8%, transparent); padding: 0.625rem 0.875rem; line-height: 1.5; color: var(--app-foreground); }
-.chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.125rem; margin-top: 0.375rem; font-size: 0.75rem; color: var(--app-muted-foreground); opacity: 0; transition: opacity 0.15s; }
+.chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.125rem; margin-top: 0.375rem; font-size: 0.75rem; color: var(--app-muted-foreground); opacity: 0; transition: opacity var(--duration-fast); }
 .group:hover .chat-actions, .group:focus-within .chat-actions, .chat-actions--show { opacity: 1; }
 @media (hover: none) { .chat-actions { opacity: 1; } }
 .chat-attr { margin-inline-start: 0.375rem; }

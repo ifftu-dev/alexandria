@@ -433,8 +433,8 @@ function formatDate(value: string) {
 .chat-more button { display: flex; width: 100%; align-items: center; gap: 0.625rem; padding: 0.5rem 0.625rem; border-radius: 0.5rem; text-align: start; font-size: 0.84375rem; }
 .chat-more button:hover { background: var(--app-muted); }
 .chat-more svg { width: 1rem; height: 1rem; flex: none; color: var(--app-muted-foreground); }
-.chat-more-switch { position: relative; width: 1.75rem; height: 1rem; flex: none; border-radius: 999px; background: var(--app-border); transition: background 0.15s; }
-.chat-more-switch::after { content: ""; position: absolute; top: 0.125rem; inset-inline-start: 0.125rem; width: 0.75rem; height: 0.75rem; border-radius: 999px; background: var(--app-card); transition: transform 0.15s; }
+.chat-more-switch { position: relative; width: 1.75rem; height: 1rem; flex: none; border-radius: 999px; background: var(--app-border); transition: background var(--duration-fast); }
+.chat-more-switch::after { content: ""; position: absolute; top: 0.125rem; inset-inline-start: 0.125rem; width: 0.75rem; height: 0.75rem; border-radius: 999px; background: var(--app-card); transition: transform var(--duration-fast); }
 .chat-more-switch.on { background: var(--app-primary); }
 .chat-more-switch.on::after { transform: translateX(0.75rem); }
 [dir="rtl"] .chat-more-switch.on::after { transform: translateX(-0.75rem); }

@@ -116,7 +116,7 @@ async function add() {
 <style scoped>
 .chat-switch { position: relative; width: 1.75rem; height: 1rem; flex: none; border-radius: 999px; background: var(--app-border); }
 .chat-switch[data-on='true'] { background: var(--app-primary); }
-.chat-switch::after { content: ''; position: absolute; top: 2px; inset-inline-start: 2px; width: 12px; height: 12px; border-radius: 999px; background: #fff; transition: inset-inline-start 150ms; }
+.chat-switch::after { content: ''; position: absolute; top: 2px; inset-inline-start: 2px; width: 12px; height: 12px; border-radius: 999px; background: #fff; transition: inset-inline-start var(--duration-fast); }
 .chat-switch[data-on='true']::after { inset-inline-start: 14px; }
 .chat-switch:focus-visible { outline: 2px solid var(--app-ring); outline-offset: 2px; }
 </style>

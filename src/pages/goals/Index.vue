@@ -233,7 +233,7 @@ const dash = computed(() => 2 * Math.PI * 20)
               :stroke-dasharray="dash"
               :stroke-dashoffset="dash * (1 - pct(paths[t.id]) / 100)"
               transform="rotate(-90 26 26)"
-              class="transition-all duration-500"
+              class="transition-all duration-(--duration-emphasis)"
             />
             <text x="26" y="26" text-anchor="middle" dominant-baseline="central"
               font-size="12" font-weight="600" fill="var(--app-foreground)">

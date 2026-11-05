@@ -85,8 +85,8 @@ const visible = computed(
 .update-banner-enter-active,
 .update-banner-leave-active {
   transition:
-    transform 0.2s ease,
-    opacity 0.2s ease;
+    transform var(--duration-base) ease,
+    opacity var(--duration-base) ease;
 }
 .update-banner-enter-from,
 .update-banner-leave-to {

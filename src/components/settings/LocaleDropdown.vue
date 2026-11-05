@@ -135,7 +135,7 @@ onBeforeUnmount(unbind)
   background: var(--app-background);
   color: var(--app-foreground);
   font-size: 0.875rem;
-  transition: border-color 0.15s, background-color 0.15s;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
 }
 .locale-dd__trigger:hover {
   border-color: color-mix(in srgb, var(--app-primary) 50%, transparent);
@@ -153,7 +153,7 @@ onBeforeUnmount(unbind)
   width: 1rem;
   height: 1rem;
   color: var(--app-muted-foreground);
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast);
 }
 .locale-dd__chev--open {
   transform: rotate(180deg);
@@ -190,7 +190,7 @@ onBeforeUnmount(unbind)
   border-radius: 0.5rem;
   background: transparent;
   text-align: start;
-  transition: background-color 0.12s;
+  transition: background-color var(--duration-fast);
 }
 .locale-dd__item:hover {
   background: color-mix(in srgb, var(--app-muted) 50%, transparent);
@@ -225,7 +225,7 @@ onBeforeUnmount(unbind)
 
 .locale-dd-menu-enter-active,
 .locale-dd-menu-leave-active {
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition: opacity var(--duration-fast) ease, transform var(--duration-fast) ease;
 }
 .locale-dd-menu-enter-from,
 .locale-dd-menu-leave-to {

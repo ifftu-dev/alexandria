@@ -881,7 +881,7 @@ function onSectionClick(id: SettingsSectionId) {
                         </div>
                         <div class="h-2 rounded-full bg-muted/50 overflow-hidden">
                           <div
-                            class="h-full rounded-full transition-all duration-300"
+                            class="h-full rounded-full transition-all duration-(--duration-slow)"
                             :class="usageColor(storageStats.usage_percent)"
                             :style="{ width: storageStats.usage_percent !== null ? `${Math.min(storageStats.usage_percent, 100)}%` : '0%' }"
                           />

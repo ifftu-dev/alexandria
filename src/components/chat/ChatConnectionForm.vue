@@ -407,7 +407,7 @@ async function save() {
 .connect-seg button { flex: 1; min-height: 2.25rem; border-radius: 0.5625rem; font-size: 0.8125rem; color: var(--app-muted-foreground); }
 .connect-seg button.on { background: var(--app-card); color: var(--app-foreground); font-weight: 500; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
 .connect-adv summary { cursor: pointer; font-size: 0.8125rem; color: var(--app-muted-foreground); list-style: none; display: inline-flex; align-items: center; gap: 0.25rem; }
-.connect-adv summary::before { content: "›"; display: inline-block; transition: transform 0.15s; }
+.connect-adv summary::before { content: "›"; display: inline-block; transition: transform var(--duration-fast); }
 .connect-adv[open] summary::before { transform: rotate(90deg); }
 .connect-adv summary::-webkit-details-marker { display: none; }
 </style>

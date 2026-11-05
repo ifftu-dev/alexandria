@@ -203,7 +203,7 @@ watch(() => props.contentCid, loadPdf)
         </div>
         <div class="h-1 overflow-hidden rounded-full bg-muted/30">
           <div
-            class="h-full rounded-full bg-primary transition-all duration-300"
+            class="h-full rounded-full bg-primary transition-all duration-(--duration-slow)"
             :style="{ width: `${progressPercent}%` }"
           />
         </div>

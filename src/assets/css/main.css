@@ -106,6 +106,8 @@
   --duration-slow: 320ms;
   --duration-emphasis: 650ms;
   --duration-reveal: 800ms;
+  /* The step between items that arrive in sequence (staggered entries). */
+  --duration-stagger: 60ms;
   --duration-progress-reduced: 3s;
   --transition-fast: var(--duration-fast) var(--ease-settle);
   --transition-base: var(--duration-base) var(--ease-settle);
@@ -205,6 +207,8 @@
   --color-governance-hover: var(--app-governance-hover);
   --color-governance-muted: var(--app-governance-muted);
   --color-governance-dark: var(--app-governance-dark);
+  /* Bare `transition` utilities take the fast token, like everything else. */
+  --default-transition-duration: var(--duration-fast);
 }
 
 /* ============================================
@@ -985,7 +989,7 @@ select optgroup {
 .phase-bar-fill {
   height: 100%;
   border-radius: 2px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width var(--duration-emphasis) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Vote gauge */
@@ -999,12 +1003,12 @@ select optgroup {
 
 .vote-gauge-for {
   background: var(--app-success);
-  transition: width 0.5s ease;
+  transition: width var(--duration-emphasis) ease;
 }
 
 .vote-gauge-against {
   background: var(--app-error);
-  transition: width 0.5s ease;
+  transition: width var(--duration-emphasis) ease;
 }
 
 /* Governance accent button */
@@ -1222,15 +1226,15 @@ select optgroup {
 }
 
 .sf-drift-slow {
-  animation: sf-settle 480ms var(--ease-settle) both;
+  animation: sf-settle var(--duration-slow) var(--ease-settle) both;
 }
 
 .sf-drift-mid {
-  animation: sf-settle 560ms var(--ease-settle) both;
+  animation: sf-settle var(--duration-emphasis) var(--ease-settle) both;
 }
 
 .sf-drift-fast {
-  animation: sf-settle 640ms var(--ease-settle) both;
+  animation: sf-settle var(--duration-emphasis) var(--ease-settle) both;
 }
 
 .sf-pulse {
@@ -1271,7 +1275,7 @@ select optgroup {
 .sf-line-draw {
   stroke-dasharray: 1000;
   stroke-dashoffset: 0;
-  animation: sf-line-draw 640ms var(--ease-settle) backwards;
+  animation: sf-line-draw var(--duration-emphasis) var(--ease-settle) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

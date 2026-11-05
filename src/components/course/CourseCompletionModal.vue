@@ -98,6 +98,10 @@ function rand(min: number, max: number) {
 
 function spawnConfetti() {
   if (reduced.value || document.hidden) return
+  // Each piece starts within one stagger step and lands inside the emphasis
+  // token, so the clear-up timer below never cuts a piece short.
+  const stagger = motionDuration('stagger')
+  const emphasis = motionDuration('emphasis')
   const n = 28
   const out: Piece[] = []
   for (let i = 0; i < n; i++) {
@@ -107,8 +111,8 @@ function spawnConfetti() {
       tx: `${Math.cos(angle) * dist}px`,
       ty: `${Math.sin(angle) * dist - rand(40, 140)}px`,
       rot: `${rand(-180, 180)}deg`,
-      delay: `${rand(0, 60)}ms`,
-      dur: `${rand(420, 580)}ms`,
+      delay: `${rand(0, stagger)}ms`,
+      dur: `${rand(0.65, 0.89) * emphasis}ms`,
       color: COLORS[i % COLORS.length] as string,
       left: `${rand(44, 56)}%`,
       size: `${rand(6, 11)}px`,
@@ -128,7 +132,7 @@ watch(isOpen, (open) => {
     endorsementImportJson.value = ''
     endorsementUiMessage.value = ''
     spawnConfetti()
-    // Every piece lands within the emphasis token (delay + duration < 650 ms).
+    // Every piece lands within the emphasis token (stagger + 0.89 × emphasis).
     confettiTimer = setTimeout(clearConfetti, motionDuration('emphasis'))
     document.addEventListener('visibilitychange', clearConfetti)
   } else {
@@ -295,7 +299,7 @@ function continueToDashboard() {
                 v-for="(it, i) in items"
                 :key="it.id"
                 class="mint-item"
-                :style="{ animationDelay: `${120 + i * 90}ms` }"
+                :style="{ '--mint-index': i }"
               >
                 <span class="mint-chip" :class="kindMeta(it.kind).dot">
                   <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -604,7 +608,7 @@ function continueToDashboard() {
   color: #0b1220;
   background: linear-gradient(135deg, #fde68a 0%, #34d399 55%, #10b981 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  animation: emblem-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.05s both;
+  animation: emblem-pop var(--duration-emphasis) cubic-bezier(0.34, 1.56, 0.64, 1) var(--duration-stagger) both;
 }
 .emblem-ring {
   position: absolute;
@@ -637,7 +641,7 @@ function continueToDashboard() {
   height: 220%;
   background: linear-gradient(75deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   transform: rotate(8deg);
-  animation: shine var(--duration-slow) ease-out 100ms both;
+  animation: shine var(--duration-slow) ease-out calc(var(--duration-stagger) * 2) both;
 }
 
 .eyebrow {
@@ -647,20 +651,20 @@ function continueToDashboard() {
   font-weight: 700;
   color: #fbbf24;
   margin: 0;
-  animation: fade-up 0.5s ease 0.15s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 3) both;
 }
 .title {
   font-size: 1.5rem;
   font-weight: 800;
   margin: 0.15rem 0 0.1rem;
   color: var(--app-foreground);
-  animation: fade-up 0.5s ease 0.22s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 4) both;
 }
 .course-name {
   font-size: 0.95rem;
   color: var(--app-muted-foreground);
   margin: 0;
-  animation: fade-up 0.5s ease 0.28s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 5) both;
 }
 
 .chips {
@@ -677,7 +681,7 @@ function continueToDashboard() {
   background: rgba(52, 211, 153, 0.12);
   border: 1px solid rgba(52, 211, 153, 0.3);
   color: #6ee7b7;
-  animation: chip-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: chip-in var(--duration-slow) cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 .chip-more {
   background: rgba(148, 163, 184, 0.12);
@@ -692,7 +696,7 @@ function continueToDashboard() {
   border: 1px solid var(--app-border);
   background: rgba(148, 163, 184, 0.06);
   text-align: left;
-  animation: fade-up 0.5s ease 0.4s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 7) both;
 }
 .mint-row {
   display: flex;
@@ -746,7 +750,9 @@ function continueToDashboard() {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  animation: chip-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: chip-in var(--duration-slow) cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  /* Each credential arrives one stagger step after the one above it. */
+  animation-delay: calc(var(--duration-stagger) * (var(--mint-index, 0) + 2));
 }
 .mint-chip {
   flex: none;
@@ -1001,8 +1007,8 @@ function continueToDashboard() {
 }
 
 /* Modal transition */
-.celebrate-enter-active { transition: opacity 0.25s ease; }
-.celebrate-leave-active { transition: opacity 0.2s ease; }
+.celebrate-enter-active { transition: opacity var(--duration-base) ease; }
+.celebrate-leave-active { transition: opacity var(--duration-base) ease; }
 .celebrate-enter-from,
 .celebrate-leave-to { opacity: 0; }
 

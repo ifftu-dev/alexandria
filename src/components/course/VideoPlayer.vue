@@ -628,7 +628,7 @@ onUnmounted(() => {
       </button>
 
       <div
-        class="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2 pt-8 text-white transition-opacity duration-200"
+        class="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2 pt-8 text-white transition-opacity duration-(--duration-base)"
         :class="showControls ? 'opacity-100' : 'pointer-events-none opacity-0'"
         @click.stop
       >
@@ -786,7 +786,7 @@ onUnmounted(() => {
   border-radius: 0.375rem;
   padding: 0.375rem;
   color: rgba(255, 255, 255, 0.94);
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
 .video-icon-btn:hover {
