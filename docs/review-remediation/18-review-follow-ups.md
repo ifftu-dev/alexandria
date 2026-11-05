@@ -1,6 +1,6 @@
 # Review follow-ups
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: alexandria/docs/review-remediation-spec.md
 
@@ -123,3 +123,7 @@ Checks: `cargo fmt --check`; `cargo clippy -p alexandria-node --all-targets -- -
 Text the webview sees: unchanged. The renamed type and constant are TypeScript names only.
 
 Since closed (2026-11-05): `GuardianApproval` (the ward's own view, from `ai_connection_approvals`) moved to `domain::guardian_ai` with the closed `GuardianAiRequestStatus`, mirrored by `ChatGuardianApproval` in `src/types/index.ts`, and `PendingApproval` and `ApprovalRequestPayload` became one `ApprovalRequest`, sealed as it is (`a_request_keeps_the_peer_to_peer_field_names` pins its wire fields). The notes in tickets 06 and 13 that name `scripts/chat-vocab.json` and `NotificationError::Profile` describe what shipped then and are left as written.
+
+## Closed — 2026-11-05
+
+Every item above landed with the evidence recorded in its section; the follow-up that cancels scheduled canvas upkeep on unmount came from CI. `scripts/check.sh`, the desktop UI suite and every CI check pass. Ticket 17 remains with a person.
