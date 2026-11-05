@@ -34,15 +34,22 @@ export function createAtlasPresenter(t: AtlasTranslate) {
     return field.name ?? t('skills.atlas.unknownField', { id: field.id })
   }
 
-  /** The visible evidence line: earned Bloom, its absence, or Ready. */
+  /** Earned, Ready next (every prerequisite earned) or Ready. */
+  function state(node: Pick<AtlasNode, 'status' | 'readyNext'>): string {
+    if (node.status === 'earned') return t('skills.atlas.earned')
+    return t(node.readyNext ? 'skills.atlas.readyNext' : 'skills.atlas.ready')
+  }
+
+  /** The visible evidence line: earned Bloom, its absence, Ready next or Ready. */
   function evidence(node: AtlasNode): string {
-    if (node.status === 'ready') return t('skills.atlas.ready')
+    if (node.status === 'ready') return state(node)
     return node.earnedBloom ? bloomLabel(node.earnedBloom.name) : t('skills.atlas.levelUnavailable')
   }
 
   /**
-   * Name, earned or not-yet-earned, and Bloom level. Earned skills give their
-   * current earned level; Ready skills give their learning-outcome level.
+   * Name, earned or not-yet-earned (and ready next when every prerequisite is
+   * earned), and Bloom level. Earned skills give their current earned level;
+   * Ready skills give their learning-outcome level.
    */
   function accessibleName(node: AtlasNode): string {
     const name = node.skill.name
@@ -51,10 +58,15 @@ export function createAtlasPresenter(t: AtlasTranslate) {
         ? t('skills.atlas.nameEarned', { name, level: bloomLabel(node.earnedBloom.name) })
         : t('skills.atlas.nameEarnedNoLevel', { name })
     }
+    if (node.readyNext) {
+      return node.intrinsicBloom
+        ? t('skills.atlas.nameReadyNext', { name, level: bloomLabel(node.intrinsicBloom) })
+        : t('skills.atlas.nameReadyNextNoLevel', { name })
+    }
     return node.intrinsicBloom
       ? t('skills.atlas.nameReady', { name, level: bloomLabel(node.intrinsicBloom) })
       : t('skills.atlas.nameReadyNoLevel', { name })
   }
 
-  return { bloomLabel, fieldName, evidence, accessibleName }
+  return { bloomLabel, fieldName, state, evidence, accessibleName }
 }

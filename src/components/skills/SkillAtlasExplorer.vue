@@ -263,6 +263,15 @@ const bloomOptions = computed(() => {
   void locale.value
   return BLOOM_ORDER.map((level, rank) => ({ rank, label: present.bloomLabel(level) }))
 })
+/** An inspector relation's state, from its node when loaded: earned, Ready next or Ready. */
+function relationNode(relation: AtlasNode['prerequisites'][number]): Pick<AtlasNode, 'status' | 'readyNext'> {
+  return nodesById.value.get(relation.skillId) ?? { status: relation.earned ? 'earned' : 'ready', readyNext: false }
+}
+function relationLabel(relation: AtlasNode['prerequisites'][number]): string {
+  const node = relationNode(relation)
+  const key = node.status === 'earned' ? 'skills.atlas.inspectEarned' : node.readyNext ? 'skills.atlas.inspectReadyNext' : 'skills.atlas.inspectReady'
+  return t(key, { name: relation.name })
+}
 function color(fieldId: string | null): string { return atlasFieldColor(props.model.fieldById.get(fieldId) ?? { id: fieldId, slot: null }) }
 function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
 function preserveOverviewFocus(): void {
@@ -475,9 +484,9 @@ function setBloom(event: Event): void {
                   <path class="map-edge map-edge-active" :d="edgePaths.active" /><path class="map-edge-head map-edge-active" :d="edgePaths.activeHeads" />
                 </g>
                 <AtlasNodeLayer v-slot="{ items }" :source="nodeLayer">
-                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, layout, locale, onScreen(node), node.skill.id === view.selectedSkillId, bloomMatch(node), dimmed(node), highlightedIds.includes(node.skill.id)]" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
-                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="!onScreen(node) || undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
-                      <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
+                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, layout, locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), highlightedIds.includes(node.skill.id)]" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
+                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="!onScreen(node) || undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
+                      <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
                     </button>
                   </foreignObject>
                 </AtlasNodeLayer>
@@ -490,7 +499,7 @@ function setBloom(event: Event): void {
         <details class="atlas-list" open>
           <summary>{{ t('skills.atlas.list') }} <span>{{ t('skills.atlas.results', { count: matches.length }) }}</span></summary>
           <!-- Memoised: a pan or zoom re-renders the map, never these rows. -->
-          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node) }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span>{{ status(node) }}</span></button></li></ul>
+          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node), 'is-ready-next': node.readyNext }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="node.readyNext" aria-hidden="true">◎ </span>{{ status(node) }}</span></button></li></ul>
           <button v-if="unlisted > 0" class="list-more" type="button" @click="showMoreMatches(true)">{{ t('skills.atlas.showMoreSkills', { count: Math.min(LIST_WINDOW, unlisted) }) }}</button>
           <p v-if="!matches.length">{{ t('skills.atlas.noResults') }}</p>
         </details>
@@ -501,7 +510,7 @@ function setBloom(event: Event): void {
           <template v-if="selected">
             <p class="inspector-field" :style="{ '--field': color(selected.fieldId) }"><i class="field-dot" aria-hidden="true" />{{ fieldName(selected.fieldId) }}</p>
             <h2 dir="auto">{{ selected.skill.name }}</h2>
-            <p class="inspector-status"><span v-if="selected.status === 'earned'" aria-hidden="true">✓ </span>{{ t(`skills.atlas.${selected.status}`) }}</p>
+            <p class="inspector-status" :class="{ 'is-ready-next': selected.readyNext }"><span v-if="selected.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="selected.readyNext" aria-hidden="true">◎ </span>{{ present.state(selected) }}</p>
             <p dir="auto">{{ selected.skill.description }}</p>
             <dl><template v-if="selected.status === 'earned'"><dt>{{ t('skills.atlas.currentBloom') }}</dt><dd>{{ status(selected) }}</dd></template><dt>{{ t('skills.atlas.intrinsicBloom') }}</dt><dd>{{ selected.intrinsicBloom ? t(`common.bloom.${selected.intrinsicBloom}`) : t('skills.atlas.unavailable') }}</dd></dl>
             <div class="inspector-actions"><button class="atlas-primary" type="button" :aria-label="t('skills.atlas.open')" @click="emit('open-skill', selected.skill.id)">{{ t('skills.atlas.open') }} <span aria-hidden="true">↗</span></button><button type="button" @click="emit('learn-skill', selected.skill.id)">{{ t('skills.atlas.learn') }}</button></div>
@@ -511,7 +520,7 @@ function setBloom(event: Event): void {
             <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="update({ neighborhoodDepth: Number(($event.target as HTMLSelectElement).value) === 2 ? 2 : 1 })"><option :value="1">{{ t('skills.atlas.oneStep') }}</option><option :value="2">{{ t('skills.atlas.twoSteps') }}</option></select></label></div>
             <section v-for="direction in (['prerequisites', 'dependents'] as const)" :key="direction" class="inspector-relations">
               <h3>{{ t(`skills.atlas.${direction}`) }} <span>{{ selected[direction].length }}</span></h3>
-              <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="t(relation.earned ? 'skills.atlas.inspectEarned' : 'skills.atlas.inspectReady', { name: relation.name })" @click="select(relation.skillId)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ relation.earned ? t('skills.atlas.earned') : t('skills.atlas.ready') }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
+              <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
               <p v-if="!selected[direction].length" class="atlas-muted">{{ t('skills.atlas.noRelations') }}</p>
             </section>
           </template>
@@ -582,6 +591,8 @@ function setBloom(event: Event): void {
 .atlas .map-node { box-sizing: border-box; margin: 4px; width: calc(100% - 8px); height: calc(100% - 8px); border-inline-start: 4px solid var(--field); border-radius: 12px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; padding: 10px 12px; background: var(--app-card); font-size: 14px; line-height: 1.35; }
 .node-evidence { display: flex; gap: 6px; color: var(--field); font-size: 13px; font-weight: 650; }
 .map-node.is-dimmed .skill-name { color: var(--app-muted-foreground); font-weight: 400; }
+/* Ready next: every prerequisite earned. Stronger than Ready, weaker than selection. */
+.atlas .map-node.is-ready-next { border-color: var(--field); border-inline-start-width: 7px; background: color-mix(in srgb, var(--field) 10%, var(--app-card)); }
 .atlas .map-node.is-selected { border-color: var(--app-primary); box-shadow: inset 0 0 0 2px var(--app-primary); }
 .atlas-canvas { position: absolute; top: 0; left: 0; display: block; overflow: visible; will-change: transform; }
 .atlas-grab-cover { position: absolute; inset: 0; cursor: grabbing; }
@@ -597,6 +608,8 @@ function setBloom(event: Event): void {
 .atlas-list strong, .atlas-list small { display: block; }
 .atlas-list strong { font-size: 13px; font-weight: 550; }
 .atlas-list small { color: var(--app-muted-foreground); font-size: 11px; }
+.atlas .atlas-list li button.is-ready-next { background: color-mix(in srgb, var(--field) 8%, var(--app-card)); }
+.is-ready-next .list-evidence, .inspector-status.is-ready-next { color: var(--field); font-weight: 650; }
 .list-evidence { margin-inline-start: auto; font-size: 12px; flex-shrink: 0; max-width: 42%; color: var(--field); }
 .bloom-summary { margin-block-end: 12px; padding: 10px 12px; border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); border-radius: 8px; font-size: 13px; }
 .atlas button.is-bloom-match { background: var(--app-muted); outline: 2px solid var(--app-primary); outline-offset: -2px; }

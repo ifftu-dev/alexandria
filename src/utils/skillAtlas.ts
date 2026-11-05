@@ -24,7 +24,13 @@ export interface AtlasNode {
   intrinsicBloom: BloomLevel | null
   prerequisites: readonly AtlasRelation[]
   dependents: readonly AtlasRelation[]
+  /**
+   * At least one prerequisite, and every one the skill counts is loaded and
+   * earned. Unknown, unloaded or uncounted prerequisites never satisfy it.
+   */
   prerequisitesSatisfied: boolean
+  /** Not yet earned, with its prerequisites satisfied: the only skills the atlas emphasises as next. */
+  readyNext: boolean
 }
 
 export interface AtlasField {
@@ -115,17 +121,19 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
     const prerequisites = [...(prerequisitesBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
     const dependents = [...(dependentsBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
     const rank = ranks.get(skill.id)
+    const status: AtlasStatus = earnedIds.has(skill.id) ? 'earned' : 'ready'
+    const prerequisitesSatisfied = prerequisites.length > 0 && prerequisites.length === skill.prerequisite_count &&
+      prerequisites.every((relation) => relation.loaded && relation.earned)
     return {
       skill,
       fieldId: skill.subject_field_id || null,
-      status: earnedIds.has(skill.id) ? 'earned' : 'ready',
+      status,
       earnedBloom: rank == null ? null : { rank, name: BLOOM_ORDER[rank] },
       intrinsicBloom: bloomLevel(skill.bloom_level),
       prerequisites,
       dependents,
-      // Satisfied means at least one prerequisite, every one known and earned.
-      prerequisitesSatisfied: prerequisites.length > 0 && prerequisites.length >= skill.prerequisite_count &&
-        prerequisites.every((relation) => relation.earned),
+      prerequisitesSatisfied,
+      readyNext: status === 'ready' && prerequisitesSatisfied,
     }
   })
 

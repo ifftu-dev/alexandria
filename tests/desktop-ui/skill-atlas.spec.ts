@@ -86,3 +86,34 @@ test('new evidence has no visible-duration animation with system reduced motion'
   )).toBe(0)
   await expect(page.getByRole('status').filter({ hasText: 'New evidence highlighted' })).toHaveCount(0)
 })
+
+test('only skills whose prerequisites are all earned are emphasised as ready next', async ({ page }, testInfo) => {
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=light')
+  const list = page.getByRole('list', { name: 'Full-label skill list' })
+  await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Algorithms')
+  // Sorting needs Arrays and Big-O, both earned; Greedy needs Sorting too; Graph needs neither of its two.
+  const sorting = list.getByRole('button', { name: 'Sorting Algorithms, not yet earned, ready next, learning-outcome Bloom level 3 Apply', exact: true })
+  await expect(sorting).toContainText('Ready next')
+  await expect(list.getByRole('button', { name: 'Greedy Algorithms, not yet earned, Ready, learning-outcome Bloom level 4 Analyze', exact: true })).toBeVisible()
+  await expect(list.getByRole('button', { name: 'Graph Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply', exact: true })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Python')
+  // No prerequisites: Ready, never ready next.
+  await expect(list.getByRole('button', { name: 'Python, not yet earned, Ready, learning-outcome Bloom level 3 Apply', exact: true })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Sorting')
+  await sorting.click()
+  const map = page.getByRole('group', { name: 'Skill map' })
+  const node = map.getByRole('button', { name: 'Sorting Algorithms, not yet earned, ready next, learning-outcome Bloom level 3 Apply', exact: true })
+  await expect(node).toBeVisible()
+  await expect(node).toContainText('Ready next')
+  const greedy = map.locator('.map-node').filter({ hasText: 'Greedy Algorithms' })
+  const style = (locator: typeof node) => locator.evaluate(element => {
+    const computed = getComputedStyle(element)
+    return { border: computed.borderInlineStartWidth, background: computed.backgroundColor }
+  })
+  const [next, ready] = [await style(node), await style(greedy)]
+  expect(next.border).toBe('7px')
+  expect(ready.border).toBe('4px')
+  expect(next.background).not.toBe(ready.background)
+  await expect(page.getByRole('complementary', { name: 'Skill inspector' }).locator('.inspector-status')).toHaveText('◎ Ready next')
+  await page.screenshot({ path: testInfo.outputPath('ready-next.png'), fullPage: true })
+})

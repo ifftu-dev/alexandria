@@ -406,3 +406,42 @@ it('keeps every existing field in its colour and map region when a new field is 
   expect(after.Agriculture?.colour).toContain('var(--atlas-field-2)')
 })
 
+
+it('emphasises as ready next only unearned skills whose counted prerequisites are all loaded and earned', async () => {
+  const edge = (skillId: string, prerequisiteId: string) => ({ skill_id: skillId, skill_name: skillId, skill_bloom: 'create',
+    prerequisite_id: prerequisiteId, prerequisite_name: prerequisiteId, prerequisite_bloom: 'create' })
+  const atlas = (earned: VerifiableCredential[]) => buildSkillAtlas({
+    skills: [skill('a', 'Algebra', 'Mathematics'), skill('g', 'Geometry', 'Mathematics', { prerequisite_count: 1, bloom_level: 'apply' }),
+      skill('b', 'Bridges', 'Mathematics', { prerequisite_count: 2 }), skill('p', 'Proofs', 'Mathematics')],
+    edges: [edge('g', 'a'), edge('b', 'a'), edge('b', 'missing')],
+    activeCredentials: earned, subjectDid: 'did:me' })
+  const GEOMETRY_NEXT = 'Geometry, not yet earned, ready next, learning-outcome Bloom level 3 Apply'
+  const wrapper = setup()
+  await wrapper.setProps({ model: atlas([credential('a', 3), credential('missing', 2)]) })
+  const emphasised = (selector: string) => wrapper.findAll(`${selector}.is-ready-next`).map(item => item.attributes('aria-label'))
+  // The list: only Geometry, whose one prerequisite is earned. Bridges waits on an
+  // unloaded prerequisite and Proofs has none.
+  expect(emphasised('.atlas-list li button')).toEqual([GEOMETRY_NEXT])
+  expect(wrapper.get('.atlas-list .is-ready-next').text()).toContain('Ready next')
+  expect(button(wrapper, 'Bridges, not yet earned, Ready, learning-outcome Bloom level 6 Create').classes()).not.toContain('is-ready-next')
+  await button(wrapper, 'Explore Mathematics').trigger('click')
+  expect(emphasised('.map-node')).toEqual([GEOMETRY_NEXT])
+  expect(wrapper.get('.map-node.is-ready-next').text()).toContain('Ready next')
+  expect(wrapper.findAll('.map-node').map(node => node.attributes('aria-label'))).toEqual(expect.arrayContaining([
+    'Bridges, not yet earned, Ready, learning-outcome Bloom level 6 Create', 'Proofs, not yet earned, Ready, learning-outcome Bloom level 6 Create']))
+  // The inspector says it, and so do relations that point at it.
+  await wrapper.get('.map-node.is-ready-next').trigger('click')
+  const inspector = wrapper.get('[aria-label="Skill inspector"]')
+  expect(inspector.get('.inspector-status').text()).toBe('◎ Ready next')
+  expect(inspector.get('.inspector-status [aria-hidden="true"]').text()).toBe('◎')
+  expect(inspector.text()).toContain('Prerequisite evidence available')
+  await button(wrapper, 'Inspect Algebra, earned').trigger('click')
+  expect(inspector.findAll('.inspector-relations button').map(item => item.attributes('aria-label')))
+    .toEqual(['Inspect Bridges, not yet earned, Ready', 'Inspect Geometry, not yet earned, ready next'])
+  // A memoised node follows the model: without Algebra, Geometry is no longer next.
+  await wrapper.setProps({ model: atlas([]) })
+  expect(wrapper.findAll('.is-ready-next')).toHaveLength(0)
+  expect(wrapper.findAll('.map-node').map(node => node.attributes('aria-label'))).toContain('Geometry, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
+  await wrapper.setProps({ model: atlas([credential('a', 1)]) })
+  expect(emphasised('.map-node')).toEqual([GEOMETRY_NEXT])
+})
