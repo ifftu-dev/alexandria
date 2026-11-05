@@ -356,6 +356,7 @@ A good test exercises a module's public interface or the user-visible UI, and as
 | [15](review-remediation/15-motion-rollout-step-4.md) | Motion rollout step 4 | 14 |
 | [16](review-remediation/16-frontend-hygiene-and-bookkeeping.md) | Frontend hygiene and tracker bookkeeping | none |
 | [17](review-remediation/17-human-device-verification.md) | Human device verification (`ready-for-human`) | 04, 08 |
+| [18](review-remediation/18-review-follow-ups.md) | Review follow-ups | none |
 
 ## Notes
 
