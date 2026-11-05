@@ -8,7 +8,7 @@ const LONG_TASK_BUDGET_MS = 50
 test('a 1,500-skill atlas pans without a main-thread task over 50 ms', async ({ page, browserName }, testInfo) => {
   test.skip(browserName !== 'chromium', 'The Long Tasks API (PerformanceObserver "longtask") exists only in Chromium.')
   await page.goto('/tests/desktop-ui/?screen=personal-atlas&scenario=scale')
-  await page.getByRole('button', { name: 'My Graph', exact: true }).click()
+  await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
   const atlas = page.locator('.fixture-page .atlas')
   await expect(atlas.getByRole('heading', { name: /1,?500 loaded skills/ })).toBeVisible()
   await atlas.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
