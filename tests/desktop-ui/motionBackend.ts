@@ -1,5 +1,5 @@
 import type {
-  Chapter, ChatMessage, ChatPreparedMessage, ChatThread, Classroom, ClassroomChannel, ClassroomMessage, Course, Element, Enrollment,
+  AppNotification, Chapter, ChatMessage, ChatPreparedMessage, ChatThread, Classroom, ClassroomChannel, ClassroomMessage, Course, Element, Enrollment,
   Goal, GoalTemplate, GuardianAiRequest, GuardianLinkInfo, Identity, SkillInfo, StudioConnection, StudioDocument, TutoringSessionInfo,
   TutoringSessionStatus,
 } from '@/types'
@@ -95,6 +95,26 @@ export function motionBackend() {
   const aiRequests: GuardianAiRequest[] = [{ id: 'ai-request-fixture', link_id: child.id, ward_name: 'Asha', connection_name: 'Study helper',
     endpoint: 'https://models.example/v1', model: 'helper-small', status: 'pending', received_at: '2026-11-04', decided_at: null, delivered: false }]
 
+  // The inbox: an unread offer above a read credential notice.
+  const notification = (id: string, kind: AppNotification['kind'], createdAt: string, readAt: string | null): AppNotification => ({
+    id, kind, title: '', body: '', route: null, source: 'local', created_at: createdAt, read_at: readAt, payload: null })
+  const notifications: AppNotification[] = [
+    notification('notification-offer', 'offer_sent', '2026-11-04T10:00:00Z', null),
+    notification('notification-credential', 'credential_issued', '2026-11-04T09:00:00Z', '2026-11-04T09:30:00Z'),
+  ]
+  /** A new row the backend stores and announces. */
+  function notify(kind: AppNotification['kind']): AppNotification {
+    const row = notification(`notification-${notifications.length + 1}`, kind, '2026-11-04T11:00:00Z', null)
+    notifications.unshift(row)
+    return structuredClone(row)
+  }
+  /** Another window removed a row; returns the new unread count. */
+  function removeNotification(kind: AppNotification['kind']): number {
+    const index = notifications.findIndex(item => item.kind === kind)
+    if (index >= 0) notifications.splice(index, 1)
+    return notifications.filter(item => !item.read_at).length
+  }
+
   const unexpected: string[] = []
   const answers: Record<string, unknown> = {
     get_incompatible_profile_data: null, get_profile_cleanup_required: false, list_profiles: [],
@@ -168,11 +188,13 @@ export function motionBackend() {
         if (found) Object.assign(found, { status: args?.approve ? 'approved' : 'declined', decided_at: '2026-11-04' })
         return null
       }
+      case 'notifications_list': return structuredClone(notifications)
+      case 'notifications_unread_count': return notifications.filter(item => !item.read_at).length
       case 'compute_learning_path': return { steps: [], total: 1, earned_count: 0, goal_skill_ids: args?.goalSkillIds ?? [] }
     }
     if (command in answers) return structuredClone(answers[command])
     unexpected.push(command)
     return command.startsWith('list_') || command.endsWith('_list') ? [] : null
   }
-  return { invoke, unexpected }
+  return { invoke, unexpected, notify, removeNotification }
 }

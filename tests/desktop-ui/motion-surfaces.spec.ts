@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { expectMotion, expectPressFeedback, indicator, motionAfter, motionOnArrival, open, pressedStyle, reachableAfter, setMode } from './motionHelpers'
 
 for (const mode of ['System', 'Reduced', 'Off'] as const) {
@@ -135,6 +135,49 @@ for (const mode of ['System', 'Reduced', 'Off'] as const) {
     await dialog.getByTestId('add-goal-done').click()
     await expect(cards).toHaveCount(2)
     await expect(cards.filter({ hasText: 'Data engineer' })).toHaveCSS('opacity', '1')
+  })
+}
+
+/**
+ * Run one of the fixture's inbox changes (a row arrives, or another window
+ * removes one) and report the most motion in the inbox list over twenty frames.
+ */
+function inboxMotion(page: Page, change: 'notify' | 'removeNotification', kind: string) {
+  return page.evaluate(([change, kind]) => new Promise<number>(resolve => {
+    const list = document.querySelector('[data-notification-list]')!
+    ;(window as unknown as { motionFixture: Record<typeof change, (kind: string) => void> }).motionFixture[change](kind)
+    let most = 0, frames = 0
+    const sample = () => {
+      most = Math.max(most, list.getAnimations({ subtree: true })
+        .filter(a => a.playState === 'running' && Number(a.effect?.getComputedTiming().duration) > 1).length)
+      if (++frames < 20) { requestAnimationFrame(sample); return }
+      resolve(most)
+    }
+    requestAnimationFrame(sample)
+  }), [change, kind] as const)
+}
+
+for (const mode of ['System', 'Reduced', 'Off'] as const) {
+  test(`notification inbox rows enter, leave and move under the motion setting (${mode})`, async ({ page }) => {
+    await open(page)
+    await setMode(page, mode)
+    const rows = page.locator('[data-notification-list] > li')
+    const navigate = () => page.evaluate(() => (window as unknown as { motionFixture: { navigate: (path: string) => Promise<unknown> } }).motionFixture.navigate('/notifications')).then(() => {})
+    expectMotion(await motionOnArrival(page, navigate, '[data-notification-list] > li', 'New offer', '[data-notification-list]'), mode)
+    await expect(rows).toHaveCount(2)
+    await expect(rows.first()).toHaveCSS('opacity', '1')
+
+    // A new row arrives on top and the others move down.
+    expectMotion(await inboxMotion(page, 'notify', 'interview_invited'), mode)
+    await expect(rows).toHaveCount(3)
+    await expect(rows.first()).toContainText('New interview invitation')
+    await expect(rows.first()).toHaveCSS('opacity', '1')
+
+    // Another window removes a row: the inbox resyncs, it leaves and the rest close up.
+    expectMotion(await inboxMotion(page, 'removeNotification', 'offer_sent'), mode)
+    await expect(rows).toHaveCount(2)
+    await expect(rows.filter({ hasText: 'New offer' })).toHaveCount(0)
+    for (const row of await rows.all()) await expect(row).toHaveCSS('opacity', '1')
   })
 }
 

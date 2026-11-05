@@ -5,7 +5,7 @@
 // text is never used as a fallback for an unknown kind.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AppBadge, AppButton, EmptyState } from '@/components/ui'
+import { AppBadge, AppButton, EmptyState, MotionList } from '@/components/ui'
 import { useNotifications } from '@/composables/useNotifications'
 import type { AppNotification } from '@/types'
 
@@ -66,7 +66,8 @@ async function onClear() {
       :description="$t('notifications.page.emptyHint')"
     />
 
-    <ul v-else class="divide-y divide-border rounded-lg border border-border bg-card">
+    <!-- Rows enter, leave and move like the other lists; Reduced and Off change at once. -->
+    <MotionList v-else tag="ul" appear class="divide-y divide-border rounded-lg border border-border bg-card" data-notification-list>
       <li v-for="n in items" :key="n.id">
         <button
           type="button"
@@ -92,6 +93,6 @@ async function onClear() {
           </svg>
         </button>
       </li>
-    </ul>
+    </MotionList>
   </div>
 </template>

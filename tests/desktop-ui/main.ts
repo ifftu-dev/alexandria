@@ -4,7 +4,7 @@ import { i18n, setActiveLocale } from '@/i18n'
 import { loadLocaleMessages } from '@/i18n/loadLocale'
 import { directionOf, isAppLocale } from '@/locales/meta'
 import '@/assets/css/main.css'
-import type { GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
+import type { AppNotification, GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
 
 const templates: GoalTemplate[] = [{
   id: 'audit-software-engineer',
@@ -119,15 +119,35 @@ if (screen === 'motion') {
 } else if (screen === 'motion-surfaces') {
   const { motionBackend } = await import('./motionBackend')
   const backend = motionBackend()
+  // Backend events: listeners are kept by event name, so the spec can emit.
+  const callbacks = new Map<number, (message: unknown) => void>()
+  const listeners = new Map<string, number[]>()
+  let nextCallback = 1
+  const emit = (event: string, payload: unknown) => {
+    for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload })
+  }
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
-    invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+      if (command !== 'plugin:event|listen') return backend.invoke(command, args)
+      const { event, handler } = args as { event: string, handler: number }
+      listeners.set(event, [...(listeners.get(event) ?? []), handler])
+      return handler
+    },
+    transformCallback: (callback?: (message: unknown) => void) => {
+      const id = nextCallback++
+      if (callback) callbacks.set(id, callback)
+      return id
+    },
+    unregisterCallback: (id: number) => callbacks.delete(id),
   } })
   const { useProfiles } = await import('@/composables/useProfiles')
   const { useSettings } = await import('@/composables/useSettings')
   const { useAccountStatus } = await import('@/composables/useAccountStatus')
+  const { useNotifications } = await import('@/composables/useNotifications')
+  const { getProfileSessionToken } = await import('@/composables/profileSession')
   await useProfiles().initialize()
-  await Promise.all([useSettings().initialize(), useAccountStatus().refreshAccountStatus()])
+  await Promise.all([useSettings().initialize(), useAccountStatus().refreshAccountStatus(), useNotifications().init()])
   const page = { render: () => h('p', 'Fixture page') }
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/home', component: (await import('@/pages/Home.vue')).default },
@@ -145,12 +165,19 @@ if (screen === 'motion') {
     { path: '/guardian/child/:linkId', component: (await import('@/pages/guardian/ChildDetail.vue')).default },
     { path: '/instructor/courses', component: (await import('@/pages/instructor/MyCourses.vue')).default },
     { path: '/instructor/composer/:id', component: (await import('@/pages/instructor/Composer.vue')).default },
+    { path: '/notifications', component: (await import('@/pages/Notifications.vue')).default },
     { path: '/:pathMatch(.*)*', component: page },
   ] })
   await router.push(params.get('path') ?? '/home')
   const { default: MotionSurfacesFixture } = await import('./MotionSurfacesFixture.vue')
   createApp(MotionSurfacesFixture).use(i18n).use(router).mount('#app')
-  Object.assign(window, { motionFixture: { unexpected: backend.unexpected } })
+  const session = getProfileSessionToken()
+  Object.assign(window, { motionFixture: {
+    unexpected: backend.unexpected,
+    navigate: (path: string) => router.push(path),
+    notify: (kind: AppNotification['kind']) => emit('notifications:new', { session, row: backend.notify(kind) }),
+    removeNotification: (kind: AppNotification['kind']) => emit('notifications:changed', { session, unread: backend.removeNotification(kind) }),
+  } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
