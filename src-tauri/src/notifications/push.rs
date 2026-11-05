@@ -9,9 +9,10 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use super::{
     cloud_copy, recipients, NewNotification, NotificationError, NotificationKind, NotificationOpen,
-    PushErrorCode, PushStatus, Recorded,
+    NotificationPermission, PushErrorCode, PushStatus, Recorded,
 };
 use crate::cloud::{is_loopback, nonce, origin as cloud_origin, proof};
+use crate::credentials::{CredentialError, Issuer};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileLease;
 use crate::settings::{registry::keys, SettingsStore};
@@ -152,20 +153,15 @@ pub async fn status(
     Ok(status_from(&f))
 }
 
-pub(super) async fn issuer_key(
-    state: &AppState,
-) -> Result<(SigningKey, crate::crypto::did::Did), NotificationError> {
-    let guard = state.keystore.lock().await;
-    let keystore = guard.as_ref().ok_or(NotificationError::VaultLocked)?;
-    let mnemonic = keystore
-        .retrieve_mnemonic()
-        .map_err(|e| NotificationError::Vault(e.to_string()))?;
-    drop(guard);
-    let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic)
-        .map_err(|e| NotificationError::Vault(e.to_string()))?;
-    let signing_key = SigningKey::from_bytes(&wallet.signing_key.to_bytes());
-    let did = crate::crypto::did::derive_did_key(&signing_key);
-    Ok((signing_key, did))
+/// The profile's issuer, for the holder proofs push and Cloud discovery
+/// sign. Refused while the vault is locked.
+pub(super) async fn issuer(state: &AppState) -> Result<Issuer, NotificationError> {
+    Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|error| match error {
+            CredentialError::VaultLocked => NotificationError::VaultLocked,
+            other => NotificationError::Vault(other.to_string()),
+        })
 }
 
 async fn signed_send(
@@ -286,7 +282,7 @@ async fn reconcile_inner(
     }).await.map_err(NotificationError::Profile)?;
     let staged = facts(state, lease).await?;
     for row in staged.rows.iter().filter(|r| r.pending == "delete") {
-        let (key, did) = issuer_key(state).await?;
+        let (key, did) = issuer(state).await?.into_parts();
         let result = signed_send(
             &row.origin,
             &key,
@@ -354,7 +350,7 @@ async fn reconcile_inner(
     state.db_executor.execute(DatabaseWorkload::Learner, lease.clone(), "notifications.push.stage", move |db| {
         db.conn().execute("INSERT INTO push_registrations(cloud_origin, device_id, platform, token, registered_at, pending, revision, network_id, put_body) VALUES (?1,?2,'fcm',?3,'','put',?4,?5,?6) ON CONFLICT(cloud_origin) DO UPDATE SET token=excluded.token, recipient=NULL, pending='put', revision=excluded.revision, last_error=NULL, last_error_detail=NULL, network_id=excluded.network_id, put_body=excluded.put_body", params![staged_origin, staged_device, staged_token, revision, network, serialized]).map(drop).map_err(|e| e.to_string())
     }).await.map_err(NotificationError::Profile)?;
-    let (key, did) = issuer_key(state).await?;
+    let (key, did) = issuer(state).await?.into_parts();
     let result = async {
         let response = signed_send(
             &origin,
@@ -488,14 +484,17 @@ pub async fn register<R: Runtime>(
 
 /// What the system permission prompt's answer means for registration. A
 /// prompt that could not run at all is the push SDK failing, not a refusal.
-fn permission(granted: Result<bool, String>) -> Result<(), PushFailure> {
-    match granted {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(PushFailure::new(
+fn permission(answer: Result<bool, String>) -> Result<(), PushFailure> {
+    let detail = answer.as_ref().err().cloned().unwrap_or_default();
+    match NotificationPermission::of_prompt(answer) {
+        NotificationPermission::Granted => Ok(()),
+        NotificationPermission::Denied => Err(PushFailure::new(
             PushErrorCode::PermissionDenied,
             "Notification permission was not granted",
         )),
-        Err(detail) => Err(PushFailure::new(PushErrorCode::TokenUnavailable, detail)),
+        NotificationPermission::PromptUnavailable => {
+            Err(PushFailure::new(PushErrorCode::TokenUnavailable, detail))
+        }
     }
 }
 

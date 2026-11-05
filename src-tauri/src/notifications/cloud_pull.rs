@@ -333,7 +333,7 @@ async fn run_pass<R: Runtime>(
     let Some(origin) = origin else {
         return Ok(0);
     };
-    let (signing_key, did) = super::push::issuer_key(&state).await?;
+    let (signing_key, did) = super::push::issuer(&state).await?.into_parts();
     let items = fetch(&origin, &signing_key, did.as_str()).await;
     if items.is_empty() {
         return Ok(0);
@@ -434,7 +434,11 @@ mod tests {
     ) {
         let (app, heard) = listening_app(directory).await;
         let state = app.state::<crate::AppState>();
-        let (_, did) = super::super::push::issuer_key(&state).await.unwrap();
+        let did = super::super::push::issuer(&state)
+            .await
+            .unwrap()
+            .did()
+            .clone();
         let (release, gate) = tokio::sync::watch::channel(released);
         let (origin, received, server) = fake_cloud(did.as_str().to_string(), gate).await;
         in_profile(&state, move |db| {

@@ -874,7 +874,7 @@ async fn recipient_push_and_authenticated_pull_share_room_opening_identity() {
         received.row.route.as_deref(),
         Some("/interview-room/22222222-2222-4222-8222-222222222222")
     );
-    let (key, did) = issuer_key(&state).await.unwrap();
+    let (key, did) = issuer(&state).await.unwrap().into_parts();
     for clear in [false, true] {
         let items = super::super::cloud_pull::fetch(&origin, &key, did.as_str()).await;
         assert_eq!(items.len(), 1);
