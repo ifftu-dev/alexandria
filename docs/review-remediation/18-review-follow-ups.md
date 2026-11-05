@@ -85,7 +85,7 @@ Red → green:
 - `pressFeedback.test.ts`: red against the old class name, now green.
 - `motion-surfaces.spec.ts` "notification inbox rows enter, leave and move" (Chromium and WebKit; System, Reduced, Off): red in System (no motion), now green.
 - `OmniSearch.test.ts` (new) covers both renderings. It was green before and after the refactor.
-- Press flake: under parallel load the press check failed on several controls in both browsers. Diagnostics showed nothing `:active` while the pointer was down over the control. After the change, three stress runs of the motion-surfaces and step 4 specs (3 repeats each, 12 workers) had no press failures. One of them had two failures, which coincided with dev-server reloads from concurrent edits.
+- Press flake: under parallel load the press check failed on several controls in both browsers. Diagnostics showed nothing `:active` while the pointer was down over the control. After the change, the motion-surfaces and step 4 specs ran three times under stress (3 repeats, 12 workers). In the first run, two WebKit press checks timed out after the press had registered. Dev-server reloads from concurrent edits broke two other tests in that run. The next two runs passed, 246 of 246 each. On CI, the flake stays to be watched.
 
 Checks: full Vitest (98 files, 605 tests passed); full desktop UI suite (154 passed, 2 skipped by existing browser guards); `npx vue-tsc -b --noEmit`; `npm run check:csp`; `npm run i18n:keys`; `npm run i18n:parity`; `npm run i18n:no-raw-text`; `npm run check:tauri-commands`; `scripts/check-docs.sh`.
 
