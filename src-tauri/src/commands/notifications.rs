@@ -122,7 +122,9 @@ pub async fn notifications_clear(app: AppHandle, state: State<'_, AppState>) -> 
 /// Returns how many notifications the pass recorded.
 #[tauri::command]
 pub async fn notifications_discover(app: AppHandle, lease: ProfileLease) -> Result<usize, String> {
-    notifications::cloud_pull::discover(&app, lease).await
+    notifications::cloud_pull::discover(&app, lease)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Ask the OS for permission to show banners. The desktop needs none and

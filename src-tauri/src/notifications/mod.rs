@@ -94,6 +94,12 @@ pub enum NotificationError {
     /// Sealing or opening a held notification open failed.
     #[error("{0}")]
     Crypto(String),
+    /// The application state was not managed yet (or any more).
+    #[error("application state unavailable")]
+    AppStateUnavailable,
+    /// A Cloud discovery pass's task ended without an outcome.
+    #[error("discovery pass failed: {0}")]
+    DiscoveryTask(String),
 }
 
 impl<T> From<std::sync::PoisonError<T>> for NotificationError {

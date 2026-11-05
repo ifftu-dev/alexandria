@@ -22,7 +22,9 @@ use rusqlite::Connection;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Runtime};
 
-use super::{cloud_copy, interview_room_route, NewNotification, NotificationKind};
+use super::{
+    cloud_copy, interview_room_route, NewNotification, NotificationError, NotificationKind,
+};
 use crate::cloud::{directories_db, signed_get, Directory};
 use crate::db::executor::DatabaseWorkload;
 use crate::profile::scope::ProfileLease;
@@ -240,7 +242,10 @@ fn answered(conn: &Connection, item: &PendingItem) -> bool {
     .is_ok()
 }
 
-type Outcome = Result<usize, String>;
+/// A discovery pass's error. Callers that join a running pass share its
+/// result, so the error is shared too.
+pub type DiscoveryError = std::sync::Arc<NotificationError>;
+type Outcome = Result<usize, DiscoveryError>;
 type Pass = futures::future::Shared<futures::future::BoxFuture<'static, Outcome>>;
 
 /// The discovery pass in flight, if any, and the profile session it runs for.
@@ -251,20 +256,22 @@ pub(crate) struct Passes(std::sync::Arc<std::sync::Mutex<Option<(String, Pass)>>
 /// loop or when a phone comes back to the foreground. Returns how many
 /// notifications the pass recorded.
 ///
-/// Passes are serialised. A caller arriving while a pass for the same session
-/// is running joins that pass and shares its result, so Cloud is not asked
-/// twice. Rows still go through the dedupe keys, so a push and a pass for the
-/// same event record it once.
+/// One pass runs per profile session at a time. A caller arriving while a
+/// pass for the same session is running joins that pass and shares its
+/// result, so Cloud is not asked twice; a pass for another session starts
+/// its own and may run beside the earlier one until that one ends. Rows still
+/// go through the dedupe keys, so a push and a pass for the same event record
+/// it once.
 pub async fn discover<R: Runtime>(app: &AppHandle<R>, lease: ProfileLease) -> Outcome {
     let state = app
         .try_state::<crate::AppState>()
-        .ok_or("application state unavailable")?;
+        .ok_or(NotificationError::AppStateUnavailable)?;
     let pass = {
         let mut running = state
             .cloud_discovery
             .0
             .lock()
-            .map_err(|_| "discovery state poisoned".to_string())?;
+            .map_err(NotificationError::from)?;
         match running.as_ref() {
             Some((session, pass)) if session == lease.session_id() && pass.peek().is_none() => {
                 pass.clone()
@@ -282,12 +289,15 @@ pub async fn discover<R: Runtime>(app: &AppHandle<R>, lease: ProfileLease) -> Ou
                             .clone()
                             .run_until_closed(run_pass(app, lease))
                             .await
-                            .unwrap_or_else(|| Err("profile session changed".into()))
+                            .unwrap_or(Err(NotificationError::SessionChanged))
                     }
                 });
                 let pass = async move {
                     task.await
-                        .unwrap_or_else(|error| Err(format!("discovery pass failed: {error}")))
+                        .unwrap_or_else(|error| {
+                            Err(NotificationError::DiscoveryTask(error.to_string()))
+                        })
+                        .map_err(std::sync::Arc::new)
                 }
                 .boxed()
                 .shared();
@@ -303,10 +313,13 @@ pub async fn discover<R: Runtime>(app: &AppHandle<R>, lease: ProfileLease) -> Ou
 /// Ask Cloud what is waiting, record what has not been reported, and announce
 /// it under the lease's session. Nothing to do without a Cloud origin (or with
 /// organisations off) or while the vault is locked.
-async fn run_pass<R: Runtime>(app: AppHandle<R>, lease: ProfileLease) -> Outcome {
+async fn run_pass<R: Runtime>(
+    app: AppHandle<R>,
+    lease: ProfileLease,
+) -> Result<usize, NotificationError> {
     let state = app
         .try_state::<crate::AppState>()
-        .ok_or("application state unavailable")?;
+        .ok_or(NotificationError::AppStateUnavailable)?;
     let origin = state
         .db_executor
         .execute(
@@ -315,13 +328,12 @@ async fn run_pass<R: Runtime>(app: AppHandle<R>, lease: ProfileLease) -> Outcome
             "notifications.discovery.origin",
             |db| Ok(directories_db(db.conn())?.into_iter().next().map(|d| d.url)),
         )
-        .await?;
+        .await
+        .map_err(NotificationError::Profile)?;
     let Some(origin) = origin else {
         return Ok(0);
     };
-    let (signing_key, did) = super::push::issuer_key(&state)
-        .await
-        .map_err(|e| e.to_string())?;
+    let (signing_key, did) = super::push::issuer_key(&state).await?;
     let items = fetch(&origin, &signing_key, did.as_str()).await;
     if items.is_empty() {
         return Ok(0);
@@ -347,7 +359,8 @@ async fn run_pass<R: Runtime>(app: AppHandle<R>, lease: ProfileLease) -> Outcome
                 Ok(recorded)
             },
         )
-        .await?;
+        .await
+        .map_err(NotificationError::Profile)?;
     for row in &recorded {
         super::announce(&app, lease.session_id(), row);
     }
@@ -446,7 +459,7 @@ mod tests {
         let state = app.state::<crate::AppState>();
         let session = state.profile_operations.session().unwrap();
 
-        assert_eq!(discover(app.handle(), admitted(&state)).await, Ok(1));
+        assert_eq!(discover(app.handle(), admitted(&state)).await.unwrap(), 1);
 
         let rows = in_profile(&state, |db| super::super::list(db.conn(), None, false)).await;
         assert_eq!(rows.len(), 1);
@@ -458,6 +471,25 @@ mod tests {
             .iter()
             .any(|event| event["session"] == session.as_str()
                 && event["row"]["id"] == rows[0].id.as_str()));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_pass_with_the_vault_locked_fails_with_the_typed_refusal() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, _, received, _release, server) =
+            learner_with_invitation(directory.path(), true).await;
+        let state = app.state::<crate::AppState>();
+        *state.keystore.lock().await = None;
+
+        let error = discover(app.handle(), admitted(&state))
+            .await
+            .expect_err("no issuer key while the vault is locked");
+        assert!(
+            matches!(*error, NotificationError::VaultLocked),
+            "got {error:?}"
+        );
+        assert_eq!(received.load(Ordering::SeqCst), 0, "Cloud is not asked");
         server.abort();
     }
 
@@ -494,12 +526,16 @@ mod tests {
             "the resume pass must join, not ask Cloud again"
         );
         release.send(true).unwrap();
-        assert_eq!(background.await.unwrap(), Ok(1));
-        assert_eq!(resume.await.unwrap(), Ok(1), "the joiner shares the result");
+        assert_eq!(background.await.unwrap().unwrap(), 1);
+        assert_eq!(
+            resume.await.unwrap().unwrap(),
+            1,
+            "the joiner shares the result"
+        );
         assert_eq!(received.load(Ordering::SeqCst), lists);
 
         // A later pass is a new one, and de-duplication keeps the row single.
-        assert_eq!(discover(app.handle(), admitted(&state)).await, Ok(0));
+        assert_eq!(discover(app.handle(), admitted(&state)).await.unwrap(), 0);
         assert_eq!(received.load(Ordering::SeqCst), 2 * lists);
         let rows = in_profile(&state, |db| super::super::list(db.conn(), None, false)).await;
         assert_eq!(rows.len(), 1);

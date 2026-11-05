@@ -56,3 +56,11 @@ Deviations:
 - `AccessDenied::Invalid` also covers Studio errors the lesson lookups and the attempt gate never produce.
 - Credentials is one enum, not several: bundles and issuance share the database, signing and status-list failures. The status-list publication report and the auto-issuance report keep their per-item string lines, which the webview shows.
 - Revocation still reports a missing credential and one without a status list as one case, `NotRevocable`.
+
+## Follow-up — 2026-11-05
+
+The Cloud discovery deviation is gone. `cloud_pull::discover` returns `Result<usize, DiscoveryError>`, where `DiscoveryError` is `Arc<NotificationError>`, so the shared pass that joined callers await stays `Clone`. `NotificationError` gains `AppStateUnavailable` and `DiscoveryTask`. `notifications_discover` converts to a string at the command boundary. The `discover` doc comment now says one pass runs per profile session, and passes for different sessions can run side by side.
+
+Red → green: `cloud_pull::tests::a_pass_with_the_vault_locked_fails_with_the_typed_refusal` would not build against the string outcome. Now green: it asserts `NotificationError::VaultLocked`, and Cloud is not asked.
+
+Text the webview sees: unchanged, except a poisoned discovery slot now says "poisoned lock: another task failed inside" (it said "discovery state poisoned").
