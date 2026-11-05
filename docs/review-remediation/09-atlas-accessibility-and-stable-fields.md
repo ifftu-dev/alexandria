@@ -60,3 +60,4 @@ Deviations:
 ## Notes
 
 - 2026-11-05: The inspector's relation buttons now say the earned state, as their visible text does: "Inspect {name}, earned" or "Inspect {name}, not yet earned, Ready". This replaces the deviation above. The two strings are translated by hand into all nine locales, and the unused "Inspect {name}" string is removed. Red → green: `SkillAtlasExplorer.test.ts` names both relation kinds; red ("Inspect Algebra"), now green.
+- 2026-11-05: Story 51 is now built (ticket 18), replacing the first deviation above. Not-yet-earned skills whose counted prerequisites are all loaded and earned are shown as "Ready next", with a stronger map node and list row and the state in their accessible name. An earned but unloaded prerequisite no longer satisfies a skill.

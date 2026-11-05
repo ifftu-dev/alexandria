@@ -42,3 +42,25 @@ Ticket 17's device checks stay with a person.
 - Each item has a test at the module interface or the desktop UI suite, red before and green after, or is a pure refactor covered by existing tests.
 - `scripts/check.sh` and the desktop UI suite pass.
 - Text the webview sees is unchanged, or the change is listed here.
+
+## Completion evidence (atlas) — 2026-11-05
+
+What changed:
+
+- **Ready next (story 51).** A not-yet-earned skill is ready next when it has at least one prerequisite and every prerequisite it counts is loaded and earned. Skills with no prerequisites, with partly earned prerequisites, or with a prerequisite that is unloaded or uncounted are not ready next. `prerequisitesSatisfied` now also needs every prerequisite loaded and the loaded count to equal `prerequisite_count`, so an earned but unloaded prerequisite no longer satisfies it. Ready next skills get a stronger map node (field-coloured border, a wider field edge and a field tint) and a tinted list row, with a decorative ◎. Their accessible name says "ready next" ("Sorting Algorithms, not yet earned, ready next, learning-outcome Bloom level 3 Apply"), and so do the evidence line, the inspector status and inspector relations. Every unearned skill is still counted as Ready. The class is in the node's `v-memo` dependencies, and the label comes from the cached node text.
+- **Durations.** `src/components/skills/**` takes its transition durations from the `--duration-*` tokens.
+
+Text the webview sees:
+
+- New: "Ready next", "{name}, not yet earned, ready next[, learning-outcome Bloom level {level}]" and "Inspect {name}, not yet earned, ready next". The atlas legend's last sentence now reads "Every other skill is Ready; ◎ Ready next marks those whose prerequisites you have all earned." All are translated by hand into the nine locales; the other locales keep their "Ready" word (for example "Lista para empezar").
+
+Red → green:
+
+- `skillAtlas.test.ts`: ready next only with every counted prerequisite loaded and earned (none, partial, unloaded, uncounted, over-counted and already earned cases), and an earned but unloaded prerequisite no longer satisfies a skill.
+- `SkillAtlasExplorer.test.ts`: only the ready next skill is emphasised in the list and on the map, with its accessible name, visible label, inspector status and relation names; the memoised node gains and loses the emphasis as the model changes.
+- `skill-atlas.spec.ts` (Chromium and WebKit): Sorting Algorithms is ready next with the stronger node; Greedy Algorithms (partly earned), Graph Algorithms and Python (no prerequisites) stay Ready. It failed against the previous code.
+- `motionDurations.test.ts`: the three `src/components/skills` entries failed, then passed.
+
+Checks: full Vitest (98 files, 605 tests), `npx playwright test` on the skill-atlas, personal-atlas and atlas-performance specs (Chromium and WebKit, 34 passed, 2 skipped), `npx vue-tsc -b --noEmit`, `npm run i18n:keys`, `npm run i18n:parity`, `npm run i18n:no-raw-text`, `npm run check:csp`, `scripts/check-docs.sh`.
+
+Performance: `atlas-performance.spec.ts` saw no long tasks. With 20× CPU throttling on the scale fixture there were none in six runs on a quiet machine. With other builds running, the old and new code both had occasional single tasks of 50–65 ms, and outliers of about 200–300 ms, in an interleaved comparison of eight runs each.
