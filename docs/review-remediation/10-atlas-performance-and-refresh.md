@@ -52,3 +52,7 @@ Deviations:
 - The sidebar graph is not an atlas surface. It updates on credential events and profile change only.
 - The perf spec is skipped on WebKit, which has no Long Tasks API.
 - Existing tests that counted every list row now assert the window and the full count. The sidebar test now expects no refresh on navigation.
+
+## Notes
+
+- 2026-11-05: Four issuing paths did not announce credential changes, so the atlas stayed stale after them: graded plugin submissions (`plugin_submit_and_grade`), skill bootstrap confirmation, `useCredentials().issue` and role credentials. Each now announces after it succeeds; a bootstrap that claims nothing stays silent, as does every failure. Red → green: `PluginHost.test.ts` and `credentialIssuance.test.ts` (issue, bootstrap, role credential); red (no event), now green.

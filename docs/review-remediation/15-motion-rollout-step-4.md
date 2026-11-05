@@ -61,3 +61,7 @@ Deviations:
 - The interview call page is not mounted in the desktop UI suite. Its controls (`LiveSessionControls`) are covered by Vitest, and its chat uses the same transition as the tested tutoring chat.
 - `AppTabs` buttons are now `type="button"`, so a tab inside a form no longer submits it.
 
+## Notes
+
+- 2026-11-05: Messages that "load earlier messages" inserts above the oldest shown message now appear at once; only new arrivals rise in. This replaces the classroom deviation above. Red → green: the classroom step in `motion-step4.spec.ts` loads an earlier message in every mode and expects no motion on it; red in System (2 transitions), now green.
+- 2026-11-05: `AppTabs` is a `tablist` of `tab`s with `aria-selected` instead of `aria-pressed`. Only the selected tab is in the tab order; the arrow keys (mirrored right-to-left), Home and End move focus and selection. Panels are not wrapped by `AppTabs`, so there is no `aria-controls`. Red → green: `pressFeedback.test.ts` (roles, selection, roving focus, keys, right-to-left), and the guardian step in `motion-step4.spec.ts` (selection and arrow keys); red, now green. The atlas specs now find the skills page tabs by the tab role.

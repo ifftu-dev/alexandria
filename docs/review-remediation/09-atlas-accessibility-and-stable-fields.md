@@ -57,3 +57,6 @@ Deviations:
 - The default and field-focus cameras now share one framing. The default view sits 10 map units higher and, on narrow screens, frames a region's first column.
 - The inspector's relation buttons keep their "Inspect {name}" labels. Their visible earned or Ready text is not part of the name.
 
+## Notes
+
+- 2026-11-05: The inspector's relation buttons now say the earned state, as their visible text does: "Inspect {name}, earned" or "Inspect {name}, not yet earned, Ready". This replaces the deviation above. The two strings are translated by hand into all nine locales, and the unused "Inspect {name}" string is removed. Red → green: `SkillAtlasExplorer.test.ts` names both relation kinds; red ("Inspect Algebra"), now green.

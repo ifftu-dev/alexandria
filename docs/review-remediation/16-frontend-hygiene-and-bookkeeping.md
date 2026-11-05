@@ -46,3 +46,7 @@ Red → green:
 - The inbox helper is a pure refactor, covered by the existing localisation tests.
 
 Checks: full Vitest (92 files, 575 tests); `npx vue-tsc -b --noEmit`; `npm run check:tauri-commands`; `scripts/check-docs.sh`; `npx playwright test tests/desktop-ui/notification-links.spec.ts` (4 passed, Chromium and WebKit).
+
+## Notes
+
+- 2026-11-05: `isInAppPath` accepted no plain spaces, so a route like `/search?q=two words` was refused. It now allows U+0020, which URL parsers encode rather than strip. Tabs, newlines, other control characters, backslashes and other origins are still refused. Red → green: `parse.test.ts` accepts spaced routes, including an `open?route=` link, and still refuses control characters and backslashes beside a space; red, now green.
