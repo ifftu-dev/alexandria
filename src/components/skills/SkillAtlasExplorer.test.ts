@@ -162,9 +162,17 @@ describe('personal atlas explorer public interactions', () => {
     expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('Mathematics')
     await button(wrapper, 'Show all connections').trigger('click')
     expect(wrapper.props('view')).toMatchObject({ selectedSkillId: 'b', neighborhood: 'none' })
-    await button(wrapper, 'Inspect Algebra').trigger('click')
+    await button(wrapper, 'Inspect Algebra, earned').trigger('click')
     expect(wrapper.props('view')).toMatchObject({ selectedSkillId: 'a', focusedFieldId: 'Mathematics' })
     expect(wrapper.emitted('open-skill')).toBeUndefined()
+  })
+
+  it('names each inspector relation with its earned state, as its visible text shows', async () => {
+    const wrapper = setup({ ...initialView(), selectedSkillId: 'b' })
+    const inspector = wrapper.get('[aria-label="Skill inspector"]')
+    expect(inspector.findAll('.inspector-relations button').map(item => item.attributes('aria-label'))).toEqual(['Inspect Algebra, earned'])
+    await button(wrapper, 'Inspect Algebra, earned').trigger('click')
+    expect(inspector.findAll('.inspector-relations button').map(item => item.attributes('aria-label'))).toEqual(['Inspect Bridges, not yet earned, Ready'])
   })
 
   it('restores view props across remount and resets all exploration controls through the public event', async () => {
