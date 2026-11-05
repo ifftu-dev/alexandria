@@ -2314,7 +2314,8 @@ export interface ChatMessage { id: string; thread_id: string; position: number; 
 export interface ChatBinding { id: string; thread_id: string; kind: 'lesson' | 'goal'; course_id: string; element_id: string; label: string; created_at: string }
 export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
 export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
-export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; requested_at: string; decided_at: string | null }
+/** Mirrors `GuardianApproval` in `src-tauri/src/domain/guardian_ai.rs`. */
+export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: GuardianAiRequestStatus; requested_at: string; decided_at: string | null }
 /** Mirrors `GuardianAiRequestStatus` in `src-tauri/src/domain/guardian_ai.rs`. */
 export type GuardianAiRequestStatus = 'pending' | 'approved' | 'declined'
 /** Mirrors `GuardianAiRequest` in `src-tauri/src/domain/guardian_ai.rs`. */

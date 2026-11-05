@@ -525,24 +525,12 @@ async fn send_approval_requests(
     key: &[u8; 32],
     peer_str: &str,
 ) -> Result<(), String> {
-    let pending: Vec<proto::ApprovalRequestPayload> = db_executor
+    let pending: Vec<crate::ai_access::ApprovalRequest> = db_executor
         .execute(
             workload,
             lease.clone(),
             "guardian.approvals.pending",
-            |db| {
-                let pending =
-                    crate::ai_access::pending_approvals(db.conn(), 20).map_err(refused)?;
-                Ok(pending
-                    .into_iter()
-                    .map(|p| proto::ApprovalRequestPayload {
-                        request_id: p.id,
-                        connection_name: p.connection_name,
-                        endpoint: p.endpoint,
-                        model: p.model,
-                    })
-                    .collect())
-            },
+            |db| crate::ai_access::pending_approvals(db.conn(), 20).map_err(refused),
         )
         .await?;
     if pending.is_empty() {

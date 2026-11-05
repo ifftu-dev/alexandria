@@ -122,4 +122,4 @@ Checks: `cargo fmt --check`; `cargo clippy -p alexandria-node --all-targets -- -
 
 Text the webview sees: unchanged. The renamed type and constant are TypeScript names only.
 
-Not done: `GuardianApproval` (the ward's own view, from `ai_connection_approvals`) still carries `status: String`, and `PendingApproval` still has a field-for-field copy in `ApprovalRequestPayload` (`id` vs `request_id`). Neither was in this ticket. The notes in tickets 06 and 13 that name `scripts/chat-vocab.json` and `NotificationError::Profile` describe what shipped then and are left as written.
+Since closed (2026-11-05): `GuardianApproval` (the ward's own view, from `ai_connection_approvals`) moved to `domain::guardian_ai` with the closed `GuardianAiRequestStatus`, mirrored by `ChatGuardianApproval` in `src/types/index.ts`, and `PendingApproval` and `ApprovalRequestPayload` became one `ApprovalRequest`, sealed as it is (`a_request_keeps_the_peer_to_peer_field_names` pins its wire fields). The notes in tickets 06 and 13 that name `scripts/chat-vocab.json` and `NotificationError::Profile` describe what shipped then and are left as written.

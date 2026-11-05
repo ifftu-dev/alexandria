@@ -37,10 +37,9 @@ use alexandria_ai::endpoint::Location;
 use alexandria_studio::model::{StudioConnection, StudioDocument};
 use alexandria_studio::provider as studio_provider;
 use rusqlite::{Connection, OptionalExtension};
-use serde::Serialize;
 
 pub use crate::domain::guardian_ai::{
-    GuardianAiRequest, GuardianAiRequestStatus, GuardianDecision,
+    ApprovalRequest, GuardianAiRequest, GuardianAiRequestStatus, GuardianApproval, GuardianDecision,
 };
 pub use alexandria_studio::access::{visible_lesson, AccessDenied, Reader};
 
@@ -210,29 +209,6 @@ pub fn no_attempt_in_progress(conn: &Connection, surface: Surface) -> Result<(),
 
 // ─── guardian approvals ──────────────────────────────────────────────────
 
-/// A request for a guardian's approval of a remote connection, as the
-/// learner sees it.
-#[derive(Debug, Clone, Serialize)]
-pub struct GuardianApproval {
-    pub id: String,
-    pub connection_id: String,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-    pub status: String,
-    pub requested_at: String,
-    pub decided_at: Option<String>,
-}
-
-/// An open request, as the guardian sync sends it: what the guardian sees.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingApproval {
-    pub id: String,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-}
-
 /// The latest guardian decision for a connection at this endpoint:
 /// `pending`, `approved` or `declined`.
 fn latest_decision(
@@ -266,7 +242,7 @@ pub fn approvals(conn: &Connection) -> Result<Vec<GuardianApproval>, AccessDenie
                     connection_name: r.get(2)?,
                     endpoint: r.get(3)?,
                     model: r.get(4)?,
-                    status: r.get(5)?,
+                    status: stored_status(r, 5)?,
                     requested_at: r.get(6)?,
                     decided_at: r.get(7)?,
                 })
@@ -329,16 +305,16 @@ pub fn request_approval(
 pub fn pending_approvals(
     conn: &Connection,
     limit: u32,
-) -> Result<Vec<PendingApproval>, AccessDenied> {
-    let read = || -> rusqlite::Result<Vec<PendingApproval>> {
+) -> Result<Vec<ApprovalRequest>, AccessDenied> {
+    let read = || -> rusqlite::Result<Vec<ApprovalRequest>> {
         let mut stmt = conn.prepare(
             "SELECT id, connection_name, endpoint, model FROM ai_connection_approvals
               WHERE status = 'pending' ORDER BY requested_at LIMIT ?1",
         )?;
         let rows = stmt
             .query_map([limit], |r| {
-                Ok(PendingApproval {
-                    id: r.get(0)?,
+                Ok(ApprovalRequest {
+                    request_id: r.get(0)?,
                     connection_name: r.get(1)?,
                     endpoint: r.get(2)?,
                     model: r.get(3)?,
@@ -361,7 +337,7 @@ pub fn record_decision(
     endpoint: &str,
     approved: bool,
 ) -> Result<bool, AccessDenied> {
-    let status = if approved { "approved" } else { "declined" };
+    let status = GuardianAiRequestStatus::of_decision(approved).as_str();
     conn.execute(
         "UPDATE ai_connection_approvals
             SET status = ?3, decided_by_link = ?4, decided_at = datetime('now')
@@ -396,14 +372,14 @@ fn stored_status(
 pub fn record_ward_request(
     conn: &Connection,
     link_id: &str,
-    request: &PendingApproval,
+    request: &ApprovalRequest,
 ) -> Result<(), AccessDenied> {
     conn.execute(
         "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 'pending', datetime('now'))
          ON CONFLICT(id, link_id) DO NOTHING",
         rusqlite::params![
-            request.id,
+            request.request_id,
             link_id,
             request.connection_name,
             request.endpoint,
@@ -658,7 +634,7 @@ mod tests {
         assert!(matches!(ask(&conn, "c1"), Err(AccessDenied::NoGuardian)));
         link_guardian(&conn);
         let asked = ask(&conn, "c1").unwrap();
-        assert_eq!(asked.status, "pending");
+        assert_eq!(asked.status, GuardianAiRequestStatus::Pending);
         assert_eq!(
             ask(&conn, "c1").unwrap().id,
             asked.id,
@@ -672,8 +648,8 @@ mod tests {
         // comes back bound to the endpoint asked about.
         assert_eq!(
             pending_approvals(&conn, 20).unwrap(),
-            vec![PendingApproval {
-                id: asked.id.clone(),
+            vec![ApprovalRequest {
+                request_id: asked.id.clone(),
                 connection_name: "Ollama".into(),
                 endpoint: "https://api.openai.com/v1".into(),
                 model: "llama3.1:8b".into(),
@@ -727,8 +703,8 @@ mod tests {
         record_ward_request(
             conn,
             link_id,
-            &PendingApproval {
-                id: id.into(),
+            &ApprovalRequest {
+                request_id: id.into(),
                 connection_name: "Work OpenAI".into(),
                 endpoint: "https://api.openai.com/v1".into(),
                 model: "gpt-5.1-mini".into(),

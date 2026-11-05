@@ -91,21 +91,11 @@ pub enum GuardianRequest {
         link_id: String,
         sealed_marker: Vec<u8>,
     },
-    /// Child → guardian: sealed [`ApprovalRequestPayload`], asking the
+    /// Child → guardian: sealed [`crate::ai_access::ApprovalRequest`], asking the
     /// guardian to approve a remote model connection.
     ApprovalRequest { link_id: String, sealed: Vec<u8> },
     /// Guardian → child: sealed [`GuardianDecision`].
     ApprovalDecision { link_id: String, sealed: Vec<u8> },
-}
-
-/// What a learner under 18 asks a guardian to approve: one model connection
-/// at one endpoint. Sent only inside the sealed link.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalRequestPayload {
-    pub request_id: String,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,7 +468,7 @@ fn handle_approval_request(conn: &Connection, link_id: &str, sealed: &[u8]) -> G
         Ok(None) => return GuardianResponse::Unauthorized,
         Err(e) => return GuardianResponse::Error(e),
     };
-    let request: ApprovalRequestPayload = match open(&key, sealed) {
+    let request: crate::ai_access::ApprovalRequest = match open(&key, sealed) {
         Ok(r) => r,
         Err(e) => return GuardianResponse::Error(format!("open approval request: {e}")),
     };
@@ -490,12 +480,6 @@ fn handle_approval_request(conn: &Connection, link_id: &str, sealed: &[u8]) -> G
         return GuardianResponse::Error("approval request out of bounds".into());
     }
     // Repeats are expected: the ward re-sends until it hears a decision.
-    let request = crate::ai_access::PendingApproval {
-        id: request.request_id,
-        connection_name: request.connection_name,
-        endpoint: request.endpoint,
-        model: request.model,
-    };
     match crate::ai_access::record_ward_request(conn, link_id, &request) {
         Ok(()) => GuardianResponse::Acknowledged,
         Err(e) => GuardianResponse::Error(e.to_string()),
@@ -1331,7 +1315,7 @@ mod tests {
         let guardian = test_db();
         let g = guardian.conn();
         seed_guardian_link(g, "link", "guardian", key);
-        let request = ApprovalRequestPayload {
+        let request = crate::ai_access::ApprovalRequest {
             request_id: "req".into(),
             connection_name: "Work OpenAI".into(),
             endpoint: "https://api.openai.com/v1".into(),
