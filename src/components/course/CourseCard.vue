@@ -159,6 +159,10 @@ onMounted(async () => {
   height: 100%;
 }
 
+/* WebKit drops :active when a press lands on a clipped (truncated) child.
+   These parts hold no controls, so a press on them reaches the card. */
+.cc-thumb, .cc-tags, .cc-title, .cc-desc { pointer-events: none; }
+
 .cc-grid:hover {
   transform: translateY(-3px);
   box-shadow:
