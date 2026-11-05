@@ -5,8 +5,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles } from '@/composables/useProfiles'
-import { holdLeavingPlace } from '@/composables/useMotion'
-import { AppButton, EmptyState, StatusBadge } from '@/components/ui'
+import { AppButton, EmptyState, StatusBadge, MotionList } from '@/components/ui'
 import type { Course } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -91,13 +90,10 @@ onMounted(async () => {
       :description="$t('instructor.myCourses.emptyDesc')"
     />
 
-    <TransitionGroup
+    <MotionList
       v-else
-      name="motion-list"
-      tag="div"
       appear
-      class="relative grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-      @before-leave="holdLeavingPlace"
+      class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
     >
       <button
         v-for="course in mine"
@@ -117,6 +113,6 @@ onMounted(async () => {
         </p>
         <p class="mt-2 text-xs text-muted-foreground">{{ $t('instructor.myCourses.updated', { date: course.updated_at.slice(0, 10) }) }}</p>
       </button>
-    </TransitionGroup>
+    </MotionList>
   </div>
 </template>

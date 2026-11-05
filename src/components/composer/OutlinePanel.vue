@@ -4,9 +4,8 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton } from '@/components/ui'
+import { AppButton, MotionList } from '@/components/ui'
 import { useDragReorder } from './useDragReorder'
-import { holdLeavingPlace } from '@/composables/useMotion'
 import type { Chapter, CreateChapterRequest, CreateElementRequest, Element } from '@/types'
 
 const props = defineProps<{
@@ -138,7 +137,7 @@ function typeLabel(type: string): string {
   <div class="space-y-3">
     <!-- Chapters and elements arrive, leave and move into a new order as one
          motion-list (full motion only); drops and adds never wait for it. -->
-    <TransitionGroup name="motion-list" tag="div" class="relative space-y-3" @before-leave="holdLeavingPlace">
+    <MotionList class="space-y-3">
     <div
       v-for="(chapter, chIdx) in chapters"
       :key="chapter.id"
@@ -169,7 +168,7 @@ function typeLabel(type: string): string {
 
       <!-- Elements -->
       <div class="p-1.5 space-y-0.5">
-        <TransitionGroup name="motion-list" tag="div" class="relative space-y-0.5" @before-leave="holdLeavingPlace">
+        <MotionList class="space-y-0.5">
         <button
           v-for="el in elements[chapter.id] ?? []"
           :key="el.id"
@@ -192,7 +191,7 @@ function typeLabel(type: string): string {
             {{ typeLabel(el.element_type) }}
           </span>
         </button>
-        </TransitionGroup>
+        </MotionList>
 
         <!-- Add element -->
         <div v-if="addingToChapter === chapter.id" class="rounded-md border border-dashed border-border p-2 space-y-2">
@@ -222,7 +221,7 @@ function typeLabel(type: string): string {
         </button>
       </div>
     </div>
-    </TransitionGroup>
+    </MotionList>
 
     <!-- Add chapter (course mode only) -->
     <template v-if="!flat">

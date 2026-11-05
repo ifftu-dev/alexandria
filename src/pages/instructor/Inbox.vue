@@ -5,8 +5,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { holdLeavingPlace } from '@/composables/useMotion'
-import { AppButton, AppTabs, AppTextarea, EmptyState } from '@/components/ui'
+import { AppButton, AppTabs, AppTextarea, EmptyState, MotionList } from '@/components/ui'
 import type {
   CourseCompletionBinding,
   CourseCompletionEndorsement,
@@ -230,7 +229,7 @@ async function copySignedEndorsement() {
       :description="$t('instructor.inbox.emptyDesc')"
     />
 
-    <TransitionGroup v-else name="motion-list" tag="div" appear class="relative space-y-2" @before-leave="holdLeavingPlace">
+    <MotionList v-else appear class="space-y-2">
       <button
         v-for="item in visible"
         :key="`${item.kind}-${item.id}`"
@@ -248,6 +247,6 @@ async function copySignedEndorsement() {
         </span>
         <span class="shrink-0 text-xs text-muted-foreground">{{ item.created_at.slice(0, 16) }}</span>
       </button>
-    </TransitionGroup>
+    </MotionList>
   </div>
 </template>

@@ -34,13 +34,10 @@
     </div>
 
     <!-- Classroom grid -->
-    <TransitionGroup
+    <MotionList
       v-else
-      name="motion-list"
-      tag="div"
       appear
-      class="relative p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
-      @before-leave="holdLeavingPlace"
+      class="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
     >
       <RouterLink
         v-for="classroom in classrooms"
@@ -70,7 +67,7 @@
           {{ classroom.description }}
         </p>
       </RouterLink>
-    </TransitionGroup>
+    </MotionList>
 
     <!-- Error -->
     <div v-if="lastError" class="mx-6 mt-4 p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive">
@@ -136,7 +133,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
-import { holdLeavingPlace } from '@/composables/useMotion'
+import { MotionList } from '@/components/ui'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 

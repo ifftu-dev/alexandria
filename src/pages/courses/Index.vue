@@ -2,8 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { holdLeavingPlace } from '@/composables/useMotion'
-import { AppButton } from '@/components/ui'
+import { AppButton, MotionList } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type { Course, SkillDetail } from '@/types'
 
@@ -175,20 +174,17 @@ onMounted(async () => {
     </div>
 
     <!-- Course grid (gap-6, 4 columns max) -->
-    <TransitionGroup
+    <MotionList
       v-else
-      name="motion-list"
-      tag="div"
       appear
-      class="relative grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
       data-catalog-grid
-      @before-leave="holdLeavingPlace"
     >
       <CourseCard
         v-for="course in filteredCourses"
         :key="course.id"
         :course="course"
       />
-    </TransitionGroup>
+    </MotionList>
   </div>
 </template>

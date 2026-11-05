@@ -6,8 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
 import { useAssessment } from '@/composables/useAssessment'
-import { holdLeavingPlace } from '@/composables/useMotion'
-import { AppButton, AppModal, EmptyState, AppSpinner } from '@/components/ui'
+import { AppButton, AppModal, EmptyState, AppSpinner, MotionList } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
@@ -213,14 +212,11 @@ const dash = computed(() => 2 * Math.PI * 20)
     <!-- Per-goal cards -->
     <!-- items-start: grid rows default to stretch, which would inflate every
          card in a row to match an expanded sibling's height. -->
-    <TransitionGroup
+    <MotionList
       v-else
-      name="motion-list"
-      tag="div"
       appear
-      class="relative grid items-start gap-5 sm:grid-cols-2 xl:grid-cols-3"
+      class="grid items-start gap-5 sm:grid-cols-2 xl:grid-cols-3"
       data-goal-grid
-      @before-leave="holdLeavingPlace"
     >
       <div v-for="t in goals" :key="t.id" class="card flex flex-col p-5" data-goal-card>
         <div class="flex items-start gap-4">
@@ -268,7 +264,7 @@ const dash = computed(() => 2 * Math.PI * 20)
           <LearningPathView :path="paths[t.id]!" :assess="assess[t.id]" />
         </div>
       </div>
-    </TransitionGroup>
+    </MotionList>
 
     <!-- Add-a-goal modal — same flow as onboarding -->
     <AppModal

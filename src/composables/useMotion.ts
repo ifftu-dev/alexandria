@@ -1,4 +1,4 @@
-import { computed, getCurrentScope, onScopeDispose, readonly, ref, watch } from 'vue'
+import { computed, effectScope, getCurrentScope, onScopeDispose, readonly, ref, watch } from 'vue'
 import { useSetting } from './useSettings'
 
 export type MotionPreference = 'system' | 'reduced' | 'off'
@@ -8,7 +8,8 @@ export type MotionMode = 'full' | 'reduced' | 'off'
 // first paint and on the picker; it mirrors the setting, as the theme does.
 const SETTING_KEY = 'ui.motion'
 const CACHE_KEY = 'alexandria-motion'
-const setting = useSetting<string>(SETTING_KEY)
+// Made on first use, so importing motion helpers (MotionList) touches no settings.
+let setting: ReturnType<typeof useSetting<string>> | undefined
 const preference = ref<MotionPreference>('system')
 const osReduced = ref(false)
 const mode = computed<MotionMode>(() => preference.value === 'off' ? 'off'
@@ -69,7 +70,11 @@ export function initMotion(): void {
   document.addEventListener('visibilitychange', visibilityChanged)
   document.addEventListener('pointerdown', cancelMotion, { passive: true, capture: true })
   document.addEventListener('keydown', cancelMotion, true)
-  stopSetting = watch(setting.ref, settingChanged, { immediate: true })
+  // Detached, so the first component to ask for motion does not own the watch.
+  effectScope(true).run(() => {
+    setting = useSetting<string>(SETTING_KEY)
+    stopSetting = watch(setting.ref, settingChanged, { immediate: true })
+  })
 }
 
 export function useMotion() {
@@ -79,7 +84,7 @@ export function useMotion() {
     writeCache(value)
     apply()
     // Unlocked: store it in the profile's device setting (never synced).
-    if (setting.ref.value !== null) void setting.set(value).catch(() => { /* The cache keeps it on this device. */ })
+    if (setting && setting.ref.value !== null) void setting.set(value).catch(() => { /* The cache keeps it on this device. */ })
   }
   return { preference: readonly(preference), mode, reduced: computed(() => mode.value !== 'full'), setPreference }
 }

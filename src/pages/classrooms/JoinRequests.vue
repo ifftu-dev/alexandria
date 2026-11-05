@@ -25,7 +25,7 @@
 
       <!-- Requests list: an approved or denied request leaves while the rest
            move up (full motion only). -->
-      <TransitionGroup v-else name="motion-list" tag="div" class="relative space-y-3" @before-leave="holdLeavingPlace">
+      <MotionList v-else class="space-y-3">
         <div
           v-for="req in joinRequests"
           :key="req.id"
@@ -69,7 +69,7 @@
             </AppButton>
           </div>
         </div>
-      </TransitionGroup>
+      </MotionList>
     </div>
   </div>
 </template>
@@ -78,7 +78,7 @@
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
-import { holdLeavingPlace } from '@/composables/useMotion'
+import { MotionList } from '@/components/ui'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { JoinRequest } from '@/types'
 
