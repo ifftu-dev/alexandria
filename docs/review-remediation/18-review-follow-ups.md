@@ -95,3 +95,31 @@ Visible behaviour changes (no text changes):
 - Completion modal: emblem 600 → 650 ms, fade-ups 500 → 650, chips 400 → 320, entry fade 250 → 200. Delays are 60/120/180/240/300/420 ms, previously 50/100/150/220/280/400. Credential rows are staggered 60 ms apart (previously 90).
 - Onboarding steps and decided guardian AI requests now use the shared settle-in frames (0.65 opacity, 6 px), previously 0.5/8 px and 0.6/4 px.
 - The notifications inbox now animates its rows in full motion.
+
+## Completion evidence (backend) — 2026-11-05
+
+What changed:
+
+- **Guardian AI requests.** `GuardianAiRequest` and its status are in `domain/guardian_ai.rs`. The status is the closed `GuardianAiRequestStatus` vocabulary (`pending`, `approved`, `declined`), mirrored as `GuardianAiRequestStatus` in `src/types/index.ts`. `ai_access` re-exports both and reads the status column into the enum. The column already has a CHECK on the same three strings, so no stored row changes meaning.
+- **One decision shape.** `GuardianDecision` (also in `domain/guardian_ai.rs`) is what `ai_access` returns and what the guardian sync seals. `ApprovalDecisionPayload` is gone. Its field names are the peer-to-peer wire format, and a test pins them.
+- **Profile session.** `profile::scope::ProfileSession` is a newtype serialised as its string (`#[serde(transparent)]`). Admission, `ProfileLease::session_id`, `ProfileOperations::{session, admit}`, `notifications::{announcement, announce, emit_changed}`, `InboundDatabase::run_in_session` and `pinned`, inbound UI events, `P2pEvent::GuardianLinked`, `P2pEvent::SettingsSynced`, the Cloud discovery slot and `get_profile_session_token` carry it. Only the IPC session header builds one from webview text.
+- **One Cloud notification.** `notifications::CloudEvent::notification` builds the copy, route, dedupe key and payload (`id`, `event_id`, optional `cloud_origin` and `role_label`) for both Cloud discovery and push.
+- **Push.** The holder proof key comes from `credentials::Issuer::from_keystore`, split with `into_parts` because a proof is not a credential (`push::issuer`, also used by Cloud discovery). The permission prompt maps through `NotificationPermissionOutcome::of_prompt` alone. Push registration matches on its outcome.
+- **Errors.** `NotificationError::Executor` holds a failed database job or an executor refusal. `NotificationError::Profile` now holds only admission, lease and profile id failures. Both still display the underlying text.
+- **Vocabulary ownership.** `notifications::vocabulary` owns `scripts/notification-vocab.json` (`notification_vocab_snapshot_is_current`, rewritten by the new `npm run generate:notification-vocab`). `scripts/chat-vocab.json` holds the chat lists only. `scripts/check-tauri-commands.mjs` reads each snapshot on its own and names the matching generate script when a generated file is stale. The snapshot check and the round-trip check are shared helpers in `crate::vocabulary`. The `Surface::ChatState` doc now names `AccessDenied::AttemptInProgress`.
+- **Permission name.** The Rust vocabulary, the generated TypeScript type and their importers (`useNotifications`, `NotificationsPanel` and its test) use `NotificationPermissionOutcome` and `NOTIFICATION_PERMISSION_OUTCOMES`. The snapshot key is `notification_permission_outcomes`. The wire strings are unchanged.
+- **Tooling and docs.** `scripts/check.sh` runs the release workflow regression tests (`python3 -m unittest discover -s scripts -p 'test_*.py'`). The Settings bullet in `src-tauri/src/AGENTS.md` says how synced settings are followed.
+
+Red → green:
+
+- `ai_access` guardian tests, rewritten to expect `GuardianAiRequestStatus`: they failed to compile, then passed. New `domain::guardian_ai` tests cover the status strings and the decision's wire fields.
+- `notifications::tests::a_cloud_event_records_the_same_row_from_discovery_or_a_push`: failed to compile, then passed.
+- `push_tests::a_failed_database_job_is_an_executor_failure_not_a_profile_one`: failed to compile, then passed.
+- `check-tauri-commands.test.mjs` "a notification snapshot missing the notification kinds fails the guard": failed, then passed. "a broken notification snapshot leaves the chat vocabulary checked" is new.
+- `profile::scope::tests::a_session_crosses_the_bridge_as_a_plain_string` pins the wire form. The session change, the push changes and the rename are refactors covered by the existing notification, push, Cloud discovery, inbound, guardian and scope tests.
+
+Checks: `cargo fmt --check`; `cargo clippy -p alexandria-node --all-targets -- -D warnings`; `cargo test -p alexandria-node` (1,750 lib tests and all integration tests passed); `cargo check -p alexandria-node --tests --features personhood-lab`; `cargo check -p alexandria-node --target aarch64-apple-ios --features tutoring-video-ios`; `npm run check:tauri-commands` and its regression tests; `npx vue-tsc -b --noEmit`; `scripts/check.sh --fast`, which passed every step; `scripts/check-docs.sh`.
+
+Text the webview sees: unchanged. The renamed type and constant are TypeScript names only.
+
+Not done: `GuardianApproval` (the ward's own view, from `ai_connection_approvals`) still carries `status: String`, and `PendingApproval` still has a field-for-field copy in `ApprovalRequestPayload` (`id` vs `request_id`). Neither was in this ticket. The notes in tickets 06 and 13 that name `scripts/chat-vocab.json` and `NotificationError::Profile` describe what shipped then and are left as written.
