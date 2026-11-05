@@ -2533,10 +2533,11 @@ async fn swarm_event_loop(
                                                     ))
                                                 })
                                                 .await
-                                                .unwrap_or_else(|error| {
-                                                    (GuardianResponse::Error(inbound::refusal_text(&error)), String::new())
-                                                });
-                                            if let GuardianResponse::Linked { notification, .. } = &response {
+                                                .map_or_else(
+                                                    |error| (GuardianResponse::Error(inbound::refusal_text(&error)), None),
+                                                    |(response, session)| (response, Some(session)),
+                                                );
+                                            if let (GuardianResponse::Linked { notification, .. }, Some(session)) = (&response, session) {
                                                 let _ = events.send(P2pEvent::GuardianLinked { session, notification: notification.clone() }).await;
                                             }
                                             InboundCompletion::Guardian(channel, response)

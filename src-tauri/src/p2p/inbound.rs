@@ -43,7 +43,7 @@ use crate::classroom::types::{
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
 use crate::profile::operations::ProfileOperations;
-use crate::profile::scope::ProfileLease;
+use crate::profile::scope::{ProfileLease, ProfileSession};
 
 use super::types::{
     SignedGossipMessage, TOPIC_CATALOG, TOPIC_GOAL_TEMPLATES, TOPIC_GOVERNANCE, TOPIC_OPINIONS,
@@ -74,7 +74,7 @@ pub(crate) fn is_busy(error: &str) -> bool {
 pub(crate) struct InboundDatabase {
     executor: DatabaseExecutor,
     operations: ProfileOperations,
-    session: Arc<Mutex<Option<String>>>,
+    session: Arc<Mutex<Option<ProfileSession>>>,
 }
 
 impl InboundDatabase {
@@ -83,7 +83,7 @@ impl InboundDatabase {
     pub(crate) fn pinned(
         executor: DatabaseExecutor,
         operations: ProfileOperations,
-        session: String,
+        session: ProfileSession,
     ) -> Self {
         Self {
             executor,
@@ -164,13 +164,13 @@ impl InboundDatabase {
         &self,
         label: &'static str,
         operation: F,
-    ) -> Result<(T, String), String>
+    ) -> Result<(T, ProfileSession), String>
     where
         T: Send + 'static,
         F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
     {
         let lease = self.lease()?;
-        let session = lease.session_id().to_owned();
+        let session = lease.session_id().clone();
         self.executor
             .execute(DatabaseWorkload::Background, lease, label, operation)
             .await
@@ -260,7 +260,11 @@ pub(crate) enum InboundUiEvent {
 
 impl InboundUiEvent {
     /// Emit under `session`, the profile session the producing job ran in.
-    pub(crate) fn emit<R: tauri::Runtime>(self, app: &tauri::AppHandle<R>, session: &str) {
+    pub(crate) fn emit<R: tauri::Runtime>(
+        self,
+        app: &tauri::AppHandle<R>,
+        session: &ProfileSession,
+    ) {
         use tauri::Emitter;
         let result = match self {
             Self::ClassroomMessage(event) => app.emit(classroom_manager::MESSAGE_EVENT, event),
@@ -347,7 +351,7 @@ pub(crate) fn gossip_ingest<E>(
     mut emit: E,
 ) -> (GossipIngest, impl Future<Output = ()> + Send + 'static)
 where
-    E: FnMut(InboundUiEvent, &str) + Send + 'static,
+    E: FnMut(InboundUiEvent, &ProfileSession) + Send + 'static,
 {
     let (queue, mut receiver) =
         mpsc::channel::<(String, SignedGossipMessage)>(GOSSIP_QUEUE_CAPACITY);
@@ -395,7 +399,7 @@ async fn apply_gossip(
     database: &InboundDatabase,
     topic: &str,
     message: SignedGossipMessage,
-) -> Result<Option<(InboundUiEvent, String)>, String> {
+) -> Result<Option<(InboundUiEvent, ProfileSession)>, String> {
     let Some(work) = GossipWork::decode(topic, &message) else {
         return Ok(None);
     };
@@ -511,7 +515,7 @@ mod tests {
         Arc::new(Mutex::new(Some(database)))
     }
 
-    async fn active_operations() -> (ProfileOperations, String) {
+    async fn active_operations() -> (ProfileOperations, ProfileSession) {
         let operations = ProfileOperations::default();
         operations
             .activate(async { Ok(()) }, async { Ok(()) })
@@ -561,7 +565,7 @@ mod tests {
     fn block_database(
         executor: &DatabaseExecutor,
         operations: &ProfileOperations,
-        session: &str,
+        session: &ProfileSession,
     ) -> (Arc<Gate>, tokio::task::JoinHandle<Result<(), String>>) {
         let gate = Arc::new(Gate::default());
         let blocker_gate = Arc::clone(&gate);

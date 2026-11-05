@@ -250,7 +250,9 @@ type Pass = futures::future::Shared<futures::future::BoxFuture<'static, Outcome>
 
 /// The discovery pass in flight, if any, and the profile session it runs for.
 #[derive(Clone, Default)]
-pub(crate) struct Passes(std::sync::Arc<std::sync::Mutex<Option<(String, Pass)>>>);
+pub(crate) struct Passes(
+    std::sync::Arc<std::sync::Mutex<Option<(crate::profile::scope::ProfileSession, Pass)>>>,
+);
 
 /// Run one discovery pass for the profile `lease` admits, from the background
 /// loop or when a phone comes back to the foreground. Returns how many
@@ -280,7 +282,7 @@ pub async fn discover<R: Runtime>(app: &AppHandle<R>, lease: ProfileLease) -> Ou
                 // The pass runs as its own task, so it finishes even if every
                 // caller stops waiting, and it ends at once when the profile
                 // locks: the slot never holds a lease nobody polls.
-                let session = lease.session_id().to_owned();
+                let session = lease.session_id().clone();
                 let task = tokio::spawn({
                     let app = app.clone();
                     let lease = lease.clone();

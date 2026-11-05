@@ -162,7 +162,7 @@ pub async fn move_incompatible_profile_data(state: State<'_, AppState>) -> Resul
 #[tauri::command]
 pub async fn get_profile_session_token(
     state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<crate::profile::scope::ProfileSession>, String> {
     Ok(state.profile_operations.session())
 }
 

@@ -235,7 +235,7 @@ pub enum P2pEvent {
     /// link is already recorded; this is what lets the app tell the learner.
     GuardianLinked {
         /// The profile session the link was recorded under.
-        session: String,
+        session: crate::profile::scope::ProfileSession,
         notification: Option<Box<crate::notifications::Recorded>>,
     },
     /// A paired device's sync request changed these settings here. They are
@@ -243,7 +243,7 @@ pub enum P2pEvent {
     /// local write (push eligibility, the notification channel).
     SettingsSynced {
         /// The profile session the payload was applied under.
-        session: String,
+        session: crate::profile::scope::ProfileSession,
         keys: Vec<String>,
     },
 }

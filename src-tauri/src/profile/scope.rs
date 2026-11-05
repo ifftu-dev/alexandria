@@ -9,9 +9,40 @@ use crate::AppState;
 
 const SESSION_HEADER: &str = "x-alexandria-profile-session";
 
+/// One unlock of one profile. A lease holds the session it was admitted
+/// under, and work it produced (an event, a notification, a settings
+/// follow-up) names that session, so it reaches that unlock and no later one.
+/// The webview sees it as a plain string: the session header and the
+/// `session` field of profile-bound events.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct ProfileSession(String);
+
+impl ProfileSession {
+    fn fresh() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    /// A session as the webview sent it. Admission decides whether it is
+    /// current.
+    pub(crate) fn from_webview(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ProfileSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Default)]
 struct AdmissionState {
-    session: String,
+    session: ProfileSession,
     accepting: bool,
     readers: usize,
 }
@@ -27,7 +58,7 @@ struct AdmissionInner {
 pub(crate) struct Admission(Arc<AdmissionInner>);
 
 impl Admission {
-    pub(crate) fn revision(&self) -> String {
+    pub(crate) fn revision(&self) -> ProfileSession {
         self.0
             .state
             .lock()
@@ -36,50 +67,50 @@ impl Admission {
             .clone()
     }
 
-    pub(crate) fn begin_start(&self, expected_revision: &str) -> Option<String> {
+    pub(crate) fn begin_start(&self, expected_revision: &ProfileSession) -> Option<ProfileSession> {
         let mut state = self.0.state.lock().expect("profile admission poisoned");
-        if state.session != expected_revision {
+        if state.session != *expected_revision {
             return None;
         }
         state.accepting = false;
-        state.session = uuid::Uuid::new_v4().to_string();
+        state.session = ProfileSession::fresh();
         let session = state.session.clone();
         drop(state);
         self.0.closed.notify_waiters();
         Some(session)
     }
 
-    pub(crate) fn close(&self) -> String {
+    pub(crate) fn close(&self) -> ProfileSession {
         let mut state = self.0.state.lock().expect("profile admission poisoned");
         state.accepting = false;
-        state.session = uuid::Uuid::new_v4().to_string();
+        state.session = ProfileSession::fresh();
         let session = state.session.clone();
         drop(state);
         self.0.closed.notify_waiters();
         session
     }
 
-    pub(crate) fn open(&self, ticket: &str) -> bool {
+    pub(crate) fn open(&self, ticket: &ProfileSession) -> bool {
         let mut state = self.0.state.lock().expect("profile admission poisoned");
-        if state.session != ticket || state.readers != 0 {
+        if state.session != *ticket || state.readers != 0 {
             return false;
         }
         state.accepting = true;
         true
     }
 
-    pub(crate) fn session(&self) -> Option<String> {
+    pub(crate) fn session(&self) -> Option<ProfileSession> {
         let state = self.0.state.lock().expect("profile admission poisoned");
         state.accepting.then(|| state.session.clone())
     }
 
-    pub(crate) fn admit(&self, expected: &str) -> Result<ProfileLease, String> {
+    pub(crate) fn admit(&self, expected: &ProfileSession) -> Result<ProfileLease, String> {
         let mut state = self
             .0
             .state
             .lock()
             .map_err(|_| "profile admission poisoned")?;
-        if !state.accepting || state.session != expected {
+        if !state.accepting || state.session != *expected {
             return Err("profile session is locked or has changed".to_string());
         }
         state.readers = state
@@ -89,7 +120,7 @@ impl Admission {
         Ok(ProfileLease {
             inner: Arc::new(LeaseInner {
                 admission: self.0.clone(),
-                session: expected.to_owned(),
+                session: expected.clone(),
             }),
         })
     }
@@ -116,7 +147,7 @@ impl Admission {
 
 struct LeaseInner {
     admission: Arc<AdmissionInner>,
-    session: String,
+    session: ProfileSession,
 }
 
 impl Drop for LeaseInner {
@@ -139,7 +170,7 @@ pub struct ProfileLease {
 }
 
 impl ProfileLease {
-    pub(crate) fn session_id(&self) -> &str {
+    pub(crate) fn session_id(&self) -> &ProfileSession {
         &self.inner.session
     }
 
@@ -217,7 +248,7 @@ impl<'de, R: tauri::Runtime> CommandArg<'de, R> for ProfileLease {
             .ok_or_else(|| InvokeError::from("profile session header is required"))?;
         state
             .profile_operations
-            .admit(session)
+            .admit(&ProfileSession::from_webview(session))
             .map_err(InvokeError::from)
     }
 }
@@ -321,6 +352,17 @@ mod tests {
         .expect("IPC task")
     }
 
+    #[test]
+    fn a_session_crosses_the_bridge_as_a_plain_string() {
+        let session = ProfileSession::from_webview("s-1");
+        assert_eq!(serde_json::to_value(&session).unwrap(), "s-1");
+        assert_eq!(
+            serde_json::from_value::<ProfileSession>("s-1".into()).unwrap(),
+            session
+        );
+        assert_eq!(session.to_string(), "s-1");
+    }
+
     #[tokio::test]
     async fn tauri_dispatch_rejects_stale_sessions_and_holds_lease_across_await() {
         let directory = tempfile::TempDir::new().expect("temporary app directory");
@@ -349,7 +391,7 @@ mod tests {
         assert!(request(&webview, Some("wrong-session")).await.is_err());
         assert_eq!(probe.calls.load(Ordering::SeqCst), 0);
 
-        let mut admitted = Box::pin(request(&webview, Some(&first)));
+        let mut admitted = Box::pin(request(&webview, Some(first.as_str())));
         assert!(futures::poll!(&mut admitted).is_pending());
         tokio::time::timeout(std::time::Duration::from_secs(5), probe.started.notified())
             .await
@@ -361,7 +403,7 @@ mod tests {
         }));
         assert!(futures::poll!(&mut lock).is_pending());
         assert!(operations.session().is_none());
-        assert!(request(&webview, Some(&first)).await.is_err());
+        assert!(request(&webview, Some(first.as_str())).await.is_err());
         assert!(matches!(
             cleanup.try_recv(),
             Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -378,9 +420,9 @@ mod tests {
             .expect("activate next profile");
         let second = operations.session().expect("second session");
         assert_ne!(first, second);
-        assert!(request(&webview, Some(&first)).await.is_err());
+        assert!(request(&webview, Some(first.as_str())).await.is_err());
         probe.release.notify_one();
-        request(&webview, Some(&second))
+        request(&webview, Some(second.as_str()))
             .await
             .expect("new session admitted");
         assert_eq!(probe.calls.load(Ordering::SeqCst), 2);

@@ -195,7 +195,9 @@ mod implementation {
                 "personhood.prepare",
                 move |db| {
                     current_account(db.conn(), &account)?;
-                    lease.with_current(|| store::prepare(db.conn(), lease.session_id(), &challenge))
+                    lease.with_current(|| {
+                        store::prepare(db.conn(), lease.session_id().as_str(), &challenge)
+                    })
                 },
             )
             .await?;
@@ -238,7 +240,7 @@ mod implementation {
                     current_account(db.conn(), &account)?;
                     store::pending(
                         db.conn(),
-                        lease.session_id(),
+                        lease.session_id().as_str(),
                         &id,
                         &policy,
                         &account.verifying_key(),
@@ -272,7 +274,7 @@ mod implementation {
                     current_account(db.conn(), &lookup_account)?;
                     store::existing(
                         db.conn(),
-                        lookup_lease.session_id(),
+                        lookup_lease.session_id().as_str(),
                         &lookup_id,
                         &lookup_account.verifying_key(),
                         &lookup_policy,
@@ -350,7 +352,7 @@ mod implementation {
                     current_account(&tx, &account)?;
                     let receipt = store::consume(
                         &tx,
-                        lease.session_id(),
+                        lease.session_id().as_str(),
                         &verified,
                         &policy,
                         &account.verifying_key(),
@@ -374,7 +376,7 @@ mod implementation {
                 DatabaseWorkload::Learner,
                 lease.clone(),
                 "personhood.cancel",
-                move |db| store::cancel(db.conn(), lease.session_id(), &nonce),
+                move |db| store::cancel(db.conn(), lease.session_id().as_str(), &nonce),
             )
             .await?;
         native("receipt_discard", &id)?;

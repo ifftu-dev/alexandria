@@ -428,7 +428,7 @@ pub(crate) async fn register_with_token(
     lease: ProfileLease,
     token: impl std::future::Future<Output = Result<String, PushFailure>>,
 ) -> Result<PushStatus, NotificationError> {
-    let session = lease.session_id().to_string();
+    let session = lease.session_id().clone();
     let cleaned = reconcile(state, lease.clone(), None, None).await?;
     if !cleaned.enabled || cleaned.paused_by_organisations || cleaned.cloud_origin.is_none() {
         return Ok(cleaned);

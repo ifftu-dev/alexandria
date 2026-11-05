@@ -44,6 +44,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::profile::scope::ProfileSession;
 use crate::settings::{registry::keys, SettingsStore};
 
 pub use store::{clear, list, mark_all_read, mark_read, record, unread_count};
@@ -323,7 +324,7 @@ pub fn record_if_enabled(
 /// checks and the profile the OS banner is tagged with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Announcement {
-    pub session: String,
+    pub session: ProfileSession,
     pub profile_id: crate::profile::ProfileId,
 }
 
@@ -333,7 +334,7 @@ pub struct Announcement {
 /// stays in its own profile's store unannounced. The profile is read while
 /// the session is held current, so a banner is never tagged with the profile
 /// that took over.
-pub fn announcement(state: &crate::AppState, session: &str) -> Option<Announcement> {
+pub fn announcement(state: &crate::AppState, session: &ProfileSession) -> Option<Announcement> {
     let lease = state.profile_operations.admit(session).ok()?;
     let profile_id = lease
         .with_current(|| {
@@ -343,13 +344,13 @@ pub fn announcement(state: &crate::AppState, session: &str) -> Option<Announceme
         })
         .ok()?;
     Some(Announcement {
-        session: session.to_owned(),
+        session: session.clone(),
         profile_id,
     })
 }
 
 /// Tell the webview, and the OS when nobody is looking at the app.
-pub fn announce<R: Runtime>(app: &AppHandle<R>, session: &str, recorded: &Recorded) {
+pub fn announce<R: Runtime>(app: &AppHandle<R>, session: &ProfileSession, recorded: &Recorded) {
     let Some(state) = app.try_state::<crate::AppState>() else {
         return;
     };
@@ -371,7 +372,7 @@ pub fn announce<R: Runtime>(app: &AppHandle<R>, session: &str, recorded: &Record
 /// Emit the unread count after anything that changes it, under `session`,
 /// the session of the lease that changed it. Dropped once that session is no
 /// longer current, so the next profile's badge is never overwritten.
-pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, session: &str, unread: u32) {
+pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, session: &ProfileSession, unread: u32) {
     let current = app
         .try_state::<crate::AppState>()
         .is_some_and(|state| state.profile_operations.admit(session).is_ok());
@@ -380,7 +381,7 @@ pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, session: &str, unread: u32) 
     }
 }
 
-fn emit_unread<R: Runtime>(app: &AppHandle<R>, session: &str, unread: u32) {
+fn emit_unread<R: Runtime>(app: &AppHandle<R>, session: &ProfileSession, unread: u32) {
     let _ = app.emit(
         EVENT_CHANGED,
         serde_json::json!({ "session": session, "unread": unread }),
