@@ -160,7 +160,8 @@ pub enum Surface {
     /// allowing a proposal. Flagged.
     ChatModel,
     /// Every other chat command that reads or changes chat state: threads,
-    /// attachments, models, memory, notes, approvals. AccessDenied, not flagged.
+    /// attachments, models, memory, notes, approvals. Refused with
+    /// [`AccessDenied::AttemptInProgress`], not flagged.
     ChatState,
     /// Asking the lesson tutor, or having its answer checked. Flagged.
     Tutor,
