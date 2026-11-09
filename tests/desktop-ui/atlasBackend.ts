@@ -111,6 +111,8 @@ export function atlasBackend(scenario: AtlasScenario | null = null) {
       case 'list_subjects': return subjects
       case 'list_skills': return skills
       case 'list_skill_graph_edges': return edges
+      // The credentials page reads anchor state; fixture credentials are never anchored.
+      case 'list_credential_anchors': return []
       case 'list_credentials': {
         state.reads++
         if (args?.activeOnly && args.subject !== `did:fixture:${state.profile}`) throw new Error('Atlas credentials must be subject-bound')

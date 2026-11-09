@@ -1505,6 +1505,25 @@ export type VerificationPendingReason =
   | 'status_list_unavailable'
   | 'suspension_state_unavailable'
   | 'supersession_state_unavailable'
+  | 'integrity_anchor_unavailable'
+
+/** Mirrors `domain::credential_anchor::AnchorStatus`. */
+export type AnchorStatus = 'pending' | 'outcome_unknown' | 'submitted' | 'confirmed' | 'failed'
+
+/**
+ * Mirrors `domain::credential_anchor::CredentialAnchorState`: where this
+ * node's Cardano anchor of a credential it issued stands. Only `confirmed`
+ * makes a credential `integrityAnchored`.
+ */
+export interface CredentialAnchorState {
+  credential_id: string
+  status: AnchorStatus
+  tx_hash: string | null
+  attempts: number
+  last_error: string | null
+  enqueued_at: string
+  confirmed_at: string | null
+}
 
 /**
  * Strongly-typed view over a `credentialSubject`'s skill properties.

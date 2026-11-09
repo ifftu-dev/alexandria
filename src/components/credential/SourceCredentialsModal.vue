@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AppModal, AppInput } from '@/components/ui'
+import { AppBadge, AppModal, AppInput } from '@/components/ui'
 import { useDisplayNames } from '@/composables/useDisplayNames'
-import { extractSkillClaim, extractRoleClaim, type VerifiableCredential } from '@/types'
+import {
+  extractSkillClaim,
+  extractRoleClaim,
+  type CredentialAnchorState,
+  type VerifiableCredential,
+} from '@/types'
+import { anchorBadge } from './anchorStatus'
 import {
   kindOfType,
   classNameOf,
@@ -20,6 +26,8 @@ const props = defineProps<{
   sourceCount: number
   /** Resolved input credentials that fed the derived state. */
   sources: VerifiableCredential[]
+  /** Anchor state by credential id, for credentials this device issued. */
+  anchors?: ReadonlyMap<string, CredentialAnchorState>
 }>()
 
 const emit = defineEmits<{
@@ -199,6 +207,13 @@ function pickCredential(c: VerifiableCredential) {
               {{ displayName(issuerOf(c)) }} · {{ (c.validFrom ?? '').slice(0, 10) }}
             </p>
           </div>
+          <AppBadge
+            v-if="c.id && anchors?.get(c.id)"
+            class="shrink-0"
+            :variant="anchorBadge(anchors.get(c.id)!.status).variant"
+          >
+            {{ $t(anchorBadge(anchors.get(c.id)!.status).label) }}
+          </AppBadge>
           <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="kindOfType(c.type).badge">
             {{ $t(kindOfType(c.type).short) }}
           </span>

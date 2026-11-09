@@ -3,6 +3,7 @@ import { useLocalApi } from './useLocalApi'
 import { announceCredentialsChanged } from './credentialEvents'
 import type {
   CreatePresentationRequest,
+  CredentialAnchorState,
   CredentialBundle,
   CredentialTrust,
   DerivedSkillState,
@@ -107,6 +108,25 @@ export function useCredentials() {
     )
   }
 
+  /** Anchor state of every credential this device issued. */
+  async function listAnchors() {
+    return run(() => invoke<CredentialAnchorState[]>('list_credential_anchors'))
+  }
+
+  /** One credential's anchor state; `null` when this device never queued it. */
+  async function anchor(credentialId: string) {
+    return run(() =>
+      invoke<CredentialAnchorState | null>('get_credential_anchor', { credentialId }),
+    )
+  }
+
+  /** Queue a failed anchor for another attempt. */
+  async function retryAnchor(credentialId: string) {
+    return run(() =>
+      invoke<CredentialAnchorState | null>('retry_credential_anchor', { credentialId }),
+    )
+  }
+
   /** Returns the JCS-canonical bundle string, ready to write to disk. */
   async function exportBundle() {
     return run(() => invoke<string>('export_credentials_bundle'))
@@ -202,6 +222,11 @@ export function useCredentials() {
     verify,
     trust,
     exportBundle,
+
+    // integrity anchors
+    listAnchors,
+    anchor,
+    retryAnchor,
 
     // presentations
     createPresentation,

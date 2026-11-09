@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   trust: vi.fn(),
   revoke: vi.fn(),
   publishStatusLists: vi.fn(),
+  anchor: vi.fn(),
+  retryAnchor: vi.fn(),
 }))
 vi.mock('@/composables/useCredentials', () => ({
   useCredentials: () => ({ ...mocks, error: ref<string | null>(null) }),
@@ -57,6 +59,7 @@ async function open() {
   mocks.get.mockResolvedValue(credential)
   mocks.verify.mockResolvedValue(verification)
   mocks.trust.mockResolvedValue(null)
+  if (!mocks.anchor.getMockImplementation()) mocks.anchor.mockResolvedValue(null)
   const wrapper = mount(CredentialDetail, { global: { stubs, mocks: { $t: (k: string) => k } } })
   await flushPromises()
   return wrapper
@@ -101,5 +104,46 @@ describe('CredentialDetail revoke', () => {
     expect(alert.attributes('data-variant')).toBe('warning')
     expect(alert.text()).toContain('credentials.detail.statusPublishFailed')
     expect(alert.text()).toContain('connection refused')
+  })
+})
+
+const TX = 'ba27e829cb186b6a242cddfeb3f283fd60c8e0c62d7f34f92fccf4f733adad2f'
+const anchorState = (over: Record<string, unknown>) => ({
+  credential_id: 'urn:alexandria:vc:demo', status: 'pending', tx_hash: null, attempts: 0,
+  last_error: null, enqueued_at: '2026-11-09T00:00:00Z', confirmed_at: null, ...over,
+})
+
+describe('CredentialDetail public record', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach(m => m.mockReset())
+  })
+
+  it('links a confirmed anchor to its transaction', async () => {
+    mocks.anchor.mockResolvedValue(anchorState({ status: 'confirmed', tx_hash: TX, confirmed_at: '2026-11-09T08:10:00Z' }))
+    const section = (await open()).find('[data-anchor-section]')
+    expect(section.text()).toContain('credentials.anchor.status.confirmed')
+    expect(section.text()).toContain('credentials.anchor.body.confirmed')
+    expect(section.find('a').attributes('href')).toBe(`https://preprod.cardanoscan.io/transaction/${TX}`)
+    expect(section.findAll('button')).toHaveLength(0)
+  })
+
+  it('offers a retry for a failed anchor and shows the new state', async () => {
+    mocks.anchor.mockResolvedValue(anchorState({ status: 'failed', attempts: 5, last_error: 'no UTxOs at funding address' }))
+    mocks.retryAnchor.mockResolvedValue(anchorState({ status: 'pending' }))
+    const wrapper = await open()
+    const section = wrapper.find('[data-anchor-section]')
+    expect(section.text()).toContain('no UTxOs at funding address')
+    await section.find('button').trigger('click')
+    await flushPromises()
+    expect(mocks.retryAnchor).toHaveBeenCalledWith('urn:alexandria:vc:demo')
+    expect(wrapper.find('[data-anchor-section]').text()).toContain('credentials.anchor.status.pending')
+    expect(wrapper.find('[data-anchor-section]').findAll('button')).toHaveLength(0)
+  })
+
+  it('says a credential issued elsewhere has no record on this device', async () => {
+    mocks.anchor.mockResolvedValue(null)
+    const section = (await open()).find('[data-anchor-section]')
+    expect(section.text()).toContain('credentials.anchor.body.none')
+    expect(section.find('a').exists()).toBe(false)
   })
 })
